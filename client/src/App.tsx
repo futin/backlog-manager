@@ -51,11 +51,39 @@ function AppShell() {
       <main className="main">
         {/* The board's four columns need the room; settings reads better narrow. */}
         <div className={current === 'projects' ? 'wrap wide' : 'wrap'}>
-          <Suspense fallback={<div className="board-empty">loading…</div>}>
+          <Suspense fallback={<SectionLoading />}>
             {current === 'projects' ? <BoardView /> : <SettingsView />}
           </Suspense>
         </div>
       </main>
+    </div>
+  );
+}
+
+/**
+ * The fallback for a section's chunk. An icon rather than bare text because this
+ * is the one spinner that can be on screen for a whole network round trip — the
+ * chunk is still being fetched, so there is nothing else painted in `main` to
+ * say the app is alive.
+ *
+ * Inline SVG, not an icon package: this is the app's only icon, and a dependency
+ * for one 32-byte arc would ship a whole font or component library through the
+ * bundle the fallback exists to cover.
+ *
+ * `aria-hidden` on the mark and a live region around the word: a screen reader
+ * should hear "loading…" once, not a nameless graphic beside it. The rotation is
+ * CSS, so the global `prefers-reduced-motion` rule in styles.css freezes it with
+ * everything else and the text still carries the meaning.
+ */
+function SectionLoading() {
+  return (
+    <div className="board-empty" role="status">
+      <svg className="spinner" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+        {/* Track first, arc over it — the gap in the arc is what reads as motion. */}
+        <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.5" opacity=".25" />
+        <path d="M8 1.5a6.5 6.5 0 0 1 6.5 6.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+      loading…
     </div>
   );
 }

@@ -8,10 +8,23 @@
      reason vite.config.ts keeps a proxy list — a missing /favicon.svg would not
      404 in dev, Vite's SPA fallback would hand back index.html as an image and
      the tab would silently show the default globe. A data URI has no route to
-     forget. Colours are the theme's cyan accent and ink, hardcoded because a
-     favicon is painted by the browser chrome and never sees the page's CSS
-     variables. -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2355d0dd'/%3E%3Cpath d='M6 8.6c3.6-1.5 6.7-1.4 9.3.7v14.9c-2.6-2.1-5.7-2.2-9.3-.7z' fill='%230c1220'/%3E%3Cpath d='M26 8.6c-3.6-1.5-6.7-1.4-9.3.7v14.9c2.6-2.1 5.7-2.2 9.3-.7z' fill='%230c1220' opacity='.45'/%3E%3C/svg%3E">
+     forget. Colours are the theme's amber and ink (`--on-accent` is that ink,
+     defined for exactly this — text on filled amber), hardcoded because a favicon
+     is painted by the browser chrome and never sees the page's CSS variables.
+
+     Amber rather than the cyan accent the rest of the UI uses: ../guide-manager
+     ships a cyan favicon of its own, and both run on this machine at once, so a
+     cyan mark here would be a second near-identical square in the tab strip. Of
+     the palette's other hues amber separates from cyan by temperature as well as
+     hue, so the two tabs stay tellable apart at 16px and without colour vision;
+     green sits too close to cyan to help.
+
+     The mark is the board: three columns hanging from a common top edge, filled
+     to different depths. Deliberately three solid bars rather than the four real
+     columns or a stack of separate cards — at the 16px a tab actually paints,
+     card-sized shapes blur into a smudge, and the top alignment is what keeps it
+     reading as a board; bottom-aligned bars read as a bar chart instead. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffb03a'/%3E%3Cg fill='%230c1220'%3E%3Crect x='5' y='5' width='6' height='22' rx='3'/%3E%3Crect x='13' y='5' width='6' height='14.5' rx='3'/%3E%3Crect x='21' y='5' width='6' height='7' rx='3'/%3E%3C/g%3E%3C/svg%3E">
 <script>
 // Stamp the saved theme, density and text scale before first paint. Without
 // this every load renders in the default palette at 100% until React mounts,

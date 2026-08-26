@@ -170,7 +170,17 @@ body {
 /* Focus is the cyan rule, matching .set-control's fields in Settings — the UA
    outline is dropped only because something visible replaces it. */
 .board-search:focus, .board-select:focus { outline: none; color: var(--ink); border-color: var(--cyan) }
-.board-empty { font-size: 11px; color: var(--ink3); padding: 20px 2px; text-align: center }
+/* A centred flex line, not plain centred text: the loading fallback puts an icon
+   beside the word, and `vertical-align` would not align it — an inline SVG's
+   baseline is its bottom edge, which hangs the arc below the x-height of the text
+   next to it. Message-only uses of this class are unaffected; one text node in a
+   centred flex row lays out as it did. */
+.board-empty {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 11px; color: var(--ink3); padding: 20px 2px; text-align: center;
+}
+.spinner { animation: spin .7s linear infinite; flex: none }
+@keyframes spin { to { transform: rotate(360deg) } }
 
 /* Phones: the toolbar gets its own full-width line under the title (the bar wraps
    it there anyway; `margin-left:auto` is dropped so it starts at the left edge
