@@ -36,6 +36,11 @@ describe('ItemDrawer', () => {
     expect(screen.getByText('bug')).toBeInTheDocument();
     expect(screen.getByText(/alpha · 2026-08-20/)).toBeInTheDocument();
     expect(screen.getByText(ITEM.path)).toBeInTheDocument();
+    // Lets the mocked fetch's state update land inside act() before the test
+    // ends — otherwise React logs an act() warning on every run because
+    // nothing above this line waits on the body fetch this component always
+    // fires on mount.
+    await screen.findByText('off by one');
   });
 
   it('closes on Escape, on the close button, and on the backdrop', async () => {
@@ -53,5 +58,32 @@ describe('ItemDrawer', () => {
     );
     render(<ItemDrawer item={ITEM} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('item file unavailable')).toBeInTheDocument());
+  });
+
+  it('drops raw HTML instead of passing it to dangerouslySetInnerHTML', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('safe text\n\n<img src=x onerror="window.__pwned=1">')
+      } as Response)
+    );
+    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('safe text')).toBeInTheDocument());
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(document.querySelector('.drawer-body')?.innerHTML).not.toContain('onerror');
+    expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+  });
+
+  it('neutralizes a javascript: href instead of rendering it as a clickable link', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('[click](javascript:alert(1))')
+      } as Response)
+    );
+    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(document.querySelector('.drawer-body')?.innerHTML).not.toContain('javascript:');
   });
 });
