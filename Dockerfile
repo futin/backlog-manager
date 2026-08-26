@@ -40,8 +40,9 @@ RUN corepack enable
 
 # Copied on their own so editing source does not invalidate the install layer.
 # pnpm-workspace.yaml belongs here too, not just alongside the source: it holds
-# the allowBuilds list, and without it esbuild and mongodb-memory-server install
-# with their postinstall scripts skipped — which shows up much later as Vite
-# failing to start rather than as an install error.
+# the allowBuilds list, and without it esbuild installs with its postinstall
+# script skipped — which shows up much later as Vite failing to start rather
+# than as an install error. esbuild is the only entry: this repo has no
+# database, so nothing else here has an install script worth running.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile

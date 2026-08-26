@@ -59,8 +59,16 @@ server on `:5177` — with no database service. Open whichever suits you:
 — useful after a dependency change, since `node_modules` lives in a named
 volume seeded from the image rather than in the bind mount.
 
-To run the Node processes on the host instead: `pnpm run dev` (API) and
-`pnpm run dev:web` (client), in separate shells. No database to start first.
+To run the Node processes on the host instead, install the dependencies first
+— Quick start never needs this, because the image does its own install:
+
+```bash
+pnpm install
+pnpm run dev      # the API, in one shell
+pnpm run dev:web  # the client, in another
+```
+
+No database to start first.
 
 ### Configuration
 
@@ -91,6 +99,15 @@ That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, and
 `/backlog-execute`. `init` and `new` both register the current project in the
 real registry, so a project appears on the board the first time any of the
 four skills runs in it — no separate registration step.
+
+If you ran these skills before this repo existed, they are still sitting in
+`~/.claude/skills/` and will now load a second time alongside the plugin's
+copies, which then drift apart. Remove them once the plugin is installed:
+
+```bash
+rm -rf ~/.claude/skills/backlog ~/.claude/skills/backlog-capture \
+       ~/.claude/skills/backlog-groom ~/.claude/skills/backlog-execute
+```
 
 Registering a project without capturing anything:
 
