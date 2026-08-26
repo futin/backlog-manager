@@ -14,7 +14,7 @@
     "dev": "nest start --watch --no-shell",
     "dev:web": "vite",
     "test": "jest --runInBand",
-    "test:skills": "node --test skills/backlog/tools/",
+    "test:skills": "node --test skills/*/tools/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
