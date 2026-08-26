@@ -9,6 +9,17 @@
 #
 # Only the host side of each published port is configurable. Set
 # BM_WEB_PORT / BM_API_PORT in .env to move them.
+#
+# Both ports publish on 127.0.0.1 only, never a wildcard bind — nothing in
+# this stack has auth in front of it, and the API's item-body route reads
+# every registered project's backlog files straight off disk, so loopback IS
+# the access control. Reaching this from elsewhere (a phone, another machine
+# on the tailnet) is a separate, deliberate step layered on top: point
+# `tailscale serve` at the loopback port yourself — there is no script here
+# that does it for you. That is also the only reason `allowedHosts:
+# ['.ts.net']` in vite.config.ts means anything: without a tailnet serve in
+# front of it, no request ever arrives with a .ts.net Host header for that
+# allowlist to match.
 services:
   server:
     build: .
@@ -26,7 +37,7 @@ services:
       # both honest.
       HOME: ${HOME}
     ports:
-      - '${BM_API_PORT:-4322}:4322'
+      - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:
       - .:/app
       - backlog-manager-node-modules:/app/node_modules
@@ -53,7 +64,7 @@ services:
       # always notices.
       CHOKIDAR_USEPOLLING: 'true'
     ports:
-      - '${BM_WEB_PORT:-5177}:5177'
+      - '127.0.0.1:${BM_WEB_PORT:-5177}:5177'
     volumes:
       - .:/app
       - backlog-manager-node-modules:/app/node_modules

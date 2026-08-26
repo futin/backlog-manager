@@ -113,7 +113,11 @@ node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init
 | Production build | `pnpm run build` |
 
 Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
-`BM_WEB_PORT` in `.env` — inside the compose stack they are fixed.
+`BM_WEB_PORT` in `.env` — inside the compose stack they are fixed. Both
+publish on `127.0.0.1` only — nothing here has auth in front of it, so
+loopback is the access control; reach it from another device by putting your
+own `tailscale serve` in front of the loopback port, not by widening the
+publish.
 
 ## Architecture
 

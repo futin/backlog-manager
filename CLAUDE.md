@@ -62,6 +62,12 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan
   non-empty), never stored; status is the directory, never frontmatter.
 - **Ports 4322/5177** — guide-manager holds 4321/5175/5176 on this machine.
+- **Both published ports bind `127.0.0.1` only, never a wildcard.** Nothing
+  in this stack has auth in front of it — the item-body route reads every
+  registered project's backlog files straight off disk — so loopback is the
+  access control; reach it from another device with your own
+  `tailscale serve` in front of the loopback port, which is also what makes
+  `allowedHosts: ['.ts.net']` in `vite.config.ts` meaningful.
 - **Container mounts land on host paths, read-only**, because the registry
   stores absolute host paths.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the
