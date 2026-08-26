@@ -231,4 +231,68 @@ describe('ItemDrawer', () => {
     const img = document.querySelector('.drawer-body img') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('/abs/path.png');
   });
+
+  // Round 4: whitespace *inside* the destination. `schemeOf` stripped it
+  // before sniffing a scheme; the protocol-relative check did not, so it saw
+  // "starts with a tab, not a slash" and let the src through — and the URL
+  // parser then deleted the tab and fetched from evil.example. Both guards
+  // are now one `classifyTarget`, so there is a single normalization to get
+  // right. Characters that matter are built by code point rather than written
+  // as escapes, so the vector in the source is unambiguous.
+  const TAB = String.fromCharCode(9);
+  const FORM_FEED = String.fromCharCode(12);
+  const C0_CONTROL = String.fromCharCode(1);
+
+  it.each([
+    ['leading space', '![logo](< //evil.example/p.png>)'],
+    ['leading tab', `![logo](<${TAB}//evil.example/p.png>)`],
+    ['leading tab, backslash spelling', `![logo](<${TAB}/\\evil.example/p.png>)`],
+    ['leading tab, reference-definition form', `![logo][r]\n\n[r]: <${TAB}//evil.example/p.png>\n`],
+    ['tab between the two slashes', `![logo](</${TAB}/evil.example/p.png>)`],
+    ['leading form feed', `![logo](<${FORM_FEED}//evil.example/p.png>)`],
+    ['leading C0 control', `![logo](<${C0_CONTROL}//evil.example/p.png>)`],
+    ['leading tab, triple slash', `![logo](<${TAB}///evil.example/p.png>)`]
+  ])('never requests an off-origin image src hidden behind whitespace — %s', async (_desc, body) => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
+    );
+    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
+    const img = document.querySelector('.drawer-body img') as HTMLImageElement | null;
+    // `.src` is the resolved property, not the attribute and not the HTML
+    // string: only that form shows where the request would actually go. The
+    // attribute still reads as a relative-looking path in every one of these,
+    // which is exactly why a string check on the markup passes while the DOM
+    // holds a live cross-origin fetch.
+    expect(img?.src ?? '').not.toContain('evil.example');
+    expect(img).not.toBeInTheDocument();
+  });
+
+  it('neutralizes a javascript: scheme split by whitespace', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve(`[click](<java${TAB}script:alert(1)>)`)
+      } as Response)
+    );
+    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
+    // Same normalization as the image cases above — a browser ignores the tab
+    // when it sniffs the scheme, so the guard has to as well.
+    expect(document.querySelector('.drawer-body a')).not.toBeInTheDocument();
+  });
+
+  it('still renders a nested relative image path as a real img tag', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('![diagram](sub/dir/x.png)')
+      } as Response)
+    );
+    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
+    const img = document.querySelector('.drawer-body img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('sub/dir/x.png');
+    expect(new URL(img.src).origin).toBe(window.location.origin);
+  });
 });

@@ -13,7 +13,7 @@ const PILL: Record<Section, { cls: string; label: string }> = {
 /**
  * Absolute-URL schemes a link may point at. A relative href (no scheme at
  * all — './x', '/x', '#x') always passes; this only gates hrefs that name a
- * scheme once whitespace is stripped (see `schemeOf`).
+ * scheme, or that borrow this page's own — see `isAllowedTarget`.
  */
 const ALLOWED_LINK_SCHEMES = new Set(['http', 'https', 'mailto']);
 
@@ -22,39 +22,70 @@ const ALLOWED_LINK_SCHEMES = new Set(['http', 'https', 'mailto']);
  * local board with no legitimate reason to make an outbound fetch to a third
  * party on a viewer's behalf, so http(s) is exactly as unwelcome here as
  * javascript:/data: is dangerous elsewhere: only a same-origin-relative path
- * is ever actually requested. "Relative" excludes protocol-relative — see
- * `isProtocolRelative` below, which is what actually enforces that half.
+ * is ever actually requested. Being empty is also what rules out a
+ * protocol-relative `//host/...` src, which names no scheme but borrows
+ * http(s) from the page — see `isAllowedTarget`.
  */
 const ALLOWED_IMAGE_SCHEMES = new Set<string>();
 
-/**
- * The scheme named at the start of a raw (pre-entity-decode) href, or
- * undefined for a relative reference. Whitespace is stripped first because
- * browsers ignore embedded tabs/newlines when sniffing a URL's scheme —
- * that's how a literal `java\tscript:` bypasses a naive check.
- */
-function schemeOf(href: string): string | undefined {
-  return href.replace(/\s/g, '').match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
-}
-
-function isDisallowedScheme(href: string, allowed: ReadonlySet<string>): boolean {
-  const scheme = schemeOf(href);
-  return scheme !== undefined && !allowed.has(scheme);
-}
+/** How a browser will read a rendered href/src. */
+type Target =
+  | { kind: 'relative' }
+  | { kind: 'protocol-relative' }
+  | { kind: 'scheme'; scheme: string };
 
 /**
- * True for a protocol-relative reference — `//host/...` — which `schemeOf`
- * calls "relative" (there's no `scheme:` to match) even though a browser
- * resolves it against its *own* current scheme and fetches from `host`
- * exactly as if `javascript:`/`data:` had been typed out: same third-party
- * request, no scheme check ever sees it coming. Backslashes are mapped to
- * forward slashes first because in a "special" URL scheme (http/https among
- * them) a browser treats `\` and `/` interchangeably, so `/\host`, `\\host`,
- * and `\/host` all resolve exactly like `//host` — this one check has to see
- * them the same way a browser would, or it only covers one spelling of four.
+ * Classify an href the way the *browser's* URL parser will — the only
+ * reading that matters, since it is that parser, not this file, that decides
+ * what actually gets fetched.
+ *
+ * Every classification below starts from one normalized string, and that is
+ * the entire reason this function exists. It replaces two sibling guards that
+ * each normalized the same href their own way — one stripped whitespace
+ * before sniffing a scheme, the other mapped backslashes before testing for
+ * `//` — so an href spelled with the *other* one's blind spot walked
+ * through. `![l](<TAB//evil.example/p.png>)` is the proof: an angle-bracket
+ * destination keeps its interior whitespace, marked hands the tab over
+ * verbatim, a `startsWith('//')` test says "that starts with a tab, not a
+ * slash", and the URL parser then deletes the tab and fetches from
+ * evil.example. Normalizing once, here, is what stops the next spelling from
+ * being a fourth round of this.
+ *
+ * The normalization mirrors what that parser does before it decides anything:
+ * it deletes tab/LF/CR wherever they appear and trims leading/trailing C0
+ * controls and spaces. This deletes a wider set — every whitespace and
+ * control character, in every position — because erring wide can only
+ * *block* (a form feed mid-path renders as alt text instead of an image),
+ * while erring narrow is the bug above.
+ *
+ * Backslashes fold into slashes for the authority test only, never for the
+ * scheme test, because that is exactly where a browser folds them: under a
+ * "special" scheme (http/https among them) `/\host`, `\\host` and `\/host`
+ * all reach the same host as `//host`, but a backslash inside a scheme name
+ * only stops it from being a scheme at all.
  */
-function isProtocolRelative(href: string): boolean {
-  return href.replace(/\\/g, '/').startsWith('//');
+function classifyTarget(href: string): Target {
+  const bare = href.replace(/[\s\p{Cc}]/gu, '');
+  const scheme = bare.match(/^([a-z][a-z0-9+.-]*):/i)?.[1];
+  if (scheme !== undefined) return { kind: 'scheme', scheme: scheme.toLowerCase() };
+  if (/^[\\/]{2}/.test(bare)) return { kind: 'protocol-relative' };
+  return { kind: 'relative' };
+}
+
+/**
+ * The single policy gate, so `link` and `image` can never again disagree
+ * about what an href says — they differ only in the allowlist they pass.
+ */
+function isAllowedTarget(href: string, allowed: ReadonlySet<string>): boolean {
+  const target = classifyTarget(href);
+  if (target.kind === 'scheme') return allowed.has(target.scheme);
+  // A protocol-relative reference names no scheme of its own, it inherits
+  // whichever one this page was served under — so it is allowed only when
+  // every scheme the page could be served under is. Links allow both http and
+  // https, so `//host` stays a link; the image allowlist is empty, so it never
+  // becomes a real third-party fetch.
+  if (target.kind === 'protocol-relative') return allowed.has('http') && allowed.has('https');
+  return true;
 }
 
 /**
@@ -118,13 +149,12 @@ function escapeHtml(s: string): string {
  *    rather than as markup, wherever it sits (list item, blockquote, table
  *    cell, heading, ...).
  *  - `link` renders a disallowed (or entity-hidden) scheme as plain text
- *    with no `<a>` at all; an allowed scheme gets a hand-built, escaped
- *    anchor rather than marked's default one.
- *  - `image` never lets a scheme through — see `ALLOWED_IMAGE_SCHEMES` — and
- *    separately never lets a *protocol-relative* `//host/...` src through
- *    either, since that has no scheme for the allowlist check to catch yet
- *    still fetches from `host`. A disallowed src renders as the alt text
- *    instead of an `<img>`.
+ *    with no `<a>` at all; an allowed one gets a hand-built, escaped anchor
+ *    rather than marked's default.
+ *  - `image` allows no scheme at all — see `ALLOWED_IMAGE_SCHEMES` — so a
+ *    disallowed src renders as its alt text instead of an `<img>`.
+ *  - Both ask `isAllowedTarget` the same question about the same normalized
+ *    href, differing only in which allowlist they hand it.
  */
 marked.use({
   renderer: {
@@ -133,14 +163,12 @@ marked.use({
     },
     link({ href, title, tokens }) {
       const text = this.parser.parseInline(tokens);
-      if (isDisallowedScheme(href, ALLOWED_LINK_SCHEMES)) return text;
+      if (!isAllowedTarget(href, ALLOWED_LINK_SCHEMES)) return text;
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
       return `<a href="${escapeHtml(href)}"${titleAttr}>${text}</a>`;
     },
     image({ href, title, text }) {
-      if (isDisallowedScheme(href, ALLOWED_IMAGE_SCHEMES) || isProtocolRelative(href)) {
-        return escapeHtml(text);
-      }
+      if (!isAllowedTarget(href, ALLOWED_IMAGE_SCHEMES)) return escapeHtml(text);
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
       return `<img src="${escapeHtml(href)}" alt="${escapeHtml(text)}"${titleAttr}>`;
     }
