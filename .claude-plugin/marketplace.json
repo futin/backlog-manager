@@ -1,0 +1,11 @@
+{
+  "name": "backlog-manager-marketplace",
+  "owner": { "name": "andrejajevtic" },
+  "plugins": [
+    {
+      "name": "backlog-manager",
+      "source": "./",
+      "description": "backlog skills and local backlog board"
+    }
+  ]
+}
