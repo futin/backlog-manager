@@ -12,7 +12,16 @@ const config: Config = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   // Nest's DI reads decorator metadata at class-definition time.
   setupFiles: ['reflect-metadata'],
-  testTimeout: 30_000
+  testTimeout: 30_000,
+  // marked ships ESM-only (package.json "type": "module", no cjs entry), but
+  // ts-jest compiles this repo's own code to CommonJS, so a plain `require`
+  // of the package hits its .esm.js file and Jest chokes on the bare `export`
+  // syntax. The package's own UMD build is the escape hatch: it feature-tests
+  // `module.exports` at load time and behaves as a normal CJS module when
+  // found. Test-only — Vite resolves the real ESM entry for the client build.
+  moduleNameMapper: {
+    '^marked$': '<rootDir>/node_modules/marked/lib/marked.umd.js'
+  }
 };
 
 export default config;
