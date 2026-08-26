@@ -73,6 +73,14 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   in front of the loopback port, which is also what makes
   `allowedHosts: ['.ts.net']` in `vite.config.ts` meaningful — that list is
   never consulted for a bare IP, so it protects nothing on a wildcard bind.
+- **The served build carries a CSP; dev does not.** `server/src/security.ts`
+  sets the header from Nest, so it rides on `client/dist` and on `/api` alike.
+  It is deliberately not a `<meta>` tag in `client/index.html`: that would
+  apply in dev too, where Vite injects an inline React-refresh preamble a
+  strict `script-src` would block. Dev binds loopback only, so the build is
+  where the policy earns its keep. `script-src` carries the sha256 of the
+  pre-paint theme script instead of `'unsafe-inline'` — edit that script and
+  `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
 - **Container mounts land on host paths, read-only**, because the registry
   stores absolute host paths.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the
