@@ -47,6 +47,7 @@ export function scanProject(project: RegistryProject): { items: BacklogItem[]; e
           id: fm.fields.id,
           title: fm.fields.title,
           created: fm.fields.created ?? '',
+          started: fm.fields.started ?? '',
           tags: fm.tags,
           section: leaf.section,
           status: leaf.status,

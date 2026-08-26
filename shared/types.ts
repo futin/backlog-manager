@@ -19,7 +19,9 @@ export type Section = 'bugs' | 'ideas' | 'tasks' | 'out-of-scope';
 
 /** An item's status IS the directory it lives in (open/ vs done/), never a
  *  frontmatter field — backlog.mjs rejects a status: key outright. out-of-scope
- *  is flat and terminal. */
+ *  is flat and terminal. In progress is deliberately NOT a member here: it is a
+ *  marker on an open item (see BacklogItem.started), not a fourth place a file
+ *  can live. */
 export type ItemStatus = 'open' | 'done' | 'terminal';
 
 export interface BacklogItem {
@@ -27,6 +29,14 @@ export interface BacklogItem {
   title: string;
   /** YYYY-MM-DD from frontmatter; '' when the file lacks one (still renderable) */
   created: string;
+  /**
+   * YYYY-MM-DD the item was picked up (`backlog.mjs start`), '' when nobody
+   * has. Surfaced verbatim, never interpreted here: an archived item keeps the
+   * date it was started as history, so "is this in progress" is `started !== ''`
+   * AND `status === 'open'` — a question the client answers, since it is the
+   * only side that renders it.
+   */
+  started: string;
   tags: string[];
   section: Section;
   status: ItemStatus;

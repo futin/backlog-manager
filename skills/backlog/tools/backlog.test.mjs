@@ -397,7 +397,7 @@ test('CLI board --section prints only the requested section', () => {
   assert.doesNotMatch(out.stdout, /tasks/)
 })
 
-test('CLI board --json prints a parseable array of items with all six fields', () => {
+test('CLI board --json prints a parseable array of items with all seven fields', () => {
   const { dir } = boardFixture()
 
   const out = run(dir, 'board', '--json')
@@ -405,7 +405,7 @@ test('CLI board --json prints a parseable array of items with all six fields', (
   assert.equal(out.status, 0)
   const items = JSON.parse(out.stdout)
   assert.equal(items.length, 1)
-  for (const key of ['id', 'section', 'title', 'created', 'ageDays', 'path']) {
+  for (const key of ['id', 'section', 'title', 'created', 'ageDays', 'started', 'path']) {
     assert.ok(key in items[0], `missing key ${key}`)
   }
 })
@@ -828,6 +828,208 @@ test('CLI new bugs allocates bug-3 after bug-2 is rejected into out-of-scope, no
   assert.equal(out3.status, 0)
   const path3 = out3.stdout.split('\n')[0]
   assert.match(path3, /bug-3-third-bug\.md$/)
+})
+
+// --- start / stop ------------------------------------------------------------
+// `start` and `stop` are the only commands that rewrite an EXISTING item's
+// content: `new` writes a file that did not exist, and `move` renames without
+// ever opening one. So most of what follows is about what they must not
+// disturb — the body, unknown keys, and every byte of a file they refuse to
+// touch — rather than about the one line they add.
+
+const TODAY = new Date().toISOString().slice(0, 10)
+
+// writeItem's items have no body at all, which is exactly the case where a
+// body-preserving bug hides. Anything asserting on the body uses this.
+function writeItemWithBody(backlog, rel, id, title, body) {
+  const filePath = path.join(backlog, rel, `${id}-${slugify(title)}.md`)
+  fs.writeFileSync(filePath, `${renderFrontmatter({ id, title, created: '2026-01-02' })}\n${body}`)
+  return filePath
+}
+
+test('CLI start bug-7 adds a started: line dated today and prints the item path', () => {
+  const { dir, openBugPath } = boardFixture()
+
+  const out = run(dir, 'start', 'bug-7')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stdout.split('\n')[0], openBugPath)
+  assert.match(fs.readFileSync(openBugPath, 'utf8'), new RegExp(`^started: ${TODAY}$`, 'm'))
+})
+
+test('CLI start leaves the body byte-for-byte identical, fences and blank lines included', () => {
+  const { dir, backlog } = boardFixture()
+  const body = '\n## Cause\n\nThe cache never invalidates.\n\n```js\nconst a = 1\n```\n\n\n## Fix\n\nunknown\n'
+  const itemPath = writeItemWithBody(backlog, 'tasks/open', 'task-4', 'Rework the cache', body)
+
+  const out = run(dir, 'start', 'task-4')
+
+  assert.equal(out.status, 0, out.stderr)
+  const text = fs.readFileSync(itemPath, 'utf8')
+  assert.equal(text.slice(text.indexOf('---', 3) + 4), body)
+})
+
+test('CLI start preserves an unknown frontmatter key such as from:', () => {
+  const { dir, backlog } = boardFixture()
+  const itemPath = path.join(backlog, 'tasks/open', 'task-4-promoted.md')
+  fs.writeFileSync(itemPath, `${renderFrontmatter({ id: 'task-4', title: 'Promoted', created: '2026-01-02', from: 'idea-9' })}\n`)
+
+  const out = run(dir, 'start', 'task-4')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(fs.readFileSync(itemPath, 'utf8'), /^from: idea-9$/m)
+})
+
+test('CLI start bug-7 twice refuses, names the date already there, and leaves the file untouched', () => {
+  const { dir, openBugPath } = boardFixture()
+  assert.equal(run(dir, 'start', 'bug-7').status, 0)
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'start', 'bug-7')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /bug-7 is already in progress/)
+  assert.match(out.stderr, new RegExp(TODAY))
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('CLI start bug-3 refuses because a done item has nothing left to start', () => {
+  const { dir, doneBugPath } = boardFixture()
+  const before = fs.readFileSync(doneBugPath, 'utf8')
+
+  const out = run(dir, 'start', 'bug-3')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /bug-3 is done/)
+  assert.equal(fs.readFileSync(doneBugPath, 'utf8'), before)
+})
+
+test('CLI start oos-2 refuses because out-of-scope is terminal', () => {
+  const { dir, oosPath } = boardFixture()
+  const before = fs.readFileSync(oosPath, 'utf8')
+
+  const out = run(dir, 'start', 'oos-2')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /oos-2 is out of scope/)
+  assert.equal(fs.readFileSync(oosPath, 'utf8'), before)
+})
+
+// An idea is the one open section with nothing to execute — backlog-execute
+// refuses it by prose, and the tool refuses it here so a hand-typed
+// `start idea-5` cannot put a marker on a card no skill will ever clear.
+test('CLI start idea-5 refuses and names backlog-groom, because an idea has no plan to work', () => {
+  const { dir, backlog } = boardFixture()
+  const ideaPath = writeItem(backlog, 'ideas/open', 'idea-5', 'Maybe a graph view')
+  const before = fs.readFileSync(ideaPath, 'utf8')
+
+  const out = run(dir, 'start', 'idea-5')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /idea-5/)
+  assert.match(out.stderr, /backlog-groom/)
+  assert.equal(fs.readFileSync(ideaPath, 'utf8'), before)
+})
+
+test('CLI start bug-99 exits 1 and names the unknown id', () => {
+  const { dir } = boardFixture()
+
+  const out = run(dir, 'start', 'bug-99')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /unknown id: bug-99/)
+})
+
+test('CLI start with no id exits 1 and prints a usage line naming both verbs', () => {
+  const { dir } = boardFixture()
+
+  const out = run(dir, 'start')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs start <id>/)
+})
+
+test('CLI start exits 3 and names init when there is no backlog/ store yet', () => {
+  const { dir } = backlogFixture()
+
+  const out = run(dir, 'start', 'bug-1')
+
+  assert.equal(out.status, 3)
+  assert.match(out.stderr, /init/)
+})
+
+test('CLI stop bug-7 removes the started: line, restoring the file byte-for-byte', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+  assert.equal(run(dir, 'start', 'bug-7').status, 0)
+  assert.notEqual(fs.readFileSync(openBugPath, 'utf8'), before)
+
+  const out = run(dir, 'stop', 'bug-7')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('CLI stop bug-7 refuses when the item was never started, leaving the file untouched', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'stop', 'bug-7')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /bug-7 is not in progress/)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+// The whole point of keeping `started` out of move's way: an archived item
+// keeps the date it was picked up, so "started 01-02, done today" survives in
+// the file. move never reads content, so this is really a test that start
+// wrote something move can carry.
+test('CLI move bug-7 done after a start keeps the started: line in the archived file', () => {
+  const { dir, backlog, openBugPath } = boardFixture()
+  assert.equal(run(dir, 'start', 'bug-7').status, 0)
+
+  const out = run(dir, 'move', 'bug-7', 'done')
+
+  assert.equal(out.status, 0, out.stderr)
+  const movedPath = path.join(backlog, 'bugs/done', path.basename(openBugPath))
+  assert.match(fs.readFileSync(movedPath, 'utf8'), new RegExp(`^started: ${TODAY}$`, 'm'))
+})
+
+test('CLI board marks a started item with the » column', () => {
+  const { dir } = boardFixture()
+  assert.equal(run(dir, 'start', 'bug-7').status, 0)
+
+  const out = run(dir, 'board')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /»\s*Deck scroll chains/)
+})
+
+// The column is conditional so that a board with no work in progress prints
+// exactly the bytes it printed before this feature existed — the `backlog`
+// skill shows this output to a human, and every unstarted board is the
+// common case.
+test('CLI board with nothing started prints no » column at all', () => {
+  const { dir } = boardFixture()
+
+  const out = run(dir, 'board')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.doesNotMatch(out.stdout, /»/)
+})
+
+test('CLI board --json carries started, empty for an item nobody has started', () => {
+  const { dir, backlog } = boardFixture()
+  writeItem(backlog, 'tasks/open', 'task-4', 'Untouched task')
+  assert.equal(run(dir, 'start', 'bug-7').status, 0)
+
+  const out = run(dir, 'board', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const items = JSON.parse(out.stdout)
+  assert.equal(items.find((i) => i.id === 'bug-7').started, TODAY)
+  assert.equal(items.find((i) => i.id === 'task-4').started, '')
 })
 
 // --- board registry ----------------------------------------------------------

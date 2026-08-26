@@ -73,6 +73,26 @@ After reading the file at the path `show` printed:
 re-confirms it live before any change is made anyway (see Dispatch below), so an
 unreliable cause doesn't slip through even though the gate itself doesn't inspect it.
 
+## Mark it in progress
+
+The gate passed, so this item is about to be worked. Say so on disk, before any of the
+work starts:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id>
+```
+
+That writes one `started: <today>` line into the item's frontmatter and nothing else — the
+body is untouched. The board app renders it as an amber edge on the card, so anyone
+looking at the board can see what's being worked without asking. It is not a status: the
+item is still open, still in `<section>/open/`.
+
+Exit `1` here means the item can't be started, and the message says which: already in
+progress (someone is on it — say so and stop rather than working it twice), already done,
+out of scope, or an idea. Don't work around it.
+
+Clear it if you walk away without archiving — see below.
+
 ## Dispatch
 
 **Bug** → invoke `superpowers:systematic-debugging` first, to confirm the diagnosis in
@@ -116,6 +136,17 @@ Still append `## Outcome`: the date, what was attempted, what failed, and the re
 showing the failure. That record is what keeps the next attempt — yours or someone
 else's — from repeating the same dead end. Tell the user what failed and let them decide
 whether to retry, re-groom, or escalate.
+
+Leave the in-progress marker alone if they're retrying now. Clear it if the item is being
+parked or handed back:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+```
+
+An item nobody is actually working that still shows an amber edge is worse than no marker
+at all — it's the board lying about where the work is. Archiving does not need this:
+`move` never rewrites content, so a done item keeps its `started` date as history.
 
 ## Hard limits
 

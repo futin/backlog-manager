@@ -145,6 +145,12 @@ section has a fixed id prefix used when naming its items.
 | ideas         | idea   | open -> done  |
 | tasks         | task   | open -> done  |
 | out-of-scope  | oos    | flat          |
+
+An item's status is the directory it lives in, never a frontmatter key. The one
+exception is not a status: a \`started: YYYY-MM-DD\` line means someone is working
+that item right now. It is still an open item in \`<section>/open/\`; the date only
+says when it was picked up. Set it with \`start <id>\`, clear it with \`stop <id>\`.
+Archiving keeps it, so a done item records when the work began.
 `
 
 // Creates whatever is missing and returns only what it actually created, so
@@ -541,6 +547,89 @@ export function moveItem(backlog, id, dest) {
   return destPath
 }
 
+// --- in progress -------------------------------------------------------------
+// `started` is the one lifecycle key an item's frontmatter is allowed to
+// carry, and it is deliberately NOT a status. The directory still answers
+// "where is this item in its lifecycle" — open, done, out-of-scope — and
+// parseFrontmatter's outright refusal of a `status:` key stands untouched,
+// because a second answer to THAT question is the competing source of truth
+// the ban exists to prevent. `started` answers a different question: is
+// someone on this right now. An item with a started date is still an open
+// item; nothing about where its file lives changes.
+//
+// Storing it instead of deriving it (the way `groomed` is derived from the
+// body) is forced: nothing inside a file can imply that a human picked it up
+// five minutes ago. The value is a date rather than a boolean so the board and
+// the card can age it — work that has been "in progress" for eleven days is
+// the signal worth surfacing, and a bare `true` cannot carry it.
+//
+// These two commands are the only ones that rewrite an EXISTING item's
+// content: `new` writes a file that did not exist yet, and `move` renames
+// without ever opening one. Both go through parseFrontmatter →
+// renderFrontmatter, which round-trips unknown keys (`from:`, `promoted-to:`)
+// by construction, and both re-attach the body as the exact string
+// parseFrontmatter handed back — so the only bytes that can differ afterwards
+// are inside the fence.
+function writeItemFile(absPath, data, body) {
+  fs.writeFileSync(absPath, `${renderFrontmatter(data)}\n${body}`)
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+// Refuses in the same three cases the lifecycle makes meaningless, each with
+// its own message rather than one shared "cannot start": done and
+// out-of-scope have no work left to pick up, and an idea has no plan to work
+// from at all. That last one duplicates a rule backlog-execute already
+// enforces in prose — enforced here too, because a hand-typed
+// `start idea-5` would otherwise paint an in-progress marker on a card no
+// skill will ever come back to clear.
+//
+// Starting an already-started item is refused rather than re-stamped: a
+// second `start` is almost always a re-run, and silently moving the date
+// forward would erase exactly the "this has been open for eleven days"
+// signal the date exists to provide. The refusal names the date already
+// there so the caller can see what it would have overwritten.
+export function startItem(backlog, id, today = todayISO()) {
+  const item = locateItem(backlog, id)
+
+  if (item.state === 'terminal') {
+    throw new BacklogError(`${id} is out of scope — nothing to start`, 1)
+  }
+  if (item.state === 'done') {
+    throw new BacklogError(`${id} is done — nothing to start`, 1)
+  }
+  if (item.section === 'ideas') {
+    throw new BacklogError(`${id} is an idea, not work — promote it to a task with /backlog-groom first`, 1)
+  }
+
+  const { data, body } = readItemFile(item.path)
+  if (data.started) {
+    throw new BacklogError(`${id} is already in progress (started ${data.started})`, 1)
+  }
+
+  writeItemFile(item.path, { ...data, started: today }, body)
+  return item.path
+}
+
+// Deliberately permissive about WHERE the item is, unlike startItem: the one
+// thing stop is for is clearing a marker, and a stale `started` on an
+// archived item is precisely a marker worth being able to clear. Only
+// "there is nothing to clear" is refused.
+export function stopItem(backlog, id) {
+  const item = locateItem(backlog, id)
+
+  const { data, body } = readItemFile(item.path)
+  if (!data.started) {
+    throw new BacklogError(`${id} is not in progress`, 1)
+  }
+
+  const { started, ...rest } = data
+  writeItemFile(item.path, rest, body)
+  return item.path
+}
+
 // Resolves the repo root for a CLI command and turns a BacklogError into the
 // stderr message + exit code every command reports it with, so `root` and
 // `init` below — and every command tasks 2-4 add — share this one place
@@ -612,7 +701,9 @@ commands:
   new    print a new item's path and frontmatter (writes nothing)
   board  print the board of open items (bugs, ideas, tasks)
   show   print an item's absolute path and frontmatter
-  move   move an item into done or out-of-scope`
+  move   move an item into done or out-of-scope
+  start  mark an open bug or task as in progress
+  stop   clear the in-progress marker`
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
 
@@ -623,6 +714,11 @@ const BOARD_USAGE = `usage: backlog.mjs board [--section <bugs|ideas|tasks>] [--
 const SHOW_USAGE = `usage: backlog.mjs show <id>`
 
 const MOVE_USAGE = `usage: backlog.mjs move <id> done|out-of-scope`
+
+// One constant for both verbs: they are a pair, and someone who mistyped one
+// of them is the person most likely to want the other named right there.
+const START_STOP_USAGE = `usage: backlog.mjs start <id>
+       backlog.mjs stop <id>`
 
 export function main(argv) {
   const [cmd] = argv
@@ -741,18 +837,25 @@ export function main(argv) {
     // items that ARE readable. `problems` is checked once at the very end,
     // after whatever output below could still be produced.
     const { items: openItems, problems } = readOpenItems(r.resolved.backlog)
-    let items = openItems.map((item) => ({ ...item, ageDays: ageDaysSince(item.created) }))
+    let items = openItems.map((item) => ({ ...item, ageDays: ageDaysSince(item.created), started: item.data.started ?? '' }))
     if (sectionFlag !== undefined) {
       items = items.filter((item) => item.section === sectionFlag)
     }
 
     if (json) {
-      console.log(JSON.stringify(items.map(({ id, section, title, created, ageDays, path: itemPath }) => (
-        { id, section, title, created, ageDays, path: itemPath }
+      console.log(JSON.stringify(items.map(({ id, section, title, created, ageDays, started, path: itemPath }) => (
+        { id, section, title, created, ageDays, started, path: itemPath }
       ))))
     } else {
       const idWidth = Math.max(0, ...items.map((item) => item.id.length))
       const ageWidth = Math.max(0, ...items.map((item) => `${item.ageDays}d`.length))
+      // The in-progress column appears only when something on this board is
+      // actually in progress, which keeps every unstarted board — the common
+      // case, and the one the `backlog` skill prints to a human — byte-identical
+      // to what it printed before the column existed. Computed over the same
+      // post---section set the widths above are, so a --section slice never
+      // indents for work happening in a section it isn't showing.
+      const wipWidth = items.some((item) => item.started !== '') ? 2 : 0
       const sectionsToPrint = sectionFlag !== undefined ? [sectionFlag] : QUEUE_SECTIONS
       for (const s of sectionsToPrint) {
         const sectionItems = items.filter((item) => item.section === s)
@@ -760,7 +863,8 @@ export function main(argv) {
         for (const item of sectionItems) {
           const idCol = item.id.padEnd(idWidth)
           const ageCol = `${item.ageDays}d`.padEnd(ageWidth)
-          console.log(`  ${idCol}  ${ageCol}  ${item.title}`)
+          const wipCol = (item.started === '' ? '' : '»').padEnd(wipWidth)
+          console.log(`  ${idCol}  ${ageCol}  ${wipCol}${item.title}`)
         }
       }
     }
@@ -820,6 +924,36 @@ export function main(argv) {
     }
 
     console.log(newPath)
+    return 0
+  }
+
+  // start and stop share one block: the only thing that differs is which
+  // function runs, and duplicating the id check, the store check, and the
+  // error-to-exit-code funnel twice over would be three chances for them to
+  // drift apart. Both print the item's path on success — unchanged, unlike
+  // move's, but it is what a skill needs next in order to read the file.
+  if (cmd === 'start' || cmd === 'stop') {
+    const id = argv[1]
+    if (!id) {
+      console.error(START_STOP_USAGE)
+      return 1
+    }
+
+    const r = requireBacklog()
+    if (!r.ok) return r.code
+
+    let itemPath
+    try {
+      itemPath = cmd === 'start'
+        ? startItem(r.resolved.backlog, id)
+        : stopItem(r.resolved.backlog, id)
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
+
+    console.log(itemPath)
     return 0
   }
 

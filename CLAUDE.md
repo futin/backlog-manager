@@ -61,6 +61,17 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   (`allow.util.ts`); a file outside every registered `backlog/` 404s.
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan
   non-empty), never stored; status is the directory, never frontmatter.
+- **`started: YYYY-MM-DD` is the one lifecycle key allowed in frontmatter, and
+  it is not a status.** The `status:` ban stands (both parsers still throw on
+  it) because a second answer to "which directory holds this file" is the
+  competing source of truth the ban exists to prevent; `started` answers a
+  different question — is someone on this right now — and an item carrying it
+  is still an open item in `<section>/open/`. Written only by `start`/`stop`,
+  the only two commands that rewrite an existing item's content (`move`
+  renames and never opens the file), so both must round-trip unknown keys and
+  the body byte-for-byte. Surfaced raw by the scanner; "in progress" is
+  `started !== '' && status === 'open'`, decided in the client, because
+  archiving deliberately keeps the date as history.
 - **Ports 4322/5177** — guide-manager holds 4321/5175/5176 on this machine.
 - **Both processes bind `127.0.0.1` by default and both compose ports publish
   on `127.0.0.1`.** Nothing in this stack has auth in front of it — the

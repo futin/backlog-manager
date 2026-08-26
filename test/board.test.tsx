@@ -20,7 +20,7 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // literal's `section`/`status` widen to plain `string` and fail against
   // `Section`/`ItemStatus` below — the annotation is what keeps them narrowed.
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: '2026-08-20', tags: [],
+    id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over
@@ -31,9 +31,9 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
 const ITEMS: ItemsIndex = {
   items: [
     fakeItem({}),
-    fakeItem({ id: 'bug-2', title: 'groomed bug', groomed: true }),
+    fakeItem({ id: 'bug-2', title: 'groomed bug', groomed: true, started: '2026-08-24' }),
     fakeItem({ id: 'task-1', title: 'a task', section: 'tasks', project: 'beta', projectPath: '/abs/beta', groomed: true }),
-    fakeItem({ id: 'task-9', title: 'finished task', section: 'tasks', status: 'done', groomed: true }),
+    fakeItem({ id: 'task-9', title: 'finished task', section: 'tasks', status: 'done', groomed: true, started: '2026-08-01' }),
     fakeItem({ id: 'idea-1', title: 'an idea', section: 'ideas', groomed: null }),
     fakeItem({ id: 'oos-1', title: 'declined thing', section: 'out-of-scope', status: 'terminal', groomed: null })
   ],
@@ -88,6 +88,43 @@ describe('BoardView', () => {
     expect(within(card).getByText('alpha'))
       .toHaveClass('pill', buildProjectHues(PROJECTS).classFor('alpha'));
     expect(card.textContent).toContain('bug-2 · 2026-08-20');
+  });
+
+  // The marker is `◍ <age>` and lives in the foot rather than on the meta line,
+  // pinned unshrinkable at the card's right edge. Measured, not guessed: the
+  // meta line is nowrap-with-ellipsis inside ~118px at the real column width,
+  // already clips `· groomed`, and swallowed the marker whole when it sat there —
+  // 239px of content in a 118px box, rendered but invisible. The words move to
+  // the title attribute (and to the drawer), which is what the assertion on the
+  // title below is protecting: the visible text alone is deliberately terse.
+  it('marks an in-progress card with the live class and an aged marker in the foot', async () => {
+    await renderBoard();
+    const live = screen.getByText('groomed bug').closest('.board-card') as HTMLElement;
+    expect(live).toHaveClass('board-card-live');
+    const mark = within(live).getByTitle(/in progress since 2026-08-24/);
+    expect(mark).toHaveClass('board-card-live-mark');
+    expect(mark.textContent).toMatch(/^◍ \d+d$/);
+    expect(mark.closest('.board-card-foot')).not.toBeNull();
+    expect(mark.closest('.board-card-meta')).toBeNull();
+
+    // The negative half matters as much: without it, a marker rendered
+    // unconditionally would pass the assertions above.
+    const idle = screen.getByText('a bug').closest('.board-card') as HTMLElement;
+    expect(idle).not.toHaveClass('board-card-live');
+    expect(within(idle).queryByTitle(/in progress/)).not.toBeInTheDocument();
+  });
+
+  // An archived item keeps its started date — "picked up on the 1st, finished on
+  // the 20th" is history worth having in the file, and `move` never rewrites
+  // content to strip it. So the card has to gate on status as well as the date,
+  // or every item ever worked would read as live forever after it shipped.
+  it('renders a done item that still carries a started date as done, not live', async () => {
+    await renderBoard();
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
+    const card = screen.getByText('finished task').closest('.board-card') as HTMLElement;
+    expect(card).not.toHaveClass('board-card-live');
+    expect(within(card).queryByTitle(/in progress/)).not.toBeInTheDocument();
+    expect(within(card).getByText('· done')).toBeInTheDocument();
   });
 
   it('colours the pill by project, not by section', async () => {

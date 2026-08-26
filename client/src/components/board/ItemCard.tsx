@@ -1,3 +1,4 @@
+import { daysSince } from '../../lib/item-age';
 import type { ProjectHues } from '../../lib/project-hue';
 import type { BacklogItem } from '../../../../shared/types';
 
@@ -9,9 +10,19 @@ import type { BacklogItem } from '../../../../shared/types';
 export function ItemCard(
   { item, hues, onOpen }: { item: BacklogItem; hues: ProjectHues; onOpen: () => void }
 ) {
+  // Two conditions, not one. `started` outlives the work: `move` never rewrites
+  // an item's content, so an archived file keeps the date it was picked up as
+  // history — worth having, and exactly why the date alone cannot mean "live",
+  // or every item ever shipped would read as in progress forever.
+  const inProgress = item.status === 'open' && item.started !== '';
+  // null when `started` is not a date this can age (a hand-edited file — the CLI
+  // only ever writes YYYY-MM-DD). The marker still renders; it just drops the
+  // age rather than printing NaNd.
+  const age = inProgress ? daysSince(item.started) : null;
+
   return (
     <div
-      className="board-card"
+      className={inProgress ? 'board-card board-card-live' : 'board-card'}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -39,6 +50,23 @@ export function ItemCard(
           ) : null}
           {item.status === 'done' ? <span className="board-card-done"> · done</span> : null}
         </div>
+        {/* A sibling of the meta line, not a part of it: the meta is
+            nowrap-with-ellipsis in about 118px at the real column width and
+            already clips `· groomed`, so a marker appended there rendered 239px
+            of content into a 118px box and was never once visible. Out here it
+            is unshrinkable (CSS) and takes the space the meta's ellipsis frees.
+            Amber, where groomed is green — the theme's own legend reads amber as
+            "a human must act", and the card someone is actively on is the one
+            that is true of.
+            Terse because that is all the room there is: the age is the half that
+            cannot be guessed from the amber edge, and three days versus three
+            weeks is the whole reason a date is stored rather than a boolean. The
+            words go in the title attribute and, in full, in the drawer. */}
+        {inProgress ? (
+          <span className="board-card-live-mark" title={`in progress since ${item.started}`}>
+            ◍{age === null ? '' : ` ${age}d`}
+          </span>
+        ) : null}
       </div>
     </div>
   );

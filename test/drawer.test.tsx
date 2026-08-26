@@ -12,7 +12,7 @@ import type { BacklogItem } from '../shared/types';
 const ITEM: BacklogItem = {
   id: 'bug-2', title: 'groomed bug', created: '2026-08-20', tags: ['ui'],
   section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-  groomed: true, path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
+  groomed: true, started: '', path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
 };
 
 /* The drawer renders whatever assignment the board hands it, so the suite
@@ -28,6 +28,20 @@ describe('ItemDrawer', () => {
     global.fetch = jest.fn(() =>
       Promise.resolve({ ok: true, text: () => Promise.resolve('## Cause\n\noff by one\n') } as Response)
     ) as jest.Mock;
+  });
+
+  // The card has room only for an age; the drawer is where the actual date
+  // belongs, since "in progress 47d" invites the follow-up question "since
+  // when" and the answer is right there in the file.
+  it('names the date an in-progress item was picked up, and says nothing when it was not', async () => {
+    const { unmount } = render(
+      <ItemDrawer item={{ ...ITEM, started: '2026-08-24' }} hues={HUES} onClose={() => {}} />
+    );
+    expect(screen.getByText(/in progress since 2026-08-24/)).toBeInTheDocument();
+    unmount();
+
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    expect(screen.queryByText(/in progress/)).not.toBeInTheDocument();
   });
 
   it('fetches the body by path and renders the markdown', async () => {

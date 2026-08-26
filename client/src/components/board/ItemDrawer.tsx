@@ -236,6 +236,12 @@ export function ItemDrawer(
           <span>
             {/* Project lives in the pill above, not twice. */}
             {item.id} · {item.created}
+            {/* Plain text, like the `done` marker beside it — the card has room
+                only for an age, so the drawer is where the actual date belongs:
+                "in progress 47d" invites "since when", and the answer is here.
+                Gated on status the same way the card is, so an archived item
+                reads as done rather than as still being worked. */}
+            {item.status === 'open' && item.started !== '' ? ` · ◍ in progress since ${item.started}` : ''}
             {item.status === 'done' ? ' · done' : ''}
             {item.tags.length > 0 ? ` · ${item.tags.join(', ')}` : ''}
           </span>

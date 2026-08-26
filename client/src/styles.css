@@ -264,6 +264,25 @@ body {
    history and dims. */
 .board-card-groomed { color: var(--green) }
 .board-card-done { color: var(--ink2) }
+/* In progress: an amber edge down the card, because "which of these twelve is
+   anyone on" is a question asked of a whole column at once, and 10.5px of mono
+   at the bottom of a card cannot answer it at a glance.
+   An inset shadow rather than border-left: a real 3px border would push this
+   card's content 2px right of every unmarked card beside it (the 1px border and
+   the padding above are one tuned block, with a compact-density override), while
+   a shadow paints inside the existing box and moves nothing. The top-edge inset
+   from .board-card is repeated here because box-shadow does not cascade per
+   layer — declaring only the amber one would drop the edge highlight. */
+.board-card-live { box-shadow: inset 0 1px 0 var(--edge), inset 3px 0 0 var(--amber) }
+/* flex:none is the whole point of the marker living in the foot instead of on the
+   meta line: the meta yields and ellipsizes (it is id-and-date, readable from its
+   head), while this stays whole at the card's right edge. Mono at the meta's own
+   size because it is a sibling of that line, not a child of it, so it inherits
+   neither. */
+.board-card-live-mark {
+  flex: none; color: var(--amber);
+  font-family: var(--mono); font-size: 10.5px; white-space: nowrap;
+}
 
 /* ---------------------------------------------- Settings section */
 .mdetail-label {
