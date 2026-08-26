@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
-    "docker:sync": "pnpm run docker:down && docker volume rm -f backlog-manager_backlog-manager-node-modules && pnpm run docker:up"
+    "docker:sync": "pnpm run docker:down && pnpm run docker:up"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",
