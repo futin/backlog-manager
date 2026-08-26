@@ -4,14 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Backlog Manager</title>
-<!-- An open book, one page read and one still dimmed: the board's whole job is
-     which guide you are part-way through. Inlined as a data URI rather than a
-     file under client/public for the same reason vite.config.ts keeps a proxy
-     list — a missing /favicon.svg would not 404 in dev, Vite's SPA fallback
-     would hand back index.html as an image and the tab would silently show the
-     default globe. A data URI has no route to forget. Colours are the theme's
-     cyan accent and ink, hardcoded because a favicon is painted by the browser
-     chrome and never sees the page's CSS variables. -->
+<!-- Inlined as a data URI rather than a file under client/public for the same
+     reason vite.config.ts keeps a proxy list — a missing /favicon.svg would not
+     404 in dev, Vite's SPA fallback would hand back index.html as an image and
+     the tab would silently show the default globe. A data URI has no route to
+     forget. Colours are the theme's cyan accent and ink, hardcoded because a
+     favicon is painted by the browser chrome and never sees the page's CSS
+     variables. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2355d0dd'/%3E%3Cpath d='M6 8.6c3.6-1.5 6.7-1.4 9.3.7v14.9c-2.6-2.1-5.7-2.2-9.3-.7z' fill='%230c1220'/%3E%3Cpath d='M26 8.6c-3.6-1.5-6.7-1.4-9.3.7v14.9c2.6-2.1 5.7-2.2 9.3-.7z' fill='%230c1220' opacity='.45'/%3E%3C/svg%3E">
 <script>
 // Stamp the saved theme, density and text scale before first paint. Without
@@ -20,10 +19,8 @@
 // flashing 100% is the same flash by a different name. Kept inline and tiny on
 // purpose: it must run before the stylesheet paints, so it cannot be a module.
 //
-// The server injects a script into every rendered guide page (see wrapPage)
-// that reads this same key for the theme alone — density and scale are shell
-// concerns and deliberately stop at the iframe. Mirrors hooks/useSettings.tsx.
-// Fails silently (private mode, no storage) straight back to the defaults.
+// Mirrors hooks/useSettings.tsx. Fails silently (private mode, no storage)
+// straight back to the defaults.
 try {
   var s = JSON.parse(localStorage.getItem('backlog-manager.settings') || '{}');
   var r = document.documentElement;

@@ -195,11 +195,6 @@ body {
   .board-select { flex: 1 1 0; min-width: 0; max-width: none }
 }
 
-/* auto-fill, so the column count follows the width the board actually got rather
-   than a breakpoint guessing at it: the same rule gives a phone one column, the
-   820px board three, and the 1280px wide board more. 220px is the floor at which
-   a card's mono meta line still fits beside its pill without wrapping. */
-.board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--card-gap) }
 /* A flex column, where the row layout used a named-areas grid. The grid put the
    pill and the meta line in a grid row, and a grid row cannot be pushed to the
    bottom of a cell that a taller neighbour stretched — which is what every cell
