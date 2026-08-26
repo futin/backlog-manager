@@ -88,4 +88,21 @@ describe('GET /api/items and /api/projects', () => {
     expect(ghost.missing).toBe(true);
     expect(ghost.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 });
   });
+
+  it('serves an item body as text/plain with the frontmatter stripped', async () => {
+    const items = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    const bug = items.items.find((i) => i.id === 'bug-2' && i.project === 'alpha') as BacklogItem;
+    const res = await request(app.getHttpServer())
+      .get('/api/items/body')
+      .query({ path: bug.path })
+      .expect(200)
+      .expect('content-type', /text\/plain/);
+    expect(res.text).toContain('## Cause');
+    expect(res.text).not.toContain('id: bug-2');
+  });
+
+  it('404s a path outside every registered store, and a missing param', async () => {
+    await request(app.getHttpServer()).get('/api/items/body').query({ path: '/etc/hosts' }).expect(404);
+    await request(app.getHttpServer()).get('/api/items/body').expect(404);
+  });
 });
