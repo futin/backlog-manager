@@ -1,0 +1,11 @@
+# pnpm's settings file. Single package — no `packages:` list — but pnpm 11
+# reads workspace-level settings from here, and allowBuilds is not optional:
+# pnpm runs no dependency install script unless the dependency is named here.
+#
+#   esbuild   downloads and links the platform binary Vite compiles with;
+#             without it `vite` dies at startup.
+#
+# guide-manager also allows mongodb-memory-server here; this repo has no
+# database, so esbuild is the only entry.
+allowBuilds:
+  esbuild: true
