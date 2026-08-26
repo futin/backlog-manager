@@ -1,0 +1,84 @@
+# The whole stack in one command:
+#
+#   docker compose up
+#
+# The Nest API on :4322 and the Vite dev server on :5177. Open
+# http://localhost:5177 — that is the one with hot reload; its proxy sends
+# /api through to the API container. No database service: the registry file
+# and the project stores ARE the data, mounted read-only from the host.
+#
+# Only the host side of each published port is configurable. Set
+# BM_WEB_PORT / BM_API_PORT in .env to move them.
+#
+# Both ports publish on 127.0.0.1 only — nothing in this stack has auth in
+# front of it, and the API's item-body route reads every registered project's
+# backlog files straight off disk, so loopback IS the access control. Both
+# services set BM_BIND=0.0.0.0 on purpose: on the host that variable is unset
+# and each process binds loopback itself, but inside a container the publish
+# above is already the boundary, and a container-loopback bind would only make
+# the published port unreachable.
+#
+# Reaching this from elsewhere (a phone, another machine on the tailnet) is a
+# separate, deliberate step layered on top: point
+# `tailscale serve` at the loopback port yourself — there is no script here
+# that does it for you. That is also the only reason `allowedHosts:
+# ['.ts.net']` in vite.config.ts means anything: without a tailnet serve in
+# front of it, no request ever arrives with a .ts.net Host header for that
+# allowlist to match.
+services:
+  server:
+    build: .
+    command: pnpm run dev
+    restart: unless-stopped
+    environment:
+      # pnpm 11 wants a TTY to fix a node_modules/lockfile disagreement and
+      # crash-loops in compose without one. CI=true is pnpm's documented
+      # non-interactive answer.
+      CI: 'true'
+      PORT: '4322'
+      # See the note at the top of this file: loopback inside the container
+      # would hide the API from its own published port.
+      BM_BIND: '0.0.0.0'
+      # The registry stores absolute host paths, and defaultRegistryFile()
+      # reads ~/.backlog-manager/registry.json off homedir() — which on Linux
+      # is $HOME. Pointing it at the same path the mount below uses keeps
+      # both honest.
+      HOME: ${HOME}
+    ports:
+      - '127.0.0.1:${BM_API_PORT:-4322}:4322'
+    volumes:
+      - .:/app
+      - backlog-manager-node-modules:/app/node_modules
+      # The registry names projects by absolute host path, so those paths
+      # have to mean the same thing inside the container. Read-only
+      # throughout: the server never writes; backlog.mjs does, on the host.
+      - ${HOME}/.backlog-manager:${HOME}/.backlog-manager:ro
+      - ${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:ro
+
+  client:
+    build: .
+    command: pnpm run dev:web
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      CI: 'true'
+      # vite.config.ts builds its proxy target from these. localhost inside
+      # this container is this container, so the API is named by service.
+      API_HOST: server
+      PORT: '4322'
+      WEB_PORT: '5177'
+      # Same reason as the server service: the publish is the boundary, the
+      # bind inside the container has to be open for it to reach anything.
+      BM_BIND: '0.0.0.0'
+      # Bind-mount file events are unreliable on Docker Desktop; polling
+      # always notices.
+      CHOKIDAR_USEPOLLING: 'true'
+    ports:
+      - '127.0.0.1:${BM_WEB_PORT:-5177}:5177'
+    volumes:
+      - .:/app
+      - backlog-manager-node-modules:/app/node_modules
+
+volumes:
+  backlog-manager-node-modules:

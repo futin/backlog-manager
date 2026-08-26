@@ -1,0 +1,110 @@
+/* ── Theme tokens ─────────────────────────────────────────────────────────────
+   Ported verbatim from ../claude-agents-dashboard/client/src/styles.css.
+
+   This file is the single palette definition for BOTH surfaces: the React shell
+   imports it, and the server links it into every rendered guide page (see
+   wrapPage in server/src/render/render.util.ts). Keeping one copy is the point —
+   a palette tweak can never leave the guide body and the shell disagreeing.
+
+   The attribute is stamped on <html> pre-paint by the inline script in
+   client/index.html and by the equivalent script wrapPage injects, then kept in
+   step by the client's useSettings hook. Adding a theme means: redefine the same
+   names, set `color-scheme`, and add the id to the client's THEMES list. */
+:root,[data-theme="midnight"]{
+  color-scheme:dark; /* dark UA scrollbars + form controls on the olive board */
+  /* ATC strip board — midnight radar: deep navy scope-room */
+  --board:#0c1220;            /* page bg: dark scope-room navy */
+  --steel:#131a2b;            /* recessed wells: inputs, tracks, inactive controls */
+  --strip:#182238;            /* strip paper — every card surface */
+  --strip-hi:#1e2a44;         /* raised/tinted paper (user msgs, active tab) */
+  --edge:rgba(255,255,255,.05);/* 1px paper catch-light */
+  --hairline:#2a3752;         /* printed rule on paper */
+  --hairline2:#354463;        /* hover/strong rule */
+  --ink:#dde6f4;--ink2:#9fadc6;--ink3:#66738c;
+  --green:#46d48c;            /* working — phosphor */
+  --amber:#ffb03a;            /* attention: a human must act */
+  --mustard:#d1ba52;          /* incomplete/pending */
+  --cyan:#55d0dd;             /* the one interactive accent */
+  --red:#e0533f;              /* danger thresholds */
+  --magenta:#cf6f9e;          /* Task subagent / kaizen */
+  --on-accent:#0c1220;        /* ink ON a filled accent (the amber Send button) */
+  --scrim:rgba(4,8,16,.66);   /* drawer backdrop */
+  --shadow:rgba(0,0,0,.4);    /* card lift — lighter themes need far less */
+  --shadow2:rgba(0,0,0,.5);   /* deeper lift: popovers, the cocked strip */
+  --mono:'IBM Plex Mono','SF Mono','JetBrains Mono',monospace;
+  --font:'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --display:'Barlow Condensed','Barlow',sans-serif;
+  /* legacy aliases — TSX inline styles + unmigrated rules keep resolving */
+  --bg:var(--board);--surface:var(--strip);--surface2:var(--steel);
+  --border:var(--hairline);--border2:var(--hairline2);
+  --text:var(--ink);--text2:var(--ink2);--text3:var(--ink3);
+  --accent:var(--cyan);--blue:var(--amber);--orange:var(--amber);
+  --yellow:var(--mustard);--pink:var(--magenta);
+}
+/* Graphite — the same board with the blue cast taken out. For anyone who finds
+   the navy too warm-shifted on a wide-gamut display. */
+[data-theme="graphite"]{
+  color-scheme:dark;
+  --board:#111214;--steel:#191b1e;--strip:#1f2124;--strip-hi:#282b2f;
+  --edge:rgba(255,255,255,.05);--hairline:#33363b;--hairline2:#43474e;
+  --ink:#e4e5e7;--ink2:#a6a9ae;--ink3:#6d7176;
+  --green:#5ac98a;--amber:#e6a445;--mustard:#c8b45e;--cyan:#6fc5cf;
+  --red:#dd5f4c;--magenta:#c47fa4;
+  --on-accent:#111214;--scrim:rgba(0,0,0,.66);
+  --shadow:rgba(0,0,0,.45);--shadow2:rgba(0,0,0,.55);
+}
+/* Amber CRT — black glass, one phosphor. The status colors survive as amber
+   tints rather than hues, which is the point: a monochrome tube. */
+[data-theme="amber"]{
+  color-scheme:dark;
+  --board:#0a0805;--steel:#141009;--strip:#1a150c;--strip-hi:#241d10;
+  --edge:rgba(255,176,58,.07);--hairline:#3a2f18;--hairline2:#544425;
+  --ink:#ffcf7a;--ink2:#c69a4f;--ink3:#8a6a35;
+  --green:#c8d24a;--amber:#ffb03a;--mustard:#e0a63c;--cyan:#ffc76b;
+  --red:#e2603a;--magenta:#e0975a;
+  --on-accent:#0a0805;--scrim:rgba(10,6,0,.72);
+  --shadow:rgba(0,0,0,.55);--shadow2:rgba(0,0,0,.65);
+}
+/* Nightshift — a deep green scope. Easiest of the dark set on a dim room. */
+[data-theme="nightshift"]{
+  color-scheme:dark;
+  --board:#07120d;--steel:#0d1c15;--strip:#12251b;--strip-hi:#193225;
+  --edge:rgba(255,255,255,.05);--hairline:#204030;--hairline2:#2d5641;
+  --ink:#d7ecdf;--ink2:#94b7a4;--ink3:#5e7e6c;
+  --green:#4fe09a;--amber:#ffbe52;--mustard:#cfc55e;--cyan:#54cfba;
+  --red:#e2664b;--magenta:#c982ad;
+  --on-accent:#07120d;--scrim:rgba(2,10,7,.68);
+  --shadow:rgba(0,0,0,.42);--shadow2:rgba(0,0,0,.52);
+}
+/* Daylight Strip — the actual paper the whole metaphor comes from: manila
+   stock, dark ink, printed rules. The one light theme; shadows drop right down
+   because a lift that reads as depth on black reads as dirt on paper. */
+[data-theme="daylight"]{
+  color-scheme:light;
+  --board:#e8e3d7;--steel:#f2eee5;--strip:#fbf8f1;--strip-hi:#f2ecdd;
+  --edge:rgba(0,0,0,.04);--hairline:#cdc4b1;--hairline2:#ab9f88;
+  --ink:#231f1a;--ink2:#5a5346;--ink3:#8a8172;
+  --green:#1f7a4d;--amber:#a86414;--mustard:#8a7415;--cyan:#136d78;
+  --red:#a83420;--magenta:#8d3f66;
+  --on-accent:#fbf8f1;--scrim:rgba(60,52,38,.42);
+  --shadow:rgba(60,50,30,.13);--shadow2:rgba(60,50,30,.2);
+}
+
+/* Aliases for the older token names the guide stylesheet and the vendored
+   reading aid already consume. assets/bionic.css themes itself from --line,
+   --panel, --accent, --muted and --fg; the aid is vendored and must not be
+   edited, so the names it expects are provided here instead. */
+:root{
+  --fg:var(--ink);
+  --muted:var(--ink2);
+  --line:var(--hairline);
+  --card:var(--strip);
+  /* --strip, not --strip-hi: the aid's panel sits directly on the page, whose
+     background is --board, so it needs the card-on-board tone. --strip-hi is the
+     raised-on-a-card tone — lighter than --strip on the four dark palettes, but
+     on daylight a tint BETWEEN board and strip, which left the panel at 1.09:1
+     against the page and reading as no panel at all. */
+  --panel:var(--strip);
+  --good:var(--green);
+  --bad:var(--red);
+}

@@ -1,0 +1,5 @@
+{
+  "name": "backlog-manager",
+  "description": "Home of the backlog skills (capture, groom, execute, board), plus a local Tailscale-reachable board showing every project's backlog",
+  "version": "0.1.0"
+}

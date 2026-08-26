@@ -1,0 +1,20 @@
+registry.json
+node_modules/
+*.log
+.DS_Store
+.idea/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# local env
+.env
+
+# client build output
+client/dist/
+
+# claude code local state — scoped, not a blanket .claude/: this repo publishes
+# itself as a plugin, so anything shared there stays trackable.
+.claude/worktrees/
+.claude/settings.local.json
