@@ -30,11 +30,11 @@ describe('ItemDrawer', () => {
     expect(screen.getByText('off by one')).toBeInTheDocument();
   });
 
-  it('shows the item meta: pill, project, created, path', async () => {
+  it('shows the item meta: project pill, id, created, path', async () => {
     render(<ItemDrawer item={ITEM} onClose={() => {}} />);
     expect(screen.getByRole('dialog', { name: 'groomed bug' })).toBeInTheDocument();
-    expect(screen.getByText('bug')).toBeInTheDocument();
-    expect(screen.getByText(/alpha · 2026-08-20/)).toBeInTheDocument();
+    expect(screen.getByText('alpha')).toHaveClass('pill', 'pill-bug');
+    expect(screen.getByText(/bug-2 · 2026-08-20/)).toBeInTheDocument();
     expect(screen.getByText(ITEM.path)).toBeInTheDocument();
     // Lets the mocked fetch's state update land inside act() before the test
     // ends — otherwise React logs an act() warning on every run because

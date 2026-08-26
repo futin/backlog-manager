@@ -3,11 +3,14 @@ import { marked } from 'marked';
 
 import type { BacklogItem, Section } from '../../../../shared/types';
 
-const PILL: Record<Section, { cls: string; label: string }> = {
-  bugs: { cls: 'pill-bug', label: 'bug' },
-  ideas: { cls: 'pill-idea', label: 'idea' },
-  tasks: { cls: 'pill-task', label: 'task' },
-  'out-of-scope': { cls: 'pill-oos', label: 'oos' }
+/* Same deal as the card's pill: section hue, project name as the text. Kept in
+   step with ItemCard on purpose — a card and the drawer it opens should not
+   disagree about what the pill says. */
+const PILL: Record<Section, string> = {
+  bugs: 'pill-bug',
+  ideas: 'pill-idea',
+  tasks: 'pill-task',
+  'out-of-scope': 'pill-oos'
 };
 
 /**
@@ -228,13 +231,14 @@ export function ItemDrawer({ item, onClose }: { item: BacklogItem; onClose: () =
       <div className="drawer-backdrop" data-testid="drawer-backdrop" onClick={onClose} />
       <aside className="drawer" role="dialog" aria-label={item.title}>
         <div className="drawer-head">
-          <span className={`pill ${PILL[item.section].cls}`}>{PILL[item.section].label}</span>
+          <span className={`pill ${PILL[item.section]}`}>{item.project}</span>
           <span className="drawer-title">{item.title}</span>
           <button className="drawer-close" onClick={onClose}>close</button>
         </div>
         <div className="drawer-meta">
           <span>
-            {item.id} · {item.project} · {item.created}
+            {/* Project lives in the pill above, not twice. */}
+            {item.id} · {item.created}
             {item.status === 'done' ? ' · done' : ''}
             {item.tags.length > 0 ? ` · ${item.tags.join(', ')}` : ''}
           </span>

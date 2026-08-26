@@ -223,10 +223,20 @@ body {
 /* margin-top:auto is the pin: cards in a row are as tall as the tallest title, and
    without it the meta lines of neighbours sit at different heights. */
 .board-card-foot { margin-top: auto; display: flex; align-items: baseline; gap: 8px }
-.board-card-foot .pill { flex: none }
-.board-card-meta { min-width: 0; font-size: 10.5px; color: var(--ink3); font-family: var(--mono) }
+/* The pill is unshrinkable and the meta line yields: the pill now holds the
+   project name, which is identity and must read in full, while the meta is
+   id-and-date — recognisable from its head, so an ellipsis there costs little.
+   Without the nowrap the meta would instead wrap under a long project name and
+   break the baseline the foot rows share. */
+.board-card-foot .pill { flex: none; max-width: 100% }
+.board-card-meta {
+  min-width: 0; font-size: 10.5px; color: var(--ink3); font-family: var(--mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
-/* Section pill: the item's type, on its card and in the drawer head. Shape and
+/* Section pill: the item's *project*, in the section's hue, on its card and in
+   the drawer head. The hue is what still says "bug" / "idea" — the text is free
+   for the project because the card's column already declares the type. Shape and
    type here; the colours are the four rules below it. */
 .pill {
   font-family: var(--mono); font-size: 9px; font-weight: 600; line-height: 1.5;
@@ -235,7 +245,9 @@ body {
 }
 /* Section pills. Outline and ink only, no tint — same rationale as
    guide-manager: a tinted fill would need a mix per palette. Four hues that
-   collide with nothing else on the card: --green stays the groomed marker. */
+   collide with nothing else on the card: --green stays the groomed marker.
+   With the type no longer spelled out, these four are the only thing carrying
+   it on a card, so they earn their keep twice over. */
 .pill-bug { color: var(--red); border-color: var(--red) }
 .pill-idea { color: var(--mustard); border-color: var(--mustard) }
 .pill-task { color: var(--cyan); border-color: var(--cyan) }
@@ -347,7 +359,8 @@ body {
 /* Column header: the bay header's anatomy (tick, name, count) without the
    fold — a fixed four-column board has nothing to fold. The tick carries the
    section's hue, the same one its pills wear, so a card's pill points back to
-   its column at a glance. */
+   its column at a glance — which is the whole reason the pill can spend its
+   text on the project instead of on the type. */
 .board-col-h { display: flex; align-items: baseline; gap: 8px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline) }
 .board-col-tick { flex: none; align-self: center; width: 14px; height: 3px; background: var(--ink3) }
 .board-col-bugs .board-col-tick { background: var(--red) }

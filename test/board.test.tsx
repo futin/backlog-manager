@@ -78,11 +78,14 @@ describe('BoardView', () => {
     expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
-  it('marks groomed bugs and shows id · project · date on the card', async () => {
+  it('marks groomed bugs, pills the project, and shows id · date on the card', async () => {
     await renderBoard();
     const card = screen.getByText('groomed bug').closest('.board-card') as HTMLElement;
     expect(within(card).getByText('· groomed')).toBeInTheDocument();
-    expect(card.textContent).toContain('bug-2 · alpha · 2026-08-20');
+    // The pill carries the project — not the type, which the column already
+    // states — and the meta line carries what is left.
+    expect(within(card).getByText('alpha')).toHaveClass('pill', 'pill-bug');
+    expect(card.textContent).toContain('bug-2 · 2026-08-20');
   });
 
   it('status filter: done shows only done items in the three queue columns', async () => {
