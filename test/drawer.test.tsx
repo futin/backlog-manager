@@ -194,4 +194,41 @@ describe('ItemDrawer', () => {
     expect(img.getAttribute('src')).toBe('./diagram.png');
     expect(img.getAttribute('alt')).toBe('diagram');
   });
+
+  // Round 3: a protocol-relative src (`//host/...`) has no `scheme:` for
+  // isDisallowedScheme to match, so it read as "relative" and slipped past
+  // the round-2 image guard — a real third-party fetch (leaking the
+  // viewer's IP/UA/referrer) from a board whose own comments say it only
+  // ever talks to its own origin. `/\host` and reference-definition forms
+  // reach the same renderer the same way; a browser treats `\` the same as
+  // `/` in a URL, and marked resolves a `[x][r]` / `[r]: <src>` reference
+  // before the renderer ever runs.
+  it.each([
+    ['protocol-relative', '![logo](//evil.example/p.png)'],
+    ['backslash variant of protocol-relative', '![logo](/\\evil.example/p.png)'],
+    ['reference-definition form', '![logo][r]\n\n[r]: //evil.example/p.png\n']
+  ])('never requests a protocol-relative image src — %s', async (_desc, body) => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
+    );
+    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
+    // No <img> at all — same fallback as the scheme-based cases above, and
+    // for the same reason: there is no safe src to neutralize this src down
+    // to, so it renders as its alt text instead.
+    expect(document.querySelector('.drawer-body img')).not.toBeInTheDocument();
+  });
+
+  it('still renders an absolute-path (single-slash) image as a real img tag', async () => {
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('![diagram](/abs/path.png)')
+      } as Response)
+    );
+    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
+    const img = document.querySelector('.drawer-body img') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/abs/path.png');
+  });
 });

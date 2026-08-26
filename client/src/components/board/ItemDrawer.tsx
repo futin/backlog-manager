@@ -21,8 +21,9 @@ const ALLOWED_LINK_SCHEMES = new Set(['http', 'https', 'mailto']);
  * Absolute-URL schemes an image src may use — none. This is a read-only
  * local board with no legitimate reason to make an outbound fetch to a third
  * party on a viewer's behalf, so http(s) is exactly as unwelcome here as
- * javascript:/data: is dangerous elsewhere: only a relative, same-origin-ish
- * path is ever actually requested.
+ * javascript:/data: is dangerous elsewhere: only a same-origin-relative path
+ * is ever actually requested. "Relative" excludes protocol-relative — see
+ * `isProtocolRelative` below, which is what actually enforces that half.
  */
 const ALLOWED_IMAGE_SCHEMES = new Set<string>();
 
@@ -39,6 +40,21 @@ function schemeOf(href: string): string | undefined {
 function isDisallowedScheme(href: string, allowed: ReadonlySet<string>): boolean {
   const scheme = schemeOf(href);
   return scheme !== undefined && !allowed.has(scheme);
+}
+
+/**
+ * True for a protocol-relative reference — `//host/...` — which `schemeOf`
+ * calls "relative" (there's no `scheme:` to match) even though a browser
+ * resolves it against its *own* current scheme and fetches from `host`
+ * exactly as if `javascript:`/`data:` had been typed out: same third-party
+ * request, no scheme check ever sees it coming. Backslashes are mapped to
+ * forward slashes first because in a "special" URL scheme (http/https among
+ * them) a browser treats `\` and `/` interchangeably, so `/\host`, `\\host`,
+ * and `\/host` all resolve exactly like `//host` — this one check has to see
+ * them the same way a browser would, or it only covers one spelling of four.
+ */
+function isProtocolRelative(href: string): boolean {
+  return href.replace(/\\/g, '/').startsWith('//');
 }
 
 /**
@@ -104,8 +120,11 @@ function escapeHtml(s: string): string {
  *  - `link` renders a disallowed (or entity-hidden) scheme as plain text
  *    with no `<a>` at all; an allowed scheme gets a hand-built, escaped
  *    anchor rather than marked's default one.
- *  - `image` never lets a scheme through — see `ALLOWED_IMAGE_SCHEMES`. A
- *    disallowed src renders as the alt text instead of an `<img>`.
+ *  - `image` never lets a scheme through — see `ALLOWED_IMAGE_SCHEMES` — and
+ *    separately never lets a *protocol-relative* `//host/...` src through
+ *    either, since that has no scheme for the allowlist check to catch yet
+ *    still fetches from `host`. A disallowed src renders as the alt text
+ *    instead of an `<img>`.
  */
 marked.use({
   renderer: {
@@ -119,7 +138,9 @@ marked.use({
       return `<a href="${escapeHtml(href)}"${titleAttr}>${text}</a>`;
     },
     image({ href, title, text }) {
-      if (isDisallowedScheme(href, ALLOWED_IMAGE_SCHEMES)) return escapeHtml(text);
+      if (isDisallowedScheme(href, ALLOWED_IMAGE_SCHEMES) || isProtocolRelative(href)) {
+        return escapeHtml(text);
+      }
       const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
       return `<img src="${escapeHtml(href)}" alt="${escapeHtml(text)}"${titleAttr}>`;
     }
