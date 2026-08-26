@@ -70,6 +70,7 @@ Everything lives in `.env`; `.env.example` documents each key.
 |---|---|---|
 | `PORT` | `4322` | API port, and the port the built client bundle is served from |
 | `BM_REGISTRY_FILE` | `~/.backlog-manager/registry.json` | Where `backlog.mjs` writes |
+| `BM_BIND` | `127.0.0.1` | Interface both processes bind. Compose sets `0.0.0.0` inside the containers, where the loopback publish is the boundary |
 | `BM_WEB_PORT` / `BM_API_PORT` | `5177` / `4322` | Host-side ports, for when something else already holds one |
 | `BM_PROJECT_ROOT` | `~/Documents/custom-projects` | The tree mounted read-only into the server container |
 
@@ -113,11 +114,12 @@ node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init
 | Production build | `pnpm run build` |
 
 Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
-`BM_WEB_PORT` in `.env` — inside the compose stack they are fixed. Both
-publish on `127.0.0.1` only — nothing here has auth in front of it, so
-loopback is the access control; reach it from another device by putting your
-own `tailscale serve` in front of the loopback port, not by widening the
-publish.
+`BM_WEB_PORT` in `.env` — inside the compose stack they are fixed. On the host
+both processes bind `127.0.0.1`, and under compose both ports publish on
+`127.0.0.1` — nothing here has auth in front of it, so loopback is the access
+control. `BM_BIND` moves the bind if you really need to; reach it from another
+device by putting your own `tailscale serve` in front of the loopback port
+instead.
 
 ## Architecture
 

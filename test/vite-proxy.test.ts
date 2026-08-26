@@ -15,8 +15,11 @@ import { ItemsController } from '../server/src/items/items.controller';
  */
 const CONTROLLERS = [HealthController, ItemsController];
 
+type ViteServer = { host?: string | boolean; proxy?: Record<string, unknown> };
+const server = (viteConfig as { server?: ViteServer }).server ?? {};
+
 describe('vite dev proxy', () => {
-  const proxy = (viteConfig as { server?: { proxy?: Record<string, unknown> } }).server?.proxy ?? {};
+  const proxy = server.proxy ?? {};
 
   it('proxies /api', () => {
     expect(Object.keys(proxy)).toContain('/api');
@@ -28,5 +31,20 @@ describe('vite dev proxy', () => {
       const prefix = Reflect.getMetadata('path', ctor) as string;
       expect(prefix === 'api' || prefix.startsWith('api/')).toBe(true);
     }
+  });
+});
+
+/**
+ * The dev server has no auth in front of it and proxies /api straight through
+ * to an API that reads every registered project's backlog off disk, so the
+ * bind is the access control. `host: true` (0.0.0.0) is not covered by
+ * `allowedHosts`: Vite short-circuits `if (net.isIP(hostname) === 4) return
+ * true` before consulting the list, so a bare-IP Host header always passes.
+ * BM_BIND is read at import time, hence the unset assertion below.
+ */
+describe('vite dev server bind', () => {
+  it('binds loopback unless BM_BIND says otherwise', () => {
+    expect(process.env.BM_BIND).toBeUndefined();
+    expect(server.host).toBe('127.0.0.1');
   });
 });

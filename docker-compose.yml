@@ -10,11 +10,16 @@
 # Only the host side of each published port is configurable. Set
 # BM_WEB_PORT / BM_API_PORT in .env to move them.
 #
-# Both ports publish on 127.0.0.1 only, never a wildcard bind — nothing in
-# this stack has auth in front of it, and the API's item-body route reads
-# every registered project's backlog files straight off disk, so loopback IS
-# the access control. Reaching this from elsewhere (a phone, another machine
-# on the tailnet) is a separate, deliberate step layered on top: point
+# Both ports publish on 127.0.0.1 only — nothing in this stack has auth in
+# front of it, and the API's item-body route reads every registered project's
+# backlog files straight off disk, so loopback IS the access control. Both
+# services set BM_BIND=0.0.0.0 on purpose: on the host that variable is unset
+# and each process binds loopback itself, but inside a container the publish
+# above is already the boundary, and a container-loopback bind would only make
+# the published port unreachable.
+#
+# Reaching this from elsewhere (a phone, another machine on the tailnet) is a
+# separate, deliberate step layered on top: point
 # `tailscale serve` at the loopback port yourself — there is no script here
 # that does it for you. That is also the only reason `allowedHosts:
 # ['.ts.net']` in vite.config.ts means anything: without a tailnet serve in
@@ -31,6 +36,9 @@ services:
       # non-interactive answer.
       CI: 'true'
       PORT: '4322'
+      # See the note at the top of this file: loopback inside the container
+      # would hide the API from its own published port.
+      BM_BIND: '0.0.0.0'
       # The registry stores absolute host paths, and defaultRegistryFile()
       # reads ~/.backlog-manager/registry.json off homedir() — which on Linux
       # is $HOME. Pointing it at the same path the mount below uses keeps
@@ -60,6 +68,9 @@ services:
       API_HOST: server
       PORT: '4322'
       WEB_PORT: '5177'
+      # Same reason as the server service: the publish is the boundary, the
+      # bind inside the container has to be open for it to reach anything.
+      BM_BIND: '0.0.0.0'
       # Bind-mount file events are unreliable on Docker Desktop; polling
       # always notices.
       CHOKIDAR_USEPOLLING: 'true'

@@ -62,12 +62,17 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan
   non-empty), never stored; status is the directory, never frontmatter.
 - **Ports 4322/5177** — guide-manager holds 4321/5175/5176 on this machine.
-- **Both published ports bind `127.0.0.1` only, never a wildcard.** Nothing
-  in this stack has auth in front of it — the item-body route reads every
-  registered project's backlog files straight off disk — so loopback is the
-  access control; reach it from another device with your own
-  `tailscale serve` in front of the loopback port, which is also what makes
-  `allowedHosts: ['.ts.net']` in `vite.config.ts` meaningful.
+- **Both processes bind `127.0.0.1` by default and both compose ports publish
+  on `127.0.0.1`.** Nothing in this stack has auth in front of it — the
+  item-body route reads every registered project's backlog files straight off
+  disk — so loopback is the access control. `BM_BIND` is the single knob for
+  the bind (`main.ts` and `vite.config.ts` read the same variable);
+  `docker-compose.yml` sets it to `0.0.0.0` in both services because there the
+  loopback *publish* is the boundary and a container-loopback bind would just
+  hide the port. Reach it from another device with your own `tailscale serve`
+  in front of the loopback port, which is also what makes
+  `allowedHosts: ['.ts.net']` in `vite.config.ts` meaningful — that list is
+  never consulted for a bare IP, so it protects nothing on a wildcard bind.
 - **Container mounts land on host paths, read-only**, because the registry
   stores absolute host paths.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the
