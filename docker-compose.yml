@@ -44,6 +44,13 @@ services:
       # is $HOME. Pointing it at the same path the mount below uses keeps
       # both honest.
       HOME: ${HOME}
+      # Must match the Dockerfile's PNPM_CONFIG_STORE_DIR exactly. HOME above is
+      # why: with the store left to derive from it, pnpm relocated the store to
+      # /app/.pnpm-store (the bind mount), disagreed with the path baked into
+      # node_modules/.modules.yaml, and reinstalled all 650 packages before
+      # every start. Pinned on both sides, node_modules reads as up to date and
+      # `pnpm run dev` starts straight away.
+      PNPM_CONFIG_STORE_DIR: /pnpm/store
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:
@@ -74,6 +81,10 @@ services:
       # Bind-mount file events are unreliable on Docker Desktop; polling
       # always notices.
       CHOKIDAR_USEPOLLING: 'true'
+      # Same pin as the server service, and it matters twice over here: both
+      # services share the node_modules volume, so an unpinned store had the
+      # two of them running the same full install into it concurrently.
+      PNPM_CONFIG_STORE_DIR: /pnpm/store
     ports:
       - '127.0.0.1:${BM_WEB_PORT:-5177}:5177'
     volumes:

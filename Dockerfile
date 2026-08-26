@@ -38,6 +38,28 @@ RUN apt-get update \
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 
+# The store, pinned to an absolute path that means the same thing at build time
+# and at run time. Left unset, pnpm derives it from $HOME and then *relocates*
+# it whenever the home store and the project turn out to sit on different
+# drives — which is exactly the runtime shape here: compose overrides HOME to
+# the host home path (the registry stores absolute host paths) and masks
+# /app/node_modules with a named volume, leaving /app itself a bind mount. The
+# store resolved to /app/.pnpm-store there, disagreeing with the
+# /root/.local/share/pnpm/store this layer had recorded in
+# node_modules/.modules.yaml, so pnpm 11 judged node_modules stale and ran a
+# full 650-package install — into the bind mount, the slowest filesystem in the
+# stack — before every `pnpm run`. Two minutes of it, on both services at once,
+# for a Vite server that starts in 233ms.
+#
+# /pnpm lives on the image's own layer, so the warm store ships with the image
+# and no volume or bind mount carries it. It is also the same device as
+# /app/node_modules during this build, which is what keeps the install
+# hardlinking rather than copying.
+#
+# PNPM_CONFIG_* is the prefix pnpm 11 reads. The npm-compatible npm_config_*
+# form is silently ignored, which looks identical to the bug being unfixed.
+ENV PNPM_CONFIG_STORE_DIR=/pnpm/store
+
 # Copied on their own so editing source does not invalidate the install layer.
 # pnpm-workspace.yaml belongs here too, not just alongside the source: it holds
 # the allowBuilds list, and without it esbuild installs with its postinstall
