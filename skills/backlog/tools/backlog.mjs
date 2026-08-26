@@ -8,6 +8,7 @@
 //   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" root
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -18,6 +19,50 @@ export const SECTIONS = {
   ideas: 'idea',
   tasks: 'task',
   'out-of-scope': 'oos',
+}
+
+// --- board registry ----------------------------------------------------------
+// The board app in this repo reads ~/.backlog-manager/registry.json to know
+// which projects have a backlog at all. This tool is that file's ONLY writer —
+// the same one-writer invariant guide-manager keeps for its registry. `init`
+// and `new` both upsert the current repo, so any project a capture ever
+// touches appears on the board without a separate registration step.
+//
+// Upsert is keyed on the project's absolute root path (two checkouts of one
+// repo are two projects); the name is the root's basename, refreshed on every
+// upsert so a renamed directory heals itself; createdAt is set once, on first
+// insert, and never rewritten.
+export function registryFile() {
+  return process.env.BM_REGISTRY_FILE || path.join(os.homedir(), '.backlog-manager', 'registry.json')
+}
+
+export function registerProject(root, file = registryFile()) {
+  let registry = { projects: [] }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (Array.isArray(parsed.projects)) registry = parsed
+  } catch {
+    // first write, or a corrupt file — start fresh rather than fail the capture
+  }
+  const existing = registry.projects.find((p) => p.path === root)
+  if (existing) {
+    existing.name = path.basename(root)
+  } else {
+    registry.projects.push({ name: path.basename(root), path: root, createdAt: new Date().toISOString() })
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
+}
+
+// Registration must never fail the command that triggered it: a capture that
+// exits non-zero because a dashboard's bookkeeping file was unwritable would
+// teach people not to capture. stderr and move on.
+function registerBestEffort(root) {
+  try {
+    registerProject(root)
+  } catch (e) {
+    console.error(`registry update failed (board will not list this project): ${e.message}`)
+  }
 }
 
 // Carries the intended process exit code so `main` never has to re-classify
@@ -599,6 +644,7 @@ export function main(argv) {
       console.log(`initialized ${r.resolved.backlog}`)
       for (const p of created) console.log(`  created ${p}`)
     }
+    registerBestEffort(r.resolved.root)
     return 0
   }
 
@@ -663,6 +709,7 @@ export function main(argv) {
 
     console.log(absPath)
     console.log(block)
+    registerBestEffort(r.resolved.root)
     return 0
   }
 

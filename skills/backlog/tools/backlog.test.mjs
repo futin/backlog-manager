@@ -5,10 +5,21 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen } from './backlog.mjs'
+import { BacklogError, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile } from './backlog.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
+
+// `run` spawns the real CLI as a child process, which inherits this process's
+// env by default. Task 4 wires registerBestEffort into `init` and `new`, so
+// without this, every CLI-driven test below (there are a dozen `new` calls)
+// would upsert its own throwaway tmpdir into a developer's REAL
+// ~/.backlog-manager/registry.json every time this suite runs — exactly the
+// file this tool must not touch outside of real usage. One throwaway file for
+// the whole test process keeps that write off the real registry. The
+// registryFile test below still exercises BM_REGISTRY_FILE handling correctly
+// on top of this default, since it saves and restores whatever value it finds.
+process.env.BM_REGISTRY_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-registry-test-')), 'registry.json')
 
 // Every later task (ids, board+show, move) reuses this: a fresh tmpdir that
 // is already a git repo, plus the backlog/ path resolveRoot would compute
@@ -817,4 +828,61 @@ test('CLI new bugs allocates bug-3 after bug-2 is rejected into out-of-scope, no
   assert.equal(out3.status, 0)
   const path3 = out3.stdout.split('\n')[0]
   assert.match(path3, /bug-3-third-bug\.md$/)
+})
+
+// --- board registry ----------------------------------------------------------
+
+function tmpRegistry() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-registry-'))
+  return path.join(dir, 'nested', 'registry.json') // nested: mkdir -p is part of the contract
+}
+
+test('registryFile honours BM_REGISTRY_FILE and falls back to the home default', () => {
+  const prev = process.env.BM_REGISTRY_FILE
+  try {
+    process.env.BM_REGISTRY_FILE = '/tmp/somewhere/registry.json'
+    assert.equal(registryFile(), '/tmp/somewhere/registry.json')
+    delete process.env.BM_REGISTRY_FILE
+    assert.equal(registryFile(), path.join(os.homedir(), '.backlog-manager', 'registry.json'))
+  } finally {
+    if (prev === undefined) delete process.env.BM_REGISTRY_FILE
+    else process.env.BM_REGISTRY_FILE = prev
+  }
+})
+
+test('registerProject inserts a new project with name = basename and an ISO createdAt', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/path/my-project', file)
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.equal(written.projects.length, 1)
+  assert.equal(written.projects[0].name, 'my-project')
+  assert.equal(written.projects[0].path, '/abs/path/my-project')
+  assert.ok(!Number.isNaN(Date.parse(written.projects[0].createdAt)))
+})
+
+test('registerProject upserts by path and never rewrites createdAt', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/path/my-project', file)
+  const first = JSON.parse(fs.readFileSync(file, 'utf8')).projects[0]
+  registerProject('/abs/path/my-project', file)
+  const again = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.equal(again.projects.length, 1)
+  assert.equal(again.projects[0].createdAt, first.createdAt)
+})
+
+test('registerProject keeps other projects and appends new ones', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/one', file)
+  registerProject('/abs/two', file)
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.deepEqual(written.projects.map((p) => p.path), ['/abs/one', '/abs/two'])
+})
+
+test('registerProject starts fresh over a corrupt registry rather than failing', () => {
+  const file = tmpRegistry()
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, 'not json')
+  registerProject('/abs/one', file)
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.equal(written.projects.length, 1)
 })
