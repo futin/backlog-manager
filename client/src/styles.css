@@ -234,24 +234,32 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* Section pill: the item's *project*, in the section's hue, on its card and in
-   the drawer head. The hue is what still says "bug" / "idea" — the text is free
-   for the project because the card's column already declares the type. Shape and
-   type here; the colours are the four rules below it. */
+/* Project pill: the item's project, in that project's own hue, on its card and
+   in the drawer head. Both halves now say the same thing — name in the text,
+   identity in the colour — where the hue used to carry the section and merely
+   restate the column the card was already sitting in. Shape and type here; the
+   colours are the eight rules below it. */
 .pill {
   font-family: var(--mono); font-size: 9px; font-weight: 600; line-height: 1.5;
   text-transform: uppercase; letter-spacing: .09em; white-space: nowrap;
   padding: 1px 6px; border: 1px solid; border-radius: 2px;
 }
-/* Section pills. Outline and ink only, no tint — same rationale as
-   guide-manager: a tinted fill would need a mix per palette. Four hues that
-   collide with nothing else on the card: --green stays the groomed marker.
-   With the type no longer spelled out, these four are the only thing carrying
-   it on a card, so they earn their keep twice over. */
-.pill-bug { color: var(--red); border-color: var(--red) }
-.pill-idea { color: var(--mustard); border-color: var(--mustard) }
-.pill-task { color: var(--cyan); border-color: var(--cyan) }
-.pill-oos { color: var(--ink3); border-color: var(--ink3) }
+/* Project pills. Outline and ink only, no tint — same rationale as
+   guide-manager: a tinted fill would need a mix per palette. Which of the eight
+   a project gets is decided by client/src/lib/project-hue.ts, and the hues
+   themselves by the --proj-N block in shared/theme.css, so a theme owns its own
+   set. Eight near-identical rules rather than one rule reading an inline
+   --proj custom property off the element: the class keeps the whole thing in
+   the stylesheet, where the palette already lives, instead of splitting it
+   between CSS and a style attribute on every card. */
+.pill-proj-1 { color: var(--proj-1); border-color: var(--proj-1) }
+.pill-proj-2 { color: var(--proj-2); border-color: var(--proj-2) }
+.pill-proj-3 { color: var(--proj-3); border-color: var(--proj-3) }
+.pill-proj-4 { color: var(--proj-4); border-color: var(--proj-4) }
+.pill-proj-5 { color: var(--proj-5); border-color: var(--proj-5) }
+.pill-proj-6 { color: var(--proj-6); border-color: var(--proj-6) }
+.pill-proj-7 { color: var(--proj-7); border-color: var(--proj-7) }
+.pill-proj-8 { color: var(--proj-8); border-color: var(--proj-8) }
 /* Meta-line markers. Groomed is quiet confirmation, not an alarm; done is
    history and dims. */
 .board-card-groomed { color: var(--green) }
@@ -358,9 +366,9 @@ body {
 .board-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
 /* Column header: the bay header's anatomy (tick, name, count) without the
    fold — a fixed four-column board has nothing to fold. The tick carries the
-   section's hue, the same one its pills wear, so a card's pill points back to
-   its column at a glance — which is the whole reason the pill can spend its
-   text on the project instead of on the type. */
+   section's hue, and since the pills went over to project colours it is now the
+   only place that hue appears — which is fine, because the type was always
+   readable from the column a card sits in, and from the prefix on its id. */
 .board-col-h { display: flex; align-items: baseline; gap: 8px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline) }
 .board-col-tick { flex: none; align-self: center; width: 14px; height: 3px; background: var(--ink3) }
 .board-col-bugs .board-col-tick { background: var(--red) }

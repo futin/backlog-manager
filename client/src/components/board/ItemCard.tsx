@@ -1,23 +1,14 @@
-import type { BacklogItem, Section } from '../../../../shared/types';
-
-/** Pill class per section. The pill wears the section's hue but *reads* the
- *  project name: the card already sits in the section's own column, so a label
- *  spelling out "idea" repeats what the column heading said, while the project
- *  is the one thing a card on this cross-project board can't get from its
- *  position. Colour keeps the type, text carries the project. */
-const PILL: Record<Section, string> = {
-  bugs: 'pill-bug',
-  ideas: 'pill-idea',
-  tasks: 'pill-task',
-  'out-of-scope': 'pill-oos'
-};
+import type { ProjectHues } from '../../lib/project-hue';
+import type { BacklogItem } from '../../../../shared/types';
 
 /**
  * guide-manager's .guides-card, ported: title on top, footer pinned to the
  * bottom with a project pill and a mono meta line. Keyboard added (the original
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
-export function ItemCard({ item, onOpen }: { item: BacklogItem; onOpen: () => void }) {
+export function ItemCard(
+  { item, hues, onOpen }: { item: BacklogItem; hues: ProjectHues; onOpen: () => void }
+) {
   return (
     <div
       className="board-card"
@@ -33,7 +24,10 @@ export function ItemCard({ item, onOpen }: { item: BacklogItem; onOpen: () => vo
     >
       <div className="board-card-title">{item.title}</div>
       <div className="board-card-foot">
-        <span className={`pill ${PILL[item.section]}`}>{item.project}</span>
+        {/* Both the text and the hue are the project: the card's column and the
+            id's prefix below already say which type this is, so the pill spends
+            everything it has on the one thing position can't tell you. */}
+        <span className={`pill ${hues.classFor(item.project)}`}>{item.project}</span>
         <div className="board-card-meta">
           {/* Project omitted here — the pill above it says it. */}
           {item.id} · {item.created}

@@ -90,6 +90,56 @@
   --shadow:rgba(60,50,30,.13);--shadow2:rgba(60,50,30,.2);
 }
 
+/* ── Project hues ─────────────────────────────────────────────────────────────
+   Eight identity colours for the pill on a card and in the drawer head. The
+   pill used to wear its *section's* hue, which meant every card in a column
+   was the same colour and the hue said nothing the column heading hadn't
+   already said. Keyed on the project instead, the colour is the one thing on a
+   cross-project board worth scanning for: the eye finds "all of guide-manager"
+   in one pass, across all four columns at once. The type is still legible from
+   the card's column and from the id's prefix (bug-2 / idea-7) on the meta line.
+
+   Which project gets which is decided in client/src/lib/project-hue.ts — a
+   hash of the project's name picks its preference, and registration order
+   settles collisions so no two registered projects share while there are hues
+   left. Eight because that is roughly where outline pills at 9px stop being
+   tellable apart, and because a hand-picked set per theme only stays feasible
+   while it is small: --amber is a monochrome tube with no hues to rotate
+   through, and --daylight needs dark inks on paper where the dark themes need
+   bright ones, so neither could take a computed rotation of one set.
+
+   These deliberately do NOT reuse --red / --mustard / --cyan / --green /
+   --amber. Those five are load-bearing elsewhere on the same screen (the three
+   column ticks, the groomed marker, the degraded-scan line), and a project
+   that happened to hash onto the groomed green would read as a status. The
+   sets below sit a step off each of them. */
+:root,[data-theme="midnight"]{
+  --proj-1:#e0748a;--proj-2:#e09a55;--proj-3:#b8c95e;--proj-4:#5cc98a;
+  --proj-5:#4dbfc4;--proj-6:#6fa4f5;--proj-7:#a58ae8;--proj-8:#dc85c8;
+}
+[data-theme="graphite"]{
+  --proj-1:#dd7b8c;--proj-2:#dd9d5f;--proj-3:#bcc767;--proj-4:#66c78f;
+  --proj-5:#5fc0c6;--proj-6:#7ba6ee;--proj-7:#a892e4;--proj-8:#d68cc4;
+}
+/* Amber CRT keeps its bargain: one phosphor, so the eight differ by brightness
+   and a few degrees of drift inside the amber band, not by hue. Less separable
+   than the other four sets by design — the same trade this theme already makes
+   flattening green, cyan and red into tints. */
+[data-theme="amber"]{
+  --proj-1:#ffcf7a;--proj-2:#ffb03a;--proj-3:#d9c05a;--proj-4:#e2905a;
+  --proj-5:#f0bd6a;--proj-6:#c68c3a;--proj-7:#b09a48;--proj-8:#e8a13c;
+}
+[data-theme="nightshift"]{
+  --proj-1:#e0788d;--proj-2:#e59a55;--proj-3:#c2cb5f;--proj-4:#5fdc9a;
+  --proj-5:#4fcdc0;--proj-6:#6fb0ea;--proj-7:#a794e2;--proj-8:#d489bd;
+}
+/* Dark inks, not bright ones: the pill is 9px uppercase on manila stock, where
+   the dark sets' hues would drop under 3:1 and read as a smudge. */
+[data-theme="daylight"]{
+  --proj-1:#a83a56;--proj-2:#9a5a12;--proj-3:#6b7412;--proj-4:#1c7a4e;
+  --proj-5:#0e6f80;--proj-6:#2a5fae;--proj-7:#6a3fa0;--proj-8:#96356f;
+}
+
 /* Aliases for the older token names the guide stylesheet and the vendored
    reading aid already consume. assets/bionic.css themes itself from --line,
    --panel, --accent, --muted and --fg; the aid is vendored and must not be

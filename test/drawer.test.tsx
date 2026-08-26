@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { ItemDrawer } from '../client/src/components/board/ItemDrawer';
+import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
@@ -13,6 +14,14 @@ const ITEM: BacklogItem = {
   section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
   groomed: true, path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
 };
+
+/* The drawer renders whatever assignment the board hands it, so the suite
+   builds one from a one-project registry rather than hard-coding a class —
+   which keeps this test about the drawer and leaves the hue arithmetic to
+   test/project-hue.test.ts. */
+const HUES = buildProjectHues([
+  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }
+]);
 
 describe('ItemDrawer', () => {
   beforeEach(() => {
@@ -22,7 +31,7 @@ describe('ItemDrawer', () => {
   });
 
   it('fetches the body by path and renders the markdown', async () => {
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     expect(global.fetch).toHaveBeenCalledWith(
       `/api/items/body?path=${encodeURIComponent(ITEM.path)}`
     );
@@ -31,9 +40,9 @@ describe('ItemDrawer', () => {
   });
 
   it('shows the item meta: project pill, id, created, path', async () => {
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     expect(screen.getByRole('dialog', { name: 'groomed bug' })).toBeInTheDocument();
-    expect(screen.getByText('alpha')).toHaveClass('pill', 'pill-bug');
+    expect(screen.getByText('alpha')).toHaveClass('pill', HUES.classFor('alpha'));
     expect(screen.getByText(/bug-2 · 2026-08-20/)).toBeInTheDocument();
     expect(screen.getByText(ITEM.path)).toBeInTheDocument();
     // Lets the mocked fetch's state update land inside act() before the test
@@ -45,7 +54,7 @@ describe('ItemDrawer', () => {
 
   it('closes on Escape, on the close button, and on the backdrop', async () => {
     const onClose = jest.fn();
-    render(<ItemDrawer item={ITEM} onClose={onClose} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={onClose} />);
     await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
     await userEvent.click(screen.getByTestId('drawer-backdrop'));
@@ -56,7 +65,7 @@ describe('ItemDrawer', () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({ ok: false, status: 404 } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('item file unavailable')).toBeInTheDocument());
   });
 
@@ -67,7 +76,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('safe text\n\n<img src=x onerror="window.__pwned=1">')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('safe text')).toBeInTheDocument());
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(document.querySelector('.drawer-body')?.innerHTML).not.toContain('onerror');
@@ -81,7 +90,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('[click](javascript:alert(1))')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(document.querySelector('.drawer-body')?.innerHTML).not.toContain('javascript:');
@@ -109,7 +118,7 @@ describe('ItemDrawer', () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
     const link = document.querySelector('.drawer-body a') as HTMLAnchorElement | null;
     // A real anchor still renders (the scheme check alone can't see through
@@ -128,7 +137,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![logo](javascript:alert(1))')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     // Waits on the loading state clearing rather than the alt text becoming
     // visible: alt text is only ever *visible* text in the disallowed-src
     // fallback this test is trying to prove exists — waiting on it directly
@@ -145,7 +154,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![logo](https://evil.example/tracker.gif)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     expect(document.querySelector('.drawer-body img')).not.toBeInTheDocument();
   });
@@ -162,7 +171,7 @@ describe('ItemDrawer', () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
     const link = document.querySelector('.drawer-body a') as HTMLAnchorElement | null;
     expect(link?.protocol).toBe(protocol);
@@ -175,7 +184,7 @@ describe('ItemDrawer', () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
     const link = document.querySelector('.drawer-body a');
     expect(link?.getAttribute('href')).toBe(href);
@@ -188,7 +197,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![diagram](./diagram.png)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
     const img = document.querySelector('.drawer-body img') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('./diagram.png');
@@ -211,7 +220,7 @@ describe('ItemDrawer', () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     // No <img> at all — same fallback as the scheme-based cases above, and
     // for the same reason: there is no safe src to neutralize this src down
@@ -226,7 +235,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![diagram](/abs/path.png)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
     const img = document.querySelector('.drawer-body img') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('/abs/path.png');
@@ -256,7 +265,7 @@ describe('ItemDrawer', () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     const img = document.querySelector('.drawer-body img') as HTMLImageElement | null;
     // `.src` is the resolved property, not the attribute and not the HTML
@@ -275,7 +284,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve(`[click](<java${TAB}script:alert(1)>)`)
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
     // Same normalization as the image cases above — a browser ignores the tab
     // when it sniffs the scheme, so the guard has to as well.
@@ -289,7 +298,7 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![diagram](sub/dir/x.png)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} onClose={() => {}} />);
+    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
     const img = document.querySelector('.drawer-body img') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('sub/dir/x.png');

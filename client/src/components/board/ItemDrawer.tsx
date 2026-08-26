@@ -1,17 +1,8 @@
 import { useEffect, useState } from 'react';
 import { marked } from 'marked';
 
-import type { BacklogItem, Section } from '../../../../shared/types';
-
-/* Same deal as the card's pill: section hue, project name as the text. Kept in
-   step with ItemCard on purpose — a card and the drawer it opens should not
-   disagree about what the pill says. */
-const PILL: Record<Section, string> = {
-  bugs: 'pill-bug',
-  ideas: 'pill-idea',
-  tasks: 'pill-task',
-  'out-of-scope': 'pill-oos'
-};
+import type { ProjectHues } from '../../lib/project-hue';
+import type { BacklogItem } from '../../../../shared/types';
 
 /**
  * Absolute-URL schemes a link may point at. A relative href (no scheme at
@@ -186,7 +177,9 @@ marked.use({
  * refetched on every window focus, and shipping every body every time would
  * make that refresh pay for content nobody is looking at.
  */
-export function ItemDrawer({ item, onClose }: { item: BacklogItem; onClose: () => void }) {
+export function ItemDrawer(
+  { item, hues, onClose }: { item: BacklogItem; hues: ProjectHues; onClose: () => void }
+) {
   const [body, setBody] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -231,7 +224,11 @@ export function ItemDrawer({ item, onClose }: { item: BacklogItem; onClose: () =
       <div className="drawer-backdrop" data-testid="drawer-backdrop" onClick={onClose} />
       <aside className="drawer" role="dialog" aria-label={item.title}>
         <div className="drawer-head">
-          <span className={`pill ${PILL[item.section]}`}>{item.project}</span>
+          {/* Same pill the card carried, same hue — one shared helper rather
+              than a second table here, so a card and the drawer it opens can
+              never disagree. The drawer has no column to state the type, but
+              the id's prefix on the meta line below still does. */}
+          <span className={`pill ${hues.classFor(item.project)}`}>{item.project}</span>
           <span className="drawer-title">{item.title}</span>
           <button className="drawer-close" onClick={onClose}>close</button>
         </div>

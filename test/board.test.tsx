@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
+import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
 
 // `path` is derived after the spread rather than hard-coded: every other field
@@ -84,8 +85,27 @@ describe('BoardView', () => {
     expect(within(card).getByText('· groomed')).toBeInTheDocument();
     // The pill carries the project — not the type, which the column already
     // states — and the meta line carries what is left.
-    expect(within(card).getByText('alpha')).toHaveClass('pill', 'pill-bug');
+    expect(within(card).getByText('alpha'))
+      .toHaveClass('pill', buildProjectHues(PROJECTS).classFor('alpha'));
     expect(card.textContent).toContain('bug-2 · 2026-08-20');
+  });
+
+  it('colours the pill by project, not by section', async () => {
+    await renderBoard();
+    // alpha's bug and alpha's task: different columns, so under the old
+    // section-keyed pill these two carried different classes. Same project now
+    // means the same class, which is the whole point — a project reads as one
+    // colour straight across the board.
+    const bug = screen.getByText('a bug').closest('.board-card') as HTMLElement;
+    const idea = screen.getByText('an idea').closest('.board-card') as HTMLElement;
+    const alphaOnBug = within(bug).getByText('alpha');
+    const alphaOnIdea = within(idea).getByText('alpha');
+    expect(alphaOnIdea.className).toBe(alphaOnBug.className);
+
+    // ...and beta, a different project in the same column as one of them, does
+    // not — otherwise "same class everywhere" would also pass on a constant.
+    const betaTask = screen.getByText('a task').closest('.board-card') as HTMLElement;
+    expect(within(betaTask).getByText('beta').className).not.toBe(alphaOnBug.className);
   });
 
   it('status filter: done shows only done items in the three queue columns', async () => {

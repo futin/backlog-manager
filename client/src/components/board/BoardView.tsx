@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { useBoard } from '../../hooks/useBoard';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { buildProjectHues } from '../../lib/project-hue';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import type { BacklogItem, Section } from '../../../../shared/types';
@@ -64,6 +65,15 @@ export default function BoardView() {
 
   const all = index?.items ?? [];
   const registered = projects ?? [];
+
+  /* One assignment for the whole board, built here rather than per card: the
+     hue a project gets depends on which projects were registered before it, so
+     it is a property of the registry and not of any one item. Keyed on
+     `projects` and not on `registered` — the pass is cheap either way, but
+     `registered` is a fresh [] on every render while the fetch is in flight,
+     which would make the memo a no-op and hand every card a new prop object on
+     each keystroke in the search box. */
+  const hues = useMemo(() => buildProjectHues(projects ?? []), [projects]);
 
   /* Fail-open on a stale stored project (unregistered since): an unmatched
      filter that emptied the board would look like the server broke. The
@@ -166,7 +176,7 @@ export default function BoardView() {
                 </div>
                 <div className="board-col-cards">
                   {colItems.map((item) => (
-                    <ItemCard key={item.path} item={item} onOpen={() => setOpen(item)} />
+                    <ItemCard key={item.path} item={item} hues={hues} onOpen={() => setOpen(item)} />
                   ))}
                 </div>
               </div>
@@ -175,7 +185,7 @@ export default function BoardView() {
         </div>
       )}
 
-      {open !== null && <ItemDrawer item={open} onClose={() => setOpen(null)} />}
+      {open !== null && <ItemDrawer item={open} hues={hues} onClose={() => setOpen(null)} />}
     </div>
   );
 }
