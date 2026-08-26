@@ -120,6 +120,23 @@ describe('BoardView', () => {
     expect(screen.getByRole('dialog', { name: 'a bug' })).toBeInTheDocument();
   });
 
+  it('shows board unavailable on a non-2xx fetch, not the empty state', async () => {
+    // A 500 from Nest is a JSON body, so it parses cleanly. Without the res.ok
+    // check in useBoard it landed in state as the index, `all` fell back to
+    // [], and the board told you to go run a backlog skill — the one message
+    // that hides a server failure behind a user-error prompt.
+    (global.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ statusCode: 500, message: 'Internal Server Error' })
+      } as Response)
+    );
+    render(<BoardView />);
+    await waitFor(() => expect(screen.getByText('board unavailable')).toBeInTheDocument());
+    expect(screen.queryByText('nothing registered yet')).not.toBeInTheDocument();
+  });
+
   it('shows the nothing-registered empty state on an empty index', async () => {
     (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);

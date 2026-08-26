@@ -58,7 +58,19 @@ export class ItemsService {
   body(requestPath: string): string | null {
     const real = resolveAllowed(requestPath, buildAllowlist(this.registry.load()));
     if (real === null || !real.endsWith('.md')) return null;
-    const text = readFileSync(real, 'utf8');
+
+    let text: string;
+    try {
+      text = readFileSync(real, 'utf8');
+    } catch {
+      // Inside the try, not above it. A DIRECTORY named `x.md` inside a
+      // registered store passes both checks above and then throws EISDIR; an
+      // unreadable file throws EACCES. Either escaping here is a 500 with a
+      // stack trace — and a 500 where every other rejected path gets a 404 is
+      // an oracle telling the caller their path IS inside an allowlisted
+      // store, which is exactly what the 404 above exists to withhold.
+      return null;
+    }
     try {
       return parseFrontmatter(text).body;
     } catch {
