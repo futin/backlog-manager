@@ -8,13 +8,23 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import type { BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
 
+// `path` is derived after the spread rather than hard-coded: every other field
+// here is a shared default that `over` may or may not touch, but `path` must be
+// unique per fixture because BoardView keys each card on it (`id` alone would
+// collide across projects, since ids are only sequential within one project's
+// own store). An explicit `over.path` still wins, so a test that cares about a
+// specific path can still set one.
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
-  return {
+  // Annotated (not inferred): without a contextual type here, the object
+  // literal's `section`/`status` widen to plain `string` and fail against
+  // `Section`/`ItemStatus` below — the annotation is what keeps them narrowed.
+  const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: '2026-08-20', tags: [],
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over
   };
+  return { ...base, path: over.path ?? `${base.projectPath}/backlog/${base.section}/${base.status}/${base.id}.md` };
 }
 
 const ITEMS: ItemsIndex = {
@@ -61,6 +71,10 @@ describe('BoardView', () => {
     // done task-9 hidden by the default open filter; oos unaffected
     expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
       .toEqual(['2', '1', '1', '1']);
+    // col-count renders colItems.length, an array length — assert the DOM
+    // actually holds that many cards so a key-driven card omission would fail
+    // this test instead of passing unnoticed behind a correct-looking number.
+    expect(within(cols[0]).getAllByRole('button')).toHaveLength(2);
     expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
