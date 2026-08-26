@@ -1,0 +1,419 @@
+/* Ported from ../guide-manager/client/src/styles.css, cut to the two sections
+   this app has. Everything for the per-project bays, the guide viewer and its
+   reading aid is gone; the board's four type columns and the item drawer are
+   what replaced them.
+
+   The five theme palettes are NOT here: they live in shared/theme.css, so the
+   palettes stay one definition rather than a copy per app that ports this
+   stylesheet.
+
+   The text scale IS here, so the viewport divisions guide-manager carries are
+   here too — see `.shell{zoom}` below and every `/ var(--font-scale)`
+   in this file. They are not decoration: `zoom` scales the element's own box but
+   NOT what `vh`/`vw`/`dvh` resolve against, so an undivided `100vh` child of the
+   zoomed shell overhangs the screen by exactly the scale factor. Anything added
+   here that measures in viewport units needs the same division. */
+@import '../../shared/theme.css';
+
+/* Density + text scale.
+
+   Compact only retunes spacing — never a colour, never a font size — so it
+   composes with all five palettes rather than multiplying into five more. Every
+   value it moves is a custom property declared here first, which is what keeps
+   the override to one block: a rule that wants to be denser asks for a token
+   instead of growing a `[data-density]` twin.
+
+   `zoom` scales the whole board including its px-based type, which a root
+   font-size cannot do here — this stylesheet is px throughout, so `rem` would
+   reach almost nothing. It rides `.shell` and NOT `body`: `zoom` is a legacy
+   property whose interaction with `position: sticky` descendants is
+   engine-dependent, and the sticky rail is a direct child of the zoomed element
+   rather than a grandchild of the scroll root. Everything the app renders lives
+   inside `.shell`, so the scaling reach is unchanged either way. */
+.shell { zoom: var(--font-scale, 1) }
+
+:root {
+  --body-pad: 24px;
+  --card-pad: 10px 14px;
+  --card-gap: 10px;
+  --card-inner-gap: 10px;
+  --group-gap: 14px;
+  --set-pad: 9px 12px;
+}
+/* Must FOLLOW the :root defaults — both selectors match <html> at the same
+   specificity, so source order is the only thing deciding the winner. */
+[data-density="compact"] {
+  --body-pad: 14px;
+  --card-pad: 7px 11px;
+  --card-gap: 6px;
+  --card-inner-gap: 6px;
+  --group-gap: 9px;
+  --set-pad: 6px 10px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+
+/* The one viewport unit in this file that is deliberately NOT divided by
+   --font-scale: body is the zoomed element's parent, not its descendant, so
+   `zoom` on .shell never scales it and 100vh here already means the screen. */
+body {
+  font-family: var(--font);
+  background: var(--board);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.4;
+}
+
+.wrap { max-width: 820px; margin: 0 }
+.wrap.wide { max-width: 1280px }
+
+/* rack selector — the section rail down the left edge. Sticky and full-height so
+   its right rule runs the length of the board. The height is divided by
+   --font-scale because .shell{zoom} leaves 100vh resolving against the UNZOOMED
+   viewport: at 120% a plain 100vh rail is drawn 20% taller than the screen. */
+.shell { display: flex }
+.rail {
+  flex: 0 0 150px; display: flex; flex-direction: column; gap: 2px;
+  align-self: flex-start; position: sticky; top: 0; z-index: 5;
+  height: calc(100vh / var(--font-scale, 1)); overflow-y: auto; padding: var(--body-pad) 10px;
+  background: var(--strip); border-right: 1px solid var(--hairline);
+}
+/* the app's wordmark, in the rail rather than the page — a kicker over the name */
+.rail-brand {
+  font-family: var(--display); font-size: 15px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; line-height: 1.15;
+  color: var(--ink); padding: 0 10px; margin-bottom: 18px;
+}
+.rail-kicker {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 400;
+  letter-spacing: .14em; color: var(--ink3);
+}
+.rail-link {
+  font-family: var(--display); font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .08em; text-align: left;
+  color: var(--ink3); background: none; border: 0; border-radius: 2px;
+  padding: 8px 10px; cursor: pointer; transition: color .15s, background .15s;
+}
+.rail-link:hover { color: var(--ink2); background: var(--strip-hi) }
+/* the accent bar sits on the LEFT edge here — a bottom bar marks position in a
+   row, but reads as a divider in a column */
+.rail-link.on {
+  color: var(--ink); background: var(--strip-hi);
+  box-shadow: inset 2px 0 0 var(--cyan), inset 0 1px 0 var(--edge);
+}
+.main { flex: 1; min-width: 0; padding: var(--body-pad) }
+
+/* phone: the rail lies down into a scrollable strip above the content, and the
+   accent bar goes back to the bottom edge where a row wants it. */
+@media (max-width: 700px) {
+  .shell { flex-direction: column }
+  .rail {
+    flex: none; width: auto; height: auto; align-self: stretch;
+    flex-direction: row; gap: 4px; padding: 8px 10px;
+    overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-bottom: 1px solid var(--hairline);
+  }
+  .rail-brand { display: none }
+  .rail-link { flex: none; white-space: nowrap; min-height: 38px; display: flex; align-items: center }
+  .rail-link.on { box-shadow: inset 0 -2px 0 var(--cyan), inset 0 1px 0 var(--edge) }
+}
+
+/* ---------------------------------------------- Board section
+   Every registered project's backlog on one board, read via GET /api/projects
+   and GET /api/items. One column per type rather than one bay per project: the
+   toolbar narrows to a project, the columns never do. A card opens the drawer,
+   which fetches that one item's body from GET /api/items/body. */
+.board { display: flex; flex-direction: column; gap: var(--group-gap) }
+/* `row-gap` separately from the flex `gap`, because once the toolbar wraps below
+   the title the two lines need less air between them than the 10px that reads
+   right between controls sitting side by side. */
+.board-bar { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; row-gap: 8px }
+.board-title {
+  font-family: var(--display); font-size: 14px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink);
+}
+/* The toolbar: search, then project / type / sort. Pushed to the far end of the
+   bar because it states the board's state, so it belongs beside the board rather
+   than next to the section title. Its own wrap is what saves a narrow tablet: the
+   four controls break onto a second line before they start squeezing each other
+   into unreadable widths. `align-items:stretch` rather than `center` because an
+   input and a select do not resolve the same height from the same padding and
+   font — rendered, the search box came out 2px shorter than the selects beside
+   it, which on a 23px control row reads as one misaligned instrument. Stretch
+   levels each flex line to its tallest member and keeps doing so if the padding
+   is ever changed. */
+.board-tools { margin-left: auto; display: flex; align-items: stretch; flex-wrap: wrap; gap: 6px }
+/* One recessed-well look for all four, inherited from the removed .board-scope
+   button: --steel against the --strip cards, a hairline rule, and 10px mono, so
+   the row reads as instrument panel rather than as a form. One block rather than
+   four, because the four controls only read as one instrument while their
+   padding, border and type are literally the same declarations. */
+.board-search, .board-select {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
+  color: var(--ink2); background: var(--steel);
+  border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 4px 8px; transition: color .15s, border-color .15s;
+}
+/* Fixed rather than content-sized: a text field that grows as you type shoves the
+   three selects along the bar with every keystroke. `min-width:0` so the flex
+   line can still shrink it rather than overflowing the bar. */
+.board-search { width: 150px; min-width: 0 }
+.board-search::placeholder { color: var(--ink3) }
+/* A select sizes itself to its widest option, so the project one is as wide as
+   the longest project name in the registry — and a project directory named after
+   a long branch would otherwise push the whole toolbar off the bar. The cap makes
+   the UA truncate that one option instead; the full name is still readable in
+   the open dropdown, and on each card's meta line. */
+.board-select { cursor: pointer; max-width: 190px; text-overflow: ellipsis }
+.board-search:hover, .board-select:hover { color: var(--ink); border-color: var(--hairline2) }
+/* Focus is the cyan rule, matching .set-control's fields in Settings — the UA
+   outline is dropped only because something visible replaces it. */
+.board-search:focus, .board-select:focus { outline: none; color: var(--ink); border-color: var(--cyan) }
+.board-empty { font-size: 11px; color: var(--ink3); padding: 20px 2px; text-align: center }
+
+/* Phones: the toolbar gets its own full-width line under the title (the bar wraps
+   it there anyway; `margin-left:auto` is dropped so it starts at the left edge
+   rather than sitting oddly right-aligned on a line of its own). The search takes
+   a whole row and the three selects share the next, each free to shrink — at
+   375px the four cannot share one line without every label truncating. */
+@media (max-width: 700px) {
+  .board-tools { margin-left: 0; width: 100% }
+  .board-search { flex: 1 1 100%; width: auto }
+  /* Thirds of the row, and the cap is off: a select given `max-width` as well as
+     a flex basis stops growing before it has used the room the row gave it.
+
+     At 375px a third is 105px and the UA's dropdown arrow takes 18 of them, so
+     the longest labels ("All projects", "Newest first") lose their last two or
+     three characters to an ellipsis. Left that way on purpose: buying those
+     characters back costs either a third row of controls on the screen with the
+     least vertical room to spare, or labels shortened until "All projects" reads
+     as the category rather than as the current value. A truncated label on a
+     native select is a phone convention — the full text is one tap away in the
+     open dropdown — and the selects only truncate at all while showing the value
+     that filters nothing. */
+  .board-select { flex: 1 1 0; min-width: 0; max-width: none }
+}
+
+/* auto-fill, so the column count follows the width the board actually got rather
+   than a breakpoint guessing at it: the same rule gives a phone one column, the
+   820px board three, and the 1280px wide board more. 220px is the floor at which
+   a card's mono meta line still fits beside its pill without wrapping. */
+.board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--card-gap) }
+/* A flex column, where the row layout used a named-areas grid. The grid put the
+   pill and the meta line in a grid row, and a grid row cannot be pushed to the
+   bottom of a cell that a taller neighbour stretched — which is what every cell
+   in a card grid is. .board-card-foot plus margin-top:auto can be.
+   Every padding and gap the card has lives in this one rule, so task-8's
+   [data-density="compact"] override is a single block rather than a hunt through
+   four selectors. */
+.board-card {
+  display: flex; flex-direction: column; gap: var(--card-inner-gap);
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: var(--card-pad); cursor: pointer; transition: border-color .15s;
+  box-shadow: inset 0 1px 0 var(--edge);
+}
+.board-card:hover { border-color: var(--hairline2) }
+.board-card-title { font-size: 13px; font-weight: 600; color: var(--ink) }
+/* margin-top:auto is the pin: cards in a row are as tall as the tallest title, and
+   without it the meta lines of neighbours sit at different heights. */
+.board-card-foot { margin-top: auto; display: flex; align-items: baseline; gap: 8px }
+.board-card-foot .pill { flex: none }
+.board-card-meta { min-width: 0; font-size: 10.5px; color: var(--ink3); font-family: var(--mono) }
+
+/* Section pill: the item's type, on its card and in the drawer head. Shape and
+   type here; the colours are the four rules below it. */
+.pill {
+  font-family: var(--mono); font-size: 9px; font-weight: 600; line-height: 1.5;
+  text-transform: uppercase; letter-spacing: .09em; white-space: nowrap;
+  padding: 1px 6px; border: 1px solid; border-radius: 2px;
+}
+/* Section pills. Outline and ink only, no tint — same rationale as
+   guide-manager: a tinted fill would need a mix per palette. Four hues that
+   collide with nothing else on the card: --green stays the groomed marker. */
+.pill-bug { color: var(--red); border-color: var(--red) }
+.pill-idea { color: var(--mustard); border-color: var(--mustard) }
+.pill-task { color: var(--cyan); border-color: var(--cyan) }
+.pill-oos { color: var(--ink3); border-color: var(--ink3) }
+/* Meta-line markers. Groomed is quiet confirmation, not an alarm; done is
+   history and dims. */
+.board-card-groomed { color: var(--green) }
+.board-card-done { color: var(--ink2) }
+
+/* ---------------------------------------------- Settings section */
+.mdetail-label {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--display); font-size: 10.5px; font-weight: 600;
+  color: var(--ink3); text-transform: uppercase; letter-spacing: .09em; margin-top: 4px;
+}
+.set { display: flex; flex-direction: column; gap: 18px; max-width: 640px }
+.set-group { display: flex; flex-direction: column; gap: 2px }
+.set-group > .mdetail-label { margin-bottom: 6px }
+.set-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: var(--set-pad); border: 1px solid var(--hairline); border-radius: 2px;
+  background: var(--strip); box-shadow: inset 0 1px 0 var(--edge);
+}
+/* The theme grid is a .set-row's sibling but not one itself, so the adjacency
+   rule above skips the first row after it — Density would sit flush against the
+   swatches without this. */
+.set-row + .set-row, .set-themes + .set-row { margin-top: 5px }
+.set-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 }
+.set-name { font-size: 12px; font-weight: 600; color: var(--ink) }
+.set-hint { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
+.set-hint code { font-family: var(--mono); font-size: 10px; color: var(--cyan) }
+.set-control { display: flex; align-items: center; gap: 6px; flex-shrink: 0 }
+.set-control select,
+.set-control input[type=number],
+.set-control input[type=text] {
+  font-family: var(--mono); font-size: 11px; color: var(--ink);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 5px 8px;
+}
+.set-control select:focus, .set-control input:focus { outline: none; border-color: var(--cyan) }
+.set-control input[type=number] { width: 84px; font-variant-numeric: tabular-nums }
+.set-unit { font-size: 10px; color: var(--ink3); font-family: var(--mono) }
+
+.set-seg { display: flex; gap: 4px }
+.set-seg button {
+  font-family: var(--display); font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 5px 11px; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.set-seg button:hover:not(:disabled) { color: var(--ink2); border-color: var(--hairline2) }
+.set-seg button:disabled { cursor: default; opacity: .4 }
+.set-seg button.on { color: var(--ink); border-color: var(--cyan); box-shadow: inset 0 -2px 0 var(--cyan) }
+
+.set-themes { display: flex; gap: 8px; flex-wrap: wrap }
+.set-theme {
+  display: flex; flex-direction: column; gap: 6px; width: 104px; padding: 7px;
+  border: 1px solid var(--hairline); border-radius: 2px; background: var(--steel);
+  cursor: pointer; transition: border-color .15s;
+}
+.set-theme:hover { border-color: var(--hairline2) }
+.set-theme.on { border-color: var(--cyan); box-shadow: inset 0 0 0 1px var(--cyan) }
+.set-swatch { display: flex; height: 34px; border-radius: 2px; overflow: hidden; border: 1px solid var(--hairline) }
+.set-swatch i { flex: 1 }
+.set-swatch i:last-child { flex: 0 0 8px }
+.set-theme-name { font-size: 10.5px; font-weight: 600; color: var(--ink2); text-align: left; line-height: 1.25 }
+.set-theme.on .set-theme-name { color: var(--ink) }
+
+@media (max-width: 700px) {
+  .set-row { align-items: flex-start; flex-direction: column; gap: 8px }
+  .set-control { width: 100% }
+  .set-seg { width: 100% }
+  .set-seg button { flex: 1; min-height: 38px }
+  .set-theme { width: calc(50% - 4px) }
+}
+
+/* ---------------------------------------------- quality floor */
+:where(button, select, input, textarea, summary, [role=button]):focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important }
+}
+/* touch: iOS Safari zooms the viewport when a focused field's font size is under
+   16px, and never zooms back out on blur. Text-entry fields only — a <select>
+   opens a native picker rather than putting a caret in the page, so it does not
+   trip it and does not need the floor. */
+@media (pointer: coarse) {
+  /* The 16px is a RENDERED size, and .shell{zoom} multiplies the declared one —
+     so at 90% a declared 16px paints at 14.4px and trips the zoom anyway.
+     Dividing states the floor in declared px; max() keeps scales above 100%
+     from dropping the declared value below 16 and shrinking the field. */
+  .set-control input[type=number], .set-control input[type=text] {
+    font-size: max(16px, calc(16px / var(--font-scale, 1)));
+  }
+}
+
+/* ---------------------------------------------- board columns
+   Four fixed columns — bugs, ideas, tasks, out-of-scope — in the store's own
+   order. auto-fit would reflow by width alone and put out-of-scope under bugs
+   on some widths; the type axis is the board's whole point, so the column
+   count is stepped explicitly instead. align-items:start keeps a short column
+   from stretching to its tallest neighbour. */
+.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--card-gap); align-items: start }
+@media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+@media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
+
+.board-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
+/* Column header: the bay header's anatomy (tick, name, count) without the
+   fold — a fixed four-column board has nothing to fold. The tick carries the
+   section's hue, the same one its pills wear, so a card's pill points back to
+   its column at a glance. */
+.board-col-h { display: flex; align-items: baseline; gap: 8px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline) }
+.board-col-tick { flex: none; align-self: center; width: 14px; height: 3px; background: var(--ink3) }
+.board-col-bugs .board-col-tick { background: var(--red) }
+.board-col-ideas .board-col-tick { background: var(--mustard) }
+.board-col-tasks .board-col-tick { background: var(--cyan) }
+.board-col-name {
+  font-family: var(--display); font-size: 14px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink);
+}
+.board-col-count { font-family: var(--mono); font-size: 9.5px; color: var(--ink3) }
+/* The column's cards, in their own element rather than as .board-col's
+   remaining children. Two reasons: an empty column needs something to render
+   in place of the stack, and any per-column overflow later has to scroll the
+   cards without dragging the header off its rule with them. */
+.board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
+
+/* Degraded-state line above the board: malformed files skipped by the scan,
+   or registered projects whose store is gone. Amber, not red — the board
+   below it is still real, just partial. */
+.board-warn { font-family: var(--mono); font-size: 10px; color: var(--amber); line-height: 1.5 }
+
+/* ---------------------------------------------- item drawer
+   A right-hand panel over the board; the board stays mounted behind it.
+   Fixed elements are inside the zoomed .shell, so both dimensions get the
+   same /--font-scale division the guide-manager viewer overlay needs —
+   without it the drawer hangs off two edges at any text size but 100%. */
+.drawer-backdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim) }
+.drawer {
+  position: fixed; top: 0; right: 0; z-index: 61;
+  height: calc(100dvh / var(--font-scale, 1));
+  width: min(480px, calc(100vw / var(--font-scale, 1)));
+  background: var(--strip); border-left: 1px solid var(--hairline);
+  box-shadow: -12px 0 32px var(--shadow2);
+  display: flex; flex-direction: column;
+}
+.drawer-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 14px 16px; border-bottom: 1px solid var(--hairline);
+  background: var(--strip-hi); box-shadow: inset 0 1px 0 var(--edge);
+}
+.drawer-head .pill { flex: none }
+.drawer-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink) }
+.drawer-close {
+  font-family: var(--font); font-size: 11.5px; color: var(--ink2);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 5px 10px; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.drawer-close:hover { color: var(--ink); border-color: var(--hairline2) }
+.drawer-meta {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 16px; border-bottom: 1px solid var(--hairline);
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+}
+.drawer-meta .drawer-path { color: var(--ink3); word-break: break-all }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px }
+.drawer-empty { font-size: 11px; color: var(--ink3); padding: 20px 2px; text-align: center }
+
+/* Rendered item Markdown. The section headings are the store's fixed ## set
+   (Symptom, Plan, …) — styled as printed labels, not document headings. */
+.drawer-body h2 {
+  font-family: var(--display); font-size: 12.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--ink2);
+  margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--hairline);
+}
+.drawer-body h2:first-child { margin-top: 0 }
+.drawer-body p, .drawer-body li { font-size: 12.5px; color: var(--ink); line-height: 1.55; margin: 6px 0 }
+.drawer-body ul, .drawer-body ol { padding-left: 18px; margin: 6px 0 }
+.drawer-body code { font-family: var(--mono); font-size: 11px; color: var(--cyan) }
+.drawer-body pre { background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 10px; overflow-x: auto; margin: 8px 0 }
+.drawer-body pre code { color: var(--ink) }
+.drawer-body table { border-collapse: collapse; font-size: 11.5px; margin: 8px 0 }
+.drawer-body th, .drawer-body td { border: 1px solid var(--hairline); padding: 4px 8px; text-align: left; vertical-align: top }
+.drawer-body a { color: var(--cyan) }
+.drawer-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 10px; color: var(--ink2); margin: 6px 0 }
