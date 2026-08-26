@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,12 +11,20 @@ describe('body-route allowlist', () => {
   // The trap: a SIBLING of backlog/ whose name shares the prefix. A bare
   // startsWith(dir) lets it through; startsWith(dir + sep) does not.
   const sibling = join(root, 'backlog-evil', 'bug-1-x.md');
+  // The other trap: a path that LOOKS like it lives in the store. Only
+  // realpath-before-prefix catches it — resolve() would normalise the symlink
+  // path itself, which is inside backlog/, and hand back the target's
+  // contents from wherever they actually are.
+  const target = join(root, 'outside-secret.md');
+  const symlink = join(backlog, 'bugs', 'open', 'looks-inside.md');
 
   beforeAll(() => {
     mkdirSync(join(backlog, 'bugs', 'open'), { recursive: true });
     mkdirSync(join(root, 'backlog-evil'), { recursive: true });
     writeFileSync(inside, 'x');
     writeFileSync(sibling, 'x');
+    writeFileSync(target, 'secret');
+    symlinkSync(target, symlink);
   });
 
   const registry = {
@@ -33,6 +41,16 @@ describe('body-route allowlist', () => {
 
   it('resolves a file inside a registered store', () => {
     expect(resolveAllowed(inside, buildAllowlist(registry))).toBe(realpathSync(inside));
+  });
+
+  /**
+   * The escape defence in allow.util.ts is realpathSync before the prefix
+   * check, and nothing else in this file pins it — swapping realpathSync for
+   * resolve() leaves every other case here green while handing out any file
+   * on the machine a symlink can name.
+   */
+  it('refuses a symlink inside the store that points outside it', () => {
+    expect(resolveAllowed(symlink, buildAllowlist(registry))).toBeNull();
   });
 
   it('refuses a prefix-sharing sibling, a file outside, and a missing file', () => {
