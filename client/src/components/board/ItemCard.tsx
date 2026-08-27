@@ -1,6 +1,7 @@
 import { daysSince } from '../../lib/item-age';
 import type { ProjectHues } from '../../lib/project-hue';
-import type { BacklogItem } from '../../../../shared/types';
+import { DispatchButton } from './DispatchButton';
+import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
 /**
  * guide-manager's .guides-card, ported: title on top, footer pinned to the
@@ -8,7 +9,15 @@ import type { BacklogItem } from '../../../../shared/types';
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
 export function ItemCard(
-  { item, hues, onOpen }: { item: BacklogItem; hues: ProjectHues; onOpen: () => void }
+  { item, hues, onOpen, agents, onDispatch }: {
+    item: BacklogItem;
+    hues: ProjectHues;
+    onOpen: () => void;
+    /** null until the status probe answers; absent when the board is rendered
+     *  without dispatch at all (older tests, and any future read-only view). */
+    agents?: AgentsStatus | null;
+    onDispatch?: () => void;
+  }
 ) {
   // Two conditions, not one. `started` outlives the work: `move` never rewrites
   // an item's content, so an archived file keeps the date it was picked up as
@@ -67,6 +76,9 @@ export function ItemCard(
             ◍{age === null ? '' : ` ${age}d`}
           </span>
         ) : null}
+        {onDispatch && (
+          <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} />
+        )}
       </div>
     </div>
   );

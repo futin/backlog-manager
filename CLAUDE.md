@@ -26,18 +26,27 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
 ## Layout
 
 - `server/src/` — Nest. `health/` (`GET /api/health`), `items/`
-  (`GET /api/items`, `GET /api/projects`, `GET /api/items/body`), `registry/`
+  (`GET /api/items`, `GET /api/projects`, `GET /api/items/body`), `agents/`
+  (the one outbound-calling module in the app — `GET /api/agents/status`,
+  `POST /api/agents/plan`, `POST /api/agents/dispatch`), `registry/`
   (read-only view of the registry file), `static.ts` (serves `client/dist`
   when built — conditionally, so a missing bundle means "API only", never a
   catch-all with nothing behind it).
 - `client/src/` — React SPA: side rail (Projects / Settings — a plain section
   switch), the board (toolbar with search plus project/status/sort selects,
   four fixed columns — bugs/ideas/tasks/out-of-scope — each card opening a
-  read-only drawer that renders the item's Markdown body), Settings (five
-  themes, density, text scale, landing section).
+  read-only drawer that renders the item's Markdown body, plus a dispatch
+  button — on the card and again in the drawer — that opens a launch sheet
+  onto `../claude-agents-dashboard`), Settings (five themes, density, text
+  scale, landing section, and a Claude Agents group reporting that
+  dashboard's status). That UI is fed by `lib/agents.ts` (the same-origin
+  fetches into this app's own API) and `hooks/useAgents.ts` (the status
+  poll, on mount and on window focus).
 - `shared/` — `types.ts` (`Section` / `ItemStatus` / `BacklogItem` /
-  `ItemsIndex` / `ProjectSummary` / `Registry`, defined once and imported by
-  both sides), `theme.css` (the five theme palettes as CSS custom
+  `ItemsIndex` / `ProjectSummary` / `Registry` / the dispatch request and
+  response shapes, defined once and imported by both sides), `agent.ts`
+  (`deriveAction` and the rest of the logic that decides what a click does —
+  see Invariants), `theme.css` (the five theme palettes as CSS custom
   properties).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
   `skills/backlog-execute/` — the skills this repo publishes.
@@ -113,6 +122,12 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   in front of the loopback port, which is also what makes
   `allowedHosts: ['.ts.net']` in `vite.config.ts` meaningful — that list is
   never consulted for a bare IP, so it protects nothing on a wildcard bind.
+  With `BM_AGENTS` on, that bind is no longer standing in front of a read
+  surface alone: it also fronts a POST that spawns a Claude Code session with
+  file-write permission in another repo. That is a boundary a browser inside
+  the loopback does not respect at all, which is exactly why the origin and
+  content-type guard on those two routes exists — the bind and the guard cover
+  different attackers, and neither substitutes for the other.
 - **The served build carries a CSP; dev does not.** `server/src/security.ts`
   sets the header from Nest, so it rides on `client/dist` and on `/api` alike.
   It is deliberately not a `<meta>` tag in `client/index.html`: that would
@@ -129,6 +144,83 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   surfaces as Vite failing to start.
 - **Editing `vite.config.ts` needs `docker compose restart client`.**
 - **Backlog items move `open/` → `done/`; `out-of-scope/` is flat.**
+- **Dispatch derives the action; it never accepts one.** `shared/agent.ts` is
+  the single derivation (`deriveAction`), imported by the board to label a
+  button and by the server to validate a request — one implementation, so a
+  button can never promise what the API refuses. `POST /api/agents/dispatch`
+  re-scans the item file and 409s when the request's action disagrees, which
+  is the groomed invariant enforced on the only side that can read the file.
+  The prompt is the one field whose client-supplied content is taken
+  outright — `action` is checked against the file rather than trusted, and
+  `permissionMode` is clamped to the dashboard's ceiling — so editing the
+  prompt in the launch sheet is the actual point of the sheet.
+- **The browser never talks to the dashboard.** `connect-src 'self'` forbids
+  it and the bearer token must not be in a page, so every call goes board →
+  this API → dashboard. `BM_AGENTS_URL` is env-only and never client-supplied:
+  there is deliberately no request shape in which a browser names the host
+  this server will call. `BM_AGENTS` defaults to off, so an unconfigured
+  install makes no outbound request at all.
+- **Dispatch still writes no item files.** The spawned session runs the
+  skills, which remain the only writers — the read-only invariant above holds
+  literally, not by exception.
+- **A project the dashboard cannot see cannot be dispatched to.** Its
+  `POST /api/spawn` takes a `dirName` resolved against projects active inside
+  its `LOOKBACK_HOURS` (24 by default), so a quiet repo has no key to send.
+  Accepted, not worked around: the alternative is teaching that app to take an
+  absolute path, which widens the widest write surface it has. This is the one
+  block that leaves a control on screen: the button's own `title` and its
+  visually-hidden `aria-describedby` span carry the per-item reason (it names
+  the path, and nothing else in the UI does), while Settings lists the
+  host-level setup — including the two fixes for this one, a session in that
+  repo or a higher `LOOKBACK_HOURS`. Environment-level blocks render no button
+  at all; see the `dispatchGate` invariant below. Never derive a
+  `dirName` from a path to route around this. The membership check behind it
+  (`status.projectPaths.includes(item.projectPath)`, in `dispatchGate`,
+  `shared/agent.ts`) is a raw string compare, not a realpath one, even though
+  `agents.service.ts` already calls `realpathSync` elsewhere for its own item
+  lookup and could afford one here too: `dispatchGate` is one implementation
+  the board also runs in a browser, which has no filesystem to resolve a
+  symlink with, so the server side stays just as literal rather than let the
+  two sides risk giving different answers. Known consequence: a registered
+  project whose path reaches its git root through a symlink can show a
+  disabled button even with a live session inside `LOOKBACK_HOURS`, if the
+  dashboard's own recorded path and the registry's do not match byte-for-byte.
+- **An environment-level block hides the dispatch control; only the per-item
+  one disables it.** `dispatchGate` (`shared/agent.ts`) answers with
+  `hidden` / `disabled` / `enabled`, and `dispatchBlock` is the flattened
+  string form of the same ladder for the two callers that only refuse (the
+  launch sheet's re-check and the server's). Dispatch off, dashboard
+  unreachable, no `CLAUDE_BIN`, remote answers off — none of those is about
+  any one card, all four are true of every card at once, and none is fixable
+  from the board, so they render no button. That is what makes the promise in
+  the spec and `.env.example` — with `BM_AGENTS` off the board "renders exactly
+  as it does today" and "shows no dispatch buttons" — literally true; do not
+  "improve" it into a disabled button on forty cards. The project-visibility
+  block is the opposite case and keeps its button.
+- **The two agents POSTs are guarded by content-type and origin**
+  (`server/src/agents/origin.guard.ts`), and this is the one place in the app
+  where loopback is NOT the access control. Nest registers
+  `express.urlencoded` on every app it builds, and
+  `application/x-www-form-urlencoded` is a content type a cross-origin HTML
+  form posts with no CORS preflight — so before this guard, any page in the
+  developer's browser could auto-submit a hidden form at
+  `/api/agents/dispatch` and spawn a session with an attacker-written prompt.
+  The browser is already inside the loopback boundary; a bind cannot help.
+  Both halves are load-bearing: a non-`application/json` content type is
+  refused (which forces a preflight there is deliberately no `enableCors` to
+  answer), and a present `Origin` that is not this request's own host is
+  refused (which is what closes `Origin: null` from a sandboxed iframe).
+  Absent `Origin` stays allowed — curl and every server-side test send none.
+  `GET /api/agents/status` is deliberately outside it, like every other GET
+  here. Known consequence: a TLS-terminating proxy in front of this that
+  rewrites `Host` without rewriting `Origin` will 403 — the guard compares
+  host and port only, not the scheme, precisely so a `tailscale serve` that
+  preserves `Host` keeps working.
+- **`linkBase` is per-device and becomes an href**, so `clampSettings` routes
+  it through `clampOrigin`, which parses it as a URL — the browser's own
+  parser, not a regex — and rejects any scheme but `http(s)`. It is the one
+  settings key a hand-edited localStorage value could turn into script
+  execution.
 
 ## Conventions
 

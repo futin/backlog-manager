@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 
+import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { buildProjectHues } from '../../lib/project-hue';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
+import { LaunchSheet } from './LaunchSheet';
 import type { BacklogItem, Section } from '../../../../shared/types';
 
 const PROJECT_KEY = 'backlog-manager.project';
@@ -53,6 +55,11 @@ function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
 export default function BoardView() {
   const { items: index, projects, loading, error } = useBoard();
   const [open, setOpen] = useState<BacklogItem | null>(null);
+  const { status: agents } = useAgents();
+  /* Separate from `open`: the sheet can be opened from a card (drawer closed)
+     or from inside the drawer (drawer stays open behind it), so one piece of
+     state cannot serve both. */
+  const [dispatching, setDispatching] = useState<BacklogItem | null>(null);
 
   /* The query is plain useState — deliberately not remembered. A remembered
      query is a board that opens showing three cards out of forty for no
@@ -176,7 +183,14 @@ export default function BoardView() {
                 </div>
                 <div className="board-col-cards">
                   {colItems.map((item) => (
-                    <ItemCard key={item.path} item={item} hues={hues} onOpen={() => setOpen(item)} />
+                    <ItemCard
+                      key={item.path}
+                      item={item}
+                      hues={hues}
+                      onOpen={() => setOpen(item)}
+                      agents={agents}
+                      onDispatch={() => setDispatching(item)}
+                    />
                   ))}
                 </div>
               </div>
@@ -185,7 +199,34 @@ export default function BoardView() {
         </div>
       )}
 
-      {open !== null && <ItemDrawer item={open} hues={hues} onClose={() => setOpen(null)} />}
+      {open !== null && (
+        <ItemDrawer
+          item={open}
+          hues={hues}
+          onClose={() => setOpen(null)}
+          agents={agents}
+          onDispatch={() => setDispatching(open)}
+        />
+      )}
+      {dispatching !== null && (
+        /* `key` on a singleton element, which looks redundant and is not: it
+           makes re-targeting the sheet a REMOUNT rather than a prop change.
+           LaunchSheet holds nine pieces of state and its only effect refetches
+           the plan without resetting any of them, so without this, switching
+           from item A to item B rendered A's `sessionId` success panel under
+           B's title — B reading as already launched, with no launch button at
+           all — and A's `planError` kept B permanently blocked with A's
+           message, since `blocked = plan?.blocked ?? planError`. Launching
+           inside the in-flight plan fetch also POSTed B's path with A's
+           prompt.
+           One key resets all nine, which is smaller and more honest than
+           nine resets in an effect that would have to be extended every time
+           the sheet grows a tenth. Contrast ItemDrawer, which DOES clear its
+           own state on an `item.path` change: it holds two fields and both
+           are derived from the fetch that effect already owns, so the reset
+           is the effect's own business there. The difference is deliberate. */
+        <LaunchSheet key={dispatching.path} item={dispatching} onClose={() => setDispatching(null)} />
+      )}
     </div>
   );
 }

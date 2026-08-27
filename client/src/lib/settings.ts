@@ -39,13 +39,21 @@ export interface Settings {
   /** Percent. Applied as a `zoom` factor on `.shell`. */
   fontScale: number;
   landing: Landing;
+  /**
+   * Where *this device* reaches ../claude-agents-dashboard, used only to build
+   * the link to a launched session. Per-device because it genuinely differs:
+   * the laptop reaches it on loopback, the phone on a tailnet name. The API's
+   * own outbound call uses BM_AGENTS_URL server-side and never this.
+   */
+  linkBase: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'midnight',
   density: 'comfortable',
   fontScale: 100,
-  landing: 'last'
+  landing: 'last',
+  linkBase: 'http://127.0.0.1:5174'
 };
 
 /**
@@ -76,6 +84,24 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.min(max, Math.max(min, Math.round(n)));
 }
 
+/**
+ * An http(s) origin, or the fallback. Narrow on purpose: this string becomes an
+ * href, so a hand-edited `javascript:` in localStorage must not survive to
+ * reach the DOM. URL parsing, not a regex — the browser's own parser is the
+ * one that decides what an href means.
+ */
+function clampOrigin(value: unknown, fallback: string): string {
+  if (typeof value !== 'string' || value.trim() === '') return fallback;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 const THEME_IDS = THEMES.map((t) => t.id);
 const DENSITIES = ['comfortable', 'compact'] as const;
 /**
@@ -99,6 +125,7 @@ export function clampSettings(raw: unknown): Settings {
       s.fontScale, DEFAULT_SETTINGS.fontScale,
       LIMITS.fontScale.min, LIMITS.fontScale.max
     ),
-    landing: pickOne(s.landing, LANDINGS, DEFAULT_SETTINGS.landing)
+    landing: pickOne(s.landing, LANDINGS, DEFAULT_SETTINGS.landing),
+    linkBase: clampOrigin(s.linkBase, DEFAULT_SETTINGS.linkBase)
   };
 }
