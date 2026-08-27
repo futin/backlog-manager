@@ -86,6 +86,22 @@ A project outside `BM_PROJECT_ROOT` is invisible to the container and is
 reported as missing on `/api/projects` rather than silently dropped from the
 board — widen the mount if you keep backlogs elsewhere.
 
+### Dispatching to Claude (optional)
+
+With `../claude-agents-dashboard` running, a card's button hands that item to a
+real Claude Code session: an idea gets groomed into a task, an ungroomed bug
+gets its Cause and Fix filled in, a groomed bug or task gets executed. The
+board calls this API, this API calls the dashboard's `POST /api/spawn`, and the
+session shows up in the dashboard a poll later — where you can watch it, and
+answer its questions from a phone if its hooks are installed.
+
+Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, and `BM_AGENTS_TOKEN`
+if the dashboard sets `ANSWER_TOKEN`). **Settings ▸ Claude Agents** reports
+exactly which gate is closed and what to do about it. The action is derived
+from the item file, not from the click, so an ungroomed bug cannot be executed
+by asking nicely — and nothing here ever writes an item: the spawned session
+runs the skills, which remain the only writers.
+
 ## Install the skills
 
 The repo is its own plugin marketplace:

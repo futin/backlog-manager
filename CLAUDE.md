@@ -26,18 +26,27 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
 ## Layout
 
 - `server/src/` — Nest. `health/` (`GET /api/health`), `items/`
-  (`GET /api/items`, `GET /api/projects`, `GET /api/items/body`), `registry/`
+  (`GET /api/items`, `GET /api/projects`, `GET /api/items/body`), `agents/`
+  (`GET /api/agents/status`, `POST /api/agents/plan`,
+  `POST /api/agents/dispatch` — the one outbound call in the app), `registry/`
   (read-only view of the registry file), `static.ts` (serves `client/dist`
   when built — conditionally, so a missing bundle means "API only", never a
   catch-all with nothing behind it).
 - `client/src/` — React SPA: side rail (Projects / Settings — a plain section
   switch), the board (toolbar with search plus project/status/sort selects,
   four fixed columns — bugs/ideas/tasks/out-of-scope — each card opening a
-  read-only drawer that renders the item's Markdown body), Settings (five
-  themes, density, text scale, landing section).
+  read-only drawer that renders the item's Markdown body, plus a dispatch
+  button — on the card and again in the drawer — that opens a launch sheet
+  onto `../claude-agents-dashboard`), Settings (five themes, density, text
+  scale, landing section, and a Claude Agents group reporting that
+  dashboard's status). `lib/agents.ts` (the three fetches into this app's own
+  API) and `hooks/useAgents.ts` (the status poll, on mount and on window
+  focus) are the two files behind that surface.
 - `shared/` — `types.ts` (`Section` / `ItemStatus` / `BacklogItem` /
-  `ItemsIndex` / `ProjectSummary` / `Registry`, defined once and imported by
-  both sides), `theme.css` (the five theme palettes as CSS custom
+  `ItemsIndex` / `ProjectSummary` / `Registry` / the dispatch request and
+  response shapes, defined once and imported by both sides), `agent.ts`
+  (`deriveAction` and the rest of the logic that decides what a click does —
+  see Invariants), `theme.css` (the five theme palettes as CSS custom
   properties).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
   `skills/backlog-execute/` — the skills this repo publishes.
@@ -129,6 +138,47 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   surfaces as Vite failing to start.
 - **Editing `vite.config.ts` needs `docker compose restart client`.**
 - **Backlog items move `open/` → `done/`; `out-of-scope/` is flat.**
+- **Dispatch derives the action; it never accepts one.** `shared/agent.ts` is
+  the single derivation (`deriveAction`), imported by the board to label a
+  button and by the server to validate a request — one implementation, so a
+  button can never promise what the API refuses. `POST /api/agents/dispatch`
+  re-scans the item file and 409s when the request's action disagrees, which
+  is the groomed invariant enforced on the only side that can read the file.
+  The prompt is the one field whose client-supplied content is taken
+  outright — `action` is checked against the file rather than trusted, and
+  `permissionMode` is clamped to the dashboard's ceiling — so editing the
+  prompt in the launch sheet is the actual point of the sheet.
+- **The browser never talks to the dashboard.** `connect-src 'self'` forbids
+  it and the bearer token must not be in a page, so every call goes board →
+  this API → dashboard. `BM_AGENTS_URL` is env-only and never client-supplied:
+  there is deliberately no request shape in which a browser names the host
+  this server will call. `BM_AGENTS` defaults to off, so an unconfigured
+  install makes no outbound request at all.
+- **Dispatch still writes no item files.** The spawned session runs the
+  skills, which remain the only writers — the read-only invariant above holds
+  literally, not by exception.
+- **A project the dashboard cannot see cannot be dispatched to.** Its
+  `POST /api/spawn` takes a `dirName` resolved against projects active inside
+  its `LOOKBACK_HOURS` (24 by default), so a quiet repo has no key to send.
+  Accepted, not worked around: the alternative is teaching that app to take an
+  absolute path, which widens the widest write surface it has. The button
+  disables with the reason; Settings names both fixes. Never derive a
+  `dirName` from a path to route around this. The membership check behind it
+  (`status.projectPaths.includes(item.projectPath)`, in `dispatchBlock`,
+  `shared/agent.ts`) is a raw string compare, not a realpath one, even though
+  `agents.service.ts` already calls `realpathSync` elsewhere for its own item
+  lookup and could afford one here too: `dispatchBlock` is one implementation
+  the board also runs in a browser, which has no filesystem to resolve a
+  symlink with, so the server side stays just as literal rather than let the
+  two sides risk giving different answers. Known consequence: a registered
+  project whose path reaches its git root through a symlink can show a
+  disabled button even with a live session inside `LOOKBACK_HOURS`, if the
+  dashboard's own recorded path and the registry's do not match byte-for-byte.
+- **`linkBase` is per-device and becomes an href**, so `clampSettings` routes
+  it through `clampOrigin`, which parses it as a URL — the browser's own
+  parser, not a regex — and rejects any scheme but `http(s)`. It is the one
+  settings key a hand-edited localStorage value could turn into script
+  execution.
 
 ## Conventions
 
