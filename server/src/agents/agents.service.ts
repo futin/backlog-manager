@@ -6,8 +6,10 @@ import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { clampMode, deriveAction, dispatchBlock, modesUpTo, PERMISSION_LADDER } from '../../../shared/agent';
-import { composePrompt } from './prompt.util';
-import type { AgentPlan, AgentsStatus, BacklogItem, PermissionMode } from '../../../shared/types';
+import { composePrompt, sessionName } from './prompt.util';
+import type {
+  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, PermissionMode
+} from '../../../shared/types';
 
 /**
  * agents.service.ts — the only file in this app that makes an outbound call.
@@ -29,6 +31,10 @@ const MANAGEMENT_TIMEOUT_MS = 15_000;
  * worked, which the sheet's own re-check then corrects.
  */
 const PROJECT_TTL_MS = 60_000;
+/** The spawn call forks a process on the other side; the health probe's 4s is
+ *  the wrong budget for it, and a constant named for the health probe governing
+ *  the launch would be a misnomer besides. */
+const SPAWN_TIMEOUT_MS = 10_000;
 
 /** Shape we rely on from the dashboard's /api/health. Everything optional: it
  *  is a different app's response and an older build may omit fields. */
@@ -115,6 +121,87 @@ export class AgentsService {
       defaultMode: clampMode('acceptEdits', status.spawnMaxPermission),
       blocked: dispatchBlock(item, status) ?? undefined
     };
+  }
+
+  /** A prompt longer than this is not a prompt any more. The dashboard's own
+   *  body cap is 64KB; this one exists so a runaway paste fails here, with a
+   *  message, rather than there, as a truncated instruction. */
+  private static readonly PROMPT_MAX = 8_000;
+
+  /**
+   * Start the session. Every check that matters re-runs here, because `plan`
+   * ran against a different request and the sheet has been open for however
+   * long the reader took: the item may have been groomed, archived, or
+   * rewritten in between, and the answer must come from the file as it is now.
+   */
+  async dispatch(req: AgentDispatchRequest): Promise<AgentDispatchResult> {
+    const prompt = typeof req.prompt === 'string' ? req.prompt.trim() : '';
+    if (prompt === '') throw new HttpException({ error: 'prompt is required' }, 400);
+    if (prompt.length > AgentsService.PROMPT_MAX) {
+      throw new HttpException({ error: 'prompt is too long' }, 400);
+    }
+
+    const item = this.findItem(req.itemPath);
+    if (item === null) throw new HttpException({ error: 'not found' }, 404);
+    const action = deriveAction(item);
+    if (action === null) {
+      throw new HttpException({ error: 'nothing to dispatch for this item' }, 409);
+    }
+    // The whole reason this call is proxied rather than relayed: the client
+    // said what it wanted, the file says what is legal, and the file wins.
+    // Asking to execute a bug whose Fix still reads "unknown" is refused here,
+    // which is the groomed invariant enforced on the only side that can read
+    // the file.
+    if (req.action !== action) {
+      throw new HttpException({ error: `this item's next step is ${action}, not ${req.action}` }, 409);
+    }
+
+    const status = await this.status();
+    const blocked = dispatchBlock(item, status);
+    if (blocked !== null) {
+      // 502 when the dashboard never answered, 409 when it answered and said
+      // no: the first is an infrastructure problem, the second is a state the
+      // reader can go and change.
+      throw new HttpException({ error: blocked }, status.reachable ? 409 : 502);
+    }
+
+    const cfg = readAgentsConfig();
+    const dirName = (await this.projectMap(cfg)).get(item.projectPath);
+    if (dirName === undefined) {
+      // dispatchBlock already covers this from the same map, so reaching here
+      // means the cache expired between the two reads. Refuse rather than
+      // guess a dirName from the path — deriving one would route around the
+      // dashboard's membership check, which is the one thing it asks of us.
+      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+    }
+
+    const res = await fetch(`${cfg.url}/api/spawn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeaders(cfg) },
+      body: JSON.stringify({
+        project: dirName,
+        prompt,
+        name: sessionName(item),
+        permissionMode: clampMode(req.permissionMode, status.spawnMaxPermission),
+        // Strictly `=== true`, matching the dashboard's own parse rule for this
+        // field: anything else means off.
+        remoteControl: req.remoteControl === true
+      }),
+      signal: AbortSignal.timeout(SPAWN_TIMEOUT_MS)
+    });
+
+    const body = (await res.json().catch(() => null)) as { sessionId?: unknown; error?: unknown } | null;
+    if (!res.ok) {
+      // Verbatim. The dashboard's rejections are short and specific ("too many
+      // launches in flight", "unknown project: …"); paraphrasing them would
+      // only lose the one detail the reader needs.
+      const error = typeof body?.error === 'string' ? body.error : `spawn answered ${res.status}`;
+      throw new HttpException({ error }, res.status);
+    }
+    if (typeof body?.sessionId !== 'string') {
+      throw new HttpException({ error: 'spawn returned no session id' }, 502);
+    }
+    return { sessionId: body.sessionId };
   }
 
   /** Absolute project path → the dashboard's own dirName key. */
