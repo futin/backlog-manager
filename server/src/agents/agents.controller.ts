@@ -1,7 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, Post } from '@nestjs/common';
 
 import { AgentsService } from './agents.service';
-import type { AgentsStatus } from '../../../shared/types';
+import type { AgentPlan, AgentsStatus } from '../../../shared/types';
 
 /**
  * Under /api like every other controller — test/vite-proxy.test.ts asserts it
@@ -20,5 +20,17 @@ export class AgentsController {
   @Get('status')
   status(): Promise<AgentsStatus> {
     return this.agents.status();
+  }
+
+  /**
+   * POST, not GET, because the item's absolute path is the argument: a path in
+   * a query string ends up in access logs and in the browser's history, and
+   * this one names a file on a developer's disk.
+   */
+  @Post('plan')
+  plan(@Body() body: { itemPath?: unknown } | undefined): Promise<AgentPlan> {
+    const itemPath = typeof body?.itemPath === 'string' ? body.itemPath.trim() : '';
+    if (itemPath === '') throw new HttpException({ error: 'itemPath is required' }, 400);
+    return this.agents.plan(itemPath);
   }
 }

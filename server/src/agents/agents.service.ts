@@ -5,8 +5,9 @@ import { RegistryService } from '../registry/registry.service';
 import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
-import { PERMISSION_LADDER } from '../../../shared/agent';
-import type { AgentsStatus, BacklogItem, PermissionMode } from '../../../shared/types';
+import { clampMode, deriveAction, dispatchBlock, modesUpTo, PERMISSION_LADDER } from '../../../shared/agent';
+import { composePrompt } from './prompt.util';
+import type { AgentPlan, AgentsStatus, BacklogItem, PermissionMode } from '../../../shared/types';
 
 /**
  * agents.service.ts — the only file in this app that makes an outbound call.
@@ -84,6 +85,35 @@ export class AgentsService {
       spawnAvailable: health.spawnAvailable === true,
       spawnMaxPermission: asMode(health.spawnMaxPermission),
       projectPaths
+    };
+  }
+
+  /**
+   * Everything the launch sheet needs. `blocked` is filled rather than thrown
+   * because the item IS dispatchable — the environment is what is not, and a
+   * sheet that can explain that is more use than a failed request. The two
+   * genuine 4xx cases (no such item, no next step) are the ones where there is
+   * nothing to show a sheet about.
+   */
+  async plan(itemPath: string): Promise<AgentPlan> {
+    const item = this.findItem(itemPath);
+    if (item === null) throw new HttpException({ error: 'not found' }, 404);
+    const action = deriveAction(item);
+    if (action === null) {
+      throw new HttpException({ error: 'nothing to dispatch for this item' }, 404);
+    }
+
+    const status = await this.status();
+    return {
+      action,
+      prompt: composePrompt(item, action),
+      project: item.project,
+      allowedModes: modesUpTo(status.spawnMaxPermission),
+      // acceptEdits, not the ceiling: the work is editing files in one repo,
+      // and asking for the most a host allows by default is how a convenience
+      // becomes an incident. The select is right there if more is wanted.
+      defaultMode: clampMode('acceptEdits', status.spawnMaxPermission),
+      blocked: dispatchBlock(item, status) ?? undefined
     };
   }
 
