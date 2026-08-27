@@ -1,6 +1,8 @@
 import { Segmented, SettingsGroup, SettingsRow } from './SettingsRow';
+import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
 import { FONT_SCALES, THEMES, type Landing, type ThemeId } from '../../lib/settings';
+import type { AgentsStatus } from '../../../../shared/types';
 
 /**
  * Preview colors per theme — board / strip / accent, in that order. A mirror of
@@ -31,6 +33,32 @@ const LANDINGS: { value: Landing; label: string }[] = [
   { value: 'projects', label: 'Projects' },
   { value: 'settings', label: 'Settings' }
 ];
+
+/**
+ * One line per gate, in the order dispatchBlock (shared/agent.ts) checks
+ * them, so the first red dot named here is also the thing worth fixing
+ * first. Read-only: every one of these gates lives on a host — in this
+ * API's env or in the dashboard's — and a switch here that wrote to a
+ * browser's localStorage would just be a lie about where the setting is.
+ */
+function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
+  if (status === null) return <span className="set-hint">checking…</span>;
+  if (!status.enabled) return <span className="set-hint">● off — dispatch is not enabled on the API</span>;
+  if (!status.reachable) {
+    return <span className="set-hint">● unreachable{status.error ? ` — ${status.error}` : ''}</span>;
+  }
+  const gaps = [
+    status.spawnAvailable ? null : 'no CLAUDE_BIN',
+    status.remoteAnswer ? null : 'remote answers off'
+  ].filter((g): g is string => g !== null);
+  return (
+    <span className="set-hint">
+      ● connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
+      {' · '}ceiling: {status.spawnMaxPermission ?? 'unknown'}
+      {' · '}{status.projectPaths.length} projects
+    </span>
+  );
+}
 
 /** The Settings section: this device only (localStorage). */
 export default function SettingsView() {
@@ -100,6 +128,61 @@ export default function SettingsView() {
           </select>
         </SettingsRow>
       </SettingsGroup>
+
+      <AgentsGroup />
     </div>
+  );
+}
+
+/**
+ * The integration's only editable field is the link base, because it is the
+ * only part of it that is genuinely per-device: the API's own outbound call
+ * uses BM_AGENTS_URL on the host, and the bearer token must never be in a
+ * browser at all. Everything else here is a report on where that host config
+ * currently stands.
+ */
+function AgentsGroup() {
+  const { settings, update } = useSettings();
+  const { status } = useAgents();
+  const healthy =
+    status !== null && status.enabled && status.reachable &&
+    status.spawnAvailable && status.remoteAnswer;
+
+  return (
+    <SettingsGroup title="Claude Agents · this machine">
+      <SettingsRow name="Dispatch" hint={<AgentsStatusLines status={status} />}>
+        <a className="sheet-link" href={settings.linkBase} target="_blank" rel="noreferrer">
+          open dashboard ↗
+        </a>
+      </SettingsRow>
+
+      <SettingsRow
+        name="Dashboard link"
+        hint="Where THIS device reaches the dashboard — the laptop on loopback, a phone on its tailnet name. Used only for the link; the API calls it over BM_AGENTS_URL."
+      >
+        <input
+          type="text"
+          aria-label="Dashboard link"
+          defaultValue={settings.linkBase}
+          onBlur={(e) => update({ linkBase: e.currentTarget.value })}
+          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        />
+      </SettingsRow>
+
+      {!healthy && (
+        <div className="set-row">
+          <div className="set-label">
+            <span className="set-name">Setting it up</span>
+            <span className="set-hint">
+              1 · <code>BM_AGENTS=on</code> and <code>BM_AGENTS_URL</code> in this app's <code>.env</code>, then restart the API.<br />
+              2 · <code>CLAUDE_BIN</code> in the dashboard's <code>.env</code> — that is its spawn gate.<br />
+              3 · Turn its remote-answer pill on; spawning is refused without it.<br />
+              4 · Run its <code>pnpm hooks:install</code>, or a groom that asks you a question will stall with nowhere to ask.<br />
+              5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to.
+            </span>
+          </div>
+        </div>
+      )}
+    </SettingsGroup>
   );
 }
