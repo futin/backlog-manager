@@ -152,7 +152,25 @@ function main() {
 
   const run = (args) => execFileSync('claude', args, { stdio: 'inherit' })
   run(['plugin', 'marketplace', 'update', MARKETPLACE])
-  run(['plugin', 'update', PLUGIN_ID, '-y'])
+
+  // Not `plugin update`: that compares the version in plugin.json and stops
+  // at "already at the latest version (0.1.1)" no matter how far the commit
+  // behind it has moved. The cache directory is keyed by version, so the
+  // only ways past it are a patch bump on every skills edit — which is
+  // another commit and another push before anything installs — or this:
+  // uninstall, install, and let the fresh clone carry whatever HEAD says.
+  // The reinstall is cheap precisely because the source is sparse (~400KB).
+  run(['plugin', 'uninstall', PLUGIN_ID])
+  try {
+    run(['plugin', 'install', PLUGIN_ID, '-y'])
+  } catch (error) {
+    // The uninstall already happened, so a failure here leaves the machine
+    // with no plugin at all. Say so plainly and hand over the one command
+    // that fixes it rather than letting a stack trace imply a smaller mess.
+    console.error(`install failed after the uninstall — ${PLUGIN_ID} is NOT installed right now.`)
+    console.error(`  claude plugin install ${PLUGIN_ID}`)
+    throw error
+  }
 
   const after = readInstall()
   if (!after) {
@@ -165,7 +183,6 @@ function main() {
     // overwrite in place. When it doesn't, a version bump is the lever.
     console.error(`installed skills still differ from the repo at ${after.installPath}`)
     console.error(`installed commit ${after.gitCommitSha?.slice(0, 7) ?? 'unknown'}, repo HEAD ${head.slice(0, 7)}`)
-    console.error('bump the patch version in .claude-plugin/plugin.json, commit, push, and run this again')
     process.exit(1)
   }
 

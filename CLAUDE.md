@@ -89,9 +89,15 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   table). Git is therefore the publishing boundary: the installer sees pushed
   commits and nothing else, so `plugin:sync` refuses a dirty `skills/`, an
   unpushed HEAD, or a HEAD behind `origin/main` rather than installing stale
-  code and reporting success. It never commits or pushes for you. It no-ops
-  when the installed copy already matches HEAD, verifies the landed `skills/`
-  by hash, and prunes older version copies — skipping any marked `.in_use`,
+  code and reporting success. It never commits or pushes for you. It also
+  uninstalls and reinstalls rather than calling `claude plugin update`: that
+  command compares the version in `plugin.json` and stops at "already at the
+  latest version" however far the commit behind it has moved, and the cache
+  directory is keyed by version, so the alternative would be a patch bump —
+  another commit, another push — on every skills edit. A reinstall from a
+  sparse source is cheap enough that the bump buys nothing. It no-ops when
+  the installed copy already matches HEAD, verifies the landed `skills/` by
+  hash, and prunes older version copies — skipping any marked `.in_use`,
   which a running session still has open. New skills load on the next Claude
   Code restart, not in the session that ran the sync.
 
