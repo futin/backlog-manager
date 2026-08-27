@@ -66,6 +66,13 @@ that is groom's job.
    new section, and promotion is `backlog-groom`'s job — capture doesn't do it, even when
    the new item was clearly inspired by an existing one.
 
+   **Filing several items in one request: finish each capture before starting the next.**
+   `new` derives the id by looking at the files already on disk, so it hands out the *same*
+   id every time until step 3 has actually written one. Running `new` six times up front
+   yields six paths carrying three `bug-3`s and two `idea-7`s — duplicate ids that every
+   other skill then cites ambiguously. Loop `new` → write → `new` → write, one item at a
+   time, and the ids come out sequential on their own.
+
 3. Write the file at the path `new` printed:
    - keep the printed `---`-delimited frontmatter block exactly as printed;
    - if the user gave tags, add a `tags:` line **inside** that block, before the closing
