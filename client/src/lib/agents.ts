@@ -26,8 +26,42 @@ async function unwrap<T>(res: Response): Promise<T> {
   return data as T;
 }
 
+/**
+ * `unwrap`'s `return data as T` is a compile-time-only promise: it tells
+ * TypeScript what shape to expect, but nothing checks that the bytes that
+ * actually arrived match it. For every other caller here that promise is
+ * cheap to keep — a malformed `AgentPlan` or dispatch result surfaces as a
+ * downstream crash the moment a consumer reads a missing field, in the same
+ * request/response round trip that produced it. `AgentsStatus` is different:
+ * it is cached in `useAgents`' state and re-read by every card on the board,
+ * so a bad shape does not fail once, it lies quietly to every consumer for as
+ * long as that state sticks around. This is where the cast is made honest —
+ * checking every field `dispatchBlock` (`shared/agent.ts`) actually
+ * dereferences, in the order it dereferences them, so nothing downstream can
+ * read `undefined` as false-y or throw on a missing `.projectPaths`.
+ */
+function isAgentsStatus(data: unknown): data is AgentsStatus {
+  return (
+    typeof data === 'object' && data !== null &&
+    typeof (data as AgentsStatus).enabled === 'boolean' &&
+    typeof (data as AgentsStatus).reachable === 'boolean' &&
+    typeof (data as AgentsStatus).spawnAvailable === 'boolean' &&
+    typeof (data as AgentsStatus).remoteAnswer === 'boolean' &&
+    Array.isArray((data as AgentsStatus).projectPaths)
+  );
+}
+
 export async function fetchAgentsStatus(): Promise<AgentsStatus> {
-  return unwrap<AgentsStatus>(await fetch('/api/agents/status'));
+  const data = await unwrap<AgentsStatus>(await fetch('/api/agents/status'));
+  // Thrown, not returned-anyway: `useAgents`' own `.catch` already maps a
+  // failed fetch onto the disabled/unreachable status a real dashboard-off
+  // answer would produce. Reusing that path here means a wrong-shaped 200
+  // and an unreachable API collapse onto the same "no usable status" —
+  // one fallback object, defined once, rather than a second copy of it here.
+  if (!isAgentsStatus(data)) {
+    throw new Error('malformed /api/agents/status response');
+  }
+  return data;
 }
 
 /** POST, not GET: the argument is an absolute path on someone's disk, and a

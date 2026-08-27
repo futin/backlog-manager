@@ -7,6 +7,8 @@ import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
 import { DispatchButton } from '../client/src/components/board/DispatchButton';
+import { ItemDrawer } from '../client/src/components/board/ItemDrawer';
+import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -60,18 +62,46 @@ describe('DispatchButton', () => {
     expect(screen.getByRole('button', { name: 'execute' })).toBeDisabled();
   });
 
-  // `status` is only ever as trustworthy as whoever resolved the hook that
-  // produced it: `unwrap` in lib/agents.ts casts the fetched JSON to
-  // `AgentsStatus` with a bare `as`, a promise TypeScript cannot enforce once
-  // the bytes actually arrive. A payload missing the fields every real answer
-  // carries (this is exactly the shape BoardView's own item/project index
-  // takes) is not a status this component has ever validated — it must render
-  // nothing, the same as `status === null`, rather than let `dispatchBlock`
-  // read `undefined` as a false-y `enabled` and announce a fabricated reason.
-  it('renders nothing when the status object does not look like a real answer', () => {
-    const bogus = { items: [], errors: [] } as unknown as AgentsStatus;
-    const { container } = render(<DispatchButton item={fakeItem()} status={bogus} onDispatch={() => {}} />);
-    expect(container).toBeEmptyDOMElement();
+  // The button is a real <button>, so its own native Enter/Space activation
+  // must be what fires — not the card's onKeyDown, which bubbles up from any
+  // descendant and unconditionally opens the drawer. Proven at the board level
+  // below (`opens the sheet from the keyboard...`), since that is where the
+  // card's competing handler actually lives; this component alone has no card
+  // to race against.
+});
+
+// Coverage gap the brief never touched: `ItemDrawer` gained the same two
+// optional props as `ItemCard`, but no existing suite ever rendered it WITH
+// them — `test/drawer.test.tsx` only ever calls it bare. Direct-render it
+// here, the same way `test/drawer.test.tsx` does, rather than going through
+// `BoardView`: the question is only "does the drawer render the button it
+// was handed", which needs no board around it.
+describe('ItemDrawer wiring', () => {
+  const HUES = buildProjectHues([
+    { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }
+  ]);
+
+  beforeEach(() => {
+    // The drawer always fetches the item body on mount; a resolved stub
+    // keeps that effect from rejecting into an unrelated "unavailable" state
+    // that has nothing to do with what this test checks.
+    global.fetch = jest.fn(() =>
+      Promise.resolve({ ok: true, text: () => Promise.resolve('') } as Response)
+    ) as jest.Mock;
+  });
+
+  it('renders the dispatch button in the drawer head when the board supplies one', () => {
+    render(
+      <ItemDrawer item={fakeItem()} hues={HUES} onClose={() => {}} agents={READY} onDispatch={() => {}} />
+    );
+    const head = document.querySelector('.drawer-head') as HTMLElement;
+    expect(within(head).getByRole('button', { name: 'execute' })).toBeInTheDocument();
+  });
+
+  it('renders nothing extra when agents/onDispatch are absent, same as before this task', () => {
+    render(<ItemDrawer item={fakeItem()} hues={HUES} onClose={() => {}} />);
+    const head = document.querySelector('.drawer-head') as HTMLElement;
+    expect(within(head).queryByRole('button', { name: /execute|groom/ })).not.toBeInTheDocument();
   });
 });
 
@@ -123,5 +153,41 @@ describe('the board wiring', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument()
     );
+  });
+
+  // The card's whole surface is role="button" with its own onKeyDown, which
+  // bubbles up from ANY descendant (including this button) and unconditionally
+  // opens the drawer. Enter on a focused dispatch button must activate the
+  // button, not the card underneath it — the mouse-click test above proves
+  // stopPropagation on click; this proves the keyboard path independently,
+  // since a keydown reaching the card is a different bug than a click reaching
+  // it (preventDefault on keydown silently cancels the button's own activation
+  // rather than triggering both handlers the way an unstopped click would).
+  it('opens the sheet from the keyboard without opening the item drawer', async () => {
+    render(<BoardView />);
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+    const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
+    within(card).getByRole('button', { name: 'execute' }).focus();
+    await userEvent.keyboard('{Enter}');
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: 'a task' })).not.toBeInTheDocument();
+  });
+
+  // `open` and `dispatching` are two separate pieces of state in BoardView
+  // specifically so the sheet can layer over an already-open drawer instead
+  // of replacing it. Clicking a card's own dispatch button (proven above) only
+  // ever exercises the drawer-closed path; this is the other one, and the
+  // only assertion that actually distinguishes "separate state" from "shared
+  // state that happens to pass the simpler case".
+  it('opens the sheet from inside the drawer, leaving the drawer open behind it', async () => {
+    render(<BoardView />);
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('a task'));
+    const drawer = await screen.findByRole('dialog', { name: 'a task' });
+    await userEvent.click(within(drawer).getByRole('button', { name: 'execute' }));
+
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'a task' })).toBeInTheDocument();
   });
 });

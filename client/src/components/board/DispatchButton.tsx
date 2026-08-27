@@ -2,27 +2,16 @@ import { actionLabel, deriveAction, dispatchBlock } from '../../../../shared/age
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
 /**
- * `unwrap` in `lib/agents.ts` hands back whatever JSON the fetch resolved to,
- * cast to `AgentsStatus` with a bare `as` — a compile-time-only promise that
- * erases the moment the bytes actually arrive. Every real answer carries
- * `enabled` and `projectPaths`; a caller that resolved this hook with
- * something else (an old value, unrelated JSON) handed this component a
- * status it has never actually seen, and `dispatchBlock` would either read
- * `undefined` as false-y (announcing a wrong reason) or throw on
- * `.projectPaths.includes`. Treating that the same as "not answered yet"
- * costs nothing real: a genuine answer always has both.
- */
-function isAgentsStatus(status: AgentsStatus | null): status is AgentsStatus {
-  return status !== null && typeof status.enabled === 'boolean' && Array.isArray(status.projectPaths);
-}
-
-/**
  * DispatchButton — the click that hands this item to a Claude session.
  *
  * Three states, and the absent one matters most: an item with no next step
  * (archived, or out of scope) gets no control at all rather than a disabled
  * one, because there is nothing here to enable. A status that has not arrived
  * yet is also nothing — otherwise every board load flashes a dead button.
+ * `status` is trusted here exactly as typed: making it honest at runtime is
+ * `fetchAgentsStatus`'s job (`lib/agents.ts`), the one place a JSON body
+ * actually becomes this type, not every leaf that consumes it — a guard here
+ * would not follow `useAgents` to whatever consumes it next.
  *
  * The derivation is `shared/agent.ts`, the same module the server validates
  * with, so the label can never promise an action the API would refuse.
@@ -35,7 +24,7 @@ export function DispatchButton(
   }
 ) {
   const action = deriveAction(item);
-  if (action === null || !isAgentsStatus(status)) return null;
+  if (action === null || status === null) return null;
 
   const blocked = dispatchBlock(item, status);
 
@@ -51,6 +40,20 @@ export function DispatchButton(
         // this, one click opens both.
         e.stopPropagation();
         onDispatch();
+      }}
+      onKeyDown={(e) => {
+        // Same reasoning as onClick's stopPropagation, for the keyboard path
+        // specifically: the card's own onKeyDown bubbles up from ANY
+        // descendant and unconditionally calls preventDefault()+onOpen(). Left
+        // unstopped, Enter on this button would have that handler fire first
+        // (preventDefault there cancels this button's own Enter-activates-click
+        // behaviour, so the drawer opens and the sheet does not), and Space
+        // would open the drawer on keydown while the button's own keyup click
+        // still fires — both open, the exact double-open onClick's
+        // stopPropagation exists to prevent, back again through the keyboard.
+        // Stopping it here means the card never sees the keydown at all, so
+        // its handler never runs and the button's normal activation proceeds.
+        e.stopPropagation();
       }}
     >
       {actionLabel(item, action)}

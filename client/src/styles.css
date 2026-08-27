@@ -516,8 +516,11 @@ body {
 .sheet-link { font-size: 12px; color: var(--cyan) }
 .sheet-note { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
 
-/* The card's own button. Unshrinkable, like the in-progress mark beside it —
-   the meta line's ellipsis gives up the room. */
+/* The dispatch button, shared by the card's foot and the drawer's head — one
+   class, one look, wherever the board renders it. `flex: none` keeps it
+   unshrinkable in both flex rows, for the same reason in each: something else
+   in that row is the one built to give up room, the in-progress mark's
+   neighbour on the card and the title's ellipsis in the drawer, not this. */
 .board-card-dispatch {
   flex: none; font-family: var(--mono); font-size: 10px;
   color: var(--ink2); background: var(--steel);

@@ -20,12 +20,33 @@ function stub(res: { ok: boolean; status?: number; body: unknown }) {
   return calls;
 }
 
+const AGENTS_STATUS_BODY = {
+  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
+  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+};
+
 describe('the agents client', () => {
   it('reads status from the same-origin API', async () => {
-    const calls = stub({ ok: true, body: { enabled: true } });
+    // A full, real-shaped body — this test is about the request
+    // (URL, no init), not the response, but `fetchAgentsStatus` now validates
+    // the shape before returning it (see the test below), so a partial body
+    // here would throw before either assertion below ever ran.
+    const calls = stub({ ok: true, body: AGENTS_STATUS_BODY });
     await fetchAgentsStatus();
     expect(calls[0].url).toBe('/api/agents/status');
     expect(calls[0].init).toBeUndefined();
+  });
+
+  // `unwrap`'s cast to `AgentsStatus` is compile-time only; nothing before
+  // this checked that a 200 body actually looked like one. Malformed here
+  // means "missing what `dispatchBlock` (shared/agent.ts) dereferences" —
+  // `enabled` alone, with none of `reachable`/`spawnAvailable`/`remoteAnswer`/
+  // `projectPaths`, is exactly the shape an unrelated 200 (this repo's own
+  // `/api/items` or `/api/projects`, say) could accidentally satisfy if ever
+  // hit by mistake.
+  it('rejects a malformed status body instead of returning it silently', async () => {
+    stub({ ok: true, body: { enabled: true } });
+    await expect(fetchAgentsStatus()).rejects.toThrow('malformed');
   });
 
   it('posts the item path as a body, never a query string', async () => {

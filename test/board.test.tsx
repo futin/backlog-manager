@@ -7,7 +7,7 @@ import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
 import { buildProjectHues } from '../client/src/lib/project-hue';
-import type { BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
+import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
 
 // `path` is derived after the spread rather than hard-coded: every other field
 // here is a shared default that `over` may or may not touch, but `path` must be
@@ -49,11 +49,28 @@ const PROJECTS: ProjectSummary[] = [
     counts: { bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 } }
 ];
 
+// A real answer, not a stand-in: this suite predates dispatch and never had
+// a reason to know about `/api/agents/status`, but `BoardView` now calls
+// `useAgents()` on every mount regardless of which suite is rendering it. A
+// stub that only knows `/api/projects` vs. everything-else used to be enough
+// because there was nothing else to ask; now "everything else" also catches
+// this URL and would hand `useAgents` the `ITEMS` object instead, which
+// `fetchAgentsStatus` (client/src/lib/agents.ts) rejects as malformed. Both
+// projects registered below are reachable, so every open bug/task in this
+// suite's fixtures gets an enabled dispatch button — deliberately, so this
+// stub matches what a working dashboard would actually say instead of
+// papering over the endpoint with an off/unreachable stand-in.
+const AGENTS_STATUS: AgentsStatus = {
+  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
+  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
+};
+
 beforeEach(() => {
   localStorage.clear();
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    const payload = url.includes('/api/projects') ? PROJECTS : ITEMS;
+    const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
+      : url.includes('/api/projects') ? PROJECTS : ITEMS;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
 });
@@ -75,7 +92,17 @@ describe('BoardView', () => {
     // col-count renders colItems.length, an array length — assert the DOM
     // actually holds that many cards so a key-driven card omission would fail
     // this test instead of passing unnoticed behind a correct-looking number.
-    expect(within(cols[0]).getAllByRole('button')).toHaveLength(2);
+    // Counts `.board-card` elements directly rather than `role="button"`: the
+    // card itself carries that role, and now so does its own dispatch button
+    // when the item has one — but per Task 8's design, WHICH cards get a
+    // second (dispatch) button depends on each item's own groomed/status
+    // state, not on how many cards actually rendered. A role count is no
+    // longer a stable proxy for card count at all (it would vary with the mix
+    // of dispatchable vs. archived items, independent of any card going
+    // missing); cards were always what this assertion meant to prove, so
+    // counting them directly says that outright instead of through a proxy
+    // this task's own UI broke.
+    expect(cols[0].querySelectorAll('.board-card')).toHaveLength(2);
     expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
