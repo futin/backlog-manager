@@ -83,7 +83,7 @@ ItemCard / ItemDrawer
    │  click
    ▼
 POST /api/agents/plan  { itemPath }  ──► allowlist + re-scan + project match
-   │  ← { action, prompt, projectDirName, allowedModes, defaultMode, blocked? }
+   │  ← { action, prompt, project, allowedModes, defaultMode, blocked? }
    ▼
 LaunchSheet  (prompt editable, mode select, remote-control toggle)
    │  Launch
@@ -146,7 +146,7 @@ launches nothing. `blocked` is set (with a reason) instead of erroring when the
 item is dispatchable in principle but not right now — the unresolvable-project
 case — so the sheet can explain rather than fail.
 
-**`POST /api/agents/dispatch`** — `{itemPath, action, prompt, permissionMode, model?, remoteControl}` → `{sessionId}`.
+**`POST /api/agents/dispatch`** — `{itemPath, action, prompt, permissionMode, remoteControl}` → `{sessionId}`. No dashboard `dirName` crosses to the browser in either direction: dispatch re-resolves it from `itemPath`, so the client never holds a key it has no use for.
 
 Both write paths run the same guard, in this order:
 
