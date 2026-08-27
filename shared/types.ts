@@ -145,7 +145,7 @@ export interface AgentDispatchRequest {
   remoteControl: boolean;
 }
 
-/** 200 body of `POST /api/agents/dispatch` — the dashboard's minted session id. */
+/** 201 body of `POST /api/agents/dispatch` — the dashboard's minted session id. */
 export interface AgentDispatchResult {
   sessionId: string;
 }

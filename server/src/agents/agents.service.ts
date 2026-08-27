@@ -35,6 +35,10 @@ const PROJECT_TTL_MS = 60_000;
  *  the wrong budget for it, and a constant named for the health probe governing
  *  the launch would be a misnomer besides. */
 const SPAWN_TIMEOUT_MS = 10_000;
+/** A prompt longer than this is not a prompt any more. The dashboard's own
+ *  body cap is 64KB; this one exists so a runaway paste fails here, with a
+ *  message, rather than there, as a truncated instruction. */
+const PROMPT_MAX = 8_000;
 
 /** Shape we rely on from the dashboard's /api/health. Everything optional: it
  *  is a different app's response and an older build may omit fields. */
@@ -123,11 +127,6 @@ export class AgentsService {
     };
   }
 
-  /** A prompt longer than this is not a prompt any more. The dashboard's own
-   *  body cap is 64KB; this one exists so a runaway paste fails here, with a
-   *  message, rather than there, as a truncated instruction. */
-  private static readonly PROMPT_MAX = 8_000;
-
   /**
    * Start the session. Every check that matters re-runs here, because `plan`
    * ran against a different request and the sheet has been open for however
@@ -137,7 +136,7 @@ export class AgentsService {
   async dispatch(req: AgentDispatchRequest): Promise<AgentDispatchResult> {
     const prompt = typeof req.prompt === 'string' ? req.prompt.trim() : '';
     if (prompt === '') throw new HttpException({ error: 'prompt is required' }, 400);
-    if (prompt.length > AgentsService.PROMPT_MAX) {
+    if (prompt.length > PROMPT_MAX) {
       throw new HttpException({ error: 'prompt is too long' }, 400);
     }
 
@@ -145,6 +144,10 @@ export class AgentsService {
     if (item === null) throw new HttpException({ error: 'not found' }, 404);
     const action = deriveAction(item);
     if (action === null) {
+      // 409, not plan()'s 404 for this same condition: plan is asked "is
+      // there a plan to show" and there is none, while dispatch is asked to
+      // act and the file's own state refuses. Deliberate asymmetry — do not
+      // "align" these two without re-reading why they differ.
       throw new HttpException({ error: 'nothing to dispatch for this item' }, 409);
     }
     // The whole reason this call is proxied rather than relayed: the client
@@ -159,10 +162,12 @@ export class AgentsService {
     const status = await this.status();
     const blocked = dispatchBlock(item, status);
     if (blocked !== null) {
-      // 502 when the dashboard never answered, 409 when it answered and said
-      // no: the first is an infrastructure problem, the second is a state the
-      // reader can go and change.
-      throw new HttpException({ error: blocked }, status.reachable ? 409 : 502);
+      // 502 only when the feature is on and we genuinely failed to reach the
+      // dashboard — the one case with an upstream to blame. BM_AGENTS off is
+      // a local configuration state, not a gateway failure: nothing was ever
+      // contacted, so there is no gateway to be bad. That case and "answered
+      // and said no" both get 409 — a state the reader can go and change.
+      throw new HttpException({ error: blocked }, status.enabled && !status.reachable ? 502 : 409);
     }
 
     const cfg = readAgentsConfig();
@@ -196,7 +201,15 @@ export class AgentsService {
       // launches in flight", "unknown project: …"); paraphrasing them would
       // only lose the one detail the reader needs.
       const error = typeof body?.error === 'string' ? body.error : `spawn answered ${res.status}`;
-      throw new HttpException({ error }, res.status);
+      // The message is verbatim; the status is not, because the number alone
+      // can lie about whose fault it is. A dashboard 401 would mean OUR
+      // BM_AGENTS_TOKEN is wrong, not that the browser's own request failed to
+      // authenticate — relaying it as a bare 401 reads as the reader's
+      // problem. Anything outside the ordinary 400-499 client-error range
+      // (a 500, a proxy's own 502/503) is an upstream fault this app cannot
+      // vouch for, so it collapses to 502 instead of leaking an arbitrary code.
+      const httpStatus = res.status >= 400 && res.status < 500 ? res.status : 502;
+      throw new HttpException({ error }, httpStatus);
     }
     if (typeof body?.sessionId !== 'string') {
       throw new HttpException({ error: 'spawn returned no session id' }, 502);

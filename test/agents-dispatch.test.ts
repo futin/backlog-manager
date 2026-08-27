@@ -9,6 +9,7 @@ import { item, makeProject, makeRegistry } from './helpers/store';
 
 const GROOMED_BUG = item('bug-2', 'a known bug', '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n');
 const RAW_BUG = item('bug-1', 'a fresh bug', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n');
+const OOS = item('oos-1', 'declined', '## Why not\n\nno\n');
 
 let projectPath: string;
 
@@ -41,11 +42,18 @@ function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } =
 describe('POST /api/agents/dispatch', () => {
   let app: INestApplication;
   const env = { ...process.env };
+  // Captured once so every case — including the ones that replace
+  // global.fetch outright rather than calling stubDashboard() — hands the
+  // real implementation back afterwards. Without this, a ninth case that
+  // forgets to stub inherits whatever the previous case's mock left behind
+  // instead of failing loudly on a real network call.
+  const realFetch = global.fetch;
 
   beforeEach(async () => {
     projectPath = makeProject('alpha', [
       { leaf: 'bugs/open', filename: 'bug-1-a-fresh-bug.md', content: RAW_BUG },
-      { leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG }
+      { leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG },
+      { leaf: 'out-of-scope', filename: 'oos-1-declined.md', content: OOS }
     ]);
     process.env.BM_AGENTS = 'on';
     process.env.BM_AGENTS_URL = 'http://dash.test:4173';
@@ -61,6 +69,7 @@ describe('POST /api/agents/dispatch', () => {
   afterEach(async () => {
     await app.close();
     process.env = { ...env };
+    global.fetch = realFetch;
   });
 
   const bugPath = (name: string) => join(projectPath, 'backlog', 'bugs/open', name);
@@ -150,5 +159,46 @@ describe('POST /api/agents/dispatch', () => {
     global.fetch = jest.fn(() => Promise.reject(new Error('ECONNREFUSED'))) as jest.Mock;
     const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(502);
     expect(res.body.error).toContain('unreachable');
+  });
+
+  it('400s a prompt over the cap', async () => {
+    stubDashboard();
+    const res = await post({
+      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), prompt: 'x'.repeat(9_000)
+    }).expect(400, { error: 'prompt is too long' });
+    expect(res.body.error).toBe('prompt is too long');
+  });
+
+  it('treats a stringy "true" as off, not on, for remoteControl', async () => {
+    const sent = stubDashboard();
+    await post({
+      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), remoteControl: 'true'
+    }).expect(201);
+    const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
+    expect(body.remoteControl).toBe(false);
+  });
+
+  it('409s "dispatch is off" without spawning, when BM_AGENTS is off', async () => {
+    const sent = stubDashboard();
+    process.env.BM_AGENTS = 'off';
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
+    expect(res.body.error).toContain('dispatch is off');
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it('409s an item with no next step at all', async () => {
+    stubDashboard();
+    const res = await post({
+      ...good, itemPath: join(projectPath, 'backlog', 'out-of-scope', 'oos-1-declined.md')
+    }).expect(409);
+    expect(res.body.error).toBe('nothing to dispatch for this item');
+  });
+
+  it('refuses a groom request when the item\'s actual next step is execute', async () => {
+    stubDashboard();
+    const res = await post({
+      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), action: 'groom'
+    }).expect(409);
+    expect(res.body.error).toContain('execute');
   });
 });
