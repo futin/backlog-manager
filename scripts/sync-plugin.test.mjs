@@ -4,29 +4,44 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { PLUGIN_ID, bumpPatch, hashTree, readInstall } from './sync-plugin.mjs'
+import { PLUGIN_ID, hashTree, publishBlocker, readInstall } from './sync-plugin.mjs'
 
-test('bumpPatch moves only the patch digit', () => {
-  assert.equal(bumpPatch('0.1.0'), '0.1.1')
-  assert.equal(bumpPatch('1.4.9'), '1.4.10')
+const clean = { dirty: [], ahead: 0, behind: 0 }
+
+test('publishBlocker passes a committed, pushed tree', () => {
+  assert.equal(publishBlocker(clean), undefined)
 })
 
-test('bumpPatch refuses a version it cannot reason about', () => {
-  for (const bad of ['0.1', '1.2.3-rc1', 'v1.2.3', '']) {
-    assert.throws(() => bumpPatch(bad), /not major\.minor\.patch/)
-  }
+test('publishBlocker names the uncommitted files rather than just refusing', () => {
+  const blocker = publishBlocker({ ...clean, dirty: [' M skills/backlog/SKILL.md'] })
+  assert.match(blocker, /skills\/backlog\/SKILL\.md/)
+  assert.match(blocker, /commit these first/)
+})
+
+test('publishBlocker refuses an unpushed HEAD — the marketplace clones from GitHub', () => {
+  assert.match(publishBlocker({ ...clean, ahead: 2 }), /git push/)
+})
+
+test('publishBlocker refuses a stale HEAD, so a sync never installs backwards', () => {
+  assert.match(publishBlocker({ ...clean, behind: 3 }), /git pull --ff-only/)
+})
+
+// Dirty beats unpushed: committing is the first step of pushing, so the
+// message that comes out has to be the one the user can act on now.
+test('publishBlocker reports the dirty tree before the unpushed commits', () => {
+  assert.match(publishBlocker({ dirty: ['?? skills/new.md'], ahead: 4, behind: 0 }), /commit these first/)
 })
 
 test('hashTree notices content, renames and deletions', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sync-plugin-'))
+  const empty = mkdtempSync(join(tmpdir(), 'sync-plugin-empty-'))
   try {
     mkdirSync(join(dir, 'a'))
     writeFileSync(join(dir, 'a', 'one.md'), 'hello')
     const base = hashTree(dir)
 
     writeFileSync(join(dir, 'a', 'one.md'), 'hello!')
-    const edited = hashTree(dir)
-    assert.notEqual(edited, base, 'edited content must change the digest')
+    assert.notEqual(hashTree(dir), base, 'edited content must change the digest')
 
     // Same bytes under a different name: a rename has to register, which is
     // why the digest eats the relative path and not just the file contents.
@@ -36,9 +51,10 @@ test('hashTree notices content, renames and deletions', () => {
     assert.notEqual(hashTree(dir), base, 'a rename must change the digest')
 
     rmSync(join(dir, 'a', 'two.md'))
-    assert.equal(hashTree(dir), hashTree(mkdtempSync(join(tmpdir(), 'sync-plugin-empty-'))))
+    assert.equal(hashTree(dir), hashTree(empty), 'a deletion must change the digest back')
   } finally {
     rmSync(dir, { recursive: true, force: true })
+    rmSync(empty, { recursive: true, force: true })
   }
 })
 
@@ -54,7 +70,7 @@ test('readInstall picks the user-scoped entry and tolerates a missing file', () 
       plugins: {
         [PLUGIN_ID]: [
           { scope: 'project', installPath: '/project/copy', version: '0.1.0' },
-          { scope: 'user', installPath: '/user/copy', version: '0.1.1' },
+          { scope: 'user', installPath: '/user/copy', version: '0.1.1', gitCommitSha: 'abc' },
         ],
       },
     }))

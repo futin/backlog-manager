@@ -16,7 +16,7 @@ kanban-by-type board. No database: the registry file and each project's
 | Client only, on the host | `pnpm run dev:web` |
 | Tests | `pnpm test` (jest, `--runInBand`) |
 | Skill tests | `pnpm run test:skills` (`node --test skills/*/tools/*.test.mjs scripts/*.test.mjs`) |
-| Reinstall the plugin from this working tree | `pnpm run plugin:sync` |
+| Reinstall the plugin from the pushed HEAD | `pnpm run plugin:sync` |
 | Types | `pnpm run typecheck` |
 | Production build | `pnpm run build` |
 
@@ -45,9 +45,8 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   registry's only writer.
 - `backlog/` — this repo's own file-based backlog, one Markdown file per
   item, self-registered like any other project.
-- `scripts/sync-plugin.mjs` — bumps the plugin version and reinstalls the
-  plugin from this repo; the one way edits under `skills/` reach the running
-  Claude Code.
+- `scripts/sync-plugin.mjs` — reinstalls the plugin from the pushed HEAD;
+  the one way edits under `skills/` reach the running Claude Code.
 - `docs/superpowers/` — design spec and implementation plan.
 
 ## Invariants
@@ -76,21 +75,25 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   the body byte-for-byte. Surfaced raw by the scanner; "in progress" is
   `started !== '' && status === 'open'`, decided in the client, because
   archiving deliberately keeps the date as history.
-- **Editing `skills/` changes nothing until `pnpm run plugin:sync` runs.** The
-  marketplace source here is `directory` pointing at this repo, and a
-  directory install is a *copy* — Claude Code loads
+- **Editing `skills/` changes nothing until it is committed, pushed, and
+  `pnpm run plugin:sync` runs.** A plugin install is a copy, not a link:
+  Claude Code loads
   `~/.claude/plugins/cache/backlog-manager-marketplace/backlog-manager/<version>/`,
-  never the working tree. The drift is silent: `started` shipped in `fcd3d16`
-  and the installed plugin sat on the first commit for weeks. The cache path is
-  keyed by `version` in `.claude-plugin/plugin.json`, so the script bumps the
-  patch digit before calling `claude plugin update` — without a new version
-  the update has nowhere new to land. It no-ops when the installed `skills/`
-  already hashes to the working tree's, so running it twice costs nothing, and
-  it prunes older version copies afterwards because each one is a full ~200MB
-  copy of the repo (`node_modules` and `dist` included — the CLI has no ignore
-  file, checked against 2.1.246) and nothing else reaps them. A copy carrying
-  `.in_use` is left alone; some session still has it open. New skills load on
-  the next Claude Code restart, not in the session that ran the sync.
+  never the working tree. The drift is silent — `started` shipped in `fcd3d16`
+  and the installed plugin sat on the first commit for weeks. The marketplace
+  source is the private repo `futin/backlog-manager` over SSH,
+  sparse-checked-out to `.claude-plugin skills`, which is why an install is
+  ~400KB instead of the ~215MB a `directory` source copied (`node_modules` and
+  `dist` included — the CLI honours no ignore file; checked against 2.1.246,
+  and it rejects a `file://` source, so a local-only git source is not on the
+  table). Git is therefore the publishing boundary: the installer sees pushed
+  commits and nothing else, so `plugin:sync` refuses a dirty `skills/`, an
+  unpushed HEAD, or a HEAD behind `origin/main` rather than installing stale
+  code and reporting success. It never commits or pushes for you. It no-ops
+  when the installed copy already matches HEAD, verifies the landed `skills/`
+  by hash, and prunes older version copies — skipping any marked `.in_use`,
+  which a running session still has open. New skills load on the next Claude
+  Code restart, not in the session that ran the sync.
 
 - **Ports 4322/5177** — guide-manager holds 4321/5175/5176 on this machine.
 - **Both processes bind `127.0.0.1` by default and both compose ports publish
