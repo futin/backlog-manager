@@ -25,6 +25,17 @@ const AGENTS_STATUS_BODY = {
   spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
 };
 
+// Captured once and handed back after every case, the way
+// test/agents-dispatch.test.ts does it: a mock left on global.fetch is
+// inherited by whatever runs next in this worker, where a case that forgot to
+// stub passes on someone else's leftovers instead of failing loudly on a real
+// network call.
+const realFetch = global.fetch;
+
+afterEach(() => {
+  global.fetch = realFetch;
+});
+
 describe('the agents client', () => {
   it('reads status from the same-origin API', async () => {
     // A full, real-shaped body — this test is about the request

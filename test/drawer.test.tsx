@@ -42,6 +42,11 @@ describe('ItemDrawer', () => {
 
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     expect(screen.queryByText(/in progress/)).not.toBeInTheDocument();
+    // The first render was unmounted, so its `alive` flag swallowed its own
+    // resolution; this second one is still mounted and its body fetch lands
+    // either way, which is an un-acted state update unless the test waits for
+    // it. Same reason as the two cases below.
+    await screen.findByText('off by one');
   });
 
   it('fetches the body by path and renders the markdown', async () => {
@@ -69,6 +74,11 @@ describe('ItemDrawer', () => {
   it('closes on Escape, on the close button, and on the backdrop', async () => {
     const onClose = jest.fn();
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={onClose} />);
+    // Same reason as the case above: the mount fetch resolves whether or not
+    // this test cares about the body, and letting it land after the last
+    // assertion is an un-acted state update React warns about. It was the one
+    // remaining act() warning in the suite.
+    await screen.findByText('off by one');
     await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
     await userEvent.click(screen.getByTestId('drawer-backdrop'));

@@ -94,10 +94,15 @@ describe('POST /api/agents/dispatch', () => {
     expect((spawn?.init?.headers as Record<string, string>).authorization).toBe('Bearer s3cret');
     const body = JSON.parse(String(spawn?.init?.body));
     expect(body.project).toBe('-abs-alpha');
-    expect(body.name).toBe('bl:alpha/bug-2');
+    expect(body.name).toBe('bl alpha bug-2');
     expect(body.permissionMode).toBe('acceptEdits');
     expect(body.remoteControl).toBe(true);
-    expect(body.prompt).toContain('backlog-execute');
+    // The client's prompt, byte for byte — not a `toContain` on some phrase
+    // both the sent prompt and a server-recomposed one would satisfy. Editing
+    // the prompt in the launch sheet is the whole point of the sheet, and only
+    // an equality assertion can tell "forwards what was sent" from
+    // "recomposes and silently discards the edit".
+    expect(body.prompt).toBe(good.prompt);
     // A path must never be sent — dirName membership is the dashboard's own
     // contract and this is the assertion that keeps us inside it.
     expect(JSON.stringify(body)).not.toContain(projectPath);

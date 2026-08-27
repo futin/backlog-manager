@@ -77,10 +77,62 @@ describe('composePrompt', () => {
     expect(p).toContain('"line one line two"');
     expect(p).not.toContain('\nline two');
   });
+
+  // The no-path-to-the-dashboard rule, asserted on the composed prompt itself.
+  // test/agents-dispatch.test.ts checks the outbound body for the project
+  // path, but every case there overrides the prompt with its own string, so
+  // nothing proved composePrompt's OWN output is path-free — and this is the
+  // string that would carry it, since the item's absolute path is right there
+  // on the object being formatted.
+  it('never puts the item\'s absolute path in the prompt', () => {
+    for (const item of [
+      fakeItem(),
+      fakeItem({ section: 'ideas', groomed: null }),
+      fakeItem({ section: 'tasks', groomed: true })
+    ]) {
+      for (const action of ['groom', 'execute'] as const) {
+        expect(composePrompt(item, action)).not.toContain(item.path);
+        expect(composePrompt(item, action)).not.toContain(item.projectPath);
+      }
+    }
+  });
 });
+
+/**
+ * A copy of the dashboard's own `NAME_RE` and `NAME_CAP`
+ * (../claude-agents-dashboard/server/lib/spawn.ts). Copied rather than
+ * imported: that repo is a sibling checkout, not a dependency, and importing
+ * from it would make this repo's tests unrunnable without it.
+ *
+ * Pinned here because the contract fails SILENTLY on the other side —
+ * `parseSpawnRequest` drops an invalid name to `undefined` rather than
+ * rejecting the request, so the old `bl:<project>/<id>` spelling (neither `:`
+ * nor `/` is in the charset) was discarded on 100% of dispatches and every row
+ * fell back to the bare project name. Nothing in either app would have said so.
+ */
+const DASHBOARD_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/;
+const DASHBOARD_NAME_CAP = 60;
 
 describe('sessionName', () => {
   it('labels the dashboard row with project and id', () => {
-    expect(sessionName(fakeItem({ project: 'alpha', id: 'task-12' }))).toBe('bl:alpha/task-12');
+    expect(sessionName(fakeItem({ project: 'alpha', id: 'task-12' }))).toBe('bl alpha task-12');
+  });
+
+  it('composes a name the dashboard will actually keep', () => {
+    for (const item of [
+      fakeItem({ project: 'alpha', id: 'task-12' }),
+      fakeItem({ project: 'backlog-manager', id: 'bug-7' }),
+      fakeItem({ project: 'guide.manager_2', id: 'idea-1' })
+    ]) {
+      const name = sessionName(item);
+      expect(name).toMatch(DASHBOARD_NAME_RE);
+      expect(name.length).toBeLessThanOrEqual(DASHBOARD_NAME_CAP);
+    }
+  });
+
+  it('stays inside the cap for a project name long enough to blow it', () => {
+    const name = sessionName(fakeItem({ project: 'a'.repeat(80), id: 'task-1' }));
+    expect(name).toMatch(DASHBOARD_NAME_RE);
+    expect(name).toHaveLength(DASHBOARD_NAME_CAP);
   });
 });

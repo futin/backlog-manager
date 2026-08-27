@@ -33,6 +33,12 @@ function stubDashboard() {
 describe('GET /api/agents/status', () => {
   let app: INestApplication;
   const env = { ...process.env };
+  // Captured once and handed back after every case, the way
+  // test/agents-dispatch.test.ts does it: a suite that leaves a mock on
+  // global.fetch hands it to whatever runs next in the same worker, where a
+  // case that forgot to stub passes on someone else's leftovers instead of
+  // failing loudly on a real network call.
+  const realFetch = global.fetch;
 
   beforeEach(async () => {
     process.env.BM_AGENTS = 'on';
@@ -49,6 +55,7 @@ describe('GET /api/agents/status', () => {
   afterEach(async () => {
     await app.close();
     process.env = { ...env };
+    global.fetch = realFetch;
     jest.restoreAllMocks();
   });
 

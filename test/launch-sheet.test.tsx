@@ -38,8 +38,18 @@ function stub(handlers: { plan?: unknown; dispatch?: { ok: boolean; body: unknow
   return calls;
 }
 
+const realFetch = global.fetch;
+
 beforeEach(() => {
   localStorage.clear();
+});
+
+// Same hazard test/agents-dispatch.test.ts guards against, and the same fix: a
+// suite that leaves a mock on global.fetch hands it to whatever runs next in
+// the same worker, where a case that forgot to stub passes on someone else's
+// leftovers instead of failing loudly on a real network call.
+afterEach(() => {
+  global.fetch = realFetch;
 });
 
 // Correction over the brief's literal test: every case here mounts LaunchSheet
@@ -113,11 +123,47 @@ describe('LaunchSheet', () => {
     expect(screen.queryByRole('button', { name: 'launch' })).not.toBeInTheDocument();
   });
 
+  /* The other half of `blocked = plan?.blocked ?? planError`, and the half
+     that produced the worse bug: a rejected plan fetch used to leave
+     `planError` set forever, so every subsequent item rendered permanently
+     blocked with the FIRST item's message. BoardView's `key` is what resets
+     it; this case is what proves the state exists and is reachable at all,
+     which nothing exercised before. */
+  it('offers no launch when the plan fetch itself fails, and says why', async () => {
+    global.fetch = jest.fn(() => Promise.reject(new Error('NetworkError'))) as jest.Mock;
+    renderSheet({ item: ITEM, onClose: () => {} });
+    expect(await screen.findByText('NetworkError')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'launch' })).not.toBeInTheDocument();
+  });
+
   it('closes on Escape', async () => {
     stub({});
     const onClose = jest.fn();
     renderSheet({ item: ITEM, onClose });
     await userEvent.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
+  });
+
+  /* The listener lives on `window`, so it outlives the component unless the
+     effect's cleanup actually runs. This suite asserted "closes on Escape"
+     and nothing more, which is a property a permanently-leaked listener also
+     satisfies — and a leaked one keeps calling a closed sheet's onClose on
+     every later Escape anywhere in the app. Unmounting and pressing again is
+     the only assertion that tells the two apart.
+     The board-level case in test/dispatch-button.test.tsx covers the
+     complementary gap: Escape reaching this listener at all when focus is
+     still on the button that opened the sheet. */
+  it('removes its Escape listener when it unmounts', async () => {
+    stub({});
+    const onClose = jest.fn();
+    const { unmount } = render(
+      <SettingsProvider>
+        <LaunchSheet item={ITEM} onClose={onClose} />
+      </SettingsProvider>
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'launch' })).toBeEnabled());
+    unmount();
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

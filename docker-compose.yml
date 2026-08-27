@@ -18,6 +18,13 @@
 # above is already the boundary, and a container-loopback bind would only make
 # the published port unreachable.
 #
+# With BM_AGENTS on, that loopback publish fronts more than a read surface:
+# POST /api/agents/dispatch spawns a Claude Code session with file-write
+# permission in another repo. It is still the right boundary for other machines
+# — but it is no boundary at all against a page in this machine's own browser,
+# which is why those two POST routes additionally check content-type and
+# Origin (server/src/agents/origin.guard.ts).
+#
 # Reaching this from elsewhere (a phone, another machine on the tailnet) is a
 # separate, deliberate step layered on top: point
 # `tailscale serve` at the loopback port yourself — there is no script here

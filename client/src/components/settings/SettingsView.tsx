@@ -199,7 +199,7 @@ function AgentsGroup() {
               2 · <code>CLAUDE_BIN</code> in the dashboard's <code>.env</code> — that is its spawn gate.<br />
               3 · Turn its remote-answer pill on; spawning is refused without it.<br />
               4 · Run its <code>pnpm hooks:install</code>, or a groom that asks you a question will stall with nowhere to ask.<br />
-              5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to.
+              5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to — open one there, or raise <code>LOOKBACK_HOURS</code> in the dashboard's <code>.env</code>.
             </span>
           </div>
         </div>

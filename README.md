@@ -192,8 +192,11 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   never sent to the server — plus a Claude Agents group reporting that
   dashboard's status).
 - `shared/` — `types.ts` (registry and API shapes, defined once and imported
-  by both sides) and `theme.css` (the five theme palettes as CSS custom
-  properties).
+  by both sides), `agent.ts` (`deriveAction` and `dispatchGate` — the single
+  implementation of what a dispatch click does and whether it may happen,
+  imported by the board to label a button and by the server to validate the
+  request, so a button can never promise what the API refuses) and `theme.css`
+  (the five theme palettes as CSS custom properties).
 - `skills/` — the four published skills; this is the plugin's skill root.
 - `backlog/` — this repo's own file-based backlog, self-registered like any
   other project (see `backlog/README.md`).
@@ -219,7 +222,7 @@ Tests are flat in `test/`. Component suites opt into jsdom with a
 | `skills/` | The published skills — this is the plugin's skill root |
 | `server/` | Nest API: items, projects, item bodies, the registry reader |
 | `client/` | React SPA: side rail, board, drawer, settings |
-| `shared/` | Types and theme tokens shared by both |
+| `shared/` | Types, the dispatch derivation (`agent.ts`) and theme tokens shared by both |
 | `backlog/` | This repo's own file-based backlog |
 | `docs/superpowers/` | Design spec and implementation plan |
 

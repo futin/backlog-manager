@@ -1,5 +1,5 @@
 import {
-  PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock, modesUpTo
+  PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock, dispatchGate, modesUpTo
 } from '../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../shared/types';
 
@@ -69,9 +69,55 @@ describe('the permission ladder', () => {
   });
 });
 
+describe('dispatchGate', () => {
+  it('enables a dispatchable item on a healthy dashboard', () => {
+    expect(dispatchGate(fakeItem(), OK)).toEqual({ control: 'enabled' });
+  });
+
+  /* The four host-level conditions HIDE the control. None of them is about any
+     one card — all four are true of every card at once — none is fixable from
+     the board, and the .env.example and spec both promise that with BM_AGENTS
+     off the board looks exactly as it did before this feature. A disabled
+     button on forty cards would break that promise and tell the reader
+     nothing they can act on from there. */
+  it.each([
+    [{ enabled: false }, /BM_AGENTS/],
+    [{ reachable: false, error: 'ECONNREFUSED' }, /unreachable.*ECONNREFUSED/],
+    [{ spawnAvailable: false }, /CLAUDE_BIN/],
+    [{ remoteAnswer: false }, /remote answers/]
+  ])('hides the control for an environment-level block (%p)', (over, matcher) => {
+    const gate = dispatchGate(fakeItem(), { ...OK, ...over });
+    expect(gate.control).toBe('hidden');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toMatch(matcher);
+  });
+
+  /* The per-item one DISABLES instead: it is about this card, it names a path,
+     and it is fixable — open a session in that repo, or raise the dashboard's
+     LOOKBACK_HOURS. That reason has nowhere else to be stated (Settings
+     reports a count, not which projects), which is also why the button that
+     carries it stays focusable. */
+  it('disables the control, with the reason, for the project-visibility block', () => {
+    const gate = dispatchGate(fakeItem(), { ...OK, projectPaths: ['/abs/other'] });
+    expect(gate.control).toBe('disabled');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toContain('/abs/alpha');
+  });
+});
+
 describe('dispatchBlock', () => {
   it('passes a dispatchable item on a healthy dashboard', () => {
     expect(dispatchBlock(fakeItem(), OK)).toBeNull();
+  });
+
+  /* Flattens dispatchGate for the two callers that only ever refuse — the
+     launch sheet's re-check and the server's — so hidden and disabled read
+     the same to them. Asserted here so the two forms cannot drift into
+     different wordings for the same condition. */
+  it('flattens both kinds of block to their reason string', () => {
+    for (const over of [{ enabled: false }, { projectPaths: ['/abs/other'] }]) {
+      const status = { ...OK, ...over };
+      const gate = dispatchGate(fakeItem(), status);
+      expect(dispatchBlock(fakeItem(), status)).toBe(gate.control === 'enabled' ? null : gate.reason);
+    }
   });
 
   it('reports each gate, most-fundamental first', () => {

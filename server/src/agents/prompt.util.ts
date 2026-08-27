@@ -55,9 +55,27 @@ export function composePrompt(item: BacklogItem, action: AgentAction): string {
 }
 
 /**
- * The `-n` name the dashboard row is labelled with. Prefixed `bl:` so a row
+ * The `-n` name the dashboard row is labelled with. Prefixed `bl ` so a row
  * this board started is recognisable among sessions started from a terminal.
+ *
+ * Spaces, not the `bl:<project>/<id>` this used to emit. That spelling was
+ * silently discarded on 100% of dispatches: the dashboard's own
+ * `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` (`server/lib/spawn.ts`) allows
+ * neither `:` nor `/`, and `parseSpawnRequest` drops an invalid name to
+ * `undefined` under a documented fail-soft rule rather than rejecting the
+ * request. So `-n` never reached the CLI and every row fell back to the bare
+ * project name — indistinguishable from a terminal-started session, which is
+ * the entire affordance this function exists to buy.
+ *
+ * test/agents-prompt.test.ts asserts the composed name against a copy of that
+ * regex, so the cross-app contract is pinned rather than assumed. It is a
+ * copy on purpose: importing from a sibling repo would make this repo's tests
+ * depend on a checkout of another one.
+ *
+ * Sliced to that app's `NAME_CAP` (60) for the same reason: over the cap is
+ * the same silent drop, and a long project name plus a long id can reach it.
+ * A truncated name still reads as ours; no name at all does not.
  */
 export function sessionName(item: BacklogItem): string {
-  return `bl:${item.project}/${item.id}`;
+  return `bl ${item.project} ${item.id}`.slice(0, 60);
 }

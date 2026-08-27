@@ -209,7 +209,23 @@ export default function BoardView() {
         />
       )}
       {dispatching !== null && (
-        <LaunchSheet item={dispatching} onClose={() => setDispatching(null)} />
+        /* `key` on a singleton element, which looks redundant and is not: it
+           makes re-targeting the sheet a REMOUNT rather than a prop change.
+           LaunchSheet holds nine pieces of state and its only effect refetches
+           the plan without resetting any of them, so without this, switching
+           from item A to item B rendered A's `sessionId` success panel under
+           B's title — B reading as already launched, with no launch button at
+           all — and A's `planError` kept B permanently blocked with A's
+           message, since `blocked = plan?.blocked ?? planError`. Launching
+           inside the in-flight plan fetch also POSTed B's path with A's
+           prompt.
+           One key resets all nine, which is smaller and more honest than
+           nine resets in an effect that would have to be extended every time
+           the sheet grows a tenth. Contrast ItemDrawer, which DOES clear its
+           own state on an `item.path` change: it holds two fields and both
+           are derived from the fetch that effect already owns, so the reset
+           is the effect's own business there. The difference is deliberate. */
+        <LaunchSheet key={dispatching.path} item={dispatching} onClose={() => setDispatching(null)} />
       )}
     </div>
   );

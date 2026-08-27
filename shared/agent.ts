@@ -85,23 +85,71 @@ export function clampMode(want: string, ceiling: PermissionMode | null): Permiss
 }
 
 /**
+ * What the board should do with this item's dispatch control, and why.
+ *
+ * The three cases are not three severities of the same thing — they are two
+ * genuinely different kinds of "no", and the UI owes them different answers:
+ *
+ *  - `hidden` — an ENVIRONMENT-level block: dispatch is off, the dashboard is
+ *    unreachable, it has no `CLAUDE_BIN`, its remote answers are off. None of
+ *    those is about this card, none is fixable from the board, and all four
+ *    are true of every card at once. A disabled control on all forty of them
+ *    is noise the reader cannot act on, so the control is not rendered at all.
+ *    This is also what makes the promise the spec and `.env.example` both
+ *    make — with `BM_AGENTS` off the board "renders exactly as it does today"
+ *    and "shows no dispatch buttons" — literally true.
+ *  - `disabled` — a PER-ITEM block: the dashboard cannot see this item's
+ *    project. That one IS about this card, it is fixable (open a session
+ *    there, or raise the dashboard's `LOOKBACK_HOURS`), and it names a path,
+ *    so a control that states the reason is worth more than silence. It is
+ *    precisely the behaviour chosen when the lookback limit was accepted
+ *    rather than worked around.
+ *  - `enabled` — nothing is in the way.
+ *
+ * Ordered most-fundamental first so the reason names the thing to fix rather
+ * than a symptom of it: with BM_AGENTS off there is nothing to say about
+ * reachability.
+ */
+export type DispatchGate =
+  | { control: 'enabled' }
+  | { control: 'hidden'; reason: string }
+  | { control: 'disabled'; reason: string };
+
+export function dispatchGate(item: BacklogItem, status: AgentsStatus): DispatchGate {
+  if (!status.enabled) {
+    return { control: 'hidden', reason: 'dispatch is off — set BM_AGENTS=on for the API' };
+  }
+  if (!status.reachable) {
+    return {
+      control: 'hidden',
+      reason: `dashboard unreachable${status.error ? `: ${status.error}` : ''}`
+    };
+  }
+  if (!status.spawnAvailable) {
+    return { control: 'hidden', reason: 'the dashboard has no CLAUDE_BIN configured' };
+  }
+  if (!status.remoteAnswer) {
+    return { control: 'hidden', reason: 'remote answers are off in the dashboard' };
+  }
+  if (!status.projectPaths.includes(item.projectPath)) {
+    return {
+      control: 'disabled',
+      reason: `the dashboard cannot see ${item.projectPath} — no Claude session there inside its LOOKBACK_HOURS`
+    };
+  }
+  return { control: 'enabled' };
+}
+
+/**
  * Why this item cannot be dispatched right now, or null when it can.
  *
- * Ordered most-fundamental first so the message names the thing to fix rather
- * than a symptom of it: with BM_AGENTS off there is nothing to say about
- * reachability. Shared because the board disables a button with it, the launch
- * sheet re-checks it, and the server refuses with it — one wording, three
- * places.
+ * The same decision as `dispatchGate`, flattened for the two callers that only
+ * ever refuse — the launch sheet's re-check and the server's own — because
+ * hidden-versus-disabled is a rendering question and neither of them renders
+ * anything. Derived from `dispatchGate` rather than repeating the ladder, so
+ * one ordering and one set of wordings serves the board, the sheet and the API.
  */
 export function dispatchBlock(item: BacklogItem, status: AgentsStatus): string | null {
-  if (!status.enabled) return 'dispatch is off — set BM_AGENTS=on for the API';
-  if (!status.reachable) {
-    return `dashboard unreachable${status.error ? `: ${status.error}` : ''}`;
-  }
-  if (!status.spawnAvailable) return 'the dashboard has no CLAUDE_BIN configured';
-  if (!status.remoteAnswer) return 'remote answers are off in the dashboard';
-  if (!status.projectPaths.includes(item.projectPath)) {
-    return `the dashboard cannot see ${item.projectPath} — no Claude session there inside its LOOKBACK_HOURS`;
-  }
-  return null;
+  const gate = dispatchGate(item, status);
+  return gate.control === 'enabled' ? null : gate.reason;
 }

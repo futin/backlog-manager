@@ -30,6 +30,10 @@ function stubDashboard(over: Record<string, unknown> = {}) {
 describe('POST /api/agents/plan', () => {
   let app: INestApplication;
   const env = { ...process.env };
+  // See the same constant in test/agents-dispatch.test.ts: a mock left on
+  // global.fetch is inherited by whatever runs next in this worker, where a
+  // case that forgot to stub passes on leftovers instead of failing loudly.
+  const realFetch = global.fetch;
 
   beforeEach(async () => {
     projectPath = makeProject('alpha', [
@@ -51,6 +55,7 @@ describe('POST /api/agents/plan', () => {
   afterEach(async () => {
     await app.close();
     process.env = { ...env };
+    global.fetch = realFetch;
   });
 
   const post = (body: unknown) =>

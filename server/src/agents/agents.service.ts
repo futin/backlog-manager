@@ -35,9 +35,20 @@ const PROJECT_TTL_MS = 60_000;
  *  the wrong budget for it, and a constant named for the health probe governing
  *  the launch would be a misnomer besides. */
 const SPAWN_TIMEOUT_MS = 10_000;
-/** A prompt longer than this is not a prompt any more. The dashboard's own
- *  body cap is 64KB; this one exists so a runaway paste fails here, with a
- *  message, rather than there, as a truncated instruction. */
+/**
+ * A prompt longer than this is not a prompt any more. This is a sanity bound on
+ * a runaway paste, not a mirror of the peer's limit.
+ *
+ * The peer's limit is `PROMPT_CAP = 4000` in
+ * ../claude-agents-dashboard/server/lib/spawn.ts — not its 64KB body cap — and
+ * it does not truncate: over the cap it answers 400 with
+ * "prompt must be at most 4000 characters". Deliberately NOT hardcoded here at
+ * 4000: that number is not published on its `/api/health`, so copying it would
+ * only relocate the staleness into this file, where a bump on their side turns
+ * into a rejection on ours for a prompt they would have accepted. Their 400 is
+ * already relayed verbatim (see `dispatch`), and it names the real number,
+ * which is a better message than anything this constant could produce.
+ */
 const PROMPT_MAX = 8_000;
 
 /** Shape we rely on from the dashboard's /api/health. Everything optional: it
