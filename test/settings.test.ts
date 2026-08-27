@@ -3,7 +3,10 @@ import { DEFAULT_SETTINGS, FONT_SCALES, THEMES, clampSettings } from '../client/
 describe('clampSettings', () => {
   it('passes a valid object through', () => {
     const s = clampSettings({ theme: 'daylight', density: 'compact', fontScale: 110, landing: 'projects' });
-    expect(s).toEqual({ theme: 'daylight', density: 'compact', fontScale: 110, landing: 'projects' });
+    expect(s).toEqual({
+      theme: 'daylight', density: 'compact', fontScale: 110, landing: 'projects',
+      linkBase: 'http://127.0.0.1:5174'
+    });
   });
 
   it('falls back per field, independently', () => {
