@@ -41,22 +41,28 @@ const LANDINGS: { value: Landing; label: string }[] = [
  * API's env or in the dashboard's — and a switch here that wrote to a
  * browser's localStorage would just be a lie about where the setting is.
  */
+// No wrapping `<span className="set-hint">` here on purpose: every caller
+// passes this straight into `SettingsRow`'s `hint` prop, which already wraps
+// its child in that exact span (`SettingsRow.tsx`). Wrapping it again here
+// nested a `.set-hint` inside a `.set-hint` — harmless (the class sets no
+// compounding properties) but redundant, so this returns bare content and
+// lets the row supply the class once.
 function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
-  if (status === null) return <span className="set-hint">checking…</span>;
-  if (!status.enabled) return <span className="set-hint">● off — dispatch is not enabled on the API</span>;
+  if (status === null) return <>checking…</>;
+  if (!status.enabled) return <>● off — dispatch is not enabled on the API</>;
   if (!status.reachable) {
-    return <span className="set-hint">● unreachable{status.error ? ` — ${status.error}` : ''}</span>;
+    return <>● unreachable{status.error ? ` — ${status.error}` : ''}</>;
   }
   const gaps = [
     status.spawnAvailable ? null : 'no CLAUDE_BIN',
     status.remoteAnswer ? null : 'remote answers off'
   ].filter((g): g is string => g !== null);
   return (
-    <span className="set-hint">
+    <>
       ● connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
       {' · '}ceiling: {status.spawnMaxPermission ?? 'unknown'}
       {' · '}{status.projectPaths.length} projects
-    </span>
+    </>
   );
 }
 
@@ -164,12 +170,27 @@ function AgentsGroup() {
           type="text"
           aria-label="Dashboard link"
           defaultValue={settings.linkBase}
+          // Re-seed on commit, same idiom and same reason as `NumberField`
+          // (`SettingsRow.tsx`): this field's own commit path can rewrite
+          // what was typed into a different canonical value — `clampOrigin`
+          // (client/src/lib/settings.ts) strips a trailing slash, or falls
+          // back to the default outright on a rejected scheme. Without this
+          // key the box is a `defaultValue`-only input React never touches
+          // again after mount, so it would go on showing the untouched
+          // keystrokes forever — silently disagreeing with what is actually
+          // stored and about to be used as the "open dashboard" href.
+          key={settings.linkBase}
           onBlur={(e) => update({ linkBase: e.currentTarget.value })}
           onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
         />
       </SettingsRow>
 
-      {!healthy && (
+      {/* Gated on an actual answer, not bare `!healthy`: `healthy` starts
+          false the instant `status` is still `null` (its own `status !==
+          null` check fails first), which would fold "not answered yet" into
+          "broken" and tell the reader to go edit their .env while the status
+          line above still correctly says "checking…". */}
+      {status !== null && !healthy && (
         <div className="set-row">
           <div className="set-label">
             <span className="set-name">Setting it up</span>
