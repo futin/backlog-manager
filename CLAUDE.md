@@ -27,8 +27,8 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
 
 - `server/src/` — Nest. `health/` (`GET /api/health`), `items/`
   (`GET /api/items`, `GET /api/projects`, `GET /api/items/body`), `agents/`
-  (`GET /api/agents/status`, `POST /api/agents/plan`,
-  `POST /api/agents/dispatch` — the one outbound call in the app), `registry/`
+  (the one outbound-calling module in the app — `GET /api/agents/status`,
+  `POST /api/agents/plan`, `POST /api/agents/dispatch`), `registry/`
   (read-only view of the registry file), `static.ts` (serves `client/dist`
   when built — conditionally, so a missing bundle means "API only", never a
   catch-all with nothing behind it).
@@ -39,9 +39,9 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   button — on the card and again in the drawer — that opens a launch sheet
   onto `../claude-agents-dashboard`), Settings (five themes, density, text
   scale, landing section, and a Claude Agents group reporting that
-  dashboard's status). `lib/agents.ts` (the three fetches into this app's own
-  API) and `hooks/useAgents.ts` (the status poll, on mount and on window
-  focus) are the two files behind that surface.
+  dashboard's status). That UI is fed by `lib/agents.ts` (the same-origin
+  fetches into this app's own API) and `hooks/useAgents.ts` (the status
+  poll, on mount and on window focus).
 - `shared/` — `types.ts` (`Section` / `ItemStatus` / `BacklogItem` /
   `ItemsIndex` / `ProjectSummary` / `Registry` / the dispatch request and
   response shapes, defined once and imported by both sides), `agent.ts`
