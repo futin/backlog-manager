@@ -462,3 +462,81 @@ body {
 .drawer-body th, .drawer-body td { border: 1px solid var(--hairline); padding: 4px 8px; text-align: left; vertical-align: top }
 .drawer-body a { color: var(--cyan) }
 .drawer-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 10px; color: var(--ink2); margin: 6px 0 }
+
+/* ---- dispatch: the card button and the launch sheet -------------------
+   z-index above the item drawer (60/61): the sheet is opened FROM the
+   drawer as well as from a card, so it has to sit over it. */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 70; background: var(--scrim) }
+.sheet {
+  position: fixed; z-index: 71;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  /* Same /--font-scale division the drawer needs — without it the sheet
+     overflows the viewport at any text size but 100%. */
+  width: min(520px, calc(100vw / var(--font-scale, 1) - 24px));
+  max-height: calc(100dvh / var(--font-scale, 1) - 24px);
+  display: flex; flex-direction: column;
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 3px;
+  box-shadow: 0 18px 48px var(--shadow2);
+}
+.sheet-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 12px 14px; border-bottom: 1px solid var(--hairline);
+  background: var(--strip-hi); box-shadow: inset 0 1px 0 var(--edge);
+}
+.sheet-kicker {
+  font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--cyan); flex: none;
+}
+.sheet-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.sheet-body { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px }
+.sheet-field { display: flex; flex-direction: column; gap: 4px }
+.sheet-static { font-family: var(--mono); font-size: 11px; color: var(--ink2) }
+.sheet-prompt {
+  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--ink);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 8px; resize: vertical;
+}
+.sheet-prompt:focus { outline: none; border-color: var(--cyan) }
+.sheet-field select {
+  font-family: var(--font); font-size: 11.5px; color: var(--ink);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 5px 8px;
+  align-self: flex-start;
+}
+.sheet-check { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink2) }
+.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px }
+.sheet-launch {
+  font-family: var(--font); font-size: 11.5px; font-weight: 600; color: var(--bg);
+  background: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
+  padding: 5px 12px; cursor: pointer;
+}
+.sheet-launch:disabled { opacity: .45; cursor: default }
+.sheet-error, .sheet-blocked { font-family: var(--mono); font-size: 10.5px; line-height: 1.5; color: var(--amber) }
+.sheet-ok { font-family: var(--mono); font-size: 10.5px; color: var(--green, var(--cyan)) }
+.sheet-link { font-size: 12px; color: var(--cyan) }
+.sheet-note { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
+
+/* The dispatch button, shared by the card's foot and the drawer's head — one
+   class, one look, wherever the board renders it. `flex: none` keeps it
+   unshrinkable in both flex rows, for the same reason in each: something else
+   in that row is the one built to give up room, the in-progress mark's
+   neighbour on the card and the title's ellipsis in the drawer, not this. */
+.board-card-dispatch {
+  flex: none; font-family: var(--mono); font-size: 10px;
+  color: var(--ink2); background: var(--steel);
+  border: 1px solid var(--hairline); border-radius: 2px; padding: 2px 6px; cursor: pointer;
+}
+/* `[aria-disabled]`, not `:disabled` — the button stays a real, focusable
+   button on purpose (see DispatchButton.tsx), so the *look* of unavailable is
+   this repo's job rather than the browser's. */
+.board-card-dispatch:hover:not([aria-disabled='true']) { color: var(--ink); border-color: var(--cyan) }
+.board-card-dispatch[aria-disabled='true'] { opacity: .4; cursor: default }
+
+/* Reachable by a screen reader and by nothing else. The 1px-clip idiom rather
+   than display:none or visibility:hidden, which both remove the node from the
+   accessibility tree — the one thing this must not do, since its entire job is
+   to be the text an aria-describedby points at. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}

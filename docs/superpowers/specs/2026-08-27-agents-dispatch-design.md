@@ -58,9 +58,12 @@ inside `LOOKBACK_HOURS` (default 24). **A registered backlog project with no
 Claude session in the last day cannot be spawned into.** This is accepted as a
 limit rather than worked around: the alternative is teaching the dashboard to
 take an absolute path, which widens the widest write surface in that app and
-belongs to its own design pass. The board therefore disables the button and
-names the reason, and Settings names the two fixes — open a session in that repo
-once, or raise `LOOKBACK_HOURS` in the dashboard's `.env`.
+belongs to its own design pass. This is the one block that leaves a control on
+screen: the button stays rendered and `aria-disabled`, and the reason — which
+names the path, and is stated nowhere else in the UI — rides in its `title` and
+in the visually-hidden span its `aria-describedby` points at. Settings carries
+the host-level setup list instead, including this one's two fixes: open a
+session in that repo once, or raise `LOOKBACK_HOURS` in the dashboard's `.env`.
 
 ### Why groom works headlessly
 
@@ -208,17 +211,27 @@ Lifecycle stays with the skills: `backlog-execute` runs `backlog.mjs start`
 itself, `backlog-groom` does its own `move`. The prompt asks for the work, never
 for the bookkeeping.
 
-`SpawnRequest.name` is set to `bl:<project>/<id>` so the dashboard's row is
+`SpawnRequest.name` is set to `bl <project> <id>` so the dashboard's row is
 legible at a glance, and `effort` is left unset — the session inherits the host
-default.
+default. Spaces rather than the `bl:<project>/<id>` first drafted here: that
+app's `NAME_RE` (`server/lib/spawn.ts`) allows neither `:` nor `/`, and it
+fail-softs an invalid name to `undefined`, so the punctuated form was silently
+dropped on every dispatch and every row fell back to the bare project name.
+`test/agents-prompt.test.ts` now asserts the composed name against a copy of
+that regex.
 
 ## UI
 
-**Card.** One action button in the `ItemCard` footer, with `stopPropagation` so
-it does not open the drawer. Rendered only when `status.enabled && reachable &&
-spawnAvailable && remoteAnswer`; rendered disabled, with the reason in its
-`title`, when the item's project is not in `projectPaths`. `ItemDrawer` repeats
-the same button.
+**Card.** One action button in the `ItemCard` footer, with `stopPropagation` on
+click — and on `Enter`/`Space` only, never on every key, or the sheet's own
+window-level Escape listener never sees the keydown while focus is still on this
+button. Rendered only when `status.enabled && reachable && spawnAvailable &&
+remoteAnswer`: those four are environment-level, true of every card at once, and
+a disabled control on all of them would be noise, so the control is absent
+instead (`dispatchGate`, `shared/agent.ts`). When the item's project is not in
+`projectPaths` it renders `aria-disabled` — focusable, so a keyboard user can
+actually reach the reason — with the reason in `title` and in an
+`aria-describedby` span. `ItemDrawer` repeats the same button.
 
 **Launch sheet.** A small modal: project name, the composed prompt in an
 editable textarea, a permission-mode select whose options are the ladder
@@ -272,14 +285,28 @@ things bound it:
 - **The ceiling is the dashboard's**, and the dashboard's ceiling is its host's
   `SPAWN_MAX_PERMISSION`. Nothing in this app can raise it; the sheet can only
   offer modes at or below it.
-- **The action is derived, not requested.** The worst a crafted POST achieves is
-  a session running the action the item's own state already authorised, in the
-  project that item belongs to.
+- **The action is derived, not requested.** A crafted POST cannot pick the
+  work: the server re-scans the item file and 409s a request whose `action`
+  disagrees, so `execute` on an ungroomed bug is refused. This bounds the
+  *action* and the *project* — and nothing else. It does **not** bound the
+  instructions: no `action` field is ever sent to the dashboard, and `prompt` is
+  forwarded verbatim, which is the whole point of the launch sheet's editable
+  textarea. So the honest statement is that a caller who can post at all can
+  make the session do whatever a prompt can make it do, inside the permission
+  mode the ceiling allows.
+- **Who may post at all is therefore the real bound**, and it is
+  `server/src/agents/origin.guard.ts`: the two POST routes accept
+  `application/json` only, and refuse a present `Origin` that is not the
+  request's own host. Without it, `express.urlencoded` — which Nest registers
+  unconditionally — plus the no-preflight status of
+  `application/x-www-form-urlencoded` meant any page in the developer's browser
+  could auto-submit a hidden form and spawn a session with its own prompt. The
+  loopback bind does not help there: the browser is already inside it.
 
-What it does *not* add: item writes from the server (still none), auth (still
-loopback-only, same as v1 — see the `BM_BIND` invariant), or a CSP relaxation
-(`connect-src 'self'` still holds, because every request the page makes is
-same-origin).
+What it does *not* add: item writes from the server (still none), user auth
+(still none — the bind plus the POST guard above are the whole access control;
+see the `BM_BIND` invariant), or a CSP relaxation (`connect-src 'self'` still
+holds, because every request the page makes is same-origin).
 
 ## Testing
 
@@ -289,13 +316,15 @@ Flat in `test/`, jest, dashboard calls stubbed — no test ever spawns anything.
 |---|---|
 | `agents-prompt.test.ts` | The action table, every row, including `done` and out-of-scope returning none |
 | `agents-prompt.test.ts` | Prompt composition: item id, title and skill name present; no slash command |
-| `agents-guard.test.ts` | Ungroomed bug + `execute` ⇒ 409; foreign `itemPath` ⇒ 404; unknown item ⇒ 404 |
-| `agents-guard.test.ts` | Mode clamping against a stubbed `spawnMaxPermission` |
+| `agents-dispatch.test.ts` | Ungroomed bug + `execute` ⇒ 409; foreign `itemPath` ⇒ 404; unknown item ⇒ 404 |
+| `agents-dispatch.test.ts` | Mode clamping against a stubbed `spawnMaxPermission` |
+| `agents-origin-guard.test.ts` | A urlencoded POST and a cross-origin/`null`-origin POST are 403 with **zero** outbound fetches; same-origin JSON, the Vite-proxy header pair, and a no-origin caller still work; `GET status` stays open |
+| `agents-shared.test.ts` | `dispatchGate`: the four environment reasons hide the control, the project one disables it; `dispatchBlock` flattens the same ladder |
 | `agents-status.test.ts` | `BM_AGENTS=off` ⇒ all-falsy status and **zero** fetches; unreachable ⇒ `error` populated |
 | `agents-status.test.ts` | The 60s project-map cache: two calls, one `/api/management` fetch |
 | `agents-dispatch.test.ts` | Happy path sends `dirName` (never a path) and the bearer header when the token is set |
 | `launch-sheet.test.tsx` | jsdom: options truncated at the ceiling; error string rendered verbatim |
-| `item-card-dispatch.test.tsx` | jsdom: no button when disabled/unreachable; disabled with reason for an unresolvable project; click does not open the drawer |
+| `dispatch-button.test.tsx` | jsdom: no button at all when dispatch is off/unreachable; `aria-disabled` with a reachable, described reason for an unresolvable project; click and Enter do not open the drawer; Escape closes the sheet with focus still on the card's button |
 | `settings.test.ts` | `linkBase` clamping, including a non-`http(s)` value falling back |
 
 ## Accepted limits

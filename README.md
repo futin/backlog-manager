@@ -81,10 +81,31 @@ Everything lives in `.env`; `.env.example` documents each key.
 | `BM_BIND` | `127.0.0.1` | Interface both processes bind. Compose sets `0.0.0.0` inside the containers, where the loopback publish is the boundary |
 | `BM_WEB_PORT` / `BM_API_PORT` | `5177` / `4322` | Host-side ports, for when something else already holds one |
 | `BM_PROJECT_ROOT` | `~/Documents/custom-projects` | The tree mounted read-only into the server container |
+| `BM_AGENTS` | off | Turns on dispatching backlog items to `../claude-agents-dashboard` |
+| `BM_AGENTS_URL` | `http://127.0.0.1:4173` | The dashboard's API origin — its `PORT`, not its Vite port |
+| `BM_AGENTS_TOKEN` | empty | Sent as `Authorization: Bearer …` when the dashboard sets `ANSWER_TOKEN` |
 
 A project outside `BM_PROJECT_ROOT` is invisible to the container and is
 reported as missing on `/api/projects` rather than silently dropped from the
 board — widen the mount if you keep backlogs elsewhere.
+
+### Dispatching to Claude (optional)
+
+With `../claude-agents-dashboard` running, a card's button hands that item to a
+real Claude Code session: an idea gets groomed into a task, an ungroomed bug
+gets its Cause and Fix filled in, an ungroomed task — rare, since capture
+refuses to create one without a Plan — gets one filled in, and a groomed bug
+or task gets executed. The board calls this API, this API calls the
+dashboard's `POST /api/spawn`, and the session shows up in the dashboard a
+poll later — where you can watch it, and answer its questions from a phone if
+its hooks are installed.
+
+Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, and `BM_AGENTS_TOKEN`
+if the dashboard sets `ANSWER_TOKEN`). **Settings ▸ Claude Agents** reports
+exactly which gate is closed and what to do about it. The action is derived
+from the item file, not from the click, so an ungroomed bug cannot be executed
+by asking nicely — and nothing here ever writes an item: the spawned session
+runs the skills, which remain the only writers.
 
 ## Install the skills
 
@@ -157,14 +178,25 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   registry — a path outside every registered project's `backlog/` 404s).
 - `server/src/registry/` — read-only view of the registry file, re-read on
   every request so a capture made mid-session shows up on the next fetch.
+- `server/src/agents/` — `GET /api/agents/status` (whether dispatch is on
+  and whether `../claude-agents-dashboard` answered), `POST /api/agents/plan`
+  (this item's next step, derived from the file, plus a composed default
+  prompt), `POST /api/agents/dispatch` (spawns the session in that
+  dashboard).
 - `client/src/` — a side rail (Projects / Settings, a plain section switch),
   the board (toolbar with search plus project/status/sort selects, four fixed
-  columns, a click-to-open drawer rendering the item's Markdown body), and
-  Settings (five themes, density, text scale, landing section — all
-  per-device, in `localStorage`, never sent to the server).
+  columns, a click-to-open drawer rendering the item's Markdown body, plus a
+  dispatch button — on the card and again in the drawer — that opens a
+  launch sheet onto `../claude-agents-dashboard`), and Settings (five themes,
+  density, text scale, landing section — all per-device, in `localStorage`,
+  never sent to the server — plus a Claude Agents group reporting that
+  dashboard's status).
 - `shared/` — `types.ts` (registry and API shapes, defined once and imported
-  by both sides) and `theme.css` (the five theme palettes as CSS custom
-  properties).
+  by both sides), `agent.ts` (`deriveAction` and `dispatchGate` — the single
+  implementation of what a dispatch click does and whether it may happen,
+  imported by the board to label a button and by the server to validate the
+  request, so a button can never promise what the API refuses) and `theme.css`
+  (the five theme palettes as CSS custom properties).
 - `skills/` — the four published skills; this is the plugin's skill root.
 - `backlog/` — this repo's own file-based backlog, self-registered like any
   other project (see `backlog/README.md`).
@@ -190,7 +222,7 @@ Tests are flat in `test/`. Component suites opt into jsdom with a
 | `skills/` | The published skills — this is the plugin's skill root |
 | `server/` | Nest API: items, projects, item bodies, the registry reader |
 | `client/` | React SPA: side rail, board, drawer, settings |
-| `shared/` | Types and theme tokens shared by both |
+| `shared/` | Types, the dispatch derivation (`agent.ts`) and theme tokens shared by both |
 | `backlog/` | This repo's own file-based backlog |
 | `docs/superpowers/` | Design spec and implementation plan |
 

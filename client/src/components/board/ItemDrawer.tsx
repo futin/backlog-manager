@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { marked } from 'marked';
 
 import type { ProjectHues } from '../../lib/project-hue';
-import type { BacklogItem } from '../../../../shared/types';
+import { DispatchButton } from './DispatchButton';
+import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
 /**
  * Absolute-URL schemes a link may point at. A relative href (no scheme at
@@ -178,7 +179,15 @@ marked.use({
  * make that refresh pay for content nobody is looking at.
  */
 export function ItemDrawer(
-  { item, hues, onClose }: { item: BacklogItem; hues: ProjectHues; onClose: () => void }
+  { item, hues, onClose, agents, onDispatch }: {
+    item: BacklogItem;
+    hues: ProjectHues;
+    onClose: () => void;
+    /** null until the status probe answers; absent when the board is rendered
+     *  without dispatch at all (older tests, and any future read-only view). */
+    agents?: AgentsStatus | null;
+    onDispatch?: () => void;
+  }
 ) {
   const [body, setBody] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -230,6 +239,9 @@ export function ItemDrawer(
               the id's prefix on the meta line below still does. */}
           <span className={`pill ${hues.classFor(item.project)}`}>{item.project}</span>
           <span className="drawer-title">{item.title}</span>
+          {onDispatch && (
+            <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} />
+          )}
           <button className="drawer-close" onClick={onClose}>close</button>
         </div>
         <div className="drawer-meta">

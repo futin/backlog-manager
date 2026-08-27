@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import viteConfig from '../vite.config';
 import { HealthController } from '../server/src/health/health.controller';
 import { ItemsController } from '../server/src/items/items.controller';
+import { AgentsController } from '../server/src/agents/agents.controller';
 
 /**
  * The dev proxy has exactly one entry, /api — which is only safe while every
@@ -13,7 +14,7 @@ import { ItemsController } from '../server/src/items/items.controller';
  * hand-kept list. Any new controller must be added to CONTROLLERS here —
  * the length assertion is the reminder.
  */
-const CONTROLLERS = [HealthController, ItemsController];
+const CONTROLLERS = [HealthController, ItemsController, AgentsController];
 
 type ViteServer = { host?: string | boolean; proxy?: Record<string, unknown> };
 const server = (viteConfig as { server?: ViteServer }).server ?? {};
@@ -26,7 +27,7 @@ describe('vite dev proxy', () => {
   });
 
   it('every controller lives under /api', () => {
-    expect(CONTROLLERS).toHaveLength(2);
+    expect(CONTROLLERS).toHaveLength(3);
     for (const ctor of CONTROLLERS) {
       const prefix = Reflect.getMetadata('path', ctor) as string;
       expect(prefix === 'api' || prefix.startsWith('api/')).toBe(true);
