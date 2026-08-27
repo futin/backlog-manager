@@ -61,25 +61,26 @@ export function modesUpTo(ceiling: PermissionMode | null): PermissionMode[] {
  * Clamp a requested mode to the ceiling. Takes a `string`, not a
  * `PermissionMode`, because its whole job is to be the place an unvalidated
  * value from a request body becomes a valid one.
+ *
+ * A naive search of the truncated `allowed` array alone cannot distinguish
+ * "mode we do not recognise" from "mode we recognise but the ceiling forbids".
+ * Both yield -1 with indexOf, but they need different answers: junk goes to
+ * the floor, while a legitimate-but-too-high request belongs at the ceiling.
+ * Consult the full PERMISSION_LADDER to tell them apart.
  */
 export function clampMode(want: string, ceiling: PermissionMode | null): PermissionMode {
   const allowed = modesUpTo(ceiling);
 
-  // If the wanted mode is in the allowed list, return it
   if (allowed.includes(want as PermissionMode)) {
     return want as PermissionMode;
   }
 
-  // If it's not in the allowed list, find where it is on the full ladder
   const fullIndex = PERMISSION_LADDER.indexOf(want as PermissionMode);
 
-  // If it's not on the ladder at all, return the floor
   if (fullIndex === -1) {
     return allowed[0];
   }
 
-  // If it's above the allowed list (higher index), clamp to the ceiling
-  // The ceiling is the last item in the allowed list
   return allowed[allowed.length - 1];
 }
 
