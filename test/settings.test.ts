@@ -29,3 +29,22 @@ describe('clampSettings', () => {
     expect(FONT_SCALES).toEqual([90, 100, 110, 120]);
   });
 });
+
+describe('linkBase', () => {
+  it('defaults to the dashboard on loopback', () => {
+    expect(clampSettings({}).linkBase).toBe('http://127.0.0.1:5174');
+  });
+
+  it('keeps an http(s) origin and drops a trailing slash', () => {
+    expect(clampSettings({ linkBase: 'https://box.ts.net:5174/' }).linkBase)
+      .toBe('https://box.ts.net:5174');
+  });
+
+  it('refuses a non-http scheme — this value becomes an href', () => {
+    expect(clampSettings({ linkBase: 'javascript:alert(1)' }).linkBase)
+      .toBe('http://127.0.0.1:5174');
+    expect(clampSettings({ linkBase: 'not a url' }).linkBase)
+      .toBe('http://127.0.0.1:5174');
+    expect(clampSettings({ linkBase: 42 }).linkBase).toBe('http://127.0.0.1:5174');
+  });
+});
