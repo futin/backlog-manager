@@ -76,3 +76,76 @@ export interface ProjectSummary {
   /** open items per section (out-of-scope counts its terminal items) */
   counts: SectionCounts;
 }
+
+/**
+ * The dashboard's permission-mode ladder, lowest to highest. Re-declared here
+ * rather than imported from ../claude-agents-dashboard: that repo is a sibling
+ * checkout, not a dependency, and a cross-repo import would make this app
+ * unbuildable without it. Four strings, pinned by test/agents-shared.test.ts.
+ */
+export type PermissionMode = 'plan' | 'acceptEdits' | 'auto' | 'bypassPermissions';
+
+/**
+ * `GET /api/agents/status`. Every field is false/empty when `enabled` is false —
+ * that case never leaves this process, so there is nothing to report about a
+ * dashboard we did not call.
+ */
+export interface AgentsStatus {
+  /** BM_AGENTS is on. False ⇒ no outbound request was made at all. */
+  enabled: boolean;
+  /** The dashboard answered GET /api/health. */
+  reachable: boolean;
+  /** Its remote-answer toggle. POST /api/spawn 404s without it. */
+  remoteAnswer: boolean;
+  /** Its CLAUDE_BIN probe. Also a 404 on spawn when false. */
+  spawnAvailable: boolean;
+  /** The ceiling every launch is clamped to; null when we could not read it. */
+  spawnMaxPermission: PermissionMode | null;
+  /**
+   * Absolute project paths the dashboard can currently resolve to a session
+   * directory — i.e. those with a Claude transcript inside its LOOKBACK_HOURS.
+   * A registered project missing from this list cannot be spawned into.
+   */
+  projectPaths: string[];
+  /** Why `reachable` is false. Rendered verbatim in Settings. */
+  error?: string;
+}
+
+/**
+ * `POST /api/agents/plan` — everything the launch sheet needs, and nothing the
+ * client could have decided for itself. Deliberately carries no dashboard
+ * `dirName`: that key is internal to the spawn call, the client has no use for
+ * it, and dispatch re-resolves it from `itemPath` anyway.
+ */
+export interface AgentPlan {
+  action: 'groom' | 'execute';
+  /** The composed default. The sheet may edit it before dispatching. */
+  prompt: string;
+  /** Display name of the project the session will run in. */
+  project: string;
+  /** The ladder truncated at the dashboard's ceiling — never wider. */
+  allowedModes: PermissionMode[];
+  defaultMode: PermissionMode;
+  /**
+   * Set when the item is dispatchable in principle but not right now (the
+   * dashboard is off, unreachable, or cannot see the project). Re-checked here
+   * rather than trusted from the board's older status read, which may be
+   * minutes stale — the sheet renders this instead of a Launch button.
+   */
+  blocked?: string;
+}
+
+/** Body of `POST /api/agents/dispatch`. */
+export interface AgentDispatchRequest {
+  itemPath: string;
+  /** Checked against the server's own derivation, never obeyed. */
+  action: 'groom' | 'execute';
+  prompt: string;
+  permissionMode: PermissionMode;
+  remoteControl: boolean;
+}
+
+/** 200 body of `POST /api/agents/dispatch` — the dashboard's minted session id. */
+export interface AgentDispatchResult {
+  sessionId: string;
+}
