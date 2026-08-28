@@ -62,8 +62,8 @@ services:
       # is on the host, not on this container's loopback — hence
       # host.docker.internal rather than the 127.0.0.1 default that is right
       # for `pnpm run dev` on the host.
-      # BM_AGENTS: 'on'
-      # BM_AGENTS_URL: 'http://host.docker.internal:4173'
+      BM_AGENTS: 'on'
+      BM_AGENTS_URL: 'http://host.docker.internal:4173'
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:
