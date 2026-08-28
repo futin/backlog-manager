@@ -15,12 +15,31 @@ import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../s
 // collide across projects, since ids are only sequential within one project's
 // own store). An explicit `over.path` still wins, so a test that cares about a
 // specific path can still set one.
+/**
+ * The clock-dependent fixtures below are all RELATIVE to the moment the suite
+ * runs, never literal. The card's in-progress label is now minutes-and-hours,
+ * so a literal `started` would read as a different elapsed every day and the
+ * suite would have to fake timers to say anything — and faking timers here
+ * fights userEvent, which this file uses for the filter selects. Relative
+ * values also cannot drift the wrong way: elapsed only ever grows between the
+ * fixture being built and the assertion running, and every rung floors, so
+ * `3h` stays `3h`.
+ *
+ * `CREATED` carries the current year for the same reason: `formatCreated` drops
+ * the year only when it matches now's, so a hard-coded 2026 would silently
+ * start asserting the wrong string on 1 January.
+ */
+const agoISO = (ms: number): string => `${new Date(Date.now() - ms).toISOString().slice(0, 19)}Z`;
+const daysAgoDate = (days: number): string =>
+  new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const CREATED = `${new Date().getUTCFullYear()}-08-20`;
+
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // Annotated (not inferred): without a contextual type here, the object
   // literal's `section`/`status` widen to plain `string` and fail against
   // `Section`/`ItemStatus` below — the annotation is what keeps them narrowed.
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
+    id: 'bug-1', title: 'a bug', created: CREATED, started: '', tags: [],
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over
@@ -31,7 +50,7 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
 const ITEMS: ItemsIndex = {
   items: [
     fakeItem({}),
-    fakeItem({ id: 'bug-2', title: 'groomed bug', groomed: true, started: '2026-08-24' }),
+    fakeItem({ id: 'bug-2', title: 'groomed bug', groomed: true, started: agoISO(3 * 60 * 60 * 1000) }),
     fakeItem({ id: 'task-1', title: 'a task', section: 'tasks', project: 'beta', projectPath: '/abs/beta', groomed: true }),
     fakeItem({ id: 'task-9', title: 'finished task', section: 'tasks', status: 'done', groomed: true, started: '2026-08-01' }),
     fakeItem({ id: 'idea-1', title: 'an idea', section: 'ideas', groomed: null }),
@@ -106,39 +125,133 @@ describe('BoardView', () => {
     expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
-  it('marks groomed bugs, pills the project, and shows id · date on the card', async () => {
+  it('marks groomed bugs, pills the project, and shows id · short date on the card', async () => {
     await renderBoard();
     const card = screen.getByText('groomed bug').closest('.board-card') as HTMLElement;
-    expect(within(card).getByText('· groomed')).toBeInTheDocument();
+    // Beside the meta line, not inside it: inside, the nowrap-with-ellipsis
+    // clipped it to `· gr…` at the real column width.
+    const groomed = within(card).getByText('groomed');
+    expect(groomed).toHaveClass('board-card-groomed');
+    expect(groomed.closest('.board-card-meta')).toBeNull();
+    expect(groomed.closest('.board-card-foot')).not.toBeNull();
     // The pill carries the project — not the type, which the column already
     // states — and the meta line carries what is left.
     expect(within(card).getByText('alpha'))
       .toHaveClass('pill', buildProjectHues(PROJECTS).classFor('alpha'));
-    expect(card.textContent).toContain('bug-2 · 2026-08-20');
+    // Short, not the stored YYYY-MM-DD: the meta line is nowrap-with-ellipsis
+    // in ~118px and the full date left no room for the id beside it, which is
+    // the clipping this format exists to fix.
+    expect(card.textContent).toContain('bug-2 · aug 20');
   });
 
-  // The marker is `◍ <age>` and lives in the foot rather than on the meta line,
-  // pinned unshrinkable at the card's right edge. Measured, not guessed: the
-  // meta line is nowrap-with-ellipsis inside ~118px at the real column width,
-  // already clips `· groomed`, and swallowed the marker whole when it sat there —
-  // 239px of content in a 118px box, rendered but invisible. The words move to
-  // the title attribute (and to the drawer), which is what the assertion on the
-  // title below is protecting: the visible text alone is deliberately terse.
-  it('marks an in-progress card with the live class and an aged marker in the foot', async () => {
+  // An item nobody has picked up carries no created date at all in some
+  // hand-written files. The separator has to go with it — `bug-4 ·` trailing
+  // into nothing reads as a value that failed to load.
+  it('drops the separator on a card whose created date is empty', async () => {
+    (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
+        : url.includes('/api/projects') ? PROJECTS
+          : { items: [fakeItem({ id: 'bug-4', title: 'undated bug', created: '' })], errors: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+    await renderBoard();
+
+    const meta = screen
+      .getByText('undated bug').closest('.board-card')!
+      .querySelector('.board-card-meta') as HTMLElement;
+    expect(meta.textContent).toBe('bug-4');
+  });
+
+  /**
+   * The in-progress marker is a full-width amber bar across the top of the
+   * card's face, not the 3px inset down its left edge it used to be. "Which of
+   * these twelve is anyone on" is a question asked of a whole column at once,
+   * and a hairline at the edge of one card could not answer it at a glance.
+   *
+   * The elapsed reading moves into that bar and out of the foot, which is the
+   * other half of the fix: the foot's meta line is nowrap-with-ellipsis inside
+   * ~118px at the real column width, so id, date and marker could not all fit
+   * there — measured, not guessed. In the bar the reading has the card's whole
+   * width and the foot gets its id and date back.
+   */
+  it('marks an in-progress card with a live bar carrying the words and the elapsed time', async () => {
     await renderBoard();
     const live = screen.getByText('groomed bug').closest('.board-card') as HTMLElement;
     expect(live).toHaveClass('board-card-live');
-    const mark = within(live).getByTitle(/in progress since 2026-08-24/);
-    expect(mark).toHaveClass('board-card-live-mark');
-    expect(mark.textContent).toMatch(/^◍ \d+d$/);
-    expect(mark.closest('.board-card-foot')).not.toBeNull();
-    expect(mark.closest('.board-card-meta')).toBeNull();
 
-    // The negative half matters as much: without it, a marker rendered
-    // unconditionally would pass the assertions above.
+    const bar = live.querySelector('.board-card-live-bar') as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(bar.textContent).toContain('in progress');
+    // The exact date is not on the card at any size — it is in the title
+    // attribute here and spelled out in the drawer.
+    expect(bar).toHaveAttribute('title', expect.stringContaining('in progress since'));
+
+    // Three hours before this render, per the fixture. Hours, not days: `0d`
+    // was the old reading for anything started today, which is exactly the
+    // in-progress work the marker is for.
+    const mark = within(bar).getByText('3h');
+    expect(mark).toHaveClass('board-card-live-mark');
+    expect(mark.closest('.board-card-foot')).toBeNull();
+
+    // The negative half matters as much: without it, a bar rendered
+    // unconditionally would pass every assertion above.
     const idle = screen.getByText('a bug').closest('.board-card') as HTMLElement;
     expect(idle).not.toHaveClass('board-card-live');
-    expect(within(idle).queryByTitle(/in progress/)).not.toBeInTheDocument();
+    expect(idle.querySelector('.board-card-live-bar')).toBeNull();
+  });
+
+  it('reads the elapsed time in minutes for work picked up this hour', async () => {
+    (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
+        : url.includes('/api/projects') ? PROJECTS
+          : { items: [fakeItem({ id: 'bug-5', title: 'just started', started: agoISO(20 * 60 * 1000) })], errors: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+    await renderBoard();
+
+    const bar = screen.getByText('just started').closest('.board-card')!
+      .querySelector('.board-card-live-bar') as HTMLElement;
+    expect(within(bar).getByText('20m')).toBeInTheDocument();
+  });
+
+  // Every file stamped before `start` wrote a time carries a bare date, and
+  // nothing rewrites them — so this is a shape the card renders forever, aged in
+  // days because a bare date carries no hour to read.
+  it('ages a legacy date-only started value in days', async () => {
+    (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
+        : url.includes('/api/projects') ? PROJECTS
+          : { items: [fakeItem({ id: 'bug-6', title: 'legacy start', started: daysAgoDate(1) })], errors: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+    await renderBoard();
+
+    const bar = screen.getByText('legacy start').closest('.board-card')!
+      .querySelector('.board-card-live-bar') as HTMLElement;
+    expect(within(bar).getByText('1d')).toBeInTheDocument();
+  });
+
+  // Nothing validates the shape of `started` on the way in: the CLI writes it,
+  // but a person can edit the file. The bar still has to say someone is on this
+  // — dropping only the unreadable half — and must never print NaN.
+  it('renders the bar without an elapsed reading when started cannot be parsed', async () => {
+    (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
+        : url.includes('/api/projects') ? PROJECTS
+          : { items: [fakeItem({ id: 'bug-8', title: 'hand edited', started: 'soon' })], errors: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+    await renderBoard();
+
+    const card = screen.getByText('hand edited').closest('.board-card') as HTMLElement;
+    const bar = card.querySelector('.board-card-live-bar') as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(bar.textContent).toContain('in progress');
+    expect(card.textContent).not.toContain('NaN');
   });
 
   // An archived item keeps its started date — "picked up on the 1st, finished on
@@ -150,8 +263,8 @@ describe('BoardView', () => {
     await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
     const card = screen.getByText('finished task').closest('.board-card') as HTMLElement;
     expect(card).not.toHaveClass('board-card-live');
-    expect(within(card).queryByTitle(/in progress/)).not.toBeInTheDocument();
-    expect(within(card).getByText('· done')).toBeInTheDocument();
+    expect(card.querySelector('.board-card-live-bar')).toBeNull();
+    expect(within(card).getByText('done')).toHaveClass('board-card-done');
   });
 
   it('colours the pill by project, not by section', async () => {

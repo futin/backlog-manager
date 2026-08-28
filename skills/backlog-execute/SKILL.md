@@ -82,10 +82,11 @@ work starts:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id>
 ```
 
-That writes one `started: <today>` line into the item's frontmatter and nothing else — the
-body is untouched. The board app renders it as an amber edge on the card, so anyone
-looking at the board can see what's being worked without asking. It is not a status: the
-item is still open, still in `<section>/open/`.
+That writes one `started: <UTC timestamp>` line into the item's frontmatter and nothing
+else — the body is untouched. The board app renders it as an amber bar across the top of
+the card, reading how long the work has been going, so anyone looking at the board can see
+what's being worked without asking. It is not a status: the item is still open, still in
+`<section>/open/`.
 
 Exit `1` here means the item can't be started, and the message says which: already in
 progress (someone is on it — say so and stop rather than working it twice), already done,
@@ -144,9 +145,9 @@ parked or handed back:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
 ```
 
-An item nobody is actually working that still shows an amber edge is worse than no marker
+An item nobody is actually working that still shows an amber bar is worse than no marker
 at all — it's the board lying about where the work is. Archiving does not need this:
-`move` never rewrites content, so a done item keeps its `started` date as history.
+`move` never rewrites content, so a done item keeps its `started` timestamp as history.
 
 ## Hard limits
 

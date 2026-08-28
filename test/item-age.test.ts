@@ -1,4 +1,4 @@
-import { daysSince } from '../client/src/lib/item-age';
+import { daysSince, elapsedSince, formatCreated } from '../client/src/lib/item-age';
 
 /**
  * `now` is injected in every case below rather than mocked globally: the whole
@@ -33,5 +33,111 @@ describe('daysSince', () => {
     expect(daysSince('', at('2026-08-26T12:00:00Z'))).toBeNull();
     expect(daysSince('soon', at('2026-08-26T12:00:00Z'))).toBeNull();
     expect(daysSince('2026-13-45', at('2026-08-26T12:00:00Z'))).toBeNull();
+  });
+});
+
+/**
+ * The card's in-progress label. Same injected-`now` convention and same UTC
+ * parsing as daysSince above; what is new is that the answer has four shapes
+ * rather than one number, because "someone picked this up 20 minutes ago" and
+ * "someone picked this up 11 days ago" are different facts and a single unit
+ * cannot carry both.
+ */
+describe('elapsedSince', () => {
+  const at = (iso: string): number => Date.parse(iso);
+  const STAMP = '2026-08-28T12:00:00Z';
+
+  // Under a minute is a word, not `0m`: a session that started this second is
+  // the one case where a number tells you less than plain language does.
+  it('reads "now" for the first minute', () => {
+    expect(elapsedSince(STAMP, at('2026-08-28T12:00:00Z'))).toBe('now');
+    expect(elapsedSince(STAMP, at('2026-08-28T12:00:59Z'))).toBe('now');
+  });
+
+  it('counts floored minutes up to the hour', () => {
+    expect(elapsedSince(STAMP, at('2026-08-28T12:01:00Z'))).toBe('1m');
+    expect(elapsedSince(STAMP, at('2026-08-28T12:20:30Z'))).toBe('20m');
+    expect(elapsedSince(STAMP, at('2026-08-28T12:59:59Z'))).toBe('59m');
+  });
+
+  it('counts floored hours up to the day', () => {
+    expect(elapsedSince(STAMP, at('2026-08-28T13:00:00Z'))).toBe('1h');
+    expect(elapsedSince(STAMP, at('2026-08-28T15:00:00Z'))).toBe('3h');
+    expect(elapsedSince(STAMP, at('2026-08-29T11:59:59Z'))).toBe('23h');
+  });
+
+  it('counts floored days from a full day on', () => {
+    expect(elapsedSince(STAMP, at('2026-08-29T12:00:00Z'))).toBe('1d');
+    expect(elapsedSince(STAMP, at('2026-09-04T12:00:00Z'))).toBe('7d');
+  });
+
+  // A timestamp ahead of now is a hand-edited file. Clamping to the bottom of
+  // the ladder rather than going negative, for the reason daysSince clamps to
+  // 0: "-2h in progress" reads as a bug in the board.
+  it('clamps a future timestamp to the bottom of the ladder', () => {
+    expect(elapsedSince(STAMP, at('2026-08-28T11:00:00Z'))).toBe('now');
+  });
+
+  /**
+   * Every file written before `start` stamped a time carries a bare date, and
+   * nothing rewrites them — so this branch is permanent, not a migration
+   * window. A bare date genuinely does not carry an hour, so it is aged in
+   * days only: reading "14h" off `2026-08-26` would be inventing the hour the
+   * work began out of UTC midnight.
+   */
+  describe('a legacy date-only value', () => {
+    it('reads "today" on the day itself, then whole days', () => {
+      expect(elapsedSince('2026-08-26', at('2026-08-26T09:00:00Z'))).toBe('today');
+      expect(elapsedSince('2026-08-26', at('2026-08-26T23:59:59Z'))).toBe('today');
+      expect(elapsedSince('2026-08-26', at('2026-08-27T00:00:00Z'))).toBe('1d');
+      expect(elapsedSince('2026-08-26', at('2026-09-02T12:00:00Z'))).toBe('7d');
+    });
+
+    it('clamps a future date to "today"', () => {
+      expect(elapsedSince('2026-09-05', at('2026-09-01T00:00:00Z'))).toBe('today');
+    });
+  });
+
+  // null rather than a string, so the caller can render the in-progress bar
+  // without an elapsed instead of printing NaN into it. Nothing validates the
+  // shape of `started` on the way in — a person can type anything.
+  it('returns null for anything it cannot parse', () => {
+    expect(elapsedSince('', at('2026-08-28T12:00:00Z'))).toBeNull();
+    expect(elapsedSince('soon', at('2026-08-28T12:00:00Z'))).toBeNull();
+    expect(elapsedSince('2026-13-45', at('2026-08-28T12:00:00Z'))).toBeNull();
+    expect(elapsedSince('2026-08-28T99:00:00Z', at('2026-08-28T12:00:00Z'))).toBeNull();
+  });
+});
+
+/**
+ * The card's created date. Months come from a hardcoded array rather than
+ * toLocaleString: the output must not depend on the browser's locale, or two
+ * machines looking at the same board read different dates.
+ */
+describe('formatCreated', () => {
+  const at = (iso: string): number => Date.parse(iso);
+  const NOW = at('2026-08-28T12:00:00Z');
+
+  it('drops the year for the current year, and the leading zero from the day', () => {
+    expect(formatCreated('2026-08-20', NOW)).toBe('aug 20');
+    expect(formatCreated('2026-01-05', NOW)).toBe('jan 5');
+  });
+
+  // Two digits, apostrophe-prefixed, and only when the year differs: the board
+  // is overwhelmingly current-year items, so a repeated '26 on every card is
+  // noise that crowds out the part that varies.
+  it('carries a two-digit year when it is not the current one', () => {
+    expect(formatCreated('2025-12-31', NOW)).toBe("dec 31 '25");
+    expect(formatCreated('2027-03-01', NOW)).toBe("mar 1 '27");
+  });
+
+  // Verbatim rather than null or a placeholder: an unparseable `created` is a
+  // hand-edited file, and showing what is actually in it is what lets someone
+  // find and fix the line. Empty stays empty so the caller can drop the
+  // separator with it.
+  it('passes anything it cannot parse straight through', () => {
+    expect(formatCreated('', NOW)).toBe('');
+    expect(formatCreated('whenever', NOW)).toBe('whenever');
+    expect(formatCreated('2026-13-45', NOW)).toBe('2026-13-45');
   });
 });

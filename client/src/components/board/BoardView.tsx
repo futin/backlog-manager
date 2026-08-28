@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
+import { useNow } from '../../hooks/useNow';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { buildProjectHues } from '../../lib/project-hue';
 import { ItemCard } from './ItemCard';
@@ -96,6 +97,17 @@ export default function BoardView() {
     (i.section === 'out-of-scope' || status === 'all' || i.status === status);
 
   const visible = all.filter(matches);
+
+  /* One clock for the whole board, and only while something needs one. An
+     in-progress card's elapsed reading is the only thing here that goes stale
+     with no event at all — `20m` is wrong sixty seconds later whether or not
+     anyone touches the tab, and the item fetches only refresh on mount and
+     focus. Gated on the rendered items so a board with nothing live installs no
+     interval; passed down as a value so the cards stay pure and their tests
+     never have to fake a timer. */
+  const hasLive = visible.some((i) => i.status === 'open' && i.started !== '');
+  const now = useNow(hasLive);
+
   const missing = registered.filter((p) => p.missing);
   const warnings = [
     ...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`),
@@ -190,6 +202,7 @@ export default function BoardView() {
                       onOpen={() => setOpen(item)}
                       agents={agents}
                       onDispatch={() => setDispatching(item)}
+                      now={now}
                     />
                   ))}
                 </div>

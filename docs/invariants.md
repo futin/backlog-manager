@@ -16,7 +16,22 @@ that rewrite an existing item's content (`move` renames and never opens the
 file), so both must round-trip unknown keys and the body byte-for-byte.
 Surfaced raw by the scanner; "in progress" is
 `started !== '' && status === 'open'`, decided in the client, because
-archiving deliberately keeps the date as history.
+archiving deliberately keeps the value as history.
+
+The value is a second-precision UTC timestamp (`2026-08-28T14:03:07Z`), not a
+date, because the useful resolution for "is anyone on this right now" is
+minutes and hours: a bare date rounded everything picked up today to `0d`,
+which is precisely the work the marker exists to surface, and read as "nothing
+has happened yet". UTC because the value is compared against `Date.now()` on
+whatever machine renders the board.
+
+Both shapes are on disk permanently. Every file stamped before this carries a
+bare `YYYY-MM-DD`, and no command rewrites an existing item's frontmatter — so
+this is not a migration window that closes, and a reader that drops the date-only
+branch breaks real files. A bare date is aged in DAYS ONLY (`today`, then `Nd`):
+UTC midnight is not the hour anyone started work, so reading `14h` off
+`2026-08-26` would be inventing it. `elapsedSince` in
+`client/src/lib/item-age.ts` is the one implementation of both branches.
 
 ## Editing `skills/` changes nothing until commit + push + `plugin:sync`
 

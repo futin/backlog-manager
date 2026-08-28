@@ -15,9 +15,102 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * render `in progress` without an age instead of `in progress NaNd`: nothing
  * validates the shape of `started` on the way in, since a person can type
  * anything into an item file.
+ *
+ * No component calls this directly any more — `elapsedSince` below is what the
+ * card and the drawer read, and it delegates here for a bare `YYYY-MM-DD`. Still
+ * exported and still separately tested, because this is where the day-level rule
+ * and the UTC convention are actually specified.
  */
 export function daysSince(date: string, now: number = Date.now()): number | null {
   const then = Date.parse(`${date}T00:00:00Z`);
   if (Number.isNaN(then)) return null;
   return Math.max(0, Math.floor((now - then) / MS_PER_DAY));
+}
+
+const MS_PER_MINUTE = 60 * 1000;
+const MS_PER_HOUR = 60 * MS_PER_MINUTE;
+
+/**
+ * The two shapes `started` can have on disk. `start` writes the timestamp, but
+ * every file stamped before it did carries a bare date, and nothing in the
+ * pipeline rewrites an existing item's frontmatter — so this is a permanent
+ * fork in the parser, not a migration window that closes.
+ */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * How long ago work was picked up, as the string the card prints: `now`, `20m`,
+ * `3h`, `11d` — or null when the value cannot be aged at all.
+ *
+ * The ladder exists because one unit cannot carry the whole range. A session
+ * started twenty minutes ago and one started eleven days ago are different
+ * facts about whether anyone is actually on this right now, and days-only
+ * rounded the first to `0d`, which read as "nothing has happened yet". Each rung
+ * floors: `59m` holds until the hour is complete, `23h` until the day is.
+ *
+ * A date-only value is aged in DAYS ONLY, never promoted to the hours rung. A
+ * bare date carries no hour, and the elapsed time from UTC midnight is not the
+ * elapsed time from whenever the person actually started — printing `14h` off
+ * `2026-08-26` would be inventing that hour. `today` rather than `0d` for the
+ * same reason `now` beats `0m`.
+ *
+ * Clamped at the bottom of the ladder rather than going negative, and null
+ * rather than throwing, for the two reasons daysSince has: a future value means
+ * a hand-edited file, and `-2h in progress` reads as a bug in the board, while
+ * a null lets the caller render the marker without an elapsed instead of
+ * printing `NaNm` into it.
+ */
+export function elapsedSince(started: string, now: number = Date.now()): string | null {
+  if (DATE_ONLY.test(started)) {
+    const days = daysSince(started, now);
+    if (days === null) return null;
+    return days === 0 ? 'today' : `${days}d`;
+  }
+
+  const then = Date.parse(started);
+  if (Number.isNaN(then)) return null;
+
+  const ms = Math.max(0, now - then);
+  if (ms < MS_PER_MINUTE) return 'now';
+  if (ms < MS_PER_HOUR) return `${Math.floor(ms / MS_PER_MINUTE)}m`;
+  if (ms < MS_PER_DAY) return `${Math.floor(ms / MS_PER_HOUR)}h`;
+  return `${Math.floor(ms / MS_PER_DAY)}d`;
+}
+
+/**
+ * Hardcoded rather than toLocaleString('en', { month: 'short' }): the board is
+ * a shared view of shared files, and a date that renders `aug` on one machine
+ * and `ago` on another (Catalan, same abbreviation slot) is a date two people
+ * cannot talk about. Lowercase to sit with the mono meta line it prints into
+ * rather than shouting over it.
+ */
+const MONTHS = [
+  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+];
+
+/**
+ * A `created` date short enough to share the card's foot with the item id:
+ * `aug 20`, or `dec 31 '25` when the year is not the one we are in.
+ *
+ * The year is conditional because the board is overwhelmingly current-year
+ * items — a `'26` repeated down every card is noise crowding out the half that
+ * varies, while its absence is itself the signal "this year".
+ *
+ * An unparseable value comes back VERBATIM rather than as null or a placeholder.
+ * `created` is written by the CLI but lives in a file a person can edit, and
+ * showing what is actually on the line is what lets them find and fix it;
+ * `''` stays `''` so the caller can drop the separator along with it.
+ */
+export function formatCreated(created: string, now: number = Date.now()): string {
+  const then = Date.parse(`${created}T00:00:00Z`);
+  if (Number.isNaN(then)) return created;
+
+  const date = new Date(then);
+  const month = MONTHS[date.getUTCMonth()];
+  const day = date.getUTCDate();
+  const year = date.getUTCFullYear();
+
+  if (year === new Date(now).getUTCFullYear()) return `${month} ${day}`;
+  return `${month} ${day} '${`${year}`.slice(-2)}`;
 }

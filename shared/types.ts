@@ -30,11 +30,18 @@ export interface BacklogItem {
   /** YYYY-MM-DD from frontmatter; '' when the file lacks one (still renderable) */
   created: string;
   /**
-   * YYYY-MM-DD the item was picked up (`backlog.mjs start`), '' when nobody
-   * has. Surfaced verbatim, never interpreted here: an archived item keeps the
-   * date it was started as history, so "is this in progress" is `started !== ''`
-   * AND `status === 'open'` — a question the client answers, since it is the
-   * only side that renders it.
+   * When the item was picked up (`backlog.mjs start`), '' when nobody has.
+   *
+   * Two shapes, both permanent. `start` writes a second-precision UTC timestamp
+   * (`2026-08-28T14:03:07Z`); every file stamped before it did carries a bare
+   * `YYYY-MM-DD`, and nothing rewrites an existing item's frontmatter, so both
+   * are on disk forever. Readers accept both — the client ages a bare date in
+   * days only, since UTC midnight is not the hour anyone started work.
+   *
+   * Surfaced verbatim, never interpreted here: an archived item keeps the moment
+   * it was started as history, so "is this in progress" is `started !== ''` AND
+   * `status === 'open'` — a question the client answers, since it is the only
+   * side that renders it.
    */
   started: string;
   tags: string[];

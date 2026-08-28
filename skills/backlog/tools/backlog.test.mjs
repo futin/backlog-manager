@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile } from './backlog.mjs'
+import { BacklogError, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile, startItem } from './backlog.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
@@ -315,6 +315,18 @@ test('parseFrontmatter preserves an unknown key verbatim', () => {
   const { data } = parseFrontmatter(doc)
 
   assert.equal(data.owner, 'me')
+})
+
+// The value `start` writes contains colons, and the split is on the FIRST one.
+// Asserted rather than reasoned about, because the whole in-progress timer
+// rests on this one line surviving a parse/render cycle intact.
+test('parseFrontmatter keeps a timestamped started value whole, colons included', () => {
+  const doc = '---\nid: bug-1\nstarted: 2026-08-28T14:03:07Z\n---\nbody\n'
+
+  const { data } = parseFrontmatter(doc)
+
+  assert.equal(data.started, '2026-08-28T14:03:07Z')
+  assert.match(renderFrontmatter(data), /^started: 2026-08-28T14:03:07Z$/m)
 })
 
 test('renderFrontmatter round-trips through parseFrontmatter', () => {
@@ -847,14 +859,53 @@ function writeItemWithBody(backlog, rel, id, title, body) {
   return filePath
 }
 
-test('CLI start bug-7 adds a started: line dated today and prints the item path', () => {
+// Second-precision UTC, `Z`-suffixed, no milliseconds. The shape is asserted
+// rather than a literal value because the CLI runs in a child process with its
+// own clock — what matters is that the line is a timestamp and not a bare date,
+// since the card's minutes-and-hours label has nothing to read otherwise.
+const STAMP_LINE = /^started: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m
+
+test('CLI start bug-7 adds a started: line stamped to the second in UTC and prints the item path', () => {
   const { dir, openBugPath } = boardFixture()
 
   const out = run(dir, 'start', 'bug-7')
 
   assert.equal(out.status, 0, out.stderr)
   assert.equal(out.stdout.split('\n')[0], openBugPath)
-  assert.match(fs.readFileSync(openBugPath, 'utf8'), new RegExp(`^started: ${TODAY}$`, 'm'))
+  const text = fs.readFileSync(openBugPath, 'utf8')
+  assert.match(text, STAMP_LINE)
+  // The date the CLI ran is still in there — the timestamp is a refinement of
+  // the old value, not a different fact.
+  assert.match(text, new RegExp(`^started: ${TODAY}T`, 'm'))
+})
+
+// The injected stamp is what the tool writes, verbatim: `startItem`'s third
+// parameter is the seam every caller-supplied time goes through, and a test
+// that only ever checks a regex cannot tell a passthrough from a re-derivation.
+test('startItem writes the stamp it is handed, unchanged', () => {
+  const { backlog, openBugPath } = boardFixture()
+
+  startItem(backlog, 'bug-7', '2026-08-28T14:03:07Z')
+
+  assert.match(fs.readFileSync(openBugPath, 'utf8'), /^started: 2026-08-28T14:03:07Z$/m)
+})
+
+// Every file stamped before `start` wrote a time carries a bare date, and
+// nothing rewrites an existing item's frontmatter — so both shapes are on disk
+// permanently. The refusal must name whichever one it found, or a re-run
+// silently moves the value forward and erases the age the value exists to carry.
+test('CLI start refuses an item already started with a legacy date-only value, naming that value', () => {
+  const { dir, openBugPath } = boardFixture()
+  const { data, body } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  fs.writeFileSync(openBugPath, `${renderFrontmatter({ ...data, started: '2026-08-26' })}\n${body}`)
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'start', 'bug-7')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /bug-7 is already in progress/)
+  assert.match(out.stderr, /2026-08-26/)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
 })
 
 test('CLI start leaves the body byte-for-byte identical, fences and blank lines included', () => {
@@ -970,6 +1021,21 @@ test('CLI stop bug-7 removes the started: line, restoring the file byte-for-byte
   assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
 })
 
+// stop's job is clearing a marker, and it must not learn to care which of the
+// two shapes it is clearing — a legacy date-only value on an item someone
+// abandoned is precisely a marker worth being able to remove.
+test('CLI stop bug-7 removes a legacy date-only started: line as readily as a timestamp', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+  const { data, body } = parseFrontmatter(before)
+  fs.writeFileSync(openBugPath, `${renderFrontmatter({ ...data, started: '2026-08-26' })}\n${body}`)
+
+  const out = run(dir, 'stop', 'bug-7')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
 test('CLI stop bug-7 refuses when the item was never started, leaving the file untouched', () => {
   const { dir, openBugPath } = boardFixture()
   const before = fs.readFileSync(openBugPath, 'utf8')
@@ -982,7 +1048,7 @@ test('CLI stop bug-7 refuses when the item was never started, leaving the file u
 })
 
 // The whole point of keeping `started` out of move's way: an archived item
-// keeps the date it was picked up, so "started 01-02, done today" survives in
+// keeps the moment it was picked up, so "started 01-02, done today" survives in
 // the file. move never reads content, so this is really a test that start
 // wrote something move can carry.
 test('CLI move bug-7 done after a start keeps the started: line in the archived file', () => {
@@ -993,7 +1059,7 @@ test('CLI move bug-7 done after a start keeps the started: line in the archived 
 
   assert.equal(out.status, 0, out.stderr)
   const movedPath = path.join(backlog, 'bugs/done', path.basename(openBugPath))
-  assert.match(fs.readFileSync(movedPath, 'utf8'), new RegExp(`^started: ${TODAY}$`, 'm'))
+  assert.match(fs.readFileSync(movedPath, 'utf8'), STAMP_LINE)
 })
 
 test('CLI board marks a started item with the » column', () => {
@@ -1028,7 +1094,10 @@ test('CLI board --json carries started, empty for an item nobody has started', (
 
   assert.equal(out.status, 0, out.stderr)
   const items = JSON.parse(out.stdout)
-  assert.equal(items.find((i) => i.id === 'bug-7').started, TODAY)
+  // Verbatim, timestamp and all: consumers age this value themselves (the
+  // board's own card reads it down to the minute), so anything truncated here
+  // is information they cannot get back.
+  assert.match(items.find((i) => i.id === 'bug-7').started, new RegExp(`^${TODAY}T\\d{2}:\\d{2}:\\d{2}Z$`))
   assert.equal(items.find((i) => i.id === 'task-4').started, '')
 })
 
