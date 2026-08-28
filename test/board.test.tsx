@@ -387,6 +387,33 @@ describe('BoardView', () => {
     expect(titles).toEqual(['alpha-live', 'zulu-live', 'beta-idle', 'yankee-idle']);
   });
 
+  // A stored sort key this build has no comparator for — hand-edited, or written
+  // by a later build the user has since rolled back. `usePersistedState` parses
+  // whatever JSON it finds and hands the string straight back (the `SortKey`
+  // type is a claim about what this build WRITES, never about what it can read),
+  // so the lookup in `sortItems` misses. Without a fallback that miss is called
+  // as a function, and the TypeError lands inside render with no ErrorBoundary
+  // anywhere in client/src to catch it: the entire board unmounts to a blank
+  // page that only clearing site data recovers. Three idle bugs, not two,
+  // because the fallback comparator only runs once the shared in-progress
+  // primary key ties.
+  it('falls back to the default sort when the stored sort key is unrecognized', async () => {
+    localStorage.setItem('backlog-manager.sort', JSON.stringify('newest'));
+    stubItems([
+      fakeItem({ id: 'bug-old', title: 'old-idle', created: daysAgoDate(10) }),
+      fakeItem({ id: 'bug-new', title: 'new-idle', created: daysAgoDate(0) }),
+      fakeItem({ id: 'bug-mid', title: 'mid-idle', created: daysAgoDate(5) })
+    ]);
+    await renderBoard();
+    const bugsCol = screen.getAllByTestId('board-col')[0];
+    const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
+    // Rendering at all is only half the assertion. The other half is that the
+    // fallback IS the `created` comparator — the fetched order here is
+    // old, new, mid, so a fallback that merely returned 0 and left the array
+    // as fetched would pass a "didn't crash" check and fail this one.
+    expect(titles).toEqual(['new-idle', 'mid-idle', 'old-idle']);
+  });
+
   it('search narrows by title, and no matches shows the empty state', async () => {
     await renderBoard();
     await userEvent.type(screen.getByLabelText('Search items'), 'zzz');

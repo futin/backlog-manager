@@ -60,7 +60,26 @@ const inProgressRank = (item: BacklogItem): 0 | 1 => (isInProgress(item) ? 0 : 1
 /** Onto a copy, never in place — the array belongs to the fetched index. */
 function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
   const out = [...items];
-  out.sort((a, b) => inProgressRank(a) - inProgressRank(b) || COMPARATORS[sort](a, b));
+  /* The `??` is not defensive noise, and the `SortKey` type is not a promise
+     that it can't fire. `sort` arrives from localStorage through
+     `usePersistedState`, which JSON.parses whatever is stored and hands back
+     any string it finds — the type describes what this build WRITES, never
+     what it is capable of READING. A key hand-edited, or written by a later
+     build and then rolled back, misses this record entirely, and an
+     unguarded miss is *called*: `undefined(a, b)` throws inside render, and
+     with no ErrorBoundary anywhere in client/src React unmounts the tree to a
+     blank page that only clearing site data recovers. Degrading to `created`
+     is precisely what the if/else chain this record replaced did in its final
+     `else`, so this restores behaviour rather than adding a new rule.
+     Deliberately NOT matched by the Status select below, which reads the same
+     unvalidated storage and is left unguarded on purpose: a stale status value
+     just matches nothing in the three queue columns, leaving a visibly
+     narrowed board whose cause is the select sitting right above it and whose
+     fix is one click. (The Project select goes further still and fails open to
+     "all".) The asymmetry is the point — a degraded board a user can reason
+     about is a different class of problem from a page that isn't there. */
+  const compare = COMPARATORS[sort] ?? COMPARATORS.created;
+  out.sort((a, b) => inProgressRank(a) - inProgressRank(b) || compare(a, b));
   return out;
 }
 
