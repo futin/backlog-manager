@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { dispatchAgent, fetchAgentPlan, sessionUrl } from '../../lib/agents';
+import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { useSettings } from '../../hooks/useSettings';
 import type { AgentPlan, BacklogItem, PermissionMode } from '../../../../shared/types';
 
@@ -23,6 +24,12 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const [planError, setPlanError] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
   const [mode, setMode] = useState<PermissionMode>('plan');
+  // '' is the "default" option: no flag, so the CLI's own default stands.
+  // Deliberately not remembered between launches — a sticky 'max' from last
+  // week quietly spending on a trivial groom is the failure mode a per-launch
+  // control exists to prevent.
+  const [model, setModel] = useState('');
+  const [effort, setEffort] = useState('');
   const [remoteControl, setRemoteControl] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +72,11 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
       action: plan.action,
       prompt,
       permissionMode: mode,
+      // Spread, not `model: model || undefined`: the key is absent from the
+      // request rather than present-and-empty, which is the shape the server's
+      // `pickFrom` and the dashboard's own parser both read as "no flag".
+      ...(model === '' ? {} : { model }),
+      ...(effort === '' ? {} : { effort }),
       remoteControl
     })
       .then((r) => setSessionId(r.sessionId))
@@ -120,21 +132,52 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
               />
             </label>
 
-            <label className="sheet-field">
-              <span className="set-name">Permission mode</span>
-              <select
-                aria-label="Permission mode"
-                value={mode}
-                onChange={(e) => setMode(e.target.value as PermissionMode)}
-              >
-                {/* Only what the host's ceiling can actually deliver: offering
-                    a mode the dashboard would clamp is a promise this app
-                    cannot keep. */}
-                {plan.allowedModes.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </label>
+            {/* One row, three controls: "how should this run" is a single
+                decision, and the dashboard's own launch panel groups the same
+                three the same way. Stacked, they pushed Launch below the fold
+                on a phone — the device this whole feature is aimed at. */}
+            <div className="sheet-row">
+              <label className="sheet-field">
+                <span className="set-name">Permission mode</span>
+                <select
+                  aria-label="Permission mode"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as PermissionMode)}
+                >
+                  {/* Only what the host's ceiling can actually deliver: offering
+                      a mode the dashboard would clamp is a promise this app
+                      cannot keep. */}
+                  {plan.allowedModes.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </label>
+
+              {/* Same two pickers the dashboard's own launch panel offers, with
+                  the same "default" first option, because this sheet is a second
+                  front-end onto that one spawn. Neither list is clamped against
+                  a host ceiling the way the modes above are — there is none —
+                  so an unknown name costs the flag, not the launch. */}
+              <label className="sheet-field">
+                <span className="set-name">Model</span>
+                <select aria-label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
+                  <option value="">default</option>
+                  {MODELS.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="sheet-field">
+                <span className="set-name">Effort</span>
+                <select aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
+                  <option value="">default</option>
+                  {EFFORTS.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
             <label className="sheet-check">
               <input
