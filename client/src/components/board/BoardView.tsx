@@ -31,20 +31,36 @@ const COLUMNS: { section: Section; label: string; slug: string }[] = [
 ];
 
 /**
- * Onto a copy, never in place — the array belongs to the fetched index.
  * `created` compares as a string: backlog.mjs writes fixed-width UTC
  * YYYY-MM-DD, where lexicographic order is chronological order, and an
  * unparseable value sorts predictably instead of NaN-scrambling the list.
+ *
+ * A record keyed on `SortKey`, not the three-branch if/else this used to be:
+ * `sortItems` below gives every sort a shared primary key (in-progress
+ * first), and a primary key that has to run in front of whichever comparator
+ * is selected can only be written once against a record's shared call site —
+ * three separate branches would each need their own copy of it.
  */
+const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem) => number> = {
+  name: (a, b) => a.title.localeCompare(b.title),
+  project: (a, b) => a.project.localeCompare(b.project) || b.created.localeCompare(a.created),
+  created: (a, b) => b.created.localeCompare(a.created)
+};
+
+/**
+ * 0 for a card someone is actively on, 1 for everything else. Lower sorts
+ * first, so this is the primary key every sort shares: in-progress cards
+ * float to the top of the column no matter which comparator is selected, and
+ * whichever one is selected still decides order *within* each half — two
+ * live cards do not collapse to file order against each other just because
+ * they tied on rank.
+ */
+const inProgressRank = (item: BacklogItem): 0 | 1 => (isInProgress(item) ? 0 : 1);
+
+/** Onto a copy, never in place — the array belongs to the fetched index. */
 function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
   const out = [...items];
-  if (sort === 'name') {
-    out.sort((a, b) => a.title.localeCompare(b.title));
-  } else if (sort === 'project') {
-    out.sort((a, b) => a.project.localeCompare(b.project) || b.created.localeCompare(a.created));
-  } else {
-    out.sort((a, b) => b.created.localeCompare(a.created));
-  }
+  out.sort((a, b) => inProgressRank(a) - inProgressRank(b) || COMPARATORS[sort](a, b));
   return out;
 }
 
