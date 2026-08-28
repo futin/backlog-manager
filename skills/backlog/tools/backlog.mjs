@@ -599,13 +599,13 @@ function nowISO() {
   return `${new Date().toISOString().slice(0, 19)}Z`
 }
 
-// Refuses in the same three cases the lifecycle makes meaningless, each with
-// its own message rather than one shared "cannot start": done and
-// out-of-scope have no work left to pick up, and an idea has no plan to work
-// from at all. That last one duplicates a rule backlog-execute already
-// enforces in prose — enforced here too, because a hand-typed
-// `start idea-5` would otherwise paint an in-progress marker on a card no
-// skill will ever come back to clear.
+// Refuses in the two cases the lifecycle makes meaningless, each with its
+// own message rather than one shared "cannot start": done and out-of-scope
+// have no work left to pick up. An idea carries no such refusal — grooming
+// one (promoting it to a task, or rejecting it outright) is itself the
+// active work a started: marker exists to describe, and backlog-groom is
+// the skill that now owns clearing it again: start on the way in, stop on
+// the way out.
 //
 // Starting an already-started item is refused rather than re-stamped: a
 // second `start` is almost always a re-run, and silently moving the stamp
@@ -621,9 +621,6 @@ export function startItem(backlog, id, stamp = nowISO()) {
   }
   if (item.state === 'done') {
     throw new BacklogError(`${id} is done — nothing to start`, 1)
-  }
-  if (item.section === 'ideas') {
-    throw new BacklogError(`${id} is an idea, not work — promote it to a task with /backlog-groom first`, 1)
   }
 
   const { data, body } = readItemFile(item.path)

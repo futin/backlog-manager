@@ -966,20 +966,26 @@ test('CLI start oos-2 refuses because out-of-scope is terminal', () => {
   assert.equal(fs.readFileSync(oosPath, 'utf8'), before)
 })
 
-// An idea is the one open section with nothing to execute — backlog-execute
-// refuses it by prose, and the tool refuses it here so a hand-typed
-// `start idea-5` cannot put a marker on a card no skill will ever clear.
-test('CLI start idea-5 refuses and names backlog-groom, because an idea has no plan to work', () => {
+// Grooming an idea — promoting it to a task, or rejecting it outright — is
+// itself the active work a started: marker exists to describe, so start no
+// longer refuses ideas. backlog-groom is the skill that now owns the
+// marker's whole lifecycle on an idea: start on the way in, stop on the way
+// out (its own refusal is unaffected — this only removes start's).
+test('CLI start idea-5 succeeds, because grooming an idea is the active work the marker describes', () => {
   const { dir, backlog } = boardFixture()
-  const ideaPath = writeItem(backlog, 'ideas/open', 'idea-5', 'Maybe a graph view')
-  const before = fs.readFileSync(ideaPath, 'utf8')
+  // A real body — fence and blank lines included, same shape as the
+  // byte-for-byte precedent above for a task — so the round-trip assertion
+  // below has something to actually corrupt if start ever touched the body.
+  const body = '\n## Notes\n\nWorth spiking once the API settles.\n\n```js\nconst rows = fetchRows()\n```\n\n\nSee also idea-2.\n'
+  const ideaPath = writeItemWithBody(backlog, 'ideas/open', 'idea-5', 'Maybe a graph view', body)
 
   const out = run(dir, 'start', 'idea-5')
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /idea-5/)
-  assert.match(out.stderr, /backlog-groom/)
-  assert.equal(fs.readFileSync(ideaPath, 'utf8'), before)
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stdout.split('\n')[0], ideaPath)
+  const text = fs.readFileSync(ideaPath, 'utf8')
+  assert.match(text, STAMP_LINE)
+  assert.equal(parseFrontmatter(text).body, body)
 })
 
 test('CLI start bug-99 exits 1 and names the unknown id', () => {

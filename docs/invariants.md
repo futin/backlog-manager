@@ -18,6 +18,20 @@ Surfaced raw by the scanner; "in progress" is
 `started !== '' && status === 'open'`, decided in the client, because
 archiving deliberately keeps the value as history.
 
+Two skills call `start`/`stop` now, holding the marker for different spans.
+`backlog-execute` picks an item up and holds the marker all the way to
+archive. `backlog-groom` holds it only for the length of one groom session —
+`start` once the item and the verdict are both confirmed, `stop` again once
+that verdict's steps finish, or as soon as the session ends without a verdict
+at all, so an abandoned groom never leaves a stamp nothing will clear. Either
+can stamp an idea now: the original reasoning for refusing one — "an idea has
+nothing to execute" — held for execute but not for groom, since deciding an
+idea's verdict (promote it to a task, or reject it outright) is itself the
+active work the marker exists to describe. None of this widens who writes
+the file: `backlog.mjs` is still the single writer, `start`/`stop` are still
+the only two commands that touch an existing item's content, and the
+round-trip guarantee above covers both callers identically.
+
 The value is a second-precision UTC timestamp (`2026-08-28T14:03:07Z`), not a
 date, because the useful resolution for "is anyone on this right now" is
 minutes and hours: a bare date rounded everything picked up today to `0d`,

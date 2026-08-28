@@ -1,4 +1,5 @@
 import { elapsedSince, formatCreated } from '../../lib/item-age';
+import { isInProgress } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
@@ -27,11 +28,10 @@ export function ItemCard(
   }
 ) {
   const at = now ?? Date.now();
-  // Two conditions, not one. `started` outlives the work: `move` never rewrites
-  // an item's content, so an archived file keeps the date it was picked up as
-  // history — worth having, and exactly why the date alone cannot mean "live",
-  // or every item ever shipped would read as in progress forever.
-  const inProgress = item.status === 'open' && item.started !== '';
+  // See item-progress.ts for why this is two conditions, not one: `started`
+  // outlives the work, so `status` is what tells a live item apart from an
+  // archived one that kept its stamp as history.
+  const inProgress = isInProgress(item);
   // null when `started` is not a value this can age (a hand-edited file — the
   // CLI writes a UTC timestamp, and older files a bare date). The bar still
   // renders; it just drops the reading rather than printing NaN into it.

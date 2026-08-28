@@ -99,6 +99,21 @@ async function renderBoard() {
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 
+// Same branching as the `beforeEach` stub, over a caller-supplied item list
+// instead of the fixed `ITEMS` fixture. The sort tests below need bugs whose
+// exact `created`/`started` values carry the assertion, and `ITEMS` cannot
+// grow to hold them: several tests above assert exact `col-count` numbers
+// against it, so a shared fixture is the one thing a sort-order test must
+// not touch.
+function stubItems(items: BacklogItem[]) {
+  (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+    const url = String(input);
+    const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
+      : url.includes('/api/projects') ? PROJECTS : { items, errors: [] };
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+  });
+}
+
 describe('BoardView', () => {
   it('renders the four columns with counts of what they hold (open by default)', async () => {
     await renderBoard();
@@ -294,11 +309,109 @@ describe('BoardView', () => {
     expect(screen.getByText('declined thing')).toBeInTheDocument();
   });
 
+  it('status select offers open, in progress, done and all, in that order', async () => {
+    await renderBoard();
+    const select = screen.getByLabelText('Status') as HTMLSelectElement;
+    const labels = within(select).getAllByRole('option').map((o) => o.textContent);
+    expect(labels).toEqual(['Open', 'In progress', 'Done', 'All']);
+  });
+
+  it('status filter: in progress narrows to open items carrying a started stamp', async () => {
+    await renderBoard();
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    // Only bug-2 ("groomed bug") is open with a started stamp; task-9 is
+    // started but done, and everything else carries no stamp at all.
+    const cols = screen.getAllByTestId('board-col');
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
+      .toEqual(['1', '0', '0', '0']);
+    expect(screen.getByText('groomed bug')).toBeInTheDocument();
+    expect(screen.queryByText('a bug')).not.toBeInTheDocument();
+  });
+
+  // The regression guard for the out-of-scope ordering: oos-1 is terminal, so
+  // it would leak through under 'started' if the out-of-scope bypass ran
+  // before the 'started' branch — this is the case that ordering bug would
+  // actually break. task-9 (done, but carrying a started stamp) is asserted
+  // alongside it as a plain sanity check that "started but no longer open"
+  // stays excluded too. Both are asserted separately from the case above,
+  // even though its counts already imply this, so a future edit that re-adds
+  // the bypass fails a test whose name says what broke.
+  it('status filter: in progress hides out-of-scope items even though they bypass open and done', async () => {
+    await renderBoard();
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    expect(screen.queryByText('declined thing')).not.toBeInTheDocument();
+    expect(screen.queryByText('finished task')).not.toBeInTheDocument();
+  });
+
   it('project filter narrows every column by projectPath', async () => {
     await renderBoard();
     await userEvent.selectOptions(screen.getByLabelText('Project'), '/abs/beta');
     expect(screen.getByText('a task')).toBeInTheDocument();
     expect(screen.queryByText('a bug')).not.toBeInTheDocument();
+  });
+
+  // The primary sort key: in-progress ranks above everything else, and the
+  // selected comparator only breaks ties inside each half. Newest-first is
+  // the default in play here specifically so a broken primary key produces a
+  // plausible-looking wrong answer (plain newest-on-top) instead of an
+  // assertion that would pass by accident either way.
+  it('an in-progress card sorts above a newer one under Newest first', async () => {
+    stubItems([
+      fakeItem({ id: 'bug-old-live', title: 'old-live', created: daysAgoDate(10), started: daysAgoDate(10) }),
+      fakeItem({ id: 'bug-new-idle', title: 'new-idle', created: daysAgoDate(0) }),
+      fakeItem({ id: 'bug-mid-idle', title: 'mid-idle', created: daysAgoDate(5) })
+    ]);
+    await renderBoard();
+    const bugsCol = screen.getAllByTestId('board-col')[0];
+    const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
+    // old-live jumps both newer idle cards; the two idle cards still read
+    // newest-first between themselves, proving the tiebreak comparator ran.
+    expect(titles).toEqual(['old-live', 'new-idle', 'mid-idle']);
+  });
+
+  // The case the user actually asked for: with two cards live at once, the
+  // primary key alone (rank 0 vs. rank 1) cannot order them against each
+  // other, so whichever sort is selected has to keep doing its job *inside*
+  // the in-progress group, not only inside the idle one.
+  it('two in-progress cards keep the selected sort between them', async () => {
+    stubItems([
+      fakeItem({ id: 'bug-zulu', title: 'zulu-live', started: agoISO(60 * 60 * 1000) }),
+      fakeItem({ id: 'bug-alpha', title: 'alpha-live', started: agoISO(2 * 60 * 60 * 1000) }),
+      fakeItem({ id: 'bug-beta', title: 'beta-idle' }),
+      fakeItem({ id: 'bug-yankee', title: 'yankee-idle' })
+    ]);
+    await renderBoard();
+    await userEvent.selectOptions(screen.getByLabelText('Sort'), 'name');
+    const bugsCol = screen.getAllByTestId('board-col')[0];
+    const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
+    expect(titles).toEqual(['alpha-live', 'zulu-live', 'beta-idle', 'yankee-idle']);
+  });
+
+  // A stored sort key this build has no comparator for — hand-edited, or written
+  // by a later build the user has since rolled back. `usePersistedState` parses
+  // whatever JSON it finds and hands the string straight back (the `SortKey`
+  // type is a claim about what this build WRITES, never about what it can read),
+  // so the lookup in `sortItems` misses. Without a fallback that miss is called
+  // as a function, and the TypeError lands inside render with no ErrorBoundary
+  // anywhere in client/src to catch it: the entire board unmounts to a blank
+  // page that only clearing site data recovers. Three idle bugs, not two,
+  // because the fallback comparator only runs once the shared in-progress
+  // primary key ties.
+  it('falls back to the default sort when the stored sort key is unrecognized', async () => {
+    localStorage.setItem('backlog-manager.sort', JSON.stringify('newest'));
+    stubItems([
+      fakeItem({ id: 'bug-old', title: 'old-idle', created: daysAgoDate(10) }),
+      fakeItem({ id: 'bug-new', title: 'new-idle', created: daysAgoDate(0) }),
+      fakeItem({ id: 'bug-mid', title: 'mid-idle', created: daysAgoDate(5) })
+    ]);
+    await renderBoard();
+    const bugsCol = screen.getAllByTestId('board-col')[0];
+    const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
+    // Rendering at all is only half the assertion. The other half is that the
+    // fallback IS the `created` comparator — the fetched order here is
+    // old, new, mid, so a fallback that merely returned 0 and left the array
+    // as fetched would pass a "didn't crash" check and fail this one.
+    expect(titles).toEqual(['new-idle', 'mid-idle', 'old-idle']);
   });
 
   it('search narrows by title, and no matches shows the empty state', async () => {

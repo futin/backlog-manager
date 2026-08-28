@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { marked } from 'marked';
 
 import { elapsedSince } from '../../lib/item-age';
+import { isInProgress } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
@@ -193,11 +194,17 @@ export function ItemDrawer(
   const [body, setBody] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
-  /* Read once per render rather than twice inside the JSX below, where the
+  /* The shared predicate, not a local copy of its two conditions — see
+     item-progress.ts for why it is two and not one. This drawer and the card
+     render the same claim about the same item side by side, so the day the
+     rule grows a third condition (a stamp past some age no longer counting as
+     live, say) they have to grow it together or the board will contradict
+     itself about one item on two surfaces at once.
+     Read once per render rather than twice inside the JSX below, where the
      null-check and the value would each call it. No injected clock, unlike the
      card: the drawer is opened, read and closed, so a reading that aged in place
      while it sat open would be motion for its own sake. */
-  const inProgress = item.status === 'open' && item.started !== '';
+  const inProgress = isInProgress(item);
   const elapsed = inProgress ? elapsedSince(item.started) : null;
 
   useEffect(() => {

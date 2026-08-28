@@ -4,6 +4,7 @@ import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { isInProgress } from '../../lib/item-progress';
 import { buildProjectHues } from '../../lib/project-hue';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
@@ -18,7 +19,7 @@ const SORT_KEY = 'backlog-manager.sort';
  *  always reads as itself and never as "the field was cleared". */
 const ALL = 'all';
 
-type StatusFilter = 'open' | 'done' | 'all';
+type StatusFilter = 'open' | 'started' | 'done' | 'all';
 type SortKey = 'created' | 'name' | 'project';
 
 /** Fixed column order — the store's own section order, not alphabetical. */
@@ -30,20 +31,55 @@ const COLUMNS: { section: Section; label: string; slug: string }[] = [
 ];
 
 /**
- * Onto a copy, never in place — the array belongs to the fetched index.
  * `created` compares as a string: backlog.mjs writes fixed-width UTC
  * YYYY-MM-DD, where lexicographic order is chronological order, and an
  * unparseable value sorts predictably instead of NaN-scrambling the list.
+ *
+ * A record keyed on `SortKey`, not the three-branch if/else this used to be:
+ * `sortItems` below gives every sort a shared primary key (in-progress
+ * first), and a primary key that has to run in front of whichever comparator
+ * is selected can only be written once against a record's shared call site —
+ * three separate branches would each need their own copy of it.
  */
+const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem) => number> = {
+  name: (a, b) => a.title.localeCompare(b.title),
+  project: (a, b) => a.project.localeCompare(b.project) || b.created.localeCompare(a.created),
+  created: (a, b) => b.created.localeCompare(a.created)
+};
+
+/**
+ * 0 for a card someone is actively on, 1 for everything else. Lower sorts
+ * first, so this is the primary key every sort shares: in-progress cards
+ * float to the top of the column no matter which comparator is selected, and
+ * whichever one is selected still decides order *within* each half — two
+ * live cards do not collapse to file order against each other just because
+ * they tied on rank.
+ */
+const inProgressRank = (item: BacklogItem): 0 | 1 => (isInProgress(item) ? 0 : 1);
+
+/** Onto a copy, never in place — the array belongs to the fetched index. */
 function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
   const out = [...items];
-  if (sort === 'name') {
-    out.sort((a, b) => a.title.localeCompare(b.title));
-  } else if (sort === 'project') {
-    out.sort((a, b) => a.project.localeCompare(b.project) || b.created.localeCompare(a.created));
-  } else {
-    out.sort((a, b) => b.created.localeCompare(a.created));
-  }
+  /* The `??` is not defensive noise, and the `SortKey` type is not a promise
+     that it can't fire. `sort` arrives from localStorage through
+     `usePersistedState`, which JSON.parses whatever is stored and hands back
+     any string it finds — the type describes what this build WRITES, never
+     what it is capable of READING. A key hand-edited, or written by a later
+     build and then rolled back, misses this record entirely, and an
+     unguarded miss is *called*: `undefined(a, b)` throws inside render, and
+     with no ErrorBoundary anywhere in client/src React unmounts the tree to a
+     blank page that only clearing site data recovers. Degrading to `created`
+     is precisely what the if/else chain this record replaced did in its final
+     `else`, so this restores behaviour rather than adding a new rule.
+     Deliberately NOT matched by the Status select below, which reads the same
+     unvalidated storage and is left unguarded on purpose: a stale status value
+     just matches nothing in the three queue columns, leaving a visibly
+     narrowed board whose cause is the select sitting right above it and whose
+     fix is one click. (The Project select goes further still and fails open to
+     "all".) The asymmetry is the point — a degraded board a user can reason
+     about is a different class of problem from a page that isn't there. */
+  const compare = COMPARATORS[sort] ?? COMPARATORS.created;
+  out.sort((a, b) => inProgressRank(a) - inProgressRank(b) || compare(a, b));
   return out;
 }
 
@@ -93,8 +129,19 @@ export default function BoardView() {
   const matches = (i: BacklogItem): boolean =>
     (projectValue === ALL || i.projectPath === projectValue) &&
     (needle === '' || i.title.toLowerCase().includes(needle)) &&
-    // out-of-scope is flat and terminal — the open/done select has no say there
-    (i.section === 'out-of-scope' || status === 'all' || i.status === status);
+    // The 'started' branch is tested BEFORE the out-of-scope bypass below,
+    // and that ordering is load-bearing, not arbitrary. The bypass is correct
+    // for Open/Done/All because out-of-scope is flat and terminal, so those
+    // three genuinely have no opinion about it. 'started' is different: it is
+    // a claim about live work, and a rejected out-of-scope card is never
+    // live, no matter what its (possibly stale) `started` stamp says. Running
+    // the bypass first would fill this view with terminal cards under a
+    // heading that promises otherwise — exactly the regression the "hides
+    // out-of-scope" board test guards against.
+    (status === 'started'
+      ? isInProgress(i)
+      // out-of-scope is flat and terminal — Open/Done/All have no say there
+      : i.section === 'out-of-scope' || status === 'all' || i.status === status);
 
   const visible = all.filter(matches);
 
@@ -105,7 +152,7 @@ export default function BoardView() {
      focus. Gated on the rendered items so a board with nothing live installs no
      interval; passed down as a value so the cards stay pure and their tests
      never have to fake a timer. */
-  const hasLive = visible.some((i) => i.status === 'open' && i.started !== '');
+  const hasLive = visible.some(isInProgress);
   const now = useNow(hasLive);
 
   const missing = registered.filter((p) => p.missing);
@@ -147,6 +194,7 @@ export default function BoardView() {
             onChange={(e) => setStatus(e.target.value as StatusFilter)}
           >
             <option value="open">Open</option>
+            <option value="started">In progress</option>
             <option value="done">Done</option>
             <option value="all">All</option>
           </select>
