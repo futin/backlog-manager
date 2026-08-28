@@ -90,7 +90,7 @@ what's being worked without asking. It is not a status: the item is still open, 
 
 Exit `1` here means the item can't be started, and the message says which: already in
 progress (someone is on it — say so and stop rather than working it twice), already done,
-out of scope, or an idea. Don't work around it.
+or out of scope. Don't work around it.
 
 Clear it if you walk away without archiving — see below.
 
@@ -158,6 +158,10 @@ at all — it's the board lying about where the work is. Archiving does not need
 - **Never touches `ideas/` or `out-of-scope/`.** An idea isn't executable by definition —
   promoting it into a task is `backlog-groom`'s job. A rejected item is closed. If `show`
   resolves the id into either directory, refuse immediately (see Pick an item above).
+  Nothing but this rule enforces the idea half of it: `start` used to refuse an idea and
+  no longer does, because grooming one is real work and `backlog-groom` now marks it in
+  progress the same way this skill does. The tool will happily stamp an idea for you — so
+  the id has to be checked here, before `start` is ever reached.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a
   hard limit, not a suggestion: no proof, no archive.
 

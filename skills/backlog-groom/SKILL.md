@@ -84,14 +84,80 @@ is on this right now" for either skill, not execute alone.
 
 Exit `1` here is one of two very different things:
 
-- **"already in progress."** Not a refusal — some other session (most likely a resumed
-  `backlog-execute`, or another groom already working this same id) holds the marker
-  already. Give the verdict below as normal, but skip every `stop` it ends with: the
-  marker isn't yours to clear, and clearing it would tell the board that other session
-  had finished when it hasn't. Groom only ever releases a marker it set itself.
-- **anything else** (done, out of scope). A real refusal — relay it the way the Refusals
-  section above relays refusals, and stop; there's no verdict to give an item that can't
-  be started.
+- **anything other than "already in progress"** (done, out of scope). A real refusal —
+  relay it the way the Refusals section above relays refusals, and stop; there's no
+  verdict to give an item that can't be started.
+- **"already in progress."** Not a refusal, and not an answer either — it means the file
+  already carries a `started:` stamp, and the tool cannot tell you whose. Read the next
+  section before doing anything else.
+
+### "Already in progress" — find out whose marker it is first
+
+`started:` records *when*, never *who*, so that one message covers three genuinely
+different situations:
+
+1. **Another session is on this item right now** — a `backlog-execute` mid-fix, or
+   another groom already carrying out a verdict on the same id.
+2. **An earlier groom of this same item was interrupted** — crash, `/clear`, context
+   loss — after its `start` and before its `stop`. Nobody is working it; the stamp
+   outlived the session that wrote it.
+3. **A hand-run `start` left a stamp** nobody is acting on.
+
+Case 1 is not yours to touch. Cases 2 and 3 are stamps that nothing will ever clear if
+you decline to, because this skill is the only thing that would — and until something
+does, the board shows a permanent false "someone is on this" and every later
+`backlog-execute start <id>` refuses on behalf of a session that stopped existing days
+ago. Proceeding blind is wrong in both directions: guess "stale" on case 1 and a Reject
+verdict rewrites an item's entire body and moves the file out from under a running
+session; guess "live" on case 2 and you strand the very marker you left there last time.
+
+So don't guess — surface it. The refusal message already names the stamp (`bug-7 is
+already in progress (started 2026-08-28T14:03:07Z)`); print now in the same shape so you
+can tell the user how old it is instead of reading a raw timestamp at them:
+
+```bash
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+A stamp from before timestamps existed is a bare `YYYY-MM-DD` and is only ever aged in
+whole days — such a value is old by definition, and worth saying so. Give the user the
+stamp and its age, say which of the three you think it is and why (minutes old usually
+means live; hours or days old on an item nobody mentions working usually means
+abandoned), and let them decide. This is the same rule as the verdict itself: grooming
+is a decision made *with* the user, and "whose marker is this" is exactly the kind of
+question only they can answer.
+
+Then, by their answer:
+
+- **A session is live on it.** Stop, and say so. No verdict, no edit, no `move` — the way
+  `backlog-execute` answers the mirror case ("someone is on it — say so and stop rather
+  than working it twice"). Groom has more reason to stop than execute does, not less: a
+  Reject replaces the item's whole body and relocates the file, so working over a live
+  session here doesn't merely duplicate effort, it destroys in-flight state.
+- **The stamp is stale** (case 2 or 3 — and case 2 is exactly the state "If the session
+  ends without a verdict" below exists to prevent, so it is a state this skill knows it
+  can produce). Once the user confirms it, take the marker over properly:
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id>
+  ```
+
+  Both lines, in that order. `start` refuses to re-stamp a file that already carries a
+  stamp, so the clear has to come first; and the point of the second line is that from
+  here on this is an ordinary groom session — the marker is *yours*, every `stop` below
+  applies exactly as written, and if this session is itself interrupted the abandonment
+  section clears it like any other. Clearing without re-taking would leave the item
+  unmarked while you actively work it, which is the same lie as a stale stamp with the
+  sign flipped.
+- **They know a session is live and want to proceed anyway.** Their call, and the only
+  case in which you work an item whose marker isn't yours. Give the verdict below as
+  normal, but skip every `stop` it ends with: clearing that marker would tell the board
+  the other session had finished when it hasn't.
+
+One rule holds across all three: **groom never clears a marker another session is
+actively holding.** Re-taking a stale stamp doesn't bend that rule — it applies it to a
+marker whose holder is already gone.
 
 ### Promote — idea becomes a task
 
@@ -146,8 +212,9 @@ Exit `1` here is one of two very different things:
    `stop` doesn't check location, so running it here rather than after the move below is
    a style choice, not a requirement — a session resuming after an interruption that
    already moved the idea to `done/` can still run this and clear the stamp there. Skip
-   this line entirely if `start` refused above with "already in progress" — see "Mark it
-   in progress" above; that marker belongs to another session, not this one.
+   this line entirely in one case only: you are working over another session's live
+   marker because the user chose to — see "Already in progress" above. If you re-took a
+   stale stamp there, the marker is this session's own and this line runs as written.
 7. Move the idea:
 
    ```bash
@@ -170,8 +237,9 @@ task carrying `from: idea-N` already exists before creating a second one.
    node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
    ```
 
-   Skip this if `start` refused above with "already in progress" — see "Mark it in
-   progress" above; that marker belongs to another session, not this one.
+   Skip this only if you are working over another session's live marker at the user's
+   explicit request — see "Already in progress" above; that marker belongs to another
+   session, not this one. A stale stamp you re-took is your own, so this line runs.
 
 That's the entire verdict. It's the one that never calls `move`, so `stop` is simply its
 last step rather than something to place before a move — the bug stays in `bugs/open/`,
@@ -216,9 +284,10 @@ Otherwise, for an open bug, idea, or task:
 
    Same reasoning as Promote's release: `stop` doesn't check location, so this could run
    after the move too — a session resuming here after an interruption that already moved
-   the item into `out-of-scope/` can still clear the stamp there. Skip this line if
-   `start` refused above with "already in progress" — see "Mark it in progress" above;
-   that marker belongs to another session, not this one.
+   the item into `out-of-scope/` can still clear the stamp there. Skip this line only if
+   you are working over another session's live marker at the user's explicit request —
+   see "Already in progress" above; that marker belongs to another session, not this one.
+   A stale stamp you re-took is your own, so this line runs.
 5. Move it:
 
    ```bash
@@ -248,9 +317,15 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
 A stamp left on the file reads on the board as a session still actively working it, long
 after this one is gone. Worse, the next `backlog-execute start <id>` on the same item
 refuses with "already in progress" — for a session that no longer exists to finish
-anything. Skip this only if `start` itself refused with "already in progress" earlier in
-this same conversation — see "Mark it in progress" above; there was never a marker of
-this session's own to leave behind.
+anything. That is the exact state "Already in progress" above has to untangle by hand,
+one conversation later; clearing it here is what keeps it from arising at all.
+
+Skip this whenever there is no marker of this session's own to leave behind — which is
+both of the live-session outcomes in "Already in progress" above: you stopped because
+another session holds the item, or you are working over that live marker at the user's
+explicit request. Either way the stamp on disk is somebody else's and clearing it here
+would be the same lie in reverse. If instead you re-took a stale stamp there, the marker
+*is* this session's and this section applies to it in full.
 
 ## Next
 
