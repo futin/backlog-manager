@@ -973,8 +973,11 @@ test('CLI start oos-2 refuses because out-of-scope is terminal', () => {
 // out (its own refusal is unaffected — this only removes start's).
 test('CLI start idea-5 succeeds, because grooming an idea is the active work the marker describes', () => {
   const { dir, backlog } = boardFixture()
-  const ideaPath = writeItem(backlog, 'ideas/open', 'idea-5', 'Maybe a graph view')
-  const bodyBefore = parseFrontmatter(fs.readFileSync(ideaPath, 'utf8')).body
+  // A real body — fence and blank lines included, same shape as the
+  // byte-for-byte precedent above for a task — so the round-trip assertion
+  // below has something to actually corrupt if start ever touched the body.
+  const body = '\n## Notes\n\nWorth spiking once the API settles.\n\n```js\nconst rows = fetchRows()\n```\n\n\nSee also idea-2.\n'
+  const ideaPath = writeItemWithBody(backlog, 'ideas/open', 'idea-5', 'Maybe a graph view', body)
 
   const out = run(dir, 'start', 'idea-5')
 
@@ -982,7 +985,7 @@ test('CLI start idea-5 succeeds, because grooming an idea is the active work the
   assert.equal(out.stdout.split('\n')[0], ideaPath)
   const text = fs.readFileSync(ideaPath, 'utf8')
   assert.match(text, STAMP_LINE)
-  assert.equal(parseFrontmatter(text).body, bodyBefore)
+  assert.equal(parseFrontmatter(text).body, body)
 })
 
 test('CLI start bug-99 exits 1 and names the unknown id', () => {
