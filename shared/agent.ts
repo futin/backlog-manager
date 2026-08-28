@@ -30,13 +30,22 @@ export function deriveAction(item: BacklogItem): AgentAction | null {
 }
 
 /**
- * The button's word. An idea names its destination because grooming *moves* it
- * out of the column you clicked in — a bug groomed in place does not, so it
- * says only what it does.
+ * The button's word: `execute` or `groom`, and nothing else.
+ *
+ * An idea used to read `groom → task`, on the reasoning that grooming *moves*
+ * it out of the column you clicked in and the label should warn about that.
+ * Dropped: the destination is the groom skill's business, not the button's, and
+ * spelling it out on one of four columns made the control look like two
+ * different actions when it is one. What grooming does to the file differs by
+ * section already — a bug is groomed in place and stays a bug, an idea is
+ * promoted — and the label was the only place claiming otherwise.
+ *
+ * `item` is still in the signature: the caller passes the item it is labelling
+ * either way, and a label that varies by section is a change away rather than
+ * a signature change away at every call site.
  */
-export function actionLabel(item: BacklogItem, action: AgentAction): string {
-  if (action === 'execute') return 'execute';
-  return item.section === 'ideas' ? 'groom → task' : 'groom';
+export function actionLabel(_item: BacklogItem, action: AgentAction): string {
+  return action === 'execute' ? 'execute' : 'groom';
 }
 
 /** Lowest to highest. Order is the whole meaning — do not sort this. */

@@ -31,9 +31,50 @@ describe('DispatchButton', () => {
     expect(screen.getByRole('button', { name: 'execute' })).toBeEnabled();
   });
 
-  it('names the destination for an idea', () => {
+  // Reads `groom`, not `groom → task`: where the item lands is the skill's
+  // business, and one control should not look like two actions by column.
+  it('labels an idea with the plain action word', () => {
     render(<DispatchButton item={fakeItem({ id: 'idea-1', section: 'ideas', groomed: null })} status={READY} onDispatch={() => {}} />);
-    expect(screen.getByRole('button', { name: 'groom → task' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'groom' })).toBeInTheDocument();
+  });
+
+  // The tone class IS the action, so the palette cannot drift from the
+  // derivation — `.groom` is mustard and `.execute` cyan in styles.css, and
+  // neither is amber, which the in-progress mark on the same card owns.
+  it('wears the action as its tone class, in both shapes', () => {
+    const { unmount } = render(
+      <DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} variant="tab" />
+    );
+    expect(screen.getByRole('button', { name: 'execute' })).toHaveClass('dispatch-tab', 'execute');
+    unmount();
+
+    render(
+      <DispatchButton
+        item={fakeItem({ section: 'bugs', groomed: false })} status={READY}
+        onDispatch={() => {}}
+      />
+    );
+    // chip is the default shape: the drawer head renders it with no variant.
+    expect(screen.getByRole('button', { name: 'groom' })).toHaveClass('dispatch-chip', 'groom');
+  });
+
+  // The ▸ is decoration. If it ever reaches the accessible name, every query in
+  // this file that asks for 'groom' or 'execute' stops matching — and so does a
+  // screen reader's rendering of the control.
+  it('keeps the mark out of the accessible name', () => {
+    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} variant="tab" />);
+    expect(screen.getByRole('button', { name: 'execute' })).toBeInTheDocument();
+  });
+
+  it('offers groom on an ungroomed bug and execute on a groomed one', () => {
+    const { unmount } = render(
+      <DispatchButton item={fakeItem({ section: 'bugs', groomed: false })} status={READY} onDispatch={() => {}} />
+    );
+    expect(screen.getByRole('button', { name: 'groom' })).toBeEnabled();
+    unmount();
+
+    render(<DispatchButton item={fakeItem({ section: 'bugs', groomed: true })} status={READY} onDispatch={() => {}} />);
+    expect(screen.getByRole('button', { name: 'execute' })).toBeEnabled();
   });
 
   it('renders nothing for an item with no next step', () => {
@@ -322,7 +363,7 @@ describe('the board wiring', () => {
     expect(await screen.findByText(/launched · /)).toBeInTheDocument();
 
     const ideaCard = screen.getByText('an idea').closest('.board-card') as HTMLElement;
-    await userEvent.click(within(ideaCard).getByRole('button', { name: 'groom → task' }));
+    await userEvent.click(within(ideaCard).getByRole('button', { name: 'groom' }));
 
     expect(await screen.findByRole('dialog', { name: /dispatch idea-1/ })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'launch' })).toBeEnabled();

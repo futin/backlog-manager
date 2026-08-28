@@ -65,9 +65,31 @@ export function sectionText(body: string, heading: string): string {
   return rest.slice(0, end === -1 ? undefined : end).join('\n').trim();
 }
 
-/** "unknown" with optional trailing period, any case — the exact sentinel
- *  backlog-capture writes into a fresh bug's Cause and Fix. */
-const UNKNOWN = /^unknown\.?$/i;
+/**
+ * A Cause or Fix that still says "I don't know yet", any case.
+ *
+ * Not an exact match on the sentinel backlog-capture writes. That is what this
+ * used to be (`/^unknown\.?$/i`) and it read every real ungroomed bug on the
+ * board as groomed, because nobody stops at the word: the two live examples
+ * when this was found were `unknown — likely just that SessionList receives…`
+ * and `**Unknown — gated on the repro above.**`. Both got an execute button,
+ * and execute is exactly what backlog-execute refuses on a bug whose Fix is
+ * unknown — so the board promised work the skill would bounce.
+ *
+ * Hence three parts. Markdown emphasis is stripped from both ends, so
+ * `**Unknown**` is the same answer as `Unknown`. The bare word alone still
+ * matches, which is the sentinel backlog-capture actually writes. And the word
+ * may be followed by punctuation or a dash and then keep going for a whole
+ * paragraph — `[\s\S]*` rather than `.*` because `^`/`$` are not multiline
+ * here and that tail routinely spans lines.
+ *
+ * What it deliberately does NOT match is a sentence that merely opens with the
+ * word: "Unknown option passed to X" is a real cause, so whitespace alone
+ * after the word is not enough — punctuation or a dash has to follow. The bias
+ * runs one way on purpose: a false "ungroomed" costs a groom that had little
+ * to do, while a false "groomed" spends a whole session to be refused.
+ */
+const UNKNOWN = /^[\s*_`#]*unknown[\s*_`]*(?:$|[.,:;!?\-–—][\s\S]*$)/i;
 
 /**
  * Groomed is derived, never stored — see the spec. bugs: Cause and Fix both

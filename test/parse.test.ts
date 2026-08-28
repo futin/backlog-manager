@@ -87,6 +87,32 @@ describe('deriveGroomed', () => {
     expect(deriveGroomed('bugs', '## Cause\n\nUnknown.\n\n## Fix\n\nx\n')).toBe(false);
   });
 
+  // The whole reason the sentinel is a pattern and not a string compare: an
+  // exact match read every real ungroomed bug on the board as groomed, because
+  // nobody writing "unknown" stops there. Both strings below are verbatim from
+  // items that were showing an execute button.
+  it('bug whose unknown keeps talking is still not groomed', () => {
+    const cause = '## Cause\n\nunknown — likely just that `SessionList` receives the already\n'
+      + 'filtered array.\n\n## Fix\n\nUse <=.\n';
+    expect(deriveGroomed('bugs', cause)).toBe(false);
+
+    const fix = '## Cause\n\nThe check uses < instead of <=.\n\n## Fix\n\n'
+      + '**Unknown — gated on the repro above.** Three options are on the table.\n';
+    expect(deriveGroomed('bugs', fix)).toBe(false);
+
+    expect(deriveGroomed('bugs', '## Cause\n\nunknown. Needs grooming.\n\n## Fix\n\nx\n'))
+      .toBe(false);
+    expect(deriveGroomed('bugs', '## Cause\n\n**Unknown**\n\n## Fix\n\nx\n')).toBe(false);
+    expect(deriveGroomed('bugs', '## Cause\n\nunknown, so far.\n\n## Fix\n\nx\n')).toBe(false);
+  });
+
+  // The other side of that bias. A cause is allowed to be about the word.
+  it('bug whose Cause merely opens with the word is groomed', () => {
+    const body = '## Cause\n\nUnknown option names reach renderFrontmatter and survive as\n'
+      + 'strings.\n\n## Fix\n\nDrop them.\n';
+    expect(deriveGroomed('bugs', body)).toBe(true);
+  });
+
   it('bug missing the sections entirely is not groomed', () => {
     expect(deriveGroomed('bugs', '## Symptom\n\nx\n')).toBe(false);
   });

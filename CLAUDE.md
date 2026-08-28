@@ -36,7 +36,8 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   switch), the board (toolbar with search plus project/status/sort selects,
   four fixed columns — bugs/ideas/tasks/out-of-scope — each card opening a
   read-only drawer that renders the item's Markdown body, plus a dispatch
-  button — on the card and again in the drawer — that opens a launch sheet
+  control — a tear-off tab down the card's right edge, and the same control
+  chip-shaped in the drawer head — that opens a launch sheet
   onto `../claude-agents-dashboard`), Settings (five themes, density, text
   scale, landing section, and a Claude Agents group reporting that
   dashboard's status). That UI is fed by `lib/agents.ts` (the same-origin
