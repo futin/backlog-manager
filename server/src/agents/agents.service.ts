@@ -132,10 +132,15 @@ export class AgentsService {
       prompt: composePrompt(item, action),
       project: item.project,
       allowedModes: modesUpTo(status.spawnMaxPermission),
-      // acceptEdits, not the ceiling: the work is editing files in one repo,
-      // and asking for the most a host allows by default is how a convenience
-      // becomes an incident. The select is right there if more is wanted.
-      defaultMode: clampMode('acceptEdits', status.spawnMaxPermission),
+      // auto, not the ceiling: a dispatched session runs unattended, and often
+      // with nobody at the terminal the permission prompt would appear on — a
+      // mode that stops on the first tool call it cannot self-approve is a
+      // session that silently does nothing. `bypassPermissions`, the rung
+      // above, is still refused as a default: asking for the most a host allows
+      // is how a convenience becomes an incident. The select is right there if
+      // more is wanted, and the ceiling clamps this down on hosts that cap
+      // lower, so a stricter dashboard is never widened from here.
+      defaultMode: clampMode('auto', status.spawnMaxPermission),
       blocked: dispatchBlock(item, status) ?? undefined
     };
   }

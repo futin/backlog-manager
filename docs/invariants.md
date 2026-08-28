@@ -204,7 +204,14 @@ is the failure a per-launch control exists to prevent, and a default you set
 once in a row you can go and read is the opposite arrangement. Permission
 mode deliberately has no stored default — it comes from the server's
 `plan.defaultMode` and is clamped to the host ceiling, and a remembered mode
-would fight that ladder.
+would fight that ladder. That server-side default is `auto`, because a
+dispatched session runs unattended: nobody is necessarily at the terminal the
+permission prompt would appear on, so a lower rung means a session that stops
+on its first unapprovable tool call and silently does nothing. `auto` is not
+the top rung — `bypassPermissions` stays a per-launch choice, since asking for
+the most a host allows by default is how a convenience becomes an incident —
+and the ceiling clamps `auto` down on a dashboard that caps lower, so this
+never widens a stricter host.
 
 ## `linkBase` is per-device and becomes an href
 

@@ -70,8 +70,23 @@ describe('POST /api/agents/plan', () => {
     expect(res.body.project).toBe('alpha');
     expect(res.body.prompt).toContain('backlog-manager:backlog-groom');
     expect(res.body.allowedModes).toEqual(['plan', 'acceptEdits']);
+    // The composed default is `auto`, so this is the clamp: a host that caps at
+    // acceptEdits gets acceptEdits, and the sheet never offers a rung the
+    // dashboard would refuse anyway.
     expect(res.body.defaultMode).toBe('acceptEdits');
     expect(res.body.blocked).toBeUndefined();
+  });
+
+  // `auto`, not the ceiling. The rung matters: a dispatched session runs
+  // unattended — often with nobody at the terminal the prompt would appear on —
+  // so a mode that stops on every tool call is a session that silently does
+  // nothing. `bypassPermissions`, the rung above, is a different bargain and
+  // stays a per-launch choice.
+  it('defaults to auto when the ceiling allows it', async () => {
+    stubDashboard({ spawnMaxPermission: 'bypassPermissions' });
+    const res = await post({ itemPath: itemPath('bugs/open', 'bug-1-a-fresh-bug.md') }).expect(201);
+    expect(res.body.allowedModes).toEqual(['plan', 'acceptEdits', 'auto', 'bypassPermissions']);
+    expect(res.body.defaultMode).toBe('auto');
   });
 
   it('plans an execute for a groomed bug', async () => {
