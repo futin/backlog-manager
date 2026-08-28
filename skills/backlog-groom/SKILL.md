@@ -66,6 +66,33 @@ Say which verdict you think applies and why, then wait for the user to confirm o
 different one. Don't infer a verdict silently and act on it — grooming is a decision made
 *with* the user, not a classification you run on their behalf.
 
+### Mark it in progress
+
+Only once both are confirmed — the item and the verdict — say so on disk, before any of
+the three verdicts below touches the file:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id>
+```
+
+Not any earlier: an item nobody has agreed to work on yet isn't "in progress," and
+stamping it ahead of the confirmation above would tell the board a session is running
+when the conversation might still end in "let's not." This is the same `started:` marker
+`backlog-execute` writes when it picks up a groomed item — grooming is active work on the
+item too, and the board's `»` column (see `skills/backlog/SKILL.md`) now means "someone
+is on this right now" for either skill, not execute alone.
+
+Exit `1` here is one of two very different things:
+
+- **"already in progress."** Not a refusal — some other session (most likely a resumed
+  `backlog-execute`, or another groom already working this same id) holds the marker
+  already. Give the verdict below as normal, but skip every `stop` it ends with: the
+  marker isn't yours to clear, and clearing it would tell the board that other session
+  had finished when it hasn't. Groom only ever releases a marker it set itself.
+- **anything else** (done, out of scope). A real refusal — relay it the way the Refusals
+  section above relays refusals, and stop; there's no verdict to give an item that can't
+  be started.
+
 ### Promote — idea becomes a task
 
 1. Invoke `superpowers:brainstorming` to settle the idea's `## Open questions` — but
@@ -109,7 +136,19 @@ different one. Don't infer a verdict silently and act on it — grooming is a de
    actually executable needs all four answered, not just that one.
 5. Only now edit the idea: add a `promoted-to: task-N` line inside its existing
    frontmatter block, before the closing `---`, leaving every other line untouched.
-6. Move the idea:
+6. Release the marker on the idea — not on the task step 3 just created; nobody has
+   started working that yet:
+
+   ```bash
+   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop idea-N
+   ```
+
+   `stop` doesn't check location, so running it here rather than after the move below is
+   a style choice, not a requirement — a session resuming after an interruption that
+   already moved the idea to `done/` can still run this and clear the stamp there. Skip
+   this line entirely if `start` refused above with "already in progress" — see "Mark it
+   in progress" above; that marker belongs to another session, not this one.
+7. Move the idea:
 
    ```bash
    node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move idea-N done
@@ -125,10 +164,18 @@ task carrying `from: idea-N` already exists before creating a second one.
 2. Edit `## Cause` and `## Fix` **in the bug's own file**, replacing `unknown` with the
    real answer. No new file, no promotion, no id churn — a bug stays a bug from capture
    through to done, so the whole story of one defect lives in one place.
+3. Release the marker:
 
-That's the entire verdict. It's the one that never calls `move` — the bug stays in
-`bugs/open/`, now groomed, until `backlog-execute` finishes it and archives it to
-`bugs/done/`.
+   ```bash
+   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+   ```
+
+   Skip this if `start` refused above with "already in progress" — see "Mark it in
+   progress" above; that marker belongs to another session, not this one.
+
+That's the entire verdict. It's the one that never calls `move`, so `stop` is simply its
+last step rather than something to place before a move — the bug stays in `bugs/open/`,
+now groomed, until `backlog-execute` finishes it and archives it to `bugs/done/`.
 
 ### Reject — out of scope, open items only
 
@@ -161,7 +208,18 @@ Otherwise, for an open bug, idea, or task:
    `## Goal` / ... — are gone. This is a full rewrite, not an addition.
 3. Add a `rejected: <today>` line to the frontmatter, in the same `YYYY-MM-DD` format as
    `created`.
-4. Move it:
+4. Release the marker, before the move below:
+
+   ```bash
+   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+   ```
+
+   Same reasoning as Promote's release: `stop` doesn't check location, so this could run
+   after the move too — a session resuming here after an interruption that already moved
+   the item into `out-of-scope/` can still clear the stamp there. Skip this line if
+   `start` refused above with "already in progress" — see "Mark it in progress" above;
+   that marker belongs to another session, not this one.
+5. Move it:
 
    ```bash
    node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move <id> out-of-scope
@@ -177,6 +235,22 @@ Write the file first. Call `move` only once that write is on disk. A failed writ
 the item exactly where it was; a moved file with a half-written body is the one state
 re-running this skill cannot repair. This applies to promote's idea and to every
 rejection — plan-the-fix never calls `move` at all, so it doesn't arise there.
+
+## If the session ends without a verdict
+
+If the user walks away mid-groom — no verdict given yet, or one chosen but the steps
+above never finished — clear the marker before the turn ends:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+```
+
+A stamp left on the file reads on the board as a session still actively working it, long
+after this one is gone. Worse, the next `backlog-execute start <id>` on the same item
+refuses with "already in progress" — for a session that no longer exists to finish
+anything. Skip this only if `start` itself refused with "already in progress" earlier in
+this same conversation — see "Mark it in progress" above; there was never a marker of
+this session's own to leave behind.
 
 ## Next
 

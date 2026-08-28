@@ -45,8 +45,10 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --json
 ```
 
 Each row is `<id>  <age>d  <title>`. A `»` before a title means someone is on that item
-right now — `backlog-execute` marks it when it picks the item up. The column only appears
-when something on the board is in progress, so a board without it isn't hiding anything.
+right now — `backlog-execute` marks it when it picks the item up, and `backlog-groom`
+marks it too, for as long as a groom session is actively deciding that item's verdict.
+The column only appears when something on the board is in progress, so a board without
+it isn't hiding anything.
 `--json` carries the same thing as `started`, the UTC timestamp the work began (`""` when
 nobody has started it; a bare `YYYY-MM-DD` on items picked up before it stamped a time).
 
