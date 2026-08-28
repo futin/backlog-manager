@@ -167,5 +167,26 @@ describe('SettingsView', () => {
       const fieldAfterRefusal = screen.getByLabelText('Dashboard link');
       expect(fieldAfterRefusal).toHaveValue('http://127.0.0.1:5174');
     });
+
+    it('offers a default model and effort, both starting on the CLI default', async () => {
+      renderView();
+      const model = await screen.findByLabelText('Default model') as HTMLSelectElement;
+      const effort = screen.getByLabelText('Default effort') as HTMLSelectElement;
+      expect(model.value).toBe('');
+      expect(effort.value).toBe('');
+      expect([...model.options].map((o) => o.textContent))
+        .toEqual(['CLI default', 'opus', 'sonnet', 'haiku', 'fable']);
+      expect([...effort.options].map((o) => o.textContent))
+        .toEqual(['CLI default', 'low', 'medium', 'high', 'xhigh', 'max']);
+    });
+
+    it('persists a picked default under the backlog-manager key', async () => {
+      renderView();
+      await userEvent.selectOptions(await screen.findByLabelText('Default model'), 'haiku');
+      await userEvent.selectOptions(screen.getByLabelText('Default effort'), 'low');
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
+      expect(stored.dispatchDefaultModel).toBe('haiku');
+      expect(stored.dispatchDefaultEffort).toBe('low');
+    });
   });
 });

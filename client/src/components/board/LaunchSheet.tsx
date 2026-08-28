@@ -25,11 +25,17 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const [prompt, setPrompt] = useState('');
   const [mode, setMode] = useState<PermissionMode>('plan');
   // '' is the "default" option: no flag, so the CLI's own default stands.
-  // Deliberately not remembered between launches — a sticky 'max' from last
-  // week quietly spending on a trivial groom is the failure mode a per-launch
-  // control exists to prevent.
-  const [model, setModel] = useState('');
-  const [effort, setEffort] = useState('');
+  //
+  // Seeded from Settings, and from nowhere else. The sheet still does not
+  // remember your LAST pick — a sticky 'max' from last week quietly spending on
+  // a trivial groom is the failure mode a per-launch control exists to prevent,
+  // and that remains rejected. A default you set once, in a row you can go and
+  // read, is the opposite arrangement: it is visible, it is stable, and nothing
+  // moves it behind your back. `clampSettings` has already dropped anything
+  // outside MODELS/EFFORTS, so this can only ever seed a value the selects
+  // below actually offer.
+  const [model, setModel] = useState(settings.dispatchDefaultModel);
+  const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
   const [remoteControl, setRemoteControl] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

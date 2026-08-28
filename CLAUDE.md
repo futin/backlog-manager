@@ -40,7 +40,8 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   chip-shaped in the drawer head — that opens a launch sheet
   onto `../claude-agents-dashboard`), Settings (five themes, density, text
   scale, landing section, and a Claude Agents group reporting that
-  dashboard's status). That UI is fed by `lib/agents.ts` (the same-origin
+  dashboard's status plus the per-device default model and effort the
+  launch sheet preselects). That UI is fed by `lib/agents.ts` (the same-origin
   fetches into this app's own API) and `hooks/useAgents.ts` (the status
   poll, on mount and on window focus).
 - `shared/` — `types.ts` (`Section` / `ItemStatus` / `BacklogItem` /
@@ -225,6 +226,19 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   rewrites `Host` without rewriting `Origin` will 403 — the guard compares
   host and port only, not the scheme, precisely so a `tailscale serve` that
   preserves `Host` keeps working.
+- **The launch sheet's model/effort pickers are seeded from Settings, never
+  from the last launch.** `dispatchDefaultModel` / `dispatchDefaultEffort`
+  (`client/src/lib/settings.ts`, mirroring the dashboard's own
+  `spawnDefaultModel` / `spawnDefaultEffort`) are per-device like every other
+  key there, default to `''` — no flag, the CLI decides — and are clamped
+  against the same `MODELS`/`EFFORTS` the sheet renders, so a stored name can
+  never be one the selects cannot show. Remembering the *last pick* stays
+  rejected: a sticky `max` from last week quietly spending on a trivial groom
+  is the failure a per-launch control exists to prevent, and a default you set
+  once in a row you can go and read is the opposite arrangement. Permission
+  mode deliberately has no stored default — it comes from the server's
+  `plan.defaultMode` and is clamped to the host ceiling, and a remembered mode
+  would fight that ladder.
 - **`linkBase` is per-device and becomes an href**, so `clampSettings` routes
   it through `clampOrigin`, which parses it as a URL — the browser's own
   parser, not a regex — and rejects any scheme but `http(s)`. It is the one

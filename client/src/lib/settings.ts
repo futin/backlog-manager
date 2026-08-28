@@ -12,6 +12,7 @@
  * field's default.
  */
 
+import { EFFORTS, MODELS } from '../../../shared/agent';
 import type { Section } from '../components/SideRail';
 
 export const THEMES = [
@@ -32,6 +33,16 @@ export type Density = 'comfortable' | 'compact';
  */
 export type Landing = Section | 'last';
 
+/**
+ * A preselected launch flag, or `''` for "send no flag and let the `claude` CLI
+ * decide". Not a union of MODELS' members: `MODELS` is a `readonly string[]`
+ * here (shared/agent.ts keeps it that way on purpose, so an unknown name costs
+ * the flag rather than failing to compile), so there is no literal union to
+ * derive. `clampSettings` is what actually enforces membership at runtime,
+ * which is the check that matters for a value read back out of localStorage.
+ */
+export type DispatchDefault = string;
+
 export interface Settings {
   theme: ThemeId;
   /** Spacing only — never a colour, never a font size, so it composes with every theme. */
@@ -46,6 +57,23 @@ export interface Settings {
    * own outbound call uses BM_AGENTS_URL server-side and never this.
    */
   linkBase: string;
+  /**
+   * Preselected in the launch sheet's model picker; `''` leaves it on
+   * "default". Copied from the dashboard's own `spawnDefaultModel`, and
+   * per-device for the same reason everything else here is: the laptop that
+   * runs the long executes and the phone that fires off quick grooms do not
+   * want the same answer.
+   *
+   * This is NOT the launch sheet remembering your last pick — that was
+   * rejected outright, because a sticky `max` from last week quietly spending
+   * on a trivial groom is exactly what a per-launch control exists to prevent.
+   * A default you set once in Settings, and can see there, is the opposite
+   * arrangement: nothing changes it behind your back, and the sheet still lets
+   * you override it per launch.
+   */
+  dispatchDefaultModel: DispatchDefault;
+  /** Same as `dispatchDefaultModel`, for the effort picker. */
+  dispatchDefaultEffort: DispatchDefault;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -53,7 +81,9 @@ export const DEFAULT_SETTINGS: Settings = {
   density: 'comfortable',
   fontScale: 100,
   landing: 'last',
-  linkBase: 'http://127.0.0.1:5174'
+  linkBase: 'http://127.0.0.1:5174',
+  dispatchDefaultModel: '',
+  dispatchDefaultEffort: ''
 };
 
 /**
@@ -112,6 +142,17 @@ const DENSITIES = ['comfortable', 'compact'] as const;
 const LANDINGS = ['last', 'projects', 'settings'] as const;
 
 /**
+ * `''` first, then the lists the launch sheet's own pickers are built from —
+ * the same `MODELS`/`EFFORTS` the sheet renders and the server validates
+ * against, so a stored default can never name something the sheet cannot show.
+ * A name outside them falls back to `''` rather than being kept: the sheet
+ * would render a select whose value matches no option, which renders as blank
+ * and silently sends a flag nothing on screen admits to.
+ */
+const DISPATCH_MODELS = ['', ...MODELS];
+const DISPATCH_EFFORTS = ['', ...EFFORTS];
+
+/**
  * Coerce anything — a stored blob from an older release, a hand-edited
  * localStorage value — into usable settings. Pure, and every field falls back
  * independently so one bad key cannot discard the rest.
@@ -126,6 +167,12 @@ export function clampSettings(raw: unknown): Settings {
       LIMITS.fontScale.min, LIMITS.fontScale.max
     ),
     landing: pickOne(s.landing, LANDINGS, DEFAULT_SETTINGS.landing),
-    linkBase: clampOrigin(s.linkBase, DEFAULT_SETTINGS.linkBase)
+    linkBase: clampOrigin(s.linkBase, DEFAULT_SETTINGS.linkBase),
+    dispatchDefaultModel: pickOne(
+      s.dispatchDefaultModel, DISPATCH_MODELS, DEFAULT_SETTINGS.dispatchDefaultModel
+    ),
+    dispatchDefaultEffort: pickOne(
+      s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort
+    )
   };
 }

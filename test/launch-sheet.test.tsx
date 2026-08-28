@@ -194,6 +194,37 @@ describe('LaunchSheet', () => {
     expect(body).not.toHaveProperty('effort');
   });
 
+  it('preselects the stored defaults, and sends them without a pick', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({
+      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'low'
+    }));
+    const calls = stub({});
+    await openSheet();
+    expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('sonnet');
+    expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('low');
+    await userEvent.click(screen.getByRole('button', { name: 'launch' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/dispatch'))).toBe(true));
+    const body = calls.find((c) => c.url.endsWith('/dispatch'))?.body as Record<string, unknown>;
+    expect(body.model).toBe('sonnet');
+    expect(body.effort).toBe('low');
+  });
+
+  it('lets a per-launch pick override the stored default', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({
+      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'low'
+    }));
+    const calls = stub({});
+    await openSheet();
+    await userEvent.selectOptions(screen.getByLabelText('Model'), 'opus');
+    // Back to the CLI default: the stored default must not creep back in.
+    await userEvent.selectOptions(screen.getByLabelText('Effort'), '');
+    await userEvent.click(screen.getByRole('button', { name: 'launch' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/dispatch'))).toBe(true));
+    const body = calls.find((c) => c.url.endsWith('/dispatch'))?.body as Record<string, unknown>;
+    expect(body.model).toBe('opus');
+    expect(body).not.toHaveProperty('effort');
+  });
+
   it('sends the picked model and effort', async () => {
     const calls = stub({});
     await openSheet();

@@ -2,6 +2,7 @@ import { Segmented, SettingsGroup, SettingsRow } from './SettingsRow';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
 import { FONT_SCALES, THEMES, type Landing, type ThemeId } from '../../lib/settings';
+import { EFFORTS, MODELS } from '../../../../shared/agent';
 import type { AgentsStatus } from '../../../../shared/types';
 
 /**
@@ -160,6 +161,41 @@ function AgentsGroup() {
         <a className="sheet-link" href={settings.linkBase} target="_blank" rel="noreferrer">
           open dashboard ↗
         </a>
+      </SettingsRow>
+
+      {/* The two picker defaults, copied from the dashboard's own "New sessions
+          · this device" group. They live here rather than in a group of their
+          own because the reader arrives at this group to ask "how does dispatch
+          behave on this device", and the answer is these three rows. Deliberately
+          NOT gated on `healthy`: a default is worth setting before the
+          integration works, and hiding the rows while it is down would read as
+          the setting having been lost. */}
+      <SettingsRow
+        name="Default model"
+        hint="Preselected in a card's launch sheet. “CLI default” sends no --model flag and lets Claude Code pick. Overridable per launch."
+      >
+        <select
+          aria-label="Default model"
+          value={settings.dispatchDefaultModel}
+          onChange={(e) => update({ dispatchDefaultModel: e.target.value })}
+        >
+          <option value="">CLI default</option>
+          {MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </SettingsRow>
+
+      <SettingsRow
+        name="Default effort"
+        hint="Preselected in a card's launch sheet. “CLI default” sends no --effort flag."
+      >
+        <select
+          aria-label="Default effort"
+          value={settings.dispatchDefaultEffort}
+          onChange={(e) => update({ dispatchDefaultEffort: e.target.value })}
+        >
+          <option value="">CLI default</option>
+          {EFFORTS.map((f) => <option key={f} value={f}>{f}</option>)}
+        </select>
       </SettingsRow>
 
       <SettingsRow
