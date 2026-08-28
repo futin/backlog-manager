@@ -41,8 +41,12 @@ describe('deriveAction', () => {
 });
 
 describe('actionLabel', () => {
-  it('names the destination for an idea, since groom moves it', () => {
-    expect(actionLabel(fakeItem({ section: 'ideas' }), 'groom')).toBe('groom → task');
+  it('says only what it does — never where the item lands', () => {
+    // An idea reads the same as a bug. It used to say `groom → task`; the
+    // destination is the skill's business, and one button should not look like
+    // two actions depending on which column it sits in.
+    expect(actionLabel(fakeItem({ section: 'ideas' }), 'groom')).toBe('groom');
+    expect(actionLabel(fakeItem({ section: 'tasks' }), 'groom')).toBe('groom');
     expect(actionLabel(fakeItem(), 'groom')).toBe('groom');
     expect(actionLabel(fakeItem(), 'execute')).toBe('execute');
   });

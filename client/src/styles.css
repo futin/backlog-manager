@@ -205,18 +205,34 @@ body {
   .board-select { flex: 1 1 0; min-width: 0; max-width: none }
 }
 
+/* The card is a strip in two parts: the printed face (.board-card-main) and,
+   when the item has a next step, the tear-off tab down its right edge
+   (.dispatch-tab, in the dispatch block far below). The row here is the seam
+   between them; the face is the flex column the whole card used to be.
+   `overflow: hidden` is what makes the tab meet the card's rounded corners
+   instead of squaring them off.
+   Padding lives on the face, never on this rule, so the tab reaches the card's
+   own top and bottom edges — the dashboard's .row/.row-main split, for the
+   same reason. */
+.board-card {
+  display: flex; align-items: stretch;
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
+  cursor: pointer; transition: border-color .15s;
+  box-shadow: inset 0 1px 0 var(--edge); overflow: hidden;
+}
 /* A flex column, where the row layout used a named-areas grid. The grid put the
    pill and the meta line in a grid row, and a grid row cannot be pushed to the
    bottom of a cell that a taller neighbour stretched — which is what every cell
    in a card grid is. .board-card-foot plus margin-top:auto can be.
    Every padding and gap the card has lives in this one rule, so task-8's
    [data-density="compact"] override is a single block rather than a hunt through
-   four selectors. */
-.board-card {
+   four selectors. `min-width: 0` because this is now a flex item beside the
+   tab, and a flex item's default `min-width: auto` would let a long unbroken
+   title push the card wider than its column. */
+.board-card-main {
+  flex: 1; min-width: 0;
   display: flex; flex-direction: column; gap: var(--card-inner-gap);
-  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: var(--card-pad); cursor: pointer; transition: border-color .15s;
-  box-shadow: inset 0 1px 0 var(--edge);
+  padding: var(--card-pad);
 }
 .board-card:hover { border-color: var(--hairline2) }
 .board-card-title { font-size: 13px; font-weight: 600; color: var(--ink) }
@@ -525,21 +541,88 @@ body {
 .sheet-link { font-size: 12px; color: var(--cyan) }
 .sheet-note { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
 
-/* The dispatch button, shared by the card's foot and the drawer's head — one
-   class, one look, wherever the board renders it. `flex: none` keeps it
-   unshrinkable in both flex rows, for the same reason in each: something else
-   in that row is the one built to give up room, the in-progress mark's
-   neighbour on the card and the title's ellipsis in the drawer, not this. */
-.board-card-dispatch {
-  flex: none; font-family: var(--mono); font-size: 10px;
-  color: var(--ink2); background: var(--steel);
-  border: 1px solid var(--hairline); border-radius: 2px; padding: 2px 6px; cursor: pointer;
+/* The dispatch control, in two shapes for the two places it hangs.
+   ONE component renders both (DispatchButton's `variant`) and they share the
+   tone rules below, because the thing that must never drift is the colour a
+   given action wears — not the silhouette.
+     .dispatch-tab   — on a card: the tear-off tab down its right edge, ported
+                       from the dashboard's `.row-chat`. It reads down a whole
+                       column at a glance, which a 10px chip in the foot never
+                       did, and it is the card's own edge rather than one more
+                       thing competing with the meta line for width.
+     .dispatch-chip  — in the drawer head: there is no card to tear off, and a
+                       full-height slab beside a single-line title would be a
+                       slab. Same word, same tone, chip-shaped.
+
+   Tone is the action, and the two are the palette's existing vocabulary rather
+   than new colours: cyan is the board's one "go" accent, so it is execute;
+   mustard already means incomplete/pending everywhere else, which is exactly
+   what an ungroomed item is. Amber is deliberately NOT used — it means "a
+   human must act", and it is already spoken for by the in-progress mark two
+   elements away on the same card. */
+.dispatch-tab {
+  /* Fixed basis, and `min-width: 0` to hold it there: a flex item's default
+     `min-width: auto` refuses to shrink below its content, so `execute` would
+     otherwise carve itself a wider tab than `groom` and the column would read
+     as two different controls. Both words fit the basis at this size; the
+     card's `overflow: hidden` is the backstop if a theme's fallback face runs
+     wide. */
+  flex: 0 0 64px; min-width: 0;
+  display: flex; justify-content: center; align-items: flex-start;
+  /* Vertical padding rides the density token so the word lines up with the
+     card title; the sides are cut back, since 14px each side of a 64px tab
+     leaves nothing. Two declarations because --card-pad is a `y x` pair. */
+  padding: var(--card-pad); padding-inline: 6px;
+  background: var(--steel); color: var(--ink3);
+  border: 0; border-left: 1px solid var(--hairline); border-radius: 0 1px 1px 0;
+  cursor: pointer; transition: color .15s, background .15s, border-color .15s;
 }
+.dispatch-tab-in { display: flex; flex-direction: column; align-items: center; gap: 3px }
+.dispatch-word {
+  font-family: var(--display); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; white-space: nowrap;
+}
+.dispatch-mark { font-size: 9px; line-height: 1 }
+
+.dispatch-chip {
+  /* `flex: none` keeps it unshrinkable in the drawer head: the title's
+     ellipsis is the thing in that row built to give up room, not this. */
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--display); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em;
+  padding: 3px 8px; border: 1px solid; border-radius: 2px; cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.dispatch-chip .dispatch-mark { font-size: 8px; opacity: .8 }
+
+/* Tone, both shapes. `color-mix` against --strip rather than a hand-picked
+   tint per theme: five palettes and two tones would be twenty values to keep
+   in step, and the mix follows a palette edit for free. */
+.dispatch-tab.groom { color: var(--mustard); background: color-mix(in srgb, var(--mustard) 12%, var(--strip)); border-left-color: var(--mustard) }
+.dispatch-tab.execute { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, var(--strip)); border-left-color: var(--cyan) }
+.dispatch-tab.groom:hover { color: var(--ink); background: color-mix(in srgb, var(--mustard) 30%, var(--strip)) }
+.dispatch-tab.execute:hover { color: var(--ink); background: color-mix(in srgb, var(--cyan) 30%, var(--strip)) }
+
+.dispatch-chip.groom { color: var(--mustard); border-color: color-mix(in srgb, var(--mustard) 45%, var(--hairline)); background: color-mix(in srgb, var(--mustard) 10%, var(--strip)) }
+.dispatch-chip.execute { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline)); background: color-mix(in srgb, var(--cyan) 10%, var(--strip)) }
+/* The chip fills on hover where the tab only deepens: it is the one control in
+   a drawer head, so it can afford to be the loud thing; a tab doing this would
+   flash a 64px slab of accent on every pointer sweep down a column. */
+.dispatch-chip.groom:hover { color: var(--on-accent); background: var(--mustard); border-color: var(--mustard) }
+.dispatch-chip.execute:hover { color: var(--on-accent); background: var(--cyan); border-color: var(--cyan) }
+
 /* `[aria-disabled]`, not `:disabled` — the button stays a real, focusable
    button on purpose (see DispatchButton.tsx), so the *look* of unavailable is
-   this repo's job rather than the browser's. */
-.board-card-dispatch:hover:not([aria-disabled='true']) { color: var(--ink); border-color: var(--cyan) }
-.board-card-dispatch[aria-disabled='true'] { opacity: .4; cursor: default }
+   this repo's job rather than the browser's. Declared after the tone rules so
+   it wins over them without !important: an unusable control must not wear the
+   colour of an action it will not perform. Not `opacity`, which would fade the
+   tab's own left rule into a gap in the card's edge. */
+.dispatch-tab[aria-disabled='true'] {
+  color: var(--ink3); background: var(--steel); border-left-color: var(--hairline); cursor: default;
+}
+.dispatch-chip[aria-disabled='true'] {
+  color: var(--ink3); background: var(--steel); border-color: var(--hairline); cursor: default;
+}
 
 /* Reachable by a screen reader and by nothing else. The 1px-clip idiom rather
    than display:none or visibility:hidden, which both remove the node from the

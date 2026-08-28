@@ -25,12 +25,24 @@ import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
  *
  * The derivation is `shared/agent.ts`, the same module the server validates
  * with, so the label can never promise an action the API would refuse.
+ *
+ * Two shapes, one component: `tab` is the card's tear-off right edge and
+ * `chip` is the drawer head's inline control. A shape prop rather than two
+ * components because everything above this line — the gate, the derivation,
+ * the aria-describedby reason, the two event-stopping handlers below — is the
+ * hard part and is identical in both places; only the markup inside the button
+ * differs. The tone class, though, is the action itself, so both shapes are
+ * coloured by the same rules in styles.css.
  */
 export function DispatchButton(
-  { item, status, onDispatch }: {
+  { item, status, onDispatch, variant = 'chip' }: {
     item: BacklogItem;
     status: AgentsStatus | null;
     onDispatch: () => void;
+    /** Which shape to render — see the two blocks in styles.css. `tab` is the
+     *  card's tear-off edge and needs the card to be a flex row around it;
+     *  `chip` stands on its own anywhere, which is why it is the default. */
+    variant?: 'tab' | 'chip';
   }
 ) {
   // Stable per mounted button, and unique across the forty of them a board can
@@ -46,10 +58,12 @@ export function DispatchButton(
 
   const blocked = gate.control === 'disabled' ? gate.reason : null;
 
+  // The action IS the tone class: `groom` and `execute` are the two
+  // AgentAction values, so the palette can never drift from the derivation.
   return (
     <>
       <button
-        className="board-card-dispatch"
+        className={`dispatch-${variant} ${action}`}
         // The reason, not a generic tooltip: "no Claude session in that repo
         // inside LOOKBACK_HOURS" is a fixable thing, and nowhere else says it.
         title={blocked ?? `dispatch ${action} to a Claude session`}
@@ -97,7 +111,18 @@ export function DispatchButton(
           if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
         }}
       >
-        {actionLabel(item, action)}
+        {variant === 'tab' ? (
+          <span className="dispatch-tab-in">
+            <span className="dispatch-word">{actionLabel(item, action)}</span>
+            {/* aria-hidden: the accessible name is the action word alone. */}
+            <span className="dispatch-mark" aria-hidden="true">▸</span>
+          </span>
+        ) : (
+          <>
+            {actionLabel(item, action)}
+            <span className="dispatch-mark" aria-hidden="true">▸</span>
+          </>
+        )}
       </button>
       {/* Visually hidden, deliberately not `aria-label`: the label is the
           action word, and folding a two-line explanation into it would make
