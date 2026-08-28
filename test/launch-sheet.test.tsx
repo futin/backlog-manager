@@ -166,4 +166,57 @@ describe('LaunchSheet', () => {
     await userEvent.keyboard('{Escape}');
     expect(onClose).not.toHaveBeenCalled();
   });
+  /* Both pickers start on "default", which submits nothing: the CLI's own
+     default is a real choice and the one a reader gets by not choosing. The
+     sheet deliberately does not remember the last pick — a sticky "max" from
+     last week silently spending on a trivial groom is the failure mode a
+     per-launch control exists to avoid. */
+  it('offers model and effort, both defaulting to no choice', async () => {
+    stub({});
+    await openSheet();
+    const model = screen.getByLabelText('Model') as HTMLSelectElement;
+    const effort = screen.getByLabelText('Effort') as HTMLSelectElement;
+    expect(model.value).toBe('');
+    expect(effort.value).toBe('');
+    expect([...model.options].map((o) => o.textContent))
+      .toEqual(['default', 'opus', 'sonnet', 'haiku', 'fable']);
+    expect([...effort.options].map((o) => o.textContent))
+      .toEqual(['default', 'low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('omits both fields from the dispatch when neither was picked', async () => {
+    const calls = stub({});
+    await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: 'launch' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/dispatch'))).toBe(true));
+    const body = calls.find((c) => c.url.endsWith('/dispatch'))?.body as Record<string, unknown>;
+    expect(body).not.toHaveProperty('model');
+    expect(body).not.toHaveProperty('effort');
+  });
+
+  it('sends the picked model and effort', async () => {
+    const calls = stub({});
+    await openSheet();
+    await userEvent.selectOptions(screen.getByLabelText('Model'), 'haiku');
+    await userEvent.selectOptions(screen.getByLabelText('Effort'), 'max');
+    await userEvent.click(screen.getByRole('button', { name: 'launch' }));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/dispatch'))).toBe(true));
+    const body = calls.find((c) => c.url.endsWith('/dispatch'))?.body as Record<string, unknown>;
+    expect(body.model).toBe('haiku');
+    expect(body.effort).toBe('max');
+  });
+  /* The three launch controls sit on one row, the way the dashboard's own
+     SpawnPanel groups them: they are one decision ("how should this run"),
+     and stacked they pushed the launch button below the fold on a phone.
+     Asserted on the shared parent rather than on any CSS value — the rule
+     lives in styles.css, but the grouping is the part a later edit could undo
+     without noticing. */
+  it('groups permission mode, model and effort on one row', async () => {
+    stub({});
+    await openSheet();
+    const row = screen.getByLabelText('Permission mode').closest('.sheet-row');
+    expect(row).not.toBeNull();
+    expect(row).toContainElement(screen.getByLabelText('Model'));
+    expect(row).toContainElement(screen.getByLabelText('Effort'));
+  });
 });

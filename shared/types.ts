@@ -142,6 +142,16 @@ export interface AgentDispatchRequest {
   action: 'groom' | 'execute';
   prompt: string;
   permissionMode: PermissionMode;
+  /**
+   * `--model` / `--effort` for the spawned CLI. Optional, and plain `string`
+   * rather than a literal union on purpose: the accepted names live in the
+   * dashboard, not here, so the server validates against its own mirrored copy
+   * (`pickFrom`, shared/agent.ts) and drops anything else. Absent means "send
+   * no flag" — the CLI's own default, which is what the sheet's `default`
+   * option submits.
+   */
+  model?: string;
+  effort?: string;
   remoteControl: boolean;
 }
 

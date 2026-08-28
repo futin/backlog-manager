@@ -1,5 +1,6 @@
 import {
-  PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock, dispatchGate, modesUpTo
+  EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock,
+  dispatchGate, modesUpTo, pickFrom
 } from '../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../shared/types';
 
@@ -132,5 +133,48 @@ describe('dispatchBlock', () => {
     const blocked = dispatchBlock(fakeItem(), { ...OK, projectPaths: ['/abs/other'] });
     expect(blocked).toContain('/abs/alpha');
     expect(blocked).toMatch(/LOOKBACK_HOURS/);
+  });
+});
+
+describe('MODELS / EFFORTS', () => {
+  /* Mirrors of the dashboard's server/lib/spawn.ts arrays of the same names.
+     There is no cross-repo drift test: the sibling checkout is not guaranteed
+     to exist here, and PERMISSION_LADDER above is already duplicated on the
+     same terms. What keeps this honest is the fail-soft rule below — a value
+     this copy has never heard of is dropped, so drift costs a missing flag,
+     never a wrong one. */
+  it('offers the four model names the dashboard accepts', () => {
+    expect(MODELS).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
+  });
+
+  it('offers the five effort levels, lowest first', () => {
+    expect(EFFORTS).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+});
+
+describe('pickFrom', () => {
+  it('keeps a value the list knows', () => {
+    expect(pickFrom('sonnet', MODELS)).toBe('sonnet');
+    expect(pickFrom('xhigh', EFFORTS)).toBe('xhigh');
+  });
+
+  /* Dropped, not rejected — the same rule the dashboard's own parseSpawnRequest
+     applies to these two fields. There is no ladder to clamp along, so the only
+     safe reading of a name we do not know is "send no flag and let the CLI
+     default stand". A 400 here would also make this app the thing that breaks
+     when the dashboard learns a fifth model. */
+  it('drops a value the list does not know', () => {
+    expect(pickFrom('gpt', MODELS)).toBeUndefined();
+    expect(pickFrom('ludicrous', EFFORTS)).toBeUndefined();
+  });
+
+  it('drops the empty string, which is what "default" submits', () => {
+    expect(pickFrom('', MODELS)).toBeUndefined();
+  });
+
+  it('drops a non-string', () => {
+    expect(pickFrom(undefined, MODELS)).toBeUndefined();
+    expect(pickFrom(7, EFFORTS)).toBeUndefined();
+    expect(pickFrom(['sonnet'], MODELS)).toBeUndefined();
   });
 });

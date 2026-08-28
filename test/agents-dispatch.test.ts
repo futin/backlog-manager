@@ -206,4 +206,40 @@ describe('POST /api/agents/dispatch', () => {
     }).expect(409);
     expect(res.body.error).toContain('execute');
   });
+  it('forwards a picked model and effort to the dashboard', async () => {
+    const sent = stubDashboard();
+    await post({
+      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), model: 'sonnet', effort: 'high'
+    }).expect(201);
+    const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
+    expect(body.model).toBe('sonnet');
+    expect(body.effort).toBe('high');
+  });
+
+  /* Absent, not null and not '': the dashboard only omits `--model`/`--effort`
+     from its argv when the field is missing or unrecognised, and a key present
+     with a falsy value is the shape most likely to be "fixed" later into
+     something it forwards. Asserting on the serialised body — the bytes that
+     actually leave — rather than on the parsed object, because
+     `{ model: undefined }` parses to a missing key too and would hide a
+     regression that started sending `"model": null`. */
+  it('sends no model or effort key at all when the sheet left both on default', async () => {
+    const sent = stubDashboard();
+    await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(201);
+    const raw = String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body);
+    expect(raw).not.toContain('model');
+    expect(raw).not.toContain('effort');
+  });
+
+  /* Fail soft, matching the dashboard's own rule for these two fields: a name
+     this build has never heard of costs the flag, not the launch. */
+  it('drops an unrecognised model or effort instead of refusing the launch', async () => {
+    const sent = stubDashboard();
+    await post({
+      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), model: 'gpt', effort: 'ludicrous'
+    }).expect(201);
+    const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
+    expect(body.model).toBeUndefined();
+    expect(body.effort).toBeUndefined();
+  });
 });

@@ -151,9 +151,17 @@ Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` /
   re-scans the item file and 409s when the request's action disagrees, which
   is the groomed invariant enforced on the only side that can read the file.
   The prompt is the one field whose client-supplied content is taken
-  outright — `action` is checked against the file rather than trusted, and
-  `permissionMode` is clamped to the dashboard's ceiling — so editing the
-  prompt in the launch sheet is the actual point of the sheet.
+  outright — `action` is checked against the file rather than trusted,
+  `permissionMode` is clamped to the dashboard's ceiling, and `model`/`effort`
+  go through `pickFrom` against the mirrored `MODELS`/`EFFORTS` lists — so
+  editing the prompt in the launch sheet is the actual point of the sheet.
+  Those last two drop rather than clamp or reject: there is no ladder to clamp
+  along and nothing in the item file to check against, and `undefined` is what
+  makes `JSON.stringify` omit the key, which is what makes the dashboard omit
+  the flag — so a name this build has not heard of costs that flag, never the
+  launch, which is the failure mode a duplicated list has to survive. Note the
+  controller rebuilds the dispatch body field by field, so a new field reaches
+  the service only when it is added there too.
 - **The browser never talks to the dashboard.** `connect-src 'self'` forbids
   it and the bearer token must not be in a page, so every call goes board →
   this API → dashboard. `BM_AGENTS_URL` is env-only and never client-supplied:

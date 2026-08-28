@@ -503,6 +503,15 @@ body {
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 5px 8px;
   align-self: flex-start;
 }
+/* The three launch controls on one line. `wrap` rather than a media query:
+   the row only has to survive a narrow phone, and the widest select here is
+   "bypassPermissions" — letting it drop to its own line when it no longer fits
+   costs nothing, while a breakpoint would need maintaining against a ceiling
+   that varies per host. `min-width: 0` because a flex item's default
+   `min-width: auto` refuses to shrink below its content, which is what makes a
+   long option value push a flex row wider than its container. */
+.sheet-row { display: flex; flex-wrap: wrap; gap: 10px }
+.sheet-row .sheet-field { flex: 1 1 auto; min-width: 0 }
 .sheet-check { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink2) }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px }
 .sheet-launch {

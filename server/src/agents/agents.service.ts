@@ -5,7 +5,9 @@ import { RegistryService } from '../registry/registry.service';
 import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
-import { clampMode, deriveAction, dispatchBlock, modesUpTo, PERMISSION_LADDER } from '../../../shared/agent';
+import {
+  clampMode, deriveAction, dispatchBlock, modesUpTo, pickFrom, EFFORTS, MODELS, PERMISSION_LADDER
+} from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, PermissionMode
@@ -199,6 +201,14 @@ export class AgentsService {
         prompt,
         name: sessionName(item),
         permissionMode: clampMode(req.permissionMode, status.spawnMaxPermission),
+        // Undefined for "default" and for any name this build does not know,
+        // and `JSON.stringify` drops an undefined value outright — so the key
+        // never reaches the dashboard and its argv carries no `--model` /
+        // `--effort`. Validated here rather than trusted because the sheet is
+        // not the only possible caller; the dashboard would drop a bad value
+        // too, but that is its check, not ours.
+        model: pickFrom(req.model, MODELS),
+        effort: pickFrom(req.effort, EFFORTS),
         // Strictly `=== true`, matching the dashboard's own parse rule for this
         // field: anything else means off.
         remoteControl: req.remoteControl === true

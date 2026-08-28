@@ -45,6 +45,42 @@ export const PERMISSION_LADDER: readonly PermissionMode[] = [
 ];
 
 /**
+ * The `--model` names the dashboard's spawn accepts, mirroring its
+ * `server/lib/spawn.ts` MODELS verbatim. Duplicated rather than fetched: the
+ * dashboard publishes neither list on its `/api/health`, and adding a
+ * round trip per sheet open to learn four strings that change once a year is
+ * the wrong trade. PERMISSION_LADDER above is duplicated on the same terms.
+ *
+ * Order is display order, not a ladder — nothing here is clamped, so unlike
+ * PERMISSION_LADDER this array may be reordered freely.
+ */
+export const MODELS: readonly string[] = ['opus', 'sonnet', 'haiku', 'fable'];
+
+/** Mirrors the dashboard's EFFORTS. Lowest to highest, for the reader's sake
+ *  only — see MODELS on why neither list is clamped against. */
+export const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * A value from `list`, or undefined for anything else — including the empty
+ * string the "default" option submits.
+ *
+ * Undefined is the whole point: the caller spreads the result into the spawn
+ * body, `JSON.stringify` drops an undefined value, and the dashboard omits the
+ * flag from its argv when the field is missing. So "no pick" and "a name this
+ * build has never heard of" both land on the CLI's own default rather than on
+ * a guess.
+ *
+ * Dropped, not rejected. Unlike `clampMode` there is no ladder to clamp along,
+ * and unlike `action` there is nothing in the item file to check against — a
+ * model name is neither more nor less privileged than another. Rejecting would
+ * only make this app the thing that breaks the day the dashboard learns a
+ * fifth model, which is exactly the drift these duplicated lists invite.
+ */
+export function pickFrom(want: unknown, list: readonly string[]): string | undefined {
+  return typeof want === 'string' && list.includes(want) ? want : undefined;
+}
+
+/**
  * The modes a launch may actually ask for. A null ceiling means we never read
  * one (the dashboard was unreachable), and the safe reading of "unknown
  * ceiling" is the floor, not the top.

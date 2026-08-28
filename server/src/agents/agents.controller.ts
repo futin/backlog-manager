@@ -65,6 +65,12 @@ export class AgentsController {
       // Unvalidated on purpose: clampMode is the place a junk mode becomes
       // 'plan', and it is applied server-side after the ceiling is known.
       permissionMode: body.permissionMode as AgentDispatchRequest['permissionMode'],
+      // Unvalidated here for the same reason, and forwarded even when absent:
+      // `pickFrom` in the service is the one place a name off the list — or a
+      // non-string, which this Partial type cannot actually rule out — becomes
+      // undefined, and undefined is what makes the flag disappear.
+      model: body.model,
+      effort: body.effort,
       remoteControl: body.remoteControl === true
     });
   }
