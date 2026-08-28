@@ -103,9 +103,11 @@ different situations:
    outlived the session that wrote it.
 3. **A hand-run `start` left a stamp** nobody is acting on.
 
-Case 1 is not yours to touch. Cases 2 and 3 are stamps that nothing will ever clear if
-you decline to, because this skill is the only thing that would — and until something
-does, the board shows a permanent false "someone is on this" and every later
+Case 1 is not yours to touch. Cases 2 and 3 are stamps that nothing will clear on its
+own if you decline to: a person can always hand-run `backlog.mjs stop <id>` — that is
+how case 3 got there in the first place — but no *skill* reaches for one it did not set,
+so nothing will do it unprompted. Until somebody does, the board shows a permanent false
+"someone is on this" and every later
 `backlog-execute start <id>` refuses on behalf of a session that stopped existing days
 ago. Proceeding blind is wrong in both directions: guess "stale" on case 1 and a Reject
 verdict rewrites an item's entire body and moves the file out from under a running
@@ -320,12 +322,20 @@ refuses with "already in progress" — for a session that no longer exists to fi
 anything. That is the exact state "Already in progress" above has to untangle by hand,
 one conversation later; clearing it here is what keeps it from arising at all.
 
-Skip this whenever there is no marker of this session's own to leave behind — which is
-both of the live-session outcomes in "Already in progress" above: you stopped because
-another session holds the item, or you are working over that live marker at the user's
-explicit request. Either way the stamp on disk is somebody else's and clearing it here
-would be the same lie in reverse. If instead you re-took a stale stamp there, the marker
-*is* this session's and this section applies to it in full.
+Skip this whenever there is no marker of this session's own to leave behind. **That
+sentence is the whole test — apply it, don't match against a list of cases**, because
+the ways to end up holding no marker are not enumerable in advance. Both live-session
+outcomes in "Already in progress" above are examples: you stopped because another
+session holds the item, or you are working over that live marker at the user's explicit
+request — either way the stamp on disk is somebody else's and clearing it here would be
+the same lie in reverse. So is a `start` that refused outright, on a done or
+out-of-scope item: you never took a marker, and `stop` is permissive enough to strip the
+`started:` an archived item keeps as history, which is a real record erased for nothing.
+So is having never reached `start` at all.
+
+The one case where this section *does* apply after a refusal is a stale stamp you
+re-took with `stop` then `start` — the marker is this session's own from that point on,
+and everything here holds for it in full.
 
 ## Next
 
