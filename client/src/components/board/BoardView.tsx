@@ -4,6 +4,7 @@ import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { isInProgress } from '../../lib/item-progress';
 import { buildProjectHues } from '../../lib/project-hue';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
@@ -18,7 +19,7 @@ const SORT_KEY = 'backlog-manager.sort';
  *  always reads as itself and never as "the field was cleared". */
 const ALL = 'all';
 
-type StatusFilter = 'open' | 'done' | 'all';
+type StatusFilter = 'open' | 'started' | 'done' | 'all';
 type SortKey = 'created' | 'name' | 'project';
 
 /** Fixed column order — the store's own section order, not alphabetical. */
@@ -93,8 +94,19 @@ export default function BoardView() {
   const matches = (i: BacklogItem): boolean =>
     (projectValue === ALL || i.projectPath === projectValue) &&
     (needle === '' || i.title.toLowerCase().includes(needle)) &&
-    // out-of-scope is flat and terminal — the open/done select has no say there
-    (i.section === 'out-of-scope' || status === 'all' || i.status === status);
+    // The 'started' branch is tested BEFORE the out-of-scope bypass below,
+    // and that ordering is load-bearing, not arbitrary. The bypass is correct
+    // for Open/Done/All because out-of-scope is flat and terminal, so those
+    // three genuinely have no opinion about it. 'started' is different: it is
+    // a claim about live work, and a rejected out-of-scope card is never
+    // live, no matter what its (possibly stale) `started` stamp says. Running
+    // the bypass first would fill this view with terminal cards under a
+    // heading that promises otherwise — exactly the regression the "hides
+    // out-of-scope" board test guards against.
+    (status === 'started'
+      ? isInProgress(i)
+      // out-of-scope is flat and terminal — Open/Done/All have no say there
+      : i.section === 'out-of-scope' || status === 'all' || i.status === status);
 
   const visible = all.filter(matches);
 
@@ -105,7 +117,7 @@ export default function BoardView() {
      focus. Gated on the rendered items so a board with nothing live installs no
      interval; passed down as a value so the cards stay pure and their tests
      never have to fake a timer. */
-  const hasLive = visible.some((i) => i.status === 'open' && i.started !== '');
+  const hasLive = visible.some(isInProgress);
   const now = useNow(hasLive);
 
   const missing = registered.filter((p) => p.missing);
@@ -147,6 +159,7 @@ export default function BoardView() {
             onChange={(e) => setStatus(e.target.value as StatusFilter)}
           >
             <option value="open">Open</option>
+            <option value="started">In progress</option>
             <option value="done">Done</option>
             <option value="all">All</option>
           </select>

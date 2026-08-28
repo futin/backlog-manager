@@ -294,6 +294,40 @@ describe('BoardView', () => {
     expect(screen.getByText('declined thing')).toBeInTheDocument();
   });
 
+  it('status select offers open, in progress, done and all, in that order', async () => {
+    await renderBoard();
+    const select = screen.getByLabelText('Status') as HTMLSelectElement;
+    const labels = within(select).getAllByRole('option').map((o) => o.textContent);
+    expect(labels).toEqual(['Open', 'In progress', 'Done', 'All']);
+  });
+
+  it('status filter: in progress narrows to open items carrying a started stamp', async () => {
+    await renderBoard();
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    // Only bug-2 ("groomed bug") is open with a started stamp; task-9 is
+    // started but done, and everything else carries no stamp at all.
+    const cols = screen.getAllByTestId('board-col');
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
+      .toEqual(['1', '0', '0', '0']);
+    expect(screen.getByText('groomed bug')).toBeInTheDocument();
+    expect(screen.queryByText('a bug')).not.toBeInTheDocument();
+  });
+
+  // The regression guard for the out-of-scope ordering: oos-1 is terminal, so
+  // it would leak through under 'started' if the out-of-scope bypass ran
+  // before the 'started' branch — this is the case that ordering bug would
+  // actually break. task-9 (done, but carrying a started stamp) is asserted
+  // alongside it as a plain sanity check that "started but no longer open"
+  // stays excluded too. Both are asserted separately from the case above,
+  // even though its counts already imply this, so a future edit that re-adds
+  // the bypass fails a test whose name says what broke.
+  it('status filter: in progress hides out-of-scope items even though they bypass open and done', async () => {
+    await renderBoard();
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    expect(screen.queryByText('declined thing')).not.toBeInTheDocument();
+    expect(screen.queryByText('finished task')).not.toBeInTheDocument();
+  });
+
   it('project filter narrows every column by projectPath', async () => {
     await renderBoard();
     await userEvent.selectOptions(screen.getByLabelText('Project'), '/abs/beta');
