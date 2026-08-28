@@ -65,8 +65,10 @@ happened.
   (`allow.util.ts`); a file outside every registered `backlog/` 404s.
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan
   non-empty), never stored; status is the directory, never frontmatter.
-- **`started: YYYY-MM-DD` is the one lifecycle key allowed in frontmatter,
-  and it is not a status** — the `status:` ban stands. Written only by
+- **`started:` is the one lifecycle key allowed in frontmatter, and it is not
+  a status** — the `status:` ban stands. A second-precision UTC timestamp
+  (`2026-08-28T14:03:07Z`); files stamped before that carry a bare
+  `YYYY-MM-DD` and stay valid forever, aged in days only. Written only by
   `start`/`stop`, which must round-trip unknown keys and the body
   byte-for-byte; "in progress" is decided in the client.
 - **Editing `skills/` changes nothing until it is committed, pushed, and

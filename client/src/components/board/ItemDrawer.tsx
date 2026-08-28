@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { marked } from 'marked';
 
+import { elapsedSince } from '../../lib/item-age';
 import type { ProjectHues } from '../../lib/project-hue';
 import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
@@ -192,6 +193,13 @@ export function ItemDrawer(
   const [body, setBody] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
+  /* Read once per render rather than twice inside the JSX below, where the
+     null-check and the value would each call it. No injected clock, unlike the
+     card: the drawer is opened, read and closed, so a reading that aged in place
+     while it sat open would be motion for its own sake. */
+  const inProgress = item.status === 'open' && item.started !== '';
+  const elapsed = inProgress ? elapsedSince(item.started) : null;
+
   useEffect(() => {
     let alive = true;
     setBody(null);
@@ -249,11 +257,19 @@ export function ItemDrawer(
             {/* Project lives in the pill above, not twice. */}
             {item.id} · {item.created}
             {/* Plain text, like the `done` marker beside it — the card has room
-                only for an age, so the drawer is where the actual date belongs:
-                "in progress 47d" invites "since when", and the answer is here.
+                only for an elapsed reading, so the drawer is where the stored
+                value belongs: "in progress 47d" invites "since when", and the
+                answer is here. Both halves, because they answer different
+                questions — the elapsed is what a person reads, the parenthetical
+                is the exact bytes on disk, which is what anyone reconciling a
+                card against the file actually needs. The reading drops out on a
+                value that cannot be aged (a hand-edited file), leaving the words
+                and the verbatim value rather than printing NaN.
                 Gated on status the same way the card is, so an archived item
                 reads as done rather than as still being worked. */}
-            {item.status === 'open' && item.started !== '' ? ` · ◍ in progress since ${item.started}` : ''}
+            {inProgress
+              ? ` · ◍ in progress${elapsed === null ? '' : ` ${elapsed}`} (since ${item.started})`
+              : ''}
             {item.status === 'done' ? ' · done' : ''}
             {item.tags.length > 0 ? ` · ${item.tags.join(', ')}` : ''}
           </span>

@@ -34,7 +34,14 @@
 
 :root {
   --body-pad: 24px;
-  --card-pad: 10px 14px;
+  /* Split into halves and recomposed, because the card's in-progress bar needs
+     the INLINE half on its own: it is full-width by design and only its left and
+     right padding may line up with the face's. A `y x` pair cannot be indexed in
+     CSS, so the pair is built from the parts rather than the parts guessed from
+     the pair. */
+  --card-pad-y: 10px;
+  --card-pad-x: 14px;
+  --card-pad: var(--card-pad-y) var(--card-pad-x);
   --card-gap: 10px;
   --card-inner-gap: 10px;
   --group-gap: 14px;
@@ -44,7 +51,8 @@
    specificity, so source order is the only thing deciding the winner. */
 [data-density="compact"] {
   --body-pad: 14px;
-  --card-pad: 7px 11px;
+  --card-pad-y: 7px;
+  --card-pad-x: 11px;
   --card-gap: 6px;
   --card-inner-gap: 6px;
   --group-gap: 9px;
@@ -208,29 +216,41 @@ body {
 /* The card is a strip in two parts: the printed face (.board-card-main) and,
    when the item has a next step, the tear-off tab down its right edge
    (.dispatch-tab, in the dispatch block far below). The row here is the seam
-   between them; the face is the flex column the whole card used to be.
+   between them; the face is a flex column of its own — the in-progress bar, then
+   the padded content (.board-card-face).
    `overflow: hidden` is what makes the tab meet the card's rounded corners
-   instead of squaring them off.
-   Padding lives on the face, never on this rule, so the tab reaches the card's
-   own top and bottom edges — the dashboard's .row/.row-main split, for the
-   same reason. */
+   instead of squaring them off, and what clips the in-progress bar's own top
+   corners to the same radius.
+   Padding lives on .board-card-face, never on this rule or on
+   .board-card-main, so the tab reaches the card's own top and bottom edges —
+   the dashboard's .row/.row-main split, for the same reason. It is also why the
+   bar stops at the tab's seam rather than crossing it: the bar is inside the
+   face, and the tab is the face's sibling. */
 .board-card {
   display: flex; align-items: stretch;
   background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
   cursor: pointer; transition: border-color .15s;
   box-shadow: inset 0 1px 0 var(--edge); overflow: hidden;
 }
+/* The face's own column: the in-progress bar, then the padded content. It holds
+   NO padding itself, which is what lets that bar reach the face's left and right
+   edges — a bar inset by the card's padding reads as a chip, not as a state the
+   whole card is in.
+   `min-width: 0` because this is a flex item beside the tab, and a flex item's
+   default `min-width: auto` would let a long unbroken title push the card wider
+   than its column. */
+.board-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column }
 /* A flex column, where the row layout used a named-areas grid. The grid put the
    pill and the meta line in a grid row, and a grid row cannot be pushed to the
    bottom of a cell that a taller neighbour stretched — which is what every cell
    in a card grid is. .board-card-foot plus margin-top:auto can be.
    Every padding and gap the card has lives in this one rule, so task-8's
-   [data-density="compact"] override is a single block rather than a hunt through
-   four selectors. `min-width: 0` because this is now a flex item beside the
-   tab, and a flex item's default `min-width: auto` would let a long unbroken
-   title push the card wider than its column. */
-.board-card-main {
-  flex: 1; min-width: 0;
+   [data-density="compact"] override stays a single block (of variables) rather
+   than a hunt through four selectors. `flex: 1` so this column, not the bar
+   above it, absorbs the height a taller neighbour stretches the card to — which
+   is what keeps margin-top:auto on the foot working. */
+.board-card-face {
+  flex: 1;
   display: flex; flex-direction: column; gap: var(--card-inner-gap);
   padding: var(--card-pad);
 }
@@ -238,15 +258,28 @@ body {
 .board-card-title { font-size: 13px; font-weight: 600; color: var(--ink) }
 /* margin-top:auto is the pin: cards in a row are as tall as the tallest title, and
    without it the meta lines of neighbours sit at different heights. */
-.board-card-foot { margin-top: auto; display: flex; align-items: baseline; gap: 8px }
-/* The pill is unshrinkable and the meta line yields: the pill now holds the
-   project name, which is identity and must read in full, while the meta is
-   id-and-date — recognisable from its head, so an ellipsis there costs little.
-   Without the nowrap the meta would instead wrap under a long project name and
-   break the baseline the foot rows share. */
+/* Wraps, rather than compressing its children onto one line. Three things want
+   this row — the project pill, `id · date`, and the groomed/done marker — and at
+   the real column width (about 150px inside the padding) they do not all fit.
+   Something has to give, and the choice of WHAT is the whole point: with
+   nowrap, the meta line was the only shrinkable child, so it clipped to
+   `bug-1 · aug…` — the id and date being cut is the complaint this card was
+   rebuilt to fix. Wrapping spends a line of height instead, which the card has:
+   its neighbours are already unequal heights because titles wrap. */
+.board-card-foot {
+  margin-top: auto; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 8px;
+}
+/* All three unshrinkable, so wrapping is what happens instead of clipping. The
+   pill holds the project name, which is identity and must read in full; the
+   meta is id-and-date, which is the card's handle on the file. `max-width: 100%`
+   plus the ellipsis below is the last resort for a single value too long for the
+   whole card on its own — a hand-written id, say — where wrapping has nowhere
+   left to go. */
 .board-card-foot .pill { flex: none; max-width: 100% }
 .board-card-meta {
-  min-width: 0; font-size: 10.5px; color: var(--ink3); font-family: var(--mono);
+  flex: none; max-width: 100%;
+  font-size: 10.5px; color: var(--ink3); font-family: var(--mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -276,28 +309,53 @@ body {
 .pill-proj-6 { color: var(--proj-6); border-color: var(--proj-6) }
 .pill-proj-7 { color: var(--proj-7); border-color: var(--proj-7) }
 .pill-proj-8 { color: var(--proj-8); border-color: var(--proj-8) }
-/* Meta-line markers. Groomed is quiet confirmation, not an alarm; done is
-   history and dims. */
+/* Foot markers, beside the meta line rather than inside it: `flex: none` is why
+   they sit out there at all — inside the nowrap-with-ellipsis meta they were
+   clipped to `· gr…`. They inherit nothing from that line (they are its
+   siblings), so the mono family and size are restated here.
+   Groomed is quiet confirmation, not an alarm; done is history and dims. */
+.board-card-groomed, .board-card-done {
+  flex: none; font-family: var(--mono); font-size: 10.5px; white-space: nowrap;
+}
 .board-card-groomed { color: var(--green) }
 .board-card-done { color: var(--ink2) }
-/* In progress: an amber edge down the card, because "which of these twelve is
-   anyone on" is a question asked of a whole column at once, and 10.5px of mono
-   at the bottom of a card cannot answer it at a glance.
-   An inset shadow rather than border-left: a real 3px border would push this
-   card's content 2px right of every unmarked card beside it (the 1px border and
-   the padding above are one tuned block, with a compact-density override), while
-   a shadow paints inside the existing box and moves nothing. The top-edge inset
-   from .board-card is repeated here because box-shadow does not cascade per
-   layer — declaring only the amber one would drop the edge highlight. */
-.board-card-live { box-shadow: inset 0 1px 0 var(--edge), inset 3px 0 0 var(--amber) }
-/* flex:none is the whole point of the marker living in the foot instead of on the
-   meta line: the meta yields and ellipsizes (it is id-and-date, readable from its
-   head), while this stays whole at the card's right edge. Mono at the meta's own
-   size because it is a sibling of that line, not a child of it, so it inherits
-   neither. */
+/* In progress: the card's own hairline goes amber, and a filled amber bar runs
+   across the top of its face. "Which of these twelve is anyone on" is a question
+   asked of a whole column at once, and the 3px amber inset this replaces — like
+   the 10.5px mono marker before it — could not answer it at a glance.
+   border-color rather than a border of its own: the 1px border and the padding
+   are one tuned block (with a compact-density override), so recolouring the
+   existing line moves nothing. The `inset 0 1px 0 var(--edge)` catch-light from
+   .board-card is inherited untouched, since nothing here declares box-shadow. */
+.board-card-live { border-color: var(--amber) }
+/* The bar. Filled rather than outlined, because it is competing with a whole
+   column of cards and an outline at this height reads as another hairline.
+   --on-accent is the theme's own "ink on a filled accent" — the same pairing the
+   amber Send button uses — so this stays legible on the light palette, where
+   --amber is a dark ochre and dark ink on it would not.
+   The inline padding is the face's own --card-pad-x, so the label lines up with
+   the title beneath it and follows the compact-density retune with it. The block
+   padding is fixed and small: this bar is a band, and scaling its height with
+   the card's padding would make it a second header at comfortable density. */
+.board-card-live-bar {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  background: var(--amber); color: var(--on-accent);
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .09em;
+  padding: 2px var(--card-pad-x);
+}
+/* flex:none so the reading stays whole if the label ever has to yield: the
+   elapsed time is the half that cannot be guessed from the bar's colour, and
+   three hours versus three weeks is the whole reason a timestamp is stored
+   rather than a boolean. Inherits the bar's ink and family rather than painting
+   amber on amber.
+   text-transform:none is load-bearing, not a style choice: the bar uppercases
+   its label, and an uppercased `21m` renders as `21M`, which reads as
+   twenty-one MONTHS. The unit letters have to stay lowercase to mean what they
+   say. */
 .board-card-live-mark {
-  flex: none; color: var(--amber);
-  font-family: var(--mono); font-size: 10.5px; white-space: nowrap;
+  flex: none; white-space: nowrap; letter-spacing: .04em;
+  text-transform: none; font-size: 10.5px;
 }
 
 /* ---------------------------------------------- Settings section */

@@ -559,9 +559,15 @@ export function moveItem(backlog, id, dest) {
 //
 // Storing it instead of deriving it (the way `groomed` is derived from the
 // body) is forced: nothing inside a file can imply that a human picked it up
-// five minutes ago. The value is a date rather than a boolean so the board and
-// the card can age it — work that has been "in progress" for eleven days is
-// the signal worth surfacing, and a bare `true` cannot carry it.
+// five minutes ago. The value is a UTC timestamp rather than a boolean so the
+// board and the card can age it — "in progress for eleven days" and "in
+// progress for twenty minutes" are the signals worth surfacing, and a bare
+// `true` cannot carry either.
+//
+// Files stamped before this wrote a time carry a bare `YYYY-MM-DD`, and nothing
+// here rewrites an existing item's frontmatter, so both shapes are on disk
+// permanently. Every reader accepts both; the client ages a bare date in days
+// only, since UTC midnight is not the hour anyone started work.
 //
 // These two commands are the only ones that rewrite an EXISTING item's
 // content: `new` writes a file that did not exist yet, and `move` renames
@@ -578,6 +584,21 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10)
 }
 
+// The stamp `start` writes: second-precision UTC ISO-8601. Milliseconds are
+// sliced off rather than kept — nothing needs sub-second resolution, and three
+// extra digits in a line a human reads are noise. UTC rather than local time
+// for the reason ageDaysSince parses in UTC: the value is compared against
+// `Date.now()` on whatever machine renders the board, and a local-time stamp
+// would read hours off for anyone in another zone.
+//
+// A timestamp rather than todayISO()'s bare date because the useful resolution
+// for "is anyone on this right now" is minutes and hours. A session started
+// this morning and one started ninety seconds ago were both `0d` under a date,
+// which is the one answer that made the marker worth ignoring.
+function nowISO() {
+  return `${new Date().toISOString().slice(0, 19)}Z`
+}
+
 // Refuses in the same three cases the lifecycle makes meaningless, each with
 // its own message rather than one shared "cannot start": done and
 // out-of-scope have no work left to pick up, and an idea has no plan to work
@@ -587,11 +608,12 @@ function todayISO() {
 // skill will ever come back to clear.
 //
 // Starting an already-started item is refused rather than re-stamped: a
-// second `start` is almost always a re-run, and silently moving the date
+// second `start` is almost always a re-run, and silently moving the stamp
 // forward would erase exactly the "this has been open for eleven days"
-// signal the date exists to provide. The refusal names the date already
-// there so the caller can see what it would have overwritten.
-export function startItem(backlog, id, today = todayISO()) {
+// signal the stamp exists to provide. The refusal names the value already
+// there — in whichever of the two shapes it is — so the caller can see what
+// it would have overwritten.
+export function startItem(backlog, id, stamp = nowISO()) {
   const item = locateItem(backlog, id)
 
   if (item.state === 'terminal') {
@@ -609,7 +631,7 @@ export function startItem(backlog, id, today = todayISO()) {
     throw new BacklogError(`${id} is already in progress (started ${data.started})`, 1)
   }
 
-  writeItemFile(item.path, { ...data, started: today }, body)
+  writeItemFile(item.path, { ...data, started: stamp }, body)
   return item.path
 }
 

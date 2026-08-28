@@ -30,14 +30,15 @@ describe('ItemDrawer', () => {
     ) as jest.Mock;
   });
 
-  // The card has room only for an age; the drawer is where the actual date
-  // belongs, since "in progress 47d" invites the follow-up question "since
-  // when" and the answer is right there in the file.
-  it('names the date an in-progress item was picked up, and says nothing when it was not', async () => {
+  // The card has room only for an elapsed reading; the drawer is where the
+  // stored value belongs, since "in progress 47d" invites the follow-up question
+  // "since when" and the answer is right there in the file. It prints BOTH: the
+  // elapsed for reading, the raw value because that is what is on disk.
+  it('names the moment an in-progress item was picked up, and says nothing when it was not', async () => {
     const { unmount } = render(
       <ItemDrawer item={{ ...ITEM, started: '2026-08-24' }} hues={HUES} onClose={() => {}} />
     );
-    expect(screen.getByText(/in progress since 2026-08-24/)).toBeInTheDocument();
+    expect(screen.getByText(/in progress \d+d \(since 2026-08-24\)/)).toBeInTheDocument();
     unmount();
 
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
@@ -46,6 +47,18 @@ describe('ItemDrawer', () => {
     // resolution; this second one is still mounted and its body fetch lands
     // either way, which is an un-acted state update unless the test waits for
     // it. Same reason as the two cases below.
+    await screen.findByText('off by one');
+  });
+
+  // A timestamped value reads to the hour or minute, and the parenthetical
+  // carries it verbatim — the drawer is the one surface with room to be exact,
+  // and someone reconciling a card against the file needs the exact bytes.
+  it('reads a timestamped start to the hour and still prints the stored value', async () => {
+    const threeHoursAgo = `${new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
+    render(<ItemDrawer item={{ ...ITEM, started: threeHoursAgo }} hues={HUES} onClose={() => {}} />);
+
+    expect(screen.getByText(`bug-2 · 2026-08-20 · ◍ in progress 3h (since ${threeHoursAgo}) · ui`))
+      .toBeInTheDocument();
     await screen.findByText('off by one');
   });
 

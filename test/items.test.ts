@@ -21,7 +21,13 @@ describe('GET /api/items and /api/projects', () => {
     { leaf: 'tasks/open', filename: 'task-1-build-it.md',
       content: item('task-1', 'build it', '## Goal\n\ng\n\n## Plan\n\n1. step\n', 'tags: ui, board\n') },
     { leaf: 'bugs/open', filename: 'bug-3-in-progress.md',
-      content: item('bug-3', 'someone is on it', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-24\n') },
+      content: item('bug-3', 'someone is on it', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-28T14:03:07Z\n') },
+    // The shape `start` wrote before it stamped a time. Nothing rewrites an
+    // existing item's frontmatter, so this is on disk permanently and the
+    // scanner has to keep surfacing it — the client is what knows a bare date
+    // can only be aged in days.
+    { leaf: 'bugs/open', filename: 'bug-4-legacy-start.md',
+      content: item('bug-4', 'started the old way', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-24\n') },
     { leaf: 'tasks/done', filename: 'task-2-shipped.md',
       content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
     { leaf: 'out-of-scope', filename: 'oos-1-nope.md',
@@ -56,7 +62,7 @@ describe('GET /api/items and /api/projects', () => {
     const index = res.body as ItemsIndex;
     const byId = new Map(index.items.map((i) => [`${i.project}/${i.id}`, i]));
 
-    expect(byId.size).toBe(7);
+    expect(byId.size).toBe(8);
     const bug1 = byId.get('alpha/bug-1') as BacklogItem;
     expect(bug1.section).toBe('bugs');
     expect(bug1.status).toBe('open');
@@ -88,7 +94,7 @@ describe('GET /api/items and /api/projects', () => {
     const a = byName.get('alpha') as ProjectSummary;
     expect(a.missing).toBe(false);
     // done task-2 is not counted; the malformed idea is not an item
-    expect(a.counts).toEqual({ bugs: 3, ideas: 0, tasks: 1, 'out-of-scope': 1 });
+    expect(a.counts).toEqual({ bugs: 4, ideas: 0, tasks: 1, 'out-of-scope': 1 });
     const ghost = byName.get('ghost') as ProjectSummary;
     expect(ghost.missing).toBe(true);
     expect(ghost.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 });
@@ -98,11 +104,15 @@ describe('GET /api/items and /api/projects', () => {
   // verbatim, leaving "is this actually in progress" (which also depends on the
   // item still being open) to the client. Absent means '', matching how a
   // missing `created` is reported, so no consumer has to handle undefined.
-  it('surfaces started verbatim, and empty for an item nobody has picked up', async () => {
+  it('surfaces started verbatim in either shape, and empty for an item nobody has picked up', async () => {
     const res = await request(app.getHttpServer()).get('/api/items').expect(200);
     const byId = new Map((res.body as ItemsIndex).items.map((i) => [`${i.project}/${i.id}`, i]));
 
-    expect((byId.get('alpha/bug-3') as BacklogItem).started).toBe('2026-08-24');
+    // Verbatim means the timestamp arrives with its seconds intact: the client
+    // reads this down to the minute, so anything truncated here is information
+    // it cannot get back.
+    expect((byId.get('alpha/bug-3') as BacklogItem).started).toBe('2026-08-28T14:03:07Z');
+    expect((byId.get('alpha/bug-4') as BacklogItem).started).toBe('2026-08-24');
     expect((byId.get('alpha/bug-1') as BacklogItem).started).toBe('');
   });
 
