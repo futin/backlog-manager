@@ -21,7 +21,10 @@ export type Section = 'bugs' | 'ideas' | 'tasks' | 'out-of-scope';
  *  frontmatter field — backlog.mjs rejects a status: key outright. out-of-scope
  *  is flat and terminal. In progress is deliberately NOT a member here: it is a
  *  marker on an open item (see BacklogItem.started), not a fourth place a file
- *  can live. */
+ *  can live — and neither is the board's `'started'` status-filter value
+ *  (`StatusFilter` in BoardView.tsx). That string picks out a view over these
+ *  same three members (open items where `isInProgress` holds); it does not
+ *  name a fourth one. */
 export type ItemStatus = 'open' | 'done' | 'terminal';
 
 export interface BacklogItem {
@@ -31,6 +34,13 @@ export interface BacklogItem {
   created: string;
   /**
    * When the item was picked up (`backlog.mjs start`), '' when nobody has.
+   * "Picked up" now spans two different callers, not one: `backlog-execute`
+   * stamps it and holds it all the way to archive, while `backlog-groom`
+   * stamps it too, holding it only for the length of one groom session and
+   * clearing it again once a verdict lands. Either can stamp an idea —
+   * deciding an idea's verdict (promote it, or reject it outright) is itself
+   * the active work the marker exists to describe, so an idea is no longer
+   * refused the way a done or out-of-scope item still is.
    *
    * Two shapes, both permanent. `start` writes a second-precision UTC timestamp
    * (`2026-08-28T14:03:07Z`); every file stamped before it did carries a bare

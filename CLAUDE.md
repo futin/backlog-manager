@@ -69,7 +69,9 @@ happened.
   a status** — the `status:` ban stands. A second-precision UTC timestamp
   (`2026-08-28T14:03:07Z`); files stamped before that carry a bare
   `YYYY-MM-DD` and stay valid forever, aged in days only. Written only by
-  `start`/`stop`, which must round-trip unknown keys and the body
+  `start`/`stop` — now called by both `backlog-execute` (holding the marker
+  until archive) and `backlog-groom` (holding it for one groom session,
+  ideas included) — which must round-trip unknown keys and the body
   byte-for-byte; "in progress" is decided in the client.
 - **Editing `skills/` changes nothing until it is committed, pushed, and
   `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD,
