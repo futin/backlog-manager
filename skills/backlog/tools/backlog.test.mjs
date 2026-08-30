@@ -1000,21 +1000,24 @@ test('CLI start bug-99 exits 1 and names the unknown id', () => {
   assert.match(out.stderr, /unknown id: bug-99/)
 })
 
-test('CLI start with no id exits 1 and prints a usage line naming both verbs, --as on the start line only', () => {
+test('CLI start with no id exits 1 and prints a usage line naming both verbs, each flag on its own line only', () => {
   const { dir } = boardFixture()
 
   const out = run(dir, 'start')
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /usage: backlog\.mjs start <id>/)
-  // `--as` is start's own flag: stop reads phase off the file instead (see
-  // the "phase" section below), so the usage text must not suggest stop
-  // takes one too. Asserted line-by-line rather than with one regex so a
-  // future edit that moved `--as` onto the wrong line fails clearly instead
-  // of just failing to match at all.
+  // `--as` is start's own flag and `--abandon` is stop's own flag: stop reads
+  // phase off the file instead of taking it as a flag (see the "phase"
+  // section below), and start has no dead marker to walk away from, so
+  // neither line should suggest the other verb takes its flag. Asserted
+  // line-by-line rather than with one regex so a future edit that moved a
+  // flag onto the wrong line fails clearly instead of just failing to match
+  // at all.
   const lines = out.stderr.trim().split('\n')
   assert.match(lines[0], /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/)
-  assert.match(lines[1], /^\s*backlog\.mjs stop <id>$/)
+  assert.match(lines[1], /^\s*backlog\.mjs stop <id> \[--abandon\]$/)
+  assert.doesNotMatch(lines[0], /--abandon/)
   assert.doesNotMatch(lines[1], /--as/)
 })
 
@@ -1323,7 +1326,7 @@ test('CLI start --as with no value refuses with the start/stop usage text', () =
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
-  assert.match(out.stderr, /^\s*backlog\.mjs stop <id>$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\]$/m)
 })
 
 // stop reads the phase off the file (Task 3); a --as flag here could name
@@ -1337,7 +1340,64 @@ test('CLI stop rejects --as with the usage text and leaves the file untouched', 
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
-  assert.match(out.stderr, /^\s*backlog\.mjs stop <id>$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\]$/m)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+// start has no dead marker of its own to walk away from — --abandon only
+// ever means something to stop, which is reading a marker back off the file
+// to decide whether to bill it. Refused the same way stop already refuses
+// --as: a usage error on the command line itself, before anything is read
+// or written.
+test('CLI start rejects --abandon with the usage text and leaves the file untouched', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'start', 'bug-7', '--abandon')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\]$/m)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+// The groom skill's stale-marker takeover (SKILL.md) runs exactly this: stop
+// --abandon, then start --as groom, to clear a marker nobody has been
+// actively holding without billing the dead interval as if it were work. The
+// existing bucket must survive completely untouched — --abandon skips the
+// billing block entirely rather than billing zero, so it can never disagree
+// with a corrupt or merely-inconvenient existing value either.
+test('CLI stop --abandon clears the marker and stamps updated:, without billing the existing bucket at all', () => {
+  const { dir, openBugPath } = boardFixture()
+  run(dir, 'start', 'bug-7', '--as', 'groom')
+  // Backdated well past "now" rather than left at the real start's stamp: if
+  // --abandon failed to suppress billing, the seconds between this stale
+  // marker and "now" would be enormous and unmistakably wrong, not a
+  // coincidental near-zero gap that could pass whether or not the skip
+  // actually works.
+  withFrontmatter(openBugPath, { started: '2020-01-01T00:00:00Z', 'groom-elapsed': 90 })
+
+  const out = run(dir, 'stop', 'bug-7', '--abandon')
+
+  assert.equal(out.status, 0)
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-elapsed'], '90')
+  assert.equal('started' in data, false)
+  assert.equal('phase' in data, false)
+  assert.match(data.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+})
+
+// --abandon changes what stop does with a live marker, not whether one has
+// to exist first: an item with nothing to clear is exactly as much a refusal
+// with --abandon as without it.
+test('CLI stop --abandon on an item that was never started still refuses with the existing message', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'stop', 'bug-7', '--abandon')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /bug-7 is not in progress/)
   assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
 })
 
@@ -1430,6 +1490,51 @@ test('stopItem never bills a legacy bare-date started:, though it still clears i
 
   const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
   assert.equal('groom-elapsed' in data, false)
+  assert.equal('started' in data, false)
+  assert.equal('phase' in data, false)
+  assert.match(data.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+})
+
+// FULL_TIMESTAMP is a shape test, not a validity test: `2026-08-30T25:00:00Z`
+// matches its digit pattern exactly but names an hour that does not exist, so
+// Date.parse returns NaN for it. Before this guard, that NaN flowed straight
+// into the arithmetic and out to disk as the literal string "NaN" — and
+// because DIGITS_ONLY (a few lines above) then refuses to touch that value on
+// any later stop, the item was permanently wedged: stop could never bill
+// again, and start could never re-stamp a file that still carried the old
+// started:. Treated exactly like the legacy bare-date case just above: cleared,
+// never billed.
+test('stopItem never bills an unparseable started: that still matches the timestamp shape, and writes no bucket at all', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: '2026-08-30T25:00:00Z', phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:05:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal('started' in data, false)
+  assert.equal('phase' in data, false)
+  assert.match(data.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+  // The point of this test: no matter what, "NaN" must never reach the file.
+  assert.doesNotMatch(fs.readFileSync(openBugPath, 'utf8'), /NaN/)
+})
+
+// A hand-edited phase: value outside PHASES (e.g. a typo, or a value from
+// some future version) falls through the PHASES.includes guard exactly like
+// no phase: at all — nothing to bill against, but the marker still clears.
+// This is the same "cleared but not billed" shape as the bare-date and
+// unparseable-timestamp cases above; unlike those two, this one is reachable
+// only by hand-editing the file, since startItem itself never writes a phase
+// outside PHASES.
+test('stopItem bills nothing for an unrecognized phase:, but still clears both keys', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'intake' })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:05:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal('execute-elapsed' in data, false)
   assert.equal('started' in data, false)
   assert.equal('phase' in data, false)
   assert.match(data.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)

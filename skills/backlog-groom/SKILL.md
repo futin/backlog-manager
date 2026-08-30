@@ -141,7 +141,7 @@ Then, by their answer:
   can produce). Once the user confirms it, take the marker over properly:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> --abandon
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as groom
   ```
 
@@ -152,6 +152,14 @@ Then, by their answer:
   section clears it like any other. Clearing without re-taking would leave the item
   unmarked while you actively work it, which is the same lie as a stale stamp with the
   sign flipped.
+
+  `--abandon` on that first line, not a plain `stop`: the interval between whenever that
+  stale stamp was set and right now is not work anyone did — nobody was grooming this
+  item while it sat there over a crash, a `/clear`, or a weekend — and a plain `stop`
+  would bill that whole dead stretch into `groom-elapsed:` as if it had been real
+  grooming, permanently, since that total is never reset. `--abandon` clears `started:`
+  and `phase:` and stamps `updated:` exactly as a plain `stop` does; it just skips the
+  billing that would otherwise turn a stale marker into fabricated history.
 - **They know a session is live and want to proceed anyway.** Their call, and the only
   case in which you work an item whose marker isn't yours. Give the verdict below as
   normal, but skip every `stop` it ends with: clearing that marker would tell the board

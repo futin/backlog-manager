@@ -600,11 +600,22 @@ export function moveItem(backlog, id, dest) {
 // move. Making move stamp `updated` would mean either opening the file just
 // to change one line — reintroducing the exact risk renameSync exists to
 // avoid — or leaving the stamp to describe a moment that isn't the actual
-// last edit. Nothing is lost by leaving it out: every skill path that moves
-// an item (backlog-execute, backlog-groom) calls `stop` on it immediately
-// beforehand, and `stop` already refreshes `updated` through this same
-// function, so an archived item's `updated:` is never more than one
-// function call older than its move.
+// last edit. Mostly nothing is lost by leaving it out: backlog-groom's own
+// moves (an idea promoted to done/, anything rejected to out-of-scope/) and
+// backlog-execute's abandonment path all call `stop` on the item
+// immediately beforehand, and `stop` already refreshes `updated` through
+// this same function, so for those paths an archived item's `updated:` is
+// never more than one function call older than its move. The one path that
+// doesn't hold: backlog-execute's own successful archive
+// (`move <id> done` once a fix or task is verified) holds the marker all
+// the way through instead of stopping first, so that item's `updated:`
+// stays exactly as old as its last start/stop cycle left it, and
+// `started:`/`phase:` survive as the historical record instead — see the
+// paragraph beginning "Two skills call `start`/`stop`" in
+// docs/invariants.md for the full reasoning. That gap is a known,
+// separately-tracked design point on its own, not a defect in this
+// function — the point of correcting this comment is only to stop it from
+// asserting an absolute that isn't true.
 //
 // The fourth parameter exists so a caller — real or test — can pin the exact
 // value written, mirroring startItem's own third parameter. startItem and
@@ -745,15 +756,37 @@ const DIGITS_ONLY = /^\d+$/
 // timestamp rather than a shape. A real call site never supplies it.
 //
 // `stamp` now does double duty as the elapsed-seconds billing clock too,
-// rather than taking a separate `now` parameter for that. A fourth parameter
-// would break the (backlog, id, stamp) shape startItem and stopItem
-// otherwise share, and buys nothing in return: elapsed seconds are floored
-// to whole seconds regardless (see the Math.floor below), so the one second
-// of precision `stamp` already truncates to could never change a billed
-// total anyway. `updated` and the billing clock are the same instant in
-// every real call, exactly as `started` and the first `updated` already are
-// in startItem — this just extends that equivalence to stop's own write.
-export function stopItem(backlog, id, stamp = nowISO()) {
+// rather than taking a separate `now` parameter for that. A second timing
+// parameter would break the (backlog, id, stamp) shape startItem and
+// stopItem otherwise share, and buys nothing in return: elapsed seconds are
+// floored to whole seconds regardless (see the Math.floor below), so the one
+// second of precision `stamp` already truncates to could never change a
+// billed total anyway. `updated` and the billing clock are the same instant
+// in every real call, exactly as `started` and the first `updated` already
+// are in startItem — this just extends that equivalence to stop's own
+// write.
+//
+// `abandon` IS a real fourth parameter, and a different kind of thing than
+// the timing parameter the paragraph above declines to add: not a second
+// reading of "now," but a switch that turns the billing block below off
+// entirely — mirroring startItem's own `phase` in position, not in shape, a
+// boolean because there is only one thing left to say once billing itself
+// is off the table. When true, clearing `started`/`phase` and stamping
+// `updated` still happen exactly as they do on an ordinary stop — the
+// marker is still stale and still needs to go — but the debit against
+// whichever bucket `phase` would have named is skipped outright, whatever
+// `phase` and `started` actually say, and however corrupt or fine the
+// existing bucket value is: an abandoned session has nothing to bill, so
+// there is nothing for the corrupt-bucket refusal below to even check. The
+// interval between a stale `started:` and this stop is not work anyone
+// did, and there is no safe way to guess how much of it was — a duration
+// cap was considered and rejected for the same reason DIGITS_ONLY refuses
+// rather than resets a corrupt bucket: a wrong guess silently corrupts a
+// real session's total, where an obviously-fake one is easy to reason
+// about instead. See the `--abandon` CLI flag below, which is the only
+// thing that ever sets this true; a real call site otherwise leaves it at
+// the default.
+export function stopItem(backlog, id, stamp = nowISO(), abandon = false) {
   const item = locateItem(backlog, id)
 
   const { data, body } = readItemFile(item.path)
@@ -768,14 +801,25 @@ export function stopItem(backlog, id, stamp = nowISO()) {
   const { started, phase, ...rest } = data
   let next = rest
 
-  // Billable only when there is a phase to bill the time to (an item merely
-  // `start`ed with no `--as` has nothing for stop to key the billing off of)
-  // AND `started` is the full timestamp shape `start` actually writes today
-  // — never the legacy bare `YYYY-MM-DD` a pre-timestamp `start` left behind.
-  // UTC midnight is not the hour anyone began work, so treating a bare date
-  // as billable would fabricate up to 24 hours nobody worked; the marker is
-  // still cleared above like any other `started:` value, just never billed.
-  if (phase !== undefined && PHASES.includes(phase) && FULL_TIMESTAMP.test(started)) {
+  // Billable only when the caller isn't abandoning (see stopItem's own
+  // comment above for what that means and why), there is a phase to bill
+  // the time to (an item merely `start`ed with no `--as` has nothing for
+  // stop to key the billing off of), `started` is the full timestamp shape
+  // `start` actually writes today — never the legacy bare `YYYY-MM-DD` a
+  // pre-timestamp `start` left behind, since UTC midnight is not the hour
+  // anyone began work and treating a bare date as billable would fabricate
+  // up to 24 hours nobody worked — AND that timestamp actually parses.
+  // FULL_TIMESTAMP only checks shape: `2026-08-30T25:00:00Z` matches it
+  // digit-for-digit but names an hour that does not exist, and Date.parse
+  // returns NaN for a string like that. Without this last check, that NaN
+  // would flow straight into the arithmetic below and out to disk as the
+  // literal string "NaN" — a value DIGITS_ONLY (above) then refuses to
+  // touch on any later stop, which would wedge the item shut for good: the
+  // next stop refuses the corrupt bucket, and the next start refuses
+  // because started: is still set, and neither can undo the other. Every
+  // case that fails this check still clears the marker above like any
+  // other started: value; only the billing itself is skipped.
+  if (!abandon && phase !== undefined && PHASES.includes(phase) && FULL_TIMESTAMP.test(started) && Number.isFinite(Date.parse(started))) {
     const key = ELAPSED_KEYS[phase]
     const existing = rest[key]
 
@@ -892,11 +936,14 @@ const MOVE_USAGE = `usage: backlog.mjs move <id> done|out-of-scope`
 
 // One constant for both verbs: they are a pair, and someone who mistyped one
 // of them is the person most likely to want the other named right there.
-// `--as` is shown on the start line only — stop does not take it (see the
-// CLI block below for why), and showing it on both lines would tell the
-// caller the opposite of what stop actually accepts.
+// `--as` is shown on the start line only, and `--abandon` on the stop line
+// only — each flag belongs to exactly one verb (see the CLI block below for
+// why: stop reads phase off the file rather than taking it as a flag, and
+// start has no dead marker of its own to walk away from), and showing
+// either flag on both lines would tell the caller the opposite of what that
+// verb actually accepts.
 const START_STOP_USAGE = `usage: backlog.mjs start <id> [--as groom|execute]
-       backlog.mjs stop <id>`
+       backlog.mjs stop <id> [--abandon]`
 
 export function main(argv) {
   const [cmd] = argv
@@ -1117,24 +1164,30 @@ export function main(argv) {
       return 1
     }
 
-    // `--as` is start's flag, parsed here (not left for startItem alone) so
-    // stop can refuse it before ever touching the file. stop reads the
-    // phase off the file instead of taking it as a flag: the file is the
-    // one place that can't disagree with itself, and a --as here could name
-    // something other than what start actually stored, which would leave no
-    // way to tell whether the flag or the file was telling the truth. `new`
-    // and `board`, both above, scan their own flags the same way.
+    // `--as` is start's flag and `--abandon` is stop's, both parsed here
+    // (not left for startItem/stopItem alone) so each verb can refuse the
+    // other's flag before ever touching the file. stop reads the phase off
+    // the file instead of taking it as a flag: the file is the one place
+    // that can't disagree with itself, and a --as here could name something
+    // other than what start actually stored, which would leave no way to
+    // tell whether the flag or the file was telling the truth. start, in
+    // turn, has no marker of its own yet to walk away from — --abandon only
+    // ever means something to a stop that is about to clear one. `new` and
+    // `board`, both above, scan their own flags the same way.
     let phase
     let sawAsFlag = false
+    let sawAbandonFlag = false
     for (let i = 2; i < argv.length; i++) {
       if (argv[i] === '--as') {
         sawAsFlag = true
         phase = argv[i + 1]
         i++
+      } else if (argv[i] === '--abandon') {
+        sawAbandonFlag = true
       }
     }
 
-    // Both refusals below print the shared usage text rather than a
+    // All three refusals below print the shared usage text rather than a
     // phase-specific message: a missing value and a flag on the wrong verb
     // are shape problems with the command line itself, the same class of
     // error the missing-id check above already reports this way — an
@@ -1142,6 +1195,10 @@ export function main(argv) {
     // startItem's own validation below instead, which names the two
     // accepted values explicitly.
     if (cmd === 'stop' && sawAsFlag) {
+      console.error(START_STOP_USAGE)
+      return 1
+    }
+    if (cmd === 'start' && sawAbandonFlag) {
       console.error(START_STOP_USAGE)
       return 1
     }
@@ -1157,7 +1214,7 @@ export function main(argv) {
     try {
       itemPath = cmd === 'start'
         ? startItem(r.resolved.backlog, id, undefined, phase)
-        : stopItem(r.resolved.backlog, id)
+        : stopItem(r.resolved.backlog, id, undefined, sawAbandonFlag)
     } catch (e) {
       if (!(e instanceof BacklogError)) throw e
       console.error(e.message)
