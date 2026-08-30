@@ -1,4 +1,4 @@
-import { ItemParseError, deriveGroomed, parseFrontmatter, sectionText } from '../server/src/items/parse.util';
+import { ItemParseError, clampPhase, deriveGroomed, parseElapsed, parseFrontmatter, sectionText } from '../server/src/items/parse.util';
 
 const BUG_GROOMED = `## Symptom
 
@@ -125,5 +125,53 @@ describe('deriveGroomed', () => {
   it('ideas and out-of-scope have no groomed state', () => {
     expect(deriveGroomed('ideas', 'anything')).toBeNull();
     expect(deriveGroomed('out-of-scope', 'anything')).toBeNull();
+  });
+});
+
+describe('clampPhase', () => {
+  it('accepts groom', () => {
+    expect(clampPhase('groom')).toBe('groom');
+  });
+
+  it('accepts execute', () => {
+    expect(clampPhase('execute')).toBe('execute');
+  });
+
+  it('clamps an unrecognised value to empty rather than throwing', () => {
+    expect(clampPhase('wat')).toBe('');
+  });
+
+  it('clamps an absent value to empty', () => {
+    expect(clampPhase(undefined)).toBe('');
+  });
+});
+
+describe('parseElapsed', () => {
+  it('parses a plain digit string as whole seconds', () => {
+    expect(parseElapsed('90')).toBe(90);
+  });
+
+  it('clamps a negative value to 0', () => {
+    expect(parseElapsed('-5')).toBe(0);
+  });
+
+  it('clamps a fractional value to 0', () => {
+    expect(parseElapsed('1.5')).toBe(0);
+  });
+
+  it('clamps scientific notation to 0', () => {
+    expect(parseElapsed('1e3')).toBe(0);
+  });
+
+  it('clamps a non-numeric value to 0', () => {
+    expect(parseElapsed('abc')).toBe(0);
+  });
+
+  it('clamps an empty string to 0', () => {
+    expect(parseElapsed('')).toBe(0);
+  });
+
+  it('clamps an absent value to 0', () => {
+    expect(parseElapsed(undefined)).toBe(0);
   });
 });

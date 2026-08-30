@@ -54,6 +54,46 @@ export interface BacklogItem {
    * side that renders it.
    */
   started: string;
+  /**
+   * Second-precision UTC timestamp (same shape as the newer `started`) of the
+   * last `start` or `stop` on this item. Written by both, so it moves every
+   * time work opens OR closes — unlike `started`, which is fixed at the
+   * moment work opened and only clears on `stop`. '' when the item has never
+   * been started or stopped. Surfaced verbatim, same as `started`: it is
+   * history the client renders, not something this side interprets.
+   */
+  updated: string;
+  /**
+   * Which clock is currently running: `'groom'` while a groom session holds
+   * the item, `'execute'` while an execute session does. `stop` removes the
+   * key entirely, so a stopped item legitimately has no `phase` — that state
+   * is `''`, the same value an item that was never started has. There is no
+   * way to tell "stopped" from "never started" from `phase` alone; that
+   * distinction lives in `started`.
+   *
+   * Clamped, not validated: an unrecognised value on disk (a typo, a future
+   * third phase this reader doesn't know about yet) becomes `''` rather than
+   * throwing. A malformed `phase:` must not 500 the board or drop the item
+   * from the index — `''` degrades to "in progress, phase unknown", the same
+   * value an item that was never started carries, and it is up to the client
+   * to render something sensible for that case (a generic in-progress bar
+   * rather than a groom- or execute-specific one).
+   */
+  phase: '' | 'groom' | 'execute';
+  /**
+   * Whole seconds accumulated across every groom session on this item, kept
+   * running by `start`/`stop`. `0` both when the key is absent (nobody has
+   * groomed it yet) and when the value on disk isn't a plain non-negative
+   * integer — the CLI never writes anything else, so a negative, fractional,
+   * or non-numeric string only reaches here via a hand edit, and the read
+   * side clamps it to `0` instead of surfacing NaN or throwing. A session
+   * shorter than a second still bills, so `0` is also a legitimate accrued
+   * value, not only the "absent" sentinel.
+   */
+  groomElapsed: number;
+  /** Same accumulation and same clamping as `groomElapsed`, for time spent
+   *  under `backlog-execute` instead of `backlog-groom`. */
+  executeElapsed: number;
   tags: string[];
   section: Section;
   status: ItemStatus;

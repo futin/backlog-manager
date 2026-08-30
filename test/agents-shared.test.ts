@@ -7,6 +7,7 @@ import type { AgentsStatus, BacklogItem } from '../shared/types';
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
+    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md'
   };

@@ -92,6 +92,31 @@ export function sectionText(body: string, heading: string): string {
 const UNKNOWN = /^[\s*_`#]*unknown[\s*_`]*(?:$|[.,:;!?\-–—][\s\S]*$)/i;
 
 /**
+ * `phase` frontmatter is `groom` | `execute` while work is live, and the key
+ * is absent once `stop` clears it. Clamped rather than validated: a value
+ * this reader doesn't recognise (a typo, a future phase written by a newer
+ * CLI) must not fail the scan or drop the item from the index — see
+ * `BacklogItem.phase` in shared/types.ts for what the board does with the
+ * empty-string result.
+ */
+export function clampPhase(value: string | undefined): '' | 'groom' | 'execute' {
+  return value === 'groom' || value === 'execute' ? value : '';
+}
+
+/**
+ * `groom-elapsed` / `execute-elapsed` are whole seconds the CLI accumulates
+ * on every `stop`. Only a plain string of digits is trusted — no sign, no
+ * decimal point, no exponent — so `parseInt` is never given the chance to
+ * silently truncate `"1.5"` to `1` or turn `""`/`"abc"` into `NaN`: anything
+ * that isn't `/^\d+$/` reads as `0`, the same as the key being absent. The
+ * CLI itself refuses to write a bad value; this only matters for a file
+ * edited by hand.
+ */
+export function parseElapsed(value: string | undefined): number {
+  return value !== undefined && /^\d+$/.test(value) ? parseInt(value, 10) : 0;
+}
+
+/**
  * Groomed is derived, never stored — see the spec. bugs: Cause and Fix both
  * filled and not the "unknown" sentinel (that emptiness is precisely what
  * backlog-execute refuses to work on). tasks: a non-empty Plan (capture

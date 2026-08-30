@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { ItemParseError, deriveGroomed, parseFrontmatter } from './parse.util';
+import { ItemParseError, clampPhase, deriveGroomed, parseElapsed, parseFrontmatter } from './parse.util';
 import type { BacklogItem, ItemStatus, RegistryProject, Section } from '../../../shared/types';
 
 /**
@@ -48,6 +48,14 @@ export function scanProject(project: RegistryProject): { items: BacklogItem[]; e
           title: fm.fields.title,
           created: fm.fields.created ?? '',
           started: fm.fields.started ?? '',
+          // The kebab-to-camel mapping for Task 4's four new keys lives here
+          // and only here — see BacklogItem in shared/types.ts for what each
+          // field means and why phase/the elapsed buckets clamp instead of
+          // rejecting a hand-edited value.
+          updated: fm.fields.updated ?? '',
+          phase: clampPhase(fm.fields.phase),
+          groomElapsed: parseElapsed(fm.fields['groom-elapsed']),
+          executeElapsed: parseElapsed(fm.fields['execute-elapsed']),
           tags: fm.tags,
           section: leaf.section,
           status: leaf.status,

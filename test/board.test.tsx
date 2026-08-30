@@ -40,6 +40,7 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // `Section`/`ItemStatus` below — the annotation is what keeps them narrowed.
   const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: CREATED, started: '', tags: [],
+    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over

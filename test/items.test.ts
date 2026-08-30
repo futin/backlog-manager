@@ -28,6 +28,22 @@ describe('GET /api/items and /api/projects', () => {
     // can only be aged in days.
     { leaf: 'bugs/open', filename: 'bug-4-legacy-start.md',
       content: item('bug-4', 'started the old way', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-24\n') },
+    // Task 4 fixtures: every new key present at once — proves the scan still
+    // parses, still derives section/status from the directory, and doesn't
+    // add itself to errors[].
+    { leaf: 'bugs/open', filename: 'bug-5-live-groom.md',
+      content: item('bug-5', 'mid groom', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
+        'phase: groom\nupdated: 2026-08-30T12:00:00Z\ngroom-elapsed: 90\nexecute-elapsed: 7\n') },
+    // execute-elapsed present without groom-elapsed: the two buckets are
+    // independent counters, not a shared one that both keys feed.
+    { leaf: 'bugs/open', filename: 'bug-6-live-execute.md',
+      content: item('bug-6', 'mid execute', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
+        'phase: execute\nexecute-elapsed: 7\n') },
+    // An unrecognised phase and a negative elapsed value, both only reachable
+    // by hand-editing the file — the CLI never writes either.
+    { leaf: 'bugs/open', filename: 'bug-7-bad-values.md',
+      content: item('bug-7', 'hand-edited', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
+        'phase: wat\ngroom-elapsed: -5\n') },
     { leaf: 'tasks/done', filename: 'task-2-shipped.md',
       content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
     { leaf: 'out-of-scope', filename: 'oos-1-nope.md',
@@ -62,7 +78,7 @@ describe('GET /api/items and /api/projects', () => {
     const index = res.body as ItemsIndex;
     const byId = new Map(index.items.map((i) => [`${i.project}/${i.id}`, i]));
 
-    expect(byId.size).toBe(8);
+    expect(byId.size).toBe(11);
     const bug1 = byId.get('alpha/bug-1') as BacklogItem;
     expect(bug1.section).toBe('bugs');
     expect(bug1.status).toBe('open');
@@ -94,7 +110,7 @@ describe('GET /api/items and /api/projects', () => {
     const a = byName.get('alpha') as ProjectSummary;
     expect(a.missing).toBe(false);
     // done task-2 is not counted; the malformed idea is not an item
-    expect(a.counts).toEqual({ bugs: 4, ideas: 0, tasks: 1, 'out-of-scope': 1 });
+    expect(a.counts).toEqual({ bugs: 7, ideas: 0, tasks: 1, 'out-of-scope': 1 });
     const ghost = byName.get('ghost') as ProjectSummary;
     expect(ghost.missing).toBe(true);
     expect(ghost.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 });
@@ -114,6 +130,55 @@ describe('GET /api/items and /api/projects', () => {
     expect((byId.get('alpha/bug-3') as BacklogItem).started).toBe('2026-08-28T14:03:07Z');
     expect((byId.get('alpha/bug-4') as BacklogItem).started).toBe('2026-08-24');
     expect((byId.get('alpha/bug-1') as BacklogItem).started).toBe('');
+  });
+
+  // phase, updated, and the two elapsed buckets, wired end to end from
+  // kebab-case frontmatter through the scan to the API response. Exhaustive
+  // clamping behaviour (what "-5", "1.5", "abc", or "wat" become) is
+  // unit-tested directly against clampPhase/parseElapsed in parse.test.ts;
+  // this is the proof the scan actually reads the right kebab keys into the
+  // right camelCase fields, and that a bad value clamps instead of 500ing
+  // the whole index or dropping the item.
+  it('surfaces phase, updated, and the elapsed buckets, clamping bad values instead of erroring', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+    const byId = new Map(index.items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    // Nobody has touched bug-1: every new field sits at its absent-default.
+    const bug1 = byId.get('alpha/bug-1') as BacklogItem;
+    expect(bug1.phase).toBe('');
+    expect(bug1.updated).toBe('');
+    expect(bug1.groomElapsed).toBe(0);
+    expect(bug1.executeElapsed).toBe(0);
+
+    // Every new key present at once: still parses, still bugs/open, groomed
+    // still derives from the body — none of it lands in errors[] (asserted
+    // below).
+    const bug5 = byId.get('alpha/bug-5') as BacklogItem;
+    expect(bug5.phase).toBe('groom');
+    expect(bug5.updated).toBe('2026-08-30T12:00:00Z');
+    expect(bug5.groomElapsed).toBe(90);
+    expect(bug5.executeElapsed).toBe(7);
+    expect(bug5.section).toBe('bugs');
+    expect(bug5.status).toBe('open');
+    expect(bug5.groomed).toBe(true);
+
+    // execute-elapsed present without groom-elapsed: the buckets don't share
+    // a counter — the absent one still reads 0, not the other's value.
+    const bug6 = byId.get('alpha/bug-6') as BacklogItem;
+    expect(bug6.phase).toBe('execute');
+    expect(bug6.executeElapsed).toBe(7);
+    expect(bug6.groomElapsed).toBe(0);
+
+    // An unrecognised phase and a negative elapsed value both clamp to their
+    // empty/zero default rather than erroring the whole index.
+    const bug7 = byId.get('alpha/bug-7') as BacklogItem;
+    expect(bug7.phase).toBe('');
+    expect(bug7.groomElapsed).toBe(0);
+
+    // Still only the one pre-existing malformed file (idea-1-broken.md) —
+    // none of the new fixtures above added themselves to errors[].
+    expect(index.errors).toHaveLength(1);
   });
 
   it('serves an item body as text/plain with the frontmatter stripped', async () => {

@@ -14,6 +14,7 @@ import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../s
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'task-1', title: 'a task', created: '2026-08-20', started: '', tags: [],
+    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
     section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md'
   };
