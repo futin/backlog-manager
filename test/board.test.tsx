@@ -217,6 +217,28 @@ describe('BoardView', () => {
     expect(idle.querySelector('.board-card-live-bar')).toBeNull();
   });
 
+  // The bar used to always say "in progress"; now it names which skill holds
+  // the item, because "grooming" and "executing" are different facts about
+  // what is actually happening to it. An empty phase (started before Task 4
+  // added the key, or a stop that already cleared it while `started` is
+  // somehow still set on a hand-edited file) is not an error case — it falls
+  // back to the old generic wording rather than rendering nothing.
+  it('names the activity on the live bar: grooming for a groom-phase item, generic otherwise', async () => {
+    stubItems([
+      fakeItem({ id: 'bug-grooming', title: 'being groomed', started: agoISO(5 * 60 * 1000), phase: 'groom' }),
+      fakeItem({ id: 'bug-plain-live', title: 'plain live', started: agoISO(5 * 60 * 1000) })
+    ]);
+    await renderBoard();
+
+    const groomingBar = screen.getByText('being groomed').closest('.board-card')!
+      .querySelector('.board-card-live-bar') as HTMLElement;
+    expect(within(groomingBar).getByText('grooming')).toBeInTheDocument();
+
+    const plainBar = screen.getByText('plain live').closest('.board-card')!
+      .querySelector('.board-card-live-bar') as HTMLElement;
+    expect(within(plainBar).getByText('in progress')).toBeInTheDocument();
+  });
+
   it('reads the elapsed time in minutes for work picked up this hour', async () => {
     (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);

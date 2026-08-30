@@ -1,4 +1,4 @@
-import { daysSince, elapsedSince, formatCreated } from '../client/src/lib/item-age';
+import { daysSince, elapsedSince, formatCreated, formatSeconds } from '../client/src/lib/item-age';
 
 /**
  * `now` is injected in every case below rather than mocked globally: the whole
@@ -139,5 +139,41 @@ describe('formatCreated', () => {
     expect(formatCreated('', NOW)).toBe('');
     expect(formatCreated('whenever', NOW)).toBe('whenever');
     expect(formatCreated('2026-13-45', NOW)).toBe('2026-13-45');
+  });
+});
+
+/**
+ * The drawer's accumulated-time reading — `groomElapsed`/`executeElapsed` are
+ * whole seconds, not an instant to diff against `now`, so this is a pure
+ * formatter rather than another `elapsedSince`-shaped clock function.
+ *
+ * Only two rungs, not three: `elapsedSince` above needs a days rung because a
+ * card's `started` marker can be weeks old and still be true, live, ongoing
+ * work. Accumulated time is billed, closed seconds — nobody accrues 24 real
+ * hours of active grooming or execution, and the day-of-precision that made
+ * sense for "how long has this been open" would only make an unusually large
+ * number look smaller than it is here. So minutes and hours are the whole
+ * ladder, and both floor: `90` seconds is short of two full minutes, so it
+ * reads `1m`, not `1m 30s` — seconds stop being interesting once minutes
+ * exist to hold the value, which is also why the hours rung drops the minutes
+ * remainder entirely instead of chaining a third unit onto it. The minutes
+ * remainder on the hours rung is kept only when it is non-zero: `3600` is a
+ * clean hour and `3600 · ' 0m'` would be noise, while `3660` genuinely needs
+ * the extra minute to be exact.
+ */
+describe('formatSeconds', () => {
+  it.each([
+    [0, '0s'],
+    [1, '1s'],
+    [59, '59s'],
+    [60, '1m'],
+    [90, '1m'],
+    [3599, '59m'],
+    [3600, '1h'],
+    [3660, '1h 1m'],
+    [7860, '2h 11m'],
+    [86400, '24h']
+  ])('formats %i seconds as %s', (input, expected) => {
+    expect(formatSeconds(input)).toBe(expected);
   });
 });

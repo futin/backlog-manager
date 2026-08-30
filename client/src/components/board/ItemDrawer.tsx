@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { marked } from 'marked';
 
-import { elapsedSince } from '../../lib/item-age';
+import { elapsedSince, formatSeconds } from '../../lib/item-age';
 import { isInProgress } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { DispatchButton } from './DispatchButton';
@@ -279,6 +279,18 @@ export function ItemDrawer(
               : ''}
             {item.status === 'done' ? ' · done' : ''}
             {item.tags.length > 0 ? ` · ${item.tags.join(', ')}` : ''}
+            {/* Accumulated time, unlike the in-progress segment above, is NOT
+                gated on `inProgress` or `item.status`: it is history, not a
+                live reading, and `move` never rewrites an item's content, so
+                a done item's billed seconds are exactly as true after
+                archiving as before. Each bucket renders independently — an
+                item can carry either, both, or neither — and a zero bucket
+                is silent rather than printing "groomed for 0s", since `0` is
+                also what an item that was never groomed or executed carries
+                (see BacklogItem.groomElapsed/executeElapsed in
+                shared/types.ts): there is nothing true to say about it. */}
+            {item.groomElapsed > 0 ? ` · groomed for ${formatSeconds(item.groomElapsed)}` : ''}
+            {item.executeElapsed > 0 ? ` · worked for ${formatSeconds(item.executeElapsed)}` : ''}
           </span>
           <span className="drawer-path">{item.path}</span>
         </div>

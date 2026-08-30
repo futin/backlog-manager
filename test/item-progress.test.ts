@@ -1,4 +1,4 @@
-import { isInProgress } from '../client/src/lib/item-progress';
+import { isInProgress, progressLabel } from '../client/src/lib/item-progress';
 import type { BacklogItem } from '../shared/types';
 
 /**
@@ -44,5 +44,44 @@ describe('isInProgress', () => {
 
   it('is false for a terminal (rejected) item, same reason', () => {
     expect(isInProgress(fakeItem({ status: 'terminal', started: '2026-08-28T14:03:07Z' }))).toBe(false);
+  });
+});
+
+/**
+ * The live bar's words. `phase` names which skill currently holds the item
+ * ('groom' or 'execute'); an empty phase is not an error case to special-case
+ * away, it is the legitimate reading for an item started before Task 4 added
+ * the key at all, so it falls back to the old generic wording rather than
+ * rendering nothing.
+ *
+ * The fourth case is the one worth arguing about and the brief settles it on
+ * purpose: a done item can still carry `phase: 'groom'` on disk (`move` never
+ * rewrites content, so the key some groom session left behind just sits
+ * there as history), and this function does not get to assume its caller
+ * always gates on `isInProgress` first. It doesn't here — every caller in
+ * this codebase renders the label only behind that gate — but the function's
+ * OWN answer for a done item has to be the inert one regardless, because the
+ * day a second caller forgets the gate, "in progress" is a fib and
+ * "grooming" is a fib that also claims a live session that does not exist.
+ */
+describe('progressLabel', () => {
+  it('reads "grooming" for an open item a groom session currently holds', () => {
+    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'groom' })))
+      .toBe('grooming');
+  });
+
+  it('reads "executing" for an open item an execute session currently holds', () => {
+    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'execute' })))
+      .toBe('executing');
+  });
+
+  it('falls back to "in progress" for an open, started item with no phase recorded', () => {
+    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: '' })))
+      .toBe('in progress');
+  });
+
+  it('reads "in progress" for a done item, even though it still carries phase: groom as history', () => {
+    expect(progressLabel(fakeItem({ status: 'done', started: '2026-08-28T14:03:07Z', phase: 'groom' })))
+      .toBe('in progress');
   });
 });

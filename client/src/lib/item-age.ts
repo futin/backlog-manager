@@ -114,3 +114,52 @@ export function formatCreated(created: string, now: number = Date.now()): string
   if (year === new Date(now).getUTCFullYear()) return `${month} ${day}`;
   return `${month} ${day} '${`${year}`.slice(-2)}`;
 }
+
+const SECONDS_PER_MINUTE = 60;
+const SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE;
+
+/**
+ * The drawer's accumulated-time reading for `groomElapsed`/`executeElapsed`:
+ * a whole-seconds total that was billed and closed, not an instant to diff
+ * against `now` the way `elapsedSince` above does — so this takes a duration
+ * directly rather than a stamp and a clock.
+ *
+ * Two rungs, not three. `elapsedSince` needs a days rung because a card's
+ * `started` marker can legitimately be weeks old and still describe ongoing
+ * work; nobody accrues 24 real hours of continuous grooming or execution, so
+ * a days rung here would only ever fire on a hand-edited or clock-skewed
+ * file, and hiding a full day of real billed time behind `1d` would read as
+ * LESS work than `24h` does — the reason days are explicitly not a unit,
+ * called out in this task's brief. Both remaining rungs floor, matching
+ * `elapsedSince`'s convention: a total short of the next whole unit reads as
+ * the unit below it rather than rounding up and overclaiming.
+ *
+ * The hours rung keeps its minutes remainder only when it is non-zero:
+ * `3600` is a clean hour and appending `0m` to it is noise with no
+ * information in it, while `3660` genuinely needs the extra minute to be
+ * exact. The minutes rung drops any leftover seconds outright rather than
+ * chaining a third unit the way `3600` keeps its minutes — once the total
+ * clears a minute, the remaining seconds are not interesting: `90` reads
+ * `1m`, not `1m 30s`.
+ *
+ * `groomElapsed`/`executeElapsed` are already whole non-negative integers by
+ * the time they reach here (BacklogItem clamps a hand-edited negative,
+ * fractional, or non-numeric value on disk to `0` — see shared/types.ts), so
+ * this guard is not load-bearing for any real caller. It exists anyway for
+ * the same reason the rest of this module returns a safe default instead of
+ * letting a bad input reach the DOM: a future caller passing an untrusted
+ * number should get `0s` rather than `NaNs`.
+ */
+export function formatSeconds(total: number): string {
+  const seconds = Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
+
+  if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`;
+
+  if (seconds < SECONDS_PER_HOUR) {
+    return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m`;
+  }
+
+  const hours = Math.floor(seconds / SECONDS_PER_HOUR);
+  const minutes = Math.floor((seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE);
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}

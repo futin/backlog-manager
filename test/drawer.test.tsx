@@ -63,6 +63,56 @@ describe('ItemDrawer', () => {
     await screen.findByText('off by one');
   });
 
+  /**
+   * The accumulated buckets are history, not a live-only reading: unlike the
+   * "in progress" segment above, which is gated on `isInProgress`, these are
+   * not gated on status at all. `move` never rewrites an item's content, so a
+   * done item's groomed/executed seconds are exactly as true after archiving
+   * as before — the drawer is where that kind of history belongs, same
+   * reasoning as the verbatim `started` value beside it. Each bucket is
+   * independent (an item can carry both, either, or neither) and a zero
+   * bucket renders nothing rather than "groomed for 0s", since `0` is also
+   * what an item that was never groomed carries — there is nothing true to
+   * say about it.
+   */
+  describe('accumulated time', () => {
+    it('shows "groomed for" with the formatted total, and hides "worked for" when execute is zero', async () => {
+      render(
+        <ItemDrawer
+          item={{ ...ITEM, groomElapsed: 3660, executeElapsed: 0 }}
+          hues={HUES}
+          onClose={() => {}}
+        />
+      );
+      expect(screen.getByText(/groomed for 1h 1m/)).toBeInTheDocument();
+      expect(screen.queryByText(/worked for/)).not.toBeInTheDocument();
+      await screen.findByText('off by one');
+    });
+
+    it('shows neither bucket when both are zero', async () => {
+      render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+      expect(screen.queryByText(/groomed for/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/worked for/)).not.toBeInTheDocument();
+      await screen.findByText('off by one');
+    });
+
+    // The regression guard for the "history, not live-only" claim above: this
+    // item is done, and rendering nothing here at all would be the bug the
+    // isInProgress-gated segment already correctly opts out of for a done
+    // item — this bucket must not inherit that gate by accident.
+    it('shows accumulated execute time on a done item, not gated behind in-progress', async () => {
+      render(
+        <ItemDrawer
+          item={{ ...ITEM, status: 'done', executeElapsed: 90 }}
+          hues={HUES}
+          onClose={() => {}}
+        />
+      );
+      expect(screen.getByText(/worked for 1m/)).toBeInTheDocument();
+      await screen.findByText('off by one');
+    });
+  });
+
   it('fetches the body by path and renders the markdown', async () => {
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     expect(global.fetch).toHaveBeenCalledWith(

@@ -1,5 +1,5 @@
 import { elapsedSince, formatCreated } from '../../lib/item-age';
-import { isInProgress } from '../../lib/item-progress';
+import { isInProgress, progressLabel } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
@@ -71,7 +71,13 @@ export function ItemCard(
             the tab is the item's next step and keeps its own identity. */}
         {inProgress && (
           <div className="board-card-live-bar" title={`in progress since ${item.started}`}>
-            <span>in progress</span>
+            {/* Names which skill actually holds the item ('grooming' /
+                'executing') rather than the old generic wording every live
+                card used to carry — see item-progress.ts for why an empty
+                phase still falls back to it instead of rendering nothing.
+                The title attribute above is unaffected: it keeps naming the
+                stored `started` value regardless of which activity this is. */}
+            <span>{progressLabel(item)}</span>
             {/* Absent rather than blank when the value cannot be aged: the words
                 beside it already carry the fact, and half a marker beats a lie.
                 The exact stored value is in the title above and spelled out in
