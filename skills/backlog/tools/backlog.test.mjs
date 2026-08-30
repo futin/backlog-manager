@@ -864,6 +864,9 @@ function writeItemWithBody(backlog, rel, id, title, body) {
 // own clock — what matters is that the line is a timestamp and not a bare date,
 // since the card's minutes-and-hours label has nothing to read otherwise.
 const STAMP_LINE = /^started: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m
+// Same shape as STAMP_LINE, but for asserting against a parsed value (e.g.
+// `parseFrontmatter(...).data.started`) rather than a raw frontmatter line.
+const STAMP_LINE_VALUE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
 
 test('CLI start bug-7 adds a started: line stamped to the second in UTC and prints the item path', () => {
   const { dir, openBugPath } = boardFixture()
@@ -997,13 +1000,22 @@ test('CLI start bug-99 exits 1 and names the unknown id', () => {
   assert.match(out.stderr, /unknown id: bug-99/)
 })
 
-test('CLI start with no id exits 1 and prints a usage line naming both verbs', () => {
+test('CLI start with no id exits 1 and prints a usage line naming both verbs, --as on the start line only', () => {
   const { dir } = boardFixture()
 
   const out = run(dir, 'start')
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /usage: backlog\.mjs start <id>/)
+  // `--as` is start's own flag: stop reads phase off the file instead (see
+  // the "phase" section below), so the usage text must not suggest stop
+  // takes one too. Asserted line-by-line rather than with one regex so a
+  // future edit that moved `--as` onto the wrong line fails clearly instead
+  // of just failing to match at all.
+  const lines = out.stderr.trim().split('\n')
+  assert.match(lines[0], /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/)
+  assert.match(lines[1], /^\s*backlog\.mjs stop <id>$/)
+  assert.doesNotMatch(lines[1], /--as/)
 })
 
 test('CLI start exits 3 and names init when there is no backlog/ store yet', () => {
@@ -1240,6 +1252,104 @@ test('CLI move does not add an updated: key and leaves the file byte-for-byte un
   const after = fs.readFileSync(newPath)
   assert.ok(before.equals(after))
   assert.doesNotMatch(after.toString('utf8'), /^updated:/m)
+})
+
+// --- phase ---------------------------------------------------------------
+// `phase` names which activity currently holds the started: marker — the
+// value `--as` writes. It is layered strictly on top of everything above:
+// omit `--as` and start behaves exactly as it did before this section
+// existed (no phase: key at all, not even an empty one), and every existing
+// refusal (done, out-of-scope, already-started) fires the same way whether
+// or not `--as` was given. Task 3 is what makes `stop` read this key back
+// to bill elapsed time; these tests only cover start writing and refusing
+// it, and stop refusing the flag outright.
+
+test('CLI start --as groom writes phase: groom alongside started:', () => {
+  const { dir, openBugPath } = boardFixture()
+
+  const out = run(dir, 'start', 'bug-7', '--as', 'groom')
+
+  assert.equal(out.status, 0, out.stderr)
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data.phase, 'groom')
+  assert.match(data.started, STAMP_LINE_VALUE)
+})
+
+test('CLI start --as execute writes phase: execute', () => {
+  const { dir, openBugPath } = boardFixture()
+
+  const out = run(dir, 'start', 'bug-7', '--as', 'execute')
+
+  assert.equal(out.status, 0, out.stderr)
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data.phase, 'execute')
+})
+
+test('CLI start with no --as writes started: and no phase: key at all', () => {
+  const { dir, openBugPath } = boardFixture()
+
+  const out = run(dir, 'start', 'bug-7')
+
+  assert.equal(out.status, 0, out.stderr)
+  const text = fs.readFileSync(openBugPath, 'utf8')
+  assert.match(text, STAMP_LINE)
+  assert.doesNotMatch(text, /^phase:/m)
+})
+
+// An unrecognised value is a refusal naming both accepted ones, not a bare
+// "invalid phase" the caller would have to guess at — and it must not write
+// anything, so a mistyped --as can never leave started: set with no
+// matching phase.
+test('CLI start --as reviewing refuses, names both accepted values, and leaves the file untouched', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'start', 'bug-7', '--as', 'reviewing')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /groom/)
+  assert.match(out.stderr, /execute/)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+// `--as` with nothing after it is a usage error, not "no phase" — silently
+// falling back to the no-flag behavior here would make a truncated command
+// line (a missing shell-quoted argument, say) succeed quietly instead of
+// telling the caller their flag had no value.
+test('CLI start --as with no value refuses with the start/stop usage text', () => {
+  const { dir } = boardFixture()
+
+  const out = run(dir, 'start', 'bug-7', '--as')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id>$/m)
+})
+
+// stop reads the phase off the file (Task 3); a --as flag here could name
+// something different from what is actually stored, so it is refused
+// outright rather than accepted and ignored.
+test('CLI stop rejects --as with the usage text and leaves the file untouched', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'stop', 'bug-7', '--as', 'groom')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id>$/m)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('CLI start --as groom twice refuses on the second call with the existing already-in-progress message', () => {
+  const { dir } = boardFixture()
+  assert.equal(run(dir, 'start', 'bug-7', '--as', 'groom').status, 0)
+
+  const out = run(dir, 'start', 'bug-7', '--as', 'groom')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /bug-7 is already in progress/)
+  assert.match(out.stderr, new RegExp(TODAY))
 })
 
 // --- board registry ----------------------------------------------------------

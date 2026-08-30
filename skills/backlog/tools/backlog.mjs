@@ -634,6 +634,21 @@ function nowISO() {
   return `${new Date().toISOString().slice(0, 19)}Z`
 }
 
+// The two activities that can hold the in-progress marker. Exported so
+// Task 3's stop — which reads this same key back off the file to decide
+// which of groom-elapsed:/execute-elapsed: to bill time into — validates
+// against this one list instead of a second copy that could drift from it.
+//
+// `phase` is deliberately NOT a status, and does not loosen the `status:`
+// ban in parseFrontmatter above. A status answers "where does this item
+// live" — the directory it is in, and only the directory, per that ban.
+// `phase` answers a narrower, shorter-lived question: which activity
+// currently holds the started: marker. It has no meaning without started:
+// and no lifespan beyond it — the two are written together here, and
+// (Task 3) will be cleared together too — so it can never become a fourth
+// place an item "is", the way a real status key would.
+export const PHASES = ['groom', 'execute']
+
 // Refuses in the two cases the lifecycle makes meaningless, each with its
 // own message rather than one shared "cannot start": done and out-of-scope
 // have no work left to pick up. An idea carries no such refusal — grooming
@@ -648,7 +663,19 @@ function nowISO() {
 // signal the stamp exists to provide. The refusal names the value already
 // there — in whichever of the two shapes it is — so the caller can see what
 // it would have overwritten.
-export function startItem(backlog, id, stamp = nowISO()) {
+export function startItem(backlog, id, stamp = nowISO(), phase = undefined) {
+  // Validated first, before locateItem even runs — same order moveItem
+  // checks `dest` against MOVE_DESTS in. A bad --as is a shape problem with
+  // the call itself, not something that depends on which item or state it
+  // names, so it is refused before any of that is even looked up, and
+  // before anything is written. The message names both accepted values
+  // rather than saying "invalid phase" — the CLI is the only caller today,
+  // but this same throw is what a future in-process caller gets too, and
+  // "invalid phase" would make either one guess.
+  if (phase !== undefined && !PHASES.includes(phase)) {
+    throw new BacklogError(`unknown phase: ${phase} (expected ${PHASES.join(' or ')})`, 1)
+  }
+
   const item = locateItem(backlog, id)
 
   if (item.state === 'terminal') {
@@ -663,13 +690,19 @@ export function startItem(backlog, id, stamp = nowISO()) {
     throw new BacklogError(`${id} is already in progress (started ${data.started})`, 1)
   }
 
+  // No `phase` key at all when the caller didn't pass one — not `phase: ''`
+  // or some other placeholder — so an older caller (or a plain `start` with
+  // no --as) produces a file Task 3's stop can tell apart from one it should
+  // bill time against: nothing to key the billing off of.
+  const next = phase === undefined ? { ...data, started: stamp } : { ...data, started: stamp, phase }
+
   // `stamp` is forwarded as writeItemFile's own fourth argument rather than
   // left for writeItemFile's default to recompute — see the comment on
   // writeItemFile for why: `started` and `updated` are two readings of the
   // exact same instant here, and passing the one value through both keeps
   // them identical instead of risking a second's drift between two separate
   // `nowISO()` calls a few statements apart.
-  writeItemFile(item.path, { ...data, started: stamp }, body, stamp)
+  writeItemFile(item.path, next, body, stamp)
   return item.path
 }
 
@@ -783,7 +816,10 @@ const MOVE_USAGE = `usage: backlog.mjs move <id> done|out-of-scope`
 
 // One constant for both verbs: they are a pair, and someone who mistyped one
 // of them is the person most likely to want the other named right there.
-const START_STOP_USAGE = `usage: backlog.mjs start <id>
+// `--as` is shown on the start line only — stop does not take it (see the
+// CLI block below for why), and showing it on both lines would tell the
+// caller the opposite of what stop actually accepts.
+const START_STOP_USAGE = `usage: backlog.mjs start <id> [--as groom|execute]
        backlog.mjs stop <id>`
 
 export function main(argv) {
@@ -1005,13 +1041,46 @@ export function main(argv) {
       return 1
     }
 
+    // `--as` is start's flag, parsed here (not left for startItem alone) so
+    // stop can refuse it before ever touching the file. stop reads the
+    // phase off the file instead of taking it as a flag: the file is the
+    // one place that can't disagree with itself, and a --as here could name
+    // something other than what start actually stored, which would leave no
+    // way to tell whether the flag or the file was telling the truth. `new`
+    // and `board`, both above, scan their own flags the same way.
+    let phase
+    let sawAsFlag = false
+    for (let i = 2; i < argv.length; i++) {
+      if (argv[i] === '--as') {
+        sawAsFlag = true
+        phase = argv[i + 1]
+        i++
+      }
+    }
+
+    // Both refusals below print the shared usage text rather than a
+    // phase-specific message: a missing value and a flag on the wrong verb
+    // are shape problems with the command line itself, the same class of
+    // error the missing-id check above already reports this way — an
+    // unrecognised (but present) value is the different case, and reaches
+    // startItem's own validation below instead, which names the two
+    // accepted values explicitly.
+    if (cmd === 'stop' && sawAsFlag) {
+      console.error(START_STOP_USAGE)
+      return 1
+    }
+    if (sawAsFlag && phase === undefined) {
+      console.error(START_STOP_USAGE)
+      return 1
+    }
+
     const r = requireBacklog()
     if (!r.ok) return r.code
 
     let itemPath
     try {
       itemPath = cmd === 'start'
-        ? startItem(r.resolved.backlog, id)
+        ? startItem(r.resolved.backlog, id, undefined, phase)
         : stopItem(r.resolved.backlog, id)
     } catch (e) {
       if (!(e instanceof BacklogError)) throw e
