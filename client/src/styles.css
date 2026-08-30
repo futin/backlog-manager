@@ -380,6 +380,9 @@ body {
 .set-name { font-size: 12px; font-weight: 600; color: var(--ink) }
 .set-hint { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
 .set-hint code { font-family: var(--mono); font-size: 10px; color: var(--cyan) }
+.set-dot-green { color: var(--green) }
+.set-dot-amber { color: var(--amber) }
+.set-dot-gray { color: var(--ink3) }
 .set-control { display: flex; align-items: center; gap: 6px; flex-shrink: 0 }
 .set-control select,
 .set-control input[type=number],

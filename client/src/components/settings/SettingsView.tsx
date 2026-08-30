@@ -36,6 +36,26 @@ const LANDINGS: { value: Landing; label: string }[] = [
 ];
 
 /**
+ * The dot's three colors answer one question — "can I dispatch right now?" —
+ * not the whole gate ladder `dispatchGate` walks: `spawnAvailable` (no
+ * CLAUDE_BIN) still surfaces as gap text below, it just doesn't change the
+ * color. `green` needs the dashboard reachable AND remote answers on;
+ * anything short of reachable (off, unreachable, still checking) is `gray`
+ * rather than a fourth color, since none of those name a fixable dashboard
+ * setting the way "remote answers off" does.
+ */
+type DotTier = 'green' | 'amber' | 'gray';
+
+function dispatchDotTier(status: AgentsStatus | null): DotTier {
+  if (status === null || !status.enabled || !status.reachable) return 'gray';
+  return status.remoteAnswer ? 'green' : 'amber';
+}
+
+function Dot({ tier }: { tier: DotTier }) {
+  return <span className={`set-dot set-dot-${tier}`}>●</span>;
+}
+
+/**
  * One line per gate, in the order dispatchBlock (shared/agent.ts) checks
  * them, so the first red dot named here is also the thing worth fixing
  * first. Read-only: every one of these gates lives on a host — in this
@@ -49,10 +69,11 @@ const LANDINGS: { value: Landing; label: string }[] = [
 // compounding properties) but redundant, so this returns bare content and
 // lets the row supply the class once.
 function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
+  const dot = <Dot tier={dispatchDotTier(status)} />;
   if (status === null) return <>checking…</>;
-  if (!status.enabled) return <>● off — dispatch is not enabled on the API</>;
+  if (!status.enabled) return <>{dot} off — dispatch is not enabled on the API</>;
   if (!status.reachable) {
-    return <>● unreachable{status.error ? ` — ${status.error}` : ''}</>;
+    return <>{dot} unreachable{status.error ? ` — ${status.error}` : ''}</>;
   }
   const gaps = [
     status.spawnAvailable ? null : 'no CLAUDE_BIN',
@@ -60,7 +81,7 @@ function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
   ].filter((g): g is string => g !== null);
   return (
     <>
-      ● connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
+      {dot} connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
       {' · '}ceiling: {status.spawnMaxPermission ?? 'unknown'}
       {' · '}{status.projectPaths.length} projects
     </>
