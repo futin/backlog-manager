@@ -65,10 +65,22 @@ happened.
   (`allow.util.ts`); a file outside every registered `backlog/` 404s.
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan
   non-empty), never stored; status is the directory, never frontmatter.
-- **`started:` is the one lifecycle key allowed in frontmatter, and it is not
-  a status** — the `status:` ban stands. A second-precision UTC timestamp
-  (`2026-08-28T14:03:07Z`); files stamped before that carry a bare
-  `YYYY-MM-DD` and stay valid forever, aged in days only. Written only by
+- **`started:` and `phase:` are the lifecycle keys allowed in frontmatter,
+  and neither is a status** — the `status:` ban stands, unaffected by either.
+  `start <id> [--as groom|execute]` writes `started:` (a second-precision UTC
+  timestamp, `2026-08-28T14:03:07Z`) alone, or with a `phase: groom` /
+  `phase: execute` line alongside it when `--as` is given; `stop <id>` reads
+  `phase:` back to pick `groom-elapsed:` or `execute-elapsed:` — two
+  permanent, accumulating integer-seconds counters, one per activity — bills
+  the whole seconds since `started:` into it, then removes `started:` and
+  `phase:` together. `updated:` is stamped by every `start` and every `stop`
+  (both funnel through the one function that does it); `move` deliberately
+  does not stamp it — a renameSync that never opens the file — which is also
+  why an item archived without an intervening `stop` keeps whatever
+  `started:`/`phase:` it already carried, same as `started:` alone always
+  has: that's history, not a bug. A bare `YYYY-MM-DD` `started:` from before
+  this timestamp shape existed is cleared on `stop` like any other, but never
+  billed — UTC midnight is not the hour anyone began work. Written only by
   `start`/`stop` — now called by both `backlog-execute` (holding the marker
   until archive) and `backlog-groom` (holding it for one groom session,
   ideas included) — which must round-trip unknown keys and the body

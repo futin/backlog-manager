@@ -72,7 +72,7 @@ Only once both are confirmed — the item and the verdict — say so on disk, be
 the three verdicts below touches the file:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id>
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as groom
 ```
 
 Not any earlier: an item nobody has agreed to work on yet isn't "in progress," and
@@ -142,7 +142,7 @@ Then, by their answer:
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id>
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as groom
   ```
 
   Both lines, in that order. `start` refuses to re-stamp a file that already carries a

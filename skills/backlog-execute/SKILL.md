@@ -79,13 +79,16 @@ The gate passed, so this item is about to be worked. Say so on disk, before any 
 work starts:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id>
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as execute
 ```
 
-That writes one `started: <UTC timestamp>` line into the item's frontmatter and nothing
-else — the body is untouched. The board app renders it as an amber bar across the top of
-the card, reading how long the work has been going, so anyone looking at the board can see
-what's being worked without asking. It is not a status: the item is still open, still in
+That writes a `started: <UTC timestamp>` line and a `phase: execute` line into the
+item's frontmatter, and nothing else — the body is untouched. `phase: execute` is what
+lets `stop` (see below) know to bill the time this session runs into `execute-elapsed:`
+rather than `groom-elapsed:` — leave off `--as` and there's nothing for `stop` to bill
+against. The board app renders the marker as an amber bar across the top of the card,
+reading how long the work has been going, so anyone looking at the board can see what's
+being worked without asking. It is not a status: the item is still open, still in
 `<section>/open/`.
 
 Exit `1` here means the item can't be started, and the message says which: already in

@@ -5,46 +5,100 @@ reasoning behind the ones whose "why" runs longer than the rule. Most of
 these encode a failure that already happened or an attack that was closed
 deliberately — read the relevant section before changing one.
 
-## `started:` is the one lifecycle key in frontmatter, and it is not a status
+## `started:` and `phase:` are the lifecycle keys in frontmatter, and neither is a status
 
-The `status:` ban stands (both parsers still throw on it) because a second
-answer to "which directory holds this file" is the competing source of truth
-the ban exists to prevent; `started` answers a different question — is
+The `status:` ban stands (both parsers still throw on it), unaffected by
+either of these keys — a second answer to "which directory holds this file"
+is the competing source of truth the ban exists to prevent, and neither
+lifecycle key answers that question. `started` answers a different one — is
 someone on this right now — and an item carrying it is still an open item in
-`<section>/open/`. Written only by `start`/`stop`, the only two commands
-that rewrite an existing item's content (`move` renames and never opens the
-file), so both must round-trip unknown keys and the body byte-for-byte.
-Surfaced raw by the scanner; "in progress" is
-`started !== '' && status === 'open'`, decided in the client, because
-archiving deliberately keeps the value as history.
+`<section>/open/`. `phase` answers a narrower, shorter-lived question on top
+of that: *which* activity currently holds the `started:` marker, `groom` or
+`execute`. It has no meaning and no lifespan of its own — it is written
+alongside `started:` only when `start` is called with `--as`, and removed
+together with `started:` on `stop`, never separately. That coupling is
+deliberate, not an oversight: a `phase` that could outlive its `started:`, or
+go stale independently of it, would be a second axis an item's "where is it
+in its lifecycle" depended on — exactly the ambiguity the `status:` ban
+already exists to close off, reopened one key over. `stop` never takes an
+`--as` of its own for this reason — it reads `phase:` back off the file
+instead, the one place that can't disagree with itself. Surfaced raw by the
+scanner; "in progress" is `started !== '' && status === 'open'`, decided in
+the client, because archiving deliberately keeps the value as history (see
+below).
 
-Two skills call `start`/`stop` now, holding the marker for different spans.
-`backlog-execute` picks an item up and holds the marker all the way to
-archive. `backlog-groom` holds it only for the length of one groom session —
-`start` once the item and the verdict are both confirmed, `stop` again once
-that verdict's steps finish, or as soon as the session ends without a verdict
-at all, so an abandoned groom never leaves a stamp nothing will clear. Either
-can stamp an idea now: the original reasoning for refusing one — "an idea has
-nothing to execute" — held for execute but not for groom, since deciding an
-idea's verdict (promote it to a task, or reject it outright) is itself the
-active work the marker exists to describe. None of this widens who writes
-the file: `backlog.mjs` is still the single writer, `start`/`stop` are still
-the only two commands that touch an existing item's content, and the
-round-trip guarantee above covers both callers identically.
+`start`/`stop` are still the only two commands that rewrite an existing
+item's content — `move` renames and never opens the file — so both must
+round-trip unknown keys and the body byte-for-byte, and both stamp
+`updated:` while doing it, inside `writeItemFile`, the one function they
+both funnel through rather than each writing that line itself (a caller
+added later can't forget a convention it never has to know about). `move` is
+deliberately excluded from that stamp — opening a file just to change one
+line would reintroduce the exact risk the plain `renameSync` exists to
+avoid. For `backlog-groom`'s moves (an idea promoted to `done/`, anything
+rejected to `out-of-scope/`) and for `backlog-execute`'s abandonment path,
+`stop` always runs immediately before the move, so `updated:` is never more
+than one function call older than the move that follows it. The one path
+that does not is `backlog-execute`'s own successful archive: it holds the
+marker through to `move ... done` without an intervening `stop` (see the
+next paragraph), so that item's `updated:` stays exactly as old as its last
+`start`/`stop` cycle left it, and `started:`/`phase:` are what survive as
+the historical record instead.
 
-The value is a second-precision UTC timestamp (`2026-08-28T14:03:07Z`), not a
-date, because the useful resolution for "is anyone on this right now" is
-minutes and hours: a bare date rounded everything picked up today to `0d`,
-which is precisely the work the marker exists to surface, and read as "nothing
-has happened yet". UTC because the value is compared against `Date.now()` on
-whatever machine renders the board.
+Two skills call `start`/`stop`, holding the marker for different spans.
+`backlog-groom` holds it for one groom session — `start --as groom` once the
+item and the verdict are both confirmed, `stop` again once that verdict's
+steps finish, or as soon as the session ends without a verdict at all, so an
+abandoned groom never leaves a stamp nothing will clear — billing whatever
+elapsed into `groom-elapsed:` every time it does. `backlog-execute` picks an
+item up with `start --as execute` and holds the marker all the way to
+archive: its one `stop` call sits on the "walked away without archiving"
+path, not the successful one, so a normally-finished item reaches
+`move ... done` with `started:`/`phase: execute` still on it — unbilled for
+that final stretch, and kept as permanent history exactly as a bare
+`started:` has always been for this skill: a done item recording *when the
+work began*, not merely *that* it did. Either skill can stamp an idea now:
+the original reasoning for refusing one — "an idea has nothing to execute" —
+held for execute but not for groom, since deciding an idea's verdict is
+itself the active work the marker exists to describe. None of this widens
+who writes the file: `backlog.mjs` is still the single writer, `start`/`stop`
+are still the only two commands that touch an existing item's content, and
+the round-trip guarantee above covers both callers identically.
 
-Both shapes are on disk permanently. Every file stamped before this carries a
-bare `YYYY-MM-DD`, and no command rewrites an existing item's frontmatter — so
-this is not a migration window that closes, and a reader that drops the date-only
-branch breaks real files. A bare date is aged in DAYS ONLY (`today`, then `Nd`):
-UTC midnight is not the hour anyone started work, so reading `14h` off
-`2026-08-26` would be inventing it. `elapsedSince` in
+`groom-elapsed:` and `execute-elapsed:` are permanent, accumulating integer
+counters — one whole-seconds total per activity, never reset, growing by one
+more `stop`'s worth each time that activity picks the item back up again.
+`stop` only adds to a bucket when the item has a recognized `phase:`
+(nothing to bill against otherwise — a plain `start` with no `--as` leaves
+both `started:` and every bucket alone) and when `started:` is the full
+second-precision timestamp shape, never the legacy bare date: UTC midnight
+is not the hour anyone began work, so treating a bare date as billable would
+fabricate up to 24 hours nobody worked — the marker is still cleared, just
+never billed. The seconds added are floored at zero, to cover clock skew
+between whatever machine wrote `started:` and whatever machine is now
+calling `stop`: two machines a few seconds apart must never bill negative
+time just because the second one's clock reads slightly behind the first's.
+And a bucket that already holds something other than a plain unsigned
+integer — a hand-edit, or a value some older, buggier build left behind —
+makes `stop` refuse outright rather than reset it to zero: resetting would
+silently destroy whatever real total was recorded there, and a refusal at
+least leaves the bad value in the file for a human to recover by hand.
+
+The `started:` value is a second-precision UTC timestamp
+(`2026-08-28T14:03:07Z`), not a date, because the useful resolution for "is
+anyone on this right now" is minutes and hours: a bare date rounded
+everything picked up today to `0d`, which is precisely the work the marker
+exists to surface, and read as "nothing has happened yet". UTC because the
+value is compared against `Date.now()` on whatever machine renders the
+board.
+
+Both timestamp shapes are on disk permanently. Every file stamped before
+`phase:` and elapsed billing existed carries a bare `YYYY-MM-DD`, and no
+command rewrites an existing item's frontmatter on its own initiative — so
+this is not a migration window that closes, and a reader that drops the
+date-only branch breaks real files. A bare date is aged in DAYS ONLY
+(`today`, then `Nd`): UTC midnight is not the hour anyone started work, so
+reading `14h` off `2026-08-26` would be inventing it. `elapsedSince` in
 `client/src/lib/item-age.ts` is the one implementation of both branches.
 
 ## Editing `skills/` changes nothing until commit + push + `plugin:sync`
