@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile, startItem } from './backlog.mjs'
+import { BacklogError, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile, startItem, stopItem } from './backlog.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
@@ -1015,31 +1015,51 @@ test('CLI start exits 3 and names init when there is no backlog/ store yet', () 
   assert.match(out.stderr, /init/)
 })
 
-test('CLI stop bug-7 removes the started: line, restoring the file byte-for-byte', () => {
+// Pre-dates the updated: stamp, back when stop really did restore the whole
+// file byte-for-byte: start and stop were the only two writes, and stop's
+// write undid start's. That is no longer literally true — writeItemFile now
+// stamps `updated:` on every write it makes, stop's included, so the second
+// write does not undo the first one's effect on that one line; it only ever
+// refreshes it. What still holds, and is what this asserts now: the body is
+// untouched, `started` is gone again, and every OTHER key is back to
+// exactly what it was — `updated` is the one line allowed, and expected, to
+// differ from `before`.
+test('CLI stop bug-7 removes the started: line, leaving the body and every other key as they were', () => {
   const { dir, openBugPath } = boardFixture()
-  const before = fs.readFileSync(openBugPath, 'utf8')
+  const beforeText = fs.readFileSync(openBugPath, 'utf8')
+  const before = parseFrontmatter(beforeText)
   assert.equal(run(dir, 'start', 'bug-7').status, 0)
-  assert.notEqual(fs.readFileSync(openBugPath, 'utf8'), before)
+  assert.notEqual(fs.readFileSync(openBugPath, 'utf8'), beforeText)
 
   const out = run(dir, 'stop', 'bug-7')
 
   assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+  const after = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(after.body, before.body)
+  assert.equal('started' in after.data, false)
+  const { updated, ...afterRest } = after.data
+  assert.deepEqual(afterRest, before.data)
+  assert.match(updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
 })
 
 // stop's job is clearing a marker, and it must not learn to care which of the
 // two shapes it is clearing — a legacy date-only value on an item someone
-// abandoned is precisely a marker worth being able to remove.
+// abandoned is precisely a marker worth being able to remove. Same
+// updated:-is-the-one-exception adjustment as the test above.
 test('CLI stop bug-7 removes a legacy date-only started: line as readily as a timestamp', () => {
   const { dir, openBugPath } = boardFixture()
-  const before = fs.readFileSync(openBugPath, 'utf8')
-  const { data, body } = parseFrontmatter(before)
-  fs.writeFileSync(openBugPath, `${renderFrontmatter({ ...data, started: '2026-08-26' })}\n${body}`)
+  const before = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  fs.writeFileSync(openBugPath, `${renderFrontmatter({ ...before.data, started: '2026-08-26' })}\n${before.body}`)
 
   const out = run(dir, 'stop', 'bug-7')
 
   assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+  const after = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(after.body, before.body)
+  assert.equal('started' in after.data, false)
+  const { updated, ...afterRest } = after.data
+  assert.deepEqual(afterRest, before.data)
+  assert.match(updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
 })
 
 test('CLI stop bug-7 refuses when the item was never started, leaving the file untouched', () => {
@@ -1105,6 +1125,121 @@ test('CLI board --json carries started, empty for an item nobody has started', (
   // is information they cannot get back.
   assert.match(items.find((i) => i.id === 'bug-7').started, new RegExp(`^${TODAY}T\\d{2}:\\d{2}:\\d{2}Z$`))
   assert.equal(items.find((i) => i.id === 'task-4').started, '')
+})
+
+// --- updated: stamp -----------------------------------------------------------
+// `updated` is stamped by writeItemFile itself (see the comment there), so
+// both start and stop refresh it as a side effect of the one thing they
+// already do — rewrite the file. move is the deliberate exception: it never
+// calls writeItemFile at all (see moveItem's own comment), so the regression
+// guard at the end of this section pins that down directly rather than
+// relying on it staying true by omission.
+
+test('startItem on an item with no updated: key adds one, as the last key, holding the stamp it was handed', () => {
+  const { backlog, openBugPath } = boardFixture()
+
+  startItem(backlog, 'bug-7', '2026-08-30T12:00:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  // `tags` is excluded from this order check on purpose: renderFrontmatter
+  // never writes a `tags:` line when it's empty (see renderFrontmatter's own
+  // comment), so it is not a real line in the file at all — re-parsing puts
+  // it back at the very end regardless of where it started, which would
+  // make this assertion about the file's real key order say something false
+  // about `tags` specifically. `updated` must land after every key the file
+  // ACTUALLY HAD and after the `started` this same call just added.
+  assert.deepEqual(Object.keys(data).filter((k) => k !== 'tags'), ['id', 'title', 'created', 'started', 'updated'])
+  assert.equal(data.updated, '2026-08-30T12:00:00Z')
+})
+
+test('startItem on an item that already has updated: overwrites it in place, keeping title right after it', () => {
+  const { backlog, openBugPath } = boardFixture()
+  const { body } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  fs.writeFileSync(
+    openBugPath,
+    `${renderFrontmatter({ id: 'bug-7', updated: '2026-01-01T00:00:00Z', title: 'Deck scroll chains out of the phone overlay' })}\n${body}`,
+  )
+
+  startItem(backlog, 'bug-7', '2026-08-30T12:00:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  // A spread preserves an existing key's position — `updated` must still be
+  // the second key, with `title` immediately after it, exactly as before
+  // start ran. Only the VALUE changes. `tags` is excluded from the order
+  // check for the same reason as the sibling test above: it never renders
+  // when empty, so a fresh re-parse always puts it last regardless of where
+  // it actually started.
+  assert.deepEqual(Object.keys(data).filter((k) => k !== 'tags'), ['id', 'updated', 'title', 'started'])
+  assert.equal(data.updated, '2026-08-30T12:00:00Z')
+})
+
+test('stopItem stamps updated: too, to the exact value it is handed', () => {
+  const { backlog, openBugPath } = boardFixture()
+  startItem(backlog, 'bug-7')
+
+  stopItem(backlog, 'bug-7', '2026-08-30T12:00:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data.updated, '2026-08-30T12:00:00Z')
+})
+
+test('CLI start then stop preserve unknown frontmatter keys unchanged and in their original relative order', () => {
+  const { dir, backlog } = boardFixture()
+  const itemPath = path.join(backlog, 'tasks/open', 'task-4-promoted.md')
+  fs.writeFileSync(
+    itemPath,
+    `${renderFrontmatter({ id: 'task-4', title: 'Promoted', created: '2026-01-02', from: 'idea-3', 'promoted-to': 'task-9' })}\n`,
+  )
+
+  assert.equal(run(dir, 'start', 'task-4').status, 0)
+  assert.equal(run(dir, 'stop', 'task-4').status, 0)
+
+  const text = fs.readFileSync(itemPath, 'utf8')
+  assert.match(text, /^from: idea-3$/m)
+  assert.match(text, /^promoted-to: task-9$/m)
+  assert.ok(text.indexOf('from:') < text.indexOf('promoted-to:'), 'from: must still precede promoted-to:')
+  // The point of the round trip: stop's own rewrite must not have dropped
+  // the stamp start's rewrite just added.
+  assert.match(text, /^updated: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m)
+})
+
+test('CLI start then stop leave a body byte-for-byte identical, even one containing its own --- line', () => {
+  const { dir, backlog } = boardFixture()
+  // A `---` line inside the body, trailing whitespace on a real content
+  // line, and a trailing newline at the very end — three ways a naive
+  // byte-preservation bug could show up, all in one fixture.
+  const body = '\n## Notes\n\n---\n\nTrailing spaces on this line.   \n'
+  const itemPath = writeItemWithBody(backlog, 'tasks/open', 'task-4', 'Rework the cache', body)
+
+  assert.equal(run(dir, 'start', 'task-4').status, 0)
+  assert.equal(run(dir, 'stop', 'task-4').status, 0)
+
+  const text = fs.readFileSync(itemPath, 'utf8')
+  // The stamp lands somewhere in the frontmatter — the assertion below is
+  // what actually matters here, but confirming it exists first keeps a
+  // future regression from passing this test for the wrong reason (an
+  // `updated:` line that itself corrupted the body would still slice out
+  // the same bytes below if the fence-finding logic broke in just the
+  // wrong way).
+  assert.match(text, /^updated: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m)
+  assert.equal(text.slice(text.indexOf('---', 3) + 4), body)
+})
+
+// The regression guard: move must gain no updated: key of its own. This
+// passes already, before writeItemFile stamps anything — moveItem never
+// calls writeItemFile at all, only fs.renameSync — so it proves the
+// exclusion rather than target it.
+test('CLI move does not add an updated: key and leaves the file byte-for-byte unchanged', () => {
+  const { dir, backlog, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath)
+
+  const out = run(dir, 'move', 'bug-7', 'done')
+
+  assert.equal(out.status, 0, out.stderr)
+  const newPath = path.join(backlog, 'bugs', 'done', path.basename(openBugPath))
+  const after = fs.readFileSync(newPath)
+  assert.ok(before.equals(after))
+  assert.doesNotMatch(after.toString('utf8'), /^updated:/m)
 })
 
 // --- board registry ----------------------------------------------------------

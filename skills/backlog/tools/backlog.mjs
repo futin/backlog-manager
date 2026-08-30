@@ -576,8 +576,43 @@ export function moveItem(backlog, id, dest) {
 // by construction, and both re-attach the body as the exact string
 // parseFrontmatter handed back — so the only bytes that can differ afterwards
 // are inside the fence.
-function writeItemFile(absPath, data, body) {
-  fs.writeFileSync(absPath, `${renderFrontmatter(data)}\n${body}`)
+//
+// `updated:` is stamped HERE, inside the one function both of writeItemFile's
+// callers funnel through, rather than by startItem and stopItem each writing
+// it themselves. writeItemFile is the only place an item's frontmatter is
+// actually rewritten, so a stamp added at this seam covers every caller by
+// construction — present and future. Two callers writing the same line
+// individually is exactly the setup where a third caller, added later,
+// forgets to; centralizing it here removes that failure mode entirely rather
+// than relying on every new caller remembering the convention.
+//
+// `move` is deliberately NOT a caller of writeItemFile and gets no
+// `updated:` stamp of its own — see moveItem above, which is a renameSync
+// that never opens the file at all, on purpose: an item's content must be
+// untouched by the act of filing it into done/ or out-of-scope/, the same
+// guarantee that already protects `started` and every unknown key across a
+// move. Making move stamp `updated` would mean either opening the file just
+// to change one line — reintroducing the exact risk renameSync exists to
+// avoid — or leaving the stamp to describe a moment that isn't the actual
+// last edit. Nothing is lost by leaving it out: every skill path that moves
+// an item (backlog-execute, backlog-groom) calls `stop` on it immediately
+// beforehand, and `stop` already refreshes `updated` through this same
+// function, so an archived item's `updated:` is never more than one
+// function call older than its move.
+//
+// The fourth parameter exists so a caller — real or test — can pin the exact
+// value written, mirroring startItem's own third parameter. startItem and
+// stopItem both resolve their own `stamp` (a real call site never supplies
+// one, so it defaults to `nowISO()` right there) and hand that SAME value
+// down here, rather than letting this default fire independently. The two
+// operations already write a lifecycle stamp of their own — `started` here,
+// nothing there — and `updated` is meant to record that exact instant, not a
+// microseconds-later recomputation of "now" that could round to the next
+// second and disagree with it. In production the two are the same call's
+// result either way; pinning both to one value only matters for a test that
+// wants to assert an exact literal timestamp instead of a shape.
+function writeItemFile(absPath, data, body, stamp = nowISO()) {
+  fs.writeFileSync(absPath, `${renderFrontmatter({ ...data, updated: stamp })}\n${body}`)
 }
 
 function todayISO() {
@@ -628,7 +663,13 @@ export function startItem(backlog, id, stamp = nowISO()) {
     throw new BacklogError(`${id} is already in progress (started ${data.started})`, 1)
   }
 
-  writeItemFile(item.path, { ...data, started: stamp }, body)
+  // `stamp` is forwarded as writeItemFile's own fourth argument rather than
+  // left for writeItemFile's default to recompute — see the comment on
+  // writeItemFile for why: `started` and `updated` are two readings of the
+  // exact same instant here, and passing the one value through both keeps
+  // them identical instead of risking a second's drift between two separate
+  // `nowISO()` calls a few statements apart.
+  writeItemFile(item.path, { ...data, started: stamp }, body, stamp)
   return item.path
 }
 
@@ -636,7 +677,13 @@ export function startItem(backlog, id, stamp = nowISO()) {
 // thing stop is for is clearing a marker, and a stale `started` on an
 // archived item is precisely a marker worth being able to clear. Only
 // "there is nothing to clear" is refused.
-export function stopItem(backlog, id) {
+//
+// Takes a third `stamp` parameter for the same reason startItem does, even
+// though stop has no lifecycle key of its own to stamp with it: it is the
+// only seam through which a caller can pin the `updated` value writeItemFile
+// is about to write, so a test can assert an exact literal timestamp rather
+// than a shape. A real call site never supplies it.
+export function stopItem(backlog, id, stamp = nowISO()) {
   const item = locateItem(backlog, id)
 
   const { data, body } = readItemFile(item.path)
@@ -645,7 +692,7 @@ export function stopItem(backlog, id) {
   }
 
   const { started, ...rest } = data
-  writeItemFile(item.path, rest, body)
+  writeItemFile(item.path, rest, body, stamp)
   return item.path
 }
 
