@@ -176,4 +176,16 @@ describe('formatSeconds', () => {
   ])('formats %i seconds as %s', (input, expected) => {
     expect(formatSeconds(input)).toBe(expected);
   });
+
+  // `groomElapsed`/`executeElapsed` are clamped to a non-negative integer by
+  // the server (parseElapsed), so no real caller can hand formatSeconds a
+  // negative or non-finite value today. The guard exists anyway, the same
+  // safe-default instinct formatCreated applies to its own unparseable
+  // input just above — and, unlike formatCreated's, it had no test of its
+  // own pinning what it actually does. Closes that gap for symmetry.
+  it('clamps a negative or non-finite input to 0s rather than throwing or printing garbage', () => {
+    expect(formatSeconds(-5)).toBe('0s');
+    expect(formatSeconds(NaN)).toBe('0s');
+    expect(formatSeconds(Infinity)).toBe('0s');
+  });
 });
