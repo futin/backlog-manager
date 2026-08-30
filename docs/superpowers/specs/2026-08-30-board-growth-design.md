@@ -51,11 +51,15 @@ An item is stale when its `updated:` stamp is older than the window (default
 30 days; a client setting, since Board-versus-Archive is a view decision and
 the server already returns the whole corpus for client-side narrowing).
 
-`updated:` is written by `writeItemFile`, which means `start`, `stop`, and
-`move` all stamp it. That is complete coverage in practice even though groom
-edits item bodies with the Edit tool rather than through the CLI: every groom
-and every execute session brackets its work with `start` … `stop`, so the
-stamp lands on the way out regardless of who wrote the body. A raw hand-edit
+`updated:` is written by `writeItemFile`, which is reached by `start` and
+`stop` and deliberately **not** by `move`: `moveItem` is a `renameSync` that
+never reads content, and that byte-for-byte guarantee is worth more than a
+stamp it would have to become a read-modify-write to add. Coverage survives
+anyway, from two directions. Groom edits item bodies with the Edit tool
+rather than through the CLI, but every groom and every execute session
+brackets its work with `start` … `stop`, so the stamp lands on the way out
+regardless of who wrote the body — and every skill path that calls `move`
+calls `stop` immediately before it. A raw hand-edit
 with no `start`/`stop` is missed, and that failure is safe — the item drifts
 to Archive and a single groom brings it back.
 
