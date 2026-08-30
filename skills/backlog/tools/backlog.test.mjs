@@ -1352,6 +1352,172 @@ test('CLI start --as groom twice refuses on the second call with the existing al
   assert.match(out.stderr, new RegExp(TODAY))
 })
 
+// --- elapsed billing (stop) ---------------------------------------------------
+// stopItem bills the wall-clock time between `started:` and the stamp it is
+// handed into whichever of `groom-elapsed:` / `execute-elapsed:` the item's
+// `phase:` key names (see PHASES's own comment for why there are exactly
+// two). Every case below drives stopItem directly with a pinned `stamp` —
+// the same seam startItem's own "writes the stamp it is handed" test above
+// uses — because the CLI never exposes a way to pin the clock, and seconds
+// arithmetic is exactly the kind of assertion a real clock would make flaky.
+//
+// T0 is the one `started:` value every case shares, so each test states only
+// what actually varies: the phase, any pre-existing bucket value, and the
+// stamp stop is handed.
+const T0 = '2026-08-30T10:00:00Z'
+
+// Overwrites just the named frontmatter fields on an already-written item,
+// keeping every other key and the body exactly as boardFixture/writeItem (or
+// writeItemWithBody) left them — the same read-modify-write shape the
+// legacy-date test earlier in this file uses, pulled out here because every
+// case below needs it.
+function withFrontmatter(itemPath, fields) {
+  const { data, body } = parseFrontmatter(fs.readFileSync(itemPath, 'utf8'))
+  fs.writeFileSync(itemPath, `${renderFrontmatter({ ...data, ...fields })}\n${body}`)
+}
+
+test('stopItem bills a first groom session into groom-elapsed and clears started/phase', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:01:30Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-elapsed'], '90')
+  assert.equal('started' in data, false)
+  assert.equal('phase' in data, false)
+})
+
+test('stopItem accumulates onto an existing groom-elapsed rather than overwriting it', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom', 'groom-elapsed': 90 })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:00:30Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-elapsed'], '120')
+})
+
+test('stopItem bills execute into its own bucket, leaving groom-elapsed untouched', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'execute', 'groom-elapsed': 90 })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:00:10Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['execute-elapsed'], '10')
+  assert.equal(data['groom-elapsed'], '90')
+})
+
+test('stopItem with no phase: key bills nothing, but still clears started and stamps updated', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0 })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:05:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal('execute-elapsed' in data, false)
+  assert.equal('started' in data, false)
+  assert.match(data.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+})
+
+test('stopItem never bills a legacy bare-date started:, though it still clears it', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: '2026-08-30', phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:05:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal('started' in data, false)
+  assert.equal('phase' in data, false)
+  assert.match(data.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+})
+
+test('stopItem floors a stamp earlier than started to 0 rather than a negative number', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T09:59:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-elapsed'], '0')
+})
+
+test('stopItem bills 0 seconds when the stamp equals started exactly', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', T0)
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-elapsed'], '0')
+})
+
+// Overwriting a corrupt bucket would destroy a number nobody can recover, so
+// stop refuses outright rather than resetting it to 0 — the same "a refusal
+// must not also be the thing that does the damage" guarantee move's own
+// occupied-destination refusal makes for a file it might otherwise clobber.
+test('stopItem refuses a non-numeric groom-elapsed, naming the key and the bad value, and writes nothing', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom', 'groom-elapsed': 'abc' })
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  assert.throws(
+    () => stopItem(backlog, 'bug-7', '2026-08-30T10:01:00Z'),
+    (e) => e instanceof BacklogError && e.code === 1 && /groom-elapsed/.test(e.message) && /abc/.test(e.message),
+  )
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('stopItem refuses a negative groom-elapsed just as it refuses a non-numeric one, writing nothing', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom', 'groom-elapsed': -5 })
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  assert.throws(
+    () => stopItem(backlog, 'bug-7', '2026-08-30T10:01:00Z'),
+    (e) => e instanceof BacklogError && e.code === 1,
+  )
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('stopItem removes phase: unconditionally, whichever phase it names', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'execute' })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T11:00:00Z')
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('phase' in data, false)
+})
+
+test('stopItem on an item never started still refuses with the existing message, file untouched', () => {
+  const { backlog, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  assert.throws(
+    () => stopItem(backlog, 'bug-7', '2026-08-30T10:05:00Z'),
+    (e) => e instanceof BacklogError && e.code === 1 && /bug-7 is not in progress/.test(e.message),
+  )
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('stopItem bills groom time and round-trips an unknown key and the body byte-for-byte', () => {
+  const { backlog } = boardFixture()
+  const body = '\n## Notes\n\n---\n\nSome content.\n'
+  const itemPath = writeItemWithBody(backlog, 'tasks/open', 'task-4', 'Promoted task', body)
+  withFrontmatter(itemPath, { started: T0, phase: 'groom', from: 'idea-3' })
+
+  stopItem(backlog, 'task-4', '2026-08-30T10:01:00Z')
+
+  const { data, body: afterBody } = parseFrontmatter(fs.readFileSync(itemPath, 'utf8'))
+  assert.equal(data.from, 'idea-3')
+  assert.equal(data['groom-elapsed'], '60')
+  assert.equal(afterBody, body)
+})
+
 // --- board registry ----------------------------------------------------------
 
 function tmpRegistry() {

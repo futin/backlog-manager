@@ -150,7 +150,13 @@ An item's status is the directory it lives in, never a frontmatter key. The one
 exception is not a status: a \`started: YYYY-MM-DD\` line means someone is working
 that item right now. It is still an open item in \`<section>/open/\`; the date only
 says when it was picked up. Set it with \`start <id>\`, clear it with \`stop <id>\`.
-Archiving keeps it, so a done item records when the work began.
+Archiving keeps it, so a done item records when the work began. \`start --as
+groom\` or \`--as execute\` also writes a \`phase:\` line alongside \`started:\`,
+naming which of the two \`stop\` bills the elapsed time to. \`stop\` always
+clears \`started:\` and \`phase:\` together, and adds the seconds in between to
+\`groom-elapsed:\` or \`execute-elapsed:\` — one running total per phase, kept
+separate because grooming and executing are different work. Those two totals
+are never cleared, only added to, session after session.
 `
 
 // Creates whatever is missing and returns only what it actually created, so
@@ -706,16 +712,47 @@ export function startItem(backlog, id, stamp = nowISO(), phase = undefined) {
   return item.path
 }
 
+// stop's own reading of PHASES: which frontmatter key accumulates the time
+// billed under each phase. A lookup keyed by PHASES's own values rather than
+// a second parallel array of key names, so a third phase added to PHASES
+// without a matching entry here fails loudly (undefined key, TypeError on
+// the property access below) instead of silently billing into "undefined-
+// elapsed" or dropping the time on the floor.
+const ELAPSED_KEYS = { groom: 'groom-elapsed', execute: 'execute-elapsed' }
+
+// `started:` in its billable shape: a full second-precision timestamp, the
+// one `nowISO()` writes. Deliberately excludes the legacy bare-date shape —
+// see the comment inside stopItem below for why a bare date is cleared but
+// never billed.
+const FULL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
+
+// The only shape an elapsed bucket is ever allowed to already hold: an
+// unsigned integer with no sign, decimal point, or stray whitespace. This is
+// also the only shape stopItem itself ever writes there (a non-negative
+// integer, stringified by renderFrontmatter), so anything else on disk is
+// necessarily a hand-edit or corruption — never a value this function wrote
+// itself in some earlier, valid run.
+const DIGITS_ONLY = /^\d+$/
+
 // Deliberately permissive about WHERE the item is, unlike startItem: the one
 // thing stop is for is clearing a marker, and a stale `started` on an
 // archived item is precisely a marker worth being able to clear. Only
 // "there is nothing to clear" is refused.
 //
-// Takes a third `stamp` parameter for the same reason startItem does, even
-// though stop has no lifecycle key of its own to stamp with it: it is the
-// only seam through which a caller can pin the `updated` value writeItemFile
-// is about to write, so a test can assert an exact literal timestamp rather
-// than a shape. A real call site never supplies it.
+// Takes a third `stamp` parameter for the same reason startItem does: it is
+// the only seam through which a caller can pin the `updated` value
+// writeItemFile is about to write, so a test can assert an exact literal
+// timestamp rather than a shape. A real call site never supplies it.
+//
+// `stamp` now does double duty as the elapsed-seconds billing clock too,
+// rather than taking a separate `now` parameter for that. A fourth parameter
+// would break the (backlog, id, stamp) shape startItem and stopItem
+// otherwise share, and buys nothing in return: elapsed seconds are floored
+// to whole seconds regardless (see the Math.floor below), so the one second
+// of precision `stamp` already truncates to could never change a billed
+// total anyway. `updated` and the billing clock are the same instant in
+// every real call, exactly as `started` and the first `updated` already are
+// in startItem — this just extends that equivalence to stop's own write.
 export function stopItem(backlog, id, stamp = nowISO()) {
   const item = locateItem(backlog, id)
 
@@ -724,8 +761,47 @@ export function stopItem(backlog, id, stamp = nowISO()) {
     throw new BacklogError(`${id} is not in progress`, 1)
   }
 
-  const { started, ...rest } = data
-  writeItemFile(item.path, rest, body, stamp)
+  // Both lifecycle keys come off together, unconditionally — see PHASES's own
+  // comment for why `phase` has no meaning and no lifespan beyond `started`.
+  // `rest` is what every branch below builds on: the billing branch adds one
+  // more key to it, the non-billing branches leave it exactly as is.
+  const { started, phase, ...rest } = data
+  let next = rest
+
+  // Billable only when there is a phase to bill the time to (an item merely
+  // `start`ed with no `--as` has nothing for stop to key the billing off of)
+  // AND `started` is the full timestamp shape `start` actually writes today
+  // — never the legacy bare `YYYY-MM-DD` a pre-timestamp `start` left behind.
+  // UTC midnight is not the hour anyone began work, so treating a bare date
+  // as billable would fabricate up to 24 hours nobody worked; the marker is
+  // still cleared above like any other `started:` value, just never billed.
+  if (phase !== undefined && PHASES.includes(phase) && FULL_TIMESTAMP.test(started)) {
+    const key = ELAPSED_KEYS[phase]
+    const existing = rest[key]
+
+    // A corrupt bucket — anything already there that isn't a plain unsigned
+    // integer — is refused outright rather than reset to 0. Resetting would
+    // silently destroy whatever real total was recorded there; nothing about
+    // "the file was hand-edited" or "an older, buggier version wrote this"
+    // should be allowed to erase time that may be the only record of it. A
+    // refusal at least leaves the number in the file for a human to recover
+    // by hand, and the whole write is skipped (nothing else about this stop
+    // — not even clearing `started:` — should land while the one field that
+    // depends on `existing` cannot be trusted).
+    if (existing !== undefined && !DIGITS_ONLY.test(existing)) {
+      throw new BacklogError(`${id}: ${key} is not a whole number: ${existing}`, 1)
+    }
+
+    const previous = existing === undefined ? 0 : Number(existing)
+    // Floored at zero to cover clock skew between the machine that wrote
+    // `started` and the machine calling `stop` — two machines a few seconds
+    // apart must never bill negative time just because stop's clock reads
+    // slightly behind start's.
+    const seconds = Math.max(0, Math.floor((Date.parse(stamp) - Date.parse(started)) / 1000))
+    next = { ...rest, [key]: previous + seconds }
+  }
+
+  writeItemFile(item.path, next, body, stamp)
   return item.path
 }
 
