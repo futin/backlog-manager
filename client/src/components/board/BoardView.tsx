@@ -10,8 +10,9 @@ import { buildProjectHues } from '../../lib/project-hue';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
+import { RunDrawer } from './RunDrawer';
 import { RunStrip } from './RunStrip';
-import type { BacklogItem, RunStage, Section } from '../../../../shared/types';
+import type { BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
 
 const PROJECT_KEY = 'backlog-manager.project';
 const STATUS_KEY = 'backlog-manager.status';
@@ -23,6 +24,12 @@ const ALL = 'all';
 
 type StatusFilter = 'open' | 'started' | 'done' | 'all';
 type SortKey = 'created' | 'name' | 'project';
+
+/** The endpoint's wrapper shape (Task 8) — the same local alias RunStrip.tsx
+ *  declares for its own `run` prop, redeclared here rather than imported:
+ *  neither file exports it, and a two-field intersection type is cheaper to
+ *  restate per consumer than to thread a shared export through for. */
+type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
 /**
  * Fixed column order — the store's own section order, not alphabetical.
@@ -121,6 +128,24 @@ export default function BoardView() {
      or from inside the drawer (drawer stays open behind it), so one piece of
      state cannot serve both. */
   const [dispatching, setDispatching] = useState<BacklogItem | null>(null);
+  /*
+   * Task 12: which project's run drawer is open, keyed by `project` (the
+   * registry path) rather than holding the clicked run object itself. That
+   * distinction is load-bearing, not stylistic — a run keeps changing every
+   * poll while it is fresh (useOrchestratorRuns.ts), and RunDrawer's whole
+   * reason to exist is to say so the moment a heartbeat goes quiet (see its
+   * own file-level comment). Storing the clicked object would freeze the
+   * drawer at whatever the pipeline looked like at click time — exactly the
+   * "frozen pipeline that looks live" this feature exists to rule out. Keyed
+   * on `project` rather than `runId` for the same reason `runStagesByProject`
+   * below already is: `runs` is one entry PER PROJECT (Task 8's own doc
+   * comment on OrchestratorRunsPayload), so a project path is a stable
+   * handle across every poll for as long as the SAME run is what that
+   * project is on — including after it goes stale, since a stale run stays
+   * in `runs` with `fresh: false` rather than dropping out (RunStrip.tsx
+   * relies on that same fact to know when to render nothing).
+   */
+  const [openRunProject, setOpenRunProject] = useState<string | null>(null);
 
   /* The query is plain useState — deliberately not remembered. A remembered
      query is a board that opens showing three cards out of forty for no
@@ -208,6 +233,16 @@ export default function BoardView() {
   const runStageFor = (item: BacklogItem): RunStage | undefined =>
     runStagesByProject.get(item.projectPath)?.get(item.id);
 
+  // Looked up from the FULL `runs` list, not `freshRuns` above — the drawer
+  // has to keep showing a run that just went stale (that is the entire
+  // point of `openRunProject`'s own comment), and `freshRuns` has already
+  // dropped exactly that entry by the time it goes stale. Re-derived on
+  // every render rather than cached: this is what makes the drawer track
+  // each new poll instead of freezing at whatever `runs` looked like when
+  // it was opened.
+  const openRun: RunPayload | null =
+    openRunProject === null ? null : runs.find((r) => r.project === openRunProject) ?? null;
+
   return (
     <div className="board">
       <div className="board-bar">
@@ -271,12 +306,10 @@ export default function BoardView() {
             <RunStrip
               key={run.runId}
               run={run}
-              // Task 12 opens a run drawer here. Until then this is
-              // deliberately inert: the strip's own click/keyboard handling
-              // is real and already reaches this callback with the right
-              // run (see test/orchestrator-strip.test.tsx) — there is just
-              // nothing built yet for it to open.
-              onOpen={() => {}}
+              // `r.project`, not the run object itself — see
+              // `openRunProject`'s own comment for why the drawer has to be
+              // keyed on identity rather than holding a frozen snapshot.
+              onOpen={(r) => setOpenRunProject(r.project)}
             />
           ))}
         </div>
@@ -340,6 +373,9 @@ export default function BoardView() {
           agents={agents}
           onDispatch={() => setDispatching(open)}
         />
+      )}
+      {openRun !== null && (
+        <RunDrawer run={openRun} onClose={() => setOpenRunProject(null)} />
       )}
       {dispatching !== null && (
         /* `key` on a singleton element, which looks redundant and is not: it

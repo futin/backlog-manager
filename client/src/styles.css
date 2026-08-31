@@ -660,6 +660,69 @@ body {
 .drawer-body a { color: var(--cyan) }
 .drawer-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 10px; color: var(--ink2); margin: 6px 0 }
 
+/* ---------------------------------------------- run drawer
+   RunStrip's detail view (RunDrawer.tsx). The .drawer scaffolding above —
+   backdrop, the aside itself, .drawer-head, .drawer-close, .drawer-meta,
+   .drawer-body and its h2 "printed label" rule — is REUSED wholesale, not
+   duplicated: RunDrawer.tsx's own file comment has the accessibility half of
+   that reasoning, and this section exists only for what a run's content
+   needs that an item's markdown body never did — a stale-run fault note, a
+   pipeline summary, and per-item queue/attention rows. */
+.run-drawer-note {
+  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, var(--strip));
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--hairline));
+  border-radius: 2px; padding: 8px 10px; margin-bottom: 14px;
+}
+.run-drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px }
+.run-drawer-chip {
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 4px 9px;
+}
+.run-drawer-chip-num { color: var(--ink); font-weight: 600; margin-right: 3px }
+
+.run-drawer-queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px }
+.run-drawer-item {
+  border: 1px solid var(--hairline); border-radius: 2px; background: var(--steel);
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
+}
+.run-drawer-item-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap }
+.run-drawer-item-id { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-drawer-item-title { flex: 1; min-width: 140px; font-size: 12px; color: var(--ink) }
+/* Neutral, not amber: a fix-loop count is history ("this took two attempts"),
+   the same informational-only register as .board-card-kind, not a call to
+   action — the loop already ran and, for every fixLoops>0 row except the one
+   also listed under Attention, needs nobody's intervention any more. The
+   amber warning belongs to the attention entry when there genuinely is one. */
+.run-drawer-item-fixloops { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-drawer-item-verify {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 10px;
+}
+.run-drawer-item-verify-cmd { color: var(--ink2) }
+.run-drawer-item-verify-ok { color: var(--green); font-weight: 600 }
+.run-drawer-item-verify-bad { color: var(--red); font-weight: 600 }
+.run-drawer-item-verify-tail { color: var(--ink3) }
+
+/* Attention entries share one amber tint regardless of kind (needs-answers /
+   parked / fix-exhausted): RunAttention's own doc comment calls all three
+   "things a human should look at", and splitting that into three sub-tones
+   would draw a distinction the type itself does not make. */
+.run-drawer-attn {
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--hairline));
+  background: color-mix(in srgb, var(--amber) 6%, var(--strip));
+  border-radius: 2px; padding: 8px 10px; margin-bottom: 8px;
+}
+.run-drawer-attn-head { display: flex; align-items: baseline; gap: 8px }
+.run-drawer-attn-kind {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--amber);
+}
+.run-drawer-attn-detail { font-size: 12px; color: var(--ink); line-height: 1.5; margin-top: 3px }
+.run-drawer-questions { margin: 6px 0 0; padding-left: 16px }
+.run-drawer-questions li { font-size: 12px; color: var(--ink2); line-height: 1.5; margin: 3px 0 }
+
 /* ---- dispatch: the card button and the launch sheet -------------------
    z-index above the item drawer (60/61): the sheet is opened FROM the
    drawer as well as from a card, so it has to sit over it. */
