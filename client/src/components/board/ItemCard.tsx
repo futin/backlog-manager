@@ -2,7 +2,29 @@ import { elapsedSince, formatCreated } from '../../lib/item-age';
 import { isInProgress, progressLabel } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { DispatchButton } from './DispatchButton';
-import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
+import type { AgentsStatus, BacklogItem, RunStage } from '../../../../shared/types';
+
+/**
+ * The `RunStage` values that earn a card a chip at all — a literal list
+ * rather than "everything not terminal and not pending", because that
+ * broader formula would also catch `preflight`, and Task 11's own brief
+ * enumerates exactly these six as "shown" without it. Preflight is a real
+ * pipeline stage (it sits between `pending` and `dispatched` in RunStage's
+ * own documented order — see shared/types.ts) but a usually-instant one for
+ * an already-groomed item, and a card that flickered a chip on for the
+ * fraction of a poll cycle preflight actually takes would read as noise
+ * rather than as a state anyone could act on. `needs-answers` is handled as
+ * its own case beside this list (a warning chip, not this one) rather than
+ * folded in, because it means the opposite of "this is progressing" — see
+ * the render below.
+ *
+ * Exported for the same reason REFACTOR_KINDS above is: so a test can
+ * assert against the exact list the badge renders from, not a restatement
+ * of it.
+ */
+export const ACTIVE_RUN_STAGES: readonly RunStage[] = [
+  'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
+];
 
 /**
  * The two `kind:` values a refactor may carry. An enum here rather than a
@@ -22,7 +44,7 @@ export const REFACTOR_KINDS: readonly string[] = ['chore', 'debt'];
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
 export function ItemCard(
-  { item, hues, onOpen, agents, onDispatch, now }: {
+  { item, hues, onOpen, agents, onDispatch, now, runStage }: {
     item: BacklogItem;
     hues: ProjectHues;
     onOpen: () => void;
@@ -37,6 +59,15 @@ export function ItemCard(
      * rendered on its own.
      */
     now?: number;
+    /**
+     * This card's position in a fresh orchestrator run's queue, or undefined
+     * when no such run currently says anything about it. Looked up by
+     * BoardView, not derived here — this component stays a pure function of
+     * whatever it is handed, the same discipline `now` above already follows,
+     * and RunStrip.tsx carries the long version of why the source is a run
+     * payload rather than anything on `item` itself.
+     */
+    runStage?: RunStage;
   }
 ) {
   const at = now ?? Date.now();
@@ -145,6 +176,24 @@ export function ItemCard(
               <span className="board-card-groomed">groomed</span>
             ) : null}
             {item.status === 'done' ? <span className="board-card-done">done</span> : null}
+            {/* Last among the footer markers, deliberately: kind/groomed/done
+                are all facts the item FILE holds, permanent until the next
+                edit; this one is the most volatile thing on the card by far —
+                sourced from a run payload that can go stale between one poll
+                and the next (RunStrip.tsx has the long version) — so it reads
+                last, after the stable facts, not ahead of them.
+                `ACTIVE_RUN_STAGES` is the literal "shown" list Task 11's brief
+                enumerates; `needs-answers` is its own warning-toned branch
+                because it means the opposite of progress, not a fine-grained
+                shade of it; anything else — terminal stages, `pending`,
+                `preflight`, or no run mentioning this item at all — renders
+                nothing, the same silence-is-correct rule the kind badge above
+                already follows for a kind it does not recognise. */}
+            {runStage !== undefined && ACTIVE_RUN_STAGES.includes(runStage) ? (
+              <span className="board-card-stage">{runStage}</span>
+            ) : runStage === 'needs-answers' ? (
+              <span className="board-card-stage board-card-stage-warn">{runStage}</span>
+            ) : null}
           </div>
         </div>
       </div>

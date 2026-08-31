@@ -3,13 +3,15 @@ import { useMemo, useState } from 'react';
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
+import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { isInProgress } from '../../lib/item-progress';
 import { buildProjectHues } from '../../lib/project-hue';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
-import type { BacklogItem, Section } from '../../../../shared/types';
+import { RunStrip } from './RunStrip';
+import type { BacklogItem, RunStage, Section } from '../../../../shared/types';
 
 const PROJECT_KEY = 'backlog-manager.project';
 const STATUS_KEY = 'backlog-manager.status';
@@ -108,6 +110,13 @@ export default function BoardView() {
   const { items: index, projects, loading, error } = useBoard();
   const [open, setOpen] = useState<BacklogItem | null>(null);
   const { status: agents } = useAgents();
+  // Task 11: the orchestrator's own view of any project's queue, polled live
+  // while any run is fresh (useOrchestratorRuns.ts) and not at all otherwise.
+  // `refresh` is left undestructured: this task only ever renders what the
+  // mount/focus/poll cadence already hands it on its own, with no control
+  // anywhere yet that would need to trigger one on demand — that arrives
+  // with the toolbar start control (Task 13).
+  const { runs } = useOrchestratorRuns();
   /* Separate from `open`: the sheet can be opened from a card (drawer closed)
      or from inside the drawer (drawer stays open behind it), so one piece of
      state cannot serve both. */
@@ -176,6 +185,29 @@ export default function BoardView() {
     ...(index?.errors ?? [])
   ];
 
+  // Fresh runs only: a stale one has already gone silent as far as RunStrip
+  // is concerned (see its own comment on why), and a card badge is the same
+  // claim in miniature — "this item is executing right now" — so it has to
+  // go silent on exactly the same condition, not linger because this map
+  // forgot to check.
+  const freshRuns = runs.filter((run) => run.fresh);
+
+  // The id→stage lookup Task 11's brief asks for, one map per fresh run,
+  // keyed by the run's own `project` — the registry's absolute path, the
+  // exact string `BacklogItem.projectPath` already carries on every item
+  // (shared/types.ts documents both as "the same string"). This is the
+  // "association BoardView already knows" the brief points at: every card
+  // below is matched to a run by comparing that path directly, never by
+  // deriving a project identity from `item.path` or from the display name
+  // on its pill — two checkouts of the same repo would share the name but
+  // never the path, and only the path is what the run itself reports.
+  const runStagesByProject = new Map<string, Map<string, RunStage>>();
+  for (const run of freshRuns) {
+    runStagesByProject.set(run.project, new Map(run.queue.map((q) => [q.id, q.stage])));
+  }
+  const runStageFor = (item: BacklogItem): RunStage | undefined =>
+    runStagesByProject.get(item.projectPath)?.get(item.id);
+
   return (
     <div className="board">
       <div className="board-bar">
@@ -226,6 +258,30 @@ export default function BoardView() {
         </div>
       </div>
 
+      {/* One row per fresh run, ahead of the warnings: a run actually in
+          flight is live, actionable information, where the warnings below
+          are a standing fact about the registry that will still be true the
+          next time this board loads. RunStrip filters its own staleness (see
+          its file-level comment) — `freshRuns` here exists for the id→stage
+          map above, not to protect this render, but reusing it keeps this
+          from ever mounting a strip only to have it immediately render null. */}
+      {freshRuns.length > 0 && (
+        <div className="run-strips">
+          {freshRuns.map((run) => (
+            <RunStrip
+              key={run.runId}
+              run={run}
+              // Task 12 opens a run drawer here. Until then this is
+              // deliberately inert: the strip's own click/keyboard handling
+              // is real and already reaches this callback with the right
+              // run (see test/orchestrator-strip.test.tsx) — there is just
+              // nothing built yet for it to open.
+              onOpen={() => {}}
+            />
+          ))}
+        </div>
+      )}
+
       {warnings.length > 0 && (
         <div className="board-warn" data-testid="board-warn">
           {warnings.map((w) => (
@@ -266,6 +322,7 @@ export default function BoardView() {
                       agents={agents}
                       onDispatch={() => setDispatching(item)}
                       now={now}
+                      runStage={runStageFor(item)}
                     />
                   ))}
                 </div>
