@@ -1,0 +1,172 @@
+{
+  "runId": "run-20260831-084003",
+  "project": "/Users/dev/code/example-app",
+  "status": "running",
+  "startedAt": "2026-08-31T08:40:03Z",
+  "updatedAt": "2026-08-31T09:36:40Z",
+  "maxItems": null,
+  "queue": [
+    {
+      "id": "bug-14",
+      "title": "Fix duplicate heartbeat write on a resumed run",
+      "stage": "merged",
+      "sessionId": "b3f1c9d2-4a6e-4f18-9c2a-7e5d0a1f8c33",
+      "worktree": "/Users/dev/code/example-app/.worktrees/bug-14",
+      "branch": "backlog/bug-14",
+      "fixLoops": 1,
+      "stageAt": {
+        "pending": "2026-08-31T08:40:03Z",
+        "preflight": "2026-08-31T08:40:10Z",
+        "dispatched": "2026-08-31T08:41:02Z",
+        "inspecting": "2026-08-31T08:47:30Z",
+        "reviewing": "2026-08-31T08:49:15Z",
+        "fixing": "2026-08-31T08:52:40Z",
+        "verifying": "2026-08-31T08:58:20Z",
+        "merging": "2026-08-31T08:59:40Z",
+        "merged": "2026-08-31T08:59:55Z"
+      },
+      "verification": [
+        { "cmd": "pnpm test", "ok": true, "tail": "Tests: 2 skipped, 44 passed, 46 total" },
+        { "cmd": "pnpm run typecheck", "ok": true, "tail": "Found 0 errors. Watching for file changes." }
+      ],
+      "questions": [],
+      "note": "Reviewer flagged a missing null-guard in the heartbeat writer on the first pass; fixed and re-reviewed clean before verify."
+    },
+    {
+      "id": "task-21",
+      "title": "Decide where backlog-execute's archive lands on the run drawer",
+      "stage": "needs-answers",
+      "sessionId": null,
+      "worktree": null,
+      "branch": null,
+      "fixLoops": 0,
+      "stageAt": {
+        "pending": "2026-08-31T08:40:03Z",
+        "preflight": "2026-08-31T09:00:05Z",
+        "needs-answers": "2026-08-31T09:00:42Z"
+      },
+      "verification": [],
+      "questions": [
+        "Once backlog-execute archives this item to done/, does it move to the board's Archive view right away, or stay under its original column until the whole run finishes?"
+      ],
+      "note": null
+    },
+    {
+      "id": "bug-22",
+      "title": "Board hue picker resets after a project rename",
+      "stage": "ungroomed",
+      "sessionId": null,
+      "worktree": null,
+      "branch": null,
+      "fixLoops": 0,
+      "stageAt": {
+        "pending": "2026-08-31T08:40:03Z",
+        "ungroomed": "2026-08-31T09:00:50Z"
+      },
+      "verification": [],
+      "questions": [],
+      "note": "No Cause/Fix recorded yet — skipped without dispatch; needs a backlog-groom pass first."
+    },
+    {
+      "id": "task-16",
+      "title": "Add a list/kanban layout toggle to the board",
+      "stage": "merged",
+      "sessionId": "9a7d4e21-1c3f-4b9a-8e02-5f61d2c4a7b8",
+      "worktree": "/Users/dev/code/example-app/.worktrees/task-16",
+      "branch": "backlog/task-16",
+      "fixLoops": 0,
+      "stageAt": {
+        "pending": "2026-08-31T08:40:03Z",
+        "preflight": "2026-08-31T09:01:05Z",
+        "dispatched": "2026-08-31T09:01:40Z",
+        "inspecting": "2026-08-31T09:06:12Z",
+        "reviewing": "2026-08-31T09:07:50Z",
+        "verifying": "2026-08-31T09:12:30Z",
+        "merging": "2026-08-31T09:13:05Z",
+        "parked": "2026-08-31T09:13:20Z",
+        "merged": "2026-08-31T09:19:47Z"
+      },
+      "verification": [
+        { "cmd": "pnpm test", "ok": true, "tail": "Tests: 46 passed, 46 total" }
+      ],
+      "questions": [],
+      "note": "Merge conflicted against main in shared/types.ts (an earlier item's change landed first); parked. Resumed after a human resolved the conflict by hand — merged clean on retry."
+    },
+    {
+      "id": "task-9",
+      "title": "Show a run strip above the kanban columns",
+      "stage": "merged",
+      "sessionId": "2d5f8b13-7a9c-4e02-b1d4-3c6f9a8e0d17",
+      "worktree": "/Users/dev/code/example-app/.worktrees/task-9",
+      "branch": "backlog/task-9",
+      "fixLoops": 2,
+      "stageAt": {
+        "pending": "2026-08-31T08:40:03Z",
+        "preflight": "2026-08-31T09:20:10Z",
+        "dispatched": "2026-08-31T09:20:45Z",
+        "inspecting": "2026-08-31T09:24:02Z",
+        "reviewing": "2026-08-31T09:25:30Z",
+        "fixing": "2026-08-31T09:28:00Z",
+        "verifying": "2026-08-31T09:30:10Z",
+        "merging": "2026-08-31T09:30:55Z",
+        "merged": "2026-08-31T09:31:12Z"
+      },
+      "verification": [
+        { "cmd": "pnpm test", "ok": true, "tail": "Tests: 46 passed, 46 total" }
+      ],
+      "questions": [],
+      "note": "Reviewer asked for changes twice in a row without signing off (2 fix loops, the loop cap); asked whether to merge anyway — approved. Verification still ran and passed before the merge."
+    },
+    {
+      "id": "task-14",
+      "title": "Wire the run drawer's live heartbeat indicator",
+      "stage": "reviewing",
+      "sessionId": "6c1e9a04-2b7d-4f83-a5e1-8d0c3f6b9a22",
+      "worktree": "/Users/dev/code/example-app/.worktrees/task-14",
+      "branch": "backlog/task-14",
+      "fixLoops": 0,
+      "stageAt": {
+        "pending": "2026-08-31T08:40:03Z",
+        "preflight": "2026-08-31T09:32:05Z",
+        "dispatched": "2026-08-31T09:32:40Z",
+        "inspecting": "2026-08-31T09:35:12Z",
+        "reviewing": "2026-08-31T09:36:40Z"
+      },
+      "verification": [],
+      "questions": [],
+      "note": null
+    },
+    {
+      "id": "bug-27",
+      "title": "Settings hue swatch preview lags one theme change behind",
+      "stage": "pending",
+      "sessionId": null,
+      "worktree": null,
+      "branch": null,
+      "fixLoops": 0,
+      "stageAt": {
+        "pending": "2026-08-31T08:40:03Z"
+      },
+      "verification": [],
+      "questions": [],
+      "note": null
+    }
+  ],
+  "attention": [
+    {
+      "id": "task-21",
+      "kind": "needs-answers",
+      "detail": "Needs a decision before it can be dispatched: does an archived item move to the board's Archive view immediately, or stay under its original column until the run finishes?"
+    },
+    {
+      "id": "task-16",
+      "kind": "parked",
+      "detail": "Merge conflicted against main in shared/types.ts; parked mid-run. Resumed after a human resolved the conflict by hand, then merged clean."
+    },
+    {
+      "id": "task-9",
+      "kind": "fix-exhausted",
+      "detail": "Reviewer asked for changes twice without signing off (2 fix loops, the loop cap); asked whether to merge anyway — approved, and verification still passed before the merge."
+    }
+  ]
+}

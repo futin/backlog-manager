@@ -242,3 +242,174 @@ export interface AgentDispatchRequest {
 export interface AgentDispatchResult {
   sessionId: string;
 }
+
+/**
+ * The orchestrator's one-way pipeline for a single queue item, pending
+ * through merged, plus the terminal exits that leave the pipeline early.
+ * Written out as a flat union rather than modelled as "pipeline stage" +
+ * "terminal outcome" because a queue item's `stage` field is exactly one of
+ * these strings at any moment — there is no second field to disagree with it,
+ * so nothing is gained by splitting the type and a split type would let a
+ * reader ask "which pipeline stage is `failed`?", a question with no answer.
+ *
+ * Order here is the pipeline order, not alphabetical, because Task 5's watch
+ * loop and Task 6's client render a "how far along" indicator by finding a
+ * stage's position in this list — the members exist as much for a reader
+ * scanning the sequence as for the string values themselves. `pending` is
+ * the only stage every item starts in; `merged` is the only success exit;
+ * `failed`, `skipped`, `needs-answers`, `ungroomed`, and `parked` are the
+ * five ways an item leaves the pipeline without merging. `needs-answers` and
+ * `ungroomed` are reachable straight from `pending` (a preflight question
+ * with no answer, or an item the gate never queues past parse) without ever
+ * touching `preflight` — the type does not encode reachability, only the
+ * vocabulary; `orchestrate.mjs` (Task 3) owns which transitions are legal.
+ */
+export type RunStage =
+  | 'pending' | 'preflight' | 'dispatched' | 'inspecting' | 'reviewing'
+  | 'fixing' | 'verifying' | 'merging' | 'merged'
+  | 'failed' | 'skipped' | 'needs-answers' | 'ungroomed' | 'parked';
+
+/**
+ * One row of the verify step's output, kept verbatim rather than summarised
+ * to a pass/fail count: `tail` is the last few lines of the command's own
+ * output, which is what a human actually needs to tell a flaky test from a
+ * real regression without re-running anything. `ok` is stored redundantly
+ * alongside `tail` rather than derived from it (a green tail and a red tail
+ * do not share a recognisable shape across arbitrary project test runners),
+ * so the drawer can render a checkmark without parsing prose.
+ */
+export interface RunVerification {
+  /** The exact command that ran, e.g. `pnpm test`. */
+  cmd: string;
+  /** Its exit status, already collapsed to pass/fail. */
+  ok: boolean;
+  /** The last few lines of its output — enough to diagnose, not the whole log. */
+  tail: string;
+}
+
+/**
+ * One backlog item's full run record. Every field survives the item's whole
+ * time in the queue rather than being cleared on a stage change, because the
+ * run file is the only place this history exists once a worktree is removed
+ * — `sessionId`/`worktree`/`branch` stay populated after `merged` so the
+ * drawer (Task 6) can still say which session and branch produced a given
+ * merge, and `verification`/`fixLoops` stay populated after a park so a
+ * resumed run does not have to re-discover what already happened.
+ */
+export interface RunQueueItem {
+  /** The backlog item's own id — the same id `backlog.mjs` uses. */
+  id: string;
+  title: string;
+  stage: RunStage;
+  /**
+   * The headless `claude -p` session working this item, or `null` before
+   * dispatch and for an item skipped before dispatch (`needs-answers` from a
+   * preflight question, or `ungroomed`) — those two exits never reach the
+   * point where a session would exist to record.
+   */
+  sessionId: string | null;
+  /** Absolute path of this item's git worktree, or `null` for the same reasons as `sessionId`. */
+  worktree: string | null;
+  /** The item's working branch name, or `null` for the same reasons as `sessionId`. */
+  branch: string | null;
+  /**
+   * How many times this item has gone through the fix-and-re-review loop in
+   * the *current* run attempt. Reset by a fresh `init`, not carried across a
+   * park-then-resume from an earlier run — a past exhaustion is history that
+   * belongs in `attention`, not a count this run's loop cap has to weigh.
+   */
+  fixLoops: number;
+  /**
+   * First-arrival timestamp for each stage this item has actually visited,
+   * keyed by the stage name. `Partial` because an item's route through
+   * `RunStage` is not the full member list even on a clean run (verify is
+   * skipped along with merge for anything that exits early), and a
+   * fix-and-re-review loop revisits `reviewing`/`fixing` without adding a
+   * second key — only the first arrival is kept, so this is a shape record,
+   * not a full event log.
+   */
+  stageAt: Partial<Record<RunStage, string>>;
+  /** Verify-step output, oldest first; `[]` for an item that never reached verify. */
+  verification: RunVerification[];
+  /**
+   * Unanswered preflight questions, verbatim, for a `needs-answers` item;
+   * `[]` for every other stage. Kept as a plain array rather than folded
+   * into `note` because the drawer (Task 6) renders these questions
+   * verbatim as a list, not as prose it would have to re-split out of a
+   * free-text field.
+   */
+  questions: string[];
+  /**
+   * A short free-text explanation for anything the other fields don't
+   * already say on their own — why an `ungroomed` item was skipped, or what
+   * a `parked` item is waiting on. `null` when the stage speaks for itself
+   * (a plain `merged` or `pending` item has nothing to add).
+   */
+  note: string | null;
+}
+
+/**
+ * One entry in the run's surfaced list of things a human should look at:
+ * an unanswered preflight question, a merge left parked, or an item that
+ * used up its fix-and-re-review loops without converging. Deliberately not
+ * one-to-one with a *current* queue stage — `id` names the queue item this
+ * is about, but the item may have since been resumed and moved on (a
+ * `parked` merge that got checked out and merged by hand, say), so this list
+ * is a log of what happened, not a live filter over `queue`.
+ */
+export interface RunAttention {
+  /** The `RunQueueItem.id` this entry is about. */
+  id: string;
+  kind: 'needs-answers' | 'parked' | 'fix-exhausted';
+  /** Human-readable detail — what happened and, where relevant, what unblocks it. */
+  detail: string;
+}
+
+/**
+ * Fifteen minutes. The orchestrator's watch loop (Task 5) heartbeats — i.e.
+ * re-stamps `OrchestratorRun.updatedAt` — at most roughly every 9.5 minutes
+ * even when nothing else changes, so any single missed beat still leaves the
+ * run under this threshold; only two consecutive missed beats (a genuinely
+ * wedged or crashed process, not a slow item) push `updatedAt` stale enough
+ * for the UI to call the run dead and offer resume/abort. This is the one
+ * freshness number in the app — every "is this run still alive" check reads
+ * this constant rather than hard-coding its own guess.
+ */
+export const RUN_STALE_MS = 15 * 60 * 1000;
+
+/**
+ * The orchestrator's run-state file for one project, as written by
+ * `orchestrate.mjs` (Task 3) at `~/.backlog-manager/orchestrator/<project
+ * key>/run.json` and read back by the server and client unmodified — this
+ * app never writes one. `status` mirrors the run file's own lifecycle, not
+ * any one item's: `running` until every queued item has left the pipeline
+ * (merged or otherwise), then `done`; `aborted`/`failed` record how a
+ * non-`running` run file got that way rather than staying `running` forever.
+ */
+export interface OrchestratorRun {
+  /** Identifies one run's archived file among `runs/<runId>.json` siblings for the same project. */
+  runId: string;
+  /** The registered project's absolute path — the same string as `RegistryProject.path`. */
+  project: string;
+  status: 'running' | 'done' | 'aborted' | 'failed';
+  startedAt: string;
+  /** Re-stamped on every write to the run file — the heartbeat `RUN_STALE_MS` measures against. */
+  updatedAt: string;
+  /** The `--max` the run was started with, or `null` for "work the whole gated queue". */
+  maxItems: number | null;
+  queue: RunQueueItem[];
+  attention: RunAttention[];
+}
+
+/**
+ * `GET /api/orchestrator/runs` (Task 8) — one entry per project with any run
+ * history, each run annotated with what the run file alone cannot say:
+ * `fresh` is the `RUN_STALE_MS` freshness check the server performs once so
+ * every client doesn't re-implement it against its own clock, and
+ * `pastRuns` is a count the client has no other way to obtain (it is a
+ * directory listing on the server's filesystem, not a field the run file
+ * carries about itself).
+ */
+export interface OrchestratorRunsPayload {
+  runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number }>;
+}
