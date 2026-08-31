@@ -70,6 +70,17 @@ function writeQueueJson(t, items) {
   return file
 }
 
+// Writes arbitrary raw text as a --queue-json target, unlike writeQueueJson
+// which always JSON.stringifies a real array — needed to construct the
+// "not even valid JSON" failure mode, which a normal JS value can't express.
+function writeRawFile(t, content) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-raw-'))
+  const file = path.join(dir, 'queue.json')
+  fs.writeFileSync(file, content)
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  return file
+}
+
 // --- RUN_STALE_MS -----------------------------------------------------------
 
 // Controller ruling: the .mjs tool cannot import shared/types.ts (plugin
@@ -152,6 +163,33 @@ test('init twice in a row: the second call exits 4 while the first is still fres
   assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json changed even though init was refused')
 })
 
+// Fix round 1 (Important #1): the fresh-lock case above was the only lock
+// coverage — the stale branch (a crashed run: status still "running" but
+// the heartbeat is old) is the highest-stakes branch in this file, since it
+// is the one a human is most likely to hit for real, and it had zero test
+// coverage. Simulates a crash by hand-editing updatedAt to well past
+// RUN_STALE_MS while leaving status "running", exactly the shape a killed
+// orchestrator process would leave behind.
+test('init over a stale "running" run also refuses (exit 4), names --resume/--abort, and leaves the file and directory untouched', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const file = runFile(home, project)
+  const stale = JSON.parse(fs.readFileSync(file, 'utf8'))
+  stale.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString()
+  fs.writeFileSync(file, JSON.stringify(stale, null, 2) + '\n')
+  const before = fs.readFileSync(file)
+
+  const out = run(project, home, 'init', '--project', project)
+
+  assert.equal(out.status, 4)
+  assert.match(out.stderr, /--resume/)
+  assert.match(out.stderr, /--abort/)
+  assert.match(out.stderr, /stale|crash/i)
+  assert.ok(before.equals(fs.readFileSync(file)), 'a stale-but-running run.json was modified even though init was refused')
+  const dir = path.join(home, encodeURIComponent(project))
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp')), [])
+})
+
 // --- Test case 3: init over a done run archives it and starts fresh --------
 
 test('init over a status:"done" run archives the old file to runs/<runId>.json and writes a fresh running run', (t) => {
@@ -186,6 +224,79 @@ test('a second done-then-init cycle grows runs/ to two archived files', (t) => {
 
   assert.equal(out.status, 0, out.stderr)
   assert.equal(fs.readdirSync(runsDir(home, project)).length, 2)
+})
+
+// --- Fix round 1 (Critical + Important #2): --queue-json's three failure
+// modes, each of which is exactly the path behind the critical bug a
+// reviewer reproduced live. Each case runs against a project that already
+// has a `done` run on disk — the exact setup that exposed the bug, where
+// validating the queue too late archived the done run away and then threw,
+// leaving no run.json at all (status would wrongly report exit 3). With
+// queue validation moved ahead of the archive step, none of these three
+// cases should touch the existing run.json OR create a runs/ directory —
+// the failure must be confined to "nothing written," full stop.
+
+test('init --queue-json with invalid JSON syntax exits 1 and leaves an existing done run.json completely untouched', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+  const badFile = writeRawFile(t, '{ not valid json')
+
+  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
+
+  assert.equal(out.status, 1)
+  assert.equal(fs.existsSync(runFile(home, project)), true)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
+  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived')
+  // This is the exact symptom the critical bug produced: status wrongly
+  // reporting "no run exists" because the done run had already been
+  // archived away with nothing put back in its place.
+  assert.equal(run(project, home, 'status').status, 0)
+})
+
+test('init --queue-json holding a non-array JSON value exits 1 and leaves an existing done run.json completely untouched', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+  const badFile = writeRawFile(t, JSON.stringify({ not: 'an array' }))
+
+  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
+
+  assert.equal(out.status, 1)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
+  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived')
+  assert.equal(run(project, home, 'status').status, 0)
+})
+
+test('init --queue-json with an entry missing id or title exits 1 and leaves an existing done run.json completely untouched', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+  const badFile = writeRawFile(t, JSON.stringify([{ id: 'task-1' }]))
+
+  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
+
+  assert.equal(out.status, 1)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
+  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived')
+  assert.equal(run(project, home, 'status').status, 0)
+})
+
+// Fix round 1 (Minor): confirms the reordering also kills the stray-empty-
+// directory symptom on a project with no PRIOR run at all — there is
+// nothing to archive here, so this is a distinct assertion from the three
+// above (which exercise the archive-then-throw ordering specifically).
+test('init --queue-json with invalid JSON on a brand-new project creates no directory at all', (t) => {
+  const { home, project } = orchFixture(t)
+  const badFile = writeRawFile(t, '{ not valid json')
+
+  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
+
+  assert.equal(out.status, 1)
+  assert.equal(fs.existsSync(path.join(home, encodeURIComponent(project))), false, 'a stray project directory was created despite init failing')
 })
 
 // --- Test case 4: stage sets fields, first-arrival stageAt, fresh updatedAt

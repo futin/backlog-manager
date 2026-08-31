@@ -169,6 +169,24 @@ function archivePath(archiveDir, runId) {
 // pointer back to the main tree, which is exactly why this walk is safe to
 // reuse verbatim: the orchestrator's own cwd is the main tree throughout,
 // so there is no worktree-vs-main ambiguity for this file to worry about.
+//
+// That safety depends entirely on the orchestrator loop actually honoring
+// its own contract, and the failure mode if it doesn't is worth spelling
+// out: if any `orchestrate.mjs` command were ever invoked with a per-item
+// worktree as its cwd, this walk would NOT error. A linked worktree has its
+// own `.git` (a file, not a directory, pointing at the shared gitdir), so
+// `existsSync` finds it immediately and happily returns the WORKTREE's own
+// path as "the project" — `projectDir` then keys the run under
+// `encodeURIComponent(<worktree path>)`, a directory nobody else ever
+// looks at, since every other command (and the server, Task 8) reads
+// state keyed by the registered project's own path. The run would appear
+// to vanish — no error, no crash, just state silently written to the
+// wrong key — which is far harder to notice and debug than the loud "no
+// .git found" refusal above. This is exactly why the skill (Task 7) must
+// always invoke this tool from the project root and never from inside a
+// worktree it created: per-item paths (`--worktree`, `--branch` on
+// `stage`) are passed as explicit flag values instead of being implied by
+// cwd.
 export function resolveProjectRoot(startDir = process.cwd()) {
   const resolvedStart = path.resolve(startDir)
   let dir = resolvedStart
@@ -370,9 +388,31 @@ function cmdInit(argv) {
     maxItems = n
   }
 
+  // The queue is built — and, critically, FULLY VALIDATED — before this
+  // function does anything to the filesystem: before orchHome()/projectDir
+  // are even consulted, before any directory is created, before an
+  // existing run.json is read for the lock check, and before that existing
+  // run.json is archived away. This ordering fixes a real bug a reviewer
+  // reproduced live: with validation done LATER (as an earlier version of
+  // this function had it), a bad --queue-json arriving after a prior
+  // `done` run would archive the done run to runs/<runId>.json and THEN
+  // throw while building the new queue — leaving the project with no
+  // run.json at all. The data wasn't lost (it survived under runs/), but
+  // `status` would then wrongly report exit 3 ("no run exists"), and a
+  // fresh project's `init` would even leave behind a stray empty directory
+  // (see writeRunAtomic/archivePath below, both of which now create their
+  // own directories on demand instead of this function pre-creating one).
+  // Validating first means a bad --queue-json can never destroy or hide
+  // state that already existed — the failure is confined to "nothing
+  // written," which is the same guarantee every other error path in this
+  // file already gives.
+  const stamp = nowISO()
+  const queue = queueJsonFile !== undefined
+    ? queueFromFile(queueJsonFile, stamp)
+    : idsFromArg(idsArg, maxItems).map((id) => makeQueueItem(id, id, stamp))
+
   const root = orchHome()
   const dir = projectDir(root, project)
-  fs.mkdirSync(dir, { recursive: true })
 
   const file = runFilePath(dir)
   let existing = null
@@ -441,28 +481,19 @@ function cmdInit(argv) {
     )
   }
 
-  const stamp = nowISO()
-
   // A non-running existing run (done/aborted/failed) is archived rather
   // than discarded: `runs/<runId>.json` is the only place a finished run's
   // full history survives once run.json itself is about to be replaced,
   // and `pastRuns` (the server payload, Task 8) is nothing more than a
-  // directory listing over exactly this folder.
+  // directory listing over exactly this folder. By the time execution
+  // reaches here, `queue` above has already been built and validated
+  // successfully — so this rename can never run only to be followed by a
+  // throw that leaves the project without any run.json at all.
   if (existing) {
     const archiveDir = runsArchiveDir(dir)
     fs.mkdirSync(archiveDir, { recursive: true })
     fs.renameSync(file, archivePath(archiveDir, existing.runId))
   }
-
-  // The gate Task 4 wires in is what will normally decide queue content and
-  // order; until it exists, --queue-json (test-only, see its own comment)
-  // takes priority when given, and a bare --ids list (with an optional
-  // --max cap) is the fallback used by a real, gate-less `init` today. Both
-  // paths funnel through makeQueueItem so every item in the result has the
-  // exact same shape regardless of which one built it.
-  const queue = queueJsonFile !== undefined
-    ? queueFromFile(queueJsonFile, stamp)
-    : idsFromArg(idsArg, maxItems).map((id) => makeQueueItem(id, id, stamp))
 
   const runId = makeRunId(stamp)
   const newRun = {
