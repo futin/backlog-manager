@@ -62,3 +62,51 @@ accumulated buckets on any item that has them, done items included.
 
 `pnpm run test:skills` and `pnpm test` are green, and a groomed item on the
 board shows "grooming" in its live bar with the elapsed reading beside it.
+
+## Outcome
+
+2026-08-31 — shipped. `start --as groom|execute` writes `phase:` alongside
+`started:` (`startItem`, backlog.mjs); `stop` reads `phase:` back and bills whole
+seconds into `groom-elapsed:`/`execute-elapsed:` via `ELAPSED_KEYS`, guarded by
+`FULL_TIMESTAMP` so a legacy bare `YYYY-MM-DD` is cleared and never billed;
+`updated:` is stamped inside `writeItemFile`, with `moveItem` deliberately
+excluded. Client side, `phaseLabel` (`client/src/lib/item-progress.ts`) renders
+"grooming"/"executing" on the live bar and falls back to the generic label when
+`phase` is absent, and the drawer prints both accumulated buckets ungated on
+status, so an archived item still shows its billed time.
+
+Landed over six commits: fbe27ee (updated stamp), 2ed36f8 (phase), 2a872e5
+(buckets), 46d2efb (server surfaces), aca5d08 (board), plus eb9950d and f8b2de8
+fixing two billing holes found after the fact — a dead interval being billed,
+and the successful-archive path not billing at all, which is why
+`stop --keep-started` exists.
+
+Verification:
+
+```
+$ pnpm run test:skills
+1..142
+# tests 142
+# suites 0
+# pass 142
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 46083.514292
+
+$ pnpm test
+Test Suites: 24 passed, 24 total
+Tests:       323 passed, 323 total
+Snapshots:   0 total
+Time:        130.102 s
+Ran all test suites.
+
+$ pnpm run typecheck
+$ tsc --noEmit
+[exited with code 0]
+```
+
+No `started:`/`phase:` marker was ever held on this item, so nothing was billed
+into either bucket — the work predates this archiving session, and a stamp taken
+now would have recorded a few minutes for six commits' worth of work.
