@@ -5,11 +5,18 @@ import type { MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { HealthController } from './health/health.controller';
 import { ItemsModule } from './items/items.module';
 import { AgentsModule } from './agents/agents.module';
+import { OrchestratorModule } from './orchestrator/orchestrator.module';
 import { applySecurityHeaders } from './security';
 import { clientDistModules } from './static';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ItemsModule, AgentsModule, ...clientDistModules()],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    ItemsModule,
+    AgentsModule,
+    OrchestratorModule,
+    ...clientDistModules()
+  ],
   controllers: [HealthController]
 })
 export class AppModule implements NestModule {
