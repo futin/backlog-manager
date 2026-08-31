@@ -1,5 +1,13 @@
-import { dispatchAgent, fetchAgentPlan, fetchAgentsStatus, sessionUrl } from '../client/src/lib/agents';
-import type { AgentDispatchRequest } from '../shared/types';
+import {
+  dispatchAgent, fetchAgentPlan, fetchAgentsStatus, fetchOrchestratorRuns, sessionUrl, startOrchestrate
+} from '../client/src/lib/agents';
+import rawFixture from './fixtures/orchestrator-run.json';
+import type { AgentDispatchRequest, OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
+
+// Same translation orchestrator-shapes.test.ts (Task 8) uses: the fixture is
+// plain JSON, so TS would otherwise widen its string fields to `string`
+// instead of the narrower literal unions (`RunStage`, etc).
+const fixture = rawFixture as OrchestratorRun;
 
 const REQ: AgentDispatchRequest = {
   itemPath: '/abs/alpha/backlog/tasks/open/task-1.md',
@@ -84,6 +92,49 @@ describe('the agents client', () => {
       Promise.resolve({ ok: false, status: 500, json: () => Promise.reject(new Error('not json')) } as Response)
     ) as jest.Mock;
     await expect(dispatchAgent(REQ)).rejects.toThrow('500');
+  });
+});
+
+// The hook (test/orchestrator-hook.test.tsx) exercises fetchOrchestratorRuns
+// end-to-end already, but only through the URL/method contract it happens to
+// need; these two are the direct, function-level proof every other export in
+// this file already gets (fetchAgentsStatus, fetchAgentPlan, dispatchAgent
+// above), so a change to either call's shape fails here first rather than as
+// a mystery in the hook suite.
+describe('the orchestrator calls', () => {
+  it('reads runs from the same-origin API', async () => {
+    const body: OrchestratorRunsPayload = { runs: [{ ...fixture, fresh: true, pastRuns: 0 }] };
+    const calls = stub({ ok: true, body });
+    await expect(fetchOrchestratorRuns()).resolves.toEqual(body);
+    expect(calls[0].url).toBe('/api/orchestrator/runs');
+    expect(calls[0].init).toBeUndefined();
+  });
+
+  // POST, not GET, for the same reason fetchAgentPlan is: `project` is an
+  // absolute path on someone's disk, and a query string puts it in history
+  // and in logs.
+  it('posts the project as a body, never a query string', async () => {
+    const calls = stub({ ok: true, body: { sessionId: 'sess-1' } });
+    await startOrchestrate({ project: '/abs/alpha' });
+    expect(calls[0].url).toBe('/api/agents/orchestrate');
+    // model/effort/permissionMode all absent: JSON.stringify drops an
+    // undefined value outright, which is what proves this request carries
+    // no accidental extra key when the caller supplies only a project — the
+    // same shape orchestrator-start.test.ts's own e2e case pins on the
+    // server side of this same call.
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ project: '/abs/alpha' });
+  });
+
+  it('returns the session id on a successful start', async () => {
+    stub({ ok: true, body: { sessionId: 'sess-9' } });
+    await expect(startOrchestrate({ project: '/abs/alpha' })).resolves.toEqual({ sessionId: 'sess-9' });
+  });
+
+  // The 409-with-a-runId shape orchestrator-start.test.ts's own "fresh
+  // running run" case answers with.
+  it('throws the server error string on a fresh-run conflict', async () => {
+    stub({ ok: false, status: 409, body: { error: `a fresh run already exists (${fixture.runId})` } });
+    await expect(startOrchestrate({ project: '/abs/alpha' })).rejects.toThrow(fixture.runId);
   });
 });
 

@@ -1,9 +1,9 @@
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus
+  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, OrchestratorRunsPayload, PermissionMode
 } from '../../../shared/types';
 
 /**
- * agents.ts — the board's three calls into its own API.
+ * agents.ts — the board's five calls into its own API.
  *
  * Same-origin, every one of them: the dashboard's origin is server-side
  * configuration this page never learns, which is both why the bearer token
@@ -76,6 +76,59 @@ export async function fetchAgentPlan(itemPath: string): Promise<AgentPlan> {
 
 export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDispatchResult> {
   return unwrap<AgentDispatchResult>(await fetch('/api/agents/dispatch', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(req)
+  }));
+}
+
+/**
+ * `GET /api/orchestrator/runs` (Task 8) — one entry per project with any run
+ * history, each already annotated with `fresh`/`pastRuns`. No shape guard
+ * here unlike `fetchAgentsStatus`: that one earns its `isAgentsStatus` check
+ * because a malformed body would sit silently in `useAgents`' state,
+ * misreporting every card's dispatch eligibility for as long as that state
+ * sticks around. This payload's own first consumer (`useOrchestratorRuns`)
+ * dereferences `runs` immediately to decide whether to poll, so a wrong
+ * shape fails loudly on the very next render instead of lying quietly —
+ * the same "surfaces as a downstream crash in the same round trip" case
+ * `unwrap`'s doc comment already carves out for `AgentPlan` and dispatch's
+ * result.
+ */
+export async function fetchOrchestratorRuns(): Promise<OrchestratorRunsPayload> {
+  return unwrap<OrchestratorRunsPayload>(await fetch('/api/orchestrator/runs'));
+}
+
+/**
+ * Body of `POST /api/agents/orchestrate` (Task 9). Mirrors the server's own
+ * `AgentOrchestrateRequest` (server/src/agents/agents.service.ts) field for
+ * field, but is declared here rather than promoted into shared/types.ts
+ * alongside `AgentDispatchRequest`: that file's own comment on the server
+ * type defers promotion until "a second consumer needs it", and this
+ * client-only declaration is exactly that second consumer without requiring
+ * a change to the server side, which is out of scope for the task that added
+ * this function. `permissionMode` is narrower here than the server's plain
+ * `string`: the server is validating a body it cannot trust, but a caller
+ * composing this request on the client already has the real `PermissionMode`
+ * union in scope (see `AgentDispatchRequest` above), so there is no reason
+ * to widen it back to `string` just to send it over the wire.
+ */
+export interface StartOrchestrateRequest {
+  project: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: PermissionMode;
+}
+
+/**
+ * The board's "drain the whole queue" call — one project, no item, no
+ * caller-supplied prompt (the server drops one if sent; see
+ * AgentsService.ORCHESTRATE_PROMPT). POST, not GET, for the same reason
+ * `fetchAgentPlan` is: `project` is an absolute path on someone's disk, and
+ * a query string puts it in history and in logs.
+ */
+export async function startOrchestrate(req: StartOrchestrateRequest): Promise<AgentDispatchResult> {
+  return unwrap<AgentDispatchResult>(await fetch('/api/agents/orchestrate', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(req)
