@@ -34,7 +34,11 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   a read-only view of the run file — see Invariants), `registry/` (read-only
   view of the registry file), `static.ts` (serves `client/dist` only when
   built).
-- `client/src/` — React SPA: side rail (Projects / Settings), board (five
+- `client/src/` — React SPA: side rail (Board / Archive / Settings — `SECTIONS`
+  in `SideRail.tsx` is the one runtime list of them, and `resolveSection` in
+  `App.tsx` maps a stored value that names no tab, the legacy `'projects'`
+  included, onto Board; Archive is a placeholder until its own chunk lands),
+  board (five
   fixed columns — bugs/ideas/tasks/out-of-scope/refactors — card drawer,
   dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
   a toolbar Orchestrate control opening `OrchestrateSheet`, and a run strip

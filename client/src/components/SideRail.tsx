@@ -1,9 +1,30 @@
-export type Section = 'projects' | 'settings';
-
-const TABS: { id: Section; label: string }[] = [
-  { id: 'projects', label: 'Projects' },
+/**
+ * The rail's tabs, in rail order — and the one definition of what a section is.
+ *
+ * "Board" rather than the "Projects" this tab shipped as, and rather than
+ * "Tasks": a nav entry names a place, not a type, and the place holds bugs,
+ * ideas and refactors alongside tasks. Narrowing to one project is a board
+ * control and lives in the board toolbar, which is what made "Projects" the
+ * wrong word for a section switch in the first place.
+ *
+ * `as const` so `Section` can be derived from it below. Everything that needs
+ * to *check* a value against the list — `resolveSection` in App.tsx, guarding
+ * a stored section that outlived the build that wrote it, and `LANDINGS` in
+ * lib/settings.ts, clamping the "Opens on" preference — reads `SECTIONS` from
+ * here instead of hand-copying the names. A type union alone has no runtime
+ * members to iterate, which is why those two used to carry duplicates of this
+ * list that could silently fall out of step with the rail.
+ */
+const TABS = [
+  { id: 'board', label: 'Board' },
+  { id: 'archive', label: 'Archive' },
   { id: 'settings', label: 'Settings' }
-];
+] as const;
+
+export type Section = (typeof TABS)[number]['id'];
+
+/** Every section id, runtime-readable. Derived, so the rail cannot drift from it. */
+export const SECTIONS: readonly Section[] = TABS.map((t) => t.id);
 
 interface Props {
   section: Section;
@@ -11,10 +32,10 @@ interface Props {
 }
 
 /**
- * Top-level section switch: the backlog board · settings. A rail down the left
+ * Top-level section switch: board · archive · settings. A rail down the left
  * edge on desktop, a horizontal scroll strip below 700px.
  *
- * Ported from ../guide-manager/client/src/components/SideRail.tsx with its two
+ * Ported from ../guide-manager/client/src/components/SideRail.tsx with its
  * tabs relabelled. The class names are unchanged because the ported stylesheet
  * keys off them.
  *

@@ -121,6 +121,16 @@ function stubItems(items: BacklogItem[]) {
 }
 
 describe('BoardView', () => {
+  it('titles itself Board, matching the rail tab that opens it', async () => {
+    await renderBoard();
+    // Not "Projects", which is what this said while the rail tab said it too.
+    // A nav entry names a place, not a type, and this place holds bugs, ideas
+    // and refactors as well as tasks — narrowing to one project is the
+    // toolbar's job, one line to the right of this title.
+    expect(screen.getByText('Board')).toHaveClass('board-title');
+    expect(screen.queryByText('Projects')).not.toBeInTheDocument();
+  });
+
   it('renders the five columns with counts of what they hold (open by default)', async () => {
     await renderBoard();
     const cols = screen.getAllByTestId('board-col');

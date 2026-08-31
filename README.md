@@ -183,7 +183,8 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   (this item's next step, derived from the file, plus a composed default
   prompt), `POST /api/agents/dispatch` (spawns the session in that
   dashboard).
-- `client/src/` — a side rail (Projects / Settings, a plain section switch),
+- `client/src/` — a side rail (Board / Archive / Settings, a plain section
+  switch; Archive is a placeholder describing what will land there),
   the board (toolbar with search plus project/status/sort selects, four fixed
   columns, a click-to-open drawer rendering the item's Markdown body, plus a
   dispatch button — on the card and again in the drawer — that opens a

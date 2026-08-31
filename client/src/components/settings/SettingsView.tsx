@@ -26,12 +26,20 @@ const DENSITIES = [
 
 /**
  * The landing choices, with copy rather than section ids. "Last used" is
- * first because it is the default and reads as the absence of a choice; the two
- * named sections below it are the override.
+ * first because it is the default and reads as the absence of a choice; the
+ * named sections below it are the override, in rail order so the list reads as
+ * the rail does.
+ *
+ * Still written out rather than mapped over `SECTIONS`: these are labels for a
+ * settings row, not the rail's own labels, and the day one of them needs to
+ * read differently here ("Board (all projects)") a derived list would have to
+ * be unpicked. `clampSettings` is what guarantees the *values* stay in step —
+ * its `LANDINGS` is the derived one.
  */
 const LANDINGS: { value: Landing; label: string }[] = [
   { value: 'last', label: 'Last used' },
-  { value: 'projects', label: 'Projects' },
+  { value: 'board', label: 'Board' },
+  { value: 'archive', label: 'Archive' },
   { value: 'settings', label: 'Settings' }
 ];
 

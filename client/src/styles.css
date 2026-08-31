@@ -210,6 +210,22 @@ body {
 .spinner { animation: spin .7s linear infinite; flex: none }
 @keyframes spin { to { transform: rotate(360deg) } }
 
+/* A whole explanation where `.board-empty` carries a phrase — the Archive
+   placeholder, and whatever else has to say more than "no matches". Its own
+   class rather than a modifier on `.board-empty`, whose centred flex row is
+   there to hang an icon beside a word: a paragraph inside it would need the
+   flex undone before anything else could be set, and undoing a rule is a worse
+   way to say "this is a different thing" than not opting into it.
+
+   `max-width` in `em` so the measure tracks the text rather than the viewport:
+   these sections render inside `.wrap.wide`, where a full-width line of 11px
+   type is ~200 characters and unreadable however it is aligned. Line height
+   above the page default for the same reason — long lines need the leading. */
+.board-note {
+  max-width: 42em; margin: 24px auto; padding: 0 2px;
+  font-size: 11px; line-height: 1.8; color: var(--ink3); text-align: center;
+}
+
 /* Phones: the toolbar gets its own full-width line under the title (the bar wraps
    it there anyway; `margin-left:auto` is dropped so it starts at the left edge
    rather than sitting oddly right-aligned on a line of its own). The search takes
