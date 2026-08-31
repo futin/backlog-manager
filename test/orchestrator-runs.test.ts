@@ -63,6 +63,29 @@ describe('GET /api/orchestrator/runs', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+
+    // Explicitly listen once here rather than leaving it to supertest. Left
+    // alone, supertest's Test#serverAddress calls `app.getHttpServer().listen(0)`
+    // itself whenever the server isn't already listening, and its own end()
+    // then calls `.close()` on that same server once the response lands —
+    // see node_modules/supertest/lib/test.js. That is a listen/close cycle
+    // per request, on the *same* underlying http.Server object, and it is
+    // only safe if each cycle fully completes before the next begins. Every
+    // other case in this file makes one request per test, so it never
+    // exercises this — but "never caches" below makes two, with a disk write
+    // in between, specifically to prove the endpoint re-reads per request.
+    // Under `--runInBand`'s single process, with dozens of other suites
+    // opening and closing their own Nest apps and ephemeral servers on the
+    // same event loop, that back-to-back listen/close pair on one Server
+    // instance was the flaky part: it reproduced as a bare `socket hang up`
+    // roughly 1 run in 4 under the full suite, never in isolation, and never
+    // on any single-request case in this same file. Listening once here (and
+    // never again per request) means every `request(app.getHttpServer())`
+    // call below finds `app.address()` already non-null, so supertest reuses
+    // that one address for the whole test and never touches listen/close
+    // itself — see the `if (!addr)` branch in serverAddress. `app.close()`
+    // below still tears the one listener down at the end of each test.
+    await app.listen(0);
   });
 
   afterEach(async () => {
