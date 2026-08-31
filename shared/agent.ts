@@ -22,6 +22,16 @@ export type AgentAction = 'groom' | 'execute';
  * for them by construction). Bugs and tasks turn on the groomed derivation
  * alone, which is exactly the condition backlog-execute refuses to work
  * without: a bug whose Fix still reads "unknown" gets groomed first.
+ *
+ * Refactors reach the same answer as ideas without a branch of their own, and
+ * that is deliberate rather than an oversight: `groomed` is null for them too
+ * (see deriveGroomed), so `groomed === true` is false and the return is
+ * 'groom'. Adding `|| section === 'refactors'` to the line above would read as
+ * a rule and encode none — the null derivation is the rule, and every future
+ * section that has no groomed state inherits it for free. Note this is NOT the
+ * same shape as composePrompt in server/src/agents/prompt.util.ts, which does
+ * name refactors explicitly: there the fall-through led somewhere wrong (the
+ * task fallback), so the branch had to be widened.
  */
 export function deriveAction(item: BacklogItem): AgentAction | null {
   if (item.status !== 'open') return null;

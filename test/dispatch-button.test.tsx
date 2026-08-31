@@ -14,7 +14,7 @@ import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../s
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'task-1', title: 'a task', created: '2026-08-20', started: '', tags: [],
-    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
+    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
     section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md'
   };
@@ -218,7 +218,7 @@ describe('ItemDrawer wiring', () => {
 const ITEMS: ItemsIndex = { items: [fakeItem(), fakeItem({ id: 'idea-1', title: 'an idea', section: 'ideas', groomed: null, path: '/abs/alpha/backlog/ideas/open/idea-1.md' })], errors: [] };
 const PROJECTS: ProjectSummary[] = [
   { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 1, tasks: 1, 'out-of-scope': 0 } }
+    counts: { bugs: 0, ideas: 1, tasks: 1, refactors: 0, 'out-of-scope': 0 } }
 ];
 
 describe('the board wiring', () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// backlog: a repo-local bugs/ideas/tasks/out-of-scope store, driven from the
-// CLI or from a skill. Lives under skills/backlog/tools/ of the backlog-manager
+// backlog: a repo-local bugs/ideas/tasks/refactors/out-of-scope store, driven
+// from the CLI or from a skill. Lives under skills/backlog/tools/ of the backlog-manager
 // plugin repo; nothing is installed into the repos it manages — the backlog/
 // directory itself is the only thing that lands in a project.
 //
@@ -18,6 +18,16 @@ export const SECTIONS = {
   bugs: 'bug',
   ideas: 'idea',
   tasks: 'task',
+  // `ref`, not `refactor`: the board card's meta line is nowrap-with-ellipsis
+  // in roughly 118px at real column width, and `refactor-12` does not fit
+  // beside a date there — it renders as `refactor-1…` and names nothing. The
+  // prefix is load-bearing UI, not just a namespace.
+  //
+  // Refactors are their own section rather than a flavour of idea because the
+  // distinction is real: ideas are NEW (a feature, an optimisation); refactors
+  // are EXISTING things that should be improved — not new, not broken, so
+  // neither an idea nor a bug.
+  refactors: 'ref',
   'out-of-scope': 'oos',
 }
 
@@ -118,9 +128,15 @@ export function slugify(title) {
   return slug
 }
 
-// The seven leaf directories the store is defined to have. out-of-scope is
-// flat — items land there and stay there; bugs/ideas/tasks each split into
-// open/done as items move through their lifecycle.
+// The nine leaf directories the store is defined to have. out-of-scope is
+// flat — items land there and stay there; bugs/ideas/tasks/refactors each
+// split into open/done as items move through their lifecycle.
+//
+// Spelled out rather than derived from SECTIONS, even though every entry but
+// out-of-scope is mechanically `<section>/open` + `<section>/done`: the one
+// exception is exactly what a derivation would have to special-case, and this
+// list is also the thing `init` promises. A reader checking "what does a store
+// contain" should find the answer, not a rule for computing it.
 const LEAF_DIRS = [
   'bugs/open',
   'bugs/done',
@@ -128,15 +144,17 @@ const LEAF_DIRS = [
   'ideas/done',
   'tasks/open',
   'tasks/done',
+  'refactors/open',
+  'refactors/done',
   'out-of-scope',
 ]
 
 const README_TEXT = `# Backlog
 
 A lightweight, file-based backlog for this repo. Every item is a single
-Markdown file living under one of the sections below. Bugs, ideas, and tasks
-move from open/ to done/ as they are worked; out-of-scope holds items that
-were considered and declined, and has no open/done split of its own. Each
+Markdown file living under one of the sections below. Bugs, ideas, tasks and
+refactors move from open/ to done/ as they are worked; out-of-scope holds items
+that were considered and declined, and has no open/done split of its own. Each
 section has a fixed id prefix used when naming its items.
 
 | Section       | Prefix | Lifecycle     |
@@ -144,7 +162,12 @@ section has a fixed id prefix used when naming its items.
 | bugs          | bug    | open -> done  |
 | ideas         | idea   | open -> done  |
 | tasks         | task   | open -> done  |
+| refactors     | ref    | open -> done  |
 | out-of-scope  | oos    | flat          |
+
+Ideas are new; refactors are existing things that should be improved. A refactor
+may also carry \`kind: chore\` or \`kind: debt\` in its frontmatter, saying which
+of the two it is; any other value is preserved but means nothing to the board.
 
 An item's status is the directory it lives in, never a frontmatter key. The one
 exception is not a status: a \`started: YYYY-MM-DD\` line means someone is working
@@ -255,7 +278,8 @@ export function renderFrontmatter(data) {
 
 // Ids are per-section, max+1 across every place that section's own prefix
 // can appear, never reused (gaps from done/deleted items are preserved
-// rather than filled). For bugs/ideas/tasks that "every place" is THREE
+// rather than filled). For every queue section (bugs, ideas, tasks,
+// refactors) that "every place" is THREE
 // directories, not two: <section>/open/, <section>/done/, AND out-of-scope/
 // — because a rejected item keeps its ORIGINAL id (a rejected bug-2 is
 // still "bug-2"; see readItem/moveItem) and leaves bugs/ entirely without
@@ -345,7 +369,7 @@ function readItemFile(absPath) {
 // its own and goes straight to that last step. The returned section/state
 // reflect where the file actually lives rather than the id's prefix:
 // out-of-scope is a section in its own right with a single terminal state,
-// the same way bugs/ideas/tasks are each two states (open, done).
+// the same way every queue section is each two states (open, done).
 //
 // Deliberately stops short of parsing the file. readItem (below) layers
 // readItemFile's frontmatter parse on top of this for its own return value;
@@ -414,13 +438,15 @@ export function readItem(backlog, id) {
   }
 }
 
-// bugs, ideas, tasks — the queue sections listOpen/board ever look at.
-// out-of-scope has no open/done split and is not a queue (see LEAF_DIRS and
-// README_TEXT above), so it is deliberately excluded here.
+// bugs, ideas, tasks, refactors — the queue sections listOpen/board ever look
+// at. Derived from SECTIONS by exclusion rather than listed, which is why
+// adding `refactors` to that one map was enough to put it on the board: the
+// only section that is not a queue is out-of-scope, because it has no
+// open/done split (see LEAF_DIRS and README_TEXT above).
 const QUEUE_SECTIONS = Object.keys(SECTIONS).filter((section) => section !== 'out-of-scope')
 
-// Every item currently sitting in an open/ directory, across all three queue
-// sections, in section order — each as its id plus the absolute path it was
+// Every item currently sitting in an open/ directory, across every queue
+// section, in section order — each as its id plus the absolute path it was
 // found at, not yet resolved to Items and not yet sorted by numeric id.
 // Shared by listOpen (resolve every id or throw trying) and board's own
 // tolerant read (resolve what it can, report the rest) below, so the two
@@ -448,7 +474,7 @@ function compareOpenItems(a, b) {
   return Number(a.id.split('-')[1]) - Number(b.id.split('-')[1])
 }
 
-// Every open item across bugs/ideas/tasks, sorted by the fixed section
+// Every open item across the queue sections, sorted by the fixed section
 // order and then by numeric id ascending within a section — the same order
 // `board` prints in. All-or-nothing, like every other read in this file
 // (readItem, nextId, parseFrontmatter): one malformed item throws, exactly
@@ -956,7 +982,7 @@ commands:
   init   create the backlog/ store in the current repo
   root   print the resolved backlog/ directory
   new    print a new item's path and frontmatter (writes nothing)
-  board  print the board of open items (bugs, ideas, tasks)
+  board  print the board of open items (bugs, ideas, tasks, refactors)
   show   print an item's absolute path and frontmatter
   move   move an item into done or out-of-scope
   start  mark an open bug or task as in progress
@@ -964,9 +990,9 @@ commands:
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
 
-sections: bugs, ideas, tasks, out-of-scope`
+sections: bugs, ideas, tasks, refactors, out-of-scope`
 
-const BOARD_USAGE = `usage: backlog.mjs board [--section <bugs|ideas|tasks>] [--json]`
+const BOARD_USAGE = `usage: backlog.mjs board [--section <bugs|ideas|tasks|refactors>] [--json]`
 
 const SHOW_USAGE = `usage: backlog.mjs show <id>`
 

@@ -5,6 +5,18 @@ import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
 /**
+ * The two `kind:` values a refactor may carry. An enum here rather than a
+ * clamp on the read side (see BacklogItem.kind in shared/types.ts): the server
+ * passes the frontmatter value through verbatim, and this list is the only
+ * place that decides whether it means anything. A third kind is one entry
+ * here — never a new directory, and never a change to the scanner.
+ *
+ * Exported so a test can assert against the same list the badge renders from
+ * rather than restating the strings.
+ */
+export const REFACTOR_KINDS: readonly string[] = ['chore', 'debt'];
+
+/**
  * guide-manager's .guides-card, ported: title on top, footer pinned to the
  * bottom with a project pill and a mono meta line. Keyboard added (the original
  * was pointer-only): the whole card is the target, so it needs to be reachable.
@@ -116,6 +128,19 @@ export function ItemCard(
                 Groomed only on bugs: tasks are groomed by construction, and a
                 marker that is always on says nothing. Ungroomed is the default
                 state of a fresh bug, not a warning — so silence, not red. */}
+            {/* Before the lifecycle markers below, because a refactor's kind
+                is what the item IS, not where it has got to. Gated on the
+                section as well as the value: `kind` is meaningless on a bug or
+                a task, and a hand-added `kind: debt` on one of those should
+                not sprout a badge the rest of the system has no notion of.
+                An unrecognised value renders nothing at all — it stays on disk
+                (the CLI round-trips every unknown key) and is reported by the
+                API verbatim, so the only thing a new kind needs is an entry in
+                REFACTOR_KINDS above. Silence, not a fallback badge: a badge
+                reading `kind: whatevr` would present a typo as a category. */}
+            {item.section === 'refactors' && REFACTOR_KINDS.includes(item.kind) ? (
+              <span className="board-card-kind">{item.kind}</span>
+            ) : null}
             {item.section === 'bugs' && item.groomed ? (
               <span className="board-card-groomed">groomed</span>
             ) : null}

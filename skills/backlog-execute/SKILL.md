@@ -12,8 +12,9 @@ trigger: /backlog-execute
 # /backlog-execute — do the groomed work
 
 Execute does the actual work a groomed bug or task describes, then archives it once
-verification proves it worked. It only ever works `bugs/` and `tasks/` — never `ideas/`
-(nothing to execute, by definition) and never `out-of-scope/` (already closed). It never
+verification proves it worked. It only ever works `bugs/` and `tasks/` — never `ideas/` or
+`refactors/` (neither has anything to execute: what each is waiting for is to be *promoted*
+into a task, which is `backlog-groom`'s job) and never `out-of-scope/` (already closed). It never
 files anything new (`backlog-capture`) and never writes a plan (`backlog-groom`) — if the
 plan isn't there yet, it refuses and says so.
 
@@ -27,8 +28,8 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --section bugs
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --section tasks
 ```
 
-Never `--section ideas` — an idea has no plan to execute; that's what promoting it via
-`backlog-groom` is for. "Do the next thing" means the oldest open bug or task whose plan
+Never `--section ideas` or `--section refactors` — neither has a plan to execute; that's
+what promoting one via `backlog-groom` is for. "Do the next thing" means the oldest open bug or task whose plan
 actually reads as real once you check it against the refusal gate below — not just the
 first one listed.
 
@@ -43,8 +44,8 @@ prints the item's absolute path on line 1, then its frontmatter — **never the 
 Read the file at that path yourself to see the actual headings; there's no tool command
 that prints the body, and none is needed.
 
-If that path resolves under `ideas/` or `out-of-scope/`, stop — wrong skill for this id
-(see Hard limits below). If it's already under a `done/` directory, there's nothing left
+If that path resolves under `ideas/`, `refactors/` or `out-of-scope/`, stop — wrong skill
+for this id (see Hard limits below). If it's already under a `done/` directory, there's nothing left
 to execute — say so instead of proceeding.
 
 ## The refusal gate
@@ -60,6 +61,14 @@ complaint if asked to. This skill is the only thing standing between an empty pl
 false "done."
 
 After reading the file at the path `show` printed:
+
+This gate has a shape worth stating outright: it lists the two sections this skill works,
+and **an id from any other section never reaches it at all** — the directory check in Pick
+an item above turns those away first. That ordering is load-bearing, not incidental. A
+`ref-N` reaching this gate would match neither bullet below and so pass through ungated,
+because "no rule applied" reads the same as "the rule was satisfied" — which is exactly
+how an unplanned item gets a whole execute session spent on it. The section check is what
+makes the gate total.
 
 - **Task:** look at `## Plan`. Refuse if the heading is missing entirely, if there is
   nothing under it before the next `##` heading (or the end of the file), or if all that's
@@ -175,13 +184,17 @@ leaves `started` in place as the historical record of when the work began, since
   dirty tree can sweep in unrelated in-flight work that has nothing to do with this item.
   Leave the working tree as it is; tell the user what files changed and let them stage and
   commit it themselves.
-- **Never touches `ideas/` or `out-of-scope/`.** An idea isn't executable by definition —
-  promoting it into a task is `backlog-groom`'s job. A rejected item is closed. If `show`
-  resolves the id into either directory, refuse immediately (see Pick an item above).
-  Nothing but this rule enforces the idea half of it: `start` used to refuse an idea and
-  no longer does, because grooming one is real work and `backlog-groom` now marks it in
-  progress the same way this skill does. The tool will happily stamp an idea for you — so
-  the id has to be checked here, before `start` is ever reached.
+- **Never touches `ideas/`, `refactors/` or `out-of-scope/`.** An idea isn't executable by
+  definition, and neither is a refactor — promoting either into a task is
+  `backlog-groom`'s job. A rejected item is closed. If `show` resolves the id into any of
+  those three directories, refuse immediately (see Pick an item above). Nothing but this
+  rule enforces the idea and refactor halves of it: `start` used to refuse an idea and no
+  longer does, because grooming one is real work and `backlog-groom` now marks it in
+  progress the same way this skill does — and `start` never had any notion of a refactor
+  to refuse. The tool will happily stamp either one for you, and the refusal gate below
+  inspects only a task's `## Plan` and a bug's `## Fix`, so a refactor that got past this
+  check would find no rule to fail. The id has to be checked here, before `start` is ever
+  reached.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a
   hard limit, not a suggestion: no proof, no archive.
 

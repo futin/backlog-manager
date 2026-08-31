@@ -13,9 +13,16 @@ export interface Registry {
   projects: RegistryProject[];
 }
 
-/** The four store sections. Directory names, verbatim — these strings are the
- *  contract with backlog.mjs's SECTIONS map, not display labels. */
-export type Section = 'bugs' | 'ideas' | 'tasks' | 'out-of-scope';
+/** The five store sections. Directory names, verbatim — these strings are the
+ *  contract with backlog.mjs's SECTIONS map, not display labels.
+ *
+ *  `refactors` is a peer section, not a facet on ideas: ideas are NEW (a
+ *  feature, an optimisation), refactors are EXISTING things that should be
+ *  improved — not new, not broken, so neither an idea nor a bug. Its id prefix
+ *  is `ref` (see SECTIONS in backlog.mjs for why the short form is
+ *  load-bearing), and its lifecycle matches ideas exactly: open -> done,
+ *  promotable to a task, rejectable to out-of-scope. */
+export type Section = 'bugs' | 'ideas' | 'tasks' | 'refactors' | 'out-of-scope';
 
 /** An item's status IS the directory it lives in (open/ vs done/), never a
  *  frontmatter field — backlog.mjs rejects a status: key outright. out-of-scope
@@ -94,6 +101,23 @@ export interface BacklogItem {
   /** Same accumulation and same clamping as `groomElapsed`, for time spent
    *  under `backlog-execute` instead of `backlog-groom`. */
   executeElapsed: number;
+  /**
+   * A refactor's flavour: `'chore'` (tidying that carries no risk anyone is
+   * tracking) or `'debt'` (a shortcut taken deliberately, now due). `''` when
+   * the key is absent, which is every non-refactor item and any refactor
+   * nobody classified.
+   *
+   * Surfaced verbatim rather than clamped to the two known values, unlike
+   * `phase` above — the difference is what each side does with the result.
+   * `phase` drives a label the client has to choose between, so an
+   * unrecognised value has to collapse to a known state. `kind` drives a
+   * badge that is simply not rendered when the value isn't one it knows, so
+   * passing the string through costs nothing and keeps the frontmatter
+   * round-trip honest: an unknown `kind:` is preserved on disk by the CLI and
+   * reported as-is here, so a third kind added later is one enum value in the
+   * client rather than a change on this side.
+   */
+  kind: string;
   tags: string[];
   section: Section;
   status: ItemStatus;
@@ -105,8 +129,10 @@ export interface BacklogItem {
   /**
    * Derived, never stored. bugs: `## Cause` and `## Fix` both filled (not
    * "unknown"). tasks: `## Plan` non-empty (capture refuses a task without
-   * one, so this is effectively always true). ideas / out-of-scope: null —
-   * groomed is not a state they have.
+   * one, so this is effectively always true). ideas / refactors /
+   * out-of-scope: null — groomed is not a state they have. For a refactor as
+   * for an idea, the state that matters is being PROMOTED, not being groomed;
+   * `false` would claim a refactor is waiting on a groom it can never pass.
    */
   groomed: boolean | null;
   /** absolute path of the item's file — the key /api/items/body takes */

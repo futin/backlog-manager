@@ -48,6 +48,22 @@ describe('GET /api/items and /api/projects', () => {
       content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
     { leaf: 'out-of-scope', filename: 'oos-1-nope.md',
       content: item('oos-1', 'nope', '## What was proposed\n\nx\n\n## Why rejected\n\ny\n') },
+    // Task 2 fixtures. The store on disk is what proves the scanner picks the
+    // new leaf directories up at all — LEAVES in scan.util.ts is a hand-written
+    // mirror of backlog.mjs's LEAF_DIRS, so nothing but a real refactors/ file
+    // arriving in the index shows the two lists still agree.
+    { leaf: 'refactors/open', filename: 'ref-1-split-the-scanner.md',
+      content: item('ref-1', 'split the scanner',
+        '## What exists today\n\nscan.util.ts does three things\n\n## Why it should change\n\nc\n\n## Rough shape\n\ns\n',
+        'kind: debt\n') },
+    // An unrecognised kind, only reachable by hand or by a newer capture: it
+    // must arrive verbatim rather than being clamped to '' the way `phase` is.
+    // The client is the only thing that decides a value means nothing, and it
+    // decides that by not rendering a badge — see REFACTOR_KINDS in ItemCard.
+    { leaf: 'refactors/open', filename: 'ref-2-odd-kind.md',
+      content: item('ref-2', 'odd kind', '## What exists today\n\nx\n', 'kind: whatever\n') },
+    { leaf: 'refactors/done', filename: 'ref-3-already-split.md',
+      content: item('ref-3', 'already split', '## What exists today\n\nx\n', 'kind: chore\n') },
     { leaf: 'ideas/open', filename: 'idea-1-broken.md', content: 'no frontmatter at all\n' }
   ]);
   const beta = makeProject('beta', [
@@ -78,7 +94,7 @@ describe('GET /api/items and /api/projects', () => {
     const index = res.body as ItemsIndex;
     const byId = new Map(index.items.map((i) => [`${i.project}/${i.id}`, i]));
 
-    expect(byId.size).toBe(11);
+    expect(byId.size).toBe(14);
     const bug1 = byId.get('alpha/bug-1') as BacklogItem;
     expect(bug1.section).toBe('bugs');
     expect(bug1.status).toBe('open');
@@ -110,10 +126,11 @@ describe('GET /api/items and /api/projects', () => {
     const a = byName.get('alpha') as ProjectSummary;
     expect(a.missing).toBe(false);
     // done task-2 is not counted; the malformed idea is not an item
-    expect(a.counts).toEqual({ bugs: 7, ideas: 0, tasks: 1, 'out-of-scope': 1 });
+    // refactors counts 2, not 3: ref-3 is done, and done items are history.
+    expect(a.counts).toEqual({ bugs: 7, ideas: 0, tasks: 1, refactors: 2, 'out-of-scope': 1 });
     const ghost = byName.get('ghost') as ProjectSummary;
     expect(ghost.missing).toBe(true);
-    expect(ghost.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 });
+    expect(ghost.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 });
   });
 
   // `started` is stored, not derived — the scanner's job is only to surface it
@@ -196,6 +213,59 @@ describe('GET /api/items and /api/projects', () => {
   it('404s a path outside every registered store, and a missing param', async () => {
     await request(app.getHttpServer()).get('/api/items/body').query({ path: '/etc/hosts' }).expect(404);
     await request(app.getHttpServer()).get('/api/items/body').expect(404);
+  });
+
+  // `null`, never `false`. The distinction is the whole reason this is asserted
+  // separately from "groomed is derived": `false` would put an ungroomed marker
+  // on a card and route the board's own label at a groom gate a refactor can
+  // never pass, because what a refactor waits for is being PROMOTED. It reaches
+  // null through deriveGroomed's fall-through rather than a branch of its own —
+  // see the note there on why that is deliberate.
+  it('derives a refactor section and status from the directory, with groomed null', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const byId = new Map((res.body as ItemsIndex).items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    const ref1 = byId.get('alpha/ref-1') as BacklogItem;
+    expect(ref1.section).toBe('refactors');
+    expect(ref1.status).toBe('open');
+    expect(ref1.groomed).toBeNull();
+    expect(ref1.groomed).not.toBe(false);
+    expect((byId.get('alpha/ref-3') as BacklogItem).status).toBe('done');
+  });
+
+  it('surfaces kind verbatim, including a value it does not recognise, and empty elsewhere', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const byId = new Map((res.body as ItemsIndex).items.map((i) => [`${i.project}/${i.id}`, i]));
+
+    expect((byId.get('alpha/ref-1') as BacklogItem).kind).toBe('debt');
+    expect((byId.get('alpha/ref-2') as BacklogItem).kind).toBe('whatever');
+    expect((byId.get('alpha/ref-3') as BacklogItem).kind).toBe('chore');
+    // Absent on every other section, reported as '' rather than undefined —
+    // the same contract `started` and `created` keep.
+    expect((byId.get('alpha/bug-1') as BacklogItem).kind).toBe('');
+  });
+
+  // The allowlist is built from each registered project's backlog/ directory
+  // rather than from a list of sections, so a new section needs nothing from it.
+  // Asserted rather than assumed: "it should just work" is exactly the claim
+  // that turned out to be half wrong for the scanner one file over.
+  it('serves a body from under refactors/ and still 404s outside the store', async () => {
+    const items = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    const ref = items.items.find((i) => i.id === 'ref-1' && i.project === 'alpha') as BacklogItem;
+    expect(ref.path).toContain('/refactors/open/');
+
+    const res = await request(app.getHttpServer())
+      .get('/api/items/body')
+      .query({ path: ref.path })
+      .expect(200)
+      .expect('content-type', /text\/plain/);
+    expect(res.text).toContain('## What exists today');
+    expect(res.text).not.toContain('kind: debt');
+
+    await request(app.getHttpServer())
+      .get('/api/items/body')
+      .query({ path: '/etc/hosts' })
+      .expect(404);
   });
 });
 

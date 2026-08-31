@@ -1,10 +1,11 @@
 ---
 name: backlog-groom
 description: >
-  Turn an open bug, idea, or task into something the next skill can act on: promote an idea
-  into a task with a real plan, fill in a bug's cause and fix without moving it, or close
-  anything out as decided against. Use it to groom the backlog, plan idea 3, reject task 5,
-  say this is out of scope, or make this executable. It only ever edits and moves existing
+  Turn an open bug, idea, refactor, or task into something the next skill can act on:
+  promote an idea or a refactor into a task with a real plan, fill in a bug's cause and fix
+  without moving it, or close anything out as decided against. Use it to groom the backlog,
+  plan idea 3, plan ref 2, reject task 5, say this is out of scope, or make this
+  executable. It only ever edits and moves existing
   items — filing a new one is backlog-capture's job, and doing the actual work once it's
   groomed is backlog-execute's. Trigger: /backlog-groom
 trigger: /backlog-groom
@@ -59,8 +60,14 @@ Promote or Plan the fix, so it isn't listed here with the two above.
 | The item is... | Verdict |
 |---|---|
 | an idea whose shape is now settled enough to plan | **Promote** — becomes a new task |
+| a refactor whose shape is now settled enough to plan | **Promote** — becomes a new task |
 | a bug whose cause and fix are now known (or worth chasing now) | **Plan the fix** — filled in place |
-| an open bug, idea, or task that shouldn't happen | **Reject** — moved to `out-of-scope/` |
+| an open bug, idea, refactor, or task that shouldn't happen | **Reject** — moved to `out-of-scope/` |
+
+A refactor and an idea take the *same* verdict for the same reason: neither has a groomed
+state of its own, so the only thing grooming can do for either is turn it into a task with
+a plan. That is why the board never shows a refactor as groomed or ungroomed — being
+promoted is the state it's waiting for.
 
 Say which verdict you think applies and why, then wait for the user to confirm or pick a
 different one. Don't infer a verdict silently and act on it — grooming is a decision made
@@ -169,7 +176,12 @@ One rule holds across all three: **groom never clears a marker another session i
 actively holding.** Re-taking a stale stamp doesn't bend that rule — it applies it to a
 marker whose holder is already gone.
 
-### Promote — idea becomes a task
+### Promote — an idea or a refactor becomes a task
+
+Written throughout as `idea-N`, because that is the common case. **Every step reads the
+same for a `ref-N`**: the id, the `--from`, the `promoted-to:` and the `move ... done` all
+take the refactor's id instead, and nothing else changes. Where the two genuinely differ is
+called out in the steps themselves — there is exactly one such place, step 1's headings.
 
 1. Invoke `superpowers:brainstorming` to settle the idea's `## Open questions` — but
    only if those questions are real. An idea like "mention the license in the README"
@@ -178,6 +190,15 @@ marker whose holder is already gone.
    that's the whole reason the section exists. The idea's own `## Problem` /
    `## Rough shape` / `## Open questions` can stay exactly as captured either way —
    that's the record of how the idea started; only its frontmatter changes, in step 5.
+
+   A refactor has no `## Open questions` to settle — its headings are
+   `## What exists today` / `## Why it should change` / `## Rough shape`. Read the first
+   two as the brief instead: they already name the code and the cost being paid, which is
+   what an idea's open questions exist to establish. Brainstorm when the *shape* of the
+   change is genuinely unsettled (three call sites or thirty, one commit or a migration),
+   not merely because a refactor touches existing code. Its `kind:` line stays on the
+   refactor and is deliberately NOT copied to the task: `chore` and `debt` describe why
+   the work was owed, and once there is a plan the work is simply planned work.
 2. Turn whatever came out of step 1 into a plan, written directly into the new task's
    `## Plan` section — **that section is the plan artifact; there is no separate plan
    document to produce.** Which route you take follows brainstorming's own
@@ -266,14 +287,14 @@ bug's or task's record is `## Outcome`, naming what was done and the command out
 proved it. Rejecting a done item would silently destroy whichever of those it holds, and
 nothing stops that but this paragraph: the tool has no notion of "done" blocking a move
 to `out-of-scope/` — `move <done-id> out-of-scope` succeeds whether the id is a bug, a
-task, or an idea — and nothing else in this file checks it either. If `show` puts the id
+task, an idea or a refactor — and nothing else in this file checks it either. If `show` puts the id
 under a `done/` directory, stop here and say so.
 
 If finished work turns out to have been a mistake, that's a **new item** citing the old
 one — that's what `from:` exists for — not a rewrite of the record proving what was
 actually done.
 
-Otherwise, for an open bug, idea, or task:
+Otherwise, for an open bug, idea, refactor, or task:
 
 1. If the user hasn't already given a rejection reason and a condition that would change
    the answer, ask for both — same as `backlog-capture` requires at filing time. Don't

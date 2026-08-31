@@ -5,7 +5,7 @@ import type { BacklogItem } from '../shared/types';
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
-    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
+    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md'
   };
@@ -44,6 +44,21 @@ describe('composePrompt', () => {
     expect(p).toContain('"Seed the board"');
     expect(p).toMatch(/promote/i);
     expect(p).toMatch(/plan/i);
+  });
+
+  // A refactor takes the idea's sentence, not the task fallback it used to
+  // fall through to ("give it a plan"). That fallback reads as an instruction
+  // to edit the item in place, which is the one thing a promote must not do —
+  // and a dispatched session has no human at a terminal to catch it.
+  it('names the promotion for a refactor, the same as for an idea', () => {
+    const p = composePrompt(fakeItem({ id: 'ref-3', title: 'Split the scanner', section: 'refactors', groomed: null }), 'groom');
+    expect(p).toContain('backlog-manager:backlog-groom');
+    expect(p).toContain('ref-3');
+    expect(p).toMatch(/promote/i);
+    expect(p).toMatch(/plan/i);
+    // The negative half: the task fallback's wording must not be what a
+    // refactor gets, and the two are only one fall-through apart.
+    expect(p).not.toMatch(/concrete enough/i);
   });
 
   it('asks a bug groom for Cause and Fix, in place', () => {

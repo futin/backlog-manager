@@ -1,11 +1,11 @@
 ---
 name: backlog-capture
 description: >
-  File a new item into the backlog — a bug, an idea, a task, or something already decided
-  against — as its own file under backlog/, creating the store itself if this repo doesn't
-  have one yet. Use to log a bug, note this idea, add to the backlog, capture that, or
-  remember this for later. Never moves or reclassifies an existing item — filing only,
-  nothing else. Trigger: /backlog-capture
+  File a new item into the backlog — a bug, an idea, a task, a refactor, or something
+  already decided against — as its own file under backlog/, creating the store itself if
+  this repo doesn't have one yet. Use to log a bug, note this idea, flag code that should
+  be cleaned up, add to the backlog, capture that, or remember this for later. Never moves
+  or reclassifies an existing item — filing only, nothing else. Trigger: /backlog-capture
 trigger: /backlog-capture
 ---
 
@@ -23,9 +23,17 @@ back. It never moves, converts, or reclassifies anything that already exists —
 | something in shipped code behaves wrong | `bugs` |
 | future work whose shape is not settled | `ideas` |
 | future work whose plan is already known — e.g. just designed in this session | `tasks` |
+| existing code that works but should be improved | `refactors` |
 | something already analysed and decided against | `out-of-scope` |
 
 Anything genuinely ambiguous between rows is **asked**, not guessed.
+
+The `ideas` / `refactors` line is the one worth stating outright, because it's the pair
+that gets confused: **ideas are new** — a feature, a capability, an optimisation that
+doesn't exist yet. **Refactors are existing things that should be improved** — the code
+already does its job, so it isn't an idea, and it isn't misbehaving, so it isn't a bug
+either. "Add caching to the item scan" is an idea; "the item scan has grown three
+responsibilities and should be split" is a refactor. If it's genuinely both, ask.
 
 ## Two refusals that keep the sections honest
 
@@ -79,6 +87,14 @@ that is groom's job.
      `---` (comma-separated, e.g. `tags: ui, dashboard`) — `new` never emits this line
      itself, so add it or leave it out entirely, and never add a `status:` field: the tool
      rejects that outright, because the directory an item lives in is its status;
+   - **for a `refactors` capture, add a `kind:` line to that same block**, with exactly
+     one of two values: `kind: chore` for tidying nobody is owed — dead code, a rename, a
+     file that should be three files — or `kind: debt` for a shortcut that was taken
+     deliberately and is now due. Like `tags:`, `new` never emits it and you add it by
+     hand. Ask if it isn't obvious from what the user said; the two are a real
+     distinction, not a severity. Any other value survives on disk untouched but means
+     nothing to the board, which badges the two known values and silently ignores the
+     rest — so a guess spelled differently is the same as no kind at all;
    - after the closing `---`, add the section's headings from the table below, verbatim,
      filling in what you know and writing `unknown` where you don't.
 
@@ -122,7 +138,13 @@ created: 2026-08-23
 | bug | `## Symptom`, `## Repro`, `## Affects`, `## Cause`, `## Fix` |
 | idea | `## Problem`, `## Rough shape`, `## Open questions` |
 | task | `## Goal`, `## Plan`, `## Test cases`, `## Done when` |
+| refactor | `## What exists today`, `## Why it should change`, `## Rough shape` |
 | out-of-scope | `## What was proposed`, `## Why rejected`, `## What would change the answer` |
+
+A refactor's headings are not an idea's with different words. `## What exists today` names
+the code as it actually is — a `file:line` or two, the way a bug's `## Affects` does —
+because a refactor that doesn't say what it's refactoring cannot be picked up months later.
+`## Why it should change` is the cost being paid now, not the benefit imagined later.
 
 `## Affects` holds a `file:line` list. On a freshly captured bug it's normal for
 `## Cause` and `## Fix` to both say `unknown` — that's exactly what makes the bug

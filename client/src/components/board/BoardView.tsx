@@ -22,12 +22,27 @@ const ALL = 'all';
 type StatusFilter = 'open' | 'started' | 'done' | 'all';
 type SortKey = 'created' | 'name' | 'project';
 
-/** Fixed column order — the store's own section order, not alphabetical. */
+/**
+ * Fixed column order — the store's own section order, not alphabetical.
+ *
+ * Refactoring is APPENDED rather than placed where the design wants it
+ * (Refactoring · Ideas · Bugs · Tasks, with out-of-scope evicted to Archive).
+ * That reordering is its own chunk, deliberately: it changes what every
+ * existing column-position assertion means, and doing it in the same change
+ * that introduces the section would make one diff answer two questions. Until
+ * then the board is five columns wide — see .board-columns in styles.css,
+ * which had to widen with it.
+ *
+ * `slug` is the CSS hook (`.board-col-<slug>`), not the section name, which is
+ * why out-of-scope's is `oos`: it is a class-name fragment. Refactoring's
+ * matches its section because there is nothing to shorten.
+ */
 const COLUMNS: { section: Section; label: string; slug: string }[] = [
   { section: 'bugs', label: 'Bugs', slug: 'bugs' },
   { section: 'ideas', label: 'Ideas', slug: 'ideas' },
   { section: 'tasks', label: 'Tasks', slug: 'tasks' },
-  { section: 'out-of-scope', label: 'Out of scope', slug: 'oos' }
+  { section: 'out-of-scope', label: 'Out of scope', slug: 'oos' },
+  { section: 'refactors', label: 'Refactoring', slug: 'refactors' }
 ];
 
 /**

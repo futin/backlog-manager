@@ -314,11 +314,19 @@ body {
    clipped to `· gr…`. They inherit nothing from that line (they are its
    siblings), so the mono family and size are restated here.
    Groomed is quiet confirmation, not an alarm; done is history and dims. */
-.board-card-groomed, .board-card-done {
+.board-card-groomed, .board-card-done, .board-card-kind {
   flex: none; font-family: var(--mono); font-size: 10.5px; white-space: nowrap;
 }
 .board-card-groomed { color: var(--green) }
 .board-card-done { color: var(--ink2) }
+/* A refactor's kind, in --ink3 for both values rather than a colour per kind.
+   `chore` and `debt` are not two states of a lifecycle — nothing is waiting on
+   either, and neither is a warning — so the word carries the whole distinction
+   and the colour carries none. It also keeps the footer from becoming a traffic
+   light: the amber live bar, the green groomed marker and the dimmed done
+   marker are already three signals competing in one strip, and a fourth hue
+   there would cost more than it told anyone. */
+.board-card-kind { color: var(--ink3) }
 /* In progress: the card's own hairline goes amber, and a filled amber bar runs
    across the top of its face. "Which of these twelve is anyone on" is a question
    asked of a whole column at once, and the 3px amber inset this replaces — like
@@ -455,7 +463,11 @@ body {
    on some widths; the type axis is the board's whole point, so the column
    count is stepped explicitly instead. align-items:start keeps a short column
    from stretching to its tallest neighbour. */
-.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--card-gap); align-items: start }
+/* Five columns while Refactoring and Out of scope share the board. The design
+   settles at four per surface once out-of-scope moves to Archive; until that
+   chunk lands, five is what there is to lay out, and minmax(0, 1fr) is what
+   keeps the extra one from overflowing the row rather than shrinking with it. */
+.board-columns { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--card-gap); align-items: start }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
@@ -470,6 +482,14 @@ body {
 .board-col-bugs .board-col-tick { background: var(--red) }
 .board-col-ideas .board-col-tick { background: var(--mustard) }
 .board-col-tasks .board-col-tick { background: var(--cyan) }
+/* --magenta: the only named hue in the palette with no job on this screen (its
+   documented owner, the Task-subagent marker, belongs to another app sharing
+   theme.css) and one of the few defined in all five themes. It sits nearer
+   --proj-8 than the other three ticks sit to any project hue, which the
+   project-hue note above already concedes is a property of an eight-colour set
+   drawn a step off the reserved five — a tick is a filled 14x3 block and a
+   project pill is a 9px outline, so the two never read as the same object. */
+.board-col-refactors .board-col-tick { background: var(--magenta) }
 .board-col-name {
   font-family: var(--display); font-size: 14px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .07em; color: var(--ink);

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * Builds a real on-disk backlog store — the same seven leaf directories
+ * Builds a real on-disk backlog store — the same nine leaf directories
  * backlog.mjs init creates — plus a registry file pointing at it. The e2e
  * suites run against real files because the server's whole job is reading
  * this exact layout; mocking fs here would test the mock.
@@ -17,7 +17,10 @@ export interface FixtureItem {
 
 export function makeProject(name: string, items: FixtureItem[]): string {
   const root = mkdtempSync(join(tmpdir(), `bm-${name}-`));
-  for (const leaf of ['bugs/open', 'bugs/done', 'ideas/open', 'ideas/done', 'tasks/open', 'tasks/done', 'out-of-scope']) {
+  for (const leaf of [
+    'bugs/open', 'bugs/done', 'ideas/open', 'ideas/done', 'tasks/open', 'tasks/done',
+    'refactors/open', 'refactors/done', 'out-of-scope'
+  ]) {
     mkdirSync(join(root, 'backlog', leaf), { recursive: true });
   }
   for (const item of items) {

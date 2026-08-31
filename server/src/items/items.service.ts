@@ -35,7 +35,13 @@ export class ItemsService {
   projects(): ProjectSummary[] {
     return this.registry.load().projects.map((project) => {
       const missing = !existsSync(join(project.path, 'backlog'));
-      const counts: SectionCounts = { bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 };
+      // Every section spelled out with a zero rather than built by
+      // accumulation: `SectionCounts` is a total Record, so a section missing
+      // here is a compile error rather than an `undefined` the client would
+      // render as blank. That is the whole point of the annotation — adding
+      // `refactors` to `Section` broke this line until it was listed, which is
+      // exactly the reminder a new section should get.
+      const counts: SectionCounts = { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 };
       if (!missing) {
         for (const it of scanProject(project).items) {
           // "open" counts: done items are history. out-of-scope is terminal

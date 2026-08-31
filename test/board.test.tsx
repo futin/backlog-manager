@@ -40,7 +40,7 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // `Section`/`ItemStatus` below — the annotation is what keeps them narrowed.
   const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: CREATED, started: '', tags: [],
-    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
+    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over
@@ -55,18 +55,23 @@ const ITEMS: ItemsIndex = {
     fakeItem({ id: 'task-1', title: 'a task', section: 'tasks', project: 'beta', projectPath: '/abs/beta', groomed: true }),
     fakeItem({ id: 'task-9', title: 'finished task', section: 'tasks', status: 'done', groomed: true, started: '2026-08-01' }),
     fakeItem({ id: 'idea-1', title: 'an idea', section: 'ideas', groomed: null }),
-    fakeItem({ id: 'oos-1', title: 'declined thing', section: 'out-of-scope', status: 'terminal', groomed: null })
+    fakeItem({ id: 'oos-1', title: 'declined thing', section: 'out-of-scope', status: 'terminal', groomed: null }),
+    // Task 2: one open refactor with a known kind, one with a value the badge
+    // does not recognise. `groomed: null` matches what the API derives for the
+    // section — a refactor is waiting to be promoted, not groomed.
+    fakeItem({ id: 'ref-1', title: 'a refactor', section: 'refactors', groomed: null, kind: 'debt' }),
+    fakeItem({ id: 'ref-2', title: 'oddly classified', section: 'refactors', status: 'done', groomed: null, kind: 'whatever' })
   ],
   errors: ['/abs/alpha/backlog/ideas/open/idea-9-broken.md: frontmatter has no closing --- line']
 };
 
 const PROJECTS: ProjectSummary[] = [
   { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 2, ideas: 1, tasks: 0, 'out-of-scope': 1 } },
+    counts: { bugs: 2, ideas: 1, tasks: 0, refactors: 0, 'out-of-scope': 1 } },
   { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 0, tasks: 1, 'out-of-scope': 0 } },
+    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } },
   { name: 'ghost', path: '/abs/ghost', createdAt: '2026-08-26T00:00:00.000Z', missing: true,
-    counts: { bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 } }
+    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 } }
 ];
 
 // A real answer, not a stand-in: this suite predates dispatch and never had
@@ -116,14 +121,18 @@ function stubItems(items: BacklogItem[]) {
 }
 
 describe('BoardView', () => {
-  it('renders the four columns with counts of what they hold (open by default)', async () => {
+  it('renders the five columns with counts of what they hold (open by default)', async () => {
     await renderBoard();
     const cols = screen.getAllByTestId('board-col');
+    // Refactoring last, not in the design's eventual position: reordering the
+    // board (and evicting out-of-scope to Archive) is a separate chunk, so this
+    // assertion pins where the column actually is today rather than where it
+    // is going. When that chunk lands, this line is the one that should fail.
     expect(cols.map((c) => within(c).getByTestId('col-name').textContent))
-      .toEqual(['Bugs', 'Ideas', 'Tasks', 'Out of scope']);
-    // done task-9 hidden by the default open filter; oos unaffected
+      .toEqual(['Bugs', 'Ideas', 'Tasks', 'Out of scope', 'Refactoring']);
+    // done task-9 and done ref-2 hidden by the default open filter; oos unaffected
     expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['2', '1', '1', '1']);
+      .toEqual(['2', '1', '1', '1', '1']);
     // col-count renders colItems.length, an array length — assert the DOM
     // actually holds that many cards so a key-driven card omission would fail
     // this test instead of passing unnoticed behind a correct-looking number.
@@ -215,6 +224,48 @@ describe('BoardView', () => {
     const idle = screen.getByText('a bug').closest('.board-card') as HTMLElement;
     expect(idle).not.toHaveClass('board-card-live');
     expect(idle.querySelector('.board-card-live-bar')).toBeNull();
+  });
+
+  // The kind badge, and the three ways it stays silent. Written as one test
+  // because the four cards have to be on the board together: "renders for a
+  // known kind" and "renders for nothing else" are the same claim, and split
+  // across two tests a badge that rendered unconditionally would still pass
+  // the first one.
+  it('badges a refactor kind it knows, and nothing else', async () => {
+    stubItems([
+      fakeItem({ id: 'ref-1', title: 'a chore', section: 'refactors', groomed: null, kind: 'chore' }),
+      fakeItem({ id: 'ref-2', title: 'some debt', section: 'refactors', groomed: null, kind: 'debt' }),
+      // Preserved on disk and reported verbatim by the API (see items.test.ts),
+      // but not badged: a badge reading `whatever` would present a typo as a
+      // category, and a new kind is meant to cost one entry in REFACTOR_KINDS.
+      fakeItem({ id: 'ref-3', title: 'oddly classified', section: 'refactors', groomed: null, kind: 'whatever' }),
+      // Gated on the section as well as the value: `kind` means nothing on a
+      // bug, so a hand-added one must not sprout a badge.
+      fakeItem({ id: 'bug-1', title: 'a bug with a kind', kind: 'debt' })
+    ]);
+    await renderBoard();
+
+    const kindOf = (title: string): HTMLElement | null =>
+      screen.getByText(title).closest('.board-card')!.querySelector('.board-card-kind');
+
+    expect(kindOf('a chore')).toHaveTextContent('chore');
+    expect(kindOf('some debt')).toHaveTextContent('debt');
+    expect(kindOf('oddly classified')).toBeNull();
+    expect(kindOf('a bug with a kind')).toBeNull();
+  });
+
+  // Same placement rule the groomed marker and the elapsed mark are pinned to:
+  // a sibling of the meta line, not a child of it. The meta line is
+  // nowrap-with-ellipsis in about 118px, so a badge appended inside it renders
+  // as `ref-1 · aug 3…` and tells nobody anything.
+  it('places the kind badge outside the meta line, inside the card footer', async () => {
+    stubItems([fakeItem({ id: 'ref-1', title: 'some debt', section: 'refactors', groomed: null, kind: 'debt' })]);
+    await renderBoard();
+
+    const badge = screen.getByText('debt');
+    expect(badge).toHaveClass('board-card-kind');
+    expect(badge.closest('.board-card-meta')).toBeNull();
+    expect(badge.closest('.board-card-foot')).not.toBeNull();
   });
 
   // The bar used to always say "in progress"; now it names which skill holds
@@ -346,7 +397,7 @@ describe('BoardView', () => {
     // started but done, and everything else carries no stamp at all.
     const cols = screen.getAllByTestId('board-col');
     expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['1', '0', '0', '0']);
+      .toEqual(['1', '0', '0', '0', '0']);
     expect(screen.getByText('groomed bug')).toBeInTheDocument();
     expect(screen.queryByText('a bug')).not.toBeInTheDocument();
   });

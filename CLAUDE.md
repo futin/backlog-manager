@@ -30,8 +30,8 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   `/api/items/body`), `agents/` (the one outbound-calling module — status,
   plan, dispatch), `registry/` (read-only view of the registry file),
   `static.ts` (serves `client/dist` only when built).
-- `client/src/` — React SPA: side rail (Projects / Settings), board (four
-  fixed columns — bugs/ideas/tasks/out-of-scope — card drawer, dispatch
+- `client/src/` — React SPA: side rail (Projects / Settings), board (five
+  fixed columns — bugs/ideas/tasks/out-of-scope/refactors — card drawer, dispatch
   control opening a launch sheet onto `../claude-agents-dashboard`),
   Settings. Fed by `lib/agents.ts` (same-origin fetches) and
   `hooks/useAgents.ts` (status poll on mount and window focus).
@@ -64,7 +64,19 @@ happened.
 - **Item bodies are served through a registry-built allowlist**
   (`allow.util.ts`); a file outside every registered `backlog/` 404s.
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan
-  non-empty), never stored; status is the directory, never frontmatter.
+  non-empty), never stored; status is the directory, never frontmatter. Ideas,
+  refactors and out-of-scope derive `null`, not `false` — grooming is not a
+  state they have, and for the first two the state they wait in is *promoted*.
+- **`refactors/` is a peer section, not a facet on ideas**: ideas are new,
+  refactors are existing things that should be improved. Prefix `ref` (short
+  because the card's meta line is ~118px of nowrap), lifecycle identical to
+  ideas (`open/` → `done/`, promotable to a task with `from:`, rejectable).
+  `kind: chore | debt` is written by `backlog-capture`, round-tripped by the
+  CLI as an unknown key, passed through verbatim by the API, and badged by the
+  client only for the values `REFACTOR_KINDS` lists. `backlog-execute` refuses
+  the section outright — its refusal gate inspects only a task's `## Plan` and
+  a bug's `## Fix`, so an id from any other section has to be turned away by
+  the directory check that runs before it.
 - **`started:` and `phase:` are the lifecycle keys allowed in frontmatter,
   and neither is a status** — the `status:` ban stands, unaffected by either.
   `start <id> [--as groom|execute]` writes `started:` (a second-precision UTC

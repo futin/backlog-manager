@@ -41,7 +41,12 @@ export function composePrompt(item: BacklogItem, action: AgentAction): string {
     // if it decides to be helpful.
     return `${head} Work it through to verification, then archive the item. Report what you changed; do not commit or push.`;
   }
-  if (item.section === 'ideas') {
+  // Refactors share this branch, not the fallback at the bottom: grooming one
+  // promotes it into a task exactly as grooming an idea does, so the
+  // instruction is the same sentence. Without this they fell through to the
+  // task fallback ("give it a plan") — which reads as an instruction to edit
+  // the refactor in place, the one thing a promote must not do.
+  if (item.section === 'ideas' || item.section === 'refactors') {
     return `${head} Promote it to a task with a real, executable plan.`;
   }
   if (item.section === 'bugs') {

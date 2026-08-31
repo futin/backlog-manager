@@ -7,7 +7,7 @@ import type { AgentsStatus, BacklogItem } from '../shared/types';
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
-    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
+    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md'
   };
@@ -22,6 +22,15 @@ const OK: AgentsStatus = {
 describe('deriveAction', () => {
   it('sends an open idea to groom', () => {
     expect(deriveAction(fakeItem({ section: 'ideas', groomed: null }))).toBe('groom');
+  });
+
+  // Reached through the `groomed === true` fall-through rather than a branch
+  // naming the section, which is exactly why it is worth an assertion: nothing
+  // in deriveAction mentions refactors, so this is the only thing standing
+  // between a null derivation and a refactor card offering `execute` — the one
+  // action backlog-execute refuses on the section outright.
+  it('sends an open refactor to groom, never to execute', () => {
+    expect(deriveAction(fakeItem({ section: 'refactors', groomed: null }))).toBe('groom');
   });
 
   it('grooms an ungroomed bug and executes a groomed one', () => {

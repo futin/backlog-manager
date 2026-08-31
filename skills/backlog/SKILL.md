@@ -1,9 +1,9 @@
 ---
 name: backlog
 description: >
-  Print the current backlog board — the open bugs, ideas, and tasks in this repo — and
-  nothing else; it never writes. Use for /backlog, "what's open", "show my backlog",
-  "what's on the board", or "what am I working on next". Filing something new is a
+  Print the current backlog board — the open bugs, ideas, tasks and refactors in this
+  repo — and nothing else; it never writes. Use for /backlog, "what's open", "show my
+  backlog", "what's on the board", or "what am I working on next". Filing something new is a
   different skill (backlog-capture), not this one. Trigger: /backlog
 trigger: /backlog
 ---
@@ -26,9 +26,9 @@ anything new, hand off to `backlog-capture` instead of doing it here.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board
 ```
 
-Prints three headers, in this fixed order, every time — `bugs`, `ideas`, `tasks` —
-including `(0 open)` for a section with nothing in it. `out-of-scope/` never appears here:
-those items were already decided against, not left open.
+Prints four headers, in this fixed order, every time — `bugs`, `ideas`, `tasks`,
+`refactors` — including `(0 open)` for a section with nothing in it. `out-of-scope/` never
+appears here: those items were already decided against, not left open.
 
 One section only:
 
@@ -36,7 +36,7 @@ One section only:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --section bugs
 ```
 
-`--section` takes `bugs`, `ideas`, or `tasks` — not `out-of-scope`.
+`--section` takes `bugs`, `ideas`, `tasks`, or `refactors` — not `out-of-scope`.
 
 Machine-readable:
 

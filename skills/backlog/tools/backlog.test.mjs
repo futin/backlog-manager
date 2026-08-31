@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile, startItem, stopItem } from './backlog.mjs'
+import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile, startItem, stopItem } from './backlog.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
@@ -94,12 +94,12 @@ test('slugify refuses a title with no [a-z0-9] characters left', () => {
   assert.throws(() => slugify('#$%'), (e) => e instanceof BacklogError && e.code === 1)
 })
 
-test('init creates all seven leaf directories plus a non-empty README', () => {
+test('init creates all nine leaf directories plus a non-empty README', () => {
   const { backlog } = backlogFixture()
 
   const created = init(backlog)
 
-  assert.equal(created.length, 8)
+  assert.equal(created.length, 10)
   for (const rel of [
     'bugs/open',
     'bugs/done',
@@ -107,6 +107,8 @@ test('init creates all seven leaf directories plus a non-empty README', () => {
     'ideas/done',
     'tasks/open',
     'tasks/done',
+    'refactors/open',
+    'refactors/done',
     'out-of-scope',
   ]) {
     assert.equal(fs.statSync(path.join(backlog, rel)).isDirectory(), true)
@@ -1889,4 +1891,210 @@ test('registerProject starts fresh over a corrupt registry rather than failing',
   registerProject('/abs/one', file)
   const written = JSON.parse(fs.readFileSync(file, 'utf8'))
   assert.equal(written.projects.length, 1)
+})
+
+// --- refactors section ----------------------------------------------------
+// Refactoring is a peer section, not a facet on ideas. Everything below either
+// proves the new section behaves like its peers, or pins the one thing about it
+// that is genuinely new (`kind:`). What these tests deliberately do NOT do is
+// re-test the generic machinery per section — nextId, PREFIX_TO_SECTION,
+// QUEUE_SECTIONS and compareOpenItems all derive from the one SECTIONS map, and
+// asserting each of them once for `refactors` is what proves that derivation
+// held, not that a fourth copy of each rule was written correctly.
+
+test('CLI new refactors mints ref-1 and puts it under refactors/open', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+
+  const out = run(dir, 'new', 'refactors', 'Split the item scanner')
+
+  assert.equal(out.status, 0, out.stderr)
+  const printedPath = out.stdout.split('\n')[0]
+  assert.equal(printedPath, path.join(backlog, 'refactors', 'open', 'ref-1-split-the-item-scanner.md'))
+  assert.match(out.stdout, /^id: ref-1$/m)
+})
+
+// The `ref` prefix rather than `refactor` is a UI constraint (the card's meta
+// line), so it is worth an assertion of its own: a rename here silently breaks
+// every id already written into a from: line or a commit message.
+test('the refactors id prefix is ref, not refactor', () => {
+  assert.equal(SECTIONS.refactors, 'ref')
+})
+
+// nextId's contract is max+1 across THREE directories, not two: a rejected
+// refactor keeps its ref-N id inside out-of-scope/ and must not have that id
+// handed out again. Asserted here for refactors specifically because the
+// section is new — the rule itself is generic and tested for bugs above.
+test('nextId for refactors scans open/, done/ and out-of-scope/', () => {
+  const { backlog } = backlogFixture()
+  init(backlog)
+  writeItem(backlog, 'refactors/open', 'ref-2', 'Still open')
+  writeItem(backlog, 'refactors/done', 'ref-5', 'Already done')
+  writeItem(backlog, 'out-of-scope', 'ref-9', 'Rejected but keeps its id')
+
+  assert.equal(nextId(backlog, 'refactors'), 10)
+})
+
+test('readItem resolves a ref id from refactors/open and from refactors/done', () => {
+  const { backlog } = backlogFixture()
+  init(backlog)
+  writeItem(backlog, 'refactors/open', 'ref-1', 'Open refactor')
+  writeItem(backlog, 'refactors/done', 'ref-2', 'Done refactor')
+
+  const open = readItem(backlog, 'ref-1')
+  const done = readItem(backlog, 'ref-2')
+
+  assert.equal(open.section, 'refactors')
+  assert.equal(open.state, 'open')
+  assert.equal(done.section, 'refactors')
+  assert.equal(done.state, 'done')
+})
+
+// The same defect the bare `bug` test above pins, for the new prefix: without
+// a shape check, `ref` matches `ref-` against every file in the directory and
+// the tool acts on whichever readdirSync listed first.
+test('CLI show ref refuses the bare prefix, suggesting ref-1', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  writeItem(backlog, 'refactors/open', 'ref-4', 'Some refactor')
+
+  const out = run(dir, 'show', 'ref')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /ref is a section prefix, not an id/)
+  assert.match(out.stderr, /ref-1/)
+  assert.equal(out.stdout, '')
+})
+
+test('CLI board prints a refactors header and lists an open refactor', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  writeItem(backlog, 'refactors/open', 'ref-1', 'Split the item scanner')
+
+  const out = run(dir, 'board')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /^refactors \(1 open\)$/m)
+  assert.match(out.stdout, /ref-1/)
+})
+
+test('CLI board --section refactors prints only that section', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  writeItem(backlog, 'bugs/open', 'bug-1', 'A bug')
+  writeItem(backlog, 'refactors/open', 'ref-1', 'A refactor')
+
+  const out = run(dir, 'board', '--section', 'refactors')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /ref-1/)
+  assert.doesNotMatch(out.stdout, /bug-1/)
+})
+
+test('CLI move ref-1 done archives it into refactors/done', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  writeItem(backlog, 'refactors/open', 'ref-1', 'Split the item scanner')
+
+  const out = run(dir, 'move', 'ref-1', 'done')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.existsSync(path.join(backlog, 'refactors', 'done', 'ref-1-split-the-item-scanner.md')), true)
+  assert.equal(fs.existsSync(path.join(backlog, 'refactors', 'open', 'ref-1-split-the-item-scanner.md')), false)
+})
+
+// A refactor is rejectable exactly as an idea is, and rejection keeps the id.
+test('CLI move ref-1 out-of-scope keeps the ref id in the flat directory', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  writeItem(backlog, 'refactors/open', 'ref-1', 'Split the item scanner')
+
+  const out = run(dir, 'move', 'ref-1', 'out-of-scope')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.existsSync(path.join(backlog, 'out-of-scope', 'ref-1-split-the-item-scanner.md')), true)
+})
+
+// `start`/`stop` were never section-aware and must stay that way: grooming a
+// refactor is real work and the board's amber bar is how anyone sees it.
+test('CLI start ref-1 --as groom stamps the refactor and stop bills groom-elapsed', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const refPath = writeItem(backlog, 'refactors/open', 'ref-1', 'Split the item scanner')
+
+  const started = run(dir, 'start', 'ref-1', '--as', 'groom')
+  assert.equal(started.status, 0, started.stderr)
+  const stamped = fs.readFileSync(refPath, 'utf8')
+  assert.match(stamped, STAMP_LINE)
+  assert.match(stamped, /^phase: groom$/m)
+
+  const stopped = run(dir, 'stop', 'ref-1')
+  assert.equal(stopped.status, 0, stopped.stderr)
+  const cleared = fs.readFileSync(refPath, 'utf8')
+  assert.doesNotMatch(cleared, /^started:/m)
+  assert.doesNotMatch(cleared, /^phase:/m)
+  assert.match(cleared, /^groom-elapsed: \d+$/m)
+})
+
+// `kind` is not a key this tool knows: it is written by backlog-capture into
+// the block `new` printed, and every later start/stop rewrites that block. So
+// what actually protects it is the unknown-key round trip — the same guarantee
+// `from:` and `promoted-to:` rely on. Both a known and an unrecognised value
+// are asserted, because "preserved verbatim" is the whole contract: nothing in
+// this tool validates `kind`, and a third value added later must survive a
+// groom session untouched without any change here.
+test('a kind: line round-trips through parse and render untouched', () => {
+  for (const kind of ['chore', 'debt', 'whatever-comes-next']) {
+    const doc = `---\nid: ref-1\ntitle: Split it\ncreated: 2026-08-30\nkind: ${kind}\n---\nbody\n`
+    const { data } = parseFrontmatter(doc)
+
+    assert.equal(data.kind, kind)
+    assert.equal(parseFrontmatter(`${renderFrontmatter(data)}\nbody\n`).data.kind, kind)
+  }
+})
+
+test('CLI start and stop leave a refactor kind: line exactly where it was', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const refPath = path.join(backlog, 'refactors', 'open', 'ref-1-split-it.md')
+  fs.writeFileSync(refPath, `${renderFrontmatter({ id: 'ref-1', title: 'Split it', created: '2026-08-30', kind: 'debt' })}\n## What exists today\n`)
+
+  run(dir, 'start', 'ref-1', '--as', 'groom')
+  run(dir, 'stop', 'ref-1')
+
+  assert.match(fs.readFileSync(refPath, 'utf8'), /^kind: debt$/m)
+})
+
+// The upgrade path, not the fresh-install one: a store initialised before this
+// section existed has seven leaves and quite possibly a hand-edited README.
+// Re-running init has to add exactly the two missing directories and touch
+// nothing else — the README especially, since `init` returning "already
+// initialized" is what every capture relies on being harmless.
+test('init on a pre-refactors store adds only the two new directories and spares a hand-edited README', () => {
+  const { backlog } = backlogFixture()
+  for (const rel of ['bugs/open', 'bugs/done', 'ideas/open', 'ideas/done', 'tasks/open', 'tasks/done', 'out-of-scope']) {
+    fs.mkdirSync(path.join(backlog, rel), { recursive: true })
+  }
+  const readmePath = path.join(backlog, 'README.md')
+  const handEdited = '# Hand-edited\n\nDo not overwrite me.\n'
+  fs.writeFileSync(readmePath, handEdited)
+
+  const created = init(backlog)
+
+  assert.deepEqual(created, [
+    path.join(backlog, 'refactors', 'open'),
+    path.join(backlog, 'refactors', 'done'),
+  ])
+  assert.equal(fs.readFileSync(readmePath, 'utf8'), handEdited)
+})
+
+test('the README init writes documents the refactors row and the two kinds', () => {
+  const { backlog } = backlogFixture()
+  init(backlog)
+
+  const readme = fs.readFileSync(path.join(backlog, 'README.md'), 'utf8')
+
+  assert.match(readme, /^\| refactors\s+\| ref\s+\| open -> done\s+\|$/m)
+  assert.match(readme, /kind: chore/)
+  assert.match(readme, /kind: debt/)
 })

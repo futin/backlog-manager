@@ -121,7 +121,14 @@ export function parseElapsed(value: string | undefined): number {
  * filled and not the "unknown" sentinel (that emptiness is precisely what
  * backlog-execute refuses to work on). tasks: a non-empty Plan (capture
  * refuses a task without one, so false only ever means a hand-made file).
- * ideas and out-of-scope: null — grooming is not a state they have.
+ * ideas, refactors and out-of-scope: null — grooming is not a state they have.
+ *
+ * Refactors reach that null through the same fall-through ideas do, and for the
+ * same reason: what a refactor is waiting on is being PROMOTED into a task, not
+ * being groomed, so `false` would advertise a gate it can never pass. Note this
+ * is a fall-through and not a listed case — a section added later lands on null
+ * by default, which is the safe direction (no false "ungroomed" badge, and
+ * `deriveAction` in shared/agent.ts still routes it to groom).
  */
 export function deriveGroomed(section: Section, body: string): boolean | null {
   if (section === 'bugs') {

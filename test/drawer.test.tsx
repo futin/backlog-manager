@@ -11,7 +11,7 @@ import type { BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
   id: 'bug-2', title: 'groomed bug', created: '2026-08-20', tags: ['ui'],
-  updated: '', phase: '', groomElapsed: 0, executeElapsed: 0,
+  updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
   section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
   groomed: true, started: '', path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
 };
