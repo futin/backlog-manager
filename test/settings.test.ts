@@ -1,14 +1,15 @@
+import { SECTIONS } from '../client/src/components/SideRail';
 import { DEFAULT_SETTINGS, FONT_SCALES, THEMES, clampSettings } from '../client/src/lib/settings';
 import { EFFORTS, MODELS } from '../shared/agent';
 
 describe('clampSettings', () => {
   it('passes a valid object through', () => {
     const s = clampSettings({
-      theme: 'daylight', density: 'compact', fontScale: 110, landing: 'projects',
+      theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
       dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high'
     });
     expect(s).toEqual({
-      theme: 'daylight', density: 'compact', fontScale: 110, landing: 'projects',
+      theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
       linkBase: 'http://127.0.0.1:5174',
       dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high'
     });
@@ -35,6 +36,23 @@ describe('clampSettings', () => {
   it('offers five themes and four font stops (UI contract)', () => {
     expect(THEMES).toHaveLength(5);
     expect(FONT_SCALES).toEqual([90, 100, 110, 120]);
+  });
+});
+
+describe('landing', () => {
+  it('accepts every section the rail has, and `last`', () => {
+    for (const landing of ['last', ...SECTIONS]) {
+      expect(clampSettings({ landing }).landing).toBe(landing);
+    }
+  });
+
+  it('falls back to `last` for a section this build no longer has', () => {
+    // 'projects' is what the Board tab was called before the rail grew
+    // Archive, so it is sitting in real installs' settings blobs. It is not
+    // aliased onto 'board' the way App's stored *section* is: a pin this build
+    // cannot honour has an honest answer, and it is "open where I left off".
+    expect(clampSettings({ landing: 'projects' }).landing).toBe('last');
+    expect(clampSettings({ landing: 'archives' }).landing).toBe('last');
   });
 });
 

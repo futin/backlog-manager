@@ -13,7 +13,7 @@
  */
 
 import { EFFORTS, MODELS } from '../../../shared/agent';
-import type { Section } from '../components/SideRail';
+import { SECTIONS, type Section } from '../components/SideRail';
 
 export const THEMES = [
   { id: 'midnight', label: 'Midnight Radar', hint: 'the original — deep navy scope room' },
@@ -135,11 +135,22 @@ function clampOrigin(value: unknown, fallback: string): string {
 const THEME_IDS = THEMES.map((t) => t.id);
 const DENSITIES = ['comfortable', 'compact'] as const;
 /**
- * Every value `landing` may hold. Listed rather than derived because `Section`
- * is a type and has no runtime members to iterate — so a section added to the
- * rail has to be added here too, or it stays unpickable.
+ * Every value `landing` may hold: the rail's own sections, plus `last`.
+ *
+ * Derived now rather than listed. This used to be a hand-copied literal, under
+ * a comment warning that a section added to the rail had to be added here too
+ * or it stayed unpickable — a warning nothing enforced. `SideRail` exports
+ * `SECTIONS` for exactly this, so the warning and the failure mode go together.
+ *
+ * A stored `landing` naming a section this build no longer has — `'projects'`,
+ * from before the rail said Board — falls back to `last` rather than being
+ * aliased across the way `resolveSection` aliases the stored *section*. The
+ * two are not the same problem: a section key with no matching tab would leave
+ * `main` rendering nothing, so it has to be mapped onto something, whereas
+ * `last` is a real preference that means "open where I left off" and is the
+ * honest answer to a pin this build can no longer honour.
  */
-const LANDINGS = ['last', 'projects', 'settings'] as const;
+const LANDINGS: readonly Landing[] = ['last', ...SECTIONS];
 
 /**
  * `''` first, then the lists the launch sheet's own pickers are built from —

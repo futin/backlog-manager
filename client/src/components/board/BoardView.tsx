@@ -386,7 +386,7 @@ export default function BoardView() {
   return (
     <div className="board">
       <div className="board-bar">
-        <div className="board-title">Projects</div>
+        <div className="board-title">Board</div>
         <div className="board-tools">
           <input
             type="search"

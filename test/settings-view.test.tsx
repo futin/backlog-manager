@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -71,11 +71,18 @@ describe('SettingsView', () => {
     expect(document.documentElement.style.getPropertyValue('--font-scale')).toBe('1.2');
   });
 
-  it('offers Projects as a landing choice', async () => {
+  it('offers every rail section as a landing choice, plus Last used', async () => {
     renderView();
-    await userEvent.selectOptions(screen.getByLabelText('Opens on'), 'projects');
+    const picker = screen.getByLabelText('Opens on');
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Last used', 'Board', 'Archive', 'Settings']);
+
+    // Archive rather than Board, because Board is what an unrecognised value
+    // resolves to anyway — picking it could pass on a picker that stored
+    // nothing at all.
+    await userEvent.selectOptions(picker, 'archive');
     const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
-    expect(stored.landing).toBe('projects');
+    expect(stored.landing).toBe('archive');
   });
 
   // Nested (rather than a sibling top-level describe) so these cases can use
