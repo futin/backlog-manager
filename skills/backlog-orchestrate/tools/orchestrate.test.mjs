@@ -434,6 +434,59 @@ test('stage with an unknown item id exits 1 and leaves run.json byte-unchanged',
   assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
 })
 
+// --- Fix round 1 (Task 6+7 review): `stage --fix-loop` ---------------------
+// The SKILL enforces "at most two fix loops per item," and before this flag
+// existed there was nothing on disk to enforce it against: `fixLoops` was
+// minted as 0 by makeQueueItem and never written again, so the ceiling lived
+// only in the orchestrator session's memory — which a crash plus a `--resume`
+// wipes, letting an item loop forever two at a time. These two tests pin the
+// counter's whole contract: it accumulates across separate CLI invocations
+// (each one a fresh process re-reading the file, which is what "survives a
+// resume" means mechanically), and it is strictly opt-in.
+
+test('stage --fix-loop increments fixLoops, accumulates across a re-read, and leaves every other field alone', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-4', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const beforeItem = before.queue.find((q) => q.id === 'task-4')
+  assert.equal(beforeItem.fixLoops, 0)
+
+  const out = run(project, home, 'stage', 'task-4', 'fixing', '--fix-loop')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-4', stage: 'fixing', fixLoops: 1 })
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const item = after.queue.find((q) => q.id === 'task-4')
+  assert.equal(item.fixLoops, 1)
+  // Everything else on the item is exactly as init minted it: only the three
+  // fields this call is allowed to move (fixLoops, stage, and stage's own
+  // first-arrival stamp) are normalized away before the comparison, so a
+  // stray write to sessionId/worktree/branch/verification/questions/note
+  // would fail here.
+  assert.deepEqual({ ...item, fixLoops: beforeItem.fixLoops, stage: beforeItem.stage, stageAt: beforeItem.stageAt }, beforeItem)
+  // And nothing outside the queue moved except the heartbeat.
+  assert.deepEqual({ ...after, queue: before.queue, updatedAt: before.updatedAt }, before)
+
+  // A second, separate process: the count is read back off disk and advanced,
+  // never recomputed from scratch.
+  assert.equal(run(project, home, 'stage', 'task-4', 'fixing', '--fix-loop').status, 0)
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-4').fixLoops, 2)
+})
+
+test('stage without --fix-loop never touches fixLoops, and prints its usual two-key line', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-4', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const out = run(project, home, 'stage', 'task-4', 'fixing')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-4', stage: 'fixing' })
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-4').fixLoops, 0)
+})
+
 // --- Test case 6: no *.tmp litter survives any successful command ---------
 
 test('no *.tmp file survives in the project run dir after init, stage, heartbeat, attention, and finish all succeed', (t) => {

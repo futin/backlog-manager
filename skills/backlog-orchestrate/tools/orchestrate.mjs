@@ -652,7 +652,7 @@ function findQueueItem(run, itemId) {
   return item
 }
 
-function applyQueueItemFields(item, { stage, session, worktree, branch, note } = {}) {
+function applyQueueItemFields(item, { stage, session, worktree, branch, note, fixLoop = false } = {}) {
   if (stage !== undefined) {
     item.stage = stage
     // First-arrival only — see shared/types.ts's own RunQueueItem.stageAt
@@ -661,6 +661,27 @@ function applyQueueItemFields(item, { stage, session, worktree, branch, note } =
     if (!(stage in item.stageAt)) {
       item.stageAt[stage] = nowISO()
     }
+  }
+  // `fixLoops` is the ONLY counter in a queue item, and this is the only
+  // place it ever moves. It exists because the skill's own ceiling ("at most
+  // two fix loops per item") has to survive the thing most likely to break
+  // it: a crash and a `--resume`, after which the session enforcing that
+  // ceiling from memory is gone and a brand-new one takes over. Counted in
+  // the run file, the ceiling is still there after the resume; counted in
+  // the orchestrator's head, an item could loop forever, two loops at a
+  // time. Deliberately a separate boolean rather than being inferred from
+  // `stage === 'fixing'`: the run file records first ARRIVAL at a stage
+  // (see stageAt above), so a second visit to `fixing` is indistinguishable
+  // from the first by stage alone, and a caller that re-stages an item for
+  // any other reason must not silently spend one of its two loops.
+  if (fixLoop) {
+    // Guarded rather than a bare `+ 1` because a non-integer would go
+    // through JSON.stringify as `null` (NaN has no JSON form) and silently
+    // disarm the ceiling on the next read — this file writes no NaN
+    // anywhere, and this is the one arithmetic site where it could sneak in
+    // from a run.json that reached us some other way (a hand-edit, a
+    // restored backup).
+    item.fixLoops = Number.isInteger(item.fixLoops) ? item.fixLoops + 1 : 1
   }
   if (session !== undefined) item.sessionId = session
   if (worktree !== undefined) item.worktree = worktree
@@ -983,7 +1004,7 @@ function cmdPlan(argv) {
   return 0
 }
 
-const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--note S]'
+const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--note S] [--fix-loop]'
 
 function cmdStage(argv) {
   const itemId = argv[0]
@@ -992,11 +1013,15 @@ function cmdStage(argv) {
   let worktree
   let branch
   let note
+  // The one valueless flag on this command: it consumes no argv slot, so it
+  // never does the `argv[++i]` step the four above all take.
+  let fixLoop = false
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--session') session = argv[++i]
     else if (argv[i] === '--worktree') worktree = argv[++i]
     else if (argv[i] === '--branch') branch = argv[++i]
     else if (argv[i] === '--note') note = argv[++i]
+    else if (argv[i] === '--fix-loop') fixLoop = true
   }
 
   if (!itemId || !stage) {
@@ -1013,11 +1038,17 @@ function cmdStage(argv) {
   const run = readRun(dir)
 
   const item = findQueueItem(run, itemId)
-  applyQueueItemFields(item, { stage, session, worktree, branch, note })
+  applyQueueItemFields(item, { stage, session, worktree, branch, note, fixLoop })
 
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)
-  console.log(JSON.stringify({ id: itemId, stage }))
+  // The new count is echoed back only when this call actually incremented it,
+  // so the caller enforcing the two-loop ceiling reads it straight off the
+  // command that spent the loop rather than making a second `status --json`
+  // round trip (and rather than counting in its own head, which a crash and
+  // a `--resume` would reset). Every other stage call keeps the exact
+  // two-key line it has always printed.
+  console.log(JSON.stringify(fixLoop ? { id: itemId, stage, fixLoops: item.fixLoops } : { id: itemId, stage }))
   return 0
 }
 

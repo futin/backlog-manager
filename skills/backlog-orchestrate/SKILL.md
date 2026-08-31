@@ -65,6 +65,16 @@ skill, called out where it happens: `backlog.mjs stop` in the resume and abort
 paths runs *inside* the worktree, because the item file it clears the marker
 on is the worktree's own copy.
 
+**That exception runs in a subshell — `( cd <worktree> && … )` — never a bare
+`cd`.** A bare `cd` persists as the session's working directory for every
+later command, and from there `orchestrate.mjs` resolves the project to the
+worktree: `watch` starts exiting `3` ("no run exists") on every call, §4 tells
+you to call `watch` again as many times as it takes, and an unattended run
+loops until somebody kills it. The parentheses keep the move inside one child
+shell that exits with the command. The two `sh -c 'cd … && exec claude …'`
+dispatch lines below are the same discipline by another spelling: `sh -c` is
+already its own process, so the `cd` inside it never reaches this session.
+
 The tool's exit codes, which the rest of this file quotes constantly:
 
 | Code | Meaning |
@@ -474,16 +484,34 @@ historically lost to generic reviewer templates, and a run of ten items
 cannot afford ten full reports in this session's context.
 
 - **`verdict: approve`** → straight to Verify.
-- **`verdict: fix`** → one fix loop: `stage <id> fixing`, resume the item's
-  own executor session with the findings pasted in verbatim (the same
+- **`verdict: fix`** → one fix loop. Spend it on the run file first, and read
+  the count back:
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> fixing --fix-loop
+  ```
+
+  `--fix-loop` is the only valueless flag on `stage`; it increments this
+  item's `fixLoops` and echoes the new value back, so the line prints
+  `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then resume the item's own
+  executor session with the findings pasted in verbatim (the same
   `claude -p --resume <sessionId>` shape as the retry above), `watch` it out
   as in step 4, commit again (step 6), then review again with a fresh report
   path (`<dir>/reviews/<id>-2.md`). Paste the findings as the reviewer wrote
   them — they name `file:line`, and paraphrasing them into "fix the review
   comments" hands the session a puzzle instead of a task.
 
-**At most two fix loops per item.** After the second `fix` verdict, stop
-looping and hand it to a human:
+**At most two fix loops per item, counted in the run file — not in your own
+head.** `fixLoops` is what `--fix-loop` maintains, and reading the ceiling off
+it (from the echoed value, or from `status --json`) is what makes it survive
+the thing most likely to break it: a crash and a `--resume`, after which the
+session that was counting is gone and a fresh one takes over an item that has
+already burned both its loops. A ceiling held in a session's memory silently
+resets there; one held in the run file does not. It is also the number the run
+drawer renders, so an item that took two loops says so afterwards.
+
+After the second `fix` verdict (`fixLoops` is now `2`), stop looping and hand
+it to a human:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary> — report at <dir>/reviews/<id>-2.md"
@@ -517,9 +545,12 @@ merge gate.
 
 - **exit `0`** — every command passed. Merge.
 - **exit `1`** — something is red. Treat the failing rows exactly like review
-  findings: feed them into a fix loop (same two-loop ceiling, shared with
-  review — an item does not get two review loops *and* two verify loops).
-  Never merge red. Nothing green-lights a merge except the commands passing.
+  findings: feed them into a fix loop, spent the same way
+  (`stage <id> fixing --fix-loop`, then resume, commit, re-review). The
+  ceiling is the same two loops and it is *shared* with review — an item does
+  not get two review loops *and* two verify loops, which is exactly what one
+  counter per item, incremented by whoever spends the loop, enforces. Never
+  merge red. Nothing green-lights a merge except the commands passing.
 - **exit `5`** — nothing resolvable to verify with: no `verify.json`, no
   `test`/`typecheck`/`build` script, no fenced `## Done when` command. Nothing
   was written, and this item cannot prove itself. **Park it**:
@@ -540,10 +571,21 @@ git -C "$PWD" symbolic-ref HEAD
 ```
 
 **Precondition: the main tree must actually have `main` checked out** — that
-command must print `refs/heads/main`. If it prints anything else (the user
-switched branches mid-run, or is mid-rebase), do **not** check out `main`
-yourself: their working tree is theirs, and this run's authority stops at its
-own worktrees. Park instead and continue:
+command must print `refs/heads/main`, and it must succeed. Two distinct
+failures, and both mean the same thing here:
+
+- it prints another ref (`refs/heads/some-feature`) — the user switched
+  branches mid-run;
+- it prints **nothing at all and exits non-zero**, with
+  `fatal: ref HEAD is not a symbolic ref` on stderr — the main tree is on a
+  detached HEAD (mid-rebase, mid-bisect, or checked out at a tag). Check the
+  exit status, not just the output: a bare "does it equal `refs/heads/main`"
+  comparison reads an empty string here and, written carelessly, can look
+  like a mismatch you handled rather than a command that failed.
+
+In either case do **not** check out `main` yourself: their working tree is
+theirs, and this run's authority stops at its own worktrees. Park instead and
+continue:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "main tree is on <ref>, not refs/heads/main — branch backlog/<id> kept for a manual merge"
@@ -598,11 +640,23 @@ git -C "$PWD" branch -d backlog/<id>
 
 Plain `remove`, not `--force`: if git refuses because the worktree is not
 clean, something is in there that was never committed, never reviewed and
-never merged, and forcing would delete it with no undo. Read what is there,
-and park the item with an `attention` entry rather than forcing. Likewise
-`branch -d` (safe delete) rather than `-D`: it only succeeds for a branch
-that is actually merged, so a refusal here is real information — the merge
-you think happened did not.
+never merged, and forcing would delete it with no undo.
+
+**What happens to the item when that removal refuses: nothing. It stays
+`merged`.** The `stage <id> merged` above already landed and it was true —
+the branch is in `main` — so do not re-stage it to `parked`, which would tell
+the board and the run summary that an item which actually merged did not. The
+leftover is a cleanup problem, not a pipeline state: record it with
+`attention <id> --kind parked --detail "merged; worktree <path> would not
+remove cleanly — uncommitted leftovers to look at"` (the `parked` kind is the
+attention list's closest fit, and the detail is what disambiguates it), leave
+the directory and branch alone, and carry on to the next item. A human deletes
+it after looking; nothing in the run depends on it being gone.
+
+Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a
+branch that is actually merged, so a refusal here is real information — the
+merge you think happened did not, and that *is* worth stopping to understand
+before the next item builds on a `main` you may have misread.
 
 Then the next item starts from the updated `main`, so later items build on
 earlier ones.
@@ -659,70 +713,120 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   the item file it edits is the worktree's copy:
 
   ```bash
-  cd "$PWD/.worktrees/<id>"
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+  ( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> )
   ```
 
-  A plain `stop` — it bills the elapsed interval into `execute-elapsed:` and
-  clears `started:`/`phase:`, which is the tool's own job and not this
-  skill's to second-guess. (`stop --abandon` exists for a marker nobody was
-  ever behind; here a real execute session genuinely ran, and under-reporting
-  that is the worse error of the two.) `start` refuses to stamp a file that
-  already carries a marker, so the clear has to come before the fresh
-  dispatch. Then dispatch again on the same worktree and branch, from the
-  project root.
+  The subshell is mandatory, not tidiness — see "Where commands run" at the
+  top: a bare `cd` would leave this session sitting in the worktree, and every
+  later `orchestrate.mjs` call would resolve the project to the wrong place.
+
+  A plain `stop`, deliberately — and it is worth being straight about the
+  trade, because `backlog-groom` prescribes the opposite for a marker that
+  looks exactly like this one. Groom's rule is that a stamp left behind by a
+  crash, a `/clear`, or a weekend gets `stop --abandon`, because billing that
+  dead stretch into the elapsed counter fabricates grooming nobody did. Here
+  the ruling goes the other way: this run launched that session itself, knows
+  it was a real execute session doing real work, and the elapsed interval is
+  the only record of it — so the time is billed, and `--abandon` is not used.
+  The cost is real and worth knowing: a crash noticed hours later bills those
+  idle hours into `execute-elapsed:` too, permanently, since the counter never
+  resets. `start` refuses to stamp a file that already carries a marker, so
+  the clear has to come before the fresh dispatch. Then dispatch again on the
+  same worktree and branch, from the project root.
 - **`inspect`** — either the worktree is gone but the branch survives, or the
   worktree is there with no marker at all (it may have finished cleanly just
   before the crash, or never started). Reconcile cannot tell those apart from
   outside; look, then re-enter the loop at the right step — often Commit or
   Review, because the work is already done and only the plumbing died.
 - **`park`** — neither worktree nor branch survives. Nothing to resume:
-  `attention <id> --kind parked` and `stage <id> parked`, and let the next run
-  pick the item up from the top.
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "resume: worktree and branch both gone — nothing to take over"
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  ```
+
+  `--detail` is mandatory on every `attention` call — omitting it exits `1`
+  with the usage line, and an attention row with no detail would be a
+  drawer entry that says nothing anyway. Then let the next run pick the item
+  up from the top.
 
 ### `--abort`
 
-Clear markers first, then tear down — in that order, because the tool
-deliberately will not do the first part for you:
-
-1. `reconcile --json` and note every item reporting `marker=true`.
-2. For each, `cd` into its worktree and run
-   `node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>`.
-   Item files have exactly one writer family — the backlog skills — and
-   `orchestrate.mjs` is not one of them, so it cannot clear a marker itself.
-3. From the project root:
-
-   ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
-   ```
-
-   It removes every other item's worktree and branch (best-effort — already
-   gone is fine), sets the run to `aborted`, and prints a one-line summary of
-   what it removed and what it left.
-
-**`abort` does not clean everything, by design.** Any item whose worktree
-copy still carries an in-progress `phase:` marker is left completely alone —
-worktree *and* branch — and gets an `attention` entry naming the exact
-`backlog.mjs stop` command and the exact paths. That is deliberate:
-`git worktree remove --force` deletes uncommitted work with no undo and
-nothing to `git revert`, and a live marker is the strongest available signal
-that a session was mid-flight with work not yet committed. A leftover
-directory is an annoyance; destroyed uncommitted work has no recovery path.
-
-So after `abort` returns, read `status --json`'s attention list. For each
-preserved item: run the `backlog.mjs stop <id>` it names (inside that
-worktree), check whether anything in there is worth keeping, and only then
-remove the leftovers by hand:
+**Run `abort` first. Clear markers afterwards, and only for the items abort
+names.** The order is the whole safety property of this section, so it comes
+before the commands:
 
 ```bash
-git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
-git -C "$PWD" branch -D backlog/<id>
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
 ```
 
-`-D` here, unlike the merge path's `-d`: an aborted branch was never merged
-anywhere, so a safe delete would always refuse it. Everything the run had
-already merged before the abort stays merged — abort ends a run, it does not
-undo one.
+`abort` walks the queue, and for each item it asks one question of the disk:
+does this item's worktree copy still carry an in-progress `phase:` marker?
+
+- **No marker** → it tears the item down: `git worktree remove --force` on the
+  worktree, `git branch -D` on the branch, best-effort (a worktree or branch
+  git has never heard of just fails harmlessly — that is the state abort is
+  trying to reach anyway).
+- **Marker present** → it leaves that item **completely alone**, worktree
+  *and* branch, and pushes an `attention` entry naming the absolute worktree
+  path, the exact `backlog.mjs stop <id>` to run, and the exact
+  `worktree remove` / `branch -D` commands to finish with afterwards.
+
+Then it sets the run to `aborted` and prints a one-line summary of what it
+removed and what it left.
+
+**That marker is the signal, and clearing markers *before* `abort` destroys
+it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
+marker, classifies the item as safe, and `worktree remove --force`s a
+directory whose session was still working: `--force` deletes the working
+directory outright, uncommitted changes included, and because
+`backlog-execute` never commits and the orchestrator had not got there yet,
+there is no commit to `git revert` and no reflog entry to recover from. The
+work is simply gone. That failure is the reason abort's preservation branch
+exists at all, and doing the stops first is exactly how to reintroduce it. A
+leftover directory is an annoyance a human clears in two commands; destroyed
+uncommitted work has no recovery path.
+
+So, after `abort` returns, read the attention list it wrote:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
+```
+
+For each preserved item, in this order:
+
+1. Clear the marker where the item file actually lives — in a subshell, so
+   this session's cwd stays at the project root:
+
+   ```bash
+   ( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> )
+   ```
+
+   `orchestrate.mjs` cannot do this itself: item files have exactly one writer
+   family — the backlog skills — and it is not one of them. That is why abort
+   preserves rather than cleans, instead of clearing the marker and carrying
+   on.
+2. **Look inside the worktree before deleting it.** `git -C <worktree> status`
+   and `git -C <worktree> diff`: a marker means a session was mid-flight, so
+   whatever is uncommitted in there is the work nobody has seen. If any of it
+   is worth keeping, commit it on the branch (step 6's shape) and tell the
+   user the branch is there — an abort is allowed to end a run, it is not
+   licensed to throw away code on the user's behalf.
+3. Only then remove the leftovers:
+
+   ```bash
+   git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
+   git -C "$PWD" branch -D backlog/<id>
+   ```
+
+   Plain `remove` again, for the reason it is plain everywhere else in this
+   file: a refusal means something is still uncommitted in there, and this is
+   the one path where that is *likely* rather than surprising. `-D` on the
+   branch, unlike the merge path's `-d`: an aborted branch was never merged
+   anywhere, so a safe delete would always refuse it.
+
+Everything the run had already merged before the abort stays merged — abort
+ends a run, it does not undo one.
 
 ## Hard limits
 
