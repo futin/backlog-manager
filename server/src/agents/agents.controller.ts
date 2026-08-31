@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpException, Post, UseGuards } from '@nestjs/common';
 
-import { AgentsService } from './agents.service';
+import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
 import { SameOriginPostGuard } from './origin.guard';
 import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus } from '../../../shared/types';
 
@@ -72,6 +72,39 @@ export class AgentsController {
       model: body.model,
       effort: body.effort,
       remoteControl: body.remoteControl === true
+    });
+  }
+
+  /**
+   * The board's "drain the whole queue" control: one project, no item, and
+   * no caller-supplied prompt at all — see AgentsService's ORCHESTRATE_PROMPT
+   * for why that field is never read off `body` in the first place, which is
+   * the whole mechanism by which it gets dropped rather than forwarded.
+   *
+   * Guarded for the same reason `dispatch` is: this starts something (a
+   * whole run of headless sessions across a project's backlog), so a
+   * cross-origin page must not be able to drive it either. See
+   * `origin.guard.ts`.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('orchestrate')
+  orchestrate(@Body() body: Partial<AgentOrchestrateRequest> | undefined): Promise<AgentDispatchResult> {
+    const project = typeof body?.project === 'string' ? body.project.trim() : '';
+    if (project === '') throw new HttpException({ error: 'project is required' }, 400);
+    return this.agents.orchestrate({
+      project,
+      // Unvalidated here for the same reason dispatch leaves these alone:
+      // pickFrom (in the service) is the one place a name off the list — or
+      // a non-string, which this Partial type cannot actually rule out —
+      // becomes undefined, and undefined is what makes the flag disappear.
+      // `?.`, not `.`, on all three: unlike `action` in dispatch, nothing
+      // here narrows `body` itself past the `project` check above.
+      model: body?.model,
+      effort: body?.effort,
+      // Unvalidated on purpose: clampMode is the place a junk or absent mode
+      // becomes the ladder's floor, applied server-side once the ceiling is
+      // known.
+      permissionMode: body?.permissionMode
     });
   }
 }

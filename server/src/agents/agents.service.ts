@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { HttpException, Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
+import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
@@ -53,6 +54,51 @@ const SPAWN_TIMEOUT_MS = 10_000;
  */
 const PROMPT_MAX = 8_000;
 
+/**
+ * The one prompt `orchestrate()` will ever send — never accepted from the
+ * request body. `dispatch`'s prompt varies by design: the action the item
+ * needs (groom vs. execute) is derived from the item file, but WHAT to say
+ * about it is a client-editable default the launch sheet composes
+ * (composePrompt, prompt.util.ts) and the reader may reword before sending.
+ * Orchestrate has no per-request decision to make room for: it always means
+ * "hand this project's whole groomed queue to the backlog-orchestrate skill
+ * and let orchestrate.mjs run it", so there is nothing legitimate for a
+ * caller to vary — and a `prompt` field, were it honoured, would be the one
+ * way an attacker-controlled request could make an unattended, headless
+ * session do anything at all (see origin.guard.ts's own reasoning for why
+ * that is exactly the threat these POST routes exist to prevent). A `prompt`
+ * in the body is therefore dropped the same way dispatch drops any field
+ * outside AgentDispatchRequest: by never being read.
+ *
+ * The leading slash is deliberate and differs from prompt.util.ts's own
+ * choice for groom/execute (natural language, not a slash command — see that
+ * file's comment on why). backlog-orchestrate's own SKILL.md declares
+ * `trigger: /backlog-orchestrate` as its literal invocation phrase, so this
+ * constant is that skill's documented trigger, verbatim.
+ */
+const ORCHESTRATE_PROMPT = '/backlog-orchestrate';
+
+/**
+ * Body of `POST /api/agents/orchestrate`, already reduced to exactly the
+ * fields that survive the controller's field-by-field rebuild — see
+ * AgentsController.orchestrate(). Not declared in shared/types.ts alongside
+ * AgentDispatchRequest: that one has a client-side twin because the launch
+ * sheet builds its request field by field from a form, and nothing on the
+ * client needs this shape yet (a later task's board control has the project
+ * already in hand and can compose this request directly). Promote it to
+ * shared/ if and when a second consumer needs it.
+ */
+export interface AgentOrchestrateRequest {
+  /** The registered project's absolute path — RegistryProject.path, the same
+   *  string OrchestratorRun.project carries. Never a dashboard dirName: that
+   *  key is resolved from this one value, the same way dispatch resolves it
+   *  from an item's projectPath. */
+  project: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+}
+
 /** Shape we rely on from the dashboard's /api/health. Everything optional: it
  *  is a different app's response and an older build may omit fields. */
 interface DashboardHealth {
@@ -72,7 +118,10 @@ export class AgentsService {
    *  silent cross-contamination between cases. */
   private cache: { at: number; url: string; map: Map<string, string> } | null = null;
 
-  constructor(private readonly registry: RegistryService) {}
+  constructor(
+    private readonly registry: RegistryService,
+    private readonly orchestrator: OrchestratorService
+  ) {}
 
   async status(): Promise<AgentsStatus> {
     const cfg = readAgentsConfig();
@@ -198,26 +247,124 @@ export class AgentsService {
       throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
     }
 
+    return this.spawn(cfg, {
+      project: dirName,
+      prompt,
+      name: sessionName(item),
+      permissionMode: clampMode(req.permissionMode, status.spawnMaxPermission),
+      // Undefined for "default" and for any name this build does not know,
+      // and `JSON.stringify` drops an undefined value outright — so the key
+      // never reaches the dashboard and its argv carries no `--model` /
+      // `--effort`. Validated here rather than trusted because the sheet is
+      // not the only possible caller; the dashboard would drop a bad value
+      // too, but that is its check, not ours.
+      model: pickFrom(req.model, MODELS),
+      effort: pickFrom(req.effort, EFFORTS),
+      // Strictly `=== true`, matching the dashboard's own parse rule for this
+      // field: anything else means off.
+      remoteControl: req.remoteControl === true
+    });
+  }
+
+  /**
+   * The board's whole-project cousin of dispatch: same shape, guarded the
+   * same way, one extra gate, and no item at all — this acts on a project's
+   * whole groomed queue rather than one file, so there is nothing here to
+   * call findItem/deriveAction on. See ORCHESTRATE_PROMPT for why the prompt
+   * is a constant rather than a request field.
+   */
+  async orchestrate(req: AgentOrchestrateRequest): Promise<AgentDispatchResult> {
+    const status = await this.status();
+    if (!status.enabled) {
+      // 404, not dispatch's 409-with-a-reason. dispatch's off case still has
+      // a sheet open for one specific item, and plan()/dispatchBlock exist
+      // precisely to give that sheet a "blocked" string worth rendering
+      // ("dispatch is off — set BM_AGENTS=on"). Orchestrate has no sheet: the
+      // board's control for it is either rendered or it is not, the same
+      // `hidden` posture dispatchGate takes for every environment-level
+      // block (see the "An environment-level block hides the dispatch
+      // control" invariant) — so the honest HTTP answer for "this feature is
+      // not on" is the same one an unregistered item's path gets from
+      // dispatch/plan: as far as this caller is concerned, the route is not
+      // here.
+      throw new HttpException({ error: 'not found' }, 404);
+    }
+
+    // The same membership check dispatchGate performs for a per-item
+    // dispatch, inlined rather than called: dispatchGate (shared/agent.ts)
+    // takes a whole BacklogItem because every existing caller already has
+    // one on hand, but the only field it ever reads off it is
+    // `.projectPath` — orchestrate has a project and no item, so this
+    // repeats that one line rather than manufacturing a fake item to satisfy
+    // a parameter type that does not fit here. Still the same raw string
+    // compare against `status.projectPaths`, deliberately not realpath, and
+    // deliberately not a dirName derived from the path to route around the
+    // dashboard's own membership check — see the "A project the dashboard
+    // cannot see cannot be dispatched to" invariant in CLAUDE.md, which this
+    // line exists to uphold a second time for a route dispatchGate itself
+    // never sees.
+    if (!status.projectPaths.includes(req.project)) {
+      throw new HttpException(
+        { error: `the dashboard cannot see ${req.project} — no Claude session there inside its LOOKBACK_HOURS` },
+        409
+      );
+    }
+
+    // The lock. orchestrate.mjs's own `init` already refuses to start a
+    // second run for a project that has a fresh run.json (its on-disk lock,
+    // enforced before this endpoint is ever reached from a terminal
+    // invocation) — this is that same rule enforced a second time, on the
+    // one path that does not go through orchestrate.mjs's own guard at all:
+    // a click on the board goes straight from here to POST /api/spawn, so
+    // without this check nothing on this side of the dashboard would stop
+    // two runs from racing each other into existence for the same project.
+    // Belt and suspenders, the same reasoning as the registry file's
+    // single-writer rule — the check that truly matters lives with the
+    // writer (orchestrate.mjs, there; backlog.mjs, there), and every OTHER
+    // path capable of triggering a write re-checks it rather than trusting
+    // that every caller will always go through that writer.
+    const activeRun = this.orchestrator.runs().runs.find((r) => r.project === req.project && r.fresh);
+    if (activeRun) {
+      throw new HttpException(
+        { error: `a run is already in progress for this project (${activeRun.runId})` },
+        409
+      );
+    }
+
+    const cfg = readAgentsConfig();
+    const dirName = (await this.projectMap(cfg)).get(req.project);
+    if (dirName === undefined) {
+      // Same race dispatch()'s identical line guards against: the membership
+      // check above and this lookup read the same cache, and only a TTL
+      // expiry between the two reads reaches here. Refuse rather than derive
+      // a dirName from the path, for the reason named above.
+      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+    }
+
+    return this.spawn(cfg, {
+      project: dirName,
+      prompt: ORCHESTRATE_PROMPT,
+      permissionMode: clampMode(req.permissionMode ?? '', status.spawnMaxPermission),
+      model: pickFrom(req.model, MODELS),
+      effort: pickFrom(req.effort, EFFORTS)
+    });
+  }
+
+  /**
+   * POST /api/spawn against the dashboard, and the one place this app
+   * decides what its answer means — shared by dispatch() and orchestrate().
+   * Each composes a different body for a different reason (one item vs. one
+   * project's whole queue), but once that body is built, the request itself
+   * and what a 2xx/4xx/5xx answer or a malformed one means are identical, and
+   * this file's own opening comment is the reason not to say so twice:
+   * everything this app talks to belongs to one dashboard, and that should
+   * not multiply into two slightly different tellings of the same call.
+   */
+  private async spawn(cfg: AgentsConfig, spawnBody: Record<string, unknown>): Promise<AgentDispatchResult> {
     const res = await fetch(`${cfg.url}/api/spawn`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders(cfg) },
-      body: JSON.stringify({
-        project: dirName,
-        prompt,
-        name: sessionName(item),
-        permissionMode: clampMode(req.permissionMode, status.spawnMaxPermission),
-        // Undefined for "default" and for any name this build does not know,
-        // and `JSON.stringify` drops an undefined value outright — so the key
-        // never reaches the dashboard and its argv carries no `--model` /
-        // `--effort`. Validated here rather than trusted because the sheet is
-        // not the only possible caller; the dashboard would drop a bad value
-        // too, but that is its check, not ours.
-        model: pickFrom(req.model, MODELS),
-        effort: pickFrom(req.effort, EFFORTS),
-        // Strictly `=== true`, matching the dashboard's own parse rule for this
-        // field: anything else means off.
-        remoteControl: req.remoteControl === true
-      }),
+      body: JSON.stringify(spawnBody),
       signal: AbortSignal.timeout(SPAWN_TIMEOUT_MS)
     });
 
