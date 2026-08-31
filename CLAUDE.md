@@ -72,18 +72,21 @@ happened.
   `phase: execute` line alongside it when `--as` is given; `stop <id>` reads
   `phase:` back to pick `groom-elapsed:` or `execute-elapsed:` — two
   permanent, accumulating integer-seconds counters, one per activity — bills
-  the whole seconds since `started:` into it, then removes `started:` and
-  `phase:` together. `updated:` is stamped by every `start` and every `stop`
-  (both funnel through the one function that does it); `move` deliberately
-  does not stamp it — a renameSync that never opens the file — which is also
-  why an item archived without an intervening `stop` keeps whatever
-  `started:`/`phase:` it already carried, same as `started:` alone always
-  has: that's history, not a bug. A bare `YYYY-MM-DD` `started:` from before
-  this timestamp shape existed is cleared on `stop` like any other, but never
-  billed — UTC midnight is not the hour anyone began work. Written only by
-  `start`/`stop` — now called by both `backlog-execute` (holding the marker
-  until archive) and `backlog-groom` (holding it for one groom session,
-  ideas included) — which must round-trip unknown keys and the body
+  the whole seconds since `started:` into it, then removes `phase:` and,
+  unless the caller passes `--keep-started`, `started:` too. `--keep-started`
+  is what `backlog-execute`'s successful archive uses: it bills the session
+  exactly as a plain `stop` would, but leaves `started:` in place so the
+  archived item still records when the work began. `updated:` is stamped by
+  every `start` and every `stop` (both funnel through the one function that
+  does it); `move` deliberately does not stamp it — a renameSync that never
+  opens the file — but every skill path that moves an item calls `stop`
+  immediately beforehand, so a moved item's `updated:` is never more than
+  one function call older than its move. A bare `YYYY-MM-DD` `started:` from
+  before this timestamp shape existed is cleared on `stop` like any other,
+  but never billed — UTC midnight is not the hour anyone began work. Written
+  only by `start`/`stop` — now called by both `backlog-execute` (holding the
+  marker until archive) and `backlog-groom` (holding it for one groom
+  session, ideas included) — which must round-trip unknown keys and the body
   byte-for-byte; "in progress" is decided in the client.
 - **Editing `skills/` changes nothing until it is committed, pushed, and
   `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD,
@@ -134,8 +137,13 @@ happened.
 
 ## Conventions
 
-- Comments explain *why*, at length, and the existing density is deliberate —
-  match it rather than stripping it.
+- Comments are sparse and explain only *why*. Write one where the code
+  cannot speak for itself: a constraint enforced somewhere else, a failure
+  the line exists to prevent, a choice that reads as a mistake until
+  explained. Never restate what the code does. Many existing files carry
+  heavy commentary from an earlier convention — do not match that density,
+  and do not bulk-strip it either; thin it only inside code you are already
+  changing for another reason.
 - Tests are flat in `test/`, `*.test.ts` / `*.test.tsx`; component suites opt
   into jsdom with a `@jest-environment jsdom` docblock. Skill tests live next
   to the tool they cover (`skills/*/tools/*.test.mjs`) and run under node's

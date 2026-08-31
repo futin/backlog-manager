@@ -1016,7 +1016,7 @@ test('CLI start with no id exits 1 and prints a usage line naming both verbs, ea
   // at all.
   const lines = out.stderr.trim().split('\n')
   assert.match(lines[0], /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/)
-  assert.match(lines[1], /^\s*backlog\.mjs stop <id> \[--abandon\]$/)
+  assert.match(lines[1], /^\s*backlog\.mjs stop <id> \[--abandon\] \[--keep-started\]$/)
   assert.doesNotMatch(lines[0], /--abandon/)
   assert.doesNotMatch(lines[1], /--as/)
 })
@@ -1326,7 +1326,7 @@ test('CLI start --as with no value refuses with the start/stop usage text', () =
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
-  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\] \[--keep-started\]$/m)
 })
 
 // stop reads the phase off the file (Task 3); a --as flag here could name
@@ -1340,7 +1340,7 @@ test('CLI stop rejects --as with the usage text and leaves the file untouched', 
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
-  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\] \[--keep-started\]$/m)
   assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
 })
 
@@ -1357,7 +1357,7 @@ test('CLI start rejects --abandon with the usage text and leaves the file untouc
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
-  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\] \[--keep-started\]$/m)
   assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
 })
 
@@ -1425,6 +1425,11 @@ test('CLI start --as groom twice refuses on the second call with the existing al
 // what actually varies: the phase, any pre-existing bucket value, and the
 // stamp stop is handed.
 const T0 = '2026-08-30T10:00:00Z'
+
+// The one `stamp` value the Task 7 (`--keep-started`) cases below share —
+// 7860 seconds (2h11m) after T0 — so each of those states only what varies:
+// the phase, any pre-existing bucket value, and whether `started:` survives.
+const STAMP = '2026-08-30T12:11:00Z'
 
 // Overwrites just the named frontmatter fields on an already-written item,
 // keeping every other key and the body exactly as boardFixture/writeItem (or
@@ -1621,6 +1626,212 @@ test('stopItem bills groom time and round-trips an unknown key and the body byte
   assert.equal(data.from, 'idea-3')
   assert.equal(data['groom-elapsed'], '60')
   assert.equal(afterBody, body)
+})
+
+// --- --keep-started (Task 7) --------------------------------------------------
+// Closes the gap the whole-branch review found: backlog-execute's successful
+// archive moved a fix or task to done/ without ever calling `stop`, so the
+// headline number — how long the execution actually took — was never
+// recorded for a task that finished, only for one that was abandoned. `stop
+// --keep-started` bills exactly as a plain `stop` does and still drops
+// `phase:`, but leaves `started:` on the file instead of clearing it, so an
+// archived item ends up with all three facts: when work began (`started`),
+// how long it took (`execute-elapsed`), and when it ended (`updated`).
+//
+// Every billing-shape case below is the direct `opts.keepStarted: true`
+// counterpart of an existing plain-`stop` case above — same T0, same STAMP
+// (7860s later) — so a diff between the two proves `--keep-started` changes
+// nothing about the gate or the arithmetic, only whether `started:` survives.
+
+test('stopItem --keep-started bills execute-elapsed and leaves started: in place', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'execute' })
+
+  stopItem(backlog, 'bug-7', STAMP, { keepStarted: true })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['execute-elapsed'], '7860')
+  assert.equal(data.started, T0)
+  assert.equal('phase' in data, false)
+  assert.equal(data.updated, STAMP)
+})
+
+test('stopItem --keep-started accumulates onto an existing execute-elapsed rather than overwriting it', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'execute', 'execute-elapsed': 100 })
+
+  stopItem(backlog, 'bug-7', STAMP, { keepStarted: true })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['execute-elapsed'], '7960')
+})
+
+test('stopItem --keep-started bills groom-elapsed just as readily, and still keeps started:', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', STAMP, { keepStarted: true })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-elapsed'], '7860')
+  assert.equal(data.started, T0)
+})
+
+// Regression guard: the two existing behaviours below must survive the
+// signature change from a lone `abandon` boolean to `opts.{abandon,
+// keepStarted}` unchanged — a lone `stop`, and `stop --abandon`, must still
+// clear `started:` exactly as they did before `keepStarted` existed.
+test('stopItem with no opts still removes started: on an execute phase — regression guard', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'execute' })
+
+  stopItem(backlog, 'bug-7', STAMP)
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['execute-elapsed'], '7860')
+  assert.equal('started' in data, false)
+})
+
+test('stopItem with { abandon: true } bills nothing and still removes started: — regression guard', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'execute' })
+
+  stopItem(backlog, 'bug-7', STAMP, { abandon: true })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('execute-elapsed' in data, false)
+  assert.equal('started' in data, false)
+})
+
+// `--abandon` and `--keep-started` together have no meaning worth inventing
+// (see the CLI's own comment on this refusal): abandoning already leaves
+// nothing dated for `--keep-started` to preserve. Refused as a usage error,
+// at the CLI layer, before the file is ever opened.
+test('CLI stop --abandon --keep-started together is a usage error, file untouched', () => {
+  const { dir, openBugPath } = boardFixture()
+  assert.equal(run(dir, 'start', 'bug-7', '--as', 'execute').status, 0)
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'stop', 'bug-7', '--abandon', '--keep-started')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\] \[--keep-started\]$/m)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+// start has no dead marker of its own to preserve `started:` on — refused
+// the same way it already refuses --abandon.
+test('CLI start rejects --keep-started with the usage text and leaves the file untouched', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'start', 'bug-7', '--keep-started')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /^usage: backlog\.mjs start <id> \[--as groom\|execute\]$/m)
+  assert.match(out.stderr, /^\s*backlog\.mjs stop <id> \[--abandon\] \[--keep-started\]$/m)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+// `--keep-started` changes what a live marker's stop leaves behind; it does
+// not change whether one has to exist first.
+test('CLI stop --keep-started on an item never started still refuses with the existing message', () => {
+  const { dir, openBugPath } = boardFixture()
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  const out = run(dir, 'stop', 'bug-7', '--keep-started')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /bug-7 is not in progress/)
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('stopItem --keep-started never bills a legacy bare-date started:, but keeps it verbatim', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: '2026-08-30', phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', STAMP, { keepStarted: true })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal(data.started, '2026-08-30')
+  assert.equal('phase' in data, false)
+  assert.match(data.updated, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+})
+
+test('stopItem --keep-started never bills an unparseable started:, writes no NaN, and keeps it verbatim', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: '2026-08-30T25:00:00Z', phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', STAMP, { keepStarted: true })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal(data.started, '2026-08-30T25:00:00Z')
+  assert.equal('phase' in data, false)
+  // The point of this test, same as the plain-stop precedent above: no
+  // matter what, "NaN" must never reach the file.
+  assert.doesNotMatch(fs.readFileSync(openBugPath, 'utf8'), /NaN/)
+})
+
+test('stopItem --keep-started still refuses a corrupt bucket, naming the key and the bad value, writing nothing', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom', 'groom-elapsed': 'abc' })
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  assert.throws(
+    () => stopItem(backlog, 'bug-7', STAMP, { keepStarted: true }),
+    (e) => e instanceof BacklogError && e.code === 1 && /groom-elapsed/.test(e.message) && /abc/.test(e.message),
+  )
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('stopItem --keep-started bills execute time and round-trips an unknown key and the body byte-for-byte', () => {
+  const { backlog } = boardFixture()
+  const body = '\n## Notes\n\n---\n\nSome content.\n'
+  const itemPath = writeItemWithBody(backlog, 'tasks/open', 'task-4', 'Promoted task', body)
+  withFrontmatter(itemPath, { started: T0, phase: 'execute', from: 'idea-3' })
+
+  stopItem(backlog, 'task-4', STAMP, { keepStarted: true })
+
+  const { data, body: afterBody } = parseFrontmatter(fs.readFileSync(itemPath, 'utf8'))
+  assert.equal(data.from, 'idea-3')
+  assert.equal(data['execute-elapsed'], '7860')
+  assert.equal(data.started, T0)
+  assert.equal(afterBody, body)
+})
+
+// The real archive path end to end: this is the sequence backlog-execute's
+// SKILL.md now documents (append ## Outcome -> stop --keep-started -> move
+// ... done), and it is the regression test for the defect Task 7 closes — an
+// executed-to-done task must carry its execute-elapsed, not just an
+// abandoned one. `move` is a renameSync that never opens the file (see
+// moveItem's own comment), so everything `stop --keep-started` wrote must
+// come through into done/ byte-for-byte; comparing the pre-move and
+// post-move values (rather than asserting a literal timestamp, which the
+// CLI gives no way to pin) is what actually proves that.
+test('CLI start --as execute, stop --keep-started, then move done carries started/execute-elapsed/updated through the archive', () => {
+  const { dir, backlog, openBugPath } = boardFixture()
+  assert.equal(run(dir, 'start', 'bug-7', '--as', 'execute').status, 0)
+
+  const stopOut = run(dir, 'stop', 'bug-7', '--keep-started')
+  assert.equal(stopOut.status, 0, stopOut.stderr)
+  const afterStop = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8')).data
+  assert.match(afterStop.started, STAMP_LINE_VALUE)
+  assert.match(afterStop['execute-elapsed'], /^\d+$/)
+  assert.match(afterStop.updated, STAMP_LINE_VALUE)
+  assert.equal('phase' in afterStop, false)
+
+  const moveOut = run(dir, 'move', 'bug-7', 'done')
+  assert.equal(moveOut.status, 0, moveOut.stderr)
+
+  const movedPath = path.join(backlog, 'bugs', 'done', path.basename(openBugPath))
+  const afterMove = parseFrontmatter(fs.readFileSync(movedPath, 'utf8')).data
+  assert.equal(afterMove.started, afterStop.started)
+  assert.equal(afterMove['execute-elapsed'], afterStop['execute-elapsed'])
+  assert.equal(afterMove.updated, afterStop.updated)
+  assert.equal('phase' in afterMove, false)
 })
 
 // --- board registry ----------------------------------------------------------

@@ -127,11 +127,23 @@ Then, and only then:
    them. Write the date, a sentence on what actually happened, and **the verification
    command's actual output**, pasted in. Not "tests pass" — the output that shows tests
    passing.
-2. Move it:
+2. Bill the session and clear the phase marker, but keep the record of when it started:
+
+   ```bash
+   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> --keep-started
+   ```
+
+3. Move it:
 
    ```bash
    node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move <id> done
    ```
+
+Between steps 2 and 3 the item sits open with `started:` but no `phase:` — the board
+reads that as in progress under its generic label rather than "executing," since the
+phase that named the activity is already gone. If step 3 then fails (for example, a
+same-named file already sitting in `done/`), run a plain `stop <id>` to clear the
+leftover marker; the item stays exactly where the failed move left it, ready to retry.
 
 ## If verification fails, nothing moves
 
@@ -149,8 +161,13 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
 ```
 
 An item nobody is actually working that still shows an amber bar is worse than no marker
-at all — it's the board lying about where the work is. Archiving does not need this:
-`move` never rewrites content, so a done item keeps its `started` timestamp as history.
+at all — it's the board lying about where the work is. The two paths call different stops
+for exactly that reason: parking here is clearing a marker on work that isn't happening
+anymore, so a plain `stop` is right — it bills whatever time was spent and drops `started`
+along with it, because there's nothing left to date. Archiving above is recording finished
+work instead, so it calls `stop --keep-started`: that bills the session the same way, but
+leaves `started` in place as the historical record of when the work began, since a
+`move ... done` is about to follow it into permanence.
 
 ## Hard limits
 

@@ -35,35 +35,37 @@ both funnel through rather than each writing that line itself (a caller
 added later can't forget a convention it never has to know about). `move` is
 deliberately excluded from that stamp — opening a file just to change one
 line would reintroduce the exact risk the plain `renameSync` exists to
-avoid. For `backlog-groom`'s moves (an idea promoted to `done/`, anything
-rejected to `out-of-scope/`) and for `backlog-execute`'s abandonment path,
-`stop` always runs immediately before the move, so `updated:` is never more
-than one function call older than the move that follows it. The one path
-that does not is `backlog-execute`'s own successful archive: it holds the
-marker through to `move ... done` without an intervening `stop` (see the
-next paragraph), so that item's `updated:` stays exactly as old as its last
-`start`/`stop` cycle left it, and `started:`/`phase:` are what survive as
-the historical record instead.
+avoid. Every skill path that moves an item calls `stop` immediately
+beforehand — `backlog-groom`'s moves (an idea promoted to `done/`, anything
+rejected to `out-of-scope/`), `backlog-execute`'s abandonment path, and now
+`backlog-execute`'s own successful archive too (see the next paragraph) — so
+`updated:` is never more than one function call older than the move that
+follows it, for every path there is.
 
-Two skills call `start`/`stop`, holding the marker for different spans.
-`backlog-groom` holds it for one groom session — `start --as groom` once the
-item and the verdict are both confirmed, `stop` again once that verdict's
-steps finish, or as soon as the session ends without a verdict at all, so an
+Two skills call `start`/`stop`, holding the marker for different spans, and
+`backlog-execute` now calls two different shapes of `stop`. `backlog-groom`
+holds the marker for one groom session — `start --as groom` once the item
+and the verdict are both confirmed, `stop` again once that verdict's steps
+finish, or as soon as the session ends without a verdict at all, so an
 abandoned groom never leaves a stamp nothing will clear — billing whatever
 elapsed into `groom-elapsed:` every time it does. `backlog-execute` picks an
-item up with `start --as execute` and holds the marker all the way to
-archive: its one `stop` call sits on the "walked away without archiving"
-path, not the successful one, so a normally-finished item reaches
-`move ... done` with `started:`/`phase: execute` still on it — unbilled for
-that final stretch, and kept as permanent history exactly as a bare
-`started:` has always been for this skill: a done item recording *when the
-work began*, not merely *that* it did. Either skill can stamp an idea now:
-the original reasoning for refusing one — "an idea has nothing to execute" —
-held for execute but not for groom, since deciding an idea's verdict is
-itself the active work the marker exists to describe. None of this widens
-who writes the file: `backlog.mjs` is still the single writer, `start`/`stop`
-are still the only two commands that touch an existing item's content, and
-the round-trip guarantee above covers both callers identically.
+item up with `start --as execute` and holds the marker until the work is
+either parked or archived. Walking away without archiving calls plain
+`stop`: it bills the session into `execute-elapsed:` and clears `started:`
+along with `phase:`, because nobody is working the item anymore and there is
+nothing left to date. Archiving instead calls `stop --keep-started`: it
+bills the same way and still drops `phase:`, but leaves `started:` in place,
+because a `move ... done` is about to follow and the archived item should
+still record *when the work began*, not merely *that* it did — the same
+historical value a bare `started:` has always carried for this skill, now
+sitting alongside the elapsed total instead of standing in for it. Either
+skill can stamp an idea now: the original reasoning for refusing one — "an
+idea has nothing to execute" — held for execute but not for groom, since
+deciding an idea's verdict is itself the active work the marker exists to
+describe. None of this widens who writes the file: `backlog.mjs` is still
+the single writer, `start`/`stop` are still the only two commands that touch
+an existing item's content, and the round-trip guarantee above covers both
+callers identically.
 
 `groom-elapsed:` and `execute-elapsed:` are permanent, accumulating integer
 counters — one whole-seconds total per activity, never reset, growing by one

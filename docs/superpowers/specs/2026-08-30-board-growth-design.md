@@ -110,7 +110,10 @@ actor at a time" is enforced today. What is missing is *which* actor, so
 - `start <id> --as groom|execute` writes `started:` **and** `phase:`.
 - `stop <id>` reads `phase:`, computes elapsed seconds, adds them into
   `groom-elapsed:` or `execute-elapsed:` (integer seconds, accumulated across
-  sessions), then removes `started:` and `phase:` and stamps `updated:`.
+  sessions), then removes `phase:` and stamps `updated:` — and removes
+  `started:` too, unless the caller passes `--keep-started`, which
+  `backlog-execute`'s successful archive uses so a done item still records
+  when the work began.
 
 `phase:` is not a status and does not weaken the `status:` ban. A status
 would say where the item is in its lifecycle — that remains the directory,

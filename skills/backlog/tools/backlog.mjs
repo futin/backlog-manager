@@ -600,22 +600,24 @@ export function moveItem(backlog, id, dest) {
 // move. Making move stamp `updated` would mean either opening the file just
 // to change one line — reintroducing the exact risk renameSync exists to
 // avoid — or leaving the stamp to describe a moment that isn't the actual
-// last edit. Mostly nothing is lost by leaving it out: backlog-groom's own
-// moves (an idea promoted to done/, anything rejected to out-of-scope/) and
-// backlog-execute's abandonment path all call `stop` on the item
-// immediately beforehand, and `stop` already refreshes `updated` through
-// this same function, so for those paths an archived item's `updated:` is
-// never more than one function call older than its move. The one path that
-// doesn't hold: backlog-execute's own successful archive
-// (`move <id> done` once a fix or task is verified) holds the marker all
-// the way through instead of stopping first, so that item's `updated:`
-// stays exactly as old as its last start/stop cycle left it, and
-// `started:`/`phase:` survive as the historical record instead — see the
-// paragraph beginning "Two skills call `start`/`stop`" in
-// docs/invariants.md for the full reasoning. That gap is a known,
-// separately-tracked design point on its own, not a defect in this
-// function — the point of correcting this comment is only to stop it from
-// asserting an absolute that isn't true.
+// last edit. Nothing is lost by leaving it out: every skill path that moves
+// an item calls `stop` on it immediately beforehand — backlog-groom's own
+// moves (an idea promoted to done/, anything rejected to out-of-scope/),
+// backlog-execute's abandonment path, and (Task 7) backlog-execute's own
+// successful archive too — and `stop` already refreshes `updated` through
+// this same function, so an archived item's `updated:` is never more than
+// one function call older than its move. That last case used to be the one
+// exception: backlog-execute's successful archive (`move <id> done` once a
+// fix or task is verified) held the marker all the way through instead of
+// stopping first, so `execute-elapsed:` was never billed for a task that
+// actually finished — only for one that was abandoned. Task 7 closed that
+// gap by having the archive path call `stop --keep-started` first, which
+// bills the session into `execute-elapsed:` and drops `phase:` exactly like
+// a plain `stop`, but leaves `started:` in place — so the absolute above
+// holds without exception again, and the archived item still records
+// *when* the work began even though `updated:` now sits right next to it as
+// the moment it ended. See the paragraph beginning "Two skills call
+// `start`/`stop`" in docs/invariants.md for the full reasoning.
 //
 // The fourth parameter exists so a caller — real or test — can pin the exact
 // value written, mirroring startItem's own third parameter. startItem and
@@ -766,27 +768,54 @@ const DIGITS_ONLY = /^\d+$/
 // are in startItem — this just extends that equivalence to stop's own
 // write.
 //
-// `abandon` IS a real fourth parameter, and a different kind of thing than
-// the timing parameter the paragraph above declines to add: not a second
-// reading of "now," but a switch that turns the billing block below off
-// entirely — mirroring startItem's own `phase` in position, not in shape, a
-// boolean because there is only one thing left to say once billing itself
-// is off the table. When true, clearing `started`/`phase` and stamping
-// `updated` still happen exactly as they do on an ordinary stop — the
-// marker is still stale and still needs to go — but the debit against
-// whichever bucket `phase` would have named is skipped outright, whatever
-// `phase` and `started` actually say, and however corrupt or fine the
-// existing bucket value is: an abandoned session has nothing to bill, so
-// there is nothing for the corrupt-bucket refusal below to even check. The
-// interval between a stale `started:` and this stop is not work anyone
-// did, and there is no safe way to guess how much of it was — a duration
-// cap was considered and rejected for the same reason DIGITS_ONLY refuses
-// rather than resets a corrupt bucket: a wrong guess silently corrupts a
-// real session's total, where an obviously-fake one is easy to reason
-// about instead. See the `--abandon` CLI flag below, which is the only
-// thing that ever sets this true; a real call site otherwise leaves it at
-// the default.
-export function stopItem(backlog, id, stamp = nowISO(), abandon = false) {
+// The fourth parameter is an options object rather than a second and third
+// positional boolean. `abandon` was a lone boolean until Task 7 added a
+// second one (`keepStarted`) alongside it; `stopItem(b, id, stamp, false,
+// true)` is a call site nobody could read back correctly without opening
+// this file to check which position means what, and every future flag would
+// make that worse. `opts.abandon` and `opts.keepStarted` name themselves at
+// every call site instead, at the cost of the destructuring line below —
+// a trade this file already makes the other way for `phase` (a plain fourth
+// positional on startItem) precisely because `phase` has no sibling to be
+// confused with; `abandon` now does.
+//
+// `opts.abandon` is a switch that turns the billing block below off
+// entirely — mirroring startItem's own `phase` in position, not in shape.
+// When true, clearing `started`/`phase` and stamping `updated` still happen
+// exactly as they do on an ordinary stop — the marker is still stale and
+// still needs to go — but the debit against whichever bucket `phase` would
+// have named is skipped outright, whatever `phase` and `started` actually
+// say, and however corrupt or fine the existing bucket value is: an
+// abandoned session has nothing to bill, so there is nothing for the
+// corrupt-bucket refusal below to even check. The interval between a stale
+// `started:` and this stop is not work anyone did, and there is no safe way
+// to guess how much of it was — a duration cap was considered and rejected
+// for the same reason DIGITS_ONLY refuses rather than resets a corrupt
+// bucket: a wrong guess silently corrupts a real session's total, where an
+// obviously-fake one is easy to reason about instead. See the `--abandon`
+// CLI flag below, which is the only thing that ever sets this true; a real
+// call site otherwise leaves it at the default.
+//
+// `opts.keepStarted` (Task 7) bills exactly as an ordinary stop does and
+// still removes `phase:`, but leaves `started:` on the file instead of
+// clearing it too. It exists for exactly one caller: backlog-execute's
+// successful archive, which used to hold the marker straight through to
+// `move ... done` — recording *that* work happened but never *how long* —
+// and now calls this instead, so the archived item ends up with all three
+// facts: when work began (`started`), how long it took (the elapsed
+// bucket), and when it ended (`updated`). It goes through the exact same
+// billability gate as an ordinary stop below — not abandoning, a
+// recognized `phase:`, a full timestamp that actually parses — because
+// keeping `started:` around is a decision about what the file records
+// afterward, not a second opinion on whether this session's time was real:
+// a legacy bare date or an unparseable timestamp is still cleared-but-
+// unbilled with `--keep-started` exactly as without it, just with
+// `started:` itself surviving that clearing. `abandon` and `keepStarted`
+// together is refused as a usage error at the CLI (see below) rather than
+// given a meaning here: abandonment already clears `started:` same as a
+// plain stop, so there would be nothing left for `keepStarted` to preserve.
+export function stopItem(backlog, id, stamp = nowISO(), opts = {}) {
+  const { abandon = false, keepStarted = false } = opts
   const item = locateItem(backlog, id)
 
   const { data, body } = readItemFile(item.path)
@@ -794,12 +823,18 @@ export function stopItem(backlog, id, stamp = nowISO(), abandon = false) {
     throw new BacklogError(`${id} is not in progress`, 1)
   }
 
-  // Both lifecycle keys come off together, unconditionally — see PHASES's own
-  // comment for why `phase` has no meaning and no lifespan beyond `started`.
-  // `rest` is what every branch below builds on: the billing branch adds one
-  // more key to it, the non-billing branches leave it exactly as is.
+  // `phase` always comes off — see PHASES's own comment for why it has no
+  // meaning and no lifespan beyond `started`. `started` comes off too unless
+  // `keepStarted` says otherwise (see this function's own comment above for
+  // why exactly one caller ever asks for that). `base` is what every branch
+  // below builds on: the billing branch adds one more key to it, the
+  // non-billing branches leave it exactly as is. Billing itself still reads
+  // `existing` off `rest`, not `base` — the bucket key is unrelated to
+  // `started`, so whether `started` survives this stop has no bearing on
+  // what was already banked in `execute-elapsed:`/`groom-elapsed:` before it.
   const { started, phase, ...rest } = data
-  let next = rest
+  const base = keepStarted ? { ...rest, started } : rest
+  let next = base
 
   // Billable only when the caller isn't abandoning (see stopItem's own
   // comment above for what that means and why), there is a phase to bill
@@ -818,7 +853,10 @@ export function stopItem(backlog, id, stamp = nowISO(), abandon = false) {
   // next stop refuses the corrupt bucket, and the next start refuses
   // because started: is still set, and neither can undo the other. Every
   // case that fails this check still clears the marker above like any
-  // other started: value; only the billing itself is skipped.
+  // other started: value; only the billing itself is skipped. `keepStarted`
+  // changes none of this gate — see this function's own comment above for
+  // why keeping `started:` around is orthogonal to whether this session's
+  // time is billable.
   if (!abandon && phase !== undefined && PHASES.includes(phase) && FULL_TIMESTAMP.test(started) && Number.isFinite(Date.parse(started))) {
     const key = ELAPSED_KEYS[phase]
     const existing = rest[key]
@@ -842,7 +880,7 @@ export function stopItem(backlog, id, stamp = nowISO(), abandon = false) {
     // apart must never bill negative time just because stop's clock reads
     // slightly behind start's.
     const seconds = Math.max(0, Math.floor((Date.parse(stamp) - Date.parse(started)) / 1000))
-    next = { ...rest, [key]: previous + seconds }
+    next = { ...base, [key]: previous + seconds }
   }
 
   writeItemFile(item.path, next, body, stamp)
@@ -936,14 +974,14 @@ const MOVE_USAGE = `usage: backlog.mjs move <id> done|out-of-scope`
 
 // One constant for both verbs: they are a pair, and someone who mistyped one
 // of them is the person most likely to want the other named right there.
-// `--as` is shown on the start line only, and `--abandon` on the stop line
-// only — each flag belongs to exactly one verb (see the CLI block below for
-// why: stop reads phase off the file rather than taking it as a flag, and
-// start has no dead marker of its own to walk away from), and showing
-// either flag on both lines would tell the caller the opposite of what that
-// verb actually accepts.
+// `--as` is shown on the start line only, and `--abandon`/`--keep-started`
+// on the stop line only — each flag belongs to exactly one verb (see the CLI
+// block below for why: stop reads phase off the file rather than taking it
+// as a flag, and start has no dead marker of its own to walk away from or
+// preserve), and showing a flag on the wrong line would tell the caller the
+// opposite of what that verb actually accepts.
 const START_STOP_USAGE = `usage: backlog.mjs start <id> [--as groom|execute]
-       backlog.mjs stop <id> [--abandon]`
+       backlog.mjs stop <id> [--abandon] [--keep-started]`
 
 export function main(argv) {
   const [cmd] = argv
@@ -1164,19 +1202,22 @@ export function main(argv) {
       return 1
     }
 
-    // `--as` is start's flag and `--abandon` is stop's, both parsed here
-    // (not left for startItem/stopItem alone) so each verb can refuse the
-    // other's flag before ever touching the file. stop reads the phase off
-    // the file instead of taking it as a flag: the file is the one place
-    // that can't disagree with itself, and a --as here could name something
-    // other than what start actually stored, which would leave no way to
-    // tell whether the flag or the file was telling the truth. start, in
-    // turn, has no marker of its own yet to walk away from — --abandon only
-    // ever means something to a stop that is about to clear one. `new` and
-    // `board`, both above, scan their own flags the same way.
+    // `--as` is start's flag; `--abandon` and `--keep-started` are both
+    // stop's. All three are parsed here (not left for startItem/stopItem
+    // alone) so each verb can refuse a flag that isn't its own before ever
+    // touching the file. stop reads the phase off the file instead of
+    // taking it as a flag: the file is the one place that can't disagree
+    // with itself, and a --as here could name something other than what
+    // start actually stored, which would leave no way to tell whether the
+    // flag or the file was telling the truth. start, in turn, has no marker
+    // of its own yet to walk away from or preserve — --abandon and
+    // --keep-started only ever mean something to a stop that is about to
+    // clear (or not clear) one. `new` and `board`, both above, scan their
+    // own flags the same way.
     let phase
     let sawAsFlag = false
     let sawAbandonFlag = false
+    let sawKeepStartedFlag = false
     for (let i = 2; i < argv.length; i++) {
       if (argv[i] === '--as') {
         sawAsFlag = true
@@ -1184,16 +1225,19 @@ export function main(argv) {
         i++
       } else if (argv[i] === '--abandon') {
         sawAbandonFlag = true
+      } else if (argv[i] === '--keep-started') {
+        sawKeepStartedFlag = true
       }
     }
 
-    // All three refusals below print the shared usage text rather than a
-    // phase-specific message: a missing value and a flag on the wrong verb
-    // are shape problems with the command line itself, the same class of
-    // error the missing-id check above already reports this way — an
-    // unrecognised (but present) value is the different case, and reaches
-    // startItem's own validation below instead, which names the two
-    // accepted values explicitly.
+    // The refusals below all print the shared usage text rather than a
+    // phase-specific message: a missing value, a flag on the wrong verb, and
+    // (Task 7) stop being handed two flags that fight each other are all
+    // shape problems with the command line itself, the same class of error
+    // the missing-id check above already reports this way — an unrecognised
+    // (but present) value is the different case, and reaches startItem's own
+    // validation below instead, which names the two accepted values
+    // explicitly.
     if (cmd === 'stop' && sawAsFlag) {
       console.error(START_STOP_USAGE)
       return 1
@@ -1202,7 +1246,21 @@ export function main(argv) {
       console.error(START_STOP_USAGE)
       return 1
     }
+    if (cmd === 'start' && sawKeepStartedFlag) {
+      console.error(START_STOP_USAGE)
+      return 1
+    }
     if (sawAsFlag && phase === undefined) {
+      console.error(START_STOP_USAGE)
+      return 1
+    }
+    // Nobody needs `stop --abandon --keep-started` together, and inventing
+    // semantics for it is speculative: abandoning already clears `started:`
+    // same as a plain stop, so there is nothing left for `keep-started` to
+    // preserve. Refused here, at the same command-line-shape level as the
+    // flag-on-the-wrong-verb refusals above, rather than letting stopItem
+    // silently decide which of the two flags wins.
+    if (cmd === 'stop' && sawAbandonFlag && sawKeepStartedFlag) {
       console.error(START_STOP_USAGE)
       return 1
     }
@@ -1214,7 +1272,7 @@ export function main(argv) {
     try {
       itemPath = cmd === 'start'
         ? startItem(r.resolved.backlog, id, undefined, phase)
-        : stopItem(r.resolved.backlog, id, undefined, sawAbandonFlag)
+        : stopItem(r.resolved.backlog, id, undefined, { abandon: sawAbandonFlag, keepStarted: sawKeepStartedFlag })
     } catch (e) {
       if (!(e instanceof BacklogError)) throw e
       console.error(e.message)
