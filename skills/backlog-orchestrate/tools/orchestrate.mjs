@@ -1159,20 +1159,64 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
 
+// A zombie (defunct — already exited, but not yet reaped by its parent)
+// process reports state `Z` from `ps -o stat=`, sometimes with a modifier
+// suffix (`Z+` in the foreground process group is the common shape). Pulled
+// out as its own tiny, dependency-free string check — and exported — so it
+// can be unit-tested directly against known `ps` output without having to
+// deterministically manufacture a real zombie process in a test. A real one
+// IS constructible (this file's own test suite hit one by accident early in
+// Task 5: a child reaped by a parent whose event loop was itself blocked —
+// see that test's own comment), but only by relying on exactly the kind of
+// timing window this fallback exists to defend against, which makes it a
+// racy, platform-sensitive thing to pin a test to on purpose. Testing the
+// classification directly is deterministic and just as convincing that the
+// STRING CHECK itself is right; see this file's test suite for where that
+// trade-off is made explicitly.
+export function isZombieStatState(stat) {
+  return stat.trim().startsWith('Z')
+}
+
 // `process.kill(pid, 0)` sends no signal at all, just probes whether the
-// pid could be signaled. ESRCH means no such process — the definite "gone"
-// case this command exists to detect. EPERM means the pid exists but
-// belongs to a user this process cannot signal — vanishingly unlikely for a
-// child the orchestrator loop itself spawned, but treated as "still alive"
-// rather than crashing, since a permissions error is not evidence of death.
+// pid could be signaled — but succeeding only proves the pid is still an
+// ENTRY in the process table. It does NOT distinguish a genuinely running
+// process from an unreaped ZOMBIE, and `watch` is never the parent of the
+// pid it polls (that pid belongs to a `claude -p` child spawned by whatever
+// invoked this tool — a shell, or a later task's own supervising process —
+// not by this Node process itself), so whether, and when, that pid
+// actually gets reaped depends on a process tree this file has no control
+// over. A zombie reading as "alive" would hang a watch loop at its own
+// budget every single call, forever — the caller just keeps re-invoking
+// `watch` on a pid that can never again become "not alive" by this check
+// alone, since the OS keeps the table entry until something reaps it.
+//
+// The fallback: once `kill(pid, 0)` confirms the pid exists, confirm its
+// process STATE via `ps -o stat= -p <pid>` and treat a leading `Z` (see
+// isZombieStatState above) as actually dead. `ps` itself failing — not
+// installed, the pid raced away between the two checks, unexpected output —
+// is treated as "still alive," never as "dead": the bias is deliberately
+// one-directional. Worst case on a flaky `ps` probe, a truly-dead zombie
+// gets reported alive for one more `watch` interval (the run just waits a
+// little longer before declaring the item done) — but this function must
+// NEVER report a genuinely LIVE child as dead, which would make the
+// orchestrator loop move on and merge or park an item whose session is
+// still actually running. Losing time is recoverable; a false "gone" is not.
+//
+// Residual risk this does not close: a pid can be reused by an unrelated
+// process by the time this check runs (a classic TOCTOU on any pid-based
+// liveness probe, not specific to this function), and a live-but-hung
+// process (state `S`/`D`, not `Z`) is indistinguishable from a live-and-
+// working one — this function answers "does the OS still consider this pid
+// occupied by a real process," not "is the claude session making progress."
 function pidAlive(pid) {
   try {
     process.kill(pid, 0)
-    return true
   } catch (e) {
-    if (e.code === 'ESRCH') return false
-    return true
+    return e.code !== 'ESRCH'
   }
+  const probe = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' })
+  if (probe.error || probe.status !== 0 || !probe.stdout) return true
+  return !isZombieStatState(probe.stdout)
 }
 
 // Pulls the session id out of the FIRST `{"type":"system","subtype":
@@ -1352,11 +1396,35 @@ function itemDoneWhenCommands(cwd, itemId) {
 // for zero extra proof.
 function resolveVerifyCommands(cwd, itemId) {
   let base
+  const verifyJsonPath = path.join(cwd, 'backlog', 'verify.json')
   try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(cwd, 'backlog', 'verify.json'), 'utf8'))
-    base = Array.isArray(parsed.commands) ? parsed.commands : packageJsonVerifyCommands(cwd)
-  } catch {
-    // no backlog/verify.json here, or it doesn't parse — package.json
+    const parsed = JSON.parse(fs.readFileSync(verifyJsonPath, 'utf8'))
+    if (Array.isArray(parsed.commands)) {
+      // Every entry must be a string BEFORE it ever reaches runVerifyCommand
+      // below — that function hands `cmd` straight to `spawnSync(cmd, ...)`,
+      // which throws a raw, uncaught TypeError ("The argument must be of
+      // type string") for anything else. That would blow straight through
+      // main()'s own try/catch (it only converts OrchestrateError instances
+      // to a clean exit code — see main's own comment) and dump a Node
+      // stack trace at whoever ran this command, for what is really just a
+      // malformed project file. Same "validate before mutate" ordering as
+      // everywhere else in this file: this check runs before verify has
+      // touched run.json at all, so a bad verify.json still writes nothing.
+      const badEntry = parsed.commands.find((c) => typeof c !== 'string')
+      if (badEntry !== undefined) {
+        throw new OrchestrateError(`${verifyJsonPath}: "commands" must be an array of strings, found ${JSON.stringify(badEntry)}`, 1)
+      }
+      base = parsed.commands
+    } else {
+      base = packageJsonVerifyCommands(cwd)
+    }
+  } catch (e) {
+    // Our OWN deliberate throw above must escape this catch untouched — it
+    // is not "verify.json doesn't parse," it is "verify.json parses fine
+    // and is wrong," and those two need different outcomes (a clean error
+    // vs. a silent fallback to package.json).
+    if (e instanceof OrchestrateError) throw e
+    // no backlog/verify.json here, or it doesn't parse at all — package.json
     // scripts is the only other place a baseline command can come from.
     base = packageJsonVerifyCommands(cwd)
   }
@@ -1533,35 +1601,77 @@ function cmdReconcile(argv) {
 // as `aborted` via the SAME cmdFinish this file's own `finish` command
 // uses.
 //
-// This tool NEVER runs `backlog.mjs stop` itself, even though that is the
-// one thing that would make an in-progress `phase:`/`started:` marker
-// disappear cleanly before the worktree carrying it is discarded.
-// CLAUDE.md's own invariant is explicit: item files have exactly ONE
-// writer family — the backlog skills, via `backlog.mjs start`/`stop` — and
-// this tool is not one of them. So when abort finds a marker, it records
-// that fact in `attention` instead and leaves the file untouched; the
-// backlog-orchestrate SKILL (Task 7) is the one that runs `backlog.mjs stop
-// <id>` in the worktree, BEFORE calling this command, so the dead interval
-// gets billed by the one thing allowed to bill it.
+// ONE exemption to that teardown, and it is deliberate: an item whose
+// worktree copy still carries an in-progress `phase:` marker has its
+// worktree AND branch left COMPLETELY ALONE — neither `git worktree
+// remove` nor `git branch -D` runs for that item at all. Three reasons, all
+// pointing the same direction:
+//   1. Item files have exactly ONE writer family (CLAUDE.md's own
+//      invariant): the backlog skills, via `backlog.mjs start`/`stop`. This
+//      tool is not one of them and never will be — it cannot clear the
+//      marker itself before discarding the worktree that carries it.
+//   2. A live `phase:` marker means a real `claude -p` session was working
+//      when whatever holds this worktree stopped updating it, and its most
+//      recent work is very likely NOT yet committed — `backlog-execute`
+//      never commits; the orchestrator does, as a LATER pipeline step (see
+//      the design spec's per-item loop). `git worktree remove --force`
+//      does not ask; it deletes the working directory outright, uncommitted
+//      changes included, with no undo — nothing was ever a commit for `git
+//      revert` (or a reflog entry) to reach.
+//   3. An earlier version of this function recorded the marker in
+//      `attention` with instructions to run `backlog.mjs stop` "before the
+//      worktree is discarded" and then discarded the worktree in the SAME
+//      loop iteration — making that instruction impossible to follow by the
+//      time anyone could read it. An abort that quietly destroys unbilled
+//      time AND uncommitted code, while telling a human to do something it
+//      already made impossible, is worse than one that leaves a directory
+//      behind: a leftover worktree is an annoyance a human can clean up by
+//      hand; destroyed uncommitted work has no recovery path at all.
+//
+// This does NOT stop abort from finishing overall: every OTHER item's
+// worktree and branch still get torn down, `run.status` still becomes
+// `aborted`, and the run still ends — only the marked item's own git
+// objects are skipped. Its attention entry names the exact worktree path
+// and the exact `backlog.mjs stop <id>` command a human (or a resumed
+// skill run — Task 7) needs, so nothing is left silently untracked either.
 function cmdAbort() {
   const projectRoot = resolveProjectRoot()
   const dir = projectDir(orchHome(), projectRoot)
   const run = readRun(dir)
 
+  const removedIds = []
+  const preservedIds = []
+
   for (const item of run.queue) {
+    let marker = false
+    if (item.worktree && fs.existsSync(item.worktree)) {
+      const found = findItemFilePath(item.worktree, item.id)
+      marker = !!(found && itemHasPhaseMarker(found.path))
+    }
+
+    if (marker) {
+      // See this function's own header comment for why this item's git
+      // teardown is skipped entirely rather than run "before" recording
+      // this — there is no "before" once the worktree is gone. The
+      // attention entry is this item's only durable record of what
+      // happened; it has to stand alone (a human may never see this
+      // process's own stdout), so it carries the absolute path and the
+      // exact command, not just the item id.
+      run.attention.push({
+        id: item.id,
+        kind: 'parked',
+        detail:
+          `worktree ${item.worktree} still carries an in-progress phase: marker — LEFT IN PLACE (not removed), ` +
+          `since removing it would destroy uncommitted work this tool has no way to save first. Run ` +
+          `\`backlog.mjs stop ${item.id}\` in ${item.worktree} to bill the dead interval and clear the marker, ` +
+          `then remove the worktree (\`git -C ${projectRoot} worktree remove ${item.worktree}\`) and branch ` +
+          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand or via a fresh abort.`,
+      })
+      preservedIds.push(item.id)
+      continue
+    }
+
     if (item.worktree) {
-      if (fs.existsSync(item.worktree)) {
-        const found = findItemFilePath(item.worktree, item.id)
-        if (found && itemHasPhaseMarker(found.path)) {
-          run.attention.push({
-            id: item.id,
-            kind: 'parked',
-            detail:
-              `worktree ${item.worktree} still carried an in-progress phase: marker at abort time — run ` +
-              `\`backlog.mjs stop ${item.id}\` there before the worktree is discarded (this tool never writes item files itself)`,
-          })
-        }
-      }
       // Always attempted, not gated on fs.existsSync above — this also
       // cleans up a worktree whose directory was already deleted
       // out-of-band (a stale admin entry under .git/worktrees/). Never
@@ -1575,10 +1685,20 @@ function cmdAbort() {
     if (item.branch) {
       spawnSync('git', ['-C', projectRoot, 'branch', '-D', item.branch])
     }
+    if (item.worktree || item.branch) removedIds.push(item.id)
   }
 
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)
+
+  // A one-line human-readable summary, printed BEFORE cmdFinish's own
+  // `{"status":"aborted"}` JSON line, so a human watching this run does not
+  // have to separately run `status --json` and cross-reference `attention`
+  // by hand just to learn what abort actually did.
+  console.log(
+    `abort: removed ${removedIds.length} item(s)${removedIds.length ? ` (${removedIds.join(', ')})` : ''}; ` +
+      `left ${preservedIds.length} in place with an in-progress marker${preservedIds.length ? ` (${preservedIds.join(', ')} — see attention)` : ''}`,
+  )
 
   return cmdFinish(['--status', 'aborted'])
 }

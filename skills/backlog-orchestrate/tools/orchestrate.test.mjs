@@ -6,7 +6,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
-import { RUN_STALE_MS } from './orchestrate.mjs'
+import { RUN_STALE_MS, isZombieStatState } from './orchestrate.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
 
@@ -15,6 +15,10 @@ const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
 // id), and one that never does — see watch's own test cases 1 and 3.
 const STREAM_INIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-init.jsonl')
 const STREAM_NOINIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-noinit.jsonl')
+// Fix round 1 (Minor): a leading line that isn't valid JSON at all, ahead of
+// a real init event — pins findSessionIdInJsonl's malformed-line-skip branch
+// (a bad line is swallowed and parsing continues, it is never a wedge).
+const STREAM_MALFORMED_THEN_INIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-malformed-then-init.jsonl')
 
 // The jest-side fixture is the authority for the run/queue-item key set —
 // see shared/types.ts's RunStage/RunQueueItem/RunAttention/OrchestratorRun
@@ -857,6 +861,33 @@ test('init builds its queue from the real gate: bugs oldest-first then tasks old
   assert.ok(written.queue.every((q) => q.stage === 'pending'), 'every queued item should start pending regardless of its own gate result')
 })
 
+// --- Fix round 1 (Important): pidAlive's zombie fallback ------------------
+// `process.kill(pid, 0)` alone can't tell a live process from an unreaped
+// zombie (see pidAlive's own long comment for the full reasoning and the
+// deliberately one-directional bias). Rather than deterministically
+// manufacturing a real zombie process here — possible in principle, but
+// only via a racy, platform-sensitive timing window (this file's own watch
+// tests hit one BY ACCIDENT earlier in Task 5, before the zombie-reaping
+// bug in the test harness itself was diagnosed and fixed — see the
+// `runAsync` helper's own comment) — this pins the deterministic half of
+// the fix: the pure string classification `isZombieStatState` reads real
+// `ps -o stat=` output correctly. `pidAlive` itself stays covered
+// end-to-end by the existing watch tests below, all of which exercise a
+// REAL, non-zombie child process going through this exact function on
+// every tick.
+test('isZombieStatState treats a leading Z (zombie/defunct) as dead, everything else as alive', () => {
+  assert.equal(isZombieStatState('Z'), true)
+  assert.equal(isZombieStatState('Z+'), true)
+  assert.equal(isZombieStatState('Z+\n'), true, 'ps output routinely carries a trailing newline')
+  assert.equal(isZombieStatState('  Z+  '), true, 'leading/trailing whitespace must not defeat the check')
+  assert.equal(isZombieStatState('S'), false)
+  assert.equal(isZombieStatState('S+'), false)
+  assert.equal(isZombieStatState('Ss'), false)
+  assert.equal(isZombieStatState('R+'), false)
+  assert.equal(isZombieStatState('D'), false)
+  assert.equal(isZombieStatState(''), false)
+})
+
 // --- Task 5: watch --------------------------------------------------------
 // Every case here uses a real `node -e` child (never a mock of process
 // liveness) and the two checked-in stream-json fixture heads — see this
@@ -955,6 +986,28 @@ test('watch with stream-noinit.jsonl never finds a session id, and still exits c
   assert.equal(out.status, 0, out.stderr)
   const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
   assert.equal(after.queue.find((q) => q.id === 'task-12').sessionId, null)
+})
+
+// Fix round 1 (Minor): a leading line that isn't valid JSON at all must be
+// skipped, not treated as a wedge — findSessionIdInJsonl's own lenient
+// branch, pinned directly rather than only implied by stream-noinit.jsonl
+// (which never has a bad line, only a plain absence of an init event).
+test('watch skips a malformed leading line and still finds the session id on the line after it', async (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-15', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const child = spawnChild(t, 200)
+
+  const out = await runAsync(
+    project, home, 'watch', 'task-15',
+    '--pid', String(child.pid), '--jsonl', STREAM_MALFORMED_THEN_INIT,
+    '--interval-ms', '30', '--budget-ms', '5000',
+  )
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.queue.find((q) => q.id === 'task-15').sessionId, 'deadbeef-1111-4fff-8fff-222222222222')
 })
 
 // Supplementary: a `--jsonl` file that never gets created is tolerated for
@@ -1145,6 +1198,29 @@ test("verify appends the item's own fenced \"## Done when\" commands after the b
   assert.deepEqual(JSON.parse(out.stdout).map((r) => r.cmd), ['node -e "process.exit(0)"', 'echo only-in-done-when'])
 })
 
+// Fix round 1 (Minor): a non-string entry in verify.json's own `commands`
+// array must be a clean, code-1 OrchestrateError — not a raw exception from
+// handing a number/object straight to `spawnSync` inside runVerifyCommand.
+// Also pins that this is a HARD failure, never silently treated as "no
+// verify.json" and quietly falling back to package.json scripts.
+test('verify.json with a non-string commands entry exits 1 with a clean message, and writes nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-6', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true })
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: ['node -e "process.exit(0)"', 42] }))
+
+  const out = run(project, home, 'verify', 'task-6', '--cwd', worktree, '--json')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /commands.*string/i)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json must be untouched on a malformed verify.json')
+})
+
 test('verify with no run exits 3', (t) => {
   const { home, project } = orchFixture(t)
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
@@ -1322,15 +1398,25 @@ test('abort removes a real worktree and its branch, then finishes the run as abo
   assert.equal(branchList.stdout.trim(), '')
   const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
   assert.equal(after.status, 'aborted')
+  // Fix round 1 (Minor): the one-line human-readable summary — this is the
+  // simple "everything torn down cleanly" case, so it names the removed id
+  // and reports nothing preserved.
+  assert.match(out.stdout, /removed 1 item\(s\) \(task-26\)/)
+  assert.match(out.stdout, /left 0 in place/)
 })
 
-// Item files have exactly one writer family (the backlog skills) — abort
-// must record the marker for the SKILL to act on via `backlog.mjs stop`,
-// never stop it itself. This test both proves the attention entry lands and
-// documents, via its own assertion, that the worktree still gets torn down
-// regardless (abort's teardown is unconditional; the marker only changes
-// what gets RECORDED about it, never whether cleanup happens).
-test('abort records an attention entry when the worktree copy still carries an in-progress phase: marker, and still removes it', (t) => {
+// Fix round 1 (Important): an earlier version of abort recorded the marker
+// in `attention` with instructions to run `backlog.mjs stop` "before the
+// worktree is discarded" and then discarded the worktree in the very same
+// loop iteration — making that instruction impossible to follow by the time
+// anyone could read it, and destroying whatever uncommitted work the live
+// session had done. The fix: a marker-carrying item's worktree AND branch
+// are left COMPLETELY ALONE (neither `git worktree remove` nor `git branch
+// -D` ever runs for it) — see cmdAbort's own header comment for the full
+// three-part reasoning. This test asserts the worktree, its item file, and
+// its branch all survive byte-for-byte, and that the attention entry names
+// both the absolute path and the exact `backlog.mjs stop` command.
+test('abort leaves a marker-carrying worktree and its branch completely alone, and names the exact recovery command in attention', (t) => {
   const { home, project } = orchFixture(t)
   const itemFile = seedReadyTask(project, 'task-10', 'Some task')
   commitEverything(project, 'seed')
@@ -1342,16 +1428,74 @@ test('abort records an attention entry when the worktree copy still carries an i
 
   const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile))
   const original = fs.readFileSync(worktreeItemFile, 'utf8')
-  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
+  const marked = original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---')
+  fs.writeFileSync(worktreeItemFile, marked)
 
   const out = run(project, home, 'abort')
 
   assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.existsSync(worktreePath), false)
+  // The worktree, its branch, AND its (uncommitted) marked item file all
+  // survive byte-for-byte — this tool never touched any of it.
+  assert.equal(fs.existsSync(worktreePath), true)
+  assert.equal(fs.readFileSync(worktreeItemFile, 'utf8'), marked)
+  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-10'], { encoding: 'utf8' })
+  assert.match(branchList.stdout, /backlog\/task-10/)
+
   const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'aborted', 'abort must still finish the run overall')
   assert.equal(after.attention.length, 1)
   assert.equal(after.attention[0].id, 'task-10')
-  assert.match(after.attention[0].detail, /backlog\.mjs stop/)
+  assert.match(after.attention[0].detail, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'attention must name the absolute worktree path')
+  assert.match(after.attention[0].detail, /backlog\.mjs stop task-10/, 'attention must name the exact recovery command')
+
+  assert.match(out.stdout, /left 1 in place with an in-progress marker \(task-10/)
+})
+
+// Fix round 1 (Important) — the exact scenario the review asked to pin: a
+// mixed run with ONE clean item and ONE marker-carrying item. Abort must
+// still complete for everything else — the clean item's worktree/branch are
+// torn down exactly as before, only the marked item's survive.
+test('abort tears down a clean item normally while leaving a marker-carrying item in the same run untouched', (t) => {
+  const { home, project } = orchFixture(t)
+  const cleanItemFile = seedReadyTask(project, 'task-17', 'A clean task')
+  const markedItemFile = seedReadyTask(project, 'task-18', 'A marked task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const cleanWorktree = path.join(project, '.worktrees', 'task-17')
+  const markedWorktree = path.join(project, '.worktrees', 'task-18')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', cleanWorktree, '-b', 'backlog/task-17', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', markedWorktree, '-b', 'backlog/task-18', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-17', 'dispatched', '--worktree', cleanWorktree, '--branch', 'backlog/task-17').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-18', 'dispatched', '--worktree', markedWorktree, '--branch', 'backlog/task-18').status, 0)
+
+  const markedWorktreeItemFile = path.join(markedWorktree, 'backlog', 'tasks', 'open', path.basename(markedItemFile))
+  const original = fs.readFileSync(markedWorktreeItemFile, 'utf8')
+  fs.writeFileSync(markedWorktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
+  void cleanItemFile // seeded only so task-17 gates into the queue; not otherwise inspected
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+
+  // The clean item: torn down exactly as before the fix.
+  assert.equal(fs.existsSync(cleanWorktree), false)
+  const cleanBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-17'], { encoding: 'utf8' })
+  assert.equal(cleanBranch.stdout.trim(), '')
+
+  // The marked item: worktree AND branch both survive, exactly as seeded.
+  assert.equal(fs.existsSync(markedWorktree), true)
+  const markedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-18'], { encoding: 'utf8' })
+  assert.match(markedBranch.stdout, /backlog\/task-18/)
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'aborted', 'abort must complete for the whole run, not just the clean item')
+  assert.equal(after.attention.length, 1)
+  assert.equal(after.attention[0].id, 'task-18')
+  assert.match(after.attention[0].detail, new RegExp(markedWorktree.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'attention must name the surviving worktree path')
+
+  assert.match(out.stdout, /removed 1 item\(s\) \(task-17\)/)
+  assert.match(out.stdout, /left 1 in place with an in-progress marker \(task-18/)
 })
 
 test('abort on a run with a never-dispatched pending item does nothing destructive and still finishes aborted', (t) => {
