@@ -1,8 +1,10 @@
 # backlog-manager
 
-Claude Code plugin repo: four backlog skills — `backlog`, `backlog-capture`,
-`backlog-groom`, `backlog-execute` — plus a local NestJS + React app that
-shows every registered project's backlog on one kanban-by-type board. No
+Claude Code plugin repo: five backlog skills — `backlog`, `backlog-capture`,
+`backlog-groom`, `backlog-execute`, `backlog-orchestrate` (drains a
+project's groomed queue, one item per git worktree, each reviewed and
+verified before it merges) — plus a local NestJS + React app that shows
+every registered project's backlog on one kanban-by-type board. No
 database: the registry file and each project's `backlog/` directory are the
 data.
 
@@ -28,19 +30,35 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 
 - `server/src/` — Nest: `health/`, `items/` (`/api/items`, `/api/projects`,
   `/api/items/body`), `agents/` (the one outbound-calling module — status,
-  plan, dispatch), `registry/` (read-only view of the registry file),
-  `static.ts` (serves `client/dist` only when built).
+  plan, dispatch, orchestrate), `orchestrator/` (`GET /api/orchestrator/runs`,
+  a read-only view of the run file — see Invariants), `registry/` (read-only
+  view of the registry file), `static.ts` (serves `client/dist` only when
+  built).
 - `client/src/` — React SPA: side rail (Projects / Settings), board (five
-  fixed columns — bugs/ideas/tasks/out-of-scope/refactors — card drawer, dispatch
-  control opening a launch sheet onto `../claude-agents-dashboard`),
-  Settings. Fed by `lib/agents.ts` (same-origin fetches) and
-  `hooks/useAgents.ts` (status poll on mount and window focus).
+  fixed columns — bugs/ideas/tasks/out-of-scope/refactors — card drawer,
+  dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
+  a toolbar Orchestrate control opening `OrchestrateSheet`, and a run strip
+  above the columns — `RunStrip`/`RunDrawer` — showing every project's
+  orchestrator runs), Settings. Fed by `lib/agents.ts` (same-origin
+  fetches), `hooks/useAgents.ts` (status poll on mount and window focus),
+  and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
+  run is fresh).
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
   `dispatchGate` — see Invariants), `theme.css` (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
-  `skills/backlog-execute/` — the skills this repo publishes.
-  `skills/backlog/tools/backlog.mjs` is the CLI every skill calls and the
-  registry's only writer.
+  `skills/backlog-execute/`, `skills/backlog-orchestrate/` — the skills this
+  repo publishes. `skills/backlog/tools/backlog.mjs` is the CLI every skill
+  calls and the registry's only writer;
+  `skills/backlog-orchestrate/tools/orchestrate.mjs` is
+  `backlog-orchestrate`'s own CLI and the run file's only writer (see
+  Invariants).
+- `agents/` — the plugin's own agents, one file each, discovered from this
+  root-level directory by Claude Code's own convention (no
+  `.claude-plugin/plugin.json` declaration needed). Currently one:
+  `backlog-reviewer.md`, the read-only reviewer `backlog-orchestrate`
+  dispatches before every merge. Published only because `PUBLISHED_PATHS`
+  (`scripts/sync-plugin.mjs`) now names it alongside `skills/` — see
+  Invariants.
 - `backlog/` — this repo's own backlog, self-registered like any project.
 - `scripts/sync-plugin.mjs` — reinstalls the plugin from the pushed HEAD.
 - `docs/superpowers/` — design spec and implementation plan.
