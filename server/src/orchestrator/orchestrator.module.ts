@@ -11,6 +11,7 @@ import { OrchestratorService } from './orchestrator.service';
  */
 @Module({
   controllers: [OrchestratorController],
-  providers: [OrchestratorService]
+  providers: [OrchestratorService],
+  exports: [OrchestratorService]
 })
 export class OrchestratorModule {}
