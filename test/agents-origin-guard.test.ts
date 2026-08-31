@@ -79,8 +79,15 @@ describe('the agents POST guard', () => {
     permissionMode: 'acceptEdits',
     remoteControl: true
   });
+  // orchestrate's body has no itemPath/action at all — it names a project,
+  // not an item (server/src/agents/agents.service.ts, AgentOrchestrateRequest)
+  // — so the loop below needs a route-aware body rather than body() itself,
+  // which stays exactly as every pre-existing plan/dispatch call site here
+  // already uses it.
+  const bodyFor = (route: string): Record<string, unknown> =>
+    route === 'orchestrate' ? { project: projectPath } : body();
 
-  for (const route of ['plan', 'dispatch']) {
+  for (const route of ['plan', 'dispatch', 'orchestrate']) {
     /* The exact shape of a cross-origin form auto-submit: the one content type
        that needs no preflight, carrying a body Nest's unconditional urlencoded
        parser is happy to parse. */
@@ -100,7 +107,7 @@ describe('the agents POST guard', () => {
       const res = await request(app.getHttpServer())
         .post('/api/agents/' + route)
         .set('origin', 'http://evil.example')
-        .send(body())
+        .send(bodyFor(route))
         .expect(403);
       expect(res.body.error).toMatch(/cross-origin/);
       expect(sent).toEqual([]);
@@ -114,7 +121,7 @@ describe('the agents POST guard', () => {
       await request(app.getHttpServer())
         .post('/api/agents/' + route)
         .set('origin', 'null')
-        .send(body())
+        .send(bodyFor(route))
         .expect(403);
       expect(sent).toEqual([]);
     });

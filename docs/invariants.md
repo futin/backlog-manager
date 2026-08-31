@@ -5,6 +5,128 @@ reasoning behind the ones whose "why" runs longer than the rule. Most of
 these encode a failure that already happened or an attack that was closed
 deliberately — read the relevant section before changing one.
 
+## The orchestrator's run file has exactly one writer, one reader — the same relationship the registry has
+
+The run file (`run.json`) is `orchestrate.mjs`'s entire state model for one
+project's queue — the queue itself, each item's stage, the attention list,
+timestamps — and every other consumer treats it as strictly read-only.
+`server/src/orchestrator/orchestrator.service.ts` re-derives `orchHome()`
+with its own copy of the same function rather than importing the `.mjs`
+tool (a Nest service cannot import one), so the two implementations are
+pinned to resolve identically by a comment on each side, not by the type
+system — the risk that comment names directly: a mismatch would have the
+board watching an empty directory while the CLI writes real runs a few
+characters away. `OrchestratorService.runs()` calls `orchHome()` fresh on
+every request and never caches — echoing RegistryService's own reason for
+the same choice (a skill can act on its file at any moment; a cache would
+show something stale) but for an even more time-sensitive case: a running
+`orchestrate.mjs` re-stamps `run.json` on every heartbeat, and the entire
+point of `GET /api/orchestrator/runs` is to let the board watch that happen
+live — a cache would show a run frozen at whatever moment the server last
+happened to read it. Neither the server nor the client ever writes a byte of
+it; `orchestrate.mjs`'s own "Hard limits" section states the rule for the
+skill side too — never hand-edit the run file, never `rm` it to get past an
+exit code `4`, never write it from the server or the client.
+
+## `backlog-orchestrate` is the only skill that commits or merges
+
+Every other skill in this repo edits item files and nothing else;
+`backlog-orchestrate` is the first, and by this rule the only, one that
+touches git history at all. It can, because of what it alone controls:
+`backlog-execute`'s "never commits, never pushes" limit exists because a
+headless execute session runs inside a tree it does not own, and staging
+there could sweep up work that has nothing to do with it — an unscoped
+`git add` in the user's own checkout is not a call any skill gets to make.
+The orchestrator's worktree is different by construction:
+`git worktree add .worktrees/<id> -b backlog/<id> main` creates a tree that
+holds exactly one item's work and nothing else, so `add -A` inside it is
+safe in a way it never is in the main tree — the skill says so explicitly at
+the commit step rather than leaving the asymmetry to be inferred. The commit
+itself is conventional-commit shaped, names the orchestrator as committer in
+the body (so `git log` never implies a human read the diff before it
+existed), and lands on `backlog/<id>` alone. The merge is
+`git merge --no-ff --no-edit backlog/<id>` run against whatever the main
+tree has checked out, and it is refused — parked, not forced — unless that
+is first verified to be `refs/heads/main`; a run never checks out a branch
+in the tree it does not own, either. No other branch is ever a merge target
+and no other tree is ever committed to. Force-push, history rewrite, and
+push of any kind stay off the table entirely — publishing to a remote is the
+user's call, not this skill's, merge commits or otherwise.
+
+## Undoing an already-completed orchestrator merge is `git revert -m 1`, never `git reset --hard`
+
+This was proved empirically before the skill was written, not reasoned out
+in the abstract: a pre-implementation spike ran `git reset --hard` to undo a
+completed test merge, and it silently discarded an unrelated, uncommitted
+modification sitting in the main tree along with the merge — gone with no
+reflog entry to recover, because that modification had never been staged or
+committed in the first place. The identical scenario undone instead with
+`git revert -m 1 --no-edit <merge-sha>` left the unrelated modification
+byte-for-byte intact. An unattended run can never prove the user's main tree
+is clean at the moment it needs to undo a merge, so the choice is not
+between a tidy history and a messy one — it is between a revert commit's
+noisier `git log` and a tool that can destroy work nobody backed up. `-m 1`
+names the first parent, `main` as it stood immediately before the merge in
+question, which is what "undo the branch I just merged" actually means for
+a merge commit (a plain `git revert` on a merge commit refuses without
+`-m` — a merge has more than one parent and nothing to default to). This
+rule is only about a merge that already landed; a conflict discovered
+*during* the merge attempt is a different situation with its own answer,
+`git merge --abort`, which leaves nothing to revert because nothing ever
+committed.
+
+## `orchestrate.mjs` is always invoked from the project root, never from inside a per-item worktree
+
+`resolveProjectRoot()` walks up from `process.cwd()` looking for a `.git`
+entry, deliberately duplicating rather than importing `backlog.mjs`'s
+identical walk (the file's own header comment gives the standalone reason).
+Every command but `init` uses this instead of a `--project` flag to decide
+which project's run file it means, because every one of them (`stage`,
+`heartbeat`, `attention`, `finish`, `status`, `watch`, `abort`) is only ever
+invoked by the orchestrator loop itself, whose own cwd is the project root
+for the run's entire lifetime; `init` is the exception because it can
+plausibly run from somewhere else — a server endpoint spawning the
+orchestrator before its child process has even changed directory. The
+failure mode if that contract were ever broken is silent, not loud: a linked
+worktree carries its own `.git` (a file, not a directory, pointing at the
+shared gitdir), so `existsSync` finds it immediately and happily resolves
+the WORKTREE's own path as "the project" instead of erroring — the run
+would then be keyed under `encodeURIComponent(<worktree path>)`, a directory
+nobody else ever reads, since the server and every other command key by the
+registered project's own path. The run would not crash; it would just
+appear to vanish, which is far harder to notice and debug than a loud "no
+`.git` found" refusal. This is exactly why the skill must always invoke
+`orchestrate.mjs` from the project root and never from inside a worktree it
+created — the per-item worktree and branch a command needs are passed as
+explicit values instead (`stage --worktree <path> --branch <name>`,
+`verify --cwd <dir>`), never implied by cwd.
+
+## `agents/` is part of the plugin's publish surface
+
+Claude Code discovers a plugin's agents by the same directory convention it
+uses for skills: every `*.md` in the plugin root's `agents/` directory
+becomes an agent named by its own `name:` frontmatter key, addressed as
+`<plugin>:<name>` — no declaration in `.claude-plugin/plugin.json` required
+(confirmed against a second installed plugin, `caveman`, which ships three
+agents with no `agents` key anywhere in its own `plugin.json`, and all three
+load and are dispatchable). But an install is a copy of exactly two things:
+whatever `PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) tells `plugin:sync`
+to check for dirty/unpushed state and copy, and whatever the marketplace's
+own sparse checkout on the installing machine actually pulled down,
+recorded as `sparsePaths` in that machine's `known_marketplaces.json`.
+Sparse cone mode carries root-level *files* automatically but only the
+*directories* explicitly listed, so a root-level `agents/` reached neither
+list until this task — `backlog-manager:backlog-reviewer`
+(`agents/backlog-reviewer.md`) could sit committed and pushed in the repo
+and still not exist in anyone's installed copy. Both halves have to be true
+together: `PUBLISHED_PATHS` without a matching `sparsePaths` entry means the
+checkout never fetches the directory for `PUBLISHED_PATHS`'s own dirty-check
+to find; `sparsePaths` without `agents` in `PUBLISHED_PATHS` means the
+directory is on disk but `plugin:sync`'s hash/dirty logic never accounts for
+it. `sparsePaths` is machine state, one per install, and outside this
+repo's control — the repo can only ever carry its own half of this
+invariant.
+
 ## `started:` and `phase:` are the lifecycle keys in frontmatter, and neither is a status
 
 The `status:` ban stands (both parsers still throw on it), unaffected by
@@ -188,6 +310,27 @@ duplicated list has to survive. Note the controller rebuilds the dispatch
 body field by field, so a new field reaches the service only when it is
 added there too.
 
+## The orchestrate spawn prompt is a server-side constant
+
+`ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal string
+`/backlog-orchestrate` — `backlog-orchestrate`'s own `SKILL.md` declares
+that exact phrase as its `trigger:`, so the constant is that declaration,
+not an invention on the server side. `dispatch`'s prompt varies by design,
+because *what to say* about a derived action (groom vs. execute) is a
+client-editable default the launch sheet composes and a human reader may
+reword before sending; `orchestrate` has no equivalent decision to leave
+open — it always means the same thing, "hand this project's whole groomed
+queue to the skill," so there is nothing legitimate for a caller to vary.
+`AgentOrchestrateRequest` (the body shape `POST /api/agents/orchestrate`
+accepts) has no `prompt` field to begin with, and `AgentsController`'s
+handler rebuilds the service call field by field from `project`, `model`,
+`effort`, and `permissionMode` alone — so a `prompt` sent in the request
+body is not validated and rejected, it is simply never read. That is the
+same mechanism `dispatch` already relies on for every field outside its own
+request type, applied here to the one field that would otherwise be the
+sole way an attacker-controlled cross-origin request could make an
+unattended, headless session do anything at all.
+
 ## The browser never talks to the dashboard
 
 `connect-src 'self'` forbids it and the bearer token must not be in a page,
@@ -233,6 +376,40 @@ the spec and `.env.example` — with `BM_AGENTS` off the board "renders
 exactly as it does today" and "shows no dispatch buttons" — literally true;
 do not "improve" it into a disabled button on forty cards. The
 project-visibility block is the opposite case and keeps its button.
+
+## One run per project, checked twice
+
+`orchestrate.mjs init` is the authoritative lock: it refuses outright — exit
+code 4, nothing written — whenever the project's existing run file still
+says `status: "running"`, whether that heartbeat is fresh or stale. A fresh
+one is the easy case, a second process about to stomp on a live run's
+state. A stale one is deliberately refused too, rather than treated as
+free: `status: "running"` with an old `updatedAt` is not an idle lock, it is
+the last known state of a run that crashed mid-item, and silently starting
+over on top of it would bury that crash without a trace — an orphaned
+worktree and branch leaking forever, a dead `started:`/`phase:` marker
+billing wall-clock time nobody notices. Recovering it is deliberately not
+plain `init`'s job; the refusal names `--resume` and `--abort` by name so
+the person looking at it is never left to guess. `POST /api/agents/orchestrate`
+cannot rely on that check alone, because a click on the board's own control
+reaches the dashboard's spawn endpoint directly — the one path into a new
+run that never calls `orchestrate.mjs init` at all before something starts.
+So `AgentsService.orchestrate()` re-reads the orchestrator's own run list
+and checks the same project for a run with `fresh === true` (the
+`RUN_STALE_MS` freshness check, not the skill's broader fresh-or-stale
+one — a stale run here is left for the spawned session's own `init` to
+catch and diagnose properly, since only the skill side knows how to offer
+`--resume`/`--abort`) before it will spawn anything. This is
+belt-and-suspenders in the same shape as the registry's single-writer rule: the
+check that truly matters lives with the writer, and every other path
+capable of triggering one re-checks it rather than trusting that callers
+will always go through that writer. This particular 409 is also the only
+one `orchestrate()` throws that carries a `code`
+(`RUN_IN_PROGRESS_CODE`, `shared/types.ts`) — a prior incident had a client
+guess which 409 it received by matching a substring of the `error` prose,
+which broke the moment the wording changed, so the lock case alone gets a
+stable, machine-readable answer and the other 409s this endpoint can throw
+deliberately do not, because nothing about them needs to be told apart.
 
 ## The two agents POSTs are guarded by content-type and origin
 

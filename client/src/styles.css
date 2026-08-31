@@ -178,6 +178,26 @@ body {
 /* Focus is the cyan rule, matching .set-control's fields in Settings — the UA
    outline is dropped only because something visible replaces it. */
 .board-search:focus, .board-select:focus { outline: none; color: var(--ink); border-color: var(--cyan) }
+/* Task 13: the toolbar's "drain this project's queue" control — the one
+   button among four form fields, so it wears the sheet's own filled "go"
+   look (.sheet-launch's cyan fill, restated rather than shared since that
+   class also carries .sheet-actions' own margin/alignment this control does
+   not want) instead of the recessed-well look above. Sized off the same
+   4px-vertical rhythm .board-search/.board-select use so all five controls
+   still read as one instrument row despite the different treatment. */
+.board-orchestrate {
+  font-family: var(--font); font-size: 10.5px; font-weight: 600; color: var(--bg);
+  background: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
+  padding: 4px 10px; cursor: pointer; white-space: nowrap;
+}
+.board-orchestrate:hover { background: color-mix(in srgb, var(--cyan) 82%, var(--ink)) }
+/* `[aria-disabled]`, not `:disabled` — same reasoning as .dispatch-tab's own
+   identical rule: the button stays real and focusable on purpose (see
+   BoardView's onClick guard), so "looks unavailable" is this repo's job
+   rather than the browser's. */
+.board-orchestrate[aria-disabled='true'] {
+  color: var(--ink3); background: var(--steel); border-color: var(--hairline); cursor: default;
+}
 /* A centred flex line, not plain centred text: the loading fallback puts an icon
    beside the word, and `vertical-align` would not align it — an inline SVG's
    baseline is its bottom edge, which hangs the arc below the x-height of the text
@@ -327,6 +347,50 @@ body {
    marker are already three signals competing in one strip, and a fourth hue
    there would cost more than it told anyone. */
 .board-card-kind { color: var(--ink3) }
+/* Task 11: the orchestrator's own live per-card marker (ItemCard's
+   `runStage` prop) — the one footer marker whose source is a run payload
+   rather than the item file, and the reason it is shaped as an actual chip
+   (border + tinted fill) rather than plain coloured text like its three
+   siblings above. Those three state a fact the file holds until the next
+   edit; this one can be gone by the next poll, and the border is what
+   tells a reader "this one can retract itself" at a glance, before they
+   have read a single word of it.
+   Colour: cyan, not green or amber, and both exclusions are deliberate.
+   Green is `.board-card-groomed`'s own colour a few lines up, and a bug
+   that is both groomed AND mid-run would otherwise show two green markers
+   for two unrelated facts. Amber is the in-progress bar's colour two rules
+   below — "a human is involved here" — which is exactly backwards for the
+   six stages this chip is for (dispatched..merging): those are the
+   orchestrator running WITHOUT a human. Amber is saved for the warning
+   variant just below, where a human genuinely is the blocker. Reuses
+   .dispatch-chip's own color-mix idiom rather than a new technique. */
+.board-card-stage {
+  flex: none; display: inline-flex; align-items: center;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+  padding: 1px 6px; border: 1px solid; border-radius: 2px;
+  color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--cyan) 10%, var(--strip));
+}
+/* needs-answers: the run is blocked on a person, not progressing — amber,
+   matching the in-progress bar's own "a human is involved here" legend
+   rather than the six-stage chip's cyan above it. */
+.board-card-stage-warn {
+  color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--amber) 10%, var(--strip));
+}
+/* failed: RunDrawer's own addition (fix round 1) — ItemCard never chips this
+   stage at all (it's outside ACTIVE_RUN_STAGES and isn't needs-answers), so
+   this variant exists for the drawer's per-row chip (RunDrawer.tsx's own
+   stageClass), not the card's. Red/danger rather than the default cyan:
+   RunAttention.kind has no `failed` member, so a failed item never earns a
+   box in the Attention section the way needs-answers/parked/fix-exhausted
+   do — this chip is the only place in the drawer a failure is visible at
+   all, and sharing `merged`'s cyan there made a failure read as a success. */
+.board-card-stage-bad {
+  color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--red) 10%, var(--strip));
+}
 /* In progress: the card's own hairline goes amber, and a filled amber bar runs
    across the top of its face. "Which of these twelve is anyone on" is a question
    asked of a whole column at once, and the 3px amber inset this replaces — like
@@ -506,6 +570,74 @@ body {
    below it is still real, just partial. */
 .board-warn { font-family: var(--mono); font-size: 10px; color: var(--amber); line-height: 1.5 }
 
+/* ---------------------------------------------- orchestrator run strip
+   Task 11: one row per project with a run currently worth watching live —
+   see RunStrip.tsx for the full rationale on why this exists at all (the
+   item files the columns below render do not change while a run works
+   them, so this is the board's only source for "this item is executing
+   right now"). Sits right under the toolbar, ahead of .board-warn above:
+   a run in flight is live, actionable information, where the warnings are
+   a standing fact about the registry that will read the same tomorrow.
+   A real <button>, matching .dispatch-tab/.dispatch-chip's own reset — its
+   own click and native Enter/Space activation are what open the run drawer
+   (Task 12), the same "no hand-rolled keyboard handling needed" reasoning
+   DispatchButton's button already gets for free. */
+.run-strips { display: flex; flex-direction: column; gap: 6px }
+.run-strip {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  font-family: var(--font); font-size: 11.5px; color: var(--ink2);
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 7px 12px; cursor: pointer; text-align: left;
+  transition: border-color .15s;
+}
+.run-strip:hover { border-color: var(--hairline2) }
+/* The live/aged dot. aria-hidden in the markup — the adjacent
+   .run-strip-heartbeat text is the actual "live" vs "3m" answer, this is
+   only the at-a-glance restatement of it in colour. Cyan for "live", matching
+   the card badge's own "orchestrator is actively doing something" tone
+   (.board-card-stage, above) rather than --good/--green, which this same
+   strip's progress bar below uses for a DIFFERENT fact (how much has
+   actually merged) — conflating the two into one colour would make "still
+   heartbeating" and "already succeeded" look like the same claim. */
+.run-strip-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink3) }
+.run-strip-dot-live { background: var(--cyan) }
+.run-strip-project {
+  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink);
+}
+.run-strip-heartbeat { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-strip-count { flex: none; font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink) }
+/* The bar restates merged/total graphically (aria-hidden in the markup, for
+   that exact reason) — it does NOT track a separate "processed" fraction
+   that could disagree with the count printed beside it, on purpose: the
+   brief pins one ratio (merged/total), and a second, undefined one would be
+   one more thing to keep in step by hand. --good is --green's own "success"
+   alias (shared/theme.css) — merged is the pipeline's one success exit. */
+.run-strip-bar {
+  flex: 1 1 80px; min-width: 40px; height: 4px; border-radius: 2px;
+  background: var(--steel); overflow: hidden;
+}
+.run-strip-bar-fill { display: block; height: 100%; background: var(--good) }
+.run-strip-current {
+  flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+/* Amber, matching both the in-progress bar's and the card badge's
+   needs-answers variant: "a human must act" is one legend, reused a third
+   time here rather than invented anew. */
+.run-strip-attention { flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--amber) }
+/* Trailing "there is more here" mark, same glyph and same aria-hidden
+   reasoning as DispatchButton's own .dispatch-mark. */
+.run-strip-mark { flex: none; font-size: 9px; line-height: 1; color: var(--ink3) }
+
+@media (max-width: 700px) {
+  /* The bar is the one segment built to give up its width first — the dot,
+     heartbeat, count and attention are all fixed-width facts that would
+     otherwise clip before it does. */
+  .run-strip { flex-wrap: wrap }
+  .run-strip-current { max-width: 100% }
+}
+
 /* ---------------------------------------------- item drawer
    A right-hand panel over the board; the board stays mounted behind it.
    Fixed elements are inside the zoomed .shell, so both dimensions get the
@@ -559,6 +691,83 @@ body {
 .drawer-body th, .drawer-body td { border: 1px solid var(--hairline); padding: 4px 8px; text-align: left; vertical-align: top }
 .drawer-body a { color: var(--cyan) }
 .drawer-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 10px; color: var(--ink2); margin: 6px 0 }
+
+/* ---------------------------------------------- run drawer
+   RunStrip's detail view (RunDrawer.tsx). The .drawer scaffolding above —
+   backdrop, the aside itself, .drawer-head, .drawer-close, .drawer-meta,
+   .drawer-body and its h2 "printed label" rule — is REUSED wholesale, not
+   duplicated: RunDrawer.tsx's own file comment has the accessibility half of
+   that reasoning, and this section exists only for what a run's content
+   needs that an item's markdown body never did — a stale-run fault note, a
+   pipeline summary, and per-item queue/attention rows. */
+.run-drawer-note {
+  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, var(--strip));
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--hairline));
+  border-radius: 2px; padding: 8px 10px; margin-bottom: 14px;
+}
+.run-drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px }
+.run-drawer-chip {
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 4px 9px;
+}
+.run-drawer-chip-num { color: var(--ink); font-weight: 600; margin-right: 3px }
+
+.run-drawer-queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px }
+.run-drawer-item {
+  border: 1px solid var(--hairline); border-radius: 2px; background: var(--steel);
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
+}
+.run-drawer-item-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap }
+.run-drawer-item-id { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-drawer-item-title { flex: 1; min-width: 140px; font-size: 12px; color: var(--ink) }
+/* Neutral, not amber: a fix-loop count is history ("this took two attempts"),
+   the same informational-only register as .board-card-kind, not a call to
+   action — the loop already ran and, for every fixLoops>0 row except the one
+   also listed under Attention, needs nobody's intervention any more. The
+   amber warning belongs to the attention entry when there genuinely is one. */
+.run-drawer-item-fixloops { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-drawer-item-verify {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 10px;
+}
+.run-drawer-item-verify-cmd { color: var(--ink2) }
+.run-drawer-item-verify-ok { color: var(--green); font-weight: 600 }
+.run-drawer-item-verify-bad { color: var(--red); font-weight: 600 }
+.run-drawer-item-verify-tail { color: var(--ink3) }
+
+/* OrchestrateSheet's own queue-preview rows reuse .run-drawer-item/-head/-id/
+   -title verbatim (same "bordered row inside a sheet body" shape as the run
+   drawer's real queue, just before anything has actually run) and add only
+   this one class for the row's action word — text-coloured only, deliberately
+   NOT .dispatch-chip's button treatment (border, padding, hover-fill): a
+   preview row is not clickable, and wearing a real button's look would
+   promise otherwise. Same two tokens deriveAction's own tone already uses
+   everywhere else (mustard groom / cyan execute, DispatchButton's own
+   comment on why), so a groomed vs ungroomed item reads the same colour
+   here as it will on the card underneath it. */
+.orchestrate-preview-action { font-family: var(--mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em }
+.orchestrate-preview-action.groom { color: var(--mustard) }
+.orchestrate-preview-action.execute { color: var(--cyan) }
+
+/* Attention entries share one amber tint regardless of kind (needs-answers /
+   parked / fix-exhausted): RunAttention's own doc comment calls all three
+   "things a human should look at", and splitting that into three sub-tones
+   would draw a distinction the type itself does not make. */
+.run-drawer-attn {
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--hairline));
+  background: color-mix(in srgb, var(--amber) 6%, var(--strip));
+  border-radius: 2px; padding: 8px 10px; margin-bottom: 8px;
+}
+.run-drawer-attn-head { display: flex; align-items: baseline; gap: 8px }
+.run-drawer-attn-kind {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--amber);
+}
+.run-drawer-attn-detail { font-size: 12px; color: var(--ink); line-height: 1.5; margin-top: 3px }
+.run-drawer-questions { margin: 6px 0 0; padding-left: 16px }
+.run-drawer-questions li { font-size: 12px; color: var(--ink2); line-height: 1.5; margin: 3px 0 }
 
 /* ---- dispatch: the card button and the launch sheet -------------------
    z-index above the item drawer (60/61): the sheet is opened FROM the

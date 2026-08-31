@@ -29,7 +29,16 @@ export const MARKETPLACE = 'backlog-manager-marketplace'
 // at runtime has to live under one of them, so the check below is not
 // paranoia: a skill that reaches outside these is broken once installed,
 // and broken in a way that only shows up on someone else's machine.
-export const PUBLISHED_PATHS = ['skills', '.claude-plugin']
+//
+// `agents` joined this list once backlog-reviewer (agents/backlog-reviewer.md)
+// existed to publish: Claude Code discovers a plugin's agents the same way it
+// discovers skills, by walking a root-level directory in the installed copy,
+// so an agent left out of this list is invisible post-install even though it
+// sits right there in the repo. This list is only this script's half of that
+// fix — the sparse checkout on each installed machine carries its own
+// `sparsePaths` in `known_marketplaces.json`, and that copy needs `agents`
+// added too (or the marketplace re-added) before the agent actually resolves.
+export const PUBLISHED_PATHS = ['skills', '.claude-plugin', 'agents']
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const INSTALLED = join(homedir(), '.claude', 'plugins', 'installed_plugins.json')

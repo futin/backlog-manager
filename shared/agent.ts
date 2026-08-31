@@ -170,29 +170,88 @@ export type DispatchGate =
   | { control: 'hidden'; reason: string }
   | { control: 'disabled'; reason: string };
 
-export function dispatchGate(item: BacklogItem, status: AgentsStatus): DispatchGate {
+/**
+ * The four ENVIRONMENT-level dispatch blockers — dispatchGate's `hidden`
+ * ladder, with its one item-specific line (project visibility) left out.
+ * None of these four ever reads an item: BM_AGENTS off, the dashboard
+ * unreachable, no `CLAUDE_BIN`, remote answers off are all true of every
+ * card/project at once or none of them, which is exactly dispatchGate's own
+ * definition of `hidden` above.
+ *
+ * Extracted into its own function so a caller with no `BacklogItem` at all
+ * can run these same four checks without either widening dispatchGate's
+ * signature (its fifth line is genuinely item-shaped — `item.projectPath` —
+ * so a plain `projectPath: string` parameter would only fit four of its five
+ * lines) or re-deriving them by hand. The second path is not hypothetical:
+ * an earlier version of `AgentsService.orchestrate()`
+ * (server/src/agents/agents.service.ts) did exactly that — reimplemented
+ * only the project-visibility line and silently dropped these four — so an
+ * unreachable dashboard produced a flatly wrong "cannot see this project"
+ * refusal, and a dashboard with no `CLAUDE_BIN` or remote answers off let an
+ * actual spawn request through that this ladder would have refused before
+ * any outbound call. `projectDispatchGate` below is this function's one
+ * caller now (`dispatchGate` and `orchestrate()` both go through it in
+ * turn), so there is exactly one place these four conditions and their
+ * wording live.
+ */
+export function environmentBlock(status: AgentsStatus): string | null {
   if (!status.enabled) {
-    return { control: 'hidden', reason: 'dispatch is off — set BM_AGENTS=on for the API' };
+    return 'dispatch is off — set BM_AGENTS=on for the API';
   }
   if (!status.reachable) {
-    return {
-      control: 'hidden',
-      reason: `dashboard unreachable${status.error ? `: ${status.error}` : ''}`
-    };
+    return `dashboard unreachable${status.error ? `: ${status.error}` : ''}`;
   }
   if (!status.spawnAvailable) {
-    return { control: 'hidden', reason: 'the dashboard has no CLAUDE_BIN configured' };
+    return 'the dashboard has no CLAUDE_BIN configured';
   }
   if (!status.remoteAnswer) {
-    return { control: 'hidden', reason: 'remote answers are off in the dashboard' };
+    return 'remote answers are off in the dashboard';
   }
-  if (!status.projectPaths.includes(item.projectPath)) {
+  return null;
+}
+
+/**
+ * The per-PROJECT half of `dispatchGate` — the same environment ladder plus
+ * the one project-visibility check, keyed on a project path directly rather
+ * than a whole `BacklogItem`. `dispatchGate` below is one caller (it merely
+ * supplies `item.projectPath`); `AgentsService.orchestrate()`
+ * (server/src/agents/agents.service.ts) and the board's own toolbar
+ * Orchestrate button (`client/src/components/board/BoardView.tsx`) are the
+ * other two — a project-scoped control, unlike a per-item one, never has a
+ * `BacklogItem` to hand `dispatchGate` in the first place.
+ *
+ * Hoisted here in Task 13's fix round 1 after a review found THREE
+ * independent copies of this exact reason string: `dispatchGate` below,
+ * `orchestrate()`'s own inline check, and BoardView's toolbar gate. All
+ * three agreed verbatim at the time, but that is exactly the drift class
+ * `environmentBlock` above was hoisted to prevent one level down — its own
+ * doc comment tells that story (`orchestrate()` once reimplemented only ONE
+ * of dispatchGate's five lines and silently dropped the other four). Three
+ * copies of the fifth line is the same failure shape one level up: one
+ * implementation, three callers, one reason string, so a wording change can
+ * never land in one copy and not the other two.
+ */
+export function projectDispatchGate(status: AgentsStatus, projectPath: string): DispatchGate {
+  const blocked = environmentBlock(status);
+  if (blocked !== null) {
+    return { control: 'hidden', reason: blocked };
+  }
+  if (!status.projectPaths.includes(projectPath)) {
     return {
       control: 'disabled',
-      reason: `the dashboard cannot see ${item.projectPath} — no Claude session there inside its LOOKBACK_HOURS`
+      reason: `the dashboard cannot see ${projectPath} — no Claude session there inside its LOOKBACK_HOURS`
     };
   }
   return { control: 'enabled' };
+}
+
+/** `item.projectPath` is the one item-shaped input `projectDispatchGate`
+ *  needs; every other line of the gate is already project-scoped. Signature
+ *  and behaviour unchanged by the Task 13 fix round 1 hoist above — every
+ *  existing caller and test keeps reading exactly the same answer for
+ *  exactly the same inputs. */
+export function dispatchGate(item: BacklogItem, status: AgentsStatus): DispatchGate {
+  return projectDispatchGate(status, item.projectPath);
 }
 
 /**

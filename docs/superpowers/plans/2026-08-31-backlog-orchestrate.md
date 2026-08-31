@@ -235,12 +235,12 @@ The SKILL body must cover, in this order, each with the actual commands inline t
 
 1. **Queue + preview** — `plan` first, always; show the gate table; `--ids`/`--max` pass-through.
 2. **Pre-flight per item** — question hunt; AskUserQuestion best-effort with the spec's degradation: on timeout/no-channel, `attention … --kind needs-answers` + `stage <id> needs-answers`, continue. Item-body amendments follow groom's write rules (round-trip unknown keys, body byte-for-byte, write before move).
-3. **The loop** — worktree add (plus idempotent `.git/info/exclude` entry for `.worktrees/`), `stage dispatched`, launch `claude -p "/backlog-execute <id>" --output-format stream-json --dangerously-skip-permissions` backgrounded with output to the run dir, then `watch` in a loop while it exits 3. State plainly why `--dangerously-skip-permissions` is safe *here and only here*: disposable worktree, review gate, verify gate, merge as the only door to `main` (spec §Inner-session permissions).
+3. **The loop** — worktree add (plus an idempotent `.git/info/exclude` entry for `.worktrees/` — Task 1 finding (d): that file lives in the repo's *shared common* git dir, so it is one file per repo affecting every worktree's `git status`, and the skill must check for the line before appending), `stage dispatched`, launch `claude -p "/backlog-execute <id>" --output-format stream-json --dangerously-skip-permissions` backgrounded with output to the run dir, then `watch` in a loop while it exits 3. State plainly why `--dangerously-skip-permissions` is safe *here and only here*: disposable worktree, review gate, verify gate, merge as the only door to `main` (spec §Inner-session permissions).
 4. **Inspect** — item in `done/` with verification-bearing Outcome → proceed; failure Outcome or dead session → the retry/skip/stop ask, resume via `claude -p --resume <sessionId>`.
 5. **Commit** — orchestrator commits in the worktree (conventional subject from the item title; body names the orchestrator as committer and the item id). Execute's own never-commits limit is restated, unchanged.
 6. **Review** — dispatch `backlog-manager:backlog-reviewer` with the four input fields; `verdict: fix` → resume executor session with findings, re-commit, re-review; max 2 loops then `attention --kind fix-exhausted` + park (no channel) or the merge-anyway ask (channel).
 7. **Verify** — `verify <id> --cwd <worktree>`; exit 5 → park with attention (never merge unproven); exit 1 → treat as fix-loop input.
-8. **Merge** — precondition: main tree has `main` checked out (`git symbolic-ref HEAD`) — else `attention --kind parked` and continue; `git merge --no-ff backlog/<id>`; conflict → abort the merge, park, continue. Success → `stage merged`, worktree remove, branch delete.
+8. **Merge** — precondition: main tree has `main` checked out (`git symbolic-ref HEAD`) — else `attention --kind parked` and continue; `git merge --no-ff backlog/<id>`; conflict → `git merge --abort`, park, continue. Success → `stage merged`, worktree remove, branch delete. **Undoing an already-completed merge uses `git revert -m 1 <merge-sha>`, never `git reset --hard`** — Task 1 proved empirically that `reset --hard` silently destroys unrelated uncommitted modifications in the main tree, which an unattended run can never rule out (see `## Task 1 findings` (c)). State that rule in the SKILL where the merge is described, with its reason.
 9. **Resume/abort** — `--resume`: `reconcile`, act per suggestion (the `redispatch-after-stop` path runs `backlog.mjs stop <id>` in the worktree first — billing the dead interval, the tool's own job); `--abort`: skill clears markers via `backlog.mjs stop` for items reconcile flagged, then `orchestrate.mjs abort`.
 10. **Hard limits** — sequential always; never merge red; never force-push; never write the registry; item bodies only in pre-flight; the run file is written only through `orchestrate.mjs`.
 
@@ -389,6 +389,7 @@ The SKILL body must cover, in this order, each with the actual commands inline t
 
 **Interfaces:** consumes everything; produces the recorded proof.
 
+- [ ] **Step 0 (blocks step 1): make `agents/` publishable.** Task 6 discovered that an install carries only the paths in `PUBLISHED_PATHS` in `scripts/sync-plugin.mjs` (`skills`, `.claude-plugin`) and, on the marketplace side, `sparsePaths` in the user's `known_marketplaces.json` — so a root-level `agents/` never reaches an installed plugin and `backlog-manager:backlog-reviewer` would not exist post-sync. Add `agents` to `PUBLISHED_PATHS` (a repo change, covered by whatever test guards that script), and tell the human partner that the `sparsePaths` half is machine state on their install: it needs `agents` added there too, or the marketplace re-added, before the agent resolves. Both halves must be true before step 2's liveness check can pass.
 - [ ] **Step 1: Sync the plugin** (commit, push, `pnpm run plugin:sync`; new skill + agent load on next Claude Code restart — the publishing-boundary invariant).
 - [ ] **Step 2: Agent liveness** — deferred check from Task 6: dispatch `backlog-manager:backlog-reviewer` on a trivial diff; confirm the report file appears and the return message is verdict-shaped only.
 - [ ] **Step 3: E2E run** against a *scratch fixture item* filed via `backlog-capture` in this repo (not tasks 2–6, which are real work owned by other plans): groom it trivially, ensure `main` is checked out (session-note: the repo currently sits on a task branch — coordinate with the human partner before this step), run `/backlog-orchestrate --ids <scratch-id>`. Expect: silent clean run, merge commit on `main`, worktree and branch gone, `execute-elapsed` billed once.
@@ -405,3 +406,68 @@ The SKILL body must cover, in this order, each with the actual commands inline t
 - **Spec coverage:** queue/gate → T4; pre-flight/questions → T7(§2); loop/worktree/dispatch/watch → T3/T5/T7; commit/review/fix loops → T6/T7; verify + verify.json + park-on-unprovable → T5/T7; merge + conflict/branch guard → T7(§8); run file/lock/heartbeat/resume/abort → T3/T5; reviewer contract → T6; GET runs → T8; POST orchestrate + 409 + constant prompt → T9; strip/badges → T11; drawer → T12; toolbar/sheet/seeding → T13; permissions trade → T7(§3); risks 1–2 → T1; risk 5 (stream-json session id mid-run) → T5 case 1–3; invariants/docs → T14. Spec's risk 3 (registry-vs-worktree visibility copy) → drawer stale/live copy, T12 case 3 + T11 badge-from-run-file design. Risk 4 (lookback) → inherited by reusing the dispatch spawn path, surfaced in T13 case 3's disabled-reason.
 - **Placeholder scan:** no TBDs; the two deliberate deferrals (LaunchSheet extend-vs-sibling in T13, agent-registration mechanism in T6) are decisions assigned to the implementer *with the decision rule stated*, not gaps.
 - **Type consistency:** stage strings, `RUN_STALE_MS`, payload and CLI names cross-checked; the contract fixture (T2) is the mechanical enforcement for everything downstream.
+
+---
+
+## Task 1 findings
+
+Full report with every command and its output:
+`.superpowers/sdd/2026-08-31-backlog-orchestrate/task-1-report.md`. All
+probing was done in a disposable `spike-tmp` worktree of this repo (based on
+current HEAD, not `main`) and, for the merge/reset/revert mechanics, in a
+throwaway synthetic repo under scratch space — nothing here touched the
+real `main` branch or working tree. Everything created (worktrees,
+branches, the synthetic repo, the temporary `.git/info/exclude` line) was
+removed/restored; `git worktree list` is back to the two entries this repo
+started with.
+
+**(a) `backlog.mjs board/show/start/stop` behave identically in a worktree — GO.**
+`resolveRoot` in `skills/backlog/tools/backlog.mjs` walks up from
+`process.cwd()` and stops at the first directory containing a `.git` entry
+— a comment there already notes it accepts both a directory (normal clone)
+and a file (worktree/submodule) — and returns *that* directory as root. It
+never follows a worktree's `gitdir:` pointer back to the main tree. Running
+`board --section tasks` and `show task-3` from inside the spike worktree
+gave the same items/summaries as the main tree, and `show`'s printed path
+pointed inside the worktree. `start --as execute` then `stop` on `task-3`
+inside the worktree mutated only the worktree's copy (frontmatter gained
+then lost `started:`/`phase:`, gained `updated:`/`execute-elapsed:`); the
+main tree's copy was re-hashed (md5) after each step and never changed.
+`registerBestEffort` (the registry writer) is only wired into `init`/`new`,
+not `board`/`show`/`start`/`stop`, so none of this probing touched the real
+`~/.backlog-manager/registry.json`.
+
+**(b) `git worktree add <path> -b <branch> HEAD` works — GO.** Worked from
+inside an already-linked worktree (registers against the shared common
+`.git` dir) with the base branch checked out elsewhere at the same time —
+no lock conflict, since the new branch differs from whatever is currently
+checked out. Nested worktrees of the same repository are fine, matching
+what the task's context note predicted.
+
+**(c) Merge with a dirty main tree — merge itself is a GO; `reset --hard`
+is a NO-GO for abort, use `git revert -m 1` instead.** Verified in a
+synthetic repo: `git merge --no-ff backlog/spike` succeeded while an
+*unrelated tracked file* had an uncommitted modification, and left that
+modification untouched. But undoing the merge with
+`git reset --hard ORIG_HEAD` silently discarded that unrelated uncommitted
+modification along with the merge — `reset --hard` resets working tree and
+index to the target commit in full, with no way to distinguish "changes
+from the merge" from "unmodified-by-the-merge but still uncommitted
+changes," and there is no reflog-style recovery for a modification that was
+never staged or committed. Redid the same scenario and undid the merge with
+`git revert -m 1 --no-edit <merge-sha>` instead: the merge's own tree change
+was undone by the revert commit, and the unrelated uncommitted modification
+survived byte-for-byte. **The orchestrate skill's merge/abort path must use
+`git revert -m 1`, never `git reset --hard`, whenever the main tree cannot
+be guaranteed clean.**
+
+**(d) `.git/info/exclude` hides the worktree dir — GO, with a design note.**
+Confirmed empirically: before adding a line for the spike directory,
+`git status --short` showed it as untracked noise; after, it didn't.
+Caveat worth designing around: `info/exclude` lives under the **common**
+`.git` directory, shared by every worktree of the repo (verified via
+`git rev-parse --git-common-dir`) — it is not per-worktree. The skill must
+treat it as one shared file per target repo and write to it idempotently
+(check whether the line is already present before appending), since editing
+it from any worktree affects `git status` output repo-wide, including the
+original main tree.
