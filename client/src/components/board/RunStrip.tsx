@@ -1,3 +1,4 @@
+import { POLL_MS } from '../../hooks/useOrchestratorRuns';
 import { elapsedSince } from '../../lib/item-age';
 import type { OrchestratorRun, RunStage } from '../../../../shared/types';
 
@@ -18,20 +19,17 @@ const TERMINAL_STAGES: readonly RunStage[] = [
 /**
  * How young a run's heartbeat (`updatedAt`) has to be to read as the word
  * "live" outright rather than as an aged reading ("3m", "1h", ...) off the
- * same `elapsedSince` ladder the card's own in-progress bar uses. Chosen to
- * match `useOrchestratorRuns`' own POLL_MS (5s): that hook only learns
- * anything new about a fresh run once per poll, so a heartbeat younger than
- * one poll's worth of time is, from this board's vantage point, as current
- * as information gets. Not imported from that hook — POLL_MS is a private
- * constant of its own polling cadence, not a shared export, and this
- * number is independently true (it says something about how fast a
- * heartbeat can possibly look stale to a poller checking every 5s) rather
- * than borrowed — the same relationship RUN_STALE_MS's own doc comment
- * describes against the orchestrator's unrelated ~9.5-minute heartbeat
- * cadence: two numbers about two different clocks, each justified on its
- * own terms rather than mechanically shared.
+ * same `elapsedSince` ladder the card's own in-progress bar uses. Equal to
+ * `useOrchestratorRuns`' own POLL_MS, imported rather than restated (fix
+ * round 1 — the two used to just happen to share a value): that hook only
+ * learns anything new about a fresh run once per poll, so a heartbeat
+ * younger than one poll's worth of time is, from this board's vantage
+ * point, as current as information gets — and that IS the reason for the
+ * number, not a coincidence next to it, so importing it means a future
+ * change to the poll interval carries this reading with it instead of
+ * leaving it silently wrong.
  */
-const LIVE_THRESHOLD_MS = 5_000;
+const LIVE_THRESHOLD_MS = POLL_MS;
 
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 

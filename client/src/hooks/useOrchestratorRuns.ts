@@ -8,8 +8,14 @@ import type { OrchestratorRunsPayload } from '../../../shared/types';
  * enough that the run strip (Task 11) reads as live without feeling laggy,
  * and slow enough that leaving the board open all afternoon costs a trickle
  * of same-origin GETs rather than a flood of them.
+ *
+ * Exported (fix round 1) because RunStrip.tsx imports it directly for its
+ * own "how young does a heartbeat have to be to read as 'live'" threshold —
+ * this poller is the only reason that number can ever be current, so the
+ * strip's reading and this interval have to move together, not just start
+ * out equal by coincidence.
  */
-const POLL_MS = 5_000;
+export const POLL_MS = 5_000;
 
 /**
  * The orchestrator run list, kept live while — and only while — there is

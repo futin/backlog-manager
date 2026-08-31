@@ -46,6 +46,23 @@ describe('RunStrip', () => {
     expect(screen.getByTestId('run-strip')).toHaveTextContent('3/6');
   });
 
+  // Minor fix round 1: the `total === 0` guard (what stops the progress
+  // bar's `merged / total` from dividing by zero) was already correct by
+  // hand and confirmed by a live render, but nothing pinned it — a run
+  // whose entire queue is `ungroomed` items excludes every one of them from
+  // `total`, so it must read `0/0`, not throw and not print `NaN` into the
+  // strip. Built from the fixture's own ungroomed entries rather than a
+  // hand-rolled queue, so this stays a real shape rather than a contrived
+  // one; the length assertion guards against the fixture someday losing
+  // its only ungroomed item and this test silently exercising an empty
+  // queue instead of the case it names.
+  it('reads 0/0 for a run whose entire queue is ungroomed', () => {
+    const allUngroomed = fixture.queue.filter((q) => q.stage === 'ungroomed');
+    expect(allUngroomed.length).toBeGreaterThan(0);
+    render(<RunStrip run={runPayload({ queue: allUngroomed })} onOpen={() => {}} />);
+    expect(screen.getByTestId('run-strip')).toHaveTextContent('0/0');
+  });
+
   it('renders no strip for a stale run', () => {
     const { container } = render(<RunStrip run={runPayload({ fresh: false })} onOpen={() => {}} />);
     expect(container).toBeEmptyDOMElement();
@@ -196,6 +213,57 @@ describe('BoardView: run strips and card stage badges', () => {
       const stillThere = screen.getByText('wire the heartbeat').closest('.board-card') as HTMLElement;
       expect(stillThere.querySelector('.board-card-stage')).toBeNull();
     });
+  });
+
+  // IMPORTANT fix round 1: the test above only ever exercised ItemCard's
+  // six-active-stage branch (task-14, `reviewing`). Its other two branches —
+  // the needs-answers warning chip, and rendering no chip at all for a
+  // stage that is neither active nor needs-answers — had no coverage
+  // through BoardView. Both are pinned here against the SAME contract
+  // fixture, needing no new fixture data: task-21 IS the fixture's own
+  // needs-answers entry, and bug-27 IS its pending one. Combined into one
+  // test (matching board.test.tsx's own "badges a refactor kind it knows,
+  // and nothing else" precedent) because both cards have to be on the board
+  // together for the negative half to mean anything — a chip that rendered
+  // unconditionally would still pass a version of this split across two
+  // separate, unrelated renders.
+  it('renders the needs-answers warning chip, and renders no chip at all for a pending item', async () => {
+    stub(
+      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }],
+      [
+        fakeItem({
+          id: 'task-21', title: 'decide the archive question',
+          path: '/abs/alpha/backlog/tasks/open/task-21-decide-the-archive-question.md'
+        }),
+        fakeItem({
+          id: 'bug-27', title: 'hue swatch lag', section: 'bugs',
+          path: '/abs/alpha/backlog/bugs/open/bug-27-hue-swatch-lag.md'
+        })
+      ]
+    );
+    await renderBoard();
+
+    // task-21: needs-answers. Both the text AND the warning class are
+    // asserted — text alone would still pass if this branch quietly lost
+    // its `-warn` modifier and rendered as a bare `.board-card-stage`,
+    // which is exactly the drift a reader of the rendered page (rather
+    // than the ternary) would actually notice, and exactly what would
+    // survive if the two chip branches were accidentally merged into one.
+    const needsAnswersCard = (await screen.findByText('decide the archive question'))
+      .closest('.board-card') as HTMLElement;
+    const warnChip = needsAnswersCard.querySelector('.board-card-stage');
+    expect(warnChip).not.toBeNull();
+    expect(warnChip).toHaveTextContent('needs-answers');
+    expect(warnChip).toHaveClass('board-card-stage-warn');
+
+    // bug-27: pending — neither active-ish nor needs-answers, so the "else
+    // null" branch fires. Checked against the card's own rendered content
+    // (its title, proving the card rendered in full) rather than the
+    // container being empty, which would prove nothing about this specific
+    // branch on a card that legitimately has plenty of other content.
+    const pendingCard = screen.getByText('hue swatch lag').closest('.board-card') as HTMLElement;
+    expect(pendingCard.querySelector('.board-card-title')).toHaveTextContent('hue swatch lag');
+    expect(pendingCard.querySelector('.board-card-stage')).toBeNull();
   });
 
   // The negative case a same-project match alone cannot rule out: a run
