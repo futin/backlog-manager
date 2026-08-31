@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -151,7 +151,8 @@ describe('POST /api/agents/orchestrate', () => {
 
   it('spawns for a same-origin JSON POST with no Origin header at all — curl, and this whole suite', async () => {
     const sent = stubDashboard();
-    await post({ project: projectPath }).expect(201);
+    const res = await post({ project: projectPath }).expect(201);
+    expect(res.body).toEqual({ sessionId: 'sess-1' });
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(true);
   });
 
@@ -182,6 +183,56 @@ describe('POST /api/agents/orchestrate', () => {
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
 
+  // --- Fix round 1: the other three environmentBlock reasons ---------------
+  // An earlier version of orchestrate() checked only `enabled` and project
+  // visibility, silently skipping `reachable`, `spawnAvailable` and
+  // `remoteAnswer` — so an unreachable dashboard fell through to a flatly
+  // wrong "cannot see this project" refusal, and a spawn-unavailable or
+  // remote-answers-off dashboard let an actual spawn attempt through that
+  // dispatch would have refused first. These two are the ones the review
+  // asked for explicitly; `remoteAnswer` shares environmentBlock's own
+  // unit coverage (test/agents-shared.test.ts) and dispatch's existing e2e
+  // case (test/agents-dispatch.test.ts, "refuses when the dashboard has
+  // remote answers off"), so it is not re-proven a third time here.
+
+  it('502s an unreachable dashboard, without spawning', async () => {
+    const sent: string[] = [];
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      sent.push(String(input));
+      // Every call rejects, /api/health included — the same shape
+      // agents-dispatch.test.ts's own "502s when the dashboard is
+      // unreachable" case uses.
+      return Promise.reject(new Error('ECONNREFUSED'));
+    }) as jest.Mock;
+
+    const res = await post({ project: projectPath }).expect(502);
+    expect(res.body.error).toContain('unreachable');
+    expect(sent.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it('409s a dashboard with no CLAUDE_BIN configured, without spawning', async () => {
+    const sent: string[] = [];
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      sent.push(url);
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(
+          url.endsWith('/api/management')
+            // The project IS visible here — proving this refusal fires
+            // for spawnAvailable specifically, not as a side effect of
+            // failing the later project-visibility check too.
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : { ok: true, remoteAnswer: true, spawnAvailable: false, spawnMaxPermission: 'acceptEdits' }
+        )
+      } as Response);
+    }) as jest.Mock;
+
+    const res = await post({ project: projectPath }).expect(409);
+    expect(res.body.error).toMatch(/CLAUDE_BIN/);
+    expect(sent.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+
   // --- Test case 5: a fresh run already exists -----------------------------
 
   it('409s a fresh running run for the project, naming the runId, without spawning', async () => {
@@ -203,7 +254,8 @@ describe('POST /api/agents/orchestrate', () => {
       updatedAt: new Date(Date.now() - 16 * 60 * 1000).toISOString()
     });
 
-    await post({ project: projectPath }).expect(201);
+    const res = await post({ project: projectPath }).expect(201);
+    expect(res.body).toEqual({ sessionId: 'sess-1' });
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(true);
   });
 
@@ -215,13 +267,15 @@ describe('POST /api/agents/orchestrate', () => {
      cannot choose what a headless, unattended session is told to do), and
      an unrecognised model is dropped exactly as dispatch drops one, never
      rejected. `toEqual` against the full parsed body — not a handful of
-     `toContain`/`toBe` field checks — is what proves nothing extra (a
-     `name`, a `remoteControl`, the request's own `prompt`) rides along
-     silently; a wider or narrower object than expected fails this either
-     way. */
+     `toContain`/`toBe` field checks — is what proves nothing beyond the six
+     expected keys rides along silently (a `remoteControl`, the request's
+     own `prompt`) and that `name` is exactly what orchestrateSessionName
+     produces, not merely present; a wider, narrower, or differently-valued
+     object than expected fails this either way. */
   it('spawns with the constant prompt and drops the client-supplied prompt and unknown model', async () => {
     const sent = stubDashboard();
-    await post({ project: projectPath, prompt: 'rm -rf', model: 'claude-x' }).expect(201);
+    const res = await post({ project: projectPath, prompt: 'rm -rf', model: 'claude-x' }).expect(201);
+    expect(res.body).toEqual({ sessionId: 'sess-1' });
 
     const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
     expect(spawn).toBeDefined();
@@ -231,6 +285,11 @@ describe('POST /api/agents/orchestrate', () => {
       // dispatch's identical assertion in agents-dispatch.test.ts for why.
       project: '-abs-alpha',
       prompt: '/backlog-orchestrate',
+      // orchestrateSessionName's own output: 'orchestrate ' plus the
+      // project path's basename (makeProject's tmp dir, not a clean
+      // registry display name — this is why the expectation is computed
+      // rather than a literal string like dispatch's test can use).
+      name: `orchestrate ${basename(projectPath)}`,
       // No permissionMode was sent; the ceiling here is 'acceptEdits', and
       // an absent/unrecognised mode floors to the ladder's lowest allowed
       // rung ('plan'), the same rule clampMode applies for dispatch.

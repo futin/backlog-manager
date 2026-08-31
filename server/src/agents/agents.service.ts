@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs';
+import { basename } from 'node:path';
 import { HttpException, Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
@@ -7,7 +8,8 @@ import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import {
-  clampMode, deriveAction, dispatchBlock, modesUpTo, pickFrom, EFFORTS, MODELS, PERMISSION_LADDER
+  clampMode, deriveAction, dispatchBlock, environmentBlock, modesUpTo, pickFrom,
+  EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
 import type {
@@ -290,19 +292,43 @@ export class AgentsService {
       throw new HttpException({ error: 'not found' }, 404);
     }
 
-    // The same membership check dispatchGate performs for a per-item
-    // dispatch, inlined rather than called: dispatchGate (shared/agent.ts)
-    // takes a whole BacklogItem because every existing caller already has
-    // one on hand, but the only field it ever reads off it is
-    // `.projectPath` — orchestrate has a project and no item, so this
-    // repeats that one line rather than manufacturing a fake item to satisfy
-    // a parameter type that does not fit here. Still the same raw string
-    // compare against `status.projectPaths`, deliberately not realpath, and
-    // deliberately not a dirName derived from the path to route around the
-    // dashboard's own membership check — see the "A project the dashboard
-    // cannot see cannot be dispatched to" invariant in CLAUDE.md, which this
-    // line exists to uphold a second time for a route dispatchGate itself
-    // never sees.
+    // The other three environment-level blockers dispatchGate refuses on —
+    // dashboard unreachable, no CLAUDE_BIN, remote answers off — shared with
+    // dispatchGate through environmentBlock (shared/agent.ts) rather than
+    // re-derived here a second time. A version of this method once checked
+    // only `enabled` and project visibility and silently skipped these
+    // three: an unreachable dashboard fell all the way through to the
+    // project-map lookup below and came back as a flatly wrong "cannot see
+    // this project" (a failed map lookup and a genuinely invisible project
+    // look identical from there), and a dashboard with no CLAUDE_BIN or
+    // remote answers off had nothing here to stop it at all — the request
+    // went on to an actual POST /api/spawn that dispatchGate would have
+    // refused before any outbound call. `status.enabled` is already known
+    // true at this point (the block above returns otherwise), so
+    // environmentBlock's own first check can never fire here — only the
+    // three that follow it can.
+    const envBlocked = environmentBlock(status);
+    if (envBlocked !== null) {
+      // Same split dispatch() makes for the identical situation via
+      // dispatchBlock: 502 only when there is a genuine upstream to blame
+      // (unreachable — we never got as far as asking the dashboard
+      // anything); every other environment block is a state the reader can
+      // go and change on the dashboard's own side, so 409.
+      throw new HttpException({ error: envBlocked }, !status.reachable ? 502 : 409);
+    }
+
+    // dispatchGate's fifth and final check — the only one of its five lines
+    // that is genuinely item-shaped (item.projectPath) rather than a plain
+    // AgentsStatus read, which is why it is repeated here rather than
+    // shared through environmentBlock above: dispatchGate takes a whole
+    // BacklogItem only because every existing caller already has one on
+    // hand, and this is the one line that actually uses it. Still the same
+    // raw string compare against `status.projectPaths`, deliberately not
+    // realpath, and deliberately not a dirName derived from the path to
+    // route around the dashboard's own membership check — see the "A
+    // project the dashboard cannot see cannot be dispatched to" invariant
+    // in CLAUDE.md, which this line exists to uphold a second time for a
+    // route dispatchGate itself never sees.
     if (!status.projectPaths.includes(req.project)) {
       throw new HttpException(
         { error: `the dashboard cannot see ${req.project} — no Claude session there inside its LOOKBACK_HOURS` },
@@ -344,9 +370,30 @@ export class AgentsService {
     return this.spawn(cfg, {
       project: dirName,
       prompt: ORCHESTRATE_PROMPT,
+      // Unlike dispatch, which names a session after the one item it is
+      // working (sessionName, prompt.util.ts), there is no item here to
+      // build that name from — orchestrateSessionName below is that
+      // function's counterpart for a whole project. Without a name at all,
+      // every orchestrate run's dashboard row reads exactly like a session
+      // started by hand at a terminal, which is a real usability problem
+      // for a feature whose entire purpose is watching a run that is
+      // actually happening.
+      name: orchestrateSessionName(req.project),
       permissionMode: clampMode(req.permissionMode ?? '', status.spawnMaxPermission),
       model: pickFrom(req.model, MODELS),
       effort: pickFrom(req.effort, EFFORTS)
+      // No `remoteControl`. That flag is what gives a spawned session's
+      // AskUserQuestion a channel to a human's phone when it hits a
+      // preflight question it cannot resolve alone — see
+      // skills/backlog-orchestrate/SKILL.md, "With questions: ask,
+      // best-effort". Left off on purpose for a board-started run: without
+      // a channel, the orchestrator takes that same section's "no channel"
+      // path for any question it cannot answer itself — records the
+      // question, stages that item `needs-answers`, and moves on to the
+      // next one rather than blocking — which is exactly what surfaces on
+      // the board's run view for a human to resolve on their own time. A
+      // UI-started run is designed to skip questions and surface them on
+      // the board, not answer them remotely.
     });
   }
 
@@ -444,6 +491,25 @@ export class AgentsService {
 
 export function authHeaders(cfg: AgentsConfig): Record<string, string> {
   return cfg.token ? { authorization: `Bearer ${cfg.token}` } : {};
+}
+
+/**
+ * The `-n` name an orchestrate run's dashboard row is labelled with —
+ * `sessionName`'s (prompt.util.ts) counterpart for a whole project rather
+ * than one item, needed because `orchestrate()` has no `BacklogItem` to
+ * build that one from. Same dashboard constraint, same reason:
+ * `sessionName`'s own comment explains that the dashboard's
+ * `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` allows neither `:` nor `/`,
+ * and a name that fails it is not rejected but silently dropped to
+ * `undefined` — the exact failure mode `sessionName` itself was rewritten
+ * once to fix, after an earlier `bl:<project>/<id>` spelling was discarded
+ * on 100% of dispatches without a single request actually failing. Space-
+ * separated for that reason, not the more obvious `orchestrate:<project>`.
+ * Sliced to the same 60-character cap `sessionName` uses, for the same
+ * reason: over the cap is the same silent drop.
+ */
+function orchestrateSessionName(projectPath: string): string {
+  return `orchestrate ${basename(projectPath)}`.slice(0, 60);
 }
 
 /** Never throws — used only to build messages and to compare paths. */
