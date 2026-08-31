@@ -133,9 +133,26 @@ export function OrchestrateSheet(
    * inventing a second, looser notion of "ready", and the note rendered
    * alongside it says outright that the real run may disagree once it
    * actually re-gates each item.
+   *
+   * The section filter is NOT part of that approximation, and is why
+   * `deriveAction` alone is not the whole predicate here. `deriveAction`
+   * answers "what would this card's dispatch button do", and for an idea or a
+   * refactor the honest answer is `'groom'` (shared/agent.ts) — but an
+   * orchestrate run's queue is bugs and tasks and nothing else, by
+   * construction: `GATE_SECTIONS = { bugs, tasks }` in orchestrate.mjs, which
+   * mirrors backlog-execute's own "never touches ideas, refactors or
+   * out-of-scope". So a preview built on `deriveAction` alone listed rows the
+   * run can never look at — a project with a dozen ideas showed a dozen of
+   * them — and the sheet's disclaimer does not cover that: it promises the
+   * run may re-gate an item to a different VERDICT, not that whole sections
+   * are out of scope. This is the last screen before a multi-hour unattended
+   * operation, so it lists what the run will actually consider and nothing
+   * else. An ungroomed bug or task stays in the list, labelled `groom`,
+   * because the run really will look at it and really will report it as
+   * ungroomed — that is information, not noise.
    */
   const queue = items
-    .filter((item) => item.status === 'open')
+    .filter((item) => item.status === 'open' && (item.section === 'bugs' || item.section === 'tasks'))
     .map((item) => ({ item, action: deriveAction(item) }))
     .filter((row): row is { item: BacklogItem; action: AgentAction } => row.action !== null);
 

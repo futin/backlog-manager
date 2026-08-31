@@ -1470,17 +1470,64 @@ function resolveVerifyCommands(cwd, itemId) {
   return all
 }
 
+// 64 MiB, against Node's own 1 MiB default — see runVerifyCommand for the
+// measured failure that number exists to prevent. Generous rather than
+// unbounded on purpose: a bound this far past any real test suite's console
+// output still stops a runaway command from taking this process's memory
+// down with it, which `maxBuffer: Infinity` would not.
+const VERIFY_MAX_BUFFER = 64 * 1024 * 1024
+
+// "Last 20 lines" stops bounding anything when a command emits no newlines —
+// a progress bar rewriting itself with \r, or a single enormous JSON blob, is
+// ONE line, and with the buffer above raised to 64 MiB that one line could
+// now be 64 MiB long in a file the board loads on every poll. So the row is
+// clamped by characters as well as by lines, from the END (a failure's last
+// words are the diagnostic ones). 8 KiB is roughly 20 lines of very long
+// output — wide enough that no realistic 20-line tail is touched by this,
+// narrow enough that run.json stays a state file rather than a log.
+const VERIFY_TAIL_MAX_CHARS = 8 * 1024
+
 // Runs one command through a shell (so a plain string like `pnpm run test`
 // or a `## Done when` line works exactly as typed, with no argv-splitting
 // of this tool's own to get wrong), captures combined stdout+stderr, and
-// keeps only the last 20 lines — shared/types.ts's own RunVerification doc
-// comment: "enough to diagnose, not the whole log."
+// keeps only the last 20 lines and at most VERIFY_TAIL_MAX_CHARS of them —
+// shared/types.ts's own RunVerification doc comment: "enough to diagnose,
+// not the whole log."
+//
+// `maxBuffer` is passed explicitly because Node's default is 1 MiB and what
+// it does at that limit is not an error but a lie. Measured on this machine,
+// on a command that exits 0 and prints ~1.6 MiB:
+//
+//   default : {"status":null,"signal":"SIGTERM","err":"ENOBUFS","len":1049598}
+//   64 MiB  : {"status":0,"signal":null,"len":1620000}
+//
+// The child is KILLED, so `result.status === 0` evaluates `null === 0` and a
+// green suite is recorded red — with a tail of perfectly ordinary passing
+// output. Unattended that is worse than a crash: backlog-orchestrate's §8
+// feeds the "failure" into a fix loop, asks the executor session to fix tests
+// that were never broken, spends the second loop the same way, and parks the
+// item on a healthy tree. And it would do that to EVERY item in the queue,
+// because the cause is the project's output volume, not the item's code.
+//
+// `result.error` is then its own outcome, never folded into "the command
+// failed". ENOENT/EACCES (the shell itself could not be spawned), E2BIG (a
+// command string past the OS argument limit) and a still-conceivable ENOBUFS
+// all mean *we could not run this command*, which is a different thing to
+// hand a fix loop than *the command ran and reported failure*. Both stay
+// `ok: false` — neither is proof the item works, and the merge gate must be
+// shut for either — but the recorded row now says which one happened, so
+// nobody is sent to debug a suite that never executed.
 function runVerifyCommand(cmd, cwd) {
-  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8' })
+  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', maxBuffer: VERIFY_MAX_BUFFER })
   const combined = `${result.stdout ?? ''}${result.stderr ?? ''}`
   const lines = combined.split('\n')
   const trimmedLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
-  return { cmd, ok: result.status === 0, tail: trimmedLines.slice(-20).join('\n') }
+  const tail = trimmedLines.slice(-20).join('\n').slice(-VERIFY_TAIL_MAX_CHARS)
+  if (result.error) {
+    const why = `could not run this command (${result.error.code ?? 'spawn failed'}): ${result.error.message}`
+    return { cmd, ok: false, tail: tail === '' ? why : `${why}\n${tail}` }
+  }
+  return { cmd, ok: result.status === 0, tail }
 }
 
 const VERIFY_USAGE = 'usage: orchestrate.mjs verify <itemId> --cwd <dir> [--json]'
@@ -1498,8 +1545,12 @@ function cmdVerify(argv) {
   }
 
   const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  const item = findQueueItem(run, itemId)
+  // Validated here and the object then DISCARDED: no run at all (readRun's
+  // code 3) and an unknown item id (findQueueItem's code 1) must both fail
+  // before a single command is spawned, exactly like every other command in
+  // this file — but nothing is held across the suite. See the re-read below
+  // for why that distinction is not pedantry.
+  findQueueItem(readRun(dir), itemId)
 
   const commands = resolveVerifyCommands(cwd, itemId)
   if (commands.length === 0) {
@@ -1519,6 +1570,19 @@ function cmdVerify(argv) {
   // exit is 1 the moment any row is red, computed after every row has run.
   const rows = commands.map((cmd) => runVerifyCommand(cmd, cwd))
 
+  // Re-read HERE, after the commands, instead of reusing the object from the
+  // validation above. `verify` is the one command in this tool whose middle
+  // can last many minutes, and backlog-orchestrate's §8 now runs it detached
+  // with `watch` heartbeating the SAME run file every 30s alongside it —
+  // holding a run object across the whole suite would make this write quietly
+  // revert every heartbeat that landed while the tests ran. Re-reading
+  // collapses the read-modify-write to the microseconds either side of this
+  // line, which is the window every other writer in this file already has.
+  // Still one atomic write of all the rows at once, never a row at a time:
+  // an interrupted verify must leave the run file exactly as it found it, so
+  // the merge gate can never read a half-written verification.
+  const run = readRun(dir)
+  const item = findQueueItem(run, itemId)
   item.verification = item.verification.concat(rows)
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)

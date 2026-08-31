@@ -294,6 +294,76 @@ other change this item makes. So: hunt and ask here, write in step 4.
 
 ### Create the worktree
 
+**Probe for leftovers before creating anything.** Every park path in this
+file keeps the item's branch *and* its worktree on purpose — fix-exhausted
+(§7), nothing to verify with (§8), a merge conflict and a main tree not on
+`main` (§9) — and `finish` cleans up none of it. The item most likely to be
+queued by the *next* run is therefore exactly the one that already has both
+on disk, because parking is what leaves it open. `worktree add` fails on
+either: the directory is already there, and the branch answers
+`fatal: a branch named 'backlog/<id>' already exists`.
+
+```bash
+git -C "$PWD" show-ref --verify --quiet refs/heads/backlog/<id>; echo "branch=$?"
+git -C "$PWD" worktree list --porcelain | grep -qxF "worktree $PWD/.worktrees/<id>"; echo "worktree=$?"
+[ -e "$PWD/.worktrees/<id>" ]; echo "dir=$?"
+```
+
+`0` means it is there, `1` means it is not. All three swallow their own exit
+status so the call itself always succeeds — a `1` from `show-ref` is an
+answer, not a failure. The directory is probed *separately* from the worktree
+registration because the two can disagree: a pruned registration leaves a
+plain directory git no longer knows about, and `worktree add` refuses that
+just as hard as one it does know about. Then:
+
+- **All three `1`** — nothing left over. Create it, below.
+- **`branch=0 worktree=0 dir=0`** — a previous run's work is sitting there.
+  **Never delete either to make room.** That is the same rule §10's abort
+  path spells out, for the same reason: an unmerged worktree can hold
+  uncommitted work that no commit and no reflog can bring back, and this run
+  cannot know from outside that it doesn't. Look first —
+
+  ```bash
+  git -C "$PWD/.worktrees/<id>" status
+  git -C "$PWD" log --oneline main..backlog/<id>
+  ```
+
+  — then ask, best-effort, exactly as pre-flight does, and take one of two
+  answers:
+  - **Resume onto it.** Record the existing pair and re-enter the loop at
+    **Inspect** (step 5), *not* at dispatch: the tree already carries a
+    previous session's work, and a fresh execute session dropped on top of it
+    would produce a diff nobody can attribute, which the reviewer and the
+    committer would then treat as this run's.
+
+    ```bash
+    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id>
+    ```
+  - **Park it again** — the only answer with no channel, and the honest one
+    either way: the item is parked because a human decision was already asked
+    for and not given, and a new run does not change that.
+
+    ```bash
+    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "leftover worktree $PWD/.worktrees/<id> and branch backlog/<id> from an earlier run — resume or clear them by hand before the next run"
+    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+    ```
+- **`branch=0 worktree=1 dir=1`** — the branch outlived its directory. Same
+  two answers as above; to resume, check the branch out into a fresh worktree
+  *without* `-b`:
+
+  ```bash
+  git -C "$PWD" worktree add .worktrees/<id> backlog/<id>
+  ```
+
+  then `stage <id> dispatched --worktree … --branch …` and Inspect, because
+  the branch may already carry commits.
+- **Any other combination** — a registered worktree whose directory is gone,
+  a directory git has no record of, a worktree sitting on a detached HEAD.
+  These are states this skill never creates, so it does not get to guess what
+  they mean: park, with the detail naming exactly what the three probes said.
+  Do not `worktree prune`, do not `branch -D`, do not `--force` anything —
+  this run's authority stops at worktrees it created itself.
+
 ```bash
 git -C "$PWD" worktree add .worktrees/<id> -b backlog/<id> main
 ```
@@ -342,7 +412,7 @@ a relative path that resolves for one of them may not for the other.
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p "/backlog-execute <id>" --output-format stream-json --dangerously-skip-permissions' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p "/backlog-execute <id>" --output-format stream-json --verbose --dangerously-skip-permissions' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -354,9 +424,27 @@ and `watch` polls exactly that pid. `nohup` and the redirects are what let
 the session outlive the single tool call that started it. stdout is the
 stream-json transcript and goes to the `.jsonl` that `watch` reads; stderr
 goes to its own file, so a warning printed by the CLI never lands in the
-middle of the transcript. (If your `claude` refuses this flag combination,
-add `--verbose` — the only thing that matters downstream is that the
-transcript's `system`/`init` event lands in the `.jsonl`.)
+middle of the transcript.
+
+**`--verbose` is required, not a contingency.** With `--print`, the installed
+CLI refuses the stream-json format without it — verified on this machine
+rather than assumed:
+
+```
+$ printf '' | claude -p --output-format stream-json --input-format stream-json
+Error: When using --print, --output-format=stream-json requires --verbose
+```
+
+In `-p` mode `--verbose` is what *produces* the event stream at all, so this
+is one flag doing the job of both. Leaving it off is the quietest failure in
+this whole file, and it fires on the first item of the first run: the shell
+redirect creates the `.jsonl` before `claude` is even exec'd, so `watch`'s
+missing-file check never fires; the error goes to the `.err` that nothing on
+this path reads; the process is gone inside a second, so `watch` returns `0`
+("the child is gone"); no `system`/`init` event ever lands, so the session id
+stays null. Step 5 then reads exactly the shape it calls a crashed session,
+parks the item, and moves on — for every item in the queue. The run merges
+nothing and reports that the sessions kept dying.
 
 **Why `--dangerously-skip-permissions` is acceptable here, and only here.**
 This is the design's most load-bearing trade, and it is stated out loud
@@ -377,6 +465,16 @@ gate behind it.
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/logs/<id>.pid')" --jsonl "<dir>/logs/<id>.jsonl"
 ```
+
+**Make this call with the Bash tool's timeout raised to its maximum:
+`timeout: 600000`.** The default is `120000` — two minutes — and nothing
+raises it for you. Left at the default, every `watch` call is cut off two
+minutes into a nine-minute budget. That is survivable rather than fatal (the
+child is `nohup`ed and unaffected, and the heartbeat has already landed on
+the call's first tick), but it turns one designed call into five, each ending
+in a tool error the loop has to read past instead of an exit code it has a
+branch for. Ten minutes is the ceiling the tool will accept, and it is
+exactly the number `--budget-ms`'s default was chosen to sit a minute under.
 
 `watch` blocks for up to `--budget-ms` (default `540000`, nine minutes),
 polling every `--interval-ms` (default `30000`). Each tick it heartbeats the
@@ -420,7 +518,7 @@ For both failure shapes, ask the user — best-effort, exactly like pre-flight
 resumes that item's own session so its context is not paid for twice:
 
 ```bash
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --dangerously-skip-permissions' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --dangerously-skip-permissions' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -494,12 +592,12 @@ cannot afford ten full reports in this session's context.
   `--fix-loop` is the only valueless flag on `stage`; it increments this
   item's `fixLoops` and echoes the new value back, so the line prints
   `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then resume the item's own
-  executor session with the findings pasted in verbatim (the same
-  `claude -p --resume <sessionId>` shape as the retry above), `watch` it out
-  as in step 4, commit again (step 6), then review again with a fresh report
-  path (`<dir>/reviews/<id>-2.md`). Paste the findings as the reviewer wrote
-  them — they name `file:line`, and paraphrasing them into "fix the review
-  comments" hands the session a puzzle instead of a task.
+  executor session with the findings pasted in — step 5's retry line
+  unchanged, every flag included and `--verbose` among them — then `watch` it
+  out as in step 4, commit again (step 6), and review again with a fresh
+  report path (`<dir>/reviews/<id>-2.md`). Paste the findings as the reviewer
+  wrote them — they name `file:line`, and paraphrasing them into "fix the
+  review comments" hands the session a puzzle instead of a task.
 
 **At most two fix loops per item, counted in the run file — not in your own
 head.** `fixLoops` is what `--fix-loop` maintains, and reading the ceiling off
@@ -523,11 +621,74 @@ continue to the next item, keeping the branch and worktree for them to look
 at. Never merge unreviewed-through changes silently just because the loop ran
 out: "merge anyway" is a decision a person makes, not a default.
 
+**That menu belongs to an unresolved review verdict and to nothing else.** A
+reviewer's findings are a judgement, and a person is entitled to read the
+report and decide they do not block a merge. A failing verification is not a
+judgement — it is a command that came back red — so when the shared ceiling
+runs out with `verify` still failing, this paragraph is *not* the paragraph
+that applies: §8 says what happens there, and what happens there is always a
+park. Arriving here from §8 and reading "merge anyway" as still on offer is
+the one way to talk this system into breaking its own Hard limit, so the
+offer is scoped here rather than left to be inferred.
+
 ## 8. Verify
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> verifying
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" verify <id> --cwd "$PWD/.worktrees/<id>"
+mkdir -p "<dir>/verify"
+nohup sh -c 'node "$1/skills/backlog-orchestrate/tools/orchestrate.mjs" verify <id> --cwd "$PWD/.worktrees/<id>" > "<dir>/verify/<id>.out" 2>&1; echo $? > "<dir>/verify/<id>.status"' sh "$CLAUDE_PLUGIN_ROOT" > /dev/null 2>&1 &
+echo $! > "<dir>/verify/<id>.pid"
+```
+
+**Detached, for the same reason the session in step 4 is.** A project's whole
+baseline suite is the one step in this loop with no upper bound — `pnpm test`
+plus a typecheck plus a build is minutes on a small repo and much more on a
+large one — and a Bash call cannot outlive ten minutes even with its timeout
+at the maximum. Run inline, a suite that outruns the call is killed
+mid-flight, and `verify` has then written nothing and returned no exit code
+this section has a branch for: an undefined state at the merge gate, in an
+unattended loop, which is the one place this design cannot afford one.
+Detached, the ceiling stops applying to the suite and applies only to the
+polling, which is built to be re-called.
+
+Three details in the last two lines, none of them the same as step 4's:
+
+- **No `exec`, unlike the dispatch line.** The pid recorded here is
+  deliberately the wrapper `sh`, because the wrapper is what outlives `node`
+  long enough to write `.status`. `exec` would replace it and the exit code —
+  the one thing this whole step exists to produce — would be lost.
+- **`$1`, not `$CLAUDE_PLUGIN_ROOT`, inside the quotes.** The quotes have to
+  stay single so `$?` reaches the inner shell instead of being expanded by
+  this one, and passing the plugin root as a positional argument keeps the
+  path correct whether or not that variable is exported into a child. `$PWD`
+  needs no such care — every shell sets it, which is why step 4's line can
+  use it directly.
+- **The tool still runs from the project root.** `nohup` inherits this
+  session's cwd and there is no `cd` anywhere in the line; the worktree is
+  named by `--cwd`, which is exactly what that flag is for (see "Where
+  commands run" at the top of this file).
+
+Then poll it out, with the same maximum Bash timeout step 4's `watch` needs
+(`timeout: 600000`), as many times as it takes — exit `3` means "still
+running, call me again", exactly as it does there:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/verify/<id>.pid')" --jsonl "<dir>/verify/<id>.out"
+```
+
+Yes, `watch` — the same command, doing the same three jobs: sleeping inside
+node rather than in the shell, returning `0` the moment the pid is gone, and
+heartbeating the run every interval, which is what stops a long suite making
+the board call a perfectly healthy run stale. Its `--jsonl` is a required
+flag whose only purpose is finding a session's `system`/`init` event;
+`verify`'s log has none, so that lookup finds nothing and writes nothing.
+Pointing it at the log satisfies the flag with a file that genuinely exists,
+which is all its missing-file check (exit `1`) is really testing for.
+
+Then read the exit code out of the file, never off the poll:
+
+```bash
+cat "<dir>/verify/<id>.status"
 ```
 
 `verify` resolves the project's baseline commands from
@@ -543,14 +704,42 @@ This re-runs checks execute already ran, on purpose: a fix loop may have
 changed the code after execute's own verification, and green *here* is the
 merge gate.
 
+- **no `.status` file yet** — the verification has not finished. Either
+  `watch` came back `3` and the suite is still going, or the poll itself was
+  cut short. Poll again. **This is never a merge**, and it is never a
+  failure either: it is the absence of a result.
+- **the pid is gone and there is still no `.status`** — something killed the
+  verification (the machine slept, a human `kill`ed it, the OS ran out of
+  memory). Nothing was proved, so nothing is merged. Re-run the whole block
+  above from the top; that is both safe and the only recovery. `verify`
+  writes its rows in a single atomic write *after* every command has
+  finished, so an interrupted run leaves the run file exactly as it found it
+  and a fresh attempt simply appends a fresh set of rows — the merge gate
+  never sees a half-written verification, only a complete one or none.
+  **The gate is the exit code of the last attempt that produced one**, and no
+  `.status` means there is none.
 - **exit `0`** — every command passed. Merge.
 - **exit `1`** — something is red. Treat the failing rows exactly like review
   findings: feed them into a fix loop, spent the same way
   (`stage <id> fixing --fix-loop`, then resume, commit, re-review). The
   ceiling is the same two loops and it is *shared* with review — an item does
   not get two review loops *and* two verify loops, which is exactly what one
-  counter per item, incremented by whoever spends the loop, enforces. Never
-  merge red. Nothing green-lights a merge except the commands passing.
+  counter per item, incremented by whoever spends the loop, enforces.
+
+  **When that shared ceiling runs out with verification still red, the item
+  parks — with a channel or without one.** Do not fall through to §7's
+  exhaustion paragraph: its "merge anyway" is an offer about an unresolved
+  review *verdict*, and there is no equivalent judgement to make here. A red
+  command is not an opinion.
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, verification still red: <the failing commands> — rows in status --json"
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  ```
+
+  With a channel you may still say so and ask whether to keep fixing, skip,
+  or stop the run — three of §7's four options. Never the fourth. Never merge
+  red: nothing green-lights a merge except the commands passing.
 - **exit `5`** — nothing resolvable to verify with: no `verify.json`, no
   `test`/`typecheck`/`build` script, no fenced `## Done when` command. Nothing
   was written, and this item cannot prove itself. **Park it**:
@@ -562,6 +751,15 @@ merge gate.
 
   Annoying on an unconfigured repo, and correct anyway: "merged, verified by
   nothing" is the false-done this entire system exists to prevent.
+
+On an exit `1`, read the rows themselves (`status --json`) before spending a
+loop, because one of them is not what it looks like. A row whose `tail`
+begins **`could not run this command (…)`** never executed at all — a missing
+binary, a command string the OS refused, output too large to capture. It is
+red like any other red row and it gates the merge identically, but sending a
+fix loop after the *code* over it wastes a session on an item nothing was
+ever tested against. Fix the command or the environment, or park the item
+with that row quoted in the detail.
 
 ## 9. Merge — the only door to `main`
 
@@ -678,10 +876,12 @@ groom pass before the next run. A clean item — no fix loops, no retries,
 green first try — should have produced no ping at all along the way; the
 summary is where it finally gets mentioned.
 
-Long steps in between deserve a heartbeat. `watch` stamps one every interval,
-but review, verify and merge can each outlast the fifteen-minute freshness
-threshold on their own, and a run whose heartbeat goes stale reads to the
-board (and to a later `init`) as crashed:
+Long steps in between deserve a heartbeat. `watch` stamps one every interval
+— through the dispatched session in step 4 and through the detached
+verification in step 8, which is precisely why neither of those two can make
+a healthy run read as stale any more — but review and merge still can outlast
+the fifteen-minute freshness threshold on their own, and a run whose
+heartbeat goes stale reads to the board (and to a later `init`) as crashed:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat

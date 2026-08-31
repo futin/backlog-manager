@@ -349,10 +349,19 @@ describe('OrchestrateSheet', () => {
   });
 
   // --- Queue preview derivation (context point 6) -------------------------
-  it('previews only open items with a next step, and labels itself a preview', () => {
+  // Final-review Important 5: this used to assert that `Fresh idea` WAS
+  // rendered, which pinned the preview to `deriveAction` alone — and
+  // `deriveAction` returns 'groom' for ideas and refactors, sections an
+  // orchestrate run can never touch (`GATE_SECTIONS = { bugs, tasks }`,
+  // orchestrate.mjs). The expectation is inverted below; a refactor joins the
+  // fixture so the other half of `deriveAction`'s 'groom' answer is pinned
+  // too, and the ungroomed BUG that was already here now carries the load of
+  // proving the fix was not over-applied into "groomed bugs and tasks only".
+  // Against the old code the two `queryByText` lines fail.
+  it('previews only the open bugs and tasks a run can actually queue, and labels itself a preview', () => {
     // Every call overrides `path` along with `id`: `fakeItem`'s default path
-    // names task-1 specifically, so leaving it unoverridden across five
-    // items here would collide `queue`'s own `key={item.path}` five ways.
+    // names task-1 specifically, so leaving it unoverridden across the six
+    // items here would collide `queue`'s own `key={item.path}` six ways.
     const items = [
       fakeItem({
         id: 'task-1', title: 'Groomed task', section: 'tasks', groomed: true,
@@ -367,6 +376,10 @@ describe('OrchestrateSheet', () => {
         path: '/abs/alpha/backlog/ideas/open/idea-1.md'
       }),
       fakeItem({
+        id: 'refactor-1', title: 'Tidy the thing', section: 'refactors', groomed: null,
+        path: '/abs/alpha/backlog/refactors/open/refactor-1.md'
+      }),
+      fakeItem({
         id: 'task-2', title: 'Already done', status: 'done', groomed: true,
         path: '/abs/alpha/backlog/tasks/done/task-2.md'
       }),
@@ -378,8 +391,14 @@ describe('OrchestrateSheet', () => {
     renderSheet({ items });
 
     expect(screen.getByText('Groomed task')).toBeInTheDocument();
+    // An ungroomed BUG stays: the run queues it, gates it, and reports it as
+    // ungroomed — which is exactly what this screen is for.
     expect(screen.getByText('Ungroomed bug')).toBeInTheDocument();
-    expect(screen.getByText('Fresh idea')).toBeInTheDocument();
+    // Ideas and refactors do not: `deriveAction` says 'groom' for both, but
+    // the run's own queue is bugs and tasks, so listing them here would
+    // promise work that can never happen.
+    expect(screen.queryByText('Fresh idea')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tidy the thing')).not.toBeInTheDocument();
     expect(screen.queryByText('Already done')).not.toBeInTheDocument();
     expect(screen.queryByText('Rejected')).not.toBeInTheDocument();
     // The non-authoritative disclaimer this whole preview exists under.
@@ -389,6 +408,15 @@ describe('OrchestrateSheet', () => {
   it('says so, rather than rendering an empty box, when nothing in the project is queueable', () => {
     renderSheet({ items: [fakeItem({ status: 'done' })] });
     expect(screen.getByText(/nothing groomed and open/i)).toBeInTheDocument();
+  });
+
+  // The empty-state's other route, and the one the section filter opened: a
+  // project whose only open work is ideas has a non-empty `items` array and
+  // still nothing an orchestrate run could queue.
+  it('says so when the only open items are in sections a run never touches', () => {
+    renderSheet({ items: [fakeItem({ id: 'idea-9', section: 'ideas', groomed: null, title: 'Just an idea' })] });
+    expect(screen.getByText(/nothing groomed and open/i)).toBeInTheDocument();
+    expect(screen.queryByText('Just an idea')).not.toBeInTheDocument();
   });
 
   // --- Test case 6 ---------------------------------------------------
