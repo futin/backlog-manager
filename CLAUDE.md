@@ -137,13 +137,8 @@ happened.
 
 ## Conventions
 
-- Comments are sparse and explain only *why*. Write one where the code
-  cannot speak for itself: a constraint enforced somewhere else, a failure
-  the line exists to prevent, a choice that reads as a mistake until
-  explained. Never restate what the code does. Many existing files carry
-  heavy commentary from an earlier convention — do not match that density,
-  and do not bulk-strip it either; thin it only inside code you are already
-  changing for another reason.
+- Comments explain *why*, at length, and the existing density is deliberate —
+  match it rather than stripping it.
 - Tests are flat in `test/`, `*.test.ts` / `*.test.tsx`; component suites opt
   into jsdom with a `@jest-environment jsdom` docblock. Skill tests live next
   to the tool they cover (`skills/*/tools/*.test.mjs`) and run under node's

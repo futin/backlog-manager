@@ -118,9 +118,14 @@ actor at a time" is enforced today. What is missing is *which* actor, so
 `phase:` is not a status and does not weaken the `status:` ban. A status
 would say where the item is in its lifecycle — that remains the directory,
 and only the directory. `phase:` says which activity currently holds the
-in-progress marker, and it exists only while that marker does: `stop` removes
-both together. It also earns its place in the UI, where the live bar can say
-*grooming* rather than the ambiguous *in progress*.
+in-progress marker, and it never outlives that marker as a live signal:
+`stop` always removes `phase:`, and ordinarily removes `started:` alongside
+it. `stop --keep-started` is the one exception — it still drops `phase:`,
+but leaves `started:` in place, because by then `started:` isn't a live
+marker anymore, it's the archived item's record of when work began, and a
+lingering `phase:` would misdescribe finished work as still in progress. It
+also earns its place in the UI, where the live bar can say *grooming* rather
+than the ambiguous *in progress*.
 
 Storing seconds rather than a human duration keeps accumulation trivial and
 sorting honest; formatting is the client's job, as it already is for

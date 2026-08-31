@@ -15,17 +15,25 @@ someone on this right now — and an item carrying it is still an open item in
 `<section>/open/`. `phase` answers a narrower, shorter-lived question on top
 of that: *which* activity currently holds the `started:` marker, `groom` or
 `execute`. It has no meaning and no lifespan of its own — it is written
-alongside `started:` only when `start` is called with `--as`, and removed
-together with `started:` on `stop`, never separately. That coupling is
-deliberate, not an oversight: a `phase` that could outlive its `started:`, or
-go stale independently of it, would be a second axis an item's "where is it
-in its lifecycle" depended on — exactly the ambiguity the `status:` ban
-already exists to close off, reopened one key over. `stop` never takes an
-`--as` of its own for this reason — it reads `phase:` back off the file
-instead, the one place that can't disagree with itself. Surfaced raw by the
-scanner; "in progress" is `started !== '' && status === 'open'`, decided in
-the client, because archiving deliberately keeps the value as history (see
-below).
+alongside `started:` only when `start` is called with `--as`, and `stop`
+always removes it, in the same call that decides what happens to
+`started:`. That one-way coupling is deliberate, not an oversight: a `phase`
+that could outlive its `started:` as a live marker, or go stale
+independently of it, would be a second axis an item's "where is it in its
+lifecycle" depended on — exactly the ambiguity the `status:` ban already
+exists to close off, reopened one key over. It was a *two*-way coupling —
+`phase:` and `started:` removed together, never separately — until Task 7's
+`stop --keep-started` deliberately broke the other direction: it removes
+`phase:` same as any stop, but leaves `started:` behind, because at that
+point `started:` has already stopped being a live marker and become the
+archived item's record of when work began — a `phase:` still naming an
+activity would misdescribe finished work as ongoing, so it is exactly the
+value that must not survive, while `started:` surviving is the whole point.
+`stop` never takes an `--as` of its own for this reason — it reads `phase:`
+back off the file instead, the one place that can't disagree with itself.
+Surfaced raw by the scanner; "in progress" is
+`started !== '' && status === 'open'`, decided in the client, because
+archiving deliberately keeps the value as history (see below).
 
 `start`/`stop` are still the only two commands that rewrite an existing
 item's content — `move` renames and never opens the file — so both must
