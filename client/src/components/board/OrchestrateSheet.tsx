@@ -5,6 +5,7 @@ import {
   EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction
 } from '../../../../shared/agent';
 import { useSettings } from '../../hooks/useSettings';
+import { RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
 import type { BacklogItem, PermissionMode } from '../../../../shared/types';
 
 /**
@@ -163,30 +164,28 @@ export function OrchestrateSheet(
         const message = e instanceof Error ? e.message : String(e);
         setBusy(false);
         setError(message);
-        // The failure this sheet cannot offer a useful retry for: a 409
-        // from this endpoint (agents.service.ts's `orchestrate()`) — most
-        // commonly its activeRun lock ("a run is already in progress for
-        // this project (<runId>)"), the case test case 7 names, but 409 is
-        // also what a project-visibility/CLAUDE_BIN/remote-answer state
-        // that raced the toolbar button's own render answers with. Every
-        // one of those is a state a blind retry from THIS sheet, with THIS
-        // stale form, is unlikely to fix on its own — and `refresh()` plus
-        // the toolbar's own button (which re-derives its gate from live
-        // state on the very next render) already report whichever of them
-        // actually happened better than a static error string frozen at
-        // click time. A 502 (the dashboard itself unreachable) is
-        // deliberately NOT included here — see the "leaves the sheet open
-        // and retryable for any other error" test — because trying again a
-        // moment later genuinely might succeed once the dashboard answers.
+        // The ONE failure this sheet cannot offer a useful retry for: the
+        // activeRun lock — a DIFFERENT run already exists for this project
+        // (agents.service.ts's `orchestrate()`, "a run is already in
+        // progress for this project (<runId>)"). Retrying from this sheet
+        // cannot fix that; `refresh()` pulls the winning run in and
+        // `onClose()` hands the screen to the strip that already owns it.
         //
-        // Detected by STATUS, not by matching the server's free-text
-        // message (fix round 1: the substring check this replaced broke
-        // silently the instant the server's wording changed, and no test
-        // could catch that drift since the regression fixture's message was
-        // independent of the real literal). `ApiError` (lib/agents.ts) is
-        // what makes the status available to check at all — `unwrap` used
-        // to discard it.
-        if (e instanceof ApiError && e.status === 409) {
+        // Fix round 1 tried `e.status === 409` alone — an improvement over
+        // matching the message's own prose, but still wrong, because this
+        // endpoint answers 409 for THREE OTHER reasons too (project just
+        // lost visibility, no CLAUDE_BIN, remote answers off — all folded
+        // into `gate.control === 'hidden'`/`'disabled'` server-side, plus
+        // the dirName race). Status alone cannot tell those apart from the
+        // lock, and reporting "already running" for a capability or
+        // visibility problem is not a milder version of the bug the
+        // message-substring check had — it is a confidently WRONG answer,
+        // worse than the brittle one it replaced. Fix round 2: the server
+        // now sends a `code` field (RUN_IN_PROGRESS_CODE, shared/types.ts)
+        // on the lock 409 ONLY, so this checks status AND that exact code
+        // — every other 409 (uncoded) falls through to the generic path
+        // below and shows the server's own, accurate error text instead.
+        if (e instanceof ApiError && e.status === 409 && e.code === RUN_IN_PROGRESS_CODE) {
           refresh();
           onClose();
         }

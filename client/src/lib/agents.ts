@@ -26,9 +26,20 @@ import type {
  * could not have caught that drift either). The status code is the part of
  * the response that is actually part of the contract; the message is prose
  * for a human to read.
+ *
+ * `code` is fix round 2's addition, and it exists for a narrower reason than
+ * `status`: `status === 409` alone turned out to be too coarse for
+ * `POST /api/agents/orchestrate` specifically, which answers 409 for four
+ * genuinely different reasons (RUN_IN_PROGRESS_CODE's own doc comment,
+ * shared/types.ts, has the full story). `code` is `undefined` for every
+ * response that carries no `{ code }` field at all — which today is every
+ * response except that one endpoint's activeRun-lock 409 — so a caller
+ * checking a SPECIFIC code, not just its presence, is what keeps this
+ * generic rather than growing into a wider error taxonomy no other route
+ * asked for.
  */
 export class ApiError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(message: string, public readonly status: number, public readonly code?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -38,15 +49,17 @@ export class ApiError extends Error {
  * Unwraps the `{ error }` body the API answers failures with, so a caller can
  * render the server's own wording. The status is the fallback for the
  * MESSAGE, not the message itself: "409" tells a reader nothing, "this
- * item's next step is groom" tells them everything — but the status is
- * still attached to the thrown `ApiError` (see its own comment) for the one
- * caller that needs to branch on it rather than just display it.
+ * item's next step is groom" tells them everything — but the status (and,
+ * when the body carries one, a `code`) is still attached to the thrown
+ * `ApiError` (see its own comment) for the one caller that needs to branch
+ * on more than just what to display.
  */
 async function unwrap<T>(res: Response): Promise<T> {
-  const data = (await res.json().catch(() => null)) as ({ error?: unknown } & T) | null;
+  const data = (await res.json().catch(() => null)) as ({ error?: unknown; code?: unknown } & T) | null;
   if (!res.ok) {
     const error = typeof data?.error === 'string' ? data.error : `request failed (${res.status})`;
-    throw new ApiError(error, res.status);
+    const code = typeof data?.code === 'string' ? data.code : undefined;
+    throw new ApiError(error, res.status, code);
   }
   return data as T;
 }

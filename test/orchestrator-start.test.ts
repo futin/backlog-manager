@@ -9,6 +9,7 @@ import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
+import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { OrchestratorRun } from '../shared/types';
 
 // Same translation orchestrator-runs.test.ts (Task 8) already does: the
@@ -181,6 +182,12 @@ describe('POST /api/agents/orchestrate', () => {
     expect(res.body.error).toContain(projectPath);
     expect(res.body.error).toMatch(/cannot see/);
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+    // Fix round 2: this 409 must NOT carry the activeRun lock's `code` —
+    // OrchestrateSheet's own fix-round-2 case for this exact scenario
+    // (test/orchestrator-start-ui.test.tsx) depends on this response
+    // staying uncoded, or a client-side check would be validated against
+    // a server that quietly stopped honouring its own contract.
+    expect(res.body.code).toBeUndefined();
   });
 
   // --- Fix round 1: the other three environmentBlock reasons ---------------
@@ -231,6 +238,8 @@ describe('POST /api/agents/orchestrate', () => {
     const res = await post({ project: projectPath }).expect(409);
     expect(res.body.error).toMatch(/CLAUDE_BIN/);
     expect(sent.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+    // Same fix-round-2 pin as the project-invisible case above: uncoded.
+    expect(res.body.code).toBeUndefined();
   });
 
   // --- Test case 5: a fresh run already exists -----------------------------
@@ -241,6 +250,21 @@ describe('POST /api/agents/orchestrate', () => {
 
     const res = await post({ project: projectPath }).expect(409);
     expect(res.body.error).toContain(fixture.runId);
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  // --- Fix round 2: the lock 409 alone carries a machine-readable code -----
+  // The case just above already proves the human-readable `error` string;
+  // this is the one this whole fix round exists for — OrchestrateSheet's
+  // client-side check (RUN_IN_PROGRESS_CODE, shared/types.ts) has nothing
+  // to check against if this ever regresses to sending the bare `{ error }`
+  // fix round 1 shipped.
+  it('carries RUN_IN_PROGRESS_CODE on the activeRun lock 409, and only there', async () => {
+    const sent = stubDashboard();
+    writeRun({ ...fixture, project: projectPath, updatedAt: new Date().toISOString() });
+
+    const res = await post({ project: projectPath }).expect(409);
+    expect(res.body.code).toBe(RUN_IN_PROGRESS_CODE);
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
 

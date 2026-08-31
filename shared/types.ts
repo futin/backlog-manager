@@ -244,6 +244,33 @@ export interface AgentDispatchResult {
 }
 
 /**
+ * The one machine-readable discriminator `POST /api/agents/orchestrate`
+ * ever sends — a `code` field alongside that 409's human-readable `error`
+ * string, present ONLY on the activeRun-lock refusal (agents.service.ts's
+ * `orchestrate()`), never on that endpoint's other 409s (project-invisible,
+ * no CLAUDE_BIN, remote-answers-off, the dirName race).
+ *
+ * Fix round 2's whole reason to exist: that endpoint has several distinct
+ * 409 reasons sharing one HTTP status, so status alone cannot tell a client
+ * which one happened — and a client parsing the `error` PROSE to guess is
+ * exactly the fragility a fix round already had to remove once
+ * (OrchestrateSheet.tsx's own history: a message-substring match broke
+ * silently the moment the wording changed). `code` turns "is this the
+ * lock, specifically" from a guess into a question with one right answer.
+ * Deliberately not a wider taxonomy — no other 409 on this or any other
+ * route gets a `code`, and none should without its own reason to exist;
+ * this is the one case, kept minimal on purpose.
+ *
+ * Exported once here rather than declared as a bare string literal in both
+ * agents.service.ts (which sends it) and OrchestrateSheet.tsx (which reads
+ * it), so the two sides can never drift on the one string that has to
+ * match exactly — the same "one implementation, every side imports it"
+ * rule this file and shared/agent.ts already apply to everything else two
+ * sides of this app have to agree on.
+ */
+export const RUN_IN_PROGRESS_CODE = 'run-in-progress';
+
+/**
  * The orchestrator's one-way pipeline for a single queue item, pending
  * through merged, plus the terminal exits that leave the pipeline early.
  * Written out as a flat union rather than modelled as "pipeline stage" +

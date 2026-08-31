@@ -12,6 +12,7 @@ import {
   EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
+import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, PermissionMode
 } from '../../../shared/types';
@@ -348,7 +349,24 @@ export class AgentsService {
     const activeRun = this.orchestrator.runs().runs.find((r) => r.project === req.project && r.fresh);
     if (activeRun) {
       throw new HttpException(
-        { error: `a run is already in progress for this project (${activeRun.runId})` },
+        {
+          error: `a run is already in progress for this project (${activeRun.runId})`,
+          // Fix round 2: this endpoint has FOUR distinct 409 reasons (this
+          // lock, project-invisible above, and the CLAUDE_BIN/remote-answer
+          // cases folded into `gate.control === 'hidden'` above) sharing one
+          // HTTP status, so a client cannot tell which one happened from
+          // the status code alone — and must never guess from this `error`
+          // string's prose either (RUN_IN_PROGRESS_CODE's own doc comment,
+          // shared/types.ts, has the full incident that rule exists to
+          // prevent a repeat of). `code` is that stable, machine-readable
+          // answer, sent ONLY on this one 409 — every other throw in this
+          // method (the two just above, and the dirName race below) is
+          // deliberately left without one; nothing about them needs to be
+          // distinguished from each other, and OrchestrateSheet's own retry
+          // path (client/src/components/board/OrchestrateSheet.tsx) is
+          // exactly right for all three of them as-is.
+          code: RUN_IN_PROGRESS_CODE
+        },
         409
       );
     }

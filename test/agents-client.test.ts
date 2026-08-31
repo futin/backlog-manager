@@ -122,6 +122,35 @@ describe('the agents client', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(500);
   });
+
+  // Fix round 2: `status === 409` alone turned out to be too coarse for
+  // OrchestrateSheet's one caller that needs to distinguish the
+  // orchestrate-lock 409 from the same endpoint's three OTHER 409 reasons
+  // (project-invisible, no CLAUDE_BIN, the dirName race) — see
+  // RUN_IN_PROGRESS_CODE's own doc comment (shared/types.ts) for the full
+  // story. These two cases are `unwrap`'s own half of that fix: a `code`
+  // field, when the body actually carries one, has to survive the same
+  // parse `error`/`status` already do.
+  it('carries an optional code through from the error body when present', async () => {
+    stub({
+      ok: false, status: 409,
+      body: { error: 'a run is already in progress for this project (run-9)', code: 'run-in-progress' }
+    });
+    const err = await startOrchestrate({ project: '/abs/alpha' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe('run-in-progress');
+  });
+
+  // The overwhelmingly common case — no server route sends a `code` on any
+  // OTHER response today — has to stay silently absent rather than, say,
+  // coercing to `null` or an empty string a caller's `=== someCode` check
+  // could accidentally match.
+  it('leaves code undefined when the error body carries none', async () => {
+    stub({ ok: false, status: 409, body: { error: 'the dashboard cannot see this project' } });
+    const err = await startOrchestrate({ project: '/abs/alpha' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBeUndefined();
+  });
 });
 
 // The hook (test/orchestrator-hook.test.tsx) exercises fetchOrchestratorRuns

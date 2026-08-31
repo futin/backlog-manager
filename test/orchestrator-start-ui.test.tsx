@@ -9,6 +9,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import rawFixture from './fixtures/orchestrator-run.json';
+import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type {
   AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary
 } from '../shared/types';
@@ -278,11 +279,19 @@ describe('toolbar Orchestrate button', () => {
 // OrchestrateSheet itself, direct-rendered — the same split
 // dispatch-button.test.tsx and launch-sheet.test.tsx already use between a
 // component's own suite and the board-wiring one above. Covers test cases
-// 5-7 from the brief, plus the queue-preview derivation (context point 6)
-// and the one differentiation the "closes into the strip world" behaviour
-// of case 7 requires: an error that is NOT the run-already-exists conflict
-// must leave the sheet open and retryable, or every transient failure
-// (a network blip, say) would silently discard the user's picks.
+// 5-7 from the brief, the queue-preview derivation (context point 6), and
+// two rounds of differentiation the "closes into the strip world" case-7
+// behaviour requires:
+//   - fix round 1: a DIFFERENT http status (502, the dashboard itself
+//     unreachable) must leave the sheet open and retryable, or every
+//     transient failure would silently discard the user's picks.
+//   - fix round 2: a SAME-status 409 that is not the activeRun lock — this
+//     one endpoint answers 409 for three other reasons too (project just
+//     lost visibility, no CLAUDE_BIN, remote answers off) — must ALSO leave
+//     the sheet open, or a capability/visibility problem gets reported as
+//     "your run is already in progress", which is confidently wrong rather
+//     than merely unhelpful. `RUN_IN_PROGRESS_CODE` (shared/types.ts) is
+//     what makes the lock 409 distinguishable from the other three at all.
 // =====================================================================
 describe('OrchestrateSheet', () => {
   const realFetch = global.fetch;
@@ -410,10 +419,16 @@ describe('OrchestrateSheet', () => {
   });
 
   // --- Test case 7 ---------------------------------------------------
+  // Fix round 2: the server now sends `code: RUN_IN_PROGRESS_CODE` ONLY on
+  // the activeRun-lock 409 (agents.service.ts's `orchestrate()`), and this
+  // is the shape a real lock conflict actually arrives in — error text AND
+  // code together, matching what test/orchestrator-start.test.ts's own
+  // "carries RUN_IN_PROGRESS_CODE on the activeRun lock 409" case pins
+  // server-side.
   it('shows the already-running message and closes into the strip world after refresh on a 409 conflict', async () => {
     stubOrchestrate({
       ok: false, status: 409,
-      body: { error: 'a run is already in progress for this project (run-9)' }
+      body: { error: 'a run is already in progress for this project (run-9)', code: RUN_IN_PROGRESS_CODE }
     });
     const { onClose, refresh } = renderSheet();
 
@@ -425,18 +440,18 @@ describe('OrchestrateSheet', () => {
   });
 
   // Fix round 1 (Important): the case above alone cannot prove this is
-  // detected by STATUS rather than by matching a substring of the server's
-  // message — its fixture happens to say "already in progress" too, so a
-  // message-based check would pass it right alongside a status-based one.
-  // This case is the one that actually tells them apart: same 409 status,
-  // deliberately DIFFERENT wording (not even a real server literal), and
-  // the sheet still has to close into the strip. Before this fix round it
-  // would not have — the old check matched only the literal substring
-  // 'already in progress'.
-  it('closes on any 409 from this endpoint, regardless of the message wording', async () => {
+  // detected by a stable discriminator rather than by matching a substring
+  // of the server's message — its fixture happens to say "already in
+  // progress" too, so a message-based check would pass it right alongside
+  // a discriminator-based one. This case is the one that actually tells
+  // them apart: same 409 status, same `code`, deliberately DIFFERENT
+  // wording (not even a real server literal) — and the sheet still has to
+  // close into the strip, because what it now checks is the code, not the
+  // prose.
+  it('closes on a coded 409, regardless of the message wording', async () => {
     stubOrchestrate({
       ok: false, status: 409,
-      body: { error: 'nope, not right now' }
+      body: { error: 'nope, not right now', code: RUN_IN_PROGRESS_CODE }
     });
     const { onClose, refresh } = renderSheet();
 
@@ -447,11 +462,37 @@ describe('OrchestrateSheet', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  // The differentiation case 7's own auto-close must NOT generalise to
-  // every failure — see this describe block's own file comment. 502
-  // specifically: the one status this endpoint answers with for "the
-  // dashboard itself is unreachable" (agents.service.ts), which retrying a
-  // moment later can genuinely resolve, unlike a 409.
+  // Fix round 2 (the finding this whole round exists for): a 409 status
+  // ALONE is not enough — this endpoint's other three 409 reasons
+  // (project-invisible, no CLAUDE_BIN, remote-answers-off, the dirName
+  // race) never carry `code` at all, and confusing one of THOSE for the
+  // lock would tell a user their run is "already in progress" when the
+  // real problem is that the dashboard cannot spawn — confidently wrong,
+  // not merely brittle. The message here is the server's REAL
+  // project-invisible wording (agents.service.ts / shared/agent.ts's
+  // `projectDispatchGate`), uncoded, and the sheet must stay open with it
+  // rather than silently closing into a strip that will never appear
+  // (nothing was ever started).
+  it('leaves the sheet open and shows the server message for an uncoded 409 — a capability or visibility conflict, not the lock', async () => {
+    stubOrchestrate({
+      ok: false, status: 409,
+      body: { error: 'the dashboard cannot see /abs/alpha — no Claude session there inside its LOOKBACK_HOURS' }
+    });
+    const { onClose, refresh } = renderSheet();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    expect(await screen.findByText(/cannot see \/abs\/alpha/)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+  });
+
+  // The differentiation above must NOT generalise past 409 either — see
+  // this describe block's own file comment. 502 specifically: the one
+  // status this endpoint answers with for "the dashboard itself is
+  // unreachable" (agents.service.ts), which retrying a moment later can
+  // genuinely resolve.
   it('leaves the sheet open and retryable for any other error', async () => {
     stubOrchestrate({ ok: false, status: 502, body: { error: 'dashboard unreachable' } });
     const { onClose, refresh } = renderSheet();
