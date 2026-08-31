@@ -178,6 +178,26 @@ body {
 /* Focus is the cyan rule, matching .set-control's fields in Settings — the UA
    outline is dropped only because something visible replaces it. */
 .board-search:focus, .board-select:focus { outline: none; color: var(--ink); border-color: var(--cyan) }
+/* Task 13: the toolbar's "drain this project's queue" control — the one
+   button among four form fields, so it wears the sheet's own filled "go"
+   look (.sheet-launch's cyan fill, restated rather than shared since that
+   class also carries .sheet-actions' own margin/alignment this control does
+   not want) instead of the recessed-well look above. Sized off the same
+   4px-vertical rhythm .board-search/.board-select use so all five controls
+   still read as one instrument row despite the different treatment. */
+.board-orchestrate {
+  font-family: var(--font); font-size: 10.5px; font-weight: 600; color: var(--bg);
+  background: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
+  padding: 4px 10px; cursor: pointer; white-space: nowrap;
+}
+.board-orchestrate:hover { background: color-mix(in srgb, var(--cyan) 82%, var(--ink)) }
+/* `[aria-disabled]`, not `:disabled` — same reasoning as .dispatch-tab's own
+   identical rule: the button stays real and focusable on purpose (see
+   BoardView's onClick guard), so "looks unavailable" is this repo's job
+   rather than the browser's. */
+.board-orchestrate[aria-disabled='true'] {
+  color: var(--ink3); background: var(--steel); border-color: var(--hairline); cursor: default;
+}
 /* A centred flex line, not plain centred text: the loading fallback puts an icon
    beside the word, and `vertical-align` would not align it — an inline SVG's
    baseline is its bottom edge, which hangs the arc below the x-height of the text
@@ -716,6 +736,20 @@ body {
 .run-drawer-item-verify-ok { color: var(--green); font-weight: 600 }
 .run-drawer-item-verify-bad { color: var(--red); font-weight: 600 }
 .run-drawer-item-verify-tail { color: var(--ink3) }
+
+/* OrchestrateSheet's own queue-preview rows reuse .run-drawer-item/-head/-id/
+   -title verbatim (same "bordered row inside a sheet body" shape as the run
+   drawer's real queue, just before anything has actually run) and add only
+   this one class for the row's action word — text-coloured only, deliberately
+   NOT .dispatch-chip's button treatment (border, padding, hover-fill): a
+   preview row is not clickable, and wearing a real button's look would
+   promise otherwise. Same two tokens deriveAction's own tone already uses
+   everywhere else (mustard groom / cyan execute, DispatchButton's own
+   comment on why), so a groomed vs ungroomed item reads the same colour
+   here as it will on the card underneath it. */
+.orchestrate-preview-action { font-family: var(--mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em }
+.orchestrate-preview-action.groom { color: var(--mustard) }
+.orchestrate-preview-action.execute { color: var(--cyan) }
 
 /* Attention entries share one amber tint regardless of kind (needs-answers /
    parked / fix-exhausted): RunAttention's own doc comment calls all three

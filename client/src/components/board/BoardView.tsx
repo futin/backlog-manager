@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
@@ -7,12 +7,14 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { isInProgress } from '../../lib/item-progress';
 import { buildProjectHues } from '../../lib/project-hue';
+import { environmentBlock } from '../../../../shared/agent';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
+import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunDrawer } from './RunDrawer';
 import { RunStrip } from './RunStrip';
-import type { BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
 
 const PROJECT_KEY = 'backlog-manager.project';
 const STATUS_KEY = 'backlog-manager.status';
@@ -108,6 +110,37 @@ function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
 }
 
 /**
+ * Task 13's toolbar Orchestrate button needs `dispatchGate`'s exact
+ * hide-vs-disable split (shared/agent.ts, CLAUDE.md's own invariant on the
+ * two being genuinely different kinds of "no") but has no `BacklogItem` to
+ * hand it — an orchestrate run drains a whole PROJECT's queue, and
+ * `dispatchGate`'s one item-shaped line is its last one
+ * (`item.projectPath`). Rather than widen that shared signature for a
+ * caller that has four fifths of its inputs and not the fifth, this repeats
+ * just the one project-visibility check by hand and reuses `environmentBlock`
+ * — the same shared four-reason ladder `dispatchGate` itself starts from —
+ * for everything else, so the wording and the four environment reasons can
+ * never drift from the per-item control's own, and only the one genuinely
+ * different line lives here.
+ */
+function projectDispatchGate(
+  status: AgentsStatus, projectPath: string
+): { control: 'enabled' } | { control: 'hidden' } | { control: 'disabled'; reason: string } {
+  const blocked = environmentBlock(status);
+  if (blocked !== null) return { control: 'hidden' };
+  if (!status.projectPaths.includes(projectPath)) {
+    return {
+      control: 'disabled',
+      // Verbatim match to dispatchGate's own `disabled` wording — one
+      // reason string for "the dashboard cannot see this project", used by
+      // a per-item control and a per-project one alike.
+      reason: `the dashboard cannot see ${projectPath} — no Claude session there inside its LOOKBACK_HOURS`
+    };
+  }
+  return { control: 'enabled' };
+}
+
+/**
  * The board: every registered project's items in four fixed type columns.
  * All narrowing happens here, client-side, over the fetched index — the whole
  * corpus is a few hundred rows of title-and-date, and a server-side filter
@@ -119,15 +152,35 @@ export default function BoardView() {
   const { status: agents } = useAgents();
   // Task 11: the orchestrator's own view of any project's queue, polled live
   // while any run is fresh (useOrchestratorRuns.ts) and not at all otherwise.
-  // `refresh` is left undestructured: this task only ever renders what the
-  // mount/focus/poll cadence already hands it on its own, with no control
-  // anywhere yet that would need to trigger one on demand — that arrives
-  // with the toolbar start control (Task 13).
-  const { runs } = useOrchestratorRuns();
+  // `refresh` (Task 13): OrchestrateSheet's own Start button calls this
+  // directly after both a successful start and a 409 "already running"
+  // conflict, so the strip has the fresh run ahead of the next scheduled
+  // poll rather than up to `POLL_MS` late — see OrchestrateSheet.tsx's own
+  // comment on `start` for why the conflict path needs it just as much as
+  // the success path does.
+  const { runs, refresh: refreshRuns } = useOrchestratorRuns();
   /* Separate from `open`: the sheet can be opened from a card (drawer closed)
      or from inside the drawer (drawer stays open behind it), so one piece of
      state cannot serve both. */
   const [dispatching, setDispatching] = useState<BacklogItem | null>(null);
+  /* Task 13: which project's Orchestrate sheet is open, or null. A project
+     PATH rather than a boolean — the same reasoning `openRunProject` below
+     already uses: keeping the sheet's own render keyed on an identity that
+     does not change out from under it, independent of whatever the
+     toolbar's OWN project filter (`project`/`projectValue`, below) happens
+     to read on a later render. A plain boolean would have re-rendered the
+     sheet against whatever `projectValue` currently was, which breaks the
+     moment a value it is not actually reading changes — e.g. the filter
+     resetting to "All" while the sheet is still open would otherwise erase
+     `orchestrateProject` (see that value's own guard) and unmount the sheet
+     with no `onClose` ever firing. */
+  const [orchestrating, setOrchestrating] = useState<string | null>(null);
+  // The reason span DispatchButton's own `reasonId` documents in full: an
+  // aria-describedby target has to be unique across the page, and this
+  // button (unlike DispatchButton's forty-per-board) only ever renders once,
+  // but `useId()` is still the right tool for a value that must survive
+  // Strict Mode's double-invoke with the same identity both times.
+  const orchestrateReasonId = useId();
   /*
    * Task 12: which project's run drawer is open, keyed by `project` (the
    * registry path) rather than holding the clicked run object itself. That
@@ -217,6 +270,39 @@ export default function BoardView() {
   // forgot to check.
   const freshRuns = runs.filter((run) => run.fresh);
 
+  /*
+   * Task 13's toolbar button. Four conditions, matching the brief's own
+   * four test cases in order:
+   *  1. Unfiltered (`projectValue === ALL`) — an orchestrate run is scoped
+   *     to ONE project's whole queue, so the control has nothing to name
+   *     until the board's own filter already narrows to one, the same
+   *     reading every other narrowed-view feature on this bar gives
+   *     `projectValue`.
+   *  2/3. `projectDispatchGate` (above) — the environment ladder hides the
+   *     control outright, project-invisibility disables it with a reason.
+   *  4. A fresh run already owns this project's whole story on the board
+   *     (the strip): a second Start would only race the 409 the server
+   *     already enforces (agents.service.ts's own activeRun check) — same
+   *     "nothing to add" reasoning as DispatchButton returning null for an
+   *     item with no next step. A STALE run does not count here — see
+   *     RunStrip's own comment on why a stale run renders nothing at all;
+   *     the control has to still be there to start a fresh one once the
+   *     last one has gone silent.
+   */
+  const orchestrateGate = projectValue === ALL || agents === null
+    ? null
+    : projectDispatchGate(agents, projectValue);
+  const orchestrateHasFreshRun = freshRuns.some((run) => run.project === projectValue);
+  const showOrchestrate = orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateHasFreshRun;
+  const orchestrateBlockedReason = orchestrateGate?.control === 'disabled' ? orchestrateGate.reason : null;
+  // The registry's own display name, for the button's title and the sheet's
+  // header — falls back to the raw path only in the unreachable case where
+  // `projectValue` names a project `registered` no longer carries (the same
+  // "unregistered since" staleness `knownPaths`/`projectValue` above already
+  // guard against, restated here since a fallback still has to resolve to
+  // SOME string for a title attribute).
+  const orchestrateProjectName = registered.find((p) => p.path === projectValue)?.name ?? projectValue;
+
   // The id→stage lookup Task 11's brief asks for, one map per fresh run,
   // keyed by the run's own `project` — the registry's absolute path, the
   // exact string `BacklogItem.projectPath` already carries on every item
@@ -272,6 +358,39 @@ export default function BoardView() {
     setOpenRunProject(project);
   };
 
+  /*
+   * Task 13 adds a second overlay pair on top of the one above, and the
+   * same hazard the comment above describes applies to it for the same
+   * structural reason: OrchestrateSheet reuses LaunchSheet's own `.sheet`
+   * shape verbatim (OrchestrateSheet.tsx's own header comment), which means
+   * it has exactly the same "no focus trap of its own" property the two
+   * `.drawer`s share, and the toolbar button that opens it is — like
+   * RunStrip's own open button — always on screen at the same time as
+   * every card's dispatch button. So `dispatching` and `orchestrating` get
+   * the identical treatment: two separate pieces of state, each cleared by
+   * the other's own opener and NEVER set directly outside these two
+   * functions, which is what makes "opening either closes the other" a
+   * property of the code the same way it already is for the drawer pair.
+   *
+   * What this does NOT do is touch `open`/`openRunProject` at all — LaunchSheet
+   * already coexists with an open ItemDrawer on purpose (proven by
+   * test/dispatch-button.test.tsx's "opens the sheet from inside the
+   * drawer, leaving the drawer open behind it"), and OrchestrateSheet is
+   * the same kind of overlay as LaunchSheet, not the same kind as either
+   * drawer. Extending exclusivity to the drawers here would overturn that
+   * already-proven, deliberate behaviour rather than protect against the
+   * hazard Task 12 actually fixed — which was specifically about two
+   * `.drawer`s, not a `.sheet` layering over one.
+   */
+  const openLaunchSheet = (item: BacklogItem): void => {
+    setOrchestrating(null);
+    setDispatching(item);
+  };
+  const openOrchestrateSheet = (proj: string): void => {
+    setDispatching(null);
+    setOrchestrating(proj);
+  };
+
   return (
     <div className="board">
       <div className="board-bar">
@@ -319,6 +438,37 @@ export default function BoardView() {
             <option value="name">By name</option>
             <option value="project">By project</option>
           </select>
+          {/* Task 13: the "drain this project's groomed queue" control.
+              `showOrchestrate`/`orchestrateBlockedReason` (computed above)
+              already encode all four visibility rules from the brief, so
+              this markup only has to react to them — the same hide-vs-disable
+              shape DispatchButton renders, restated by hand rather than
+              reused because DispatchButton's signature is fixed around one
+              `BacklogItem`, which a project-level control does not have. */}
+          {showOrchestrate && (
+            <>
+              <button
+                type="button"
+                className="board-orchestrate"
+                title={orchestrateBlockedReason ?? `drain ${orchestrateProjectName}'s groomed queue in a Claude session`}
+                aria-disabled={orchestrateBlockedReason !== null}
+                aria-describedby={orchestrateBlockedReason === null ? undefined : orchestrateReasonId}
+                onClick={() => {
+                  // The other half of aria-disabled: the browser fires a
+                  // click on it regardless, so this guard is what actually
+                  // makes a blocked button inert — same reasoning as
+                  // DispatchButton's identical guard.
+                  if (orchestrateBlockedReason !== null) return;
+                  openOrchestrateSheet(projectValue);
+                }}
+              >
+                Orchestrate
+              </button>
+              {orchestrateBlockedReason !== null && (
+                <span id={orchestrateReasonId} className="sr-only">{orchestrateBlockedReason}</span>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -386,7 +536,9 @@ export default function BoardView() {
                       // directly — see that function's own comment for why.
                       onOpen={() => openItemDrawer(item)}
                       agents={agents}
-                      onDispatch={() => setDispatching(item)}
+                      // Goes through `openLaunchSheet`, not `setDispatching`
+                      // directly — see that function's own comment for why.
+                      onDispatch={() => openLaunchSheet(item)}
                       now={now}
                       runStage={runStageFor(item)}
                     />
@@ -404,7 +556,9 @@ export default function BoardView() {
           hues={hues}
           onClose={() => setOpen(null)}
           agents={agents}
-          onDispatch={() => setDispatching(open)}
+          // Goes through `openLaunchSheet`, not `setDispatching` directly —
+          // see that function's own comment for why.
+          onDispatch={() => openLaunchSheet(open)}
         />
       )}
       {openRun !== null && (
@@ -428,6 +582,34 @@ export default function BoardView() {
            are derived from the fetch that effect already owns, so the reset
            is the effect's own business there. The difference is deliberate. */
         <LaunchSheet key={dispatching.path} item={dispatching} onClose={() => setDispatching(null)} />
+      )}
+      {orchestrating !== null && (
+        /* `key` on this singleton for the same reason LaunchSheet's own
+           comment just above gives, scaled down to this sheet's smaller
+           state: without it, re-opening Orchestrate for project B while an
+           error from project A is still in `error` would show A's stale
+           message under B's title. `items` is recomputed from `all` on
+           every render rather than memoised — this is the same "a few
+           hundred rows" corpus the file-level comment on `BoardView`
+           already reasons is cheap to filter, and it is what makes the
+           preview see a groom that just landed via `refresh`/`refetch`
+           without any extra plumbing. */
+        <OrchestrateSheet
+          key={orchestrating}
+          project={orchestrating}
+          // Looked up from `orchestrating` itself, NOT `orchestrateProjectName`
+          // (which tracks the toolbar's CURRENT filter, `projectValue`) —
+          // this sheet's header has to keep naming the project it actually
+          // opened for even if the filter is changed out from under it
+          // while the sheet is still up, the same "keyed on identity, not on
+          // whatever else changed" reasoning `orchestrating` itself is
+          // declared with above.
+          projectName={registered.find((p) => p.path === orchestrating)?.name ?? orchestrating}
+          items={all.filter((i) => i.projectPath === orchestrating)}
+          spawnMaxPermission={agents?.spawnMaxPermission ?? null}
+          onClose={() => setOrchestrating(null)}
+          refresh={refreshRuns}
+        />
       )}
     </div>
   );
