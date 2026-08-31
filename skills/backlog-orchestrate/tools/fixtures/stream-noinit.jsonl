@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"id":"msg_01ZzYyXxWwVvUuTtSsRrQq","role":"assistant","content":[{"type":"text","text":"Working — this transcript's head never carried a system/init event, e.g. because output-format buffering delayed it past this snapshot."}]},"session_id":"should-not-be-picked-up"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":120,"result":"Done.","session_id":"should-not-be-picked-up"}

@@ -3,11 +3,18 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
 import { RUN_STALE_MS } from './orchestrate.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
+
+// Task 5's own fixtures: a realistic `claude -p --output-format stream-json`
+// transcript head that DOES carry the init event (and therefore the session
+// id), and one that never does — see watch's own test cases 1 and 3.
+const STREAM_INIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-init.jsonl')
+const STREAM_NOINIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-noinit.jsonl')
 
 // The jest-side fixture is the authority for the run/queue-item key set —
 // see shared/types.ts's RunStage/RunQueueItem/RunAttention/OrchestratorRun
@@ -89,6 +96,72 @@ function seedReadyBug(project, id, title) {
     `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-01\n---\n\n## Symptom\n\nSomething is wrong.\n\n## Repro\n\nSteps to reproduce it.\n\n## Affects\n\nsomefile.ts\n\n## Cause\n\nThe real, diagnosed cause.\n\n## Fix\n\nThe real fix — not the placeholder.\n`,
   )
   return file
+}
+
+// --- Task 5 fixtures: real child processes and real git worktrees ----------
+// watch's contract is about a real pid and a real (possibly live-appended)
+// file, and abort/reconcile's contract is about real git worktrees/branches
+// — the brief bans stubbing any of this out, so these helpers all shell out
+// for real rather than mocking process liveness or git state.
+
+// A real, short-lived child for watch's pid-liveness tests. t.after kills it
+// defensively (SIGKILL, errors ignored) so a test that asserts before the
+// child would have exited on its own never leaves an orphan node process
+// running past this file's own test run.
+function spawnChild(t, ms) {
+  const child = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: 'ignore' })
+  t.after(() => {
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      // already dead — nothing to clean up
+    }
+  })
+  return child
+}
+
+// Runs the CLI asynchronously rather than through `run()`'s blocking
+// spawnSync — required for any test that ALSO owns a short-lived
+// `spawnChild` expected to die WHILE the CLI call is in flight. `spawnSync`
+// blocks this test file's own event loop for the whole call, which stops
+// Node from reaping ITS OWN already-exited child in the meantime — a
+// zombie process still answers `kill(pid, 0)` as "alive" until its parent
+// reaps it (a real POSIX rule, not a bug in cmdWatch), so a test using
+// `run()` here would see watch's pid check spuriously stay true for the
+// zombie's entire lifetime. Using `spawn`+`await once(..., 'exit')` instead
+// keeps this process's event loop free to reap that child the moment it
+// actually exits, exactly like a real caller (a shell driving `claude -p
+// … &` and `orchestrate.mjs watch` as separate, unrelated processes) would
+// never have this problem in the first place.
+async function runAsync(cwd, home, ...args) {
+  const proc = spawn('node', [SCRIPT, ...args], { cwd, env: { ...process.env, BM_ORCH_HOME: home } })
+  let stdout = ''
+  let stderr = ''
+  proc.stdout.on('data', (d) => {
+    stdout += d
+  })
+  proc.stderr.on('data', (d) => {
+    stderr += d
+  })
+  const [status] = await once(proc, 'exit')
+  return { status, stdout, stderr }
+}
+
+// `git worktree add <path> -b <branch> HEAD` needs an actual commit for HEAD
+// to resolve to — orchFixture's repo is `git init -q` with no commits at
+// all, which every OTHER test in this file is fine with (orchestrate.mjs
+// only ever needs a `.git` entry to exist, never a commit). Only the abort/
+// reconcile tests below exercise real worktree/branch plumbing, so only
+// they call this. A throwaway local identity (`-c user.email=…`) keeps this
+// independent of whatever global git config this machine happens to have.
+function commitEverything(project, message) {
+  spawnSync('git', ['-C', project, 'add', '-A'], { encoding: 'utf8' })
+  const result = spawnSync(
+    'git',
+    ['-C', project, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', message],
+    { encoding: 'utf8' },
+  )
+  if (result.status !== 0) throw new Error(`git commit failed: ${result.stderr}`)
 }
 
 // --- RUN_STALE_MS -----------------------------------------------------------
@@ -782,4 +855,522 @@ test('init builds its queue from the real gate: bugs oldest-first then tasks old
   const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
   assert.deepEqual(written.queue.map((q) => q.id), ['bug-2', 'bug-7', 'task-1'])
   assert.ok(written.queue.every((q) => q.stage === 'pending'), 'every queued item should start pending regardless of its own gate result')
+})
+
+// --- Task 5: watch --------------------------------------------------------
+// Every case here uses a real `node -e` child (never a mock of process
+// liveness) and the two checked-in stream-json fixture heads — see this
+// file's own header comment for why, and the brief's own ban on ever
+// invoking the real `claude` binary from an automated test.
+
+// Test case 1: a short-lived child + stream-init.jsonl → exits 0 the moment
+// the child dies, the fixture's session id landed in run.json via the same
+// field cmdStage's own `--session` writes, and updatedAt strictly advanced.
+test('watch exits 0 the moment a short-lived child dies, with the fixture session id landed in run.json and updatedAt moved', async (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-9', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+
+  const child = spawnChild(t, 200)
+
+  // runAsync, not the blocking `run()` — see that helper's own comment:
+  // this test's own event loop must stay free to reap `child` the moment
+  // it actually exits, or `child.pid` looks "alive" to watch's pid check
+  // for as long as this test's process is blocked, zombie or not.
+  const out = await runAsync(
+    project, home, 'watch', 'task-9',
+    '--pid', String(child.pid), '--jsonl', STREAM_INIT,
+    '--interval-ms', '30', '--budget-ms', '5000',
+  )
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const item = after.queue.find((q) => q.id === 'task-9')
+  assert.equal(item.sessionId, 'a1b2c3d4-5e6f-4a1b-8c2d-9f0e1a2b3c4d')
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance')
+})
+
+// Test case 2: a long-lived child with a tiny budget → exits 3 (child still
+// alive; the test kills it), having heartbeated at least twice along the
+// way — sampled by polling run.json from a SEPARATE process while watch's
+// own blocking loop runs, since watch itself is synchronous end-to-end (see
+// orchestrate.mjs's own sleepSync comment for why that is safe here).
+test('watch heartbeats at least twice before its budget elapses, then exits 3 with the child still alive', async (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-11', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const child = spawnChild(t, 60_000)
+  const watchProc = spawn(
+    'node',
+    [SCRIPT, 'watch', 'task-11', '--pid', String(child.pid), '--jsonl', STREAM_NOINIT, '--interval-ms', '100', '--budget-ms', '300'],
+    { cwd: project, env: { ...process.env, BM_ORCH_HOME: home } },
+  )
+  t.after(() => {
+    try {
+      watchProc.kill('SIGKILL')
+    } catch {
+      // already exited
+    }
+  })
+
+  const file = runFile(home, project)
+  const seen = new Set()
+  const poll = setInterval(() => {
+    try {
+      seen.add(JSON.parse(fs.readFileSync(file, 'utf8')).updatedAt)
+    } catch {
+      // a transient read racing writeRunAtomic's rename — try again next tick
+    }
+  }, 20)
+
+  const [code] = await once(watchProc, 'exit')
+  clearInterval(poll)
+
+  assert.equal(code, 3)
+  assert.ok(seen.size >= 2, `expected at least two distinct heartbeats, saw ${seen.size}`)
+  child.kill('SIGKILL')
+})
+
+// Test case 3: stream-noinit.jsonl (no init-type event anywhere in it) never
+// crashes and never picks up the OTHER lines' own `session_id` fields —
+// only a `type:"system","subtype":"init"` event counts. Exit is still
+// governed purely by the pid rule.
+test('watch with stream-noinit.jsonl never finds a session id, and still exits cleanly once the child dies', async (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-12', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const child = spawnChild(t, 200)
+
+  // runAsync — see test case 1's own comment on why the blocking `run()`
+  // would risk seeing a zombie `child` as falsely "alive."
+  const out = await runAsync(
+    project, home, 'watch', 'task-12',
+    '--pid', String(child.pid), '--jsonl', STREAM_NOINIT,
+    '--interval-ms', '30', '--budget-ms', '5000',
+  )
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.queue.find((q) => q.id === 'task-12').sessionId, null)
+})
+
+// Supplementary: a `--jsonl` file that never gets created is tolerated for
+// exactly one interval (the child may not have opened it yet) but is a
+// hard exit-1 the moment a SECOND check still finds it missing.
+test('watch exits 1 when the jsonl file is still missing after the first interval', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-13', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const child = spawnChild(t, 60_000)
+  const missingJsonl = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-jsonl-')), 'never-written.jsonl')
+
+  const out = run(
+    project, home, 'watch', 'task-13',
+    '--pid', String(child.pid), '--jsonl', missingJsonl,
+    '--interval-ms', '30', '--budget-ms', '5000',
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /never-written\.jsonl/)
+  child.kill('SIGKILL')
+})
+
+// Supplementary: a "parse wedge" — `--jsonl` naming something that is not
+// even readable as a file (here, a directory) — is a hard exit-1 on the
+// very FIRST check, distinct from the missing-file grace period above.
+test('watch exits 1 when --jsonl names something unreadable as a file at all (a parse wedge)', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-14', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const child = spawnChild(t, 60_000)
+  const dirAsJsonl = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-wedge-'))
+  t.after(() => fs.rmSync(dirAsJsonl, { recursive: true, force: true }))
+
+  const out = run(
+    project, home, 'watch', 'task-14',
+    '--pid', String(child.pid), '--jsonl', dirAsJsonl,
+    '--interval-ms', '30', '--budget-ms', '5000',
+  )
+
+  assert.equal(out.status, 1)
+  child.kill('SIGKILL')
+})
+
+test('watch with no run exits 3 before ever touching the pid or jsonl file', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'watch', 'ghost-1', '--pid', '999999', '--jsonl', '/nonexistent')
+
+  assert.equal(out.status, 3)
+})
+
+test('watch with an unknown item id exits 1', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const out = run(project, home, 'watch', 'ghost-1', '--pid', '999999', '--jsonl', '/nonexistent')
+
+  assert.equal(out.status, 1)
+})
+
+test('watch missing --pid or --jsonl exits 1', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-1', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  assert.equal(run(project, home, 'watch', 'task-1', '--jsonl', STREAM_INIT).status, 1)
+  assert.equal(run(project, home, 'watch', 'task-1', '--pid', '123').status, 1)
+})
+
+// --- Task 5: verify ---------------------------------------------------------
+// verify's own `--cwd` is a SEPARATE directory from the project root
+// resolveProjectRoot() finds from the CLI's own process cwd — exactly the
+// worktree-vs-project-root split this file's header comment on
+// resolveProjectRoot documents. Every test below spawns the CLI with `cwd:
+// project` (so run.json resolves normally) while pointing `--cwd` at an
+// unrelated throwaway directory standing in for "the item's worktree."
+
+// Test case 4: backlog/verify.json with one passing, one failing command.
+test('verify runs backlog/verify.json commands in order, capturing pass/fail and tails; exit 1 on any failure', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-1', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true })
+  fs.writeFileSync(
+    path.join(worktree, 'backlog', 'verify.json'),
+    JSON.stringify({ commands: ['node -e "process.exit(0)"', 'node -e "console.error(\'boom\'); process.exit(1)"'] }),
+  )
+
+  const out = run(project, home, 'verify', 'task-1', '--cwd', worktree, '--json')
+
+  assert.equal(out.status, 1, out.stderr)
+  const rows = JSON.parse(out.stdout)
+  assert.equal(rows.length, 2)
+  assert.equal(rows[0].cmd, 'node -e "process.exit(0)"')
+  assert.equal(rows[0].ok, true)
+  assert.equal(rows[1].ok, false)
+  assert.match(rows[1].tail, /boom/)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(written.queue[0].verification, rows)
+})
+
+// Test case 5: no verify.json, package.json with only a `test` script.
+test('verify with no verify.json falls back to the package.json test script only', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-2', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }))
+
+  const out = run(project, home, 'verify', 'task-2', '--cwd', worktree, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const rows = JSON.parse(out.stdout)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].cmd, 'npm run test')
+  assert.equal(rows[0].ok, true)
+})
+
+test('verify prefers pnpm run when pnpm-lock.yaml is present, and orders test/typecheck/build', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-3', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  fs.writeFileSync(path.join(worktree, 'pnpm-lock.yaml'), '')
+  fs.writeFileSync(
+    path.join(worktree, 'package.json'),
+    JSON.stringify({ scripts: { build: 'node -e "process.exit(0)"', test: 'node -e "process.exit(0)"', typecheck: 'node -e "process.exit(0)"' } }),
+  )
+
+  const out = run(project, home, 'verify', 'task-3', '--cwd', worktree, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout).map((r) => r.cmd), ['pnpm run test', 'pnpm run typecheck', 'pnpm run build'])
+})
+
+// Test case 6: nothing resolvable at all → exit 5, zero rows written.
+test('verify with nothing resolvable exits 5 and writes zero verification rows', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-4', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+
+  const out = run(project, home, 'verify', 'task-4', '--cwd', worktree, '--json')
+
+  assert.equal(out.status, 5)
+  assert.deepEqual(JSON.parse(out.stdout), [])
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json must be untouched when nothing was resolved')
+})
+
+// Reuses Task 4's own extractDoneWhenCommands rather than a second parser —
+// this is the test proving that reuse actually happened: a fenced `## Done
+// when` block in the item's WORKTREE copy adds its own commands after the
+// baseline, and an exact repeat of a baseline command collapses to one row.
+test("verify appends the item's own fenced \"## Done when\" commands after the baseline, de-duplicating an exact repeat", (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  // Placed under done/, not open/ — by the time verify runs, backlog-execute
+  // has typically already moved the item there (see the design spec's own
+  // per-item loop, step 2), so verify's own item-file search must look in
+  // both, not just open/ the way listOpenItems (the gate's own reader) does.
+  fs.mkdirSync(path.join(worktree, 'backlog', 'tasks', 'done'), { recursive: true })
+  fs.writeFileSync(
+    path.join(worktree, 'backlog', 'tasks', 'done', 'task-5-fixture.md'),
+    '---\nid: task-5\ntitle: Some task\ncreated: 2026-08-01\n---\n\n## Plan\n\nDone.\n\n## Done when\n\n```bash\nnode -e "process.exit(0)"\necho only-in-done-when\n```\n',
+  )
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: ['node -e "process.exit(0)"'] }))
+
+  const out = run(project, home, 'verify', 'task-5', '--cwd', worktree, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout).map((r) => r.cmd), ['node -e "process.exit(0)"', 'echo only-in-done-when'])
+})
+
+test('verify with no run exits 3', (t) => {
+  const { home, project } = orchFixture(t)
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+
+  const out = run(project, home, 'verify', 'task-1', '--cwd', worktree)
+
+  assert.equal(out.status, 3)
+})
+
+test('verify with an unknown item id exits 1 and writes nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+
+  const out = run(project, home, 'verify', 'ghost-1', '--cwd', worktree)
+
+  assert.equal(out.status, 1)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
+test('verify without --cwd exits 1', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-1', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const out = run(project, home, 'verify', 'task-1')
+
+  assert.equal(out.status, 1)
+})
+
+// --- Task 5: reconcile -------------------------------------------------
+// Read-only, always — every test below either asserts run.json is
+// byte-identical before/after, or (like the plan section's own case 8)
+// simply never gives reconcile a reason its file would need writing in the
+// first place. Real git worktrees throughout, per this file's own
+// commitEverything/spawnChild header comment.
+
+test('reconcile suggests redispatch-after-stop when the worktree survives with an in-progress phase: marker but no recorded session id', (t) => {
+  const { home, project } = orchFixture(t)
+  const itemFile = seedReadyTask(project, 'task-20', 'Some task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktreePath = path.join(project, '.worktrees', 'task-20')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-20', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-20', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-20').status, 0)
+
+  // Simulate a crashed execute session: `start --as execute` wrote
+  // started:/phase: onto the WORKTREE's own copy, uncommitted (execute
+  // never commits — see the design spec's per-item loop) — and no session
+  // id, because the crash happened before watch's own jsonl parse ever
+  // caught the init event.
+  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile))
+  const original = fs.readFileSync(worktreeItemFile, 'utf8')
+  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
+
+  const before = fs.readFileSync(runFile(home, project))
+  const out = run(project, home, 'reconcile', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-20')
+  assert.equal(row.suggestion, 'redispatch-after-stop')
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'reconcile must never write to run.json')
+})
+
+test('reconcile suggests resume-session when a session id is already recorded and the marker is still live', (t) => {
+  const { home, project } = orchFixture(t)
+  const itemFile = seedReadyTask(project, 'task-21', 'Some task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktreePath = path.join(project, '.worktrees', 'task-21')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-21', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(
+    run(project, home, 'stage', 'task-21', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-21', '--session', 'sess-abc').status,
+    0,
+  )
+  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile))
+  const original = fs.readFileSync(worktreeItemFile, 'utf8')
+  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
+
+  const out = run(project, home, 'reconcile', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-21')
+  assert.equal(row.suggestion, 'resume-session')
+})
+
+// Test case 7: the recorded worktree was deleted out-of-band (a plain
+// `rm -rf`, never `git worktree remove` — exactly what a crash or a human
+// cleaning up by hand leaves behind: git's own admin entry and the branch
+// survive, the working directory does not). No file survives to read a
+// marker from, so the only honest suggestion is `inspect`, never a
+// redispatch that would silently skip billing a marker nobody can see.
+test('reconcile suggests inspect when the recorded worktree was deleted out-of-band, since no marker can be read', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-22', 'Some task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktreePath = path.join(project, '.worktrees', 'task-22')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-22', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-22', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-22').status, 0)
+  fs.rmSync(worktreePath, { recursive: true, force: true })
+
+  const before = fs.readFileSync(runFile(home, project));
+  const out = run(project, home, 'reconcile', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-22')
+  assert.equal(row.suggestion, 'inspect')
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'reconcile must never write to run.json')
+})
+
+test('reconcile suggests park when neither the worktree directory nor the branch ever actually exist', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-23', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(
+    run(
+      project, home, 'stage', 'task-23', 'dispatched',
+      '--worktree', path.join(project, '.worktrees', 'task-23'), '--branch', 'backlog/task-23',
+    ).status,
+    0,
+  )
+
+  const out = run(project, home, 'reconcile', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-23')
+  assert.equal(row.suggestion, 'park')
+})
+
+test('reconcile only reports non-terminal queue items, skipping merged/etc', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-24', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-24', 'merged').status, 0)
+
+  const out = run(project, home, 'reconcile', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout), [])
+})
+
+test('reconcile with no run exits 3', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'reconcile')
+
+  assert.equal(out.status, 3)
+})
+
+// --- Task 5: abort -------------------------------------------------------
+
+// Test case 8.
+test('abort removes a real worktree and its branch, then finishes the run as aborted', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-26', 'Some task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktreePath = path.join(project, '.worktrees', 'task-26')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-26', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-26', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-26').status, 0)
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.existsSync(worktreePath), false)
+  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-26'], { encoding: 'utf8' })
+  assert.equal(branchList.stdout.trim(), '')
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'aborted')
+})
+
+// Item files have exactly one writer family (the backlog skills) — abort
+// must record the marker for the SKILL to act on via `backlog.mjs stop`,
+// never stop it itself. This test both proves the attention entry lands and
+// documents, via its own assertion, that the worktree still gets torn down
+// regardless (abort's teardown is unconditional; the marker only changes
+// what gets RECORDED about it, never whether cleanup happens).
+test('abort records an attention entry when the worktree copy still carries an in-progress phase: marker, and still removes it', (t) => {
+  const { home, project } = orchFixture(t)
+  const itemFile = seedReadyTask(project, 'task-10', 'Some task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const worktreePath = path.join(project, '.worktrees', 'task-10')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-10', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-10', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-10').status, 0)
+
+  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile))
+  const original = fs.readFileSync(worktreeItemFile, 'utf8')
+  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.existsSync(worktreePath), false)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.attention.length, 1)
+  assert.equal(after.attention[0].id, 'task-10')
+  assert.match(after.attention[0].detail, /backlog\.mjs stop/)
+})
+
+test('abort on a run with a never-dispatched pending item does nothing destructive and still finishes aborted', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-25', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'aborted')
+  assert.deepEqual(after.attention, [])
+})
+
+test('abort with no run exits 3', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 3)
 })

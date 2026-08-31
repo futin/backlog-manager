@@ -4,12 +4,15 @@
 // skills/backlog/tools/backlog.mjs keeps for the registry and for item
 // files, applied here to `~/.backlog-manager/orchestrator/<project
 // key>/run.json`. Task 3 built init/lock, stage, heartbeat, attention,
-// finish and status; Task 4 (this one) adds `plan` — the queue builder and
-// refusal gate that decides which backlog items are executable, in what
-// order, and which are refused as ungroomed or flagged as carrying open
-// questions — and wires that same gate into `init`'s own queue builder;
-// Task 5 adds watch, verify, resume-reconcile and abort on top of the same
-// run file.
+// finish and status; Task 4 added `plan` — the queue builder and refusal
+// gate that decides which backlog items are executable, in what order, and
+// which are refused as ungroomed or flagged as carrying open questions —
+// and wired that same gate into `init`'s own queue builder; Task 5 (this
+// one) adds `watch` (survive a long headless child across the orchestrator
+// loop's own Bash-tool ceiling), `verify` (run the project's proof
+// commands and record them), `reconcile` (read-only crash-recovery report)
+// and `abort` (tear down worktrees/branches and mark the run over) on top
+// of the same run file.
 //
 //   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project /abs/path/to/repo
 //   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
@@ -28,6 +31,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 // --- errors -------------------------------------------------------------
@@ -35,9 +39,15 @@ import { fileURLToPath } from 'node:url'
 // bottom of this file) never has to re-classify an error after the fact —
 // the same pattern backlog.mjs's BacklogError uses, duplicated rather than
 // imported for the standalone reason above. The contract other tasks quote
-// verbatim: 0 success, 1 bad args / unknown item / unknown stage, 3 no run
-// exists, 4 lock held (a fresh OR stale `status: "running"` run.json — see
-// cmdInit's own long comment on why both refuse identically).
+// verbatim: 0 success, 1 bad args / unknown item / unknown stage / missing
+// input, 3 no run exists, 4 lock held (a fresh OR stale `status: "running"`
+// run.json — see cmdInit's own long comment on why both refuse
+// identically), 5 `verify` found nothing resolvable to prove itself with
+// (that command's own "cannot verify" exit, never used anywhere else). One
+// number is deliberately overloaded: `watch` also exits 3 when its own
+// budget elapses with the child still alive — see cmdWatch's own comment
+// for why reusing "3" there (rather than minting a new code) is
+// intentional, not a collision this file failed to notice.
 export class OrchestrateError extends Error {
   constructor(message, code) {
     super(message)
@@ -622,6 +632,118 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null } = {}) {
   })
 }
 
+// --- shared queue-item lookup + field application ---------------------
+// Factored out of what used to be cmdStage's own inline body so Task 5's
+// `watch` can write a session id it discovers mid-run through the EXACT
+// SAME code path `stage --session` uses, rather than a second
+// implementation that could silently drift from it (e.g. forgetting the
+// first-arrival stageAt guard below, or the field undefined-vs-explicit-
+// value distinction this function's callers both rely on). Neither
+// function touches `run.updatedAt` or writes the file — every caller does
+// both itself, since a plain stage transition and a heartbeat-driven
+// session-id write want that timestamp bump for different reasons and at
+// different points in their own control flow.
+
+function findQueueItem(run, itemId) {
+  const item = run.queue.find((q) => q.id === itemId)
+  if (!item) {
+    throw new OrchestrateError(`unknown item id: ${itemId}`, 1)
+  }
+  return item
+}
+
+function applyQueueItemFields(item, { stage, session, worktree, branch, note } = {}) {
+  if (stage !== undefined) {
+    item.stage = stage
+    // First-arrival only — see shared/types.ts's own RunQueueItem.stageAt
+    // comment: a fix-and-re-review loop revisiting `reviewing`/`fixing`
+    // must not move that stage's timestamp forward a second time.
+    if (!(stage in item.stageAt)) {
+      item.stageAt[stage] = nowISO()
+    }
+  }
+  if (session !== undefined) item.sessionId = session
+  if (worktree !== undefined) item.worktree = worktree
+  if (branch !== undefined) item.branch = branch
+  if (note !== undefined) item.note = note
+}
+
+// --- Task 5 shared helpers: item files inside a worktree, git plumbing ----
+// `verify`, `reconcile`, and `abort` all need to find one backlog item's
+// file inside an arbitrary directory (a worktree, or `--cwd`) and ask
+// whether it currently carries an in-progress marker — two small, narrow
+// readers in the same spirit as readItemForGate above (see that section's
+// own header comment for why this file keeps rolling its own tiny readers
+// instead of importing backlog.mjs's parseFrontmatter).
+
+// Finds one backlog item's file by id under `<dir>/backlog/{bugs,tasks}/
+// {open,done}` — broader than listOpenItems' open-only search (used by the
+// gate above) because by the time verify/reconcile/abort run, backlog-
+// execute has typically already moved the item to done/ inside the
+// worktree (see the design spec's own per-item loop, step 2 — the archive
+// move happens INSIDE the headless session, before review/verify/merge
+// ever run against the branch). Same `^<id>-` prefix convention as
+// listOpenItems; returns null rather than throwing when nothing matches —
+// "no item file here" is a normal thing for a crashed or pre-dispatch item
+// to report, not an error.
+function findItemFilePath(dir, itemId) {
+  const idPattern = new RegExp(`^${itemId}-`)
+  for (const section of ['bugs', 'tasks']) {
+    for (const state of ['open', 'done']) {
+      const sectionDir = path.join(dir, 'backlog', section, state)
+      if (!fs.existsSync(sectionDir)) continue
+      const found = fs.readdirSync(sectionDir).find((name) => idPattern.test(name))
+      if (found) return { path: path.join(sectionDir, found), section, state }
+    }
+  }
+  return null
+}
+
+// True when the item file at `absPath` carries a `<key>:` line inside its
+// frontmatter fence — a one-key version of readItemForGate's own line
+// splitter, reused below for both `started` (reconcile reports it, purely
+// as information) and `phase` (reconcile/abort's actual decision signal —
+// see itemHasPhaseMarker's own comment for why the two are not
+// interchangeable).
+function itemFrontmatterHasKey(absPath, key) {
+  const lines = fs.readFileSync(absPath, 'utf8').split('\n')
+  if (lines[0] !== '---') return false
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i] === '---') break
+    const sep = lines[i].indexOf(':')
+    if (sep === -1) continue
+    if (lines[i].slice(0, sep).trim() === key) return true
+  }
+  return false
+}
+
+// Deliberately `phase:` alone, not `started:` too, even though CLAUDE.md's
+// own invariant describes both keys together as "the marker." The two mean
+// different things once `--keep-started` enters the picture (see that
+// invariant's own long paragraph): `backlog-execute`'s SUCCESSFUL archive
+// path calls `stop --keep-started`, which removes `phase:` but
+// deliberately leaves `started:` behind for provenance — so a plain
+// `started:` with no `phase:` is a NORMAL completed item, not a crash.
+// Only `phase:` still being present means a session was genuinely live
+// when whatever holds this worktree stopped updating it — which is exactly
+// the thing reconcile/abort need to tell apart from "finished cleanly, the
+// orchestrator just hasn't gotten to it yet."
+function itemHasPhaseMarker(absPath) {
+  return itemFrontmatterHasKey(absPath, 'phase')
+}
+
+// `git show-ref` rather than `git branch --list` — a plumbing command with
+// a stable, script-friendly exit code (0 found, 1 not found) instead of
+// parsing porcelain output for presence. Run against `projectRoot` (the
+// MAIN tree, always — see resolveProjectRoot's own comment on why every
+// command in this file runs from there): a linked worktree's branch is a
+// branch in the SAME repository, visible from the main tree regardless of
+// whether the worktree directory itself still exists on disk.
+function branchExists(projectRoot, branch) {
+  if (!branch) return false
+  return spawnSync('git', ['-C', projectRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0
+}
+
 // --- commands ----------------------------------------------------------
 // Each cmdXxx function is the CLI's own contract for one command: parse
 // this command's flags, validate everything that can be validated before
@@ -890,25 +1012,8 @@ function cmdStage(argv) {
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
 
-  const item = run.queue.find((q) => q.id === itemId)
-  if (!item) {
-    throw new OrchestrateError(`unknown item id: ${itemId}`, 1)
-  }
-
-  item.stage = stage
-  // First-arrival only — shared/types.ts's own RunQueueItem.stageAt comment
-  // is explicit that a fix-and-re-review loop revisiting `reviewing`/
-  // `fixing` must not move that stage's timestamp forward a second time;
-  // stageAt is a shape record of which stages this item has ever visited,
-  // not a full event log. Guarding the write with `in` (not overwriting
-  // unconditionally) is what makes a stage's very first visit permanent.
-  if (!(stage in item.stageAt)) {
-    item.stageAt[stage] = nowISO()
-  }
-  if (session !== undefined) item.sessionId = session
-  if (worktree !== undefined) item.worktree = worktree
-  if (branch !== undefined) item.branch = branch
-  if (note !== undefined) item.note = note
+  const item = findQueueItem(run, itemId)
+  applyQueueItemFields(item, { stage, session, worktree, branch, note })
 
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)
@@ -1025,6 +1130,459 @@ function cmdStatus(argv) {
   return 0
 }
 
+// --- watch ------------------------------------------------------------
+// Blocks synchronously for up to `--budget-ms`, polling once every
+// `--interval-ms`: heartbeat, look for the child's session id in its own
+// jsonl transcript (once — see findSessionIdInJsonl below), check whether
+// the pid is still alive. Exits the moment the pid is gone (0 — the caller
+// inspects what actually happened next), or once the budget elapses with
+// the child still alive (3 — see OrchestrateError's own comment for why
+// reusing "3" here is deliberate: the orchestrator loop's reaction to
+// either "no run exists yet" or "still running, try again" is the same
+// shape of retry, so this file does not mint a fresh number for a
+// distinction no caller needs to act on differently). Budget default
+// 540000ms (9 minutes) stays under a 10-minute Bash-tool ceiling with
+// slack, which is the entire reason this command loops internally instead
+// of blocking for the child's whole lifetime in one call — a caller whose
+// own tool call has a wall-clock cap survives an item that runs longer than
+// that cap simply by calling `watch` again.
+
+// A synchronous sleep via `Atomics.wait` on a throwaway SharedArrayBuffer —
+// Node (unlike a browser main thread) allows blocking the main thread this
+// way. Chosen over shelling out to a `sleep` binary (not portable) or an
+// async setTimeout loop (would require every cmdXxx function in this file,
+// and `main` itself, to become promise-aware for the sake of this one
+// command); this keeps cmdWatch a plain synchronous function like every
+// other command here, at the cost of genuinely blocking the process for
+// `ms` — which is exactly what a dedicated watch-loop child process is FOR.
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+// `process.kill(pid, 0)` sends no signal at all, just probes whether the
+// pid could be signaled. ESRCH means no such process — the definite "gone"
+// case this command exists to detect. EPERM means the pid exists but
+// belongs to a user this process cannot signal — vanishingly unlikely for a
+// child the orchestrator loop itself spawned, but treated as "still alive"
+// rather than crashing, since a permissions error is not evidence of death.
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    if (e.code === 'ESRCH') return false
+    return true
+  }
+}
+
+// Pulls the session id out of the FIRST `{"type":"system","subtype":
+// "init",...}` event in a `claude -p --output-format stream-json`
+// transcript, tolerating a partial trailing line: the file is being
+// appended to live by the very child process this command is watching, so
+// the last "line" in it at any given instant may not have its trailing
+// newline yet. `text.split('\n')` always puts that in-progress tail (or, if
+// the file happens to currently end in a newline, a harmless empty string)
+// in the array's last slot, so dropping it via `slice(0, -1)` is correct
+// either way — a genuinely complete file's last real line is never the one
+// being discarded. A line that fails to parse as JSON is skipped, not
+// fatal — the one deliberately lenient spot in this parse, since an
+// interleaved non-JSON line some future `claude` version might emit is not
+// this tool's problem to solve. An outright failure to READ the file at all
+// (see the caller, which is the thing that decides what counts as a wedge)
+// is different from a bad line and is never swallowed here.
+function findSessionIdInJsonl(file) {
+  const text = fs.readFileSync(file, 'utf8')
+  const completeLines = text.split('\n').slice(0, -1)
+  for (const line of completeLines) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    let event
+    try {
+      event = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (event && event.type === 'system' && event.subtype === 'init' && typeof event.session_id === 'string') {
+      return event.session_id
+    }
+  }
+  return null
+}
+
+const WATCH_USAGE = 'usage: orchestrate.mjs watch <itemId> --pid <p> --jsonl <file> [--interval-ms 30000] [--budget-ms 540000]'
+
+function cmdWatch(argv) {
+  const itemId = argv[0]
+  let pidArg
+  let jsonlFile
+  let intervalMs = 30_000
+  let budgetMs = 540_000
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--pid') pidArg = argv[++i]
+    else if (argv[i] === '--jsonl') jsonlFile = argv[++i]
+    else if (argv[i] === '--interval-ms') intervalMs = Number(argv[++i])
+    else if (argv[i] === '--budget-ms') budgetMs = Number(argv[++i])
+  }
+
+  if (!itemId || pidArg === undefined || jsonlFile === undefined) {
+    throw new OrchestrateError(WATCH_USAGE, 1)
+  }
+  const pid = Number(pidArg)
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new OrchestrateError(`--pid must be a positive integer: ${pidArg}`, 1)
+  }
+  if (!Number.isInteger(intervalMs) || intervalMs <= 0) {
+    throw new OrchestrateError(`--interval-ms must be a positive integer: ${intervalMs}`, 1)
+  }
+  if (!Number.isInteger(budgetMs) || budgetMs <= 0) {
+    throw new OrchestrateError(`--budget-ms must be a positive integer: ${budgetMs}`, 1)
+  }
+
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+
+  // Fail fast, before any sleeping happens: an unknown item (or no run at
+  // all — readRun's own code-3 "no run exists") is a problem with THIS
+  // call, independent of how long the loop below would otherwise run.
+  findQueueItem(readRun(dir), itemId)
+
+  let sessionId = null
+  let elapsed = 0
+  let checks = 0
+  for (;;) {
+    const jsonlExists = fs.existsSync(jsonlFile)
+    let newlyFoundSessionId = null
+    if (jsonlExists) {
+      if (sessionId === null) {
+        try {
+          newlyFoundSessionId = findSessionIdInJsonl(jsonlFile)
+        } catch (e) {
+          // Anything but ENOENT here (existsSync above already ruled that
+          // out) — e.g. `--jsonl` naming a directory — is the "parse
+          // wedge" the exit-code contract names: fatal on whichever check
+          // hits it, unlike a merely MISSING file below, which gets one
+          // interval of grace.
+          throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message}) — this is a parse wedge, not a transient miss`, 1)
+        }
+        if (newlyFoundSessionId !== null) sessionId = newlyFoundSessionId
+      }
+    } else if (checks > 0) {
+      throw new OrchestrateError(`--jsonl file not found after the first interval: ${jsonlFile}`, 1)
+    }
+    checks++
+
+    // One read-modify-write per tick: the heartbeat's updatedAt bump and a
+    // freshly-discovered session id (if any) land in the SAME write, via
+    // applyQueueItemFields — the exact function `stage --session` itself
+    // uses (see that function's own header comment for why that reuse
+    // matters, not just that it is convenient).
+    const run = readRun(dir)
+    if (newlyFoundSessionId !== null) {
+      applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId })
+    }
+    run.updatedAt = nowISO()
+    writeRunAtomic(dir, run)
+
+    if (!pidAlive(pid)) return 0
+
+    elapsed += intervalMs
+    if (elapsed >= budgetMs) return 3
+
+    sleepSync(intervalMs)
+  }
+}
+
+// --- verify -------------------------------------------------------------
+// Resolves the project's own proof commands (backlog/verify.json, else
+// package.json's test/typecheck/build scripts) plus the item's own fenced
+// `## Done when` commands (Task 4's own extractDoneWhenCommands, reused
+// verbatim rather than re-parsed — see that function's own comment for the
+// convention it recognizes), runs every one of them in `--cwd` regardless
+// of an earlier failure (a red command must never hide a second one), and
+// records `{cmd, ok, tail}` rows onto the queue item's `verification`
+// array. `--cwd` names the WORKTREE to run in and to read
+// `backlog/verify.json` / `package.json` / the item file from; it is a
+// completely separate directory from the one resolveProjectRoot() walks up
+// from (this process's own cwd, always the project root) — see
+// resolveProjectRoot's own long comment for exactly why that split exists,
+// and why `verify` takes `--cwd` explicitly instead of being run from
+// inside the worktree the way a naive port of `stage`'s style might do.
+
+function isPnpmManaged(cwd, pkg) {
+  if (fs.existsSync(path.join(cwd, 'pnpm-lock.yaml'))) return true
+  return typeof pkg.packageManager === 'string' && pkg.packageManager.startsWith('pnpm')
+}
+
+// The "obvious" package.json scripts, in the fixed order the brief names:
+// test, typecheck, build. Only scripts that actually exist are included —
+// a project with just a `test` script gets exactly one command, never two
+// more that are guaranteed to fail as "missing script."
+function packageJsonVerifyCommands(cwd) {
+  let pkg
+  try {
+    pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'))
+  } catch {
+    return []
+  }
+  const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
+  const runner = isPnpmManaged(cwd, pkg) ? 'pnpm run' : 'npm run'
+  return ['test', 'typecheck', 'build'].filter((name) => scripts[name] !== undefined).map((name) => `${runner} ${name}`)
+}
+
+// The item's own `## Done when` fenced commands, read from `cwd`'s copy of
+// the item file (open/ or done/ — see findItemFilePath's own comment for
+// why both are searched). A missing item file, or a body with no `## Done
+// when` section at all, both resolve to "nothing extra" rather than an
+// error — mirroring findUnresolvedCommands' own tolerant style in the gate
+// section above.
+function itemDoneWhenCommands(cwd, itemId) {
+  const found = findItemFilePath(cwd, itemId)
+  if (!found) return []
+  const { body } = readItemForGate(found.path)
+  const doneWhen = extractSection(body, 'Done when')
+  if (doneWhen === undefined) return []
+  return extractDoneWhenCommands(doneWhen)
+}
+
+// Base commands (verify.json's own `commands` array when it resolves to
+// one, else the package.json fallback) unioned with the item's own
+// Done-when commands, de-duplicated while preserving first-occurrence
+// order — a Done-when block routinely repeats the project's own baseline
+// command (`pnpm test` is the obvious one), and running the identical
+// command twice would only double the wall-clock cost of every verify call
+// for zero extra proof.
+function resolveVerifyCommands(cwd, itemId) {
+  let base
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(cwd, 'backlog', 'verify.json'), 'utf8'))
+    base = Array.isArray(parsed.commands) ? parsed.commands : packageJsonVerifyCommands(cwd)
+  } catch {
+    // no backlog/verify.json here, or it doesn't parse — package.json
+    // scripts is the only other place a baseline command can come from.
+    base = packageJsonVerifyCommands(cwd)
+  }
+
+  const seen = new Set()
+  const all = []
+  for (const cmd of [...base, ...itemDoneWhenCommands(cwd, itemId)]) {
+    if (seen.has(cmd)) continue
+    seen.add(cmd)
+    all.push(cmd)
+  }
+  return all
+}
+
+// Runs one command through a shell (so a plain string like `pnpm run test`
+// or a `## Done when` line works exactly as typed, with no argv-splitting
+// of this tool's own to get wrong), captures combined stdout+stderr, and
+// keeps only the last 20 lines — shared/types.ts's own RunVerification doc
+// comment: "enough to diagnose, not the whole log."
+function runVerifyCommand(cmd, cwd) {
+  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8' })
+  const combined = `${result.stdout ?? ''}${result.stderr ?? ''}`
+  const lines = combined.split('\n')
+  const trimmedLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
+  return { cmd, ok: result.status === 0, tail: trimmedLines.slice(-20).join('\n') }
+}
+
+const VERIFY_USAGE = 'usage: orchestrate.mjs verify <itemId> --cwd <dir> [--json]'
+
+function cmdVerify(argv) {
+  const itemId = argv[0]
+  let cwd
+  let json = false
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--cwd') cwd = argv[++i]
+    else if (argv[i] === '--json') json = true
+  }
+  if (!itemId || cwd === undefined) {
+    throw new OrchestrateError(VERIFY_USAGE, 1)
+  }
+
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const run = readRun(dir)
+  const item = findQueueItem(run, itemId)
+
+  const commands = resolveVerifyCommands(cwd, itemId)
+  if (commands.length === 0) {
+    // Exit 5: nothing this tool could find to prove the item works — no
+    // backlog/verify.json, no package.json test/typecheck/build script, and
+    // no fenced command under the item's own `## Done when`. Nothing is
+    // written: an item that cannot prove itself has nothing to record, and
+    // the caller (the orchestrator loop) parks it rather than merging code
+    // nobody has verified — see the design spec's own "Verify" step.
+    if (json) console.log(JSON.stringify([]))
+    else console.log('nothing to verify: no backlog/verify.json, no package.json test/typecheck/build script, and no fenced command under ## Done when')
+    return 5
+  }
+
+  // Every command runs regardless of an earlier one failing — a red first
+  // command must never hide a second, independent failure. The overall
+  // exit is 1 the moment any row is red, computed after every row has run.
+  const rows = commands.map((cmd) => runVerifyCommand(cmd, cwd))
+
+  item.verification = item.verification.concat(rows)
+  run.updatedAt = nowISO()
+  writeRunAtomic(dir, run)
+
+  if (json) {
+    console.log(JSON.stringify(rows))
+  } else {
+    for (const row of rows) console.log(`${row.ok ? 'PASS' : 'FAIL'}  ${row.cmd}`)
+  }
+  return rows.every((row) => row.ok) ? 0 : 1
+}
+
+// --- reconcile ----------------------------------------------------------
+// Read-only crash-recovery report: for every queue item still IN the
+// pipeline (not one of the terminal stages below), compares the run file's
+// own record against what is actually on disk/in git right now, and prints
+// one of a fixed set of suggested next actions. Never writes run.json — a
+// human, or the backlog-orchestrate skill's own `--resume` flow (Task 7),
+// decides what to actually DO with each suggestion; this command's only job
+// is to tell them accurately what it found.
+
+// RunStage's own doc comment: "`merged` is the only success exit; `failed`,
+// `skipped`, `needs-answers`, `ungroomed`, and `parked` are the five ways
+// an item leaves the pipeline without merging." An item already in one of
+// these six has already left the pipeline by definition — reconciling it
+// against a possibly-gone worktree would tell a human nothing they don't
+// already know from its stage alone.
+const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'])
+
+// The fixed suggestion vocabulary the brief names, in priority order:
+//   1. Neither the worktree directory nor the branch survive at all —
+//      nothing to resume, redispatch onto, or even inspect. `park`: a
+//      human decides whether this item re-enters the queue from scratch.
+//   2. The branch survives but the worktree directory does not — no live
+//      file to read a marker from, and no checkout to resume a session
+//      inside even with a known session id. `inspect`: a human decides
+//      whether to re-create the worktree from the branch tip or abandon it.
+//   3. The worktree is here and its own copy of the item file is mid-
+//      activity (see itemHasPhaseMarker's own comment for why `phase:`
+//      specifically, not `started:` alone, is what "in progress" means). A
+//      known session id means the SAME claude session can be resumed in
+//      place (`resume-session`); no session id means dispatch crashed
+//      before ever getting far enough to have one recorded, so the skill's
+//      job is `backlog.mjs stop` (bill the dead interval) followed by a
+//      FRESH dispatch on the same worktree/branch (`redispatch-after-stop`).
+//   4. Worktree present, no in-progress marker: either it never started
+//      real work, or it finished and stopped cleanly but the orchestrator
+//      itself died before committing/reviewing/merging. Reconcile cannot
+//      tell those two apart from the outside, so a human looks (`inspect`).
+function suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId }) {
+  if (!worktreeExists && !itemBranchExists) return 'park'
+  if (!worktreeExists) return 'inspect'
+  if (marker) return sessionId ? 'resume-session' : 'redispatch-after-stop'
+  return 'inspect'
+}
+
+function cmdReconcile(argv) {
+  const json = argv.includes('--json')
+
+  const projectRoot = resolveProjectRoot()
+  const dir = projectDir(orchHome(), projectRoot)
+  const run = readRun(dir) // never written back — see this function's own header comment
+
+  const report = run.queue
+    .filter((item) => !RECONCILE_TERMINAL_STAGES.has(item.stage))
+    .map((item) => {
+      const worktreeExists = !!item.worktree && fs.existsSync(item.worktree)
+      const itemBranchExists = branchExists(projectRoot, item.branch)
+      let itemFileLocation = null
+      let started = false
+      let marker = false
+      if (worktreeExists) {
+        const found = findItemFilePath(item.worktree, item.id)
+        if (found) {
+          itemFileLocation = `${found.section}/${found.state}`
+          started = itemFrontmatterHasKey(found.path, 'started')
+          marker = itemHasPhaseMarker(found.path)
+        }
+      }
+      return {
+        id: item.id,
+        stage: item.stage,
+        worktreeExists,
+        branchExists: itemBranchExists,
+        itemFileLocation,
+        started,
+        marker,
+        sessionId: item.sessionId,
+        suggestion: suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId: item.sessionId }),
+      }
+    })
+
+  if (json) {
+    console.log(JSON.stringify(report))
+  } else {
+    for (const row of report) {
+      console.log(
+        `${row.id}  stage=${row.stage}  worktree=${row.worktreeExists}  branch=${row.branchExists}  ` +
+          `marker=${row.marker}  session=${row.sessionId ?? '(none)'}  -> ${row.suggestion}`,
+      )
+    }
+  }
+  return 0
+}
+
+// --- abort ----------------------------------------------------------------
+// Tears down every queue item's worktree and branch (best-effort — a
+// worktree/branch git has never heard of, or already removed, just fails
+// these calls harmlessly; abort does not treat that as fatal, since it is
+// exactly the state abort is trying to reach anyway), then finishes the run
+// as `aborted` via the SAME cmdFinish this file's own `finish` command
+// uses.
+//
+// This tool NEVER runs `backlog.mjs stop` itself, even though that is the
+// one thing that would make an in-progress `phase:`/`started:` marker
+// disappear cleanly before the worktree carrying it is discarded.
+// CLAUDE.md's own invariant is explicit: item files have exactly ONE
+// writer family — the backlog skills, via `backlog.mjs start`/`stop` — and
+// this tool is not one of them. So when abort finds a marker, it records
+// that fact in `attention` instead and leaves the file untouched; the
+// backlog-orchestrate SKILL (Task 7) is the one that runs `backlog.mjs stop
+// <id>` in the worktree, BEFORE calling this command, so the dead interval
+// gets billed by the one thing allowed to bill it.
+function cmdAbort() {
+  const projectRoot = resolveProjectRoot()
+  const dir = projectDir(orchHome(), projectRoot)
+  const run = readRun(dir)
+
+  for (const item of run.queue) {
+    if (item.worktree) {
+      if (fs.existsSync(item.worktree)) {
+        const found = findItemFilePath(item.worktree, item.id)
+        if (found && itemHasPhaseMarker(found.path)) {
+          run.attention.push({
+            id: item.id,
+            kind: 'parked',
+            detail:
+              `worktree ${item.worktree} still carried an in-progress phase: marker at abort time — run ` +
+              `\`backlog.mjs stop ${item.id}\` there before the worktree is discarded (this tool never writes item files itself)`,
+          })
+        }
+      }
+      // Always attempted, not gated on fs.existsSync above — this also
+      // cleans up a worktree whose directory was already deleted
+      // out-of-band (a stale admin entry under .git/worktrees/). Never
+      // `git reset --hard` anywhere in this teardown: Task 1 proved
+      // empirically that `reset --hard` silently destroys unrelated
+      // uncommitted modifications, a risk `worktree remove`/`branch -D`
+      // (which only ever touch THIS item's own worktree/branch, never the
+      // main tree's own working copy) simply do not carry.
+      spawnSync('git', ['-C', projectRoot, 'worktree', 'remove', '--force', item.worktree])
+    }
+    if (item.branch) {
+      spawnSync('git', ['-C', projectRoot, 'branch', '-D', item.branch])
+    }
+  }
+
+  run.updatedAt = nowISO()
+  writeRunAtomic(dir, run)
+
+  return cmdFinish(['--status', 'aborted'])
+}
+
 const USAGE = `usage: orchestrate.mjs <command>
 
 commands:
@@ -1034,7 +1592,11 @@ commands:
   heartbeat  re-stamp the run's updatedAt
   attention  record something a human should look at
   finish     set the run's final status
-  status     print the current run`
+  status     print the current run
+  watch      survive a long headless child across the loop's own Bash cap
+  verify     run the project's proof commands and record them
+  reconcile  read-only crash-recovery report
+  abort      tear down worktrees/branches and end the run`
 
 // --- CLI dispatch --------------------------------------------------------
 // Thin by design (see the "commands" section comment above): main only maps
@@ -1044,6 +1606,25 @@ commands:
 // one is, by construction, thrown before that command has touched
 // run.json — which is what makes "errors must write nothing at all" true
 // without main having to enforce it itself.
+//
+// The full exit-code contract, in one place — the backlog-orchestrate
+// SKILL's own prose quotes this verbatim, so it must stay accurate here
+// first:
+//   0  success.
+//   1  bad args, an unknown item id, an unknown stage/kind string, or
+//      missing required input — a problem with THIS call, independent of
+//      run state. Nothing is ever written when a command exits 1.
+//   3  no run exists for this project (readRun's own refusal) — EXCEPT for
+//      `watch`, which also exits 3 when its own `--budget-ms` elapses with
+//      the child still alive. That second meaning is a deliberate reuse of
+//      the same number, not a collision this file failed to notice: see
+//      cmdWatch's own comment for why "no run yet" and "still running, try
+//      again" are the same shape of retry from the caller's point of view.
+//   4  lock held — a fresh OR stale `status: "running"` run.json refusing a
+//      plain `init` (see cmdInit's own long comment on why both refuse
+//      identically).
+//   5  `verify` found nothing it could resolve to prove the item works —
+//      that command's own exit alone; no other command ever returns it.
 export function main(argv) {
   const [cmd, ...rest] = argv
   try {
@@ -1054,6 +1635,10 @@ export function main(argv) {
     if (cmd === 'attention') return cmdAttention(rest)
     if (cmd === 'finish') return cmdFinish(rest)
     if (cmd === 'status') return cmdStatus(rest)
+    if (cmd === 'watch') return cmdWatch(rest)
+    if (cmd === 'verify') return cmdVerify(rest)
+    if (cmd === 'reconcile') return cmdReconcile(rest)
+    if (cmd === 'abort') return cmdAbort()
     console.error(`unknown command: ${cmd ?? '(none)'}\n\n${USAGE}`)
     return 1
   } catch (e) {
