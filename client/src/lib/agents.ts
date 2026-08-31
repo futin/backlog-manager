@@ -12,16 +12,41 @@ import type {
  */
 
 /**
+ * Thrown by `unwrap` on any non-2xx response. `message` is the server's own
+ * `{ error }` wording (or the status-only fallback) exactly as before this
+ * class existed — every caller that only ever reads `.message` (every one of
+ * them until Task 13's fix round 1) sees identical behaviour, since
+ * `instanceof Error` still holds and `Error`'s own `.message` is untouched.
+ *
+ * `status` is what fix round 1 added it FOR: OrchestrateSheet's "already
+ * running" 409 used to be detected by matching a substring of the server's
+ * free-text message, which is exactly the kind of check a later wording
+ * change silently breaks without any test noticing (the regression test's
+ * own fixture message is independent of the server's real literal, so it
+ * could not have caught that drift either). The status code is the part of
+ * the response that is actually part of the contract; the message is prose
+ * for a human to read.
+ */
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/**
  * Unwraps the `{ error }` body the API answers failures with, so a caller can
- * render the server's own wording. The status is the fallback, not the message:
- * "409" tells a reader nothing, "this item's next step is groom" tells them
- * everything.
+ * render the server's own wording. The status is the fallback for the
+ * MESSAGE, not the message itself: "409" tells a reader nothing, "this
+ * item's next step is groom" tells them everything — but the status is
+ * still attached to the thrown `ApiError` (see its own comment) for the one
+ * caller that needs to branch on it rather than just display it.
  */
 async function unwrap<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => null)) as ({ error?: unknown } & T) | null;
   if (!res.ok) {
     const error = typeof data?.error === 'string' ? data.error : `request failed (${res.status})`;
-    throw new Error(error);
+    throw new ApiError(error, res.status);
   }
   return data as T;
 }

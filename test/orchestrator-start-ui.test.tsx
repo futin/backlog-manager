@@ -39,6 +39,17 @@ const PROJECTS: ProjectSummary[] = [
     counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } }
 ];
 
+// Two projects, for the run-drawer exclusion case below: it needs a FRESH
+// run to open RunDrawer from, but test case 4 already pins that a project's
+// own fresh run hides ITS OWN Orchestrate button — so the run has to belong
+// to a project other than the one the board is narrowed to, or there would
+// be no button left to click at all.
+const PROJECTS_TWO: ProjectSummary[] = [
+  ...PROJECTS,
+  { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 } }
+];
+
 // =====================================================================
 // The toolbar button — test cases 1-4 from the task brief, plus the
 // mutual-exclusion regression the brief's own context calls out (Task 12
@@ -157,16 +168,22 @@ describe('toolbar Orchestrate button', () => {
     expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeEnabled();
   });
 
-  // --- Mutual exclusion with LaunchSheet --------------------------------
+  // --- Dialog mutual exclusion ------------------------------------------
   // Task 12 made ItemDrawer/RunDrawer mutually exclusive because both are
   // `.drawer`s with no focus trap of their own — two mounted at once lets a
   // keyboard user Tab straight through the frontmost one into the other's
   // controls. OrchestrateSheet reuses LaunchSheet's own `.sheet` shape,
-  // which has exactly the same no-focus-trap property, and both a card's
-  // dispatch button and this toolbar button are always reachable at the
-  // same time (the toolbar never hides while a card's dispatch control is
-  // visible) — so the identical hazard exists for this second sheet unless
-  // the two are wired the same way the two drawers already are.
+  // which has exactly the same no-focus-trap property, and this toolbar
+  // button is always reachable at the same time as every card's dispatch
+  // button AND every open drawer's own trigger (a card, a run strip) — so
+  // the identical hazard exists for this sheet against all three of the
+  // other overlays, not just LaunchSheet's.
+  //
+  // Every case below also asserts `queryAllByRole('dialog')` has length at
+  // most 1 at each step — fix round 1's own ask, and a strictly stronger
+  // claim than "the one I closed is gone": a length check catches a THIRD
+  // dialog sneaking in that neither named assertion happens to be looking
+  // for, which two `queryByRole(..., { name })` checks on their own cannot.
   it('opening the Orchestrate sheet closes an open item-dispatch sheet, and vice versa', async () => {
     stub({ items: [fakeItem()] });
     await renderNarrowed();
@@ -175,14 +192,85 @@ describe('toolbar Orchestrate button', () => {
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
     await userEvent.click(within(card).getByRole('button', { name: 'execute' }));
     expect(await screen.findByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
 
     await userEvent.click(screen.getByRole('button', { name: 'Orchestrate' }));
     expect(await screen.findByRole('dialog', { name: /orchestrate/ })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
 
     await userEvent.click(within(card).getByRole('button', { name: 'execute' }));
     expect(await screen.findByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+  });
+
+  // Fix round 1 (Important — the gap this task's own review found): the
+  // first pass reasoned by analogy from LaunchSheet's proven coexistence
+  // with ItemDrawer that OrchestrateSheet could coexist with the drawers
+  // too, but never actually tested it — and the analogy does not hold, since
+  // LaunchSheet's coexistence is reachable only through a control INSIDE the
+  // drawer it coexists with, while this toolbar button sits outside every
+  // drawer and is clickable (or Tab-reachable past either drawer's own
+  // untrapped focus) the entire time one is open. See BoardView's own
+  // `openOrchestrateSheet` comment for the full reasoning; this pins it.
+  it('opening the Orchestrate sheet closes an open item drawer, and vice versa — never more than one dialog', async () => {
+    // Not just `open`: task-1 is `deriveAction`-queueable (open, groomed),
+    // so it appears a SECOND time once the sheet is open — inside its own
+    // queue preview (context point 6). Captured once here, while "a task"
+    // is still unique, and reused below so the later clicks target the
+    // CARD specifically rather than colliding with the preview's own copy
+    // of the same title.
+    stub({ items: [fakeItem()] });
+    await renderNarrowed();
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+    const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
+
+    // The card's face, not its dispatch tab — this opens ItemDrawer, the
+    // OTHER overlay from the one the case above already covers.
+    await userEvent.click(within(card).getByText('a task'));
+    expect(await screen.findByRole('dialog', { name: 'a task' })).toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Orchestrate' }));
+    expect(await screen.findByRole('dialog', { name: /orchestrate/ })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'a task' })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    // Back the other way: the card is still there behind where the sheet
+    // was (opening Orchestrate does not remove the card, only the drawer).
+    await userEvent.click(within(card).getByText('a task'));
+    expect(await screen.findByRole('dialog', { name: 'a task' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+  });
+
+  // The run-drawer half of the same gap. Needs a run belonging to a
+  // DIFFERENT project than the one the board is narrowed to — see
+  // PROJECTS_TWO's own comment for why: a project's own fresh run hides ITS
+  // button (test case 4), so a run strip for the NARROWED project would
+  // leave no Orchestrate button here to click at all.
+  it('opening the Orchestrate sheet closes an open run drawer, and vice versa — never more than one dialog', async () => {
+    stub({
+      projects: PROJECTS_TWO,
+      runs: [{ ...fixture, project: '/abs/beta', fresh: true, pastRuns: 0 }]
+    });
+    await renderNarrowed();
+
+    const strip = await screen.findByTestId('run-strip');
+    await userEvent.click(strip);
+    expect(await screen.findByRole('dialog', { name: 'beta run' })).toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Orchestrate' }));
+    expect(await screen.findByRole('dialog', { name: /orchestrate/ })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'beta run' })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
+
+    await userEvent.click(strip);
+    expect(await screen.findByRole('dialog', { name: 'beta run' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
   });
 });
 
@@ -336,8 +424,34 @@ describe('OrchestrateSheet', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  // Fix round 1 (Important): the case above alone cannot prove this is
+  // detected by STATUS rather than by matching a substring of the server's
+  // message — its fixture happens to say "already in progress" too, so a
+  // message-based check would pass it right alongside a status-based one.
+  // This case is the one that actually tells them apart: same 409 status,
+  // deliberately DIFFERENT wording (not even a real server literal), and
+  // the sheet still has to close into the strip. Before this fix round it
+  // would not have — the old check matched only the literal substring
+  // 'already in progress'.
+  it('closes on any 409 from this endpoint, regardless of the message wording', async () => {
+    stubOrchestrate({
+      ok: false, status: 409,
+      body: { error: 'nope, not right now' }
+    });
+    const { onClose, refresh } = renderSheet();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    expect(await screen.findByText('nope, not right now')).toBeInTheDocument();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+  });
+
   // The differentiation case 7's own auto-close must NOT generalise to
-  // every failure — see this describe block's own file comment.
+  // every failure — see this describe block's own file comment. 502
+  // specifically: the one status this endpoint answers with for "the
+  // dashboard itself is unreachable" (agents.service.ts), which retrying a
+  // moment later can genuinely resolve, unlike a 409.
   it('leaves the sheet open and retryable for any other error', async () => {
     stubOrchestrate({ ok: false, status: 502, body: { error: 'dashboard unreachable' } });
     const { onClose, refresh } = renderSheet();

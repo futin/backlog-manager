@@ -1,6 +1,6 @@
 import {
   EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock,
-  dispatchGate, modesUpTo, pickFrom
+  dispatchGate, modesUpTo, pickFrom, projectDispatchGate
 } from '../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../shared/types';
 
@@ -115,6 +115,58 @@ describe('dispatchGate', () => {
     const gate = dispatchGate(fakeItem(), { ...OK, projectPaths: ['/abs/other'] });
     expect(gate.control).toBe('disabled');
     expect(gate.control === 'enabled' ? '' : gate.reason).toContain('/abs/alpha');
+  });
+});
+
+/**
+ * `projectDispatchGate` (fix round 1 hoist) is `dispatchGate`'s own
+ * implementation now — `dispatchGate` below is a one-line delegation to it
+ * with `item.projectPath` supplied. These cases exercise it directly with a
+ * bare project path, the shape its two OTHER callers actually have on hand
+ * (`AgentsService.orchestrate()` and BoardView's toolbar gate, neither of
+ * which has a `BacklogItem` to build). Deliberately the same four scenarios
+ * `dispatchGate`'s own suite above already covers — the point of the hoist
+ * is that both functions now share one code path, so proving this one
+ * behaves right is what makes `dispatchGate`'s unchanged behaviour (also
+ * still asserted above, untouched) a guarantee rather than a coincidence.
+ */
+describe('projectDispatchGate', () => {
+  it('enables a visible project on a healthy dashboard', () => {
+    expect(projectDispatchGate(OK, '/abs/alpha')).toEqual({ control: 'enabled' });
+  });
+
+  it.each([
+    [{ enabled: false }, /BM_AGENTS/],
+    [{ reachable: false, error: 'ECONNREFUSED' }, /unreachable.*ECONNREFUSED/],
+    [{ spawnAvailable: false }, /CLAUDE_BIN/],
+    [{ remoteAnswer: false }, /remote answers/]
+  ])('hides the control for an environment-level block (%p)', (over, matcher) => {
+    const gate = projectDispatchGate({ ...OK, ...over }, '/abs/alpha');
+    expect(gate.control).toBe('hidden');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toMatch(matcher);
+  });
+
+  it('disables the control, with the reason, for the project-visibility block', () => {
+    const gate = projectDispatchGate({ ...OK, projectPaths: ['/abs/other'] }, '/abs/alpha');
+    expect(gate.control).toBe('disabled');
+    expect(gate.control === 'enabled' ? '' : gate.reason).toContain('/abs/alpha');
+  });
+
+  // The hoist's whole point, pinned directly: dispatchGate must answer
+  // IDENTICALLY to a direct call with the same status and the same path,
+  // for every one of the scenarios above — not merely similarly.
+  it('is exactly what dispatchGate delegates to', () => {
+    const item = fakeItem();
+    for (const status of [
+      OK,
+      { ...OK, enabled: false },
+      { ...OK, reachable: false, error: 'ECONNREFUSED' },
+      { ...OK, spawnAvailable: false },
+      { ...OK, remoteAnswer: false },
+      { ...OK, projectPaths: ['/abs/other'] }
+    ]) {
+      expect(dispatchGate(item, status)).toEqual(projectDispatchGate(status, item.projectPath));
+    }
   });
 });
 

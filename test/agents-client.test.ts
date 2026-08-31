@@ -1,5 +1,5 @@
 import {
-  dispatchAgent, fetchAgentPlan, fetchAgentsStatus, fetchOrchestratorRuns, sessionUrl, startOrchestrate
+  ApiError, dispatchAgent, fetchAgentPlan, fetchAgentsStatus, fetchOrchestratorRuns, sessionUrl, startOrchestrate
 } from '../client/src/lib/agents';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentDispatchRequest, OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
@@ -92,6 +92,35 @@ describe('the agents client', () => {
       Promise.resolve({ ok: false, status: 500, json: () => Promise.reject(new Error('not json')) } as Response)
     ) as jest.Mock;
     await expect(dispatchAgent(REQ)).rejects.toThrow('500');
+  });
+
+  // Fix round 1 (Important): every rejection here used to be a plain Error,
+  // so a caller that needed to distinguish two different non-2xx OUTCOMES
+  // from each other (not just get some text to show) had nothing but the
+  // server's free-text message to match against — see OrchestrateSheet's
+  // own history with this (client/src/components/board/OrchestrateSheet.tsx),
+  // where a substring match on "already in progress" would break silently
+  // the moment the server's wording changed. `ApiError` is the fix: the
+  // status code is a stable part of the contract, the message is prose.
+  it('rejects with an ApiError carrying the response status, not just the message', async () => {
+    stub({ ok: false, status: 409, body: { error: 'a run is already in progress for this project (run-9)' } });
+    const err = await startOrchestrate({ project: '/abs/alpha' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).message).toContain('already in progress');
+  });
+
+  // The other half of the "falls back to the status when the error body is
+  // unusable" case above: the FALLBACK message is not the only thing built
+  // from `res.status` — the real status is still attached even when the
+  // body could not be parsed into an `{ error }` string at all.
+  it('preserves the response status even when the error body is unusable', async () => {
+    global.fetch = jest.fn(() =>
+      Promise.resolve({ ok: false, status: 500, json: () => Promise.reject(new Error('not json')) } as Response)
+    ) as jest.Mock;
+    const err = await dispatchAgent(REQ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(500);
   });
 });
 

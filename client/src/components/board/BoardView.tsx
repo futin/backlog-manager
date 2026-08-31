@@ -7,14 +7,14 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { isInProgress } from '../../lib/item-progress';
 import { buildProjectHues } from '../../lib/project-hue';
-import { environmentBlock } from '../../../../shared/agent';
+import { projectDispatchGate } from '../../../../shared/agent';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunDrawer } from './RunDrawer';
 import { RunStrip } from './RunStrip';
-import type { AgentsStatus, BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
+import type { BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
 
 const PROJECT_KEY = 'backlog-manager.project';
 const STATUS_KEY = 'backlog-manager.status';
@@ -107,37 +107,6 @@ function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
   const compare = COMPARATORS[sort] ?? COMPARATORS.created;
   out.sort((a, b) => inProgressRank(a) - inProgressRank(b) || compare(a, b));
   return out;
-}
-
-/**
- * Task 13's toolbar Orchestrate button needs `dispatchGate`'s exact
- * hide-vs-disable split (shared/agent.ts, CLAUDE.md's own invariant on the
- * two being genuinely different kinds of "no") but has no `BacklogItem` to
- * hand it — an orchestrate run drains a whole PROJECT's queue, and
- * `dispatchGate`'s one item-shaped line is its last one
- * (`item.projectPath`). Rather than widen that shared signature for a
- * caller that has four fifths of its inputs and not the fifth, this repeats
- * just the one project-visibility check by hand and reuses `environmentBlock`
- * — the same shared four-reason ladder `dispatchGate` itself starts from —
- * for everything else, so the wording and the four environment reasons can
- * never drift from the per-item control's own, and only the one genuinely
- * different line lives here.
- */
-function projectDispatchGate(
-  status: AgentsStatus, projectPath: string
-): { control: 'enabled' } | { control: 'hidden' } | { control: 'disabled'; reason: string } {
-  const blocked = environmentBlock(status);
-  if (blocked !== null) return { control: 'hidden' };
-  if (!status.projectPaths.includes(projectPath)) {
-    return {
-      control: 'disabled',
-      // Verbatim match to dispatchGate's own `disabled` wording — one
-      // reason string for "the dashboard cannot see this project", used by
-      // a per-item control and a per-project one alike.
-      reason: `the dashboard cannot see ${projectPath} — no Claude session there inside its LOOKBACK_HOURS`
-    };
-  }
-  return { control: 'enabled' };
 }
 
 /**
@@ -278,8 +247,13 @@ export default function BoardView() {
    *     until the board's own filter already narrows to one, the same
    *     reading every other narrowed-view feature on this bar gives
    *     `projectValue`.
-   *  2/3. `projectDispatchGate` (above) — the environment ladder hides the
-   *     control outright, project-invisibility disables it with a reason.
+   *  2/3. `projectDispatchGate` (shared/agent.ts, imported — fix round 1
+   *     hoisted this out of a local copy here after a review found it
+   *     hand-duplicated the same reason string `dispatchGate` and
+   *     `orchestrate()` each already had their own copy of; see that
+   *     function's own doc comment for the full story) — the environment
+   *     ladder hides the control outright, project-invisibility disables it
+   *     with a reason.
    *  4. A fresh run already owns this project's whole story on the board
    *     (the strip): a second Start would only race the 409 the server
    *     already enforces (agents.service.ts's own activeRun check) — same
@@ -343,44 +317,60 @@ export default function BoardView() {
    * — the ItemDrawer render, its onDispatch — wants a plain
    * `BacklogItem | null`, and a union would push a `.kind` discriminant
    * into each of those reads to buy a guarantee two setters already give
-   * just as reliably). These two functions are the ONLY place either is
-   * ever set to a non-null value — both call sites below go through one of
-   * them, never `setOpen`/`setOpenRunProject` directly — which is what
-   * makes "opening either closes the other" a property of the code rather
-   * than a rule a future call site has to remember to uphold.
+   * just as reliably). These two functions are still the ONLY place either
+   * goes NON-null — both call sites below go through one of them, never
+   * `setOpen`/`setOpenRunProject` directly — but Task 13's fix round 1
+   * (below) added a third caller that clears them, so "opening either
+   * closes the other" is no longer the whole story; see that comment for
+   * the rest of it.
    */
   const openItemDrawer = (item: BacklogItem): void => {
     setOpenRunProject(null);
+    // Task 13 fix round 1 — see openOrchestrateSheet's own comment for why
+    // this line was added here (it was not, at first).
+    setOrchestrating(null);
     setOpen(item);
   };
   const openRunDrawer = (project: string): void => {
     setOpen(null);
+    setOrchestrating(null);
     setOpenRunProject(project);
   };
 
   /*
-   * Task 13 adds a second overlay pair on top of the one above, and the
-   * same hazard the comment above describes applies to it for the same
-   * structural reason: OrchestrateSheet reuses LaunchSheet's own `.sheet`
-   * shape verbatim (OrchestrateSheet.tsx's own header comment), which means
-   * it has exactly the same "no focus trap of its own" property the two
-   * `.drawer`s share, and the toolbar button that opens it is — like
-   * RunStrip's own open button — always on screen at the same time as
-   * every card's dispatch button. So `dispatching` and `orchestrating` get
-   * the identical treatment: two separate pieces of state, each cleared by
-   * the other's own opener and NEVER set directly outside these two
-   * functions, which is what makes "opening either closes the other" a
-   * property of the code the same way it already is for the drawer pair.
+   * Task 13 adds a second overlay pair, and the same hazard the comment
+   * above describes applies to it for the same structural reason:
+   * OrchestrateSheet reuses LaunchSheet's own `.sheet` shape verbatim
+   * (OrchestrateSheet.tsx's own header comment), which means it has exactly
+   * the same "no focus trap of its own" property the two `.drawer`s share.
+   * `dispatching` and `orchestrating` get the identical treatment LaunchSheet
+   * and OrchestrateSheet's two openers already gave each other in Task 13's
+   * first pass: two separate pieces of state, cleared by each other's opener,
+   * never set directly outside these two functions.
    *
-   * What this does NOT do is touch `open`/`openRunProject` at all — LaunchSheet
-   * already coexists with an open ItemDrawer on purpose (proven by
-   * test/dispatch-button.test.tsx's "opens the sheet from inside the
-   * drawer, leaving the drawer open behind it"), and OrchestrateSheet is
-   * the same kind of overlay as LaunchSheet, not the same kind as either
-   * drawer. Extending exclusivity to the drawers here would overturn that
-   * already-proven, deliberate behaviour rather than protect against the
-   * hazard Task 12 actually fixed — which was specifically about two
-   * `.drawer`s, not a `.sheet` layering over one.
+   * Fix round 1 (Important): the first pass stopped there and left
+   * `orchestrating` free to coexist with an open `open`/`openRunProject`
+   * drawer, reasoning by analogy that OrchestrateSheet was "the same kind of
+   * overlay as LaunchSheet" and LaunchSheet already coexists with ItemDrawer
+   * on purpose (test/dispatch-button.test.tsx's "opens the sheet from inside
+   * the drawer, leaving the drawer open behind it"). Review found the
+   * analogy does not actually hold: LaunchSheet's coexistence is reachable
+   * only through a per-item dispatch control that lives INSIDE the drawer it
+   * coexists with (or on the card the drawer was opened from), which is a
+   * narrow, deliberately-tested path. OrchestrateSheet's own trigger is the
+   * toolbar button, which is on screen and clickable at the exact same time
+   * as every card and every run strip — "drawer open, then Orchestrate" is
+   * not an edge case here, it is the ordinary path a keyboard user (Tab past
+   * either drawer's own untrapped focus) or even a mouse user (the drawer's
+   * backdrop covers the columns, but not the toolbar above it) reaches
+   * without trying to. So `orchestrating` now clears BOTH `open` and
+   * `openRunProject` too (see `openItemDrawer`/`openRunDrawer` above), and
+   * both drawer openers clear `orchestrating` right back — a true three-way
+   * exclusion, not a two-way one with a gap. `dispatching` (LaunchSheet)
+   * deliberately still does NOT participate in that three-way exclusion:
+   * the coexistence it has with the two drawers remains the proven,
+   * deliberate, tested behaviour described above, and nothing in this fix
+   * touches it.
    */
   const openLaunchSheet = (item: BacklogItem): void => {
     setOrchestrating(null);
@@ -388,6 +378,8 @@ export default function BoardView() {
   };
   const openOrchestrateSheet = (proj: string): void => {
     setDispatching(null);
+    setOpen(null);
+    setOpenRunProject(null);
     setOrchestrating(proj);
   };
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { startOrchestrate } from '../../lib/agents';
+import { ApiError, startOrchestrate } from '../../lib/agents';
 import {
   EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction
 } from '../../../../shared/agent';
@@ -38,11 +38,11 @@ import type { BacklogItem, PermissionMode } from '../../../../shared/types';
  *     `start` below) — the run strip (Task 11) is the ongoing-progress
  *     surface for an orchestrate run, not this sheet, so there is no
  *     "launched" panel here to show at all.
- * Four of the five state variables LaunchSheet holds (`plan`, `planError`,
- * `prompt`, `remoteControl`, `sessionId` — five, really) would therefore be
- * either meaningless or permanently unused in an "orchestrate mode" bolted
- * onto it, and every future edit to LaunchSheet would have to keep reasoning
- * about a second, unrelated flow sharing its state. A sibling avoids that;
+ * All five state variables LaunchSheet holds (`plan`, `planError`, `prompt`,
+ * `remoteControl`, `sessionId`) would therefore be either meaningless or
+ * permanently unused in an "orchestrate mode" bolted onto it, and every
+ * future edit to LaunchSheet would have to keep reasoning about a second,
+ * unrelated flow sharing its state. A sibling avoids that;
  * what IS genuinely shared — `MODELS`/`EFFORTS`/`clampMode`/`modesUpTo`
  * (shared/agent.ts), `useSettings()`'s seeding, the `.sheet*` CSS vocabulary,
  * and the Escape-closes-on-`window` idiom every dialog in this app already
@@ -65,11 +65,12 @@ export function OrchestrateSheet(
      *  this component cannot be tempted to re-run `dispatchGate`'s own
      *  checks a second time. Those checks already happened once to decide
      *  whether the toolbar button that opens this sheet was even clickable,
-     *  and the server re-runs its own copy (`environmentBlock` +
-     *  project-visibility, agents.service.ts) the instant Start is pressed —
-     *  a third client-side copy here would be one more place for the three
-     *  to drift apart, buying nothing the submit's own error path doesn't
-     *  already cover. */
+     *  and the server re-runs the same check (`projectDispatchGate`,
+     *  shared/agent.ts — one implementation, shared with `dispatchGate` and
+     *  BoardView's own toolbar gate since Task 13's fix round 1) the instant
+     *  Start is pressed — a second client-side copy here would be one more
+     *  place for the two to drift apart, buying nothing the submit's own
+     *  error path doesn't already cover. */
     spawnMaxPermission: PermissionMode | null;
     onClose: () => void;
     /** `useOrchestratorRuns()`'s own refresh — called after both a
@@ -162,20 +163,30 @@ export function OrchestrateSheet(
         const message = e instanceof Error ? e.message : String(e);
         setBusy(false);
         setError(message);
-        // The one failure this sheet cannot offer a retry for: a DIFFERENT
-        // run already exists for this project (agents.service.ts's own
-        // activeRun check, 409, "a run is already in progress for this
-        // project (<runId>)"). Every other error — an unreachable
-        // dashboard, a project that just lost visibility, a network blip —
-        // stays exactly as retryable as LaunchSheet's own generic error
-        // path already is (form stays up, Start stays enabled), because
-        // trying again might genuinely succeed. This one cannot: the
-        // conflicting run is what the NEXT startOrchestrate call would
-        // 409 against too, so the only useful next step is the strip that
-        // run already owns — `refresh()` pulls it in, then `onClose()`
-        // hands the screen to it, matching test case 7's own name for this
-        // ("closes into the strip world after refresh").
-        if (message.includes('already in progress')) {
+        // The failure this sheet cannot offer a useful retry for: a 409
+        // from this endpoint (agents.service.ts's `orchestrate()`) — most
+        // commonly its activeRun lock ("a run is already in progress for
+        // this project (<runId>)"), the case test case 7 names, but 409 is
+        // also what a project-visibility/CLAUDE_BIN/remote-answer state
+        // that raced the toolbar button's own render answers with. Every
+        // one of those is a state a blind retry from THIS sheet, with THIS
+        // stale form, is unlikely to fix on its own — and `refresh()` plus
+        // the toolbar's own button (which re-derives its gate from live
+        // state on the very next render) already report whichever of them
+        // actually happened better than a static error string frozen at
+        // click time. A 502 (the dashboard itself unreachable) is
+        // deliberately NOT included here — see the "leaves the sheet open
+        // and retryable for any other error" test — because trying again a
+        // moment later genuinely might succeed once the dashboard answers.
+        //
+        // Detected by STATUS, not by matching the server's free-text
+        // message (fix round 1: the substring check this replaced broke
+        // silently the instant the server's wording changed, and no test
+        // could catch that drift since the regression fixture's message was
+        // independent of the real literal). `ApiError` (lib/agents.ts) is
+        // what makes the status available to check at all — `unwrap` used
+        // to discard it.
+        if (e instanceof ApiError && e.status === 409) {
           refresh();
           onClose();
         }

@@ -8,7 +8,7 @@ import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import {
-  clampMode, deriveAction, dispatchBlock, environmentBlock, modesUpTo, pickFrom,
+  clampMode, deriveAction, dispatchBlock, modesUpTo, pickFrom, projectDispatchGate,
   EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
@@ -292,48 +292,44 @@ export class AgentsService {
       throw new HttpException({ error: 'not found' }, 404);
     }
 
-    // The other three environment-level blockers dispatchGate refuses on —
-    // dashboard unreachable, no CLAUDE_BIN, remote answers off — shared with
-    // dispatchGate through environmentBlock (shared/agent.ts) rather than
-    // re-derived here a second time. A version of this method once checked
-    // only `enabled` and project visibility and silently skipped these
-    // three: an unreachable dashboard fell all the way through to the
-    // project-map lookup below and came back as a flatly wrong "cannot see
-    // this project" (a failed map lookup and a genuinely invisible project
-    // look identical from there), and a dashboard with no CLAUDE_BIN or
-    // remote answers off had nothing here to stop it at all — the request
-    // went on to an actual POST /api/spawn that dispatchGate would have
-    // refused before any outbound call. `status.enabled` is already known
-    // true at this point (the block above returns otherwise), so
-    // environmentBlock's own first check can never fire here — only the
-    // three that follow it can.
-    const envBlocked = environmentBlock(status);
-    if (envBlocked !== null) {
+    // The other four dispatchGate conditions — the three remaining
+    // environment-level blockers (dashboard unreachable, no CLAUDE_BIN,
+    // remote answers off) plus project visibility — now share ONE
+    // implementation with dispatchGate itself: `projectDispatchGate`
+    // (shared/agent.ts), which dispatchGate delegates to for an item's own
+    // project path and which this method now calls directly with
+    // `req.project` in place of an item it does not have. Hoisted in Task
+    // 13's fix round 1 after a review found this method's project-visibility
+    // line (below, before the hoist) and the board's own toolbar gate had
+    // each hand-duplicated the exact same reason string dispatchGate
+    // produces — three copies of one rule, the identical drift class
+    // `environmentBlock`'s own doc comment already tells the story of one
+    // level down (an earlier version of THIS method reimplemented only the
+    // project-visibility line and silently dropped the other four — see
+    // that comment for the full incident). `status.enabled` is already
+    // known true at this point (the block above returns otherwise), so
+    // `projectDispatchGate`'s own first check (via environmentBlock) can
+    // never produce `hidden` for THAT specific reason here — only its other
+    // three environment reasons, or `disabled` for project visibility, can.
+    const gate = projectDispatchGate(status, req.project);
+    if (gate.control === 'hidden') {
       // Same split dispatch() makes for the identical situation via
       // dispatchBlock: 502 only when there is a genuine upstream to blame
       // (unreachable — we never got as far as asking the dashboard
       // anything); every other environment block is a state the reader can
       // go and change on the dashboard's own side, so 409.
-      throw new HttpException({ error: envBlocked }, !status.reachable ? 502 : 409);
+      throw new HttpException({ error: gate.reason }, !status.reachable ? 502 : 409);
     }
-
-    // dispatchGate's fifth and final check — the only one of its five lines
-    // that is genuinely item-shaped (item.projectPath) rather than a plain
-    // AgentsStatus read, which is why it is repeated here rather than
-    // shared through environmentBlock above: dispatchGate takes a whole
-    // BacklogItem only because every existing caller already has one on
-    // hand, and this is the one line that actually uses it. Still the same
-    // raw string compare against `status.projectPaths`, deliberately not
-    // realpath, and deliberately not a dirName derived from the path to
-    // route around the dashboard's own membership check — see the "A
-    // project the dashboard cannot see cannot be dispatched to" invariant
-    // in CLAUDE.md, which this line exists to uphold a second time for a
-    // route dispatchGate itself never sees.
-    if (!status.projectPaths.includes(req.project)) {
-      throw new HttpException(
-        { error: `the dashboard cannot see ${req.project} — no Claude session there inside its LOOKBACK_HOURS` },
-        409
-      );
+    if (gate.control === 'disabled') {
+      // Still the same raw string compare against `status.projectPaths`,
+      // deliberately not realpath, and deliberately not a dirName derived
+      // from the path to route around the dashboard's own membership check
+      // — see the "A project the dashboard cannot see cannot be dispatched
+      // to" invariant in CLAUDE.md, which this exists to uphold a second
+      // time for a route dispatchGate itself never sees. `gate.reason` is
+      // `projectDispatchGate`'s own wording, identical to what this line
+      // built by hand before the hoist.
+      throw new HttpException({ error: gate.reason }, 409);
     }
 
     // The lock. orchestrate.mjs's own `init` already refuses to start a
