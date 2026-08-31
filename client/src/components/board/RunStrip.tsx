@@ -1,5 +1,6 @@
 import { POLL_MS } from '../../hooks/useOrchestratorRuns';
 import { elapsedSince } from '../../lib/item-age';
+import { projectLabel } from '../../lib/project-label';
 import type { OrchestratorRun, RunStage } from '../../../../shared/types';
 
 /**
@@ -95,10 +96,10 @@ export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPa
   // `item.projectPath` directly, both already the same absolute registry
   // path; that comparison never touches this derivation. This component's
   // signature is fixed at `{ run, onOpen }`, so the one project-identifying
-  // field it has is the path itself, and a bare path is exactly the wrong
-  // thing to put in a glanceable strip next to short project pills
-  // everywhere else on this board — so it prints the readable tail of it.
-  const projectLabel = run.project.split('/').filter(Boolean).pop() ?? run.project;
+  // field it has is the path itself — see lib/project-label.ts (fix round 1)
+  // for why it's the readable tail rather than the raw path that gets
+  // printed here, and why that derivation now lives in one shared place.
+  const label = projectLabel(run.project);
 
   return (
     <button
@@ -112,7 +113,7 @@ export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPa
           (its amber fill) is never the only carrier of that state — the words
           beside it always are. */}
       <span className={live ? 'run-strip-dot run-strip-dot-live' : 'run-strip-dot'} aria-hidden="true" />
-      <span className="run-strip-project">{projectLabel}</span>
+      <span className="run-strip-project">{label}</span>
       <span className="run-strip-heartbeat">{live ? 'live' : age ?? '—'}</span>
       <span className="run-strip-count">{merged}/{total}</span>
       {/* Purely a graphical restatement of the count just printed — hidden

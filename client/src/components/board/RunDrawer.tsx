@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 
+import { projectLabel } from '../../lib/project-label';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
-import type { OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
+import type { OrchestratorRun, RunQueueItem, RunStage, RunVerification } from '../../../../shared/types';
 
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
@@ -72,14 +73,32 @@ function staleNote(run: RunPayload): string | null {
 }
 
 /**
- * The readable tail of a registry path — "/Users/dev/code/example-app"
- * becomes "example-app". Duplicated from RunStrip.tsx's own inline
- * derivation rather than imported: unlike ACTIVE_RUN_STAGES below, a real
- * enumerated vocabulary worth keeping in exactly one place, this is one line
- * of stdlib string-splitting with nothing to drift out of sync.
+ * The tone for one queue item's stage chip. Extends ItemCard's own two-tone
+ * system (`.board-card-stage` cyan default, `.board-card-stage-warn` amber
+ * for needs-answers, "the run is blocked on a person") with exactly the one
+ * new tone fix round 1 asked for: `.board-card-stage-bad` (red — `--red` is
+ * theme.css's own "danger thresholds" token) for `failed`. That one earns a
+ * dedicated tone rather than sharing the default cyan `merged` and every
+ * other stage still uses, because `RunAttention.kind` has no `failed`
+ * member (shared/types.ts) — a failed item never earns its own box in the
+ * Attention section below the way needs-answers/parked/fix-exhausted do, so
+ * this chip is the ONLY place in the whole drawer a person ever sees that it
+ * failed at all; sharing merged's colour there made a failure read as a
+ * success at a glance, which the text alone could correct but the chip
+ * shouldn't have to be read that closely to catch.
+ *
+ * `parked` reuses the warn tone rather than getting a third new one: it IS
+ * one of `RunAttention`'s three kinds — the same "blocked on a person"
+ * bucket as needs-answers — and already gets its own amber box in the
+ * Attention section, so repainting its chip amber here repeats a signal the
+ * palette already has a name for rather than inventing a fourth colour.
+ * Every other stage, `merged` included, is unchanged: this fix round asked
+ * for exactly these two stages to move, not a wider retune of the system.
  */
-function projectLabel(path: string): string {
-  return path.split('/').filter(Boolean).pop() ?? path;
+function stageClass(stage: RunStage): string {
+  if (stage === 'needs-answers' || stage === 'parked') return 'board-card-stage board-card-stage-warn';
+  if (stage === 'failed') return 'board-card-stage board-card-stage-bad';
+  return 'board-card-stage';
 }
 
 /**
@@ -180,20 +199,15 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
                     <div className="run-drawer-item-head">
                       <span className="run-drawer-item-id">{q.id}</span>
                       <span className="run-drawer-item-title">{q.title}</span>
-                      {/* Same two-tone system as the card's own runStage chip
-                          (ItemCard.tsx) — cyan by default, amber specifically
-                          for needs-answers, "the run is blocked on a person,
-                          not progressing" — rather than a wider palette
-                          invented just for this file. Unlike the card, EVERY
-                          stage gets a chip here (the card only chips seven of
-                          RunStage's fourteen members — its six ACTIVE_RUN_STAGES
-                          plus needs-answers — and renders nothing for the
-                          other seven); the drawer's job is the full picture. */}
-                      <span className={
-                        q.stage === 'needs-answers'
-                          ? 'board-card-stage board-card-stage-warn'
-                          : 'board-card-stage'
-                      }>
+                      {/* Tone from stageClass (this file's own doc comment
+                          on it has the full reasoning) — cyan default, amber
+                          for needs-answers/parked, red for failed. Unlike the
+                          card, EVERY stage gets a chip here (the card only
+                          chips seven of RunStage's fourteen members — its six
+                          ACTIVE_RUN_STAGES plus needs-answers — and renders
+                          nothing for the other seven); the drawer's job is
+                          the full picture. */}
+                      <span className={stageClass(q.stage)}>
                         {q.stage}
                       </span>
                     </div>
@@ -221,10 +235,25 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
           {run.attention.length === 0 ? (
             <div className="drawer-empty">nothing needs a look</div>
           ) : (
-            run.attention.map((a) => {
+            // `i` (position) is part of the key, not just `a.id`+`a.kind`:
+            // RunAttention's own doc comment (shared/types.ts) is explicit
+            // that this list is "a log of what happened, not a live filter
+            // over queue", so the SAME item can legitimately earn a second
+            // entry of even the SAME kind later in the same run (parked,
+            // resumed, parked again on a different conflict) — id+kind alone
+            // would still collide on that case, and only the position is
+            // guaranteed unique across every case (fix round 1: `key={a.id}`
+            // alone collided whenever one item earned a second entry at all,
+            // which orchestrate.mjs's own unguarded push onto `run.attention`
+            // makes a real, not hypothetical, run shape).
+            run.attention.map((a, i) => {
               const item = run.queue.find((q) => q.id === a.id);
               return (
-                <div key={a.id} className="run-drawer-attn" data-testid={`run-drawer-attention-${a.id}`}>
+                <div
+                  key={`${a.id}-${a.kind}-${i}`}
+                  className="run-drawer-attn"
+                  data-testid={`run-drawer-attention-${a.id}`}
+                >
                   <div className="run-drawer-attn-head">
                     <span className="run-drawer-item-id">{a.id}</span>
                     <span className="run-drawer-attn-kind">{a.kind}</span>

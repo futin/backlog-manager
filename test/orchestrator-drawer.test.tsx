@@ -110,6 +110,45 @@ describe('RunDrawer', () => {
     }
   });
 
+  // Fix round 1 — reviewer-reproduced: `RunAttention`'s own doc comment
+  // (shared/types.ts) is explicit that this list is "a log of what
+  // happened... not a live filter over queue", so the same item id can
+  // legitimately earn a second entry (orchestrate.mjs pushes onto
+  // run.attention with no per-item guard). The fixture is task-locked and
+  // never exercises this shape (each of its three entries names a
+  // different id), so this constructs the colliding shape directly rather
+  // than waiting for a fixture edit.
+  it('renders two attention entries for the same item id, with no duplicate React key warning', () => {
+    const consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const attention: OrchestratorRun['attention'] = [
+      { id: 'task-9', kind: 'fix-exhausted', detail: 'first pass: asked whether to merge anyway' },
+      { id: 'task-9', kind: 'parked', detail: 'second pass: merge conflicted after resuming' }
+    ];
+
+    render(<RunDrawer run={runPayload({ attention })} onClose={() => {}} />);
+
+    // Both render — data-testid is shared on purpose when two entries name
+    // the same item (getAllByTestId is exactly the tool for that; changing
+    // the id scheme itself was not what collided, only the React `key`
+    // was), so this asserts on the array getAllByTestId returns rather than
+    // on a single unique id per row.
+    const rows = screen.getAllByTestId('run-drawer-attention-task-9');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('first pass: asked whether to merge anyway');
+    expect(rows[1]).toHaveTextContent('second pass: merge conflicted after resuming');
+
+    // React logs "Warning: Encountered two children with the same key" via
+    // console.error when a list's keys collide — this is the exact warning
+    // the reviewer reproduced against the old `key={a.id}`. Matched by
+    // substring, not exact text: React's message is a format string with
+    // the offending key value interpolated in, not this literal sentence.
+    const keyWarnings = consoleError.mock.calls.filter(
+      ([msg]) => typeof msg === 'string' && msg.includes('same key')
+    );
+    expect(keyWarnings).toEqual([]);
+    consoleError.mockRestore();
+  });
+
   it('shows the pastRuns line, pluralized correctly', () => {
     const { unmount } = render(<RunDrawer run={runPayload({ pastRuns: 5 })} onClose={() => {}} />);
     // Exact string, not a substring match: toHaveTextContent's default
@@ -239,5 +278,35 @@ describe('BoardView: run drawer wiring', () => {
     window.dispatchEvent(new Event('focus'));
 
     await waitFor(() => expect(screen.getByText(/no heartbeat/)).toBeInTheDocument());
+  });
+
+  // Fix round 1 — reviewer-reproduced: with no exclusion between `open` and
+  // `openRunProject`, ItemDrawer and RunDrawer could both be mounted at
+  // once — two role="dialog" elements in the document simultaneously, and
+  // since neither traps focus, a keyboard user could Tab past whichever
+  // backdrop is on top into the drawer still sitting behind it. Exercises
+  // both directions, not just one, since the fix (openItemDrawer /
+  // openRunDrawer in BoardView.tsx) is two symmetric functions and a test
+  // of only one direction wouldn't prove the other was ever wired up.
+  it('opening either drawer closes the other — only one dialog is ever mounted', async () => {
+    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }], [fakeItem({})]);
+    await renderBoard();
+
+    // Open the item drawer first (this describe block's own fakeItem()
+    // card: id task-14, title "wire the heartbeat").
+    await userEvent.click(await screen.findByText('wire the heartbeat'));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'wire the heartbeat' })).toBeInTheDocument();
+
+    // Opening the run drawer must REPLACE it, not stack a second dialog on
+    // top of it.
+    await userEvent.click(await screen.findByTestId('run-strip'));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'alpha run' })).toBeInTheDocument();
+
+    // And the reverse: reopening the item drawer must close the run drawer.
+    await userEvent.click(await screen.findByText('wire the heartbeat'));
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'wire the heartbeat' })).toBeInTheDocument();
   });
 });

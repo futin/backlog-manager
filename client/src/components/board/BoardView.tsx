@@ -243,6 +243,35 @@ export default function BoardView() {
   const openRun: RunPayload | null =
     openRunProject === null ? null : runs.find((r) => r.project === openRunProject) ?? null;
 
+  /*
+   * Task 12 fix round 1: ItemDrawer and RunDrawer each render a
+   * role="dialog" `.drawer` aside with no focus trap of its own — mirrored,
+   * deliberately, from ItemDrawer's own choice not to add one (see
+   * RunDrawer.tsx's file comment) — so two mounted at once is not just a
+   * visual overlap but a real keyboard hazard: Tab from the frontmost
+   * drawer's backdrop walks a keyboard-only user straight into the
+   * interactive elements of whichever drawer is still mounted behind it,
+   * and a screen reader is left with two dialogs and no signal for which
+   * one is current. `open` and `openRunProject` stay two separate pieces of
+   * state rather than one tagged union (every other reader of `open` below
+   * — the ItemDrawer render, its onDispatch — wants a plain
+   * `BacklogItem | null`, and a union would push a `.kind` discriminant
+   * into each of those reads to buy a guarantee two setters already give
+   * just as reliably). These two functions are the ONLY place either is
+   * ever set to a non-null value — both call sites below go through one of
+   * them, never `setOpen`/`setOpenRunProject` directly — which is what
+   * makes "opening either closes the other" a property of the code rather
+   * than a rule a future call site has to remember to uphold.
+   */
+  const openItemDrawer = (item: BacklogItem): void => {
+    setOpenRunProject(null);
+    setOpen(item);
+  };
+  const openRunDrawer = (project: string): void => {
+    setOpen(null);
+    setOpenRunProject(project);
+  };
+
   return (
     <div className="board">
       <div className="board-bar">
@@ -308,8 +337,10 @@ export default function BoardView() {
               run={run}
               // `r.project`, not the run object itself — see
               // `openRunProject`'s own comment for why the drawer has to be
-              // keyed on identity rather than holding a frozen snapshot.
-              onOpen={(r) => setOpenRunProject(r.project)}
+              // keyed on identity rather than holding a frozen snapshot. Goes
+              // through `openRunDrawer`, not `setOpenRunProject` directly —
+              // see that function's own comment for why.
+              onOpen={(r) => openRunDrawer(r.project)}
             />
           ))}
         </div>
@@ -351,7 +382,9 @@ export default function BoardView() {
                       key={item.path}
                       item={item}
                       hues={hues}
-                      onOpen={() => setOpen(item)}
+                      // Goes through `openItemDrawer`, not `setOpen`
+                      // directly — see that function's own comment for why.
+                      onOpen={() => openItemDrawer(item)}
                       agents={agents}
                       onDispatch={() => setDispatching(item)}
                       now={now}

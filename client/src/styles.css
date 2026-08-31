@@ -359,6 +359,18 @@ body {
   color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
   background: color-mix(in srgb, var(--amber) 10%, var(--strip));
 }
+/* failed: RunDrawer's own addition (fix round 1) — ItemCard never chips this
+   stage at all (it's outside ACTIVE_RUN_STAGES and isn't needs-answers), so
+   this variant exists for the drawer's per-row chip (RunDrawer.tsx's own
+   stageClass), not the card's. Red/danger rather than the default cyan:
+   RunAttention.kind has no `failed` member, so a failed item never earns a
+   box in the Attention section the way needs-answers/parked/fix-exhausted
+   do — this chip is the only place in the drawer a failure is visible at
+   all, and sharing `merged`'s cyan there made a failure read as a success. */
+.board-card-stage-bad {
+  color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--red) 10%, var(--strip));
+}
 /* In progress: the card's own hairline goes amber, and a filled amber bar runs
    across the top of its face. "Which of these twelve is anyone on" is a question
    asked of a whole column at once, and the 3px amber inset this replaces — like
