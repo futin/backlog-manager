@@ -3,10 +3,13 @@
 // EVERY write to a project's run file — the same single-writer discipline
 // skills/backlog/tools/backlog.mjs keeps for the registry and for item
 // files, applied here to `~/.backlog-manager/orchestrator/<project
-// key>/run.json`. Task 3 builds init/lock, stage, heartbeat, attention,
-// finish and status; Task 4 wires the real refusal gate into `init`'s queue
-// builder (see the `--queue-json` escape hatch below); Task 5 adds watch,
-// verify, resume-reconcile and abort on top of the same run file.
+// key>/run.json`. Task 3 built init/lock, stage, heartbeat, attention,
+// finish and status; Task 4 (this one) adds `plan` — the queue builder and
+// refusal gate that decides which backlog items are executable, in what
+// order, and which are refused as ungroomed or flagged as carrying open
+// questions — and wires that same gate into `init`'s own queue builder;
+// Task 5 adds watch, verify, resume-reconcile and abort on top of the same
+// run file.
 //
 //   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project /abs/path/to/repo
 //   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
@@ -297,50 +300,325 @@ function makeQueueItem(id, title, stamp) {
   }
 }
 
-// Comma-separated --ids, trimmed and emptied of blanks, then capped to
-// --max entries when one was given. Order is preserved as given: Task 4
-// owns actually deciding what order the gate should queue items in
-// (bugs-oldest-first, then tasks-oldest-first, per the plan) — this
-// function is only ever reached today via the CLI's own literal --ids
-// list, with no gate behind it yet.
-function idsFromArg(idsArg, maxItems) {
-  if (idsArg === undefined) return []
-  const ids = idsArg.split(',').map((s) => s.trim()).filter((s) => s !== '')
-  return maxItems === null ? ids : ids.slice(0, maxItems)
+// --- the gate: deciding which items are executable -------------------------
+// This is the mechanical twin of skills/backlog-execute/SKILL.md's own "The
+// refusal gate" section — the prose there is the load-bearing rule ("refuse
+// any item whose plan isn't real yet"), and everything below exists only to
+// answer the same question without a human reading the file by hand: does
+// this task's `## Plan` say anything real, does this bug's `## Fix` say
+// anything beyond the `unknown` placeholder backlog-capture writes for every
+// bug nobody has diagnosed yet. Kept in exact agreement with that prose on
+// purpose — a queue that gates more strictly (or more loosely) than the
+// skill that actually does the work would either block groomed items for no
+// reason, or hand the orchestrator loop something backlog-execute would
+// refuse the moment it got there.
+//
+// Deliberately reads item files with its own small, purpose-built
+// frontmatter and section reader rather than importing skills/backlog/
+// tools/backlog.mjs's parseFrontmatter — see this file's header comment for
+// why the two tools stand alone rather than sharing a module. The reader
+// below is intentionally narrower than backlog.mjs's own: it only ever needs
+// an item's `title` and its raw body text (to find `## Plan`/`## Fix`/
+// `## Done when`), never `tags`, `started`, or any of the other keys
+// backlog.mjs's version round-trips for a full read-modify-write — this file
+// never writes an item back, so there is nothing here to round-trip.
+
+// Only bugs and tasks are ever orchestrable, exactly mirroring
+// backlog-execute's own Hard limits ("Never touches ideas/, refactors/ or
+// out-of-scope/"): an idea or a refactor has nothing to execute yet — that
+// is what promoting one via backlog-groom is for — and out-of-scope is
+// already closed. There is no third prefix here for the same reason
+// backlog-execute has no third case in its own gate: an id from any other
+// section is simply never a candidate, the same way that skill's own "Pick
+// an item" step turns one away before its refusal gate ever runs.
+const GATE_SECTIONS = { bugs: 'bug', tasks: 'task' }
+
+// The placeholder backlog-capture writes for a bug nobody has diagnosed yet
+// (`## Cause`/`## Fix` both start as this), and the value a task's own
+// `## Plan` is treated as equivalent to "nothing here" when it's all that is
+// present — matching the brief's own wording for the task rule ("non-empty
+// content ... that is not just unknown/whitespace").
+const PLACEHOLDER = 'unknown'
+
+// Every open item in one section (bugs or tasks), each as its id, its
+// numeric id (for the oldest-first sort below — ids are minted as a
+// monotonic max+1 per store, so the number IS creation order, unlike file
+// mtime), and the absolute path it was found at. Same `^prefix-digits-`
+// filename convention as skills/backlog/tools/backlog.mjs's own
+// openEntries, re-derived here for the standalone reason given above.
+// Returns [] rather than throwing when the section's open/ directory (or
+// backlog/ itself) doesn't exist at all — a project with no backlog store
+// yet, or a fresh clone that has never run `backlog.mjs init`, has no
+// candidates to gate, not an error; `plan`/`init` both read that as "nothing
+// here yet," never as a reason to fail the whole command.
+function listOpenItems(backlogDir, section) {
+  const dir = path.join(backlogDir, section, 'open')
+  if (!fs.existsSync(dir)) return []
+  const prefix = GATE_SECTIONS[section]
+  const idPattern = new RegExp(`^(${prefix}-(\\d+))-`)
+  const items = []
+  for (const name of fs.readdirSync(dir)) {
+    const m = idPattern.exec(name)
+    if (m) items.push({ id: m[1], num: Number(m[2]), section, path: path.join(dir, name) })
+  }
+  return items
 }
 
-// --queue-json <file> — a TEMPORARY test-only escape hatch. Task 4 wires
-// the real refusal gate into `init` (reading each candidate item's own
-// groomed/ungroomed state out of the project's backlog/ directory and
-// deciding what belongs in the queue and in what order); until that
-// exists, this is the only way a test can hand `init` a queue with actual
-// content to exercise `stage`/`attention`/`finish` against. Task 4 deletes
-// this flag once the gate makes it unnecessary — do not build anything
-// else on top of it.
-//
-// The file's own contract is intentionally the narrowest thing that could
-// work: a JSON array of `{id, title}` pairs. Each entry is normalized
-// through the exact same makeQueueItem() every other queue item goes
-// through — nothing from the input file is trusted or copied through
-// as-is beyond those two strings — so a queue seeded this way is
-// shape-identical to one the real gate will eventually build, and a test
-// asserting the contract fixture's key set is really testing this tool's
-// own construction, not the fixture file's honesty.
-function queueFromFile(file, stamp) {
-  let parsed
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch (e) {
-    throw new OrchestrateError(`--queue-json ${file}: ${e.message}`, 1)
+// A narrow read: just `title` off the frontmatter fence and the raw body
+// text after it, via the same `key:` line-splitter parseFrontmatter uses
+// (see this section's own header comment for why a full parse is not worth
+// duplicating here). A file that doesn't even open the fence the way
+// backlog.mjs always writes one is treated as titleless and bodyless rather
+// than thrown on — this tool never refuses to gate the REST of a store over
+// one file some other process wrote badly; that item just reads as
+// ungroomed by construction (no recognizable `## Plan`/`## Fix` will ever be
+// found in a body of `''`).
+function readItemForGate(absPath) {
+  const text = fs.readFileSync(absPath, 'utf8')
+  const lines = text.split('\n')
+  if (lines[0] !== '---') return { title: '', body: '' }
+  let i = 1
+  let title = ''
+  for (; i < lines.length; i++) {
+    if (lines[i] === '---') break
+    const sep = lines[i].indexOf(':')
+    if (sep === -1) continue
+    if (lines[i].slice(0, sep).trim() === 'title') title = lines[i].slice(sep + 1).trim()
   }
-  if (!Array.isArray(parsed)) {
-    throw new OrchestrateError(`--queue-json must be a JSON array of {id, title} objects: ${file}`, 1)
+  if (i === lines.length) return { title, body: '' }
+  return { title, body: lines.slice(i + 1).join('\n') }
+}
+
+// Finds one `## <heading>` section's own content: everything between that
+// heading line and the next line that opens another `##` heading (or end of
+// file). Returns `undefined` when the heading isn't present at all — kept
+// distinct from an empty string, because "the heading is missing" and "the
+// heading is there with nothing under it" are two different reasons in the
+// gate below, and backlog-execute's own prose calls out both ("the heading
+// is missing entirely, ... or if all that's there is a placeholder").
+function extractSection(body, heading) {
+  const lines = body.split('\n')
+  const idx = lines.findIndex((l) => l.trim() === `## ${heading}`)
+  if (idx === -1) return undefined
+  const rest = lines.slice(idx + 1)
+  const end = rest.findIndex((l) => l.trimStart().startsWith('## '))
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n')
+}
+
+// The task half of the gate: `## Plan` must exist and hold something beyond
+// whitespace or the `unknown` placeholder. Each reason is its own string
+// (rather than one combined message) so a caller — `plan`'s own human-
+// readable printer, or a future UI — can list them as separate bullets.
+// `questionSection` carries the section text forward for detectQuestions
+// below, so that function never has to re-derive "which section did this
+// item's own gate actually look at."
+function gateTask(body) {
+  const plan = extractSection(body, 'Plan')
+  if (plan === undefined) {
+    return { reasons: ['## Plan heading is missing — nothing for backlog-execute to work'], questionSection: undefined }
   }
-  return parsed.map((entry) => {
-    if (!entry || typeof entry.id !== 'string' || typeof entry.title !== 'string') {
-      throw new OrchestrateError(`--queue-json entries must each have a string id and a string title, got ${JSON.stringify(entry)}`, 1)
+  const trimmed = plan.trim()
+  if (trimmed === '') {
+    return { reasons: ['## Plan has no content under it — it is still empty'], questionSection: plan }
+  }
+  if (trimmed === PLACEHOLDER) {
+    return { reasons: [`## Plan is still the "${PLACEHOLDER}" placeholder`], questionSection: plan }
+  }
+  return { reasons: [], questionSection: plan }
+}
+
+// The bug half: `## Fix` must not be exactly the `unknown` placeholder.
+// Mirrors backlog-execute's own wording precisely ("Refuse if its content is
+// still exactly `unknown`") — that skill does not separately call out a
+// missing `## Fix` heading, because backlog-capture's bug template always
+// writes one; a heading that is missing anyway is refused here too, rather
+// than silently read as "ready," since there is equally nothing there for
+// backlog-execute to work.
+function gateBug(body) {
+  const fix = extractSection(body, 'Fix')
+  if (fix === undefined) {
+    return { reasons: ['## Fix heading is missing'], questionSection: undefined }
+  }
+  if (fix.trim() === PLACEHOLDER) {
+    return { reasons: [`## Fix is still the "${PLACEHOLDER}" placeholder — nobody has diagnosed this yet`], questionSection: fix }
+  }
+  return { reasons: [], questionSection: fix }
+}
+
+// Pulls each command line out of a fenced code block under `## Done when` —
+// the same convention this repo's own archived items already use in their
+// `## Outcome`'s "Verification" block (a fenced block, one shell invocation
+// per line, sometimes prefixed with a `$ ` prompt marker, which is stripped
+// here). Deliberately narrower than "any backtick span in the section": a
+// task's `## Done when` prose routinely names a command or a file in
+// backticks without meaning "run this to prove I'm done" (e.g. "matches the
+// plan command's own output"), and treating every such mention as a command
+// to verify would flag ordinary prose as a question. A fenced block is the
+// one shape in this section that unambiguously means "here is something to
+// run."
+function extractDoneWhenCommands(doneWhenText) {
+  const commands = []
+  let inFence = false
+  for (const line of doneWhenText.split('\n')) {
+    const t = line.trim()
+    if (t.startsWith('```')) {
+      inFence = !inFence
+      continue
     }
-    return makeQueueItem(entry.id, entry.title, stamp)
+    if (!inFence || t === '') continue
+    commands.push(t.startsWith('$ ') ? t.slice(2).trim() : t)
+  }
+  return commands
+}
+
+// Resolves each `## Done when` command against the same two places Task 5's
+// own `verify` will (per the plan doc): `<project>/backlog/verify.json`'s
+// `commands` array, or a `pnpm`/`npm`/`yarn run <script>` naming a real
+// `package.json` script. Neither file existing, or either failing to parse,
+// is read as "nothing known" rather than an error — a project with no
+// verify.json and no package.json at all is a normal thing for this gate to
+// see (this tool's own fixtures/store/ is exactly that), and the whole point
+// of this check is a soft warning, never a reason to fail the command.
+function findUnresolvedCommands(doneWhenText, projectRoot) {
+  const commands = extractDoneWhenCommands(doneWhenText)
+  if (commands.length === 0) return []
+
+  let verifyCommands = []
+  try {
+    const verifyJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'backlog', 'verify.json'), 'utf8'))
+    if (Array.isArray(verifyJson.commands)) verifyCommands = verifyJson.commands
+  } catch {
+    // no backlog/verify.json here, or it doesn't parse — package.json
+    // scripts (below) is the only other place a command can be "known"
+  }
+
+  let scripts = {}
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
+    if (pkg.scripts && typeof pkg.scripts === 'object') scripts = pkg.scripts
+  } catch {
+    // no package.json here, or it doesn't parse
+  }
+
+  return commands.filter((cmd) => {
+    if (verifyCommands.includes(cmd)) return false
+    const m = /^(?:pnpm|npm|yarn)\s+(?:run\s+)?([\w:-]+)$/.exec(cmd)
+    return !(m && scripts[m[1]] !== undefined)
+  })
+}
+
+// Layers the "needs-answers" overlay on top of an otherwise-ready item: a
+// plan or fix that passed the primary gate can still be hiding an open
+// question, and surfacing that is softer than refusing outright — the item
+// is still listed (see the brief's own case 5: "still listed, not
+// dropped"), just flagged rather than handed straight to a dispatch. Three
+// independent triggers, all additive into one `questions` array:
+//   1. `TBD` anywhere in the body at all — not just Plan/Fix — because a TBD
+//      left in, say, `## Test cases` is just as much an open question as
+//      one left in the plan itself.
+//   2. A line ending in `?` inside the section the primary gate just read
+//      (`## Plan` for a task, `## Fix` for a bug) — that line already reads
+//      as a question, so it is used verbatim rather than paraphrased.
+//   3. A `## Done when` command this project can't actually resolve (see
+//      findUnresolvedCommands above) — phrased as a question because that
+//      is literally what it is ("is this command real?"), and it is a
+//      WARNING only: it can only ever add a question, never a reason, so it
+//      can never by itself turn a ready item into an ungroomed one.
+function detectQuestions(body, questionSection, projectRoot) {
+  const questions = []
+  if (body.includes('TBD')) {
+    questions.push('There is a TBD in this item — what still needs deciding before it can run?')
+  }
+  if (questionSection) {
+    for (const line of questionSection.split('\n')) {
+      const t = line.trim()
+      if (t.endsWith('?')) questions.push(t)
+    }
+  }
+  const doneWhen = extractSection(body, 'Done when')
+  if (doneWhen !== undefined) {
+    for (const cmd of findUnresolvedCommands(doneWhen, projectRoot)) {
+      questions.push(`## Done when references \`${cmd}\` — is that command actually runnable (not found in verify.json or package.json)?`)
+    }
+  }
+  return questions
+}
+
+// One item's full gate result: `reasons` is non-empty only for `ungroomed`,
+// `questions` only for `needs-answers` — the two never overlap, because an
+// item whose primary gate already failed has nothing further worth asking:
+// its plan or fix isn't real yet, so whether it ALSO contains a TBD is not
+// the more useful thing to tell whoever is looking at this queue.
+function gateItem(section, body, projectRoot) {
+  const { reasons, questionSection } = section === 'tasks' ? gateTask(body) : gateBug(body)
+  if (reasons.length > 0) {
+    return { gate: 'ungroomed', reasons, questions: [] }
+  }
+  const questions = detectQuestions(body, questionSection, projectRoot)
+  if (questions.length > 0) {
+    return { gate: 'needs-answers', reasons: [], questions }
+  }
+  return { gate: 'ready', reasons: [], questions: [] }
+}
+
+// Comma-separated --ids, trimmed — the one flag `plan` and `init` both
+// accept and parse identically, so a caller who validated a list against
+// one command can hand the exact same string to the other. `undefined` (the
+// flag was never given at all) is preserved as `undefined`, not folded into
+// `[]`: buildGatedQueue (below) reads the two very differently — no
+// restriction at all, vs. an explicit, if empty, selection — and collapsing
+// them here would make `--ids ''` silently mean "give me everything"
+// instead of "give me nothing," the opposite of what a caller building this
+// flag from a possibly-empty list would expect.
+function parseIdsArg(idsArg) {
+  if (idsArg === undefined) return undefined
+  return idsArg.split(',').map((s) => s.trim()).filter((s) => s !== '')
+}
+
+// The queue builder itself: reads every open bug and task under
+// `<projectRoot>/backlog`, gates each one, and returns them in the exact
+// order the brief specifies (bugs oldest-first, then tasks oldest-first).
+// This one function is the queue's only builder: `plan` (below) calls it to
+// preview a run and writes nothing at all; `cmdInit` calls this SAME
+// function to decide what actually goes into a new run's queue — the brief's
+// own words are "the UI's queue preview and init's builder are the same
+// code path." Never throws for "no backlog store" (see listOpenItems) —
+// only for an --ids entry that names nothing this store has, which is a
+// usage error regardless of which caller asked.
+function buildGatedQueue(projectRoot, { ids, maxItems = null } = {}) {
+  const backlogDir = path.join(projectRoot, 'backlog')
+  const bugs = listOpenItems(backlogDir, 'bugs').sort((a, b) => a.num - b.num)
+  const tasks = listOpenItems(backlogDir, 'tasks').sort((a, b) => a.num - b.num)
+  const byId = new Map([...bugs, ...tasks].map((item) => [item.id, item]))
+
+  let ordered
+  if (ids !== undefined) {
+    ordered = ids.map((id) => {
+      const found = byId.get(id)
+      if (!found) throw new OrchestrateError(`unknown item id: ${id}`, 1)
+      return found
+    })
+  } else {
+    ordered = [...bugs, ...tasks]
+  }
+
+  // `readyCount` is read BEFORE it is possibly incremented for the item
+  // currently being examined, so an item only ever counts as "beyond max"
+  // once `maxItems` ready items have ALREADY been placed ahead of it — the
+  // maxItems-th ready item itself lands exactly on the cap, not past it.
+  // Once that line is crossed, every later item is beyond it too, whatever
+  // its OWN gate says: a run capped at 2 items is not going to dispatch a
+  // 3rd or 4th ready item, and it is equally not going to spend a preflight
+  // cycle discovering that the item after the cap happens to be ungroomed
+  // either — the cap bounds how much of the queue this run will ever look
+  // at, not just how many items it will end up dispatching.
+  let readyCount = 0
+  return ordered.map((entry) => {
+    const { title, body } = readItemForGate(entry.path)
+    const { gate, reasons, questions } = gateItem(entry.section, body, projectRoot)
+    const beyondMax = maxItems !== null && readyCount >= maxItems
+    if (gate === 'ready') readyCount++
+    return { id: entry.id, title, gate, reasons, questions, beyondMax }
   })
 }
 
@@ -359,12 +637,10 @@ function cmdInit(argv) {
   let project
   let idsArg
   let maxArg
-  let queueJsonFile
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project') project = argv[++i]
     else if (argv[i] === '--ids') idsArg = argv[++i]
     else if (argv[i] === '--max') maxArg = argv[++i]
-    else if (argv[i] === '--queue-json') queueJsonFile = argv[++i]
   }
 
   // Validated before anything else touches disk: an unusable --project is a
@@ -394,22 +670,35 @@ function cmdInit(argv) {
   // existing run.json is read for the lock check, and before that existing
   // run.json is archived away. This ordering fixes a real bug a reviewer
   // reproduced live: with validation done LATER (as an earlier version of
-  // this function had it), a bad --queue-json arriving after a prior
-  // `done` run would archive the done run to runs/<runId>.json and THEN
-  // throw while building the new queue — leaving the project with no
-  // run.json at all. The data wasn't lost (it survived under runs/), but
-  // `status` would then wrongly report exit 3 ("no run exists"), and a
-  // fresh project's `init` would even leave behind a stray empty directory
-  // (see writeRunAtomic/archivePath below, both of which now create their
-  // own directories on demand instead of this function pre-creating one).
-  // Validating first means a bad --queue-json can never destroy or hide
-  // state that already existed — the failure is confined to "nothing
-  // written," which is the same guarantee every other error path in this
-  // file already gives.
+  // this function had it), a bad queue build arriving after a prior `done`
+  // run would archive the done run to runs/<runId>.json and THEN throw —
+  // leaving the project with no run.json at all. The data wasn't lost (it
+  // survived under runs/), but `status` would then wrongly report exit 3
+  // ("no run exists"), and a fresh project's `init` would even leave behind
+  // a stray empty directory (see writeRunAtomic/archivePath below, both of
+  // which now create their own directories on demand instead of this
+  // function pre-creating one). Validating first — today that means
+  // buildGatedQueue throwing on an --ids entry this store doesn't have —
+  // means a bad call can never destroy or hide state that already existed;
+  // the failure is confined to "nothing written," the same guarantee every
+  // other error path in this file already gives.
   const stamp = nowISO()
-  const queue = queueJsonFile !== undefined
-    ? queueFromFile(queueJsonFile, stamp)
-    : idsFromArg(idsArg, maxItems).map((id) => makeQueueItem(id, id, stamp))
+  // buildGatedQueue is the exact function `plan` (below) calls to preview a
+  // run — see its own comment for the ordering/gate/max rules, kept in one
+  // place. init deliberately does NOT carry an ungroomed or needs-answers
+  // item's reasons/questions into the queue item it writes here: those are
+  // a snapshot of the gate at THIS instant, and a run can span hours during
+  // which a human might groom the very item this instant found wanting.
+  // Baking a stale verdict into run.json would give the orchestrator loop
+  // (a later task) no reason to ever look again — so init only uses the
+  // gate to decide MEMBERSHIP (excluding whatever --max pushed past the
+  // cap) and ORDER, and leaves the per-item gate re-check, right before
+  // that item is actually dispatched, to whichever later task drives the
+  // loop. Every item that makes the cut starts exactly like every queue
+  // item always has: `pending`, via the same makeQueueItem every other
+  // caller already uses.
+  const gated = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems })
+  const queue = gated.filter((item) => !item.beyondMax).map((item) => makeQueueItem(item.id, item.title, stamp))
 
   const root = orchHome()
   const dir = projectDir(root, project)
@@ -509,6 +798,66 @@ function cmdInit(argv) {
 
   writeRunAtomic(dir, newRun)
   console.log(JSON.stringify({ runId, dir }))
+  return 0
+}
+
+const PLAN_USAGE = 'usage: orchestrate.mjs plan --project <abs path> [--ids a,b,c] [--max N] [--json]'
+
+// Previews a run without starting one: the exact queue `init` would build
+// for these flags, printed rather than written. This is what lets a human
+// (or the board's own launch UI, later) see which items are ready, which
+// are ungroomed, and which are flagged with open questions BEFORE
+// committing to a run — and what lets `init` itself stay a thin wrapper
+// around buildGatedQueue instead of duplicating its own copy of the gate.
+function cmdPlan(argv) {
+  let project
+  let idsArg
+  let maxArg
+  let json = false
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--project') project = argv[++i]
+    else if (argv[i] === '--ids') idsArg = argv[++i]
+    else if (argv[i] === '--max') maxArg = argv[++i]
+    else if (argv[i] === '--json') json = true
+  }
+
+  // Same absolute-path requirement as init, for the same reason: whatever
+  // this prints must describe the identical project a matching `init` call
+  // would act on, and a relative path here could silently mean a different
+  // directory than the one a human typing the same string into `init`
+  // right after would get.
+  if (!project || !path.isAbsolute(project)) {
+    throw new OrchestrateError(PLAN_USAGE, 1)
+  }
+
+  let maxItems = null
+  if (maxArg !== undefined) {
+    const n = Number(maxArg)
+    if (!Number.isInteger(n) || n < 0) {
+      throw new OrchestrateError(`--max must be a non-negative integer: ${maxArg}`, 1)
+    }
+    maxItems = n
+  }
+
+  // Side-effect free by construction, not just by convention: everything
+  // above is argument validation and everything below is buildGatedQueue's
+  // own read-only walk of <project>/backlog — this function never calls
+  // orchHome(), never resolves a run directory, and never opens a file for
+  // writing. That is what lets a caller (a UI's queue preview, or a human
+  // sanity-checking a run before committing to it) call this as many times
+  // as it wants without ever risking a run's own state.
+  const queue = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems })
+
+  if (json) {
+    console.log(JSON.stringify(queue))
+  } else {
+    for (const item of queue) {
+      const flag = item.beyondMax ? '  (beyond --max)' : ''
+      console.log(`${item.gate.padEnd(13)} ${item.id}  ${item.title}${flag}`)
+      for (const reason of item.reasons) console.log(`    - ${reason}`)
+      for (const question of item.questions) console.log(`    ? ${question}`)
+    }
+  }
   return 0
 }
 
@@ -680,6 +1029,7 @@ const USAGE = `usage: orchestrate.mjs <command>
 
 commands:
   init       create and lock a new run for a project
+  plan       preview the gated queue init would build, without writing
   stage      move a queue item to a new stage
   heartbeat  re-stamp the run's updatedAt
   attention  record something a human should look at
@@ -698,6 +1048,7 @@ export function main(argv) {
   const [cmd, ...rest] = argv
   try {
     if (cmd === 'init') return cmdInit(rest)
+    if (cmd === 'plan') return cmdPlan(rest)
     if (cmd === 'stage') return cmdStage(rest)
     if (cmd === 'heartbeat') return cmdHeartbeat(rest)
     if (cmd === 'attention') return cmdAttention(rest)

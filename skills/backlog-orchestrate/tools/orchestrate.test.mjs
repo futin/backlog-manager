@@ -58,26 +58,36 @@ function runsDir(home, project) {
   return path.join(home, encodeURIComponent(project), 'runs')
 }
 
-// --queue-json is the temporary test-only escape hatch named in the brief
-// (Task 4 deletes it once the real gate exists): a JSON array of {id,
-// title} pairs that `init` turns into full RunQueueItem records. Writing it
-// to a throwaway file per call keeps each test's queue seed independent of
-// every other test's.
-function writeQueueJson(t, items) {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-queue-')), 'queue.json')
-  fs.writeFileSync(file, JSON.stringify(items))
-  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }))
+// Writes one ready-gated task item straight into `project`'s own backlog/
+// store. Task 4 replaced the old --queue-json escape hatch with the real
+// gate, so every test below that just needs SOME item in the queue — and
+// does not care about gating itself, that is what the "plan / gate" section
+// further down is for — reaches for this instead of a synthetic queue file.
+// A real, non-placeholder `## Plan` is what keeps these tests honest: an
+// item built by this helper must never accidentally read as ungroomed or
+// needs-answers, or every stage/heartbeat/attention/finish test that seeds
+// one would start depending on gate behaviour it isn't testing.
+function seedReadyTask(project, id, title) {
+  const dir = path.join(project, 'backlog', 'tasks', 'open')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, `${id}-fixture.md`)
+  fs.writeFileSync(
+    file,
+    `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-01\n---\n\n## Goal\n\nSomething worth doing.\n\n## Plan\n\nDo the actual work described here, in enough detail that it counts as groomed.\n\n## Test cases\n\n## Done when\n`,
+  )
   return file
 }
 
-// Writes arbitrary raw text as a --queue-json target, unlike writeQueueJson
-// which always JSON.stringifies a real array — needed to construct the
-// "not even valid JSON" failure mode, which a normal JS value can't express.
-function writeRawFile(t, content) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-raw-'))
-  const file = path.join(dir, 'queue.json')
-  fs.writeFileSync(file, content)
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+// The bug twin of seedReadyTask above, for the handful of tests that seed a
+// bug id instead of a task id.
+function seedReadyBug(project, id, title) {
+  const dir = path.join(project, 'backlog', 'bugs', 'open')
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, `${id}-fixture.md`)
+  fs.writeFileSync(
+    file,
+    `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-01\n---\n\n## Symptom\n\nSomething is wrong.\n\n## Repro\n\nSteps to reproduce it.\n\n## Affects\n\nsomefile.ts\n\n## Cause\n\nThe real, diagnosed cause.\n\n## Fix\n\nThe real fix — not the placeholder.\n`,
+  )
   return file
 }
 
@@ -100,9 +110,9 @@ test('RUN_STALE_MS is exactly 900000ms (15 minutes) — twin of shared/types.ts 
 test('init writes a run.json whose key set matches the contract fixture exactly, for the run and for a queue item', (t) => {
   const { home, project } = orchFixture(t)
   const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
-  const queueJson = writeQueueJson(t, [{ id: 'bug-14', title: 'Fix duplicate heartbeat write on a resumed run' }])
+  seedReadyBug(project, 'bug-14', 'Fix duplicate heartbeat write on a resumed run')
 
-  const out = run(project, home, 'init', '--project', project, '--queue-json', queueJson)
+  const out = run(project, home, 'init', '--project', project)
 
   assert.equal(out.status, 0, out.stderr)
   const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
@@ -123,7 +133,7 @@ test('init prints { runId, dir } JSON on success', (t) => {
   assert.equal(printed.dir, path.join(home, encodeURIComponent(project)))
 })
 
-test('init with no --queue-json and no --ids writes an empty queue — a run with nothing gated yet is valid', (t) => {
+test('init with no backlog store and no --ids writes an empty queue — a run with nothing gated yet is valid', (t) => {
   const { home, project } = orchFixture(t)
 
   const out = run(project, home, 'init', '--project', project)
@@ -226,26 +236,27 @@ test('a second done-then-init cycle grows runs/ to two archived files', (t) => {
   assert.equal(fs.readdirSync(runsDir(home, project)).length, 2)
 })
 
-// --- Fix round 1 (Critical + Important #2): --queue-json's three failure
-// modes, each of which is exactly the path behind the critical bug a
-// reviewer reproduced live. Each case runs against a project that already
-// has a `done` run on disk — the exact setup that exposed the bug, where
-// validating the queue too late archived the done run away and then threw,
-// leaving no run.json at all (status would wrongly report exit 3). With
-// queue validation moved ahead of the archive step, none of these three
-// cases should touch the existing run.json OR create a runs/ directory —
-// the failure must be confined to "nothing written," full stop.
+// --- Fix round 1 (Critical + Important #2): the validate-before-mutate
+// ordering fix, re-expressed against the real gate now that --queue-json is
+// gone. Each case runs against a project that already has a `done` run on
+// disk — the exact setup that exposed the original bug, where validating
+// the queue too late archived the done run away and then threw, leaving no
+// run.json at all (status would wrongly report exit 3). buildGatedQueue
+// throwing on a bad --ids entry (or the pre-existing --max check failing)
+// is now the thing that has to run BEFORE any of that archiving — these
+// cases should touch neither the existing run.json nor create a runs/
+// directory; the failure must be confined to "nothing written," full stop.
 
-test('init --queue-json with invalid JSON syntax exits 1 and leaves an existing done run.json completely untouched', (t) => {
+test('init --ids naming an unknown item exits 1 and leaves an existing done run.json completely untouched', (t) => {
   const { home, project } = orchFixture(t)
   assert.equal(run(project, home, 'init', '--project', project).status, 0)
   assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
   const before = fs.readFileSync(runFile(home, project))
-  const badFile = writeRawFile(t, '{ not valid json')
 
-  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
+  const out = run(project, home, 'init', '--project', project, '--ids', 'ghost-1')
 
   assert.equal(out.status, 1)
+  assert.match(out.stderr, /ghost-1/)
   assert.equal(fs.existsSync(runFile(home, project)), true)
   assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
   assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived')
@@ -255,29 +266,13 @@ test('init --queue-json with invalid JSON syntax exits 1 and leaves an existing 
   assert.equal(run(project, home, 'status').status, 0)
 })
 
-test('init --queue-json holding a non-array JSON value exits 1 and leaves an existing done run.json completely untouched', (t) => {
+test('init --max given a negative number exits 1 and leaves an existing done run.json completely untouched', (t) => {
   const { home, project } = orchFixture(t)
   assert.equal(run(project, home, 'init', '--project', project).status, 0)
   assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
   const before = fs.readFileSync(runFile(home, project))
-  const badFile = writeRawFile(t, JSON.stringify({ not: 'an array' }))
 
-  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
-
-  assert.equal(out.status, 1)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
-  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived')
-  assert.equal(run(project, home, 'status').status, 0)
-})
-
-test('init --queue-json with an entry missing id or title exits 1 and leaves an existing done run.json completely untouched', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
-  const before = fs.readFileSync(runFile(home, project))
-  const badFile = writeRawFile(t, JSON.stringify([{ id: 'task-1' }]))
-
-  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
+  const out = run(project, home, 'init', '--project', project, '--max', '-1')
 
   assert.equal(out.status, 1)
   assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
@@ -287,13 +282,12 @@ test('init --queue-json with an entry missing id or title exits 1 and leaves an 
 
 // Fix round 1 (Minor): confirms the reordering also kills the stray-empty-
 // directory symptom on a project with no PRIOR run at all — there is
-// nothing to archive here, so this is a distinct assertion from the three
+// nothing to archive here, so this is a distinct assertion from the two
 // above (which exercise the archive-then-throw ordering specifically).
-test('init --queue-json with invalid JSON on a brand-new project creates no directory at all', (t) => {
+test('init --ids naming an unknown item on a brand-new project creates no directory at all', (t) => {
   const { home, project } = orchFixture(t)
-  const badFile = writeRawFile(t, '{ not valid json')
 
-  const out = run(project, home, 'init', '--project', project, '--queue-json', badFile)
+  const out = run(project, home, 'init', '--project', project, '--ids', 'ghost-1')
 
   assert.equal(out.status, 1)
   assert.equal(fs.existsSync(path.join(home, encodeURIComponent(project))), false, 'a stray project directory was created despite init failing')
@@ -303,8 +297,8 @@ test('init --queue-json with invalid JSON on a brand-new project creates no dire
 
 test('stage task-5 dispatched sets session/worktree/branch, stamps stageAt.dispatched, and strictly advances updatedAt', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-5', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
 
   const out = run(project, home, 'stage', 'task-5', 'dispatched', '--session', 'abc', '--worktree', '/tmp/w', '--branch', 'backlog/task-5')
@@ -322,8 +316,8 @@ test('stage task-5 dispatched sets session/worktree/branch, stamps stageAt.dispa
 
 test('stage only stamps stageAt on first arrival — revisiting a stage does not move its timestamp', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-9', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-9', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   assert.equal(run(project, home, 'stage', 'task-9', 'reviewing').status, 0)
   const firstVisit = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stageAt.reviewing
 
@@ -341,8 +335,8 @@ test('stage only stamps stageAt on first arrival — revisiting a stage does not
 
 test('stage task-5 nonsense exits 1 and leaves run.json byte-unchanged', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-5', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   const before = fs.readFileSync(runFile(home, project))
 
   const out = run(project, home, 'stage', 'task-5', 'nonsense')
@@ -367,8 +361,8 @@ test('stage with an unknown item id exits 1 and leaves run.json byte-unchanged',
 
 test('no *.tmp file survives in the project run dir after init, stage, heartbeat, attention, and finish all succeed', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-6', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-6', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   assert.equal(run(project, home, 'stage', 'task-6', 'dispatched').status, 0)
   assert.equal(run(project, home, 'heartbeat').status, 0)
   assert.equal(run(project, home, 'attention', 'task-6', '--kind', 'parked', '--detail', 'merge conflict').status, 0)
@@ -383,8 +377,8 @@ test('no *.tmp file survives in the project run dir after init, stage, heartbeat
 
 test('heartbeat changes updatedAt and nothing else', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-1', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-1', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
 
   const out = run(project, home, 'heartbeat')
@@ -410,8 +404,8 @@ test('heartbeat with no run exits 3', (t) => {
 test('attention task-6 --kind needs-answers --detail appends an attention row and the run still parses as the contract shape', (t) => {
   const { home, project } = orchFixture(t)
   const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
-  const queueJson = writeQueueJson(t, [{ id: 'task-6', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-6', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
 
   const out = run(project, home, 'attention', 'task-6', '--kind', 'needs-answers', '--detail', 'which column?')
 
@@ -424,8 +418,8 @@ test('attention task-6 --kind needs-answers --detail appends an attention row an
 
 test('attention --kind needs-answers --questions-json mirrors the questions onto the queue item', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-21', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-21', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   const questionsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-questions-')), 'questions.json')
   fs.writeFileSync(questionsFile, JSON.stringify(['Does archiving move it to the Archive view immediately?']))
   t.after(() => fs.rmSync(path.dirname(questionsFile), { recursive: true, force: true }))
@@ -442,8 +436,8 @@ test('attention --kind needs-answers --questions-json mirrors the questions onto
 // preflight questions") only applies to that one kind.
 test('attention --kind parked ignores --questions-json entirely', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-16', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-16', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   const questionsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-questions-')), 'questions.json')
   fs.writeFileSync(questionsFile, JSON.stringify(['should never appear']))
   t.after(() => fs.rmSync(path.dirname(questionsFile), { recursive: true, force: true }))
@@ -457,8 +451,8 @@ test('attention --kind parked ignores --questions-json entirely', (t) => {
 
 test('attention with an unknown kind exits 1 and leaves run.json byte-unchanged', (t) => {
   const { home, project } = orchFixture(t)
-  const queueJson = writeQueueJson(t, [{ id: 'task-6', title: 'Some task' }])
-  assert.equal(run(project, home, 'init', '--project', project, '--queue-json', queueJson).status, 0)
+  seedReadyTask(project, 'task-6', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
   const before = fs.readFileSync(runFile(home, project))
 
   const out = run(project, home, 'attention', 'task-6', '--kind', 'bogus', '--detail', 'x')
@@ -544,4 +538,248 @@ test('stage, heartbeat, attention, finish, and status all resolve the project fr
   const out = run(nested, home, 'heartbeat')
 
   assert.equal(out.status, 0, out.stderr)
+})
+
+// --- Task 4: `plan` — the queue builder + refusal gate ----------------------
+// These are the brief's own eight authoritative cases, run against the
+// checked-in fixtures/store/ — six items, three gate outcomes among them,
+// picked so the same six items also pin ordering (case 6) and --max (case
+// 7). See that directory for each item's actual `## Plan`/`## Fix` content;
+// this section only asserts what `plan` computes FROM it.
+//
+// `planFixture` copies the checked-in store into a disposable project per
+// test rather than pointing `--project` at the checked-in path directly —
+// `plan` is supposed to write nothing at all (case 8 below is exactly that
+// promise), but a bug that broke it should never be able to corrupt the
+// very fixtures this suite depends on to catch the bug in the first place.
+const FIXTURE_STORE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'store')
+
+function planFixture(t) {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-plan-home-')))
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-plan-project-'))
+  const project = path.join(scratch, 'project')
+  fs.cpSync(FIXTURE_STORE, project, { recursive: true })
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true })
+    fs.rmSync(scratch, { recursive: true, force: true })
+  })
+  return { home, project: fs.realpathSync(project) }
+}
+
+function plan(project, home, ...extra) {
+  return run(project, home, 'plan', '--project', project, ...extra)
+}
+
+// A recursive {relative path -> base64 content} snapshot, used by case 8 to
+// prove `plan` really writes nothing — byte content rather than just names
+// or mtimes, so even a same-size, same-timestamp rewrite would be caught.
+function snapshotTree(dir) {
+  const entries = []
+  const walk = (d) => {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = path.join(d, entry.name)
+      if (entry.isDirectory()) walk(p)
+      else entries.push([path.relative(dir, p), fs.readFileSync(p).toString('base64')])
+    }
+  }
+  walk(dir)
+  return entries
+}
+
+// Case 1: a real ## Plan reads as ready, with nothing to complain about.
+test('plan: a task with a real ## Plan is ready, with empty reasons', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-1', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.id, 'task-1')
+  assert.equal(item.gate, 'ready')
+  assert.deepEqual(item.reasons, [])
+})
+
+// Case 2: the heading is there, but nothing under it — ungroomed, and the
+// reason has to actually say so, not just fail silently.
+test('plan: a task whose ## Plan heading has only whitespace under it is ungroomed, and the reason names the empty Plan', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-3', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ungroomed')
+  assert.ok(
+    item.reasons.some((r) => /plan/i.test(r) && /empty|no content/i.test(r)),
+    `expected a reason naming the empty Plan, got ${JSON.stringify(item.reasons)}`,
+  )
+})
+
+// Case 3: no ## Plan heading at all — also ungroomed, distinct reason.
+test('plan: a task with no ## Plan heading at all is ungroomed', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-4', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ungroomed')
+  assert.ok(
+    item.reasons.some((r) => /plan/i.test(r) && /missing/i.test(r)),
+    `expected a reason naming the missing Plan heading, got ${JSON.stringify(item.reasons)}`,
+  )
+})
+
+// Case 4: a bug's ## Fix still exactly "unknown" — the backlog-capture
+// placeholder — is ungroomed.
+test('plan: a bug whose ## Fix is exactly "unknown" is ungroomed', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'bug-2', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ungroomed')
+  assert.ok(item.reasons.some((r) => /fix/i.test(r)), `expected a reason naming ## Fix, got ${JSON.stringify(item.reasons)}`)
+})
+
+// Case 5: a TBD in an otherwise-real Plan is needs-answers, not ungroomed —
+// and, critically, still shows up in the output rather than being dropped.
+test('plan: a task with TBD in its Plan is needs-answers, with non-empty questions, and is still listed rather than dropped', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-5', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const items = JSON.parse(out.stdout)
+  assert.equal(items.length, 1, 'a needs-answers item must still be listed, not dropped')
+  assert.equal(items[0].gate, 'needs-answers')
+  assert.ok(items[0].questions.length > 0)
+})
+
+// Case 6: the default order (no --ids) is bugs oldest-first then tasks
+// oldest-first, by id NUMBER — and --ids restricts and re-orders to exactly
+// the given sequence.
+test('plan orders bugs oldest-first then tasks oldest-first, by id number rather than file mtime', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const ids = JSON.parse(out.stdout).map((i) => i.id)
+  assert.deepEqual(ids, ['bug-2', 'bug-7', 'task-1', 'task-3', 'task-4', 'task-5'])
+})
+
+test('plan --ids restricts and re-orders to exactly the given sequence', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-1,bug-2', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const ids = JSON.parse(out.stdout).map((i) => i.id)
+  assert.deepEqual(ids, ['task-1', 'bug-2'])
+})
+
+test('plan --ids naming an unknown id exits 1 and names it', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-1,ghost-9', '--json')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /ghost-9/)
+})
+
+// Case 7: --max 2 marks everything after the 2nd READY item as beyondMax —
+// bug-2 is ungroomed and sits before either ready item, so it stays false;
+// task-3/4/5 sit after task-1 (the 2nd ready item) and are all beyond,
+// regardless of their own gate.
+test('plan --max 2 marks every item after the second ready one as beyondMax, regardless of its own gate', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--max', '2', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const byId = Object.fromEntries(JSON.parse(out.stdout).map((i) => [i.id, i.beyondMax]))
+  assert.deepEqual(byId, {
+    'bug-2': false,
+    'bug-7': false,
+    'task-1': false,
+    'task-3': true,
+    'task-4': true,
+    'task-5': true,
+  })
+})
+
+// Case 8: plan is side-effect free — the fixture store and the state dir
+// are byte-identical before and after.
+test('plan writes nothing at all: the fixture store and the state dir are byte-identical before and after', (t) => {
+  const { home, project } = planFixture(t)
+  const before = snapshotTree(project)
+  const homeBefore = fs.readdirSync(home)
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(snapshotTree(project), before)
+  assert.deepEqual(fs.readdirSync(home), homeBefore)
+})
+
+// --- supplementary: the other two question-detection triggers ---------------
+// Not among the brief's eight authoritative cases (which pin TBD detection
+// specifically), but the same interface line documents two more triggers
+// for needs-answers, and untested logic in a refusal gate is exactly the
+// kind of thing that quietly rots. Both build their own throwaway project
+// via orchFixture rather than touching fixtures/store/, keeping that
+// checked-in directory to exactly the six items the brief names.
+
+test('plan: a trailing "?" line inside ## Plan triggers needs-answers, using that line verbatim as the question', (t) => {
+  const { home, project } = orchFixture(t)
+  const dir = path.join(project, 'backlog', 'tasks', 'open')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'task-1-q.md'),
+    '---\nid: task-1\ntitle: Ask before building\ncreated: 2026-08-01\n---\n\n## Plan\n\nBuild the thing. Should it default to dark mode?\n\n## Done when\n',
+  )
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'needs-answers')
+  assert.ok(item.questions.some((q) => q.includes('dark mode?')))
+})
+
+test('plan: a ## Done when command not found in verify.json or package.json is a warning question, never a gate failure', (t) => {
+  const { home, project } = orchFixture(t)
+  const dir = path.join(project, 'backlog', 'tasks', 'open')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'task-1-dw.md'),
+    '---\nid: task-1\ntitle: Ship it\ncreated: 2026-08-01\n---\n\n## Plan\n\nReal, groomed plan content with nothing left to decide.\n\n## Done when\n\n```bash\npnpm run this-script-does-not-exist\n```\n',
+  )
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'needs-answers')
+  assert.equal(item.reasons.length, 0, 'an unresolved Done-when command is a question, never a gate failure')
+  assert.ok(item.questions.some((q) => q.includes('this-script-does-not-exist')))
+})
+
+// --- init wires the same gate in ---------------------------------------
+// Not one of the eight `plan` cases either, but the brief's whole point is
+// that `init`'s queue builder and `plan`'s preview are the SAME code path —
+// this is the one test that would catch `cmdInit` silently diverging from
+// buildGatedQueue (e.g. reintroducing its own copy of the ordering or the
+// --max cutoff) even though every `plan`-specific case above is green.
+test('init builds its queue from the real gate: bugs oldest-first then tasks oldest-first, and --max excludes items beyond the cap', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--max', '2')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(written.queue.map((q) => q.id), ['bug-2', 'bug-7', 'task-1'])
+  assert.ok(written.queue.every((q) => q.stage === 'pending'), 'every queued item should start pending regardless of its own gate result')
 })
