@@ -83,20 +83,45 @@ export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDis
 }
 
 /**
- * `GET /api/orchestrator/runs` (Task 8) — one entry per project with any run
- * history, each already annotated with `fresh`/`pastRuns`. No shape guard
- * here unlike `fetchAgentsStatus`: that one earns its `isAgentsStatus` check
- * because a malformed body would sit silently in `useAgents`' state,
- * misreporting every card's dispatch eligibility for as long as that state
- * sticks around. This payload's own first consumer (`useOrchestratorRuns`)
- * dereferences `runs` immediately to decide whether to poll, so a wrong
- * shape fails loudly on the very next render instead of lying quietly —
- * the same "surfaces as a downstream crash in the same round trip" case
- * `unwrap`'s doc comment already carves out for `AgentPlan` and dispatch's
- * result.
+ * Same reasoning as `isAgentsStatus` above, and the same "lies quietly"
+ * profile it exists to rule out — a first pass at this function argued the
+ * opposite (a missing `runs` array throws loudly, so why guard?) and that
+ * argument undersold the actual risk: `useOrchestratorRuns` reads `run.fresh`
+ * on every run in the array to decide whether to poll at all, and a `fresh`
+ * that is present but the wrong type does not throw. `fresh: "true"` is
+ * truthy, `fresh: 0` is falsy, `fresh: undefined` is falsy — every one of
+ * those is silently read as a real answer to "is this run live", not an
+ * error, and it would keep being read that way for as long as the hook's
+ * state holds onto it. There is also no ErrorBoundary anywhere to fall back
+ * on if some OTHER malformed field further downstream (Task 11's run strip,
+ * say) throws instead: BoardView.tsx's own comment on this is that an
+ * unguarded throw during render unmounts the whole tree to a blank page. So
+ * `runs` itself is checked for the same reason `isAgentsStatus` checks
+ * `projectPaths` (an unguarded `.some`/`.every` on a non-array throws before
+ * any of this even matters), and every run's `fresh` is checked because that
+ * is the one field this payload's first consumer actually branches on.
  */
+function isOrchestratorRunsPayload(data: unknown): data is OrchestratorRunsPayload {
+  return (
+    typeof data === 'object' && data !== null &&
+    Array.isArray((data as OrchestratorRunsPayload).runs) &&
+    (data as OrchestratorRunsPayload).runs.every(
+      (run) => typeof run === 'object' && run !== null && typeof (run as { fresh?: unknown }).fresh === 'boolean'
+    )
+  );
+}
+
+/** `GET /api/orchestrator/runs` (Task 8) — one entry per project with any run
+ *  history, each already annotated with `fresh`/`pastRuns`. */
 export async function fetchOrchestratorRuns(): Promise<OrchestratorRunsPayload> {
-  return unwrap<OrchestratorRunsPayload>(await fetch('/api/orchestrator/runs'));
+  const data = await unwrap<OrchestratorRunsPayload>(await fetch('/api/orchestrator/runs'));
+  // Thrown, not returned-anyway, mirroring fetchAgentsStatus: a caller gets
+  // a clean rejection rather than a payload that looks real until something
+  // reads the wrong field out of it.
+  if (!isOrchestratorRunsPayload(data)) {
+    throw new Error('malformed /api/orchestrator/runs response');
+  }
+  return data;
 }
 
 /**

@@ -110,6 +110,18 @@ describe('the orchestrator calls', () => {
     expect(calls[0].init).toBeUndefined();
   });
 
+  // Fix round 1 (IMPORTANT): fetchOrchestratorRuns now validates the shape
+  // it gets back, the same way fetchAgentsStatus already does — see
+  // isOrchestratorRunsPayload's own comment in client/src/lib/agents.ts for
+  // why `fresh` specifically is the field worth guarding (it decides
+  // whether useOrchestratorRuns polls at all, and a wrong-typed value is
+  // read as a real answer rather than throwing). A string where a boolean
+  // belongs is exactly that case, not a missing key.
+  it('rejects a runs body whose fresh field is the wrong type instead of returning it silently', async () => {
+    stub({ ok: true, body: { runs: [{ ...fixture, fresh: 'true', pastRuns: 0 }] } });
+    await expect(fetchOrchestratorRuns()).rejects.toThrow('malformed');
+  });
+
   // POST, not GET, for the same reason fetchAgentPlan is: `project` is an
   // absolute path on someone's disk, and a query string puts it in history
   // and in logs.

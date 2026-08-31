@@ -45,8 +45,26 @@ export function useOrchestratorRuns(): { runs: OrchestratorRunsPayload['runs']; 
   // through fetchOrchestratorRuns for a cancellation that would buy nothing
   // beyond what this already gets: the in-flight request still completes
   // either way, only what happens with its answer changes.
+  //
+  // The `true` has to be set HERE, in the effect body, not only in
+  // `useRef(true)`'s initializer — `useRef`'s initial value is computed
+  // exactly once for the lifetime of the fiber, never again on a later
+  // effect run, whereas this effect body runs every time the effect
+  // (re-)fires. That distinction is invisible on a plain mount, where both
+  // ever happen exactly once each, but StrictMode's dev-only mount → cleanup
+  // → remount sequence (client/src/main.tsx wraps <App> in <StrictMode>)
+  // runs the cleanup below once *before* the lasting mount: with only the
+  // initializer setting `true`, that first cleanup flips the ref to `false`
+  // and nothing ever flips it back, so the guard reads "unmounted" for the
+  // rest of the component's real, on-screen lifetime — every `refresh()`
+  // silently skips its `setRuns`, and the hook reports zero data and never
+  // polls from the very first real mount onward. Re-asserting `true` in the
+  // effect body means the remount's own run re-arms it correctly.
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const refresh = useCallback(() => {
     fetchOrchestratorRuns()
