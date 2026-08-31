@@ -24,3 +24,6 @@ client/dist/
 
 # local design previews (scratch, never shipped)
 .preview/
+
+# superpowers visual-companion sessions
+.superpowers/
