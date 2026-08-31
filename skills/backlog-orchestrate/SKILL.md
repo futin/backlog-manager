@@ -636,9 +636,14 @@ offer is scoped here rather than left to be inferred.
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> verifying
 mkdir -p "<dir>/verify"
+rm -f "<dir>/verify/<id>.status" "<dir>/verify/<id>.out" "<dir>/verify/<id>.pid"
 nohup sh -c 'node "$1/skills/backlog-orchestrate/tools/orchestrate.mjs" verify <id> --cwd "$PWD/.worktrees/<id>" > "<dir>/verify/<id>.out" 2>&1; echo $? > "<dir>/verify/<id>.status"' sh "$CLAUDE_PLUGIN_ROOT" > /dev/null 2>&1 &
 echo $! > "<dir>/verify/<id>.pid"
 ```
+
+**All four lines in one Bash call**, and the `rm -f` in particular must never
+be skipped or split off — see the first detail below for what it is actually
+preventing.
 
 **Detached, for the same reason the session in step 4 is.** A project's whole
 baseline suite is the one step in this loop with no upper bound — `pnpm test`
@@ -651,8 +656,32 @@ unattended loop, which is the one place this design cannot afford one.
 Detached, the ceiling stops applying to the suite and applies only to the
 polling, which is built to be re-called.
 
-Three details in the last two lines, none of them the same as step 4's:
+Four details in those lines, none of them the same as step 4's:
 
+- **`rm -f` first, and it is a merge-gate rule rather than housekeeping.**
+  `<dir>` belongs to the *run*, not to the attempt: nothing removes these
+  three files afterwards, and `finish` does not clean `<dir>` at all — so a
+  second attempt on the same item would inherit the first attempt's
+  `.status` verbatim. Both "the verification did not finish" branches at the
+  end of this section are predicated on that file being **absent**, so from
+  the second attempt onward neither of them could fire. The failure that
+  produces is precise, and it is the worst one this file can produce:
+  attempt one passes and writes `0`; attempt two is killed mid-suite and
+  writes nothing; the probe reads the stale `0`; this section says *merge*.
+  A green merge gate on a verification that never finished — the one thing
+  this whole design exists to make impossible. And it is reachable
+  unattended without anybody doing anything unusual: §9 parks an item
+  *after* a green verify when the main tree is not on `main` or the merge
+  conflicts, the item stays open with its branch, and the next run resumes
+  it at Inspect — where its verify is the second attempt. `.out` and `.pid`
+  are cleared on the same rule: a stale `.pid` would be polled as though it
+  were this attempt's child (and pids are recycled), and a stale `.out`
+  would satisfy `watch`'s missing-file check for a run that never started.
+  If you ever find yourself reading a `.status` you did not clear moments
+  earlier in the same call, it is not this attempt's answer — treat it as
+  absent and start the block again. (Step 4 needs no equivalent line because
+  its transcripts are already scoped per attempt — `<id>.jsonl`, then
+  `<id>-retry-1.jsonl` — and because nothing there is read as a gate.)
 - **No `exec`, unlike the dispatch line.** The pid recorded here is
   deliberately the wrapper `sh`, because the wrapper is what outlives `node`
   long enough to write `.status`. `exec` would replace it and the exit code —
@@ -704,6 +733,10 @@ This re-runs checks execute already ran, on purpose: a fix loop may have
 changed the code after execute's own verification, and green *here* is the
 merge gate.
 
+Both of the first two branches below read "the file is not there", which is
+only ever true because the `rm -f` above made it true. That is why it is in
+the same call as the launch.
+
 - **no `.status` file yet** — the verification has not finished. Either
   `watch` came back `3` and the suite is still going, or the poll itself was
   cut short. Poll again. **This is never a merge**, and it is never a
@@ -711,7 +744,8 @@ merge gate.
 - **the pid is gone and there is still no `.status`** — something killed the
   verification (the machine slept, a human `kill`ed it, the OS ran out of
   memory). Nothing was proved, so nothing is merged. Re-run the whole block
-  above from the top; that is both safe and the only recovery. `verify`
+  above from the top, `rm -f` included — that line is what makes the next
+  attempt's answer its own. It is both safe and the only recovery. `verify`
   writes its rows in a single atomic write *after* every command has
   finished, so an interrupted run leaves the run file exactly as it found it
   and a fresh attempt simply appends a fresh set of rows — the merge gate
@@ -905,8 +939,10 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
 
 - **`resume-session`** — worktree present, the item file still carries an
   in-progress `phase:` marker, and a session id is known. Resume that session
-  in place (`claude -p --resume <sessionId>`, as in step 5) and re-enter the
-  loop at Inspect.
+  in place with **step 5's retry line unchanged** — every flag it carries,
+  `--verbose` among them, since a `claude -p --output-format stream-json`
+  without it exits in under a second and this path would read that as another
+  crash — then re-enter the loop at Inspect.
 - **`redispatch-after-stop`** — same, but no session id was ever recorded, so
   there is nothing to resume. **Clear the dead marker first**, and this is the
   one command in this skill that runs with the worktree as its cwd, because
@@ -932,7 +968,9 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   idle hours into `execute-elapsed:` too, permanently, since the counter never
   resets. `start` refuses to stamp a file that already carries a marker, so
   the clear has to come before the fresh dispatch. Then dispatch again on the
-  same worktree and branch, from the project root.
+  same worktree and branch, from the project root — **step 4's dispatch line
+  unchanged**, `--verbose` included, for the reason `resume-session` above
+  gives.
 - **`inspect`** — either the worktree is gone but the branch survives, or the
   worktree is there with no marker at all (it may have finished cleanly just
   before the crash, or never started). Reconcile cannot tell those apart from
