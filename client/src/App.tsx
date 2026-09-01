@@ -6,6 +6,7 @@ import { usePersistedState } from './hooks/usePersistedState';
 
 // Lazy: each section's chunk loads only when it is opened.
 const BoardView = lazy(() => import('./components/board/BoardView'));
+const RunsView = lazy(() => import('./components/runs/RunsView'));
 const ArchiveView = lazy(() => import('./components/archive/ArchiveView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 
@@ -98,6 +99,7 @@ function AppShell() {
         <div className={section === 'settings' ? 'wrap' : 'wrap wide'}>
           <Suspense fallback={<SectionLoading />}>
             {section === 'board' && <BoardView />}
+            {section === 'runs' && <RunsView />}
             {section === 'archive' && <ArchiveView />}
             {section === 'settings' && <SettingsView />}
           </Suspense>

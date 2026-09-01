@@ -17,6 +17,7 @@
  */
 const TABS = [
   { id: 'board', label: 'Board' },
+  { id: 'runs', label: 'Runs' },
   { id: 'archive', label: 'Archive' },
   { id: 'settings', label: 'Settings' }
 ] as const;
@@ -32,8 +33,8 @@ interface Props {
 }
 
 /**
- * Top-level section switch: board · archive · settings. A rail down the left
- * edge on desktop, a horizontal scroll strip below 700px.
+ * Top-level section switch: board · runs · archive · settings. A rail down
+ * the left edge on desktop, a horizontal scroll strip below 700px.
  *
  * Ported from ../guide-manager/client/src/components/SideRail.tsx with its
  * tabs relabelled. The class names are unchanged because the ported stylesheet
