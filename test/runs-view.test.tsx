@@ -1,15 +1,15 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, type RenderResult } from '@testing-library/react';
+import { render, screen, waitFor, type RenderResult } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
-import { fetchOrchestratorArchive, fetchOrchestratorRuns } from '../client/src/lib/agents';
+import { fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns } from '../client/src/lib/agents';
 import RunsView from '../client/src/components/runs/RunsView';
 import { dayLabel } from '../client/src/lib/run-stats';
 import type {
-  ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun,
+  ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
   OrchestratorRunsPayload, RunStage, VerificationSummary
 } from '../shared/types';
 
@@ -19,14 +19,22 @@ import type {
 // instruction — lets this suite drive RunsView exactly as the browser will:
 // the hooks' mount-time fetch, their promise resolution, and their own
 // state plumbing all run for real, and only the network edge is faked.
+//
+// `fetchArchivedRun` joins the other two here for Task 7: the detail pane
+// RunsView now mounts behind the selected row calls it directly (not through
+// a hook), and with no entry for it in this factory the real module's
+// export would be `undefined` — every RunDetail render for an archived
+// selection would throw the instant its effect tried to call it.
 jest.mock('../client/src/lib/agents', () => ({
   __esModule: true,
+  fetchArchivedRun: jest.fn(),
   fetchOrchestratorArchive: jest.fn(),
   fetchOrchestratorRuns: jest.fn()
 }));
 
 const mockArchive = fetchOrchestratorArchive as jest.Mock;
 const mockRuns = fetchOrchestratorRuns as jest.Mock;
+const mockFetchArchivedRun = fetchArchivedRun as jest.Mock;
 
 /**
  * One queue item, archive-shaped (verification already summarised — the
@@ -198,6 +206,18 @@ async function renderRunsView(archiveRuns: OrchestratorArchiveRun[], liveRuns: O
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // A safe, inert default for every test in this file that does not care
+  // about the detail pane's own fetch: RunDetail (Task 7) now mounts behind
+  // whatever row is selected, and the default selection lands on an
+  // ARCHIVED row in more than one existing test below once a project filter
+  // removes the pinned live run from scope (see "narrows both the row list
+  // and the tiles"). Without an implementation here that row's RunDetail
+  // would call a bare `jest.fn()`, get back `undefined`, and throw the
+  // instant its effect called `.then()` on it — a suite whose own subject is
+  // the run LIST, not the detail pane, should not have to know that detail
+  // about Task 7's own effect to keep passing. A promise that never resolves
+  // is enough: nothing here asserts on the fetched tail text.
+  (fetchArchivedRun as jest.Mock).mockImplementation(() => new Promise(() => {}));
 });
 
 describe('RunsView', () => {
@@ -303,5 +323,25 @@ describe('RunsView', () => {
     expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_DONE_BETA.runId);
     expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toHaveAttribute('aria-current', 'true');
     expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).not.toHaveAttribute('aria-current', 'true');
+  });
+
+  // Task 7's own integration case: RunDetail is mounted by RunsView, not
+  // tested standalone here (test/run-detail.test.tsx already covers its
+  // internals in isolation) — what this suite is responsible for proving is
+  // the WIRING, specifically that clicking an ARCHIVED row (one with no
+  // fresh live entry backing it) is what makes RunsView pass `live={null}`
+  // down, which is what makes RunDetail decide to fetch at all. RUN_LIVE
+  // itself is the wrong row to click for this: it IS live-backed, so
+  // selecting it must resolve to a non-null `live` prop and no fetch should
+  // fire — that half of the contract belongs to run-detail.test.tsx's own
+  // "live run renders tails without fetching" case, not this one.
+  it('selecting an archived run mounts RunDetail which fetches that project+runId', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`));
+
+    await waitFor(() => {
+      expect(mockFetchArchivedRun).toHaveBeenCalledWith(RUN_DONE_BETA.project, RUN_DONE_BETA.runId);
+    });
   });
 });

@@ -1266,3 +1266,105 @@ body {
 @media (max-width: 700px) {
   .runs-split { grid-template-columns: 1fr }
 }
+
+/* ---------------------------------------------- run detail pane (Task 7)
+   RunDetail.tsx, rendered inside .runs-detail above. Its own chrome is
+   deliberately small: the per-item chips, queue rows, verification
+   <details>, and attention entries all wear RunDrawer.tsx's own classes
+   verbatim (.run-drawer-chips, .run-drawer-item*, .run-drawer-attn*) — see
+   that component's file header for the reuse-not-reinvention rationale.
+   What is genuinely new here is the header row this pane needs that the
+   drawer's own .drawer-head/.drawer-meta scaffolding does not fit into (this
+   pane is not a <aside role="dialog">, just plain content inside
+   .runs-detail's own bordered box), a small-caps section label to match
+   .runs-day-heading's register without borrowing a component-specific name,
+   an inline fetch-failure note, and the segmented per-item stage bar. */
+.run-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px }
+.run-detail-id { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink) }
+.run-detail-time { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+
+/* Matches .runs-day-heading's own small-caps treatment exactly (this pane
+   sits right beside that list, and the two section labels — "live"/a day,
+   "Items"/"Attention" — should read as one visual vocabulary) without
+   reusing that literal class name, which is scoped to a day GROUP in the
+   list rather than a section of THIS pane. */
+.run-detail-heading {
+  font-family: var(--display); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+  margin: 14px 0 6px;
+}
+.run-detail-heading:first-of-type { margin-top: 0 }
+
+/* The one failure this pane can hit on its own (the tail fetch — the list
+   and the poll it reads `summary`/`live` from are both handled upstream).
+   Red rather than RunDrawer's amber .run-drawer-note: that note reports a
+   run the board has stopped hearing from — a live-process fault — where
+   this one reports a plain network failure on a read-only GET, a different
+   and lesser kind of trouble that does not deserve the same alarm color. */
+.run-detail-error {
+  font-family: var(--mono); font-size: 11px; color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, var(--strip));
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--hairline));
+  border-radius: 2px; padding: 8px 10px; margin-bottom: 10px;
+}
+
+/* The segmented per-item stage bar — this pane's one genuinely new piece of
+   visual grammar, replacing RunDrawer's seven-dot stepper (which answers
+   "how far along," a question a FINISHED item has no use for) with "where
+   did the time go," which only a finished item can honestly answer at all
+   (see itemStageSpans's own KNOWN BLUR comment in run-stats.ts for why this
+   is deliberately a bar, never a timeline against the clock).
+     A thin flex row, not a set of absolutely-positioned bars against a
+   shared axis: each segment's WIDTH already encodes its share of this one
+   item's own wall time (flexGrow set to the raw span ms, see RunDetail.tsx's
+   own comment on that), so the bar needs no axis or labels of its own — the
+   caption line underneath spells out the same numbers in words for whoever
+   wants them. `overflow: hidden` is what turns the child segments' square
+   corners into one shape that reads as a single rounded bar. */
+.run-detail-stagebar {
+  display: flex; gap: 1px; height: 4px; margin-top: 5px;
+  border-radius: 2px; overflow: hidden; background: var(--hairline);
+}
+/* `min-width: 2px` is the floor the file header comment on RunDetail.tsx
+   promises: flexbox still shrinks a tiny flex-grow share below its
+   proportional width when the row is tight, but never below this, so a
+   stage that took a genuine two seconds next to one that took ten minutes
+   stays a visible sliver instead of disappearing into the seam. */
+.run-detail-seg { min-width: 2px }
+.run-detail-caption {
+  font-family: var(--mono); font-size: 10px; color: var(--ink3); margin-top: 3px;
+}
+
+/* The six `run-seg-<tone>` background colours, one per `StageTone`
+   (lib/run-stage.ts) — the SAME tone vocabulary `stageChipClass` already
+   colours the per-item chip with, extended here rather than re-invented so
+   a stage never reads one colour on the chip above the bar and a different
+   one in the bar itself. `active`/`done`/`bad`/`warn` reuse the exact four
+   tokens `stageChipClass`'s own CSS already pairs with those tones
+   (cyan/green/red/amber — board-card-stage/-done/-bad/-warn above). `idle`
+   and `muted` both read as plain `--ink3` on the chip (a single
+   stage is never shown next to itself, so the two quiet tones sharing one
+   grey was never a legibility problem there) — a multi-segment BAR is a
+   different case: two neighbouring quiet segments sharing one grey would
+   fuse into a single unreadable band with no seam between them. `idle`
+   therefore gets `--mustard` here instead — the one remaining named token,
+   and not an arbitrary pick: theme.css's own doc comment already calls
+   `--mustard` out for exactly this stage family ("incomplete/pending").
+   `muted` keeps `--ink3`, matching its existing dashed-and-dim chip
+   treatment ("never worked, never will"). In practice only `active` and
+   `idle` (the two tones covering RunStage's eight NON-terminal members) can
+   ever actually label a span at all — `itemStageSpans` labels every span by
+   the EARLIER of two consecutive stamps, and a terminal stage by definition
+   has no stamp recorded after it, so `done`/`bad`/`warn`/`muted` can only
+   ever be the unlabelled END of the last span, never a span's own colour.
+   All six classes are still written out, exhaustively, because `STAGE_TONE`
+   is itself an exhaustive `Record<RunStage, StageTone>` the compiler
+   enforces against every future stage — a class this map could reach for
+   but never actually needs today should not be the one left missing if
+   that ever changes. */
+.run-seg-active { background: var(--cyan) }
+.run-seg-done { background: var(--green) }
+.run-seg-bad { background: var(--red) }
+.run-seg-warn { background: var(--amber) }
+.run-seg-idle { background: var(--mustard) }
+.run-seg-muted { background: var(--ink3) }

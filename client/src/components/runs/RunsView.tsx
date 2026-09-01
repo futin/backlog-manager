@@ -5,6 +5,7 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { aggregateRuns, dayKey, dayLabel, runWallMs } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
+import { RunDetail } from './RunDetail';
 import type { OrchestratorArchiveRun, OrchestratorRun } from '../../../../shared/types';
 
 /**
@@ -22,12 +23,12 @@ import type { OrchestratorArchiveRun, OrchestratorRun } from '../../../../shared
  * placeholder text — and is now reached by an actual check over both
  * payloads instead of being the only thing this file could render.
  *
- * `RunDetail` (Task 7) is not built yet; `data-testid="run-detail-slot"`
- * below is what it replaces. Selection is already real — a click sets it,
- * the newest visible run is the default — because Task 7 consumes that
- * state (`selected`) rather than owning it: the list has to know what is
- * selected to draw the `aria-current` row highlight and the live marker
- * regardless of which task renders the detail pane behind it.
+ * `RunDetail` (Task 7) renders behind `data-testid="run-detail-slot"` below,
+ * fed by `selected` — a click sets it, the newest visible run is the
+ * default — because `RunDetail` consumes that state rather than owning it:
+ * the list has to know what is selected to draw the `aria-current` row
+ * highlight and the live marker regardless of which component renders the
+ * detail pane behind it.
  *
  * Fix round 1: a fresh (still-heartbeating) live run is PINNED above every
  * day group, not merely sorted first by `startedAt` — see `splitPinned`'s
@@ -459,12 +460,39 @@ export default function RunsView() {
               ))}
             </div>
 
-            {/* Task 7's RunDetail replaces this slot outright; until then the
-                selected runId is the one thing worth proving actually wired
-                up — that a click on the left really does move what "this
-                run" means, without building the detail pane twice. */}
+            {/* RunDetail (Task 7) owns everything inside this wrapper; the
+                wrapper itself — class and testid — stays here rather than
+                moving into that component, since it is this file's own
+                layout grid (.runs-split) that sizes it, the same reason
+                .runs-list's rows live in this file rather than a component
+                of their own.
+                  `selectedRow` is typed `MergedRun | undefined` only
+                because TypeScript cannot see across the `merged.length ===
+                0` branch above that guards this whole block: by the time
+                render reaches here there is always at least one row, and
+                `orderedRows[0]` (this variable's own fallback) is never
+                actually empty. The guard below is defensive typing, not a
+                real empty-selection case this pane has to design for.
+                  `liveRuns` — not `selectedRow.run`'s own fields — is where
+                the LIVE object comes from: `MergedRun.isLive` only ever
+                answers "is a fresh live entry backing this row" (see that
+                field's own doc comment), never carries the entry itself,
+                because `mergeRuns` above deliberately drops the live
+                payload's queue for every row but the selected one. Matched
+                on project AND runId, not runId alone, even though
+                `isLive`'s own computation only checks the latter — the
+                `Selection` interface's own comment already flags a runId as
+                only informally unique across projects, and this lookup can
+                afford to be the stricter of the two. */}
             <div className="runs-detail" data-testid="run-detail-slot">
-              {selectedRow?.run.runId ?? ''}
+              {selectedRow !== undefined && (
+                <RunDetail
+                  summary={selectedRow.run}
+                  live={selectedRow.isLive
+                    ? (liveRuns.find((r) => r.project === selectedRow.run.project && r.runId === selectedRow.run.runId) ?? null)
+                    : null}
+                />
+              )}
             </div>
           </div>
         </>
