@@ -3,6 +3,9 @@ id: bug-6
 title: Run drawer tells a finished run to resume or abort
 created: 2026-09-01
 tags: client, orchestrator
+updated: 2026-09-01T13:29:31Z
+started: 2026-09-01T13:25:03Z
+execute-elapsed: 268
 ---
 
 ## Symptom
@@ -87,3 +90,47 @@ Test cases, in test/orchestrator-drawer.test.tsx alongside the case at line 217:
 - the existing stale case (`status: 'running'`, `fresh: false`, an old `updatedAt`) still
   shows the banner with its minute count — proof the fix narrowed the gate rather than
   removing it.
+
+## Outcome
+
+2026-09-01 — Fixed as the `## Fix` section describes. `staleNote`
+(client/src/components/board/RunDrawer.tsx) now gates on
+`run.fresh || run.status !== 'running'`, so the banner is drawn only for a run
+that still claims to be live and has gone quiet — the one case it was written
+for. Its doc comment now spells out why the second clause is there, since
+"not fresh" reading as "stale" is the whole trap. Nothing else changed: the
+server's `fresh` derivation, the render order that puts the note first, and
+the header's `run.status` line are all untouched.
+
+Three cases added to test/orchestrator-drawer.test.tsx alongside the existing
+stale case, one per terminal status. Watched them fail first against the old
+gate ("expected document not to contain element, found ... no heartbeat for 20
+minutes — resume or abort from the terminal"), then pass. The existing stale
+case (`status: 'running'`, `fresh: false`) stayed green throughout, proving
+the gate was narrowed rather than removed.
+
+`pnpm test`:
+
+```
+Test Suites: 35 passed, 35 total
+Tests:       510 passed, 510 total
+Snapshots:   0 total
+Time:        93.493 s
+Ran all test suites.
+```
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+=== TYPECHECK EXIT: 0 ===
+```
+
+The four drawer cases specifically:
+
+```
+✓ shows the no-heartbeat note for a stale run, and hides it for a fresh one (15 ms)
+✓ hides the no-heartbeat note for a done run, whose heartbeat stopped because the run ended (5 ms)
+✓ hides the no-heartbeat note for a aborted run, whose heartbeat stopped because the run ended (7 ms)
+✓ hides the no-heartbeat note for a failed run, whose heartbeat stopped because the run ended (5 ms)
+```

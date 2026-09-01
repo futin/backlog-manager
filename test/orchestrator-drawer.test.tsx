@@ -284,6 +284,32 @@ describe('RunDrawer', () => {
     expect(screen.queryByText(/no heartbeat/)).not.toBeInTheDocument();
   });
 
+  // bug-6: `fresh` is false for two unrelated reasons — a live run that went
+  // quiet, and a run that ended on purpose — and the drawer used to read both
+  // as the former, telling a finished run to "resume or abort" one line under
+  // a header already printing `done`. Every one of these three statuses is
+  // terminal, and none of them can be resumed (`--resume` reconciles a
+  // `running` run) or aborted, so each gets its own case rather than one
+  // parameterised assertion: they are three separate claims about three
+  // separate end states, and a loop would let two of them silently vanish
+  // behind a typo'd array.
+  it.each(['done', 'aborted', 'failed'] as const)(
+    'hides the no-heartbeat note for a %s run, whose heartbeat stopped because the run ended',
+    (status) => {
+      const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      render(
+        <RunDrawer
+          run={runPayload({ status, fresh: false, updatedAt: twentyMinutesAgo })}
+          onClose={() => {}}
+        />
+      );
+      // The header still prints the status it always did — that half was
+      // never wrong, and it is what made the contradiction visible.
+      expect(screen.getByTestId('run-drawer-past')).toHaveTextContent(status);
+      expect(screen.queryByText(/no heartbeat/)).not.toBeInTheDocument();
+    }
+  );
+
   it('closes on Escape, on the close button, and on the scrim — mirroring ItemDrawer', async () => {
     const onClose = jest.fn();
     render(<RunDrawer run={runPayload()} onClose={onClose} />);

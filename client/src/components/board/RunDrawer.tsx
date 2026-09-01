@@ -67,7 +67,21 @@ function staleMinutes(updatedAt: string): number | null {
  * read-only drawer has no resume/abort button of its own to offer instead.
  */
 function staleNote(run: RunPayload): string | null {
-  if (run.fresh) return null;
+  // Two clauses, not one, because `fresh` folds two unrelated facts together:
+  // the server computes it as `status === 'running' && heartbeat is recent`
+  // (orchestrator.service.ts), so `!fresh` means EITHER "a live run has gone
+  // silent" — the fault this note exists to report — OR "this run ended",
+  // which is the normal end state of every run ever started and no fault at
+  // all. Reading "not fresh" as "stale" is exactly the trap (bug-6): a
+  // finished run drew this banner telling a person to "resume or abort" one
+  // line under a header already printing `done`, advice that was wrong twice
+  // over — `--resume` reconciles a `running` run, and aborting a finished one
+  // is not the no-op the wording implies. Gating on the run still CLAIMING to
+  // be live is what tells the two apart; `status` is already on the payload
+  // (OrchestratorRun, shared/types.ts) and the header renders it two lines
+  // away, so nothing new is plumbed for it. A `running` run whose heartbeat
+  // has genuinely gone quiet still gets the banner, unchanged.
+  if (run.fresh || run.status !== 'running') return null;
   const minutes = staleMinutes(run.updatedAt);
   const age = minutes === null ? '' : ` for ${minutes} minute${minutes === 1 ? '' : 's'}`;
   return `no heartbeat${age} — resume or abort from the terminal`;
