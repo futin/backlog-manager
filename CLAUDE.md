@@ -224,9 +224,15 @@ happened.
 - **A project the dashboard cannot see cannot be dispatched to.** Never
   derive a `dirName` from a path to route around this. The `dispatchGate`
   membership check is a raw string compare, deliberately not realpath.
-- **An environment-level block hides the dispatch control; only the per-item
-  (project-visibility) one disables it.** With `BM_AGENTS` off the board
-  shows no dispatch buttons — do not "improve" that into disabled buttons.
+- **An environment-level block hides the dispatch control; the per-item ones
+  disable it.** With `BM_AGENTS` off the board shows no dispatch buttons — do
+  not "improve" that into disabled buttons. There are two per-item blocks and
+  both keep their button: the dashboard cannot see this item's project
+  (`dispatchGate`, derived from `AgentsStatus`), and an orchestrator run has
+  already claimed this item (`runClaimBlock`, `shared/agent.ts` — read from the
+  run payload, since neither the item file nor the status payload can know it).
+  `DispatchButton` reads them in that order, environment first, so the reason
+  it shows names the thing to fix rather than a symptom of it.
 - **One run per project, checked twice.** `orchestrate.mjs init` refuses
   outright on any `status: "running"` run file, fresh or stale — a stale one
   means a crashed run, recoverable only via `--resume`/`--abort`, never

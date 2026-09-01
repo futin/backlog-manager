@@ -265,3 +265,52 @@ an edit to this item):
   `moduleNameMapper`'s `<rootDir>/node_modules/marked/...` path until
   `pnpm install` ran in it. Worth knowing for `backlog-orchestrate`, which
   creates these worktrees.
+
+### Review round 1 — one Important finding, fixed
+
+The fix added a second per-item *disabling* block, and the stale comment inside
+`DispatchButton.tsx` was corrected in the same pass — but the two documents
+that state the same rule were not. Both now match the code:
+
+- `CLAUDE.md` — the bullet read "only the per-item (project-visibility) one
+  disables it". Now "the per-item ones disable it", naming both (project
+  visibility via `dispatchGate`, the run claim via `runClaimBlock`) and the
+  order `DispatchButton` reads them in.
+- `docs/invariants.md:408` — "This is the one block that leaves a control on
+  screen" → "one of the two blocks that leave a control on screen", pointing at
+  the other.
+- `docs/invariants.md` heading — "…; per-item disables it" → "…; per-item ones
+  disable it", and its closing line ("The project-visibility block is the
+  opposite case and keeps its button") is replaced by a two-item list of the
+  per-item blocks: what `RUN_CLAIMED_STAGES` is and why `pending`/`preflight`
+  are in it, why it is not `ACTIVE_RUN_STAGES`, why the item file cannot carry
+  the fact, and why `dispatch()`'s re-check is the layer that holds. Closes by
+  naming bug-4 as the failure it encodes, matching how the rest of that file
+  reads.
+- `test/dispatch-button.test.tsx:157` — a comment quoting the invariant
+  verbatim, so it went stale with it. Re-quoted against the new wording.
+
+Deliberately left alone: `docs/superpowers/specs/2026-08-27-agents-dispatch-design.md:61`
+carries the same sentence, but it is a dated design spec — a record of what that
+pass decided, not a live statement of current behaviour. Editing it would
+rewrite history rather than fix a claim.
+
+Re-verified after the doc edits.
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+```
+
+(no output, exit 0)
+
+`pnpm test`:
+
+```
+Test Suites: 33 passed, 33 total
+Tests:       493 passed, 493 total
+Snapshots:   0 total
+Time:        25.949 s, estimated 38 s
+Ran all test suites.
+```
