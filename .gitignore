@@ -27,3 +27,7 @@ client/dist/
 
 # superpowers visual-companion sessions
 .superpowers/
+
+# playwright MCP session artifacts (snapshots/traces), created wherever the
+# server runs — the repo root and every orchestrator worktree alike
+.playwright-mcp/
