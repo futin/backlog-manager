@@ -306,6 +306,12 @@ function makeQueueItem(id, title, stamp) {
     stageAt: { pending: stamp },
     verification: [],
     questions: [],
+    // Null until a dispatch actually chooses one. Before bug-3 there was
+    // nothing to record: every session ran under the one hard-coded flag,
+    // so the mode was a constant of the design rather than a property of a
+    // run. Now that it can vary, a denial found in a transcript needs the
+    // mode that produced it recorded next to it.
+    permissionMode: null,
     note: null,
   }
 }
@@ -763,7 +769,7 @@ function findQueueItem(run, itemId) {
   return item
 }
 
-function applyQueueItemFields(item, { stage, session, worktree, branch, note, fixLoop = false } = {}) {
+function applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop = false } = {}) {
   if (stage !== undefined) {
     item.stage = stage
     // First-arrival only — see shared/types.ts's own RunQueueItem.stageAt
@@ -797,6 +803,7 @@ function applyQueueItemFields(item, { stage, session, worktree, branch, note, fi
   if (session !== undefined) item.sessionId = session
   if (worktree !== undefined) item.worktree = worktree
   if (branch !== undefined) item.branch = branch
+  if (permissionMode !== undefined) item.permissionMode = permissionMode
   if (note !== undefined) item.note = note
 }
 
@@ -1122,7 +1129,7 @@ function cmdPlan(argv) {
   return 0
 }
 
-const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--note S] [--fix-loop]'
+const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop]'
 
 function cmdStage(argv) {
   const itemId = argv[0]
@@ -1131,6 +1138,7 @@ function cmdStage(argv) {
   let worktree
   let branch
   let note
+  let permissionMode
   // The one valueless flag on this command: it consumes no argv slot, so it
   // never does the `argv[++i]` step the four above all take.
   let fixLoop = false
@@ -1138,6 +1146,7 @@ function cmdStage(argv) {
     if (argv[i] === '--session') session = argv[++i]
     else if (argv[i] === '--worktree') worktree = argv[++i]
     else if (argv[i] === '--branch') branch = argv[++i]
+    else if (argv[i] === '--permission-mode') permissionMode = argv[++i]
     else if (argv[i] === '--note') note = argv[++i]
     else if (argv[i] === '--fix-loop') fixLoop = true
   }
@@ -1156,7 +1165,7 @@ function cmdStage(argv) {
   const run = readRun(dir)
 
   const item = findQueueItem(run, itemId)
-  applyQueueItemFields(item, { stage, session, worktree, branch, note, fixLoop })
+  applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop })
 
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)
@@ -1400,6 +1409,82 @@ function findSessionIdInJsonl(file) {
     }
   }
   return null
+}
+
+// Pulls `permission_denials` off the LAST `{"type":"result",...}` event in
+// the same kind of transcript findSessionIdInJsonl reads, and shares that
+// function's two disciplines for the same two reasons: `slice(0, -1)` drops
+// a possibly-partial trailing line (this file is appended to live), and an
+// unparseable line is skipped rather than fatal.
+//
+// Why this reader exists at all: the dispatch runs under
+// `--permission-mode auto` rather than `--dangerously-skip-permissions`, so
+// a call the classifier refuses is now a thing that can happen. Measured on
+// this machine against CLI 2.1.250, a refused call is invisible in every
+// signal an orchestrator would naturally check — the tool_result comes back
+// `is_error: true`, the session reads it and carries on, and the run's final
+// result event still reports `subtype: "success"` and `is_error: false`
+// while the process exits `0`. The ONLY machine-readable trace is this
+// array. Without it, step 5 would happily merge a diff the session built
+// around a command that never ran.
+//
+// The LAST result event, not the first, because a `--resume` retry appends
+// a second one to the same transcript: reading the first would clear a run
+// whose retry was the half that got refused.
+//
+// An absent `permission_denials` key reads as `[]` — that is a transcript
+// from a CLI that predates the field, or simply a run with nothing to
+// report, and neither is a reason to treat the run as unreadable. A
+// transcript with no result event at all is also `[]`: that is the crashed
+// session watch already has a shape for, judged by the item file as it
+// always has been. Failing to READ the file, by contrast, is never
+// swallowed — see cmdDenials, which turns it into an exit 1 rather than
+// letting "unreadable" masquerade as "clean".
+export function readPermissionDenials(file) {
+  const text = fs.readFileSync(file, 'utf8')
+  const completeLines = text.split('\n').slice(0, -1)
+  let denials = []
+  for (const line of completeLines) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    let event
+    try {
+      event = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (event && event.type === 'result') {
+      denials = Array.isArray(event.permission_denials) ? event.permission_denials : []
+    }
+  }
+  return denials
+}
+
+const DENIALS_USAGE = 'usage: orchestrate.mjs denials --jsonl <file>'
+
+// Deliberately run-independent: it takes no item id, reads no run.json, and
+// needs no lock. A crashed run whose run file is in whatever state a crash
+// left it in must still be able to answer "did the session get refused
+// anything?", and the transcript on disk is the whole of the evidence.
+function cmdDenials(argv) {
+  let jsonlFile
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--jsonl') jsonlFile = argv[++i]
+  }
+  if (jsonlFile === undefined) {
+    throw new OrchestrateError(DENIALS_USAGE, 1)
+  }
+  let denials
+  try {
+    denials = readPermissionDenials(jsonlFile)
+  } catch (e) {
+    // An unreadable transcript answering "no denials" would be
+    // indistinguishable from a clean run, and step 5 merges on clean. Exit
+    // 1 instead, so the caller has to look.
+    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1)
+  }
+  console.log(JSON.stringify({ count: denials.length, denials }))
+  return 0
 }
 
 const WATCH_USAGE = 'usage: orchestrate.mjs watch <itemId> --pid <p> --jsonl <file> [--interval-ms 30000] [--budget-ms 540000]'
@@ -1927,6 +2012,7 @@ commands:
   finish     set the run's final status
   status     print the current run
   watch      survive a long headless child across the loop's own Bash cap
+  denials    list the permission denials a session's transcript recorded
   verify     run the project's proof commands and record them
   reconcile  read-only crash-recovery report
   abort      tear down worktrees/branches and end the run`
@@ -1969,6 +2055,7 @@ export function main(argv) {
     if (cmd === 'finish') return cmdFinish(rest)
     if (cmd === 'status') return cmdStatus(rest)
     if (cmd === 'watch') return cmdWatch(rest)
+    if (cmd === 'denials') return cmdDenials(rest)
     if (cmd === 'verify') return cmdVerify(rest)
     if (cmd === 'reconcile') return cmdReconcile(rest)
     if (cmd === 'abort') return cmdAbort()

@@ -487,13 +487,34 @@ once in a row you can go and read is the opposite arrangement. Permission
 mode deliberately has no stored default — it comes from the server's
 `plan.defaultMode` and is clamped to the host ceiling, and a remembered mode
 would fight that ladder. That server-side default is `auto`, because a
-dispatched session runs unattended: nobody is necessarily at the terminal the
-permission prompt would appear on, so a lower rung means a session that stops
-on its first unapprovable tool call and silently does nothing. `auto` is not
-the top rung — `bypassPermissions` stays a per-launch choice, since asking for
-the most a host allows by default is how a convenience becomes an incident —
-and the ceiling clamps `auto` down on a dashboard that caps lower, so this
-never widens a stricter host.
+dispatched session runs unattended: nobody is necessarily at the terminal a
+permission prompt would appear on. What a lower rung actually costs is worth
+stating precisely, because the earlier wording here ("a session that stops on
+its first unapprovable tool call and silently does nothing") was half right,
+and half right is worse than wrong. Measured against CLI 2.1.250: it does
+*not* stop and it does *not* do nothing. A refused call returns an ordinary
+`tool_result` with `is_error: true`, the session reads it and **improvises
+around the refusal**, and the run still exits `0` reporting
+`subtype: "success"`. So the hazard a too-low rung buys is not a wedged
+session anyone would notice — it is a session that quietly reached its
+conclusion by some other route, with the refusal recorded nowhere but the
+transcript's `permission_denials` array. That is the failure mode the
+ladder's default sits where it does to avoid. `auto` is still not the top
+rung — `bypassPermissions` stays a per-launch choice, since asking for the
+most a host allows by default is how a convenience becomes an incident — and
+the ceiling clamps `auto` down on a dashboard that caps lower, so this never
+widens a stricter host.
+
+`backlog-orchestrate` reaches the same conclusion from the other side. It
+used to hard-code `--dangerously-skip-permissions` on its headless dispatch,
+justified by a premise the paragraph above disproves — that a prompt inside a
+headless session is a hang. It now dispatches under `--permission-mode auto`
+like everything else here, and because `auto` can genuinely refuse a call, it
+reads `permission_denials` off the transcript's last `result` event before it
+judges an item clean (`orchestrate.mjs`'s `readPermissionDenials`, surfaced
+as `orchestrate.mjs denials`). The mode each session ran under is recorded on
+its queue item (`RunQueueItem.permissionMode`), so a denial found in a log has
+the mode that produced it sitting next to it.
 
 ## `linkBase` is per-device and becomes an href
 

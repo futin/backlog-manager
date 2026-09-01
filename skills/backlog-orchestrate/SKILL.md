@@ -455,18 +455,24 @@ Now write any pre-flight answer into the worktree's copy of the item file
 (see above), and record the worktree on the run:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id>
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id> --permission-mode auto
 ```
 
 Pass the worktree as an **absolute** path: `reconcile` and `abort` both test
 it with a plain existence check from wherever they happen to be running, and
 a relative path that resolves for one of them may not for the other.
 
+`--permission-mode auto` here records on the run what the dispatch below is
+about to launch under. It must match that dispatch line's own flag — the
+field exists so that a denial found in a transcript has the mode that
+produced it recorded beside it, and a field recording the wrong mode is
+worse than no field.
+
 ### Dispatch the headless session
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p "/backlog-execute <id>" --output-format stream-json --verbose --dangerously-skip-permissions' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p "/backlog-execute <id>" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -500,19 +506,51 @@ stays null. Step 5 then reads exactly the shape it calls a crashed session,
 parks the item, and moves on — for every item in the queue. The run merges
 nothing and reports that the sessions kept dying.
 
-**Why `--dangerously-skip-permissions` is acceptable here, and only here.**
-This is the design's most load-bearing trade, and it is stated out loud
-rather than buried: a headless session cannot answer a permission prompt, so
-a prompt inside one is a hang — an unattended run that stops forever with
-nobody to unstick it. What makes skipping them tolerable is not trust in the
-session, it is the four walls around it: the session can only write inside a
-**disposable worktree** created seconds ago from `main`; its output faces an
-**independent review** before anything moves; it faces **verification
-commands** that must come back green; and the **merge is the only door back
-to `main`**, walked by this skill, never by the session. Remove any one of
-those four and this flag stops being defensible. Never pass it to anything
-running in the main tree, and never carry it into a skill that has no merge
-gate behind it.
+**Why `--permission-mode auto`, and not the rung above it.** This is the
+design's most load-bearing trade, and it is stated out loud rather than
+buried. What makes running an unattended session tolerable at all is not
+trust in the session, it is the four walls around it: the session can only
+write inside a **disposable worktree** created seconds ago from `main`; its
+output faces an **independent review** before anything moves; it faces
+**verification commands** that must come back green; and the **merge is the
+only door back to `main`**, walked by this skill, never by the session.
+Remove any one of those four and dispatching unattended stops being
+defensible at any rung.
+
+Those four walls are what the run is safe *because of* — they were never an
+argument for reaching the top of the ladder specifically, and `auto` already
+clears an execute session's entire real workload. Measured on this machine
+against CLI 2.1.250: of twelve probed actions under headless `auto`, eleven
+ran unprompted — `pnpm test`, arbitrary `node`, `git commit`, `git reset
+--hard`, `git push --force`, recursive deletes, writes outside the cwd — and
+exactly one was denied: uploading a local file's contents to an external
+host, a class `backlog-execute` has no business performing. `acceptEdits`,
+the rung below, is genuinely not enough (arbitrary `pnpm test` and `git`
+still prompt there), so this is the lowest rung that works, not the mildest
+one available.
+
+**A denial is silent in every signal but one.** There is no hang to fear
+here — a refused call comes back as an ordinary `tool_result` with
+`is_error: true`, the session reads it and improvises around it. That is the
+actual hazard, and it is quieter than a hang: the run's final result event
+still reports `subtype: "success"` and `is_error: false`, and the process
+still exits `0`, **even when every tool call in the session was refused**.
+The one machine-readable trace is `permission_denials` on that same result
+event, which is why step 5 reads it before it judges anything else (see
+Inspect). Read the eleven-of-twelve above as what `auto` typically permits,
+never as a contract: the boundary is a classifier's judgment weighing cwd and
+context, not a fixed list, so the same mode name can return different
+verdicts on different days. The design has to tolerate a denial happening,
+which is exactly what that check is for.
+
+**Do not "tighten" this to `dontAsk` plus `--allowedTools`.** It was probed,
+and it is dead on arrival: under `--permission-mode dontAsk` with no
+allowlist, `pnpm test` was refused outright — *"Permission to use Bash has
+been denied because Claude Code is running in don't ask mode"* — and the run
+still finished `subtype: "success"`. Making it work means enumerating every
+command the session will ever need before the work starts, which is the one
+thing a session doing unenumerated work cannot have. Tighter is not better
+when the tightening has to be guessed ahead of the work.
 
 ### Watch until it exits
 
@@ -554,9 +592,26 @@ session id is read back from.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> inspecting
 ```
 
-Look at the item file **in the worktree**, not in the main tree — the main
-tree's copy has not changed and will not until the merge, which is exactly
-what the board shows and exactly what the run strip exists to compensate for.
+**First, before the item file: did the session get refused anything?**
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>.jsonl"
+```
+
+Prints `{"count":N,"denials":[…]}`. A non-zero `count` means the session ran
+`auto` into a call the classifier refused (see step 4's rationale) — and
+because a denied run reports `success` and exits `0` like any other, this is
+the only place it shows. **A non-zero count means the item is not clean even
+if it looks done**: whatever the session built, it built around a command
+that never ran. Treat it exactly like the two failure shapes below — ask the
+user, and do not merge the diff. Exit `1` here is an unreadable transcript,
+not a clean run; look at it before deciding anything. On the retry path
+below, re-run this against the *retry's* transcript.
+
+Then look at the item file **in the worktree**, not in the main tree — the
+main tree's copy has not changed and will not until the merge, which is
+exactly what the board shows and exactly what the run strip exists to
+compensate for.
 
 - **Moved to `backlog/<section>/done/`, with an `## Outcome` carrying real
   verification output** → execute succeeded on its own terms. Continue to
@@ -572,7 +627,7 @@ For both failure shapes, ask the user — best-effort, exactly like pre-flight
 resumes that item's own session so its context is not paid for twice:
 
 ```bash
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --dangerously-skip-permissions' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 

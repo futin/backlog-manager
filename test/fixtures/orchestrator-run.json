@@ -13,6 +13,7 @@
       "sessionId": "b3f1c9d2-4a6e-4f18-9c2a-7e5d0a1f8c33",
       "worktree": "/Users/dev/code/example-app/.worktrees/bug-14",
       "branch": "backlog/bug-14",
+      "permissionMode": "auto",
       "fixLoops": 1,
       "stageAt": {
         "pending": "2026-08-31T08:40:03Z",
@@ -39,6 +40,7 @@
       "sessionId": null,
       "worktree": null,
       "branch": null,
+      "permissionMode": null,
       "fixLoops": 0,
       "stageAt": {
         "pending": "2026-08-31T08:40:03Z",
@@ -58,6 +60,7 @@
       "sessionId": null,
       "worktree": null,
       "branch": null,
+      "permissionMode": null,
       "fixLoops": 0,
       "stageAt": {
         "pending": "2026-08-31T08:40:03Z",
@@ -74,6 +77,7 @@
       "sessionId": "9a7d4e21-1c3f-4b9a-8e02-5f61d2c4a7b8",
       "worktree": "/Users/dev/code/example-app/.worktrees/task-16",
       "branch": "backlog/task-16",
+      "permissionMode": "auto",
       "fixLoops": 0,
       "stageAt": {
         "pending": "2026-08-31T08:40:03Z",
@@ -99,6 +103,7 @@
       "sessionId": "2d5f8b13-7a9c-4e02-b1d4-3c6f9a8e0d17",
       "worktree": "/Users/dev/code/example-app/.worktrees/task-9",
       "branch": "backlog/task-9",
+      "permissionMode": "auto",
       "fixLoops": 2,
       "stageAt": {
         "pending": "2026-08-31T08:40:03Z",
@@ -124,6 +129,7 @@
       "sessionId": "6c1e9a04-2b7d-4f83-a5e1-8d0c3f6b9a22",
       "worktree": "/Users/dev/code/example-app/.worktrees/task-14",
       "branch": "backlog/task-14",
+      "permissionMode": "auto",
       "fixLoops": 0,
       "stageAt": {
         "pending": "2026-08-31T08:40:03Z",
@@ -143,6 +149,7 @@
       "sessionId": null,
       "worktree": null,
       "branch": null,
+      "permissionMode": null,
       "fixLoops": 0,
       "stageAt": {
         "pending": "2026-08-31T08:40:03Z"
