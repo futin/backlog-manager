@@ -3,8 +3,10 @@ id: bug-3
 title: Orchestrate dispatches with a stronger permission flag than it needs
 created: 2026-08-31
 tags: orchestrate, permissions
-updated: 2026-09-01T10:24:23Z
+updated: 2026-09-01T11:45:56Z
 groom-elapsed: 1103
+started: 2026-09-01T11:30:22Z
+execute-elapsed: 934
 ---
 
 ## Symptom
@@ -216,3 +218,205 @@ the flag whose quiet reintroduction nobody would notice — and a unit test for 
 reader over fixture transcripts: denial present → one entry, field absent → `[]`, a
 partial trailing line tolerated, and the last `result` event winning when a resumed
 transcript holds more than one.
+
+## Outcome
+
+2026-09-01 — Fixed. All six edits in `## Fix` landed, plus the two tests it
+asked for. The diagnosis was re-confirmed against the code first: the flag sat
+on `SKILL.md:469`, `:503` and `:575` exactly as the Cause predicted, and the
+CLI is still 2.1.250.
+
+The premise re-measured rather than taken from the item: under
+`--permission-mode dontAsk`, a refused `Bash` call came back as an ordinary
+`tool_result` with `is_error: true`, the session read it and carried on, the
+process exited `0`, and the result event reported `subtype: "success"`,
+`is_error: false` — while carrying the denial in `permission_denials`. That is
+the whole design rationale for change 4, so it was worth re-observing rather
+than citing:
+
+```
+TOOL_USE Bash {"command":"sw_vers -productVersion"}
+TOOL_RESULT is_error=true "Permission to use Bash has been denied because Claude Code is running in don't ask mode..."
+RESULT {"subtype":"success","is_error":false,"permission_denials":[{"tool_name":"Bash","tool_use_id":"toolu_01RxyfP9AtQaqVUWLRQ9ozAb","tool_input":{"command":"sw_vers -productVersion",...}}]}
+exit=0
+```
+
+What changed:
+
+1. Both headless dispatch lines (`SKILL.md` step 4, and step 5's `--resume`
+   retry) now pass `--permission-mode auto`. Every other flag unchanged.
+2. The rationale paragraph is rewritten: the hang sentence is gone, the four
+   walls are kept verbatim, and the real semantics (denial → error the session
+   reads and improvises around, run still exits `0` and reports success, the
+   only trace is `permission_denials`) take its place, with the eleven-of-twelve
+   number and the "classifier judgment, not a fixed list" caveat.
+3. `docs/invariants.md` — the "stops on its first unapprovable tool call and
+   silently does nothing" claim is replaced with what actually happens, framed
+   as why half right was worse than wrong here, plus a paragraph tying
+   orchestrate's dispatch to the same ladder default.
+4. `readPermissionDenials(file)` in `orchestrate.mjs`, beside
+   `findSessionIdInJsonl` and sharing its two disciplines (`slice(0, -1)` for
+   the live-append tail, lenient skip on an unparseable line). Returns the
+   **last** `result` event's array, `[]` when the field or the event is absent.
+   Surfaced as a new run-independent `denials --jsonl <file>` command, which
+   step 5's Inspect now runs **before** it judges the item file's three shapes;
+   an unreadable transcript exits `1` rather than reporting a clean run.
+5. `RunQueueItem.permissionMode` (`shared/types.ts`, the run fixture, and
+   `orchestrate.mjs`'s item construction), written by
+   `stage <id> dispatched --permission-mode auto`, which the skill's own stage
+   call now passes.
+6. `dontAsk` + `--allowedTools` is rejected in the rationale itself, with the
+   probe output, so the next person who tries to tighten it finds the
+   measurement instead of re-running it.
+
+The guard tests were mutation-checked rather than merely watched to pass —
+the flag was put back on the step 4 dispatch line, both guards went red, and
+the file was restored:
+
+```
+not ok 86 - both of SKILL.md's headless dispatch lines carry --permission-mode auto
+not ok 87 - no command anywhere under skills/ passes --dangerously-skip-permissions
+# pass 94
+# fail 2
+```
+
+**The original symptom, tested directly.** The exact shape of `SKILL.md`'s
+step 4 dispatch was launched from an auto-mode session — the situation that
+produced the bug. It was accepted rather than refused, and the session ran
+under the intended mode:
+
+```
+dispatch line accepted, pid=22648
+INIT permissionMode= auto session= 4a3003c4-896d-499d-bda0-698858ea519f
+RESULT {"subtype":"success","is_error":false,"denials":[]}
+```
+
+`denials` read against that real transcript, and against the genuinely-denied
+one from the probe above:
+
+```
+$ node skills/backlog-orchestrate/tools/orchestrate.mjs denials --jsonl <denied run>
+{"count":1,"denials":[{"tool_name":"Bash","tool_use_id":"toolu_01RxyfP9AtQaqVUWLRQ9ozAb","tool_input":{"command":"sw_vers -productVersion","description":"Get macOS product version"}}]}
+exit=0
+$ node skills/backlog-orchestrate/tools/orchestrate.mjs denials --jsonl <clean run>
+{"count":0,"denials":[]}
+exit=0
+$ node skills/backlog-orchestrate/tools/orchestrate.mjs denials --jsonl <missing file>
+--jsonl .../nope.jsonl: could not be read (ENOENT: no such file or directory, ...)
+exit=1
+```
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+typecheck exit=0
+
+$ pnpm test
+Test Suites: 33 passed, 33 total
+Tests:       473 passed, 473 total
+Snapshots:   0 total
+Time:        22.176 s, estimated 33 s
+Ran all test suites.
+
+$ pnpm run test:skills
+# tests 252
+# pass 252
+# fail 0
+
+$ pnpm run build
+build exit=0
+✓ built in 978ms
+```
+
+Not committed — `backlog-execute` never does. Note for whoever picks this up:
+the `skills/` half of this diff changes nothing in an installed plugin until
+it is committed, pushed, and `pnpm run plugin:sync` runs.
+
+### Review round 1 — two Important findings, both fixed
+
+2026-09-01. Both were real; both were verified against the files before
+anything was changed.
+
+**1. `SKILL.md` — the fix loop reached Commit without the denials gate.**
+Step 7's `verdict: fix` path is resume → `watch` → commit (step 6) → review,
+and it never passes back through step 5, where the gate had been added. So a
+fix-loop session refused a call would have had that work committed and merged
+with exit code, result subtype and `is_error` all reporting success — the exact
+failure this bug's whole change exists to prevent, reappearing one section
+over. Step 7 now runs the same check on the fix session's own transcript
+before committing, and a non-zero count sends the item to the fix-exhausted
+menu rather than spending its second loop on a session that could not work.
+
+The fix loop also now writes to `<dir>/logs/<id>-fix-<n>.jsonl` rather than
+reusing step 5's `-retry-1` name — a second loop was otherwise free to
+overwrite the first one's evidence, which matters more now that the
+transcript is a thing the loop reads a verdict out of.
+
+**2. `orchestrate.test.mjs` — the "no result event at all" test tested
+nothing new.** It pointed at `stream-noinit.jsonl`, which does carry a
+`result` event (one with no `permission_denials` key) and does end in a
+newline, so it was parsed: the test was a second copy of the absent-field
+case above it, and `readPermissionDenials`'s actual no-result-event branch —
+the loop never matching, so the initial `[]` is returned — was uncovered. It
+now points at a new `stream-no-result.jsonl` fixture: init, a tool_use and a
+tool_result, and no result event, the shape of a session killed mid-flight.
+
+A third change, not asked for but implied by the first: a structural guard
+test (`every step that runs a headless session checks its transcript for
+denials before committing`) parses `SKILL.md` into sections and asserts that
+both §5 and §7 — the two paths that run a session and then commit its work —
+carry the `denials --jsonl` call. Finding 1 was a gate added to one of two
+paths, which is the kind of gap prose review catches once and then stops
+catching; this makes it a test failure instead.
+
+Both new tests were mutation-checked rather than merely watched to pass.
+Removing the fix-loop denials check from step 7, then reverting the
+`readPermissionDenials` initial `[]`:
+
+```
+###### MUTATION A: remove the fix-loop denials check from step 7 ######
+not ok 97 - every step that runs a headless session checks its transcript for denials before committing
+# pass 96
+# fail 1
+
+###### MUTATION B: break readPermissionDenials' no-result-event return ######
+not ok 92 - readPermissionDenials returns no denials for a transcript that has no result event at all
+# pass 96
+# fail 1
+
+###### RESTORED ######
+# tests 97
+# pass 97
+# fail 0
+```
+
+Mutation B is also the proof that finding 2 was real: under it, *only* the
+rewritten test fails. The absent-field test still passes, because it reaches
+a result event and reassigns — so the old `stream-noinit.jsonl` version of
+this test would not have caught it either.
+
+Re-verification, fresh:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+typecheck exit=0
+
+$ pnpm test
+Test Suites: 33 passed, 33 total
+Tests:       473 passed, 473 total
+Snapshots:   0 total
+Time:        25.423 s
+Ran all test suites.
+
+$ pnpm run test:skills
+# tests 253
+# pass 253
+# fail 0
+
+$ pnpm run build
+build exit=0
+✓ built in 774ms
+```

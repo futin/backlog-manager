@@ -6,7 +6,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
-import { RUN_STALE_MS, isZombieStatState } from './orchestrate.mjs'
+import { RUN_STALE_MS, isZombieStatState, readPermissionDenials } from './orchestrate.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
 
@@ -1842,4 +1842,203 @@ test('abort with no run exits 3', (t) => {
   const out = run(project, home, 'abort')
 
   assert.equal(out.status, 3)
+})
+
+// --- bug-3: the dispatch flag, and the denial check that makes it safe ----
+// Two halves of one fix. The guard below pins the flag itself, because a
+// flag is the kind of thing that gets quietly pasted back in by anyone
+// debugging a stuck dispatch; the reader tests below pin the check that
+// exists precisely because a milder flag can now refuse a call, and a
+// refused call is invisible in every other signal the run produces (exit
+// code 0, result subtype "success", is_error false — all three measured on
+// this machine against CLI 2.1.250).
+
+const SKILL_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'SKILL.md')
+const SKILLS_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+test('both of SKILL.md\'s headless dispatch lines carry --permission-mode auto', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  // Every line that actually launches a headless session — the step 4
+  // dispatch and step 5's --resume retry. Matched by `claude -p` rather
+  // than by line number so the assertion survives the file growing, which
+  // it already did once between this bug being filed and being fixed.
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
+  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`)
+  for (const line of dispatchLines) {
+    assert.ok(line.includes('--permission-mode auto'), `dispatch line is missing --permission-mode auto: ${line}`)
+  }
+})
+
+test('no command anywhere under skills/ passes --dangerously-skip-permissions', () => {
+  // A whole-tree sweep rather than a check on the two dispatch lines above:
+  // the point is not that those two are clean, it is that nothing in the
+  // published skill surface hands the flag to a CLI. Reinstating it would be
+  // a one-word edit nobody reviewing a diff would necessarily flag, and it
+  // buys back the top of the permission ladder for a job that measurably
+  // does not need it.
+  //
+  // Two matchers, because the flag can be reintroduced two ways. The first
+  // catches an invocation on one line (`claude … --dangerously-skip-
+  // permissions`). The second catches one split across a fenced block's
+  // continuation lines, which is how a shell command in a SKILL.md would
+  // most plausibly grow long enough to hide it. Prose *naming* the flag is
+  // deliberately allowed — this fix's own explanation of why the flag is
+  // gone has to be able to say the word, and a guard that forbade that
+  // would push the reasoning out of the file it belongs in.
+  const offenders = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') continue
+        walk(full)
+      } else if (entry.isFile()) {
+        const text = fs.readFileSync(full, 'utf8')
+        if (!text.includes('--dangerously-skip-permissions')) continue
+        for (const line of text.split('\n')) {
+          if (line.includes('--dangerously-skip-permissions') && /\bclaude\b/.test(line)) {
+            offenders.push(`${full}: ${line.trim()}`)
+          }
+        }
+        if (full.endsWith('.md')) {
+          // Fenced blocks are executable content in a SKILL.md, prose is
+          // not — so inside a fence the flag is an offence wherever it sits,
+          // continuation line included.
+          let inFence = false
+          for (const line of text.split('\n')) {
+            if (line.startsWith('```')) { inFence = !inFence; continue }
+            if (inFence && line.includes('--dangerously-skip-permissions')) {
+              offenders.push(`${full} (in a fenced block): ${line.trim()}`)
+            }
+          }
+        }
+      }
+    }
+  }
+  walk(SKILLS_ROOT)
+  assert.deepEqual(offenders, [], `--dangerously-skip-permissions is back in:\n${offenders.join('\n')}`)
+})
+
+const STREAM_DENIAL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial.jsonl')
+const STREAM_NO_DENIALS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-denials.jsonl')
+const STREAM_DENIAL_PARTIAL_TAIL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial-partial-tail.jsonl')
+const STREAM_TWO_RESULTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-two-results.jsonl')
+const STREAM_NO_RESULT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-result.jsonl')
+
+test('readPermissionDenials returns the denial recorded on the result event', () => {
+  const denials = readPermissionDenials(STREAM_DENIAL)
+  assert.equal(denials.length, 1)
+  assert.equal(denials[0].tool_name, 'Bash')
+  assert.match(denials[0].tool_input.command, /^curl -X POST/)
+})
+
+test('readPermissionDenials reads an absent permission_denials field as no denials', () => {
+  assert.deepEqual(readPermissionDenials(STREAM_NO_DENIALS), [])
+})
+
+test('readPermissionDenials finds a denial ahead of a partial trailing line', () => {
+  const denials = readPermissionDenials(STREAM_DENIAL_PARTIAL_TAIL)
+  assert.equal(denials.length, 1)
+  assert.equal(denials[0].tool_use_id, 'toolu_01PartialTailProbe')
+})
+
+test('readPermissionDenials takes the LAST result event when a resumed transcript holds several', () => {
+  // First result clean, second refused. A reader that stopped at the first
+  // would clear a resumed run whose retry never ran the command it needed.
+  const denials = readPermissionDenials(STREAM_TWO_RESULTS)
+  assert.equal(denials.length, 1)
+  assert.equal(denials[0].tool_use_id, 'toolu_01ResumedRunDenial')
+})
+
+test('readPermissionDenials returns no denials for a transcript that has no result event at all', () => {
+  // The crashed-session shape watch already knows about: the child died
+  // before it could summarise anything. "No denials recorded" is the honest
+  // answer — step 5 judges that run by the item file, as it always has.
+  //
+  // Its own fixture rather than the reused stream-noinit.jsonl, which was
+  // the first thing this test pointed at and was wrong: that file DOES carry
+  // a result event (one with no permission_denials key), so this test was a
+  // second copy of the absent-field case above it and the branch it is named
+  // for — the loop never matching a result event at all, so the initial []
+  // is what comes back — went uncovered.
+  assert.deepEqual(readPermissionDenials(STREAM_NO_RESULT), [])
+})
+
+test('denials --jsonl prints the denial count and the denials themselves', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'denials', '--jsonl', STREAM_DENIAL)
+
+  assert.equal(out.status, 0, out.stderr)
+  const parsed = JSON.parse(out.stdout)
+  assert.equal(parsed.count, 1)
+  assert.equal(parsed.denials[0].tool_name, 'Bash')
+})
+
+test('denials on a missing --jsonl exits 1 rather than reporting a clean run', (t) => {
+  // The failure mode worth spending an exit code on: an unreadable
+  // transcript answering "no denials" is indistinguishable from a clean run,
+  // and step 5 would merge on it.
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'denials', '--jsonl', path.join(project, 'nope.jsonl'))
+
+  assert.equal(out.status, 1)
+})
+
+test('stage <id> dispatched --permission-mode records the mode on the queue item', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-7', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const out = run(project, home, 'stage', 'task-7', 'dispatched', '--worktree', '/tmp/w', '--branch', 'backlog/task-7', '--permission-mode', 'auto')
+
+  assert.equal(out.status, 0, out.stderr)
+  const item = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-7')
+  assert.equal(item.permissionMode, 'auto')
+})
+
+test('a queue item starts with a null permissionMode, before any dispatch has chosen one', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-8', 'Some task')
+
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const item = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-8')
+  assert.equal(item.permissionMode, null)
+})
+
+test('every step that runs a headless session checks its transcript for denials before committing', () => {
+  // The structural half of the denials gate, and the one a reading of step 5
+  // alone misses. Two paths in this file run a session and then commit its
+  // work: step 5 (dispatch → Inspect → Commit) and step 7's fix loop
+  // (resume → watch → Commit, reaching Commit WITHOUT passing back through
+  // step 5). The gate was added to the first and not the second, so a fix
+  // loop's denial would have been committed and merged with every other
+  // signal reporting success — which is exactly the shape of bug this whole
+  // check exists to catch, reappearing one section over.
+  //
+  // Asserted by section rather than by line number so the file can keep
+  // growing, which it does constantly. If a section is renamed, update the
+  // titles here — do not delete the case.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const sections = new Map()
+  let current = null
+  for (const line of text.split('\n')) {
+    if (line.startsWith('## ')) {
+      current = line.slice(3).trim()
+      sections.set(current, [])
+    } else if (current !== null) {
+      sections.get(current).push(line)
+    }
+  }
+  const MUST_CHECK = ['5. Inspect what the session left behind', '7. Review']
+  for (const title of MUST_CHECK) {
+    assert.ok(sections.has(title), `section not found (renamed?): ${title}`)
+    const body = sections.get(title).join('\n')
+    assert.ok(
+      body.includes('orchestrate.mjs" denials --jsonl'),
+      `section "${title}" runs a session and then commits, but never checks its transcript for denials`
+    )
+  }
 })
