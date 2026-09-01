@@ -7,7 +7,7 @@ import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
-import { makeProject, makeRegistry } from './helpers/store';
+import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { OrchestratorRun } from '../shared/types';
@@ -18,6 +18,14 @@ import type { OrchestratorRun } from '../shared/types';
 const fixture = rawFixture as OrchestratorRun;
 
 let projectPath: string;
+/* A SECOND registered project, holding an item id `alpha` does not have.
+   It exists for exactly one assertion — that `ids` are resolved against the
+   project being orchestrated and not, like AgentsService.findItem's own
+   registry-wide walk, against every registered store at once. Without a
+   second project on the registry that regression cannot be written down at
+   all: a whole-registry scan and a project-scoped one agree on every input
+   until two projects exist. */
+let otherPath: string;
 
 interface Sent { url: string; init?: RequestInit }
 
@@ -77,7 +85,25 @@ describe('POST /api/agents/orchestrate', () => {
   }
 
   beforeEach(async () => {
-    projectPath = makeProject('alpha', []);
+    /* The store the `ids` cases resolve against. Deliberately one item per
+       case the membership check has to tell apart — open bug, open task,
+       ARCHIVED task, open idea — rather than a single generic item, because
+       every one of those four is a different refusal (or acceptance) and a
+       shared fixture would let three of them pass on the strength of the
+       fourth. Bodies are the minimum each section's `groomed` derivation
+       reads; grooming is NOT what the membership check tests (an ungroomed
+       item is a legal selection — the run re-gates it and reports it), so
+       the values here are chosen to make the SECTION and STATUS unambiguous,
+       nothing more. */
+    projectPath = makeProject('alpha', [
+      { leaf: 'bugs/open', filename: 'bug-2-a-bug.md', content: item('bug-2', 'a bug', '## Cause\n\nknown\n\n## Fix\n\ndo it\n') },
+      { leaf: 'tasks/open', filename: 'task-1-a-task.md', content: item('task-1', 'a task', '## Plan\n\nstep one\n') },
+      { leaf: 'tasks/done', filename: 'task-3-archived.md', content: item('task-3', 'archived', '## Plan\n\nstep one\n') },
+      { leaf: 'ideas/open', filename: 'idea-1-an-idea.md', content: item('idea-1', 'an idea', 'a thought\n') }
+    ]);
+    otherPath = makeProject('beta', [
+      { leaf: 'tasks/open', filename: 'task-9-beta-only.md', content: item('task-9', 'beta only', '## Plan\n\nstep one\n') }
+    ]);
 
     // A fresh, empty BM_ORCH_HOME per test — never the developer's real
     // ~/.backlog-manager/orchestrator/. Deliberately not created here (only
@@ -96,7 +122,7 @@ describe('POST /api/agents/orchestrate', () => {
     // real-machine default would read the developer's actual registry.
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
-      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }]))
+      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }, { name: 'beta', path: otherPath }]))
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -322,5 +348,182 @@ describe('POST /api/agents/orchestrate', () => {
       // drops an undefined value outright, which is what proves the flag
       // never reaches the dashboard's argv at all.
     });
+  });
+
+  // =======================================================================
+  // The `ids` selector — the board's Orchestrate sheet sending a SUBSET of
+  // the project's queue rather than the whole thing.
+  //
+  // Every case here asserts against the spawn body's `prompt`, because that
+  // is the whole surface of the feature on this side: the ids never reach
+  // the dashboard as a field of their own, they are composed into the one
+  // prompt string the spawned session is started with. The invariant being
+  // defended is "the orchestrate spawn prompt is a server-side constant"
+  // (CLAUDE.md) in its post-selector wording — the prompt is COMPOSED
+  // server-side, and the only caller influence on it is a list of validated
+  // ids naming this project's own open bugs and tasks. `prompt: 'rm -rf'`
+  // is still dropped on the floor, which the "constant prompt" case above
+  // pins independently of everything here.
+  //
+  // Test case 1 of the plan's table — no `ids` at all, bare prompt — is the
+  // "spawns with the constant prompt" case above, which asserts the whole
+  // spawn body with toEqual and therefore already fails if an `ids` key
+  // ever leaks into a request that did not carry one.
+
+  /** The prompt the dashboard was asked to start, or undefined if nothing
+   *  was spawned at all. Every case below is one of those two questions. */
+  function spawnedPrompt(sent: Sent[]): string | undefined {
+    const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
+    if (!spawn) return undefined;
+    return JSON.parse(String(spawn.init?.body)).prompt as string;
+  }
+
+  it('composes one selected id onto the constant prompt', async () => {
+    const sent = stubDashboard();
+    await post({ project: projectPath, ids: ['task-1'] }).expect(201);
+    expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate task-1');
+  });
+
+  /* Request order, not board order. `--ids a,b,c` restricts the run to those
+     ids IN THE ORDER GIVEN, overriding the tool's own bugs-then-tasks
+     ordering (orchestrate.mjs, and SKILL.md section 1) — so the order this
+     list arrives in is a real instruction and re-sorting it here would
+     silently change what the run does. `bug-2` before `task-1` is the
+     board's own order; the assertion deliberately sends the reverse. */
+  it('preserves the order the ids arrived in, not the board order', async () => {
+    const sent = stubDashboard();
+    await post({ project: projectPath, ids: ['task-1', 'bug-2'] }).expect(201);
+    expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate task-1 bug-2');
+  });
+
+  /* De-duplicated rather than refused: a repeated id is not an error the
+     caller can act on, and the run would work the item once either way —
+     but a prompt naming it twice is a confusing thing to leave in a
+     transcript nobody is watching. First-seen order is kept, so the
+     de-duplication cannot quietly reorder a list either. */
+  it('de-duplicates a repeated id, keeping first-seen order', async () => {
+    const sent = stubDashboard();
+    await post({ project: projectPath, ids: ['task-1', 'bug-2', 'task-1'] }).expect(201);
+    expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate task-1 bug-2');
+  });
+
+  /* The single most important refusal in this block. `parseIdsArg`
+     (orchestrate.mjs) deliberately keeps `undefined` (no flag at all)
+     distinct from `[]` (an explicit, empty selection) precisely so that
+     `--ids ''` cannot silently mean "give me everything" — this is that same
+     distinction enforced one layer up, at the only place a browser can reach.
+     Treating `[]` as "no restriction" here would turn a user who unchecked
+     every box into a full unattended drain of their backlog. */
+  it('400s an explicitly empty ids list rather than reading it as "everything"', async () => {
+    const sent = stubDashboard();
+    const res = await post({ project: projectPath, ids: [] }).expect(400);
+    expect(res.body.error).toMatch(/ids/);
+    expect(spawnedPrompt(sent)).toBeUndefined();
+  });
+
+  it('400s a non-array ids, including a bare string that looks like one id', async () => {
+    const sent = stubDashboard();
+    await post({ project: projectPath, ids: 'task-1' }).expect(400);
+    await post({ project: projectPath, ids: 7 }).expect(400);
+    await post({ project: projectPath, ids: { '0': 'task-1' } }).expect(400);
+    expect(spawnedPrompt(sent)).toBeUndefined();
+  });
+
+  /* isItemId's whole reason for existing (shared/agent.ts). None of these
+     can reach the membership scan, let alone the prompt: the prompt is one
+     line handed to a shell-invoked session, so a newline or a `;` inside an
+     "id" is not a lookup that will fail harmlessly later, it is the thing
+     the anchoring exists to stop. 400, not 409 — the request is malformed,
+     not merely naming something absent. */
+  it('400s an id that is not shaped like an id, naming it', async () => {
+    const sent = stubDashboard();
+    for (const bad of ['../../etc/passwd', 'task-1; rm -rf /', 'task-1 --resume', 'task-1\nbug-2', '', 'task']) {
+      const res = await post({ project: projectPath, ids: [bad] }).expect(400);
+      expect(res.body.error).toMatch(/ids/);
+    }
+    expect(spawnedPrompt(sent)).toBeUndefined();
+  });
+
+  /* 409, not 400: the shape was fine, the store just has no such item. Same
+     split dispatch already makes between "this request is malformed" and
+     "the files disagree with what you asked for". The id is named because
+     an unattended run started from a stale board tab is exactly how this
+     happens, and "one of your ids is gone" without saying which is not an
+     answer anyone can act on. */
+  it('409s a well-formed id that names no item, naming it', async () => {
+    const sent = stubDashboard();
+    const res = await post({ project: projectPath, ids: ['task-99'] }).expect(409);
+    expect(res.body.error).toContain('task-99');
+    expect(spawnedPrompt(sent)).toBeUndefined();
+    expect(res.body.code).toBeUndefined();
+  });
+
+  /* An archived item is not a candidate — orchestrate.mjs's own queue
+     builder reads `open/` only. Refusing here rather than letting init
+     discover it means the error arrives while somebody is still looking at
+     the sheet, instead of inside a headless session that has already been
+     spawned and will exit 1. */
+  it('409s an id whose item is already archived', async () => {
+    const sent = stubDashboard();
+    const res = await post({ project: projectPath, ids: ['task-3'] }).expect(409);
+    expect(res.body.error).toContain('task-3');
+    expect(spawnedPrompt(sent)).toBeUndefined();
+  });
+
+  /* Sections, for the same reason. GATE_SECTIONS in orchestrate.mjs is bugs
+     and tasks and nothing else — ideas, refactors and out-of-scope have
+     nothing to execute by definition, which is the same limit
+     backlog-execute refuses on. `idea-1` is open and real, so nothing but
+     an explicit section check can turn it away. */
+  it('409s an open item from a section a run never looks at', async () => {
+    const sent = stubDashboard();
+    const res = await post({ project: projectPath, ids: ['idea-1'] }).expect(409);
+    expect(res.body.error).toContain('idea-1');
+    expect(spawnedPrompt(sent)).toBeUndefined();
+  });
+
+  /* The regression `otherPath` exists for. `task-9` is a real, open,
+     groomed task — in a DIFFERENT registered project. Resolving ids the way
+     AgentsService.findItem resolves an item path (walk every project in the
+     registry) would accept it here and hand `--ids task-9` to a run rooted
+     in alpha, where init exits 1 naming an id the caller never typed into
+     that project. The scan has to be scoped to `req.project`. */
+  it('409s an id that belongs to a different registered project', async () => {
+    const sent = stubDashboard();
+    const res = await post({ project: projectPath, ids: ['task-9'] }).expect(409);
+    expect(res.body.error).toContain('task-9');
+    expect(spawnedPrompt(sent)).toBeUndefined();
+  });
+
+  /* Ordering, and the one mistake this whole feature can make. The activeRun
+     lock is the ONLY 409 this endpoint codes, and OrchestrateSheet branches
+     on that code to close itself and hand the screen to the run strip. If
+     ids were validated before the lock, a stale board tab whose selection
+     has since been archived would answer an uncoded 409 for a project that
+     is actually mid-run — and the sheet would sit there showing "task-3 is
+     not open" while the real answer was "a run is already going". The ids
+     here are deliberately INVALID so that only ordering can produce the
+     coded response. */
+  it('lets the run-in-progress lock win over an ids problem', async () => {
+    const sent = stubDashboard();
+    writeRun({ ...fixture, project: projectPath, updatedAt: new Date().toISOString() });
+
+    const res = await post({ project: projectPath, ids: ['task-3'] }).expect(409);
+    expect(res.body.code).toBe(RUN_IN_PROGRESS_CODE);
+    expect(res.body.error).toContain(fixture.runId);
+    expect(spawnedPrompt(sent)).toBeUndefined();
+  });
+
+  /* Same ordering point at the other end of the gate ladder: BM_AGENTS off
+     is still 404 and still makes no outbound call, whatever the body says.
+     A route that is "not here" must not start answering 400s about the
+     shape of a field, which would tell an unauthenticated caller the route
+     exists after all. */
+  it('still 404s with BM_AGENTS off, whatever the ids say', async () => {
+    const sent = stubDashboard();
+    process.env.BM_AGENTS = 'off';
+    await post({ project: projectPath, ids: ['task-1'] }).expect(404);
+    await post({ project: projectPath, ids: ['../../etc/passwd'] }).expect(404);
+    expect(sent).toEqual([]);
   });
 });

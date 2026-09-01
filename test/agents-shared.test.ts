@@ -1,6 +1,6 @@
 import {
   EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock,
-  dispatchGate, modesUpTo, pickFrom, projectDispatchGate
+  dispatchGate, isItemId, modesUpTo, pickFrom, projectDispatchGate
 } from '../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../shared/types';
 
@@ -242,5 +242,80 @@ describe('pickFrom', () => {
     expect(pickFrom(undefined, MODELS)).toBeUndefined();
     expect(pickFrom(7, EFFORTS)).toBeUndefined();
     expect(pickFrom(['sonnet'], MODELS)).toBeUndefined();
+  });
+});
+
+describe('isItemId', () => {
+  /* The shape backlog.mjs's own ID_SHAPE has always enforced, restated on
+     this side for the one caller that needs it before any file is touched:
+     POST /api/agents/orchestrate composes a shell-visible prompt out of these
+     strings, so a value that is not an id must never reach the composition
+     step at all. */
+  it('accepts every section prefix the store mints', () => {
+    expect(isItemId('bug-1')).toBe(true);
+    expect(isItemId('idea-2')).toBe(true);
+    expect(isItemId('task-12')).toBe(true);
+    expect(isItemId('ref-3')).toBe(true);
+    expect(isItemId('oos-4')).toBe(true);
+  });
+
+  it('rejects a bare prefix, a bare number, and an empty string', () => {
+    expect(isItemId('')).toBe(false);
+    expect(isItemId('task')).toBe(false);
+    expect(isItemId('task-')).toBe(false);
+    expect(isItemId('-1')).toBe(false);
+    expect(isItemId('12')).toBe(false);
+  });
+
+  it('rejects anything with case, a filename, or inner whitespace', () => {
+    expect(isItemId('Task-1')).toBe(false);
+    expect(isItemId('task-1.md')).toBe(false);
+    expect(isItemId('task 1')).toBe(false);
+    expect(isItemId('task-1-a-title')).toBe(false);
+  });
+
+  /* The reason this predicate exists rather than a membership check alone.
+     Membership is the real boundary and runs second (AgentsService.orchestrate),
+     but these are the values that must not survive even long enough to be
+     looked up. `\n` matters on its own: the prompt is one line, and an id
+     carrying a newline would split it. */
+  it('rejects traversal, shell metacharacters and newlines', () => {
+    expect(isItemId('../task-1')).toBe(false);
+    expect(isItemId('../../etc/passwd')).toBe(false);
+    expect(isItemId('task-1; rm -rf /')).toBe(false);
+    expect(isItemId('task-1;ls')).toBe(false);
+    expect(isItemId('task-1\n')).toBe(false);
+    expect(isItemId('task-1 --resume')).toBe(false);
+  });
+
+  /* Anchored, so a valid id embedded in a longer string is not "a valid id".
+     A regex without ^ and $ passes every one of the cases above — including
+     the two padded ones, which is exactly how a `--ids` list built by naive
+     string joining would smuggle an argument through.
+
+     `xtask-1` is deliberately NOT here: it is a well-formed id whose prefix
+     names no section, and this predicate's contract is "could this be an id",
+     not "does it exist". The membership scan is what refuses it, and it is
+     the only check that can — see isItemId's own comment. */
+  it('is anchored at both ends', () => {
+    expect(isItemId('task-1x')).toBe(false);
+    expect(isItemId(' task-1')).toBe(false);
+    expect(isItemId('task-1 ')).toBe(false);
+    expect(isItemId('a'.repeat(500))).toBe(false);
+  });
+
+  /* Well-formed but absurd. Refused on length rather than shape, so the
+     directory scan behind this predicate is never handed something that
+     cannot possibly name a file. */
+  it('rejects an id longer than any store can mint', () => {
+    expect(isItemId(`task-${'9'.repeat(500)}`)).toBe(false);
+    expect(isItemId('task-1234567890')).toBe(true);
+  });
+
+  it('rejects a non-string', () => {
+    expect(isItemId(undefined)).toBe(false);
+    expect(isItemId(7)).toBe(false);
+    expect(isItemId(['task-1'])).toBe(false);
+    expect(isItemId(null)).toBe(false);
   });
 });

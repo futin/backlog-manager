@@ -805,6 +805,26 @@ body {
    comment on why), so a groomed vs ungroomed item reads the same colour
    here as it will on the card underneath it. */
 .orchestrate-preview-action { font-family: var(--mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em }
+
+/* The selector's own two rules. `align-items: baseline` on the row head
+   (above) leaves a checkbox sitting slightly high against the text it
+   belongs to, so this one child opts out with `align-self: center` rather
+   than the whole row switching alignment — the id/title/action triple is
+   baseline-aligned on purpose and looks wrong any other way.
+
+   `accent-color` rather than a hand-built box: the native control already
+   carries focus ring, keyboard toggle and the platform's own hit area, all
+   of which a styled span would have to reimplement for a control that
+   appears once per row in a dialog people tab through. */
+.orchestrate-select { flex: none; align-self: center; accent-color: var(--accent); cursor: pointer; margin: 0 }
+
+/* Sits between the preview note and the rows, sharing the row gap so the
+   count reads as a header for the list rather than a floating caption.
+   `margin-left: auto` on the first button pushes both controls right,
+   keeping the count on the same line at the left edge where the eye
+   already is. */
+.orchestrate-select-actions { display: flex; align-items: center; gap: 8px; margin-bottom: 8px }
+.orchestrate-select-actions button:first-of-type { margin-left: auto }
 .orchestrate-preview-action.groom { color: var(--mustard) }
 .orchestrate-preview-action.execute { color: var(--cyan) }
 

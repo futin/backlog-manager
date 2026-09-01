@@ -267,3 +267,50 @@ export function dispatchBlock(item: BacklogItem, status: AgentsStatus): string |
   const gate = dispatchGate(item, status);
   return gate.control === 'enabled' ? null : gate.reason;
 }
+
+/**
+ * The shape of a backlog item id: a section prefix and a number, nothing else.
+ *
+ * Deliberately the same regex `backlog.mjs`'s own `ID_SHAPE` enforces
+ * (`skills/backlog/tools/backlog.mjs`), restated here rather than imported:
+ * the skills are a published plugin with git as their publishing boundary
+ * (see CLAUDE.md), so the server and client cannot import from them at all,
+ * and the two copies are kept honest by the prefixes being a closed set that
+ * has changed exactly once (`refactors: 'ref'`) in this repo's life.
+ *
+ * `[a-z]+` rather than a literal alternation of the five known prefixes on
+ * purpose: this predicate answers "could this string be an id", and the
+ * authoritative answer to "is this an id that exists" is the membership scan
+ * in `AgentsService.orchestrate`, which is the only check that can be right.
+ * Naming the prefixes here would add a second place to edit when a section is
+ * added, and buy nothing the scan does not already refuse.
+ */
+const ITEM_ID_SHAPE = /^[a-z]+-\d+$/;
+
+/**
+ * Longer than any id this store can mint and short enough that nothing
+ * absurd reaches the directory scan behind it. Not a security boundary — the
+ * anchoring above already rules out every dangerous character — just a cap on
+ * how much nonsense a caller can make the server walk over.
+ */
+const ITEM_ID_MAX = 64;
+
+/**
+ * Is this value syntactically an item id?
+ *
+ * The cheap first gate on `POST /api/agents/orchestrate`'s `ids` list, and the
+ * reason that route can compose a prompt out of caller-supplied strings at all
+ * without weakening the "the orchestrate spawn prompt is a server-side
+ * constant" invariant: what survives this predicate is a bare identifier —
+ * no whitespace, no path separator, no shell metacharacter, no newline to
+ * split the one-line prompt with — and what survives the membership check
+ * after it is the id of a real open item in the project being orchestrated.
+ * Free text never gets near the prompt either way.
+ *
+ * Takes `unknown` for the same reason `pickFrom` does: the server is
+ * narrowing a body it cannot trust, so the type guard is the point rather
+ * than an afterthought at the call site.
+ */
+export function isItemId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= ITEM_ID_MAX && ITEM_ID_SHAPE.test(value);
+}

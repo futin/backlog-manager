@@ -8,7 +8,7 @@ import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import {
-  clampMode, deriveAction, dispatchBlock, modesUpTo, pickFrom, projectDispatchGate,
+  clampMode, deriveAction, dispatchBlock, isItemId, modesUpTo, pickFrom, projectDispatchGate,
   EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
@@ -58,8 +58,14 @@ const SPAWN_TIMEOUT_MS = 10_000;
 const PROMPT_MAX = 8_000;
 
 /**
- * The one prompt `orchestrate()` will ever send — never accepted from the
- * request body. `dispatch`'s prompt varies by design: the action the item
+ * The base of every prompt `orchestrate()` will ever send — never accepted
+ * from the request body, and never anything but this literal plus, at most,
+ * a list of ids that `resolveIds` has already proved name open bugs or tasks
+ * in the project being orchestrated (see that method for both checks and for
+ * why shape alone would not be enough). `--ids` is a flag `orchestrate.mjs`
+ * has always taken and SKILL.md has always documented on the trigger
+ * (`/backlog-orchestrate [ids…] [--max N]`), so composing them on here is
+ * speaking the skill's own invocation surface, not inventing a channel. `dispatch`'s prompt varies by design: the action the item
  * needs (groom vs. execute) is derived from the item file, but WHAT to say
  * about it is a client-editable default the launch sheet composes
  * (composePrompt, prompt.util.ts) and the reader may reword before sending.
@@ -71,7 +77,11 @@ const PROMPT_MAX = 8_000;
  * session do anything at all (see origin.guard.ts's own reasoning for why
  * that is exactly the threat these POST routes exist to prevent). A `prompt`
  * in the body is therefore dropped the same way dispatch drops any field
- * outside AgentDispatchRequest: by never being read.
+ * outside AgentDispatchRequest: by never being read. Note the asymmetry that
+ * makes `ids` acceptable where a `prompt` would not be: a prompt is free
+ * text and there is no check that could make it safe, while an id is a
+ * closed vocabulary — this project's own open items — that the server can
+ * enumerate for itself and compare against.
  *
  * The leading slash is deliberate and differs from prompt.util.ts's own
  * choice for groom/execute (natural language, not a slash command — see that
@@ -100,6 +110,16 @@ export interface AgentOrchestrateRequest {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  /** The board's item selection, or absent for "the whole queue".
+   *
+   *  `unknown` rather than `string[]`: this arrives straight off a request
+   *  body, and the narrowing is the point — see `resolveIds`, which is the
+   *  only place this value is read and the only place it is allowed to
+   *  become a string. An explicitly EMPTY array is not the same as an absent
+   *  one and is refused rather than folded into "everything"; that is the
+   *  same distinction `parseIdsArg` keeps in orchestrate.mjs, for the same
+   *  reason, one layer down. */
+  ids?: unknown;
 }
 
 /** Shape we rely on from the dashboard's /api/health. Everything optional: it
@@ -381,9 +401,26 @@ export class AgentsService {
       throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
     }
 
+    // Last, deliberately: every gate above answers a question about whether
+    // this project can be orchestrated at all, and this one answers what the
+    // run should contain. Ordering matters for exactly one of them — the
+    // activeRun lock is the only 409 this endpoint codes, and
+    // OrchestrateSheet branches on that code to close itself and hand the
+    // screen to the run strip. A stale board tab whose selection has since
+    // been archived must still be told "a run is already in progress", not
+    // "task-3 is not open"; validating ids first would answer the second and
+    // leave the sheet sitting on a project that is already mid-run.
+    const ids = this.resolveIds(req.project, req.ids);
+
     return this.spawn(cfg, {
       project: dirName,
-      prompt: ORCHESTRATE_PROMPT,
+      // The composition, and the whole of what `ids` can influence: a bare
+      // constant for a full-queue run, or that same constant followed by ids
+      // that have each been proved to name an open bug or task in THIS
+      // project. Nothing a caller sends is ever concatenated in unchecked —
+      // see resolveIds, and ORCHESTRATE_PROMPT's own comment for why a
+      // `prompt` field remains unreadable rather than merely validated.
+      prompt: ids === undefined ? ORCHESTRATE_PROMPT : `${ORCHESTRATE_PROMPT} ${ids.join(' ')}`,
       // Unlike dispatch, which names a session after the one item it is
       // working (sessionName, prompt.util.ts), there is no item here to
       // build that name from — orchestrateSessionName below is that
@@ -474,6 +511,112 @@ export class AgentsService {
    * same one GET /api/items/body uses — a path outside every registered
    * backlog/ is not an item here either.
    */
+  /**
+   * Narrows `POST /api/agents/orchestrate`'s `ids` into the list the prompt
+   * is composed from, or `undefined` for "no restriction — drain the whole
+   * queue". Throws rather than returning a failure: every rejection below is
+   * the caller's answer, and there is no partial success worth reporting.
+   *
+   * This is what lets a caller influence a prompt at all without weakening
+   * the "the orchestrate spawn prompt is a server-side constant" invariant.
+   * Two independent checks stand between a request body and that string:
+   *
+   *   1. `isItemId` (shared/agent.ts) — shape. What survives is a bare
+   *      identifier: no whitespace, no path separator, no shell
+   *      metacharacter, no newline to split a one-line prompt with.
+   *   2. Membership — this project's own scanned items, filtered to open
+   *      bugs and tasks. What survives names a file that actually exists in
+   *      the store the run is about to be pointed at.
+   *
+   * Shape alone would be far too weak (`bug-999` passes it), and membership
+   * alone would be doing a directory scan over attacker-shaped strings. Both
+   * together mean the only thing a caller can put in the prompt is the id of
+   * one of this project's real, runnable items.
+   *
+   * 400 vs 409 follows the split dispatch already makes: 400 when the
+   * request is malformed (not a list, an empty list, something that is not
+   * an id), 409 when the request is well-formed and the FILES disagree with
+   * it (no such item, archived, wrong section, another project's item). The
+   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE` is the one coded
+   * 409 this endpoint has, and nothing here needs to be told apart from the
+   * others by a machine.
+   */
+  private resolveIds(project: string, ids: unknown): string[] | undefined {
+    if (ids === undefined || ids === null) return undefined;
+    if (!Array.isArray(ids)) {
+      throw new HttpException({ error: 'ids must be an array of item ids' }, 400);
+    }
+    if (ids.length === 0) {
+      // The one refusal that is easy to get wrong in the other direction.
+      // Reading `[]` as "everything" would turn a reader who unchecked every
+      // box on the board into a full unattended drain of their backlog —
+      // the exact inversion `parseIdsArg`'s own comment (orchestrate.mjs)
+      // exists to prevent one layer down.
+      throw new HttpException(
+        { error: 'ids must name at least one item — omit ids entirely to run the whole queue' },
+        400
+      );
+    }
+    for (const id of ids) {
+      if (!isItemId(id)) {
+        // Echoed back truncated and JSON-quoted: a client bug is far easier
+        // to find when the error names the value that broke, and this body
+        // goes back to the same caller that sent it. Bounded because the
+        // value is arbitrary and there is no reason to reflect a megabyte of
+        // it into a log.
+        const shown = JSON.stringify(typeof id === 'string' ? id.slice(0, 40) : id);
+        throw new HttpException({ error: `ids must all be item ids like task-3 — ${shown} is not one` }, 400);
+      }
+    }
+
+    // Scoped to the ONE project being orchestrated, deliberately unlike
+    // findItem's registry-wide walk: an id is only meaningful inside a
+    // store, `bug-2` exists in most of them, and accepting another
+    // project's item here would hand `--ids` an id that `orchestrate.mjs
+    // init` then exits 1 on — inside a headless session that has already
+    // been spawned, where nobody is watching. Raw string compare on the
+    // path, matching the deliberately-not-realpath rule the dashboard
+    // membership check follows (see CLAUDE.md); a `project` naming nothing
+    // in the registry simply has no runnable items, and every id then gets
+    // the same honest refusal below.
+    const entry = this.registry.load().projects.find((p) => p.path === project);
+    const runnable = new Set(
+      (entry === undefined ? [] : scanProject(entry).items)
+        // Exactly orchestrate.mjs's own candidate set: open, and one of the
+        // two sections GATE_SECTIONS names. Ideas, refactors and
+        // out-of-scope have nothing to execute by definition — the same
+        // limit backlog-execute refuses on — and an archived item is not a
+        // candidate either. Grooming is NOT checked: an ungroomed item is a
+        // legal selection, the run re-gates it and reports it as ungroomed,
+        // and that is information rather than an error (see
+        // OrchestrateSheet's own queue comment for the same reasoning on
+        // the preview side).
+        .filter((it) => it.status === 'open' && (it.section === 'bugs' || it.section === 'tasks'))
+        .map((it) => it.id)
+    );
+
+    const seen: string[] = [];
+    for (const id of ids as string[]) {
+      if (!runnable.has(id)) {
+        // One message for all four ways this can fail (absent, archived,
+        // wrong section, another project's) — telling them apart would be
+        // telling the caller what exists where, and none of the four
+        // changes what they have to do about it: reopen the board and pick
+        // again.
+        throw new HttpException({ error: `${id} is not an open bug or task in this project` }, 409);
+      }
+      // De-duplicated rather than refused, first-seen order kept. A repeated
+      // id is not something a caller can act on and the run would work the
+      // item once either way, but a prompt naming it twice is a confusing
+      // thing to leave in a transcript nobody is watching. Order is load
+      // bearing: `--ids` runs items IN THE ORDER GIVEN, overriding the
+      // tool's own bugs-then-tasks ordering (orchestrate.mjs, SKILL.md §1),
+      // so this loop must never reorder what it was handed.
+      if (!seen.includes(id)) seen.push(id);
+    }
+    return seen;
+  }
+
   private findItem(requestPath: string): BacklogItem | null {
     const registry = this.registry.load();
     const real = resolveAllowed(requestPath, buildAllowlist(registry));

@@ -181,6 +181,14 @@ export interface StartOrchestrateRequest {
   model?: string;
   effort?: string;
   permissionMode?: PermissionMode;
+  /** The board's item selection, sent ONLY when it is a strict subset of the
+   *  project's queue — an absent `ids` means "drain everything", and the two
+   *  are genuinely different instructions rather than two spellings of one
+   *  (see OrchestrateSheet's `selected`). Never an empty array: the server
+   *  400s that rather than reading it as "everything", the same distinction
+   *  `parseIdsArg` keeps in orchestrate.mjs. Ids only — this request has no
+   *  prompt field to widen, and the server composes the prompt itself. */
+  ids?: string[];
 }
 
 /**

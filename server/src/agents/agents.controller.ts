@@ -104,7 +104,16 @@ export class AgentsController {
       // Unvalidated on purpose: clampMode is the place a junk or absent mode
       // becomes the ladder's floor, applied server-side once the ceiling is
       // known.
-      permissionMode: body?.permissionMode
+      permissionMode: body?.permissionMode,
+      // Also unvalidated here, and the most important one to leave alone:
+      // `resolveIds` (in the service) is the single place this becomes a
+      // list of strings, because it is the only place that can also check
+      // each entry against the project's own files. A shape check here would
+      // be a second, weaker copy of half that rule. Rebuilt field by field
+      // like every other key so that a new field reaches the service only
+      // when it is added here too — the same discipline dispatch's own
+      // rebuild keeps.
+      ids: body?.ids
     });
   }
 }
