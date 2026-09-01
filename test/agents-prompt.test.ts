@@ -82,10 +82,32 @@ describe('composePrompt', () => {
     expect(p).toMatch(/do not commit or push/i);
   });
 
+  it('asks capture for a NEW item citing the rejection, and to leave the original alone', () => {
+    const oos = fakeItem({ id: 'oos-2', title: 'Priority field', section: 'out-of-scope', status: 'terminal', groomed: null });
+    const p = composePrompt(oos, 'capture');
+    expect(p).toContain('backlog-manager:backlog-capture');
+    expect(p).toContain('oos-2');
+    expect(p).toContain('from: oos-2');
+    // The three things this sentence has to carry, each a way it goes wrong
+    // when left out: a NEW item (or the session tries to move a file `moveItem`
+    // refuses to move), the citation (or the revival loses its link back to the
+    // reasoning that rejected it), and the original left where it is.
+    expect(p).toMatch(/new item/i);
+    expect(p).toMatch(/leave/i);
+    // And never the groom or execute wording — capture is neither.
+    expect(p).not.toContain('backlog-manager:backlog-groom');
+    expect(p).not.toMatch(/concrete enough/i);
+  });
+
   it('never emits a slash command — headless expansion of those is unverified', () => {
     for (const item of [fakeItem(), fakeItem({ section: 'ideas', groomed: null })]) {
       expect(composePrompt(item, 'groom')).not.toContain('/backlog');
     }
+    // The capture arm included: the item file that settled this action wrote it
+    // as "spawns /backlog-capture", which names the skill and does not license
+    // the slash spelling — this module's own rule wins.
+    expect(composePrompt(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null }), 'capture'))
+      .not.toContain('/backlog');
   });
 
   it('collapses a title that would break the one-line quoting', () => {
@@ -104,9 +126,10 @@ describe('composePrompt', () => {
     for (const item of [
       fakeItem(),
       fakeItem({ section: 'ideas', groomed: null }),
-      fakeItem({ section: 'tasks', groomed: true })
+      fakeItem({ section: 'tasks', groomed: true }),
+      fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null })
     ]) {
-      for (const action of ['groom', 'execute'] as const) {
+      for (const action of ['groom', 'execute', 'capture'] as const) {
         expect(composePrompt(item, action)).not.toContain(item.path);
         expect(composePrompt(item, action)).not.toContain(item.projectPath);
       }

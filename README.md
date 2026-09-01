@@ -186,7 +186,7 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   prompt), `POST /api/agents/dispatch` (spawns the session in that
   dashboard).
 - `client/src/` — a side rail (Board / Archive / Settings, a plain section
-  switch; Archive is a placeholder describing what will land there),
+  switch),
   the board (toolbar with search plus project/status/sort selects, four fixed
   columns, a click-to-open drawer rendering the item's Markdown body, plus a
   dispatch button — on the card and again in the drawer — that opens a
@@ -204,6 +204,18 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   the stamp and it is back at the next load. Tasks are the exception and never
   leave — a task rotting for six weeks is a fact to look at, so it keeps its
   column and gains a `stale` marker instead.
+
+  Archive is where those land, in four columns of its own — refactoring, ideas,
+  bugs, out of scope — grouped under sticky month subheaders, newest month
+  first. It carries a project filter and a search box and nothing else: its
+  contents are defined by staleness and rejection, not by status, so a status
+  filter there would either do nothing or contradict the surface. Nothing in it
+  is finished, and both halves come back by their own route — a stale item by
+  dispatching a **groom**, which refreshes `updated:` and puts it back on the
+  Board at the next load; a rejected one by dispatching a **capture**, which
+  files a *new* item citing `from: oos-N` and leaves the original rejected on
+  the record. As everywhere else, the board writes nothing; the spawned session
+  does.
 - `shared/` — `types.ts` (registry and API shapes, defined once and imported
   by both sides), `agent.ts` (`deriveAction` and `dispatchGate` — the single
   implementation of what a dispatch click does and whether it may happen,

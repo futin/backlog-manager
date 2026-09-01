@@ -71,8 +71,14 @@ export function ItemCard(
      * has already left the Board by the time a card renders (`leavesBoard`).
      * The prop is not narrowed to tasks anyway, because the rule about which
      * sections survive belongs to the board's filter, not to the card's
-     * markup — Archive (Task 6) renders the same card for the sections that
-     * did leave, and it should be able to mark them too.
+     * markup.
+     *
+     * ArchiveView renders this same card for the sections that DID leave and
+     * deliberately passes nothing here — every card in its three stale columns
+     * is stale by construction, so a marker on all of them carries no
+     * information, exactly as `groomed` on a task would not. Its column
+     * headings say it once instead. The prop stays open to that surface all
+     * the same; what it does not have is a caller that always sets it.
      */
     stale?: boolean;
     /**

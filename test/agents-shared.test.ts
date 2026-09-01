@@ -1,6 +1,7 @@
 import {
-  EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock,
-  dispatchGate, isItemId, modesUpTo, pickFrom, projectDispatchGate, runClaimBlock
+  AGENT_ACTIONS, EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction,
+  dispatchBlock, dispatchGate, isAgentAction, isItemId, modesUpTo, pickFrom, projectDispatchGate,
+  runClaimBlock
 } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { RUN_CLAIMED_STAGES } from '../shared/types';
@@ -47,10 +48,40 @@ describe('deriveAction', () => {
     expect(deriveAction(fakeItem({ section: 'tasks', groomed: false }))).toBe('groom');
   });
 
-  it('has nothing to dispatch for an archived item or an out-of-scope one', () => {
+  it('has nothing to dispatch for a done item — history has no next step', () => {
     expect(deriveAction(fakeItem({ status: 'done', groomed: true }))).toBeNull();
-    expect(deriveAction(fakeItem({ section: 'out-of-scope', status: 'terminal', groomed: null })))
-      .toBeNull();
+    expect(deriveAction(fakeItem({ section: 'ideas', status: 'done', groomed: null }))).toBeNull();
+  });
+
+  it('captures an out-of-scope item, though its status is terminal', () => {
+    // The status is what makes this case worth its own assertion: `terminal` is
+    // not `open`, so the `status !== 'open'` line WOULD swallow this item — and
+    // did, back when one line covered both archives. The section check running
+    // first is the rule being pinned here, not just the return value.
+    //
+    // A rejection has a next step where a done item does not: reviving it is a
+    // NEW item citing `from: oos-1`, never a move out of out-of-scope, which
+    // `moveItem` refuses.
+    expect(deriveAction(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null })))
+      .toBe('capture');
+  });
+});
+
+describe('the action vocabulary', () => {
+  it('holds exactly the three actions', () => {
+    expect(AGENT_ACTIONS).toEqual(['groom', 'execute', 'capture']);
+  });
+
+  it('accepts each of them and nothing else', () => {
+    // The controller's whole body check for `action` — so a value that gets
+    // past this is a value the service is asked to re-derive against.
+    for (const action of AGENT_ACTIONS) expect(isAgentAction(action)).toBe(true);
+    expect(isAgentAction('archive')).toBe(false);
+    expect(isAgentAction('')).toBe(false);
+    expect(isAgentAction(null)).toBe(false);
+    expect(isAgentAction(undefined)).toBe(false);
+    expect(isAgentAction(1)).toBe(false);
+    expect(isAgentAction(['groom'])).toBe(false);
   });
 });
 
@@ -63,6 +94,14 @@ describe('actionLabel', () => {
     expect(actionLabel(fakeItem({ section: 'tasks' }), 'groom')).toBe('groom');
     expect(actionLabel(fakeItem(), 'groom')).toBe('groom');
     expect(actionLabel(fakeItem(), 'execute')).toBe('execute');
+  });
+
+  it('labels the third action', () => {
+    // Its own case rather than a fourth line above: the label used to be a
+    // ternary that answered `groom` for everything that was not `execute`, so
+    // a capture control read as a groom control — the button lying about what
+    // it would do.
+    expect(actionLabel(fakeItem({ section: 'out-of-scope' }), 'capture')).toBe('capture');
   });
 });
 

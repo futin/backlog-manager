@@ -648,6 +648,32 @@ body {
    cards without dragging the header off its rule with them. */
 .board-col-cards { display: flex; flex-direction: column; gap: var(--card-gap) }
 
+/* ---------------------------------------------- archive month groups
+   Archive's columns are grouped by the month of `updated ?? created` rather
+   than sorted flat (see lib/item-month.ts). The group is its own flex column
+   so the cards inside it keep the same rhythm as an ungrouped column's — the
+   gap has to be declared here as well as on .board-col-cards, because the
+   groups are now what that element's own gap separates. */
+.archive-group { display: flex; flex-direction: column; gap: var(--card-gap) }
+
+/* Sticky against the page's own scroll, which is the whole reason the grouping
+   is worth more than a sort: once a long column has scrolled past its own
+   header, the month is the only thing left saying where in the archive the
+   reader is.
+   Opaque --board, not a transparent or mixed background: cards scroll UNDER
+   this, and anything less than opaque shows a card's title through the heading
+   that is supposed to be labelling it.
+   Register is deliberately below .board-col-name — mono, small, --ink3, no
+   uppercase display face. It subdivides a column; it must not compete with the
+   column's own name two lines above it. */
+.archive-month {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--board);
+  padding: 4px 0 3px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  color: var(--ink3); border-bottom: 1px solid var(--hairline);
+}
+
 /* Degraded-state line above the board: malformed files skipped by the scan,
    or registered projects whose store is gone. Amber, not red — the board
    below it is still real, just partial. */
@@ -1104,16 +1130,28 @@ body {
    in step, and the mix follows a palette edit for free. */
 .dispatch-tab.groom { color: var(--mustard); background: color-mix(in srgb, var(--mustard) 12%, var(--strip)); border-left-color: var(--mustard) }
 .dispatch-tab.execute { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, var(--strip)); border-left-color: var(--cyan) }
+/* The third action, Archive's own: reviving a rejection by capturing a new item
+   that cites it. --magenta because it is the one accent with no competing job
+   on a CONTROL — its other use on this screen is the refactors column tick, a
+   filled 14x3 block in a header, which is the same "two shapes never read as
+   the same object" argument that tick's own note already makes about project
+   pills. It must not be mustard or cyan: those two are the actions this one is
+   not, and a capture wearing groom's colour is the button lying about what it
+   will do. */
+.dispatch-tab.capture { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 12%, var(--strip)); border-left-color: var(--magenta) }
 .dispatch-tab.groom:hover { color: var(--ink); background: color-mix(in srgb, var(--mustard) 30%, var(--strip)) }
 .dispatch-tab.execute:hover { color: var(--ink); background: color-mix(in srgb, var(--cyan) 30%, var(--strip)) }
+.dispatch-tab.capture:hover { color: var(--ink); background: color-mix(in srgb, var(--magenta) 30%, var(--strip)) }
 
 .dispatch-chip.groom { color: var(--mustard); border-color: color-mix(in srgb, var(--mustard) 45%, var(--hairline)); background: color-mix(in srgb, var(--mustard) 10%, var(--strip)) }
 .dispatch-chip.execute { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline)); background: color-mix(in srgb, var(--cyan) 10%, var(--strip)) }
+.dispatch-chip.capture { color: var(--magenta); border-color: color-mix(in srgb, var(--magenta) 45%, var(--hairline)); background: color-mix(in srgb, var(--magenta) 10%, var(--strip)) }
 /* The chip fills on hover where the tab only deepens: it is the one control in
    a drawer head, so it can afford to be the loud thing; a tab doing this would
    flash a 64px slab of accent on every pointer sweep down a column. */
 .dispatch-chip.groom:hover { color: var(--on-accent); background: var(--mustard); border-color: var(--mustard) }
 .dispatch-chip.execute:hover { color: var(--on-accent); background: var(--cyan); border-color: var(--cyan) }
+.dispatch-chip.capture:hover { color: var(--on-accent); background: var(--magenta); border-color: var(--magenta) }
 
 /* `[aria-disabled]`, not `:disabled` — the button stays a real, focusable
    button on purpose (see DispatchButton.tsx), so the *look* of unavailable is

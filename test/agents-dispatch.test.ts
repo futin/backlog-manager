@@ -19,6 +19,9 @@ const runFixture = rawFixture as OrchestratorRun;
 const GROOMED_BUG = item('bug-2', 'a known bug', '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n');
 const RAW_BUG = item('bug-1', 'a fresh bug', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n');
 const OOS = item('oos-1', 'declined', '## Why not\n\nno\n');
+/* "No next step at all" is a DONE item now that a rejection has one (capture).
+   Its own fixture because nothing else in this store is `status: done`. */
+const DONE_BUG = item('bug-9', 'a fixed bug', '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfixed\n');
 
 let projectPath: string;
 
@@ -64,6 +67,7 @@ describe('POST /api/agents/dispatch', () => {
     projectPath = makeProject('alpha', [
       { leaf: 'bugs/open', filename: 'bug-1-a-fresh-bug.md', content: RAW_BUG },
       { leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG },
+      { leaf: 'bugs/done', filename: 'bug-9-a-fixed-bug.md', content: DONE_BUG },
       { leaf: 'out-of-scope', filename: 'oos-1-declined.md', content: OOS }
     ]);
 
@@ -233,12 +237,48 @@ describe('POST /api/agents/dispatch', () => {
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
 
-  it('409s an item with no next step at all', async () => {
+  it('409s an item with no next step at all — a DONE one', async () => {
+    // Not the out-of-scope file this case used to name: a rejection has a next
+    // step now (capture), and only history has none.
     stubDashboard();
     const res = await post({
-      ...good, itemPath: join(projectPath, 'backlog', 'out-of-scope', 'oos-1-declined.md')
+      ...good, itemPath: join(projectPath, 'backlog', 'bugs/done', 'bug-9-a-fixed-bug.md')
     }).expect(409);
     expect(res.body.error).toBe('nothing to dispatch for this item');
+  });
+
+  it('spawns a capture for an out-of-scope item — the rejection\'s way back', async () => {
+    const sent = stubDashboard();
+    await post({
+      ...good,
+      itemPath: join(projectPath, 'backlog', 'out-of-scope', 'oos-1-declined.md'),
+      action: 'capture',
+      prompt: 'Use the backlog-manager:backlog-capture skill on oos-1, citing from: oos-1.'
+    }).expect(201);
+
+    const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
+    expect(spawn).toBeDefined();
+    expect(JSON.parse(String(spawn?.init?.body)).prompt).toContain('backlog-manager:backlog-capture');
+  });
+
+  it('refuses a groom request when the item\'s actual next step is capture', async () => {
+    // The derive-never-accept rule, exercised on the new action: the client
+    // said groom, the file says the item is rejected, and the file wins.
+    stubDashboard();
+    const res = await post({
+      ...good,
+      itemPath: join(projectPath, 'backlog', 'out-of-scope', 'oos-1-declined.md'),
+      action: 'groom'
+    }).expect(409);
+    expect(res.body.error).toContain('capture');
+  });
+
+  it('400s an action outside the vocabulary, naming all three', async () => {
+    stubDashboard();
+    const res = await post({
+      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), action: 'archive'
+    }).expect(400);
+    expect(res.body.error).toBe('action must be groom, execute or capture');
   });
 
   it('refuses a groom request when the item\'s actual next step is execute', async () => {
