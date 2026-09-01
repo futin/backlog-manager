@@ -45,24 +45,28 @@ the same single-writer discipline `backlog.mjs` keeps for the registry and for
 item files. This skill never edits that file by hand, and never writes item
 files either, except for one narrow case in pre-flight (see below).
 
+Two reference files sit beside this one and are **not** loaded with it. Read
+them at the moment they apply, not up front:
+
+- **`references/recovery.md`** — the whole of `--resume` and `--abort`. Read it
+  **in full** before running either, before any other command.
+- **`references/rationale.md`** — the measurements and the failures behind the
+  rules here. Read the matching section before arguing with a rule, or before
+  simplifying one away.
+
 ## Where commands run, and why it is not negotiable
 
 **This session's cwd must be the project root every time `orchestrate.mjs`
 is called — whatever put it somewhere else.** Never a worktree this run
-created. The tool resolves *which project it is acting on* by walking up
-from its own cwd to the first `.git` it finds, and a linked worktree has its
-own `.git` (a file, not a directory), so a worktree cwd used to resolve to
-the worktree itself and key the run file under a directory nothing else ever
-reads — the run appeared to vanish, quietly, with `status` reporting "no run
-exists" for a live run.
+created. A cwd inside a linked worktree (and a `--project` pointed at one)
+exits `1` with a message naming both the worktree and the project root to
+re-run from.
 
-Since bug-2 the tool refuses that outright: a cwd inside a linked worktree
-(and a `--project` pointed at one) exits `1` with a message naming both the
-worktree and the project root to re-run from. The failure is loud now, but
-the rule is unchanged and still yours to keep — a refusal mid-run is still a
-run that stopped. Note the scope: **anything** that leaves the shell inside a
-worktree arms it, not just the `cd`s this file prescribes. The run that
-surfaced this was broken by a one-off `pnpm exec jest --version` probe.
+**The scope is wider than the `cd`s this file prescribes: *anything* that
+leaves the shell inside a worktree arms it.** The refusal is loud, but a
+refusal mid-run is still a run that stopped. (What it used to do instead, and
+the stray command that first triggered it, are in
+`references/rationale.md` under "Where commands run".)
 
 Everything that genuinely concerns a worktree takes its path as an explicit
 flag instead of implying it from cwd: `stage --worktree`, `verify --cwd`, and
@@ -75,16 +79,14 @@ inside the worktree for the same reason in reverse — asking *that* tree, and
 only that tree, whether the item is in it is the entire point of the call.
 
 **That exception runs in a subshell — `( cd <worktree> && … )` — never a bare
-`cd`.** Still mandatory, and now one instance of the wider rule above rather
-than its whole extent. A bare `cd` persists as the session's working
-directory for every later command, and from there every `orchestrate.mjs`
-call refuses with exit `1` until something changes back — an unattended run
-stops dead. (Before the tool refused, it did something worse: `watch` exited
-`3`, "no run exists", §4 told you to call `watch` again as many times as it
-takes, and the run looped until somebody killed it.) The parentheses keep the
-move inside one child shell that exits with the command. The two `sh -c 'cd … && exec claude …'`
-dispatch lines below are the same discipline by another spelling: `sh -c` is
-already its own process, so the `cd` inside it never reaches this session.
+`cd`.** Still mandatory, and one instance of the wider rule above rather than
+its whole extent. A bare `cd` persists as the session's working directory for
+every later command, and from there every `orchestrate.mjs` call refuses with
+exit `1` until something changes back — an unattended run stops dead. The
+parentheses keep the move inside one child shell that exits with the command.
+The two `sh -c 'cd … && exec claude …'` dispatch lines below are the same
+discipline by another spelling: `sh -c` is already its own process, so the
+`cd` inside it never reaches this session.
 
 The tool's exit codes, which the rest of this file quotes constantly:
 
@@ -177,6 +179,15 @@ half the queue is ungroomed.
 
 ## 2. Start the run
 
+**Prefer a run started from the board to one started by typing this trigger
+into an interactive terminal.** A board-started run is spawned headless
+(`claude -p`); an interactive one additionally carries every MCP server and
+hook that terminal connects, and a run's context floor is re-read on every one
+of its several hundred turns. Measured on this machine: interactive sessions
+floor around 68k tokens before any work, headless ones around 50k. No
+board-started *orchestrate* run existed when this was written, so treat that
+~18k as the expected order for this path, not a measured result for it.
+
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project "$PWD" --ids task-3,bug-7 --max 2
 ```
@@ -197,12 +208,12 @@ subdirectories as you need them (`mkdir -p "<dir>/logs"`), and stay out of
 
 **Exit `4` means a run already exists for this project** — either one is live
 right now, or one crashed and left its `running` status behind. Plain `init`
-refuses both, identically and deliberately: a stale `running` run is not an
-idle lock, it is the last surviving record of a run that died mid-item, with
-possibly a worktree on disk, a branch, and an item file still carrying an
-in-progress marker that is billing time to nobody. Do not retry `init`, and
-never delete the run file to get past this. Run `status`, show the user, then
-take the run over with `--resume` or end it with `--abort` (both below).
+refuses both, identically and deliberately: a stale `running` run is the last
+surviving record of a run that died mid-item, and possibly of a worktree, a
+branch and an in-progress marker still on disk (`references/rationale.md`, §2).
+Do not retry `init`, and **never delete the run file to get past this.** Run
+`status`, show the user, then take the run over with `--resume` or end it with
+`--abort` — both of which begin at `references/recovery.md`.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
@@ -423,18 +434,11 @@ the main tree (a subshell, per the rules at the top of this file):
 
 §1's gate refuses an uncommitted item before a run ever starts, so on the
 ordinary path this probe never fires. It is here because it catches strictly
-more than that gate can: a project root the gate could not read as a git work
-tree at all (it falls back to the working copy there, deliberately), a main
-tree not actually on `main`, an item committed only on some other branch, a
-race between the gate and this checkout, and any future drift between the ref
-`worktree add` uses on the line above and the one the gate defaults to.
-
-What it prevents is not a crash. A session dropped into a worktree with no
-item file does not fail — `backlog.mjs show` exits `1` there, the session
-reads that as a lookup problem, searches, finds the one copy that does exist
-in the main tree, and works *that* one: the branch ends up carrying code with
-no lifecycle move on it, the item gets archived as a loose uncommitted change
-in somebody else's tree, and every stage of this run reports success.
+more than that gate can — and because what it prevents is not a crash but a
+*silent success*: a session with no item file in its tree finds the main
+tree's copy, works that one, and every stage of the run reports success over a
+branch carrying code with no lifecycle move on it. (`references/rationale.md`,
+§4, lists everything the probe catches that the gate cannot.)
 
 Then keep the new directory out of everybody's `git status`, idempotently:
 
@@ -444,20 +448,17 @@ grep -qxF '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '.worktrees/\n' >> "$EX
 ```
 
 Run that from the project root (the path `git rev-parse` prints is relative
-to cwd). Three details in those two lines, all load-bearing:
+to cwd). Three details, all load-bearing, all explained in
+`references/rationale.md` (§4):
 
-- **`--git-common-dir`, and the check-before-append.** `info/exclude` lives in
-  the repository's *shared common* git directory — it is one file for the
-  repo and every worktree of it, not one per worktree. Appending blindly on
-  each item would grow duplicate lines in a file the user owns, and change
-  `git status` output repo-wide, including in their main tree.
-- **`grep -qxF`** — whole line (`-x`), fixed string (`-F`). A substring or
-  regex match would either miss an existing entry or match an unrelated one
-  and skip an append that was actually needed.
+- **`--git-common-dir`, and the check before the append** — `info/exclude` is
+  one shared file for the repo and every worktree of it, so a blind append
+  grows duplicates in a file the user owns and changes `git status` repo-wide.
+- **`grep -qxF`** — whole line, fixed string. Anything looser either misses an
+  existing entry or matches an unrelated one and skips a needed append.
 - **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it
-  would be an uncommitted change in the user's repo at best, and a stray
-  commit riding a merge into `main` at worst. `info/exclude` is local,
-  untracked, and reversible by deleting a line.
+  is an uncommitted change in the user's repo at best, and a stray commit
+  riding a merge into `main` at worst.
 
 Now write any pre-flight answer into the worktree's copy of the item file
 (see above), and record the worktree on the run:
@@ -495,70 +496,33 @@ goes to its own file, so a warning printed by the CLI never lands in the
 middle of the transcript.
 
 **`--verbose` is required, not a contingency.** With `--print`, the installed
-CLI refuses the stream-json format without it — verified on this machine
-rather than assumed:
+CLI refuses the stream-json format without it, and in `-p` mode `--verbose` is
+also what *produces* the event stream at all. Leaving it off is the quietest
+failure in this whole file: every item in the queue parks as a crashed
+session, and the run merges nothing. `references/rationale.md` has the exact
+error and the full chain.
 
-```
-$ printf '' | claude -p --output-format stream-json --input-format stream-json
-Error: When using --print, --output-format=stream-json requires --verbose
-```
+**`--permission-mode auto`, and not the rung above it.** What makes an
+unattended session tolerable is not trust in the session, it is four walls:
+a **disposable worktree** created seconds ago from `main`, an **independent
+review** before anything moves, **verification commands** that must come back
+green, and the **merge as the only door back to `main`**, walked by this skill
+and never by the session. Remove any one and dispatching unattended stops
+being defensible at any rung.
 
-In `-p` mode `--verbose` is what *produces* the event stream at all, so this
-is one flag doing the job of both. Leaving it off is the quietest failure in
-this whole file, and it fires on the first item of the first run: the shell
-redirect creates the `.jsonl` before `claude` is even exec'd, so `watch`'s
-missing-file check never fires; the error goes to the `.err` that nothing on
-this path reads; the process is gone inside a second, so `watch` returns `0`
-("the child is gone"); no `system`/`init` event ever lands, so the session id
-stays null. Step 5 then reads exactly the shape it calls a crashed session,
-parks the item, and moves on — for every item in the queue. The run merges
-nothing and reports that the sessions kept dying.
+`auto` is the lowest rung that clears an execute session's real workload —
+`acceptEdits` below it still prompts on `pnpm test` and on `git`. Do **not**
+"tighten" it to `dontAsk` plus `--allowedTools`: that was probed and it is dead
+on arrival, because it requires enumerating every command before the work
+starts. The measurements behind both claims are in `references/rationale.md`.
 
-**Why `--permission-mode auto`, and not the rung above it.** This is the
-design's most load-bearing trade, and it is stated out loud rather than
-buried. What makes running an unattended session tolerable at all is not
-trust in the session, it is the four walls around it: the session can only
-write inside a **disposable worktree** created seconds ago from `main`; its
-output faces an **independent review** before anything moves; it faces
-**verification commands** that must come back green; and the **merge is the
-only door back to `main`**, walked by this skill, never by the session.
-Remove any one of those four and dispatching unattended stops being
-defensible at any rung.
-
-Those four walls are what the run is safe *because of* — they were never an
-argument for reaching the top of the ladder specifically, and `auto` already
-clears an execute session's entire real workload. Measured on this machine
-against CLI 2.1.250: of twelve probed actions under headless `auto`, eleven
-ran unprompted — `pnpm test`, arbitrary `node`, `git commit`, `git reset
---hard`, `git push --force`, recursive deletes, writes outside the cwd — and
-exactly one was denied: uploading a local file's contents to an external
-host, a class `backlog-execute` has no business performing. `acceptEdits`,
-the rung below, is genuinely not enough (arbitrary `pnpm test` and `git`
-still prompt there), so this is the lowest rung that works, not the mildest
-one available.
-
-**A denial is silent in every signal but one.** There is no hang to fear
-here — a refused call comes back as an ordinary `tool_result` with
-`is_error: true`, the session reads it and improvises around it. That is the
-actual hazard, and it is quieter than a hang: the run's final result event
-still reports `subtype: "success"` and `is_error: false`, and the process
-still exits `0`, **even when every tool call in the session was refused**.
-The one machine-readable trace is `permission_denials` on that same result
-event, which is why step 5 reads it before it judges anything else (see
-Inspect). Read the eleven-of-twelve above as what `auto` typically permits,
-never as a contract: the boundary is a classifier's judgment weighing cwd and
-context, not a fixed list, so the same mode name can return different
-verdicts on different days. The design has to tolerate a denial happening,
-which is exactly what that check is for.
-
-**Do not "tighten" this to `dontAsk` plus `--allowedTools`.** It was probed,
-and it is dead on arrival: under `--permission-mode dontAsk` with no
-allowlist, `pnpm test` was refused outright — *"Permission to use Bash has
-been denied because Claude Code is running in don't ask mode"* — and the run
-still finished `subtype: "success"`. Making it work means enumerating every
-command the session will ever need before the work starts, which is the one
-thing a session doing unenumerated work cannot have. Tighter is not better
-when the tightening has to be guessed ahead of the work.
+**A denial is silent in every signal but one.** A refused call comes back as an
+ordinary `tool_result` the session improvises around; the run still reports
+`subtype: "success"`, `is_error: false`, and exit `0` **even when every call was
+refused**. The one machine-readable trace is `permission_denials` on the result
+event — which is why step 5 checks it before judging anything else, and why
+that check is not optional in the fix loop either. Never read what `auto`
+permitted on one day as a contract: it is a classifier's judgment, not a list.
 
 ### Watch until it exits
 
@@ -782,64 +746,42 @@ echo $! > "<dir>/verify/<id>.pid"
 be skipped or split off — see the first detail below for what it is actually
 preventing.
 
-**Detached, for the same reason the session in step 4 is.** A project's whole
-baseline suite is the one step in this loop with no upper bound — `pnpm test`
-plus a typecheck plus a build is minutes on a small repo and much more on a
-large one — and a Bash call cannot outlive ten minutes even with its timeout
-at the maximum. Run inline, a suite that outruns the call is killed
-mid-flight, and `verify` has then written nothing and returned no exit code
-this section has a branch for: an undefined state at the merge gate, in an
-unattended loop, which is the one place this design cannot afford one.
-Detached, the ceiling stops applying to the suite and applies only to the
-polling, which is built to be re-called.
+**Detached, for the same reason the session in step 4 is.** A baseline suite
+is the one step in this loop with no upper bound, and a Bash call cannot
+outlive ten minutes. Run inline, a suite that outruns the call is killed
+mid-flight and `verify` writes no exit code at all — an undefined state at the
+merge gate, unattended. Detached, the ten-minute ceiling applies only to the
+polling, which is built to be re-called. (`references/rationale.md`, §8.)
 
 Five details in those lines, none of them the same as step 4's:
 
 - **`rm -f` first, and it is a merge-gate rule rather than housekeeping.**
-  `<dir>` belongs to the *run*, not to the attempt: nothing removes these
-  three files afterwards, and `finish` does not clean `<dir>` at all — so a
-  second attempt on the same item would inherit the first attempt's
-  `.status` verbatim. Both "the verification did not finish" branches at the
-  end of this section are predicated on that file being **absent**, so from
-  the second attempt onward neither of them could fire. The failure that
-  produces is precise, and it is the worst one this file can produce:
-  attempt one passes and writes `0`; attempt two is killed mid-suite and
-  writes nothing; the probe reads the stale `0`; this section says *merge*.
-  A green merge gate on a verification that never finished — the one thing
-  this whole design exists to make impossible. And it is reachable
-  unattended without anybody doing anything unusual: §9 parks an item
-  *after* a green verify when the main tree is not on `main` or the merge
-  conflicts, the item stays open with its branch, and the next run resumes
-  it at Inspect — where its verify is the second attempt. `.out` and `.pid`
-  are cleared on the same rule: a stale `.pid` would be polled as though it
-  were this attempt's child (and pids are recycled), and a stale `.out`
-  would satisfy `watch`'s missing-file check for a run that never started.
-  If you ever find yourself reading a `.status` you did not clear moments
-  earlier in the same call, it is not this attempt's answer — treat it as
-  absent and start the block again. (Step 4 needs no equivalent line because
-  its transcripts are already scoped per attempt — `<id>.jsonl`, then
-  `<id>-retry-1.jsonl` — and because nothing there is read as a gate.)
+  `<dir>` belongs to the *run*, not to the attempt: nothing removes these three
+  files afterwards, so a second attempt would inherit the first attempt's
+  `.status` verbatim. Both "the verification did not finish" branches at the end
+  of this section are predicated on that file being **absent**, so from the
+  second attempt onward neither could fire — and the failure that produces is a
+  green merge gate on a verification that never finished. Second attempts are
+  ordinary here, not exotic: §9 parks an item *after* a green verify, and the
+  next run resumes it at Inspect. `.out` and `.pid` are cleared on the same
+  rule. **If you ever find yourself reading a `.status` you did not clear
+  moments earlier in the same call, it is not this attempt's answer — treat it
+  as absent and start the block again.** (`references/rationale.md`, §8, has
+  the full chain and why step 4 needs no equivalent.)
 - **No `exec`, unlike the dispatch line.** The pid recorded here is
   deliberately the wrapper `sh`, because the wrapper is what outlives `node`
   long enough to write `.status`. `exec` would replace it and the exit code —
   the one thing this whole step exists to produce — would be lost.
 - **Named `env` variables inside the quotes, never a positional.** The quotes
-  have to stay single so `$?` reaches the inner shell instead of being
-  expanded by this one, which rules out writing `$CLAUDE_PLUGIN_ROOT` in
-  there directly; `env` sets both names for the child without the outer shell
-  touching anything. The obvious alternative — pass them positionally and read
-  `$1`/`$2` — is the one thing that must not be done here, and the reason is
-  not style: **slash-command argument substitution rewrites `$N` in this file
-  before the session ever reads it, fenced code included.** Invoked as
-  `/backlog-orchestrate bug-2 bug-3 …`, an earlier version of this very line
-  arrived in the session as `node "bug-3/skills/…"`, with this bullet rewritten
-  to match so it read as deliberate rather than corrupt. That failure was loud
-  by luck; a substitution producing a readable path would fail silently, and
-  this is the launcher the merge gate depends on. Keep the plugin root and the
-  run directory in `BM_PLUGIN_ROOT` / `BM_RUN_DIR`, and do not reintroduce a
-  `$N` anywhere in this file. `$PWD` needs none of this care — every shell sets
-  it and no substitution pass touches it, which is why step 4's line uses it
-  directly.
+  must stay single so `$?` reaches the inner shell rather than this one, which
+  rules out interpolating `$CLAUDE_PLUGIN_ROOT` directly; `env` sets both names
+  for the child instead. **Never pass them positionally.** Slash-command
+  argument substitution rewrites positional parameters in this file before the
+  session reads it, fenced code included — it has corrupted this exact line in a
+  live run. Keep the plugin root and the run directory in `BM_PLUGIN_ROOT` /
+  `BM_RUN_DIR`, and do not reintroduce a positional anywhere in this file.
+  `$PWD` needs none of this care, which is why step 4's line uses it directly.
+  (`references/rationale.md`, §8.)
 - **`BM_RUN_DIR` also retires the `<dir>` placeholder inside this command.**
   Every other `<dir>` in this file is pasted once; here it was pasted three
   times into one line, and each paste was a chance to redirect an attempt's
@@ -1079,17 +1021,13 @@ same reason the pre-flight amendment rule insists the item file is only ever
 edited there.
 
 **Undoing a merge that already completed is `git revert -m 1 <merge-sha>`,
-never `git reset --hard`.** This was proved empirically before this skill was
-written: `reset --hard` resets the working tree and index in full, and it
-silently discarded an *unrelated, uncommitted* modification in the main tree
-along with the merge — with no reflog recovery, because that modification was
-never staged or committed. The same scenario undone with
-`git revert -m 1 --no-edit <merge-sha>` left the unrelated modification
-byte-for-byte intact. An unattended run can never rule out that the user has
-uncommitted work sitting in their main tree, so the noisier history a revert
-commit leaves behind is the price, knowingly paid, of never destroying
-something nobody backed up. `-m 1` names the first parent — `main` as it was
-before this merge — which is what "undo the branch I just merged" means.
+never `git reset --hard`.** `reset --hard` was measured destroying an unrelated,
+uncommitted modification in the main tree along with the merge, unrecoverably;
+the same undo by revert left it byte-for-byte intact. An unattended run can
+never rule out that the user has uncommitted work in their main tree, so the
+noisier history is the price, knowingly paid. `-m 1` names the first parent —
+`main` as it was before this merge. (`references/rationale.md`, §9, has the
+measurement.)
 
 **On success**, record it and clean up:
 
@@ -1150,150 +1088,28 @@ heartbeat goes stale reads to the board (and to a later `init`) as crashed:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
 ```
 
-### `--resume`
+### `--resume` and `--abort`
 
-Start from what is actually on disk, not from what the run file hoped:
+**Both begin by reading `references/recovery.md` in full, before any other
+command.** That file carries the whole of both paths: `reconcile`'s four
+verdicts and what each one means, the ruling that a resumed session's dead
+marker is billed with a plain `stop` rather than `--abandon` (deliberately the
+opposite of what `backlog-groom` prescribes for a marker that looks identical),
+and abort's order-of-operations, which is its entire safety property.
 
-```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" reconcile
-```
+Two rules stay here, because a reader who stops at this line still has to know
+them:
 
-Read-only — it never writes the run file; deciding what to do is this skill's
-job. For every item still in the pipeline it prints what it found and one of
-four suggestions:
+- **`--resume` starts from what is on disk, not from what the run file hoped.**
+  `orchestrate.mjs reconcile` is read-only and prints one of four suggestions
+  per item; deciding what to do with each is this skill's job, not the tool's.
+- **`--abort` runs before any marker is cleared, never after.** Clearing a
+  mid-flight item's marker first makes `abort` classify that item as safe and
+  `git worktree remove --force` it — which deletes uncommitted work that was
+  never committed and never staged, with no reflog entry to recover it from.
 
-```
-task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2…  -> resume-session
-```
-
-- **`resume-session`** — worktree present, the item file still carries an
-  in-progress `phase:` marker, and a session id is known. Resume that session
-  in place with **step 5's retry line unchanged** — every flag it carries,
-  `--verbose` among them, since a `claude -p --output-format stream-json`
-  without it exits in under a second and this path would read that as another
-  crash — then re-enter the loop at Inspect.
-- **`redispatch-after-stop`** — same, but no session id was ever recorded, so
-  there is nothing to resume. **Clear the dead marker first**, and this is the
-  one command in this skill that runs with the worktree as its cwd, because
-  the item file it edits is the worktree's copy:
-
-  ```bash
-  ( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> )
-  ```
-
-  The subshell is mandatory, not tidiness — see "Where commands run" at the
-  top: a bare `cd` would leave this session sitting in the worktree, and every
-  later `orchestrate.mjs` call would resolve the project to the wrong place.
-
-  A plain `stop`, deliberately — and it is worth being straight about the
-  trade, because `backlog-groom` prescribes the opposite for a marker that
-  looks exactly like this one. Groom's rule is that a stamp left behind by a
-  crash, a `/clear`, or a weekend gets `stop --abandon`, because billing that
-  dead stretch into the elapsed counter fabricates grooming nobody did. Here
-  the ruling goes the other way: this run launched that session itself, knows
-  it was a real execute session doing real work, and the elapsed interval is
-  the only record of it — so the time is billed, and `--abandon` is not used.
-  The cost is real and worth knowing: a crash noticed hours later bills those
-  idle hours into `execute-elapsed:` too, permanently, since the counter never
-  resets. `start` refuses to stamp a file that already carries a marker, so
-  the clear has to come before the fresh dispatch. Then dispatch again on the
-  same worktree and branch, from the project root — **step 4's dispatch line
-  unchanged**, `--verbose` included, for the reason `resume-session` above
-  gives.
-- **`inspect`** — either the worktree is gone but the branch survives, or the
-  worktree is there with no marker at all (it may have finished cleanly just
-  before the crash, or never started). Reconcile cannot tell those apart from
-  outside; look, then re-enter the loop at the right step — often Commit or
-  Review, because the work is already done and only the plumbing died.
-- **`park`** — neither worktree nor branch survives. Nothing to resume:
-
-  ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "resume: worktree and branch both gone — nothing to take over"
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
-  ```
-
-  `--detail` is mandatory on every `attention` call — omitting it exits `1`
-  with the usage line, and an attention row with no detail would be a
-  drawer entry that says nothing anyway. Then let the next run pick the item
-  up from the top.
-
-### `--abort`
-
-**Run `abort` first. Clear markers afterwards, and only for the items abort
-names.** The order is the whole safety property of this section, so it comes
-before the commands:
-
-```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
-```
-
-`abort` walks the queue, and for each item it asks one question of the disk:
-does this item's worktree copy still carry an in-progress `phase:` marker?
-
-- **No marker** → it tears the item down: `git worktree remove --force` on the
-  worktree, `git branch -D` on the branch, best-effort (a worktree or branch
-  git has never heard of just fails harmlessly — that is the state abort is
-  trying to reach anyway).
-- **Marker present** → it leaves that item **completely alone**, worktree
-  *and* branch, and pushes an `attention` entry naming the absolute worktree
-  path, the exact `backlog.mjs stop <id>` to run, and the exact
-  `worktree remove` / `branch -D` commands to finish with afterwards.
-
-Then it sets the run to `aborted` and prints a one-line summary of what it
-removed and what it left.
-
-**That marker is the signal, and clearing markers *before* `abort` destroys
-it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
-marker, classifies the item as safe, and `worktree remove --force`s a
-directory whose session was still working: `--force` deletes the working
-directory outright, uncommitted changes included, and because
-`backlog-execute` never commits and the orchestrator had not got there yet,
-there is no commit to `git revert` and no reflog entry to recover from. The
-work is simply gone. That failure is the reason abort's preservation branch
-exists at all, and doing the stops first is exactly how to reintroduce it. A
-leftover directory is an annoyance a human clears in two commands; destroyed
-uncommitted work has no recovery path.
-
-So, after `abort` returns, read the attention list it wrote:
-
-```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
-```
-
-For each preserved item, in this order:
-
-1. Clear the marker where the item file actually lives — in a subshell, so
-   this session's cwd stays at the project root:
-
-   ```bash
-   ( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> )
-   ```
-
-   `orchestrate.mjs` cannot do this itself: item files have exactly one writer
-   family — the backlog skills — and it is not one of them. That is why abort
-   preserves rather than cleans, instead of clearing the marker and carrying
-   on.
-2. **Look inside the worktree before deleting it.** `git -C <worktree> status`
-   and `git -C <worktree> diff`: a marker means a session was mid-flight, so
-   whatever is uncommitted in there is the work nobody has seen. If any of it
-   is worth keeping, commit it on the branch (step 6's shape) and tell the
-   user the branch is there — an abort is allowed to end a run, it is not
-   licensed to throw away code on the user's behalf.
-3. Only then remove the leftovers:
-
-   ```bash
-   git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
-   git -C "$PWD" branch -D backlog/<id>
-   ```
-
-   Plain `remove` again, for the reason it is plain everywhere else in this
-   file: a refusal means something is still uncommitted in there, and this is
-   the one path where that is *likely* rather than surprising. `-D` on the
-   branch, unlike the merge path's `-d`: an aborted branch was never merged
-   anywhere, so a safe delete would always refuse it.
-
-Everything the run had already merged before the abort stays merged — abort
-ends a run, it does not undo one.
+`--abort` ends a run; it never undoes one. Everything already merged stays
+merged.
 
 ## Hard limits
 

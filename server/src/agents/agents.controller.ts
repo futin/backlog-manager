@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpException, Post, UseGuards } from '@nestjs/c
 
 import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
 import { SameOriginPostGuard } from './origin.guard';
+import { isAgentAction } from '../../../shared/agent';
 import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus } from '../../../shared/types';
 
 /**
@@ -55,8 +56,14 @@ export class AgentsController {
   dispatch(@Body() body: Partial<AgentDispatchRequest> | undefined): Promise<AgentDispatchResult> {
     const itemPath = typeof body?.itemPath === 'string' ? body.itemPath.trim() : '';
     if (itemPath === '') throw new HttpException({ error: 'itemPath is required' }, 400);
-    if (body?.action !== 'groom' && body?.action !== 'execute') {
-      throw new HttpException({ error: 'action must be groom or execute' }, 400);
+    // `isAgentAction` (shared/agent.ts), not a hand-written comparison chain:
+    // this check is a restatement of the `AgentAction` vocabulary, and the
+    // hand-written version was the copy that would have gone stale the moment
+    // a third action landed. Still only a SHAPE check — which of the three
+    // this item may actually have is the service's business, decided by
+    // re-deriving from the file and 409ing on disagreement.
+    if (!isAgentAction(body?.action)) {
+      throw new HttpException({ error: 'action must be groom, execute or capture' }, 400);
     }
     return this.agents.dispatch({
       itemPath,

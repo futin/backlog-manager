@@ -14,17 +14,45 @@ import type {
  */
 
 /** What a click dispatches. Derived from the item; never chosen by the caller. */
-export type AgentAction = 'groom' | 'execute';
+export type AgentAction = 'groom' | 'execute' | 'capture';
+
+/**
+ * Every member of `AgentAction`, as a value — what a request body's `action`
+ * is checked against.
+ *
+ * Exported so the controller (`agents.controller.ts`) can validate a body
+ * without restating the union by hand, which is the one thing this module
+ * exists to prevent: a hand-written `!== 'groom' && !== 'execute'` chain is a
+ * second copy of the vocabulary, and it is exactly the copy that got missed
+ * when a third action was added. `test/agents-shared.test.ts` pins it against
+ * the type.
+ */
+export const AGENT_ACTIONS: readonly AgentAction[] = ['groom', 'execute', 'capture'];
+
+/** Is this unvalidated value one of the three actions? The type guard the
+ *  controller narrows a request body's `action` with. */
+export function isAgentAction(value: unknown): value is AgentAction {
+  return typeof value === 'string' && (AGENT_ACTIONS as readonly string[]).includes(value);
+}
 
 /**
  * The next step this item actually has, or null when it has none.
  *
- * `status !== 'open'` covers both archives in one line: a `done/` item is
- * history, and out-of-scope is `terminal` — neither has a next step. Ideas go
- * to groom unconditionally (grooming is what promotes them; `groomed` is null
- * for them by construction). Bugs and tasks turn on the groomed derivation
- * alone, which is exactly the condition backlog-execute refuses to work
- * without: a bug whose Fix still reads "unknown" gets groomed first.
+ * **The section check runs first, and the ordering is the rule.** An
+ * out-of-scope item is `terminal`, so the `status !== 'open'` line below would
+ * swallow it — which is precisely what it used to do, back when that one line
+ * covered both archives at once. It no longer does, and the two archives no
+ * longer share a branch, because they are not the same kind of ending: a
+ * `done/` item is history and genuinely has no next step, while a rejection
+ * does. Reviving a rejection is `capture` — a NEW item citing the original with
+ * `from: <id>`, never a move out of `out-of-scope/`, which `moveItem` refuses
+ * and this does not lift. The old shared branch read as one rule and was two,
+ * and the second one was wrong.
+ *
+ * Ideas go to groom unconditionally (grooming is what promotes them; `groomed`
+ * is null for them by construction). Bugs and tasks turn on the groomed
+ * derivation alone, which is exactly the condition backlog-execute refuses to
+ * work without: a bug whose Fix still reads "unknown" gets groomed first.
  *
  * Refactors reach the same answer as ideas without a branch of their own, and
  * that is deliberate rather than an oversight: `groomed` is null for them too
@@ -37,13 +65,30 @@ export type AgentAction = 'groom' | 'execute';
  * task fallback), so the branch had to be widened.
  */
 export function deriveAction(item: BacklogItem): AgentAction | null {
+  if (item.section === 'out-of-scope') return 'capture';
   if (item.status !== 'open') return null;
   if (item.section === 'ideas') return 'groom';
   return item.groomed === true ? 'execute' : 'groom';
 }
 
 /**
- * The button's word: `execute` or `groom`, and nothing else.
+ * The word on every control, keyed by action rather than chosen by a ternary.
+ *
+ * A record, not `action === 'execute' ? … : 'groom'`, and the difference is
+ * the compiler: every label happens to equal its own action string today, so
+ * the record buys exactly one thing — a fourth action cannot be added without
+ * someone deciding what it says. The ternary silently labelled everything that
+ * was not `execute` as `groom`, which is how a third action would have shipped
+ * reading as the wrong word.
+ */
+const ACTION_LABEL: Record<AgentAction, string> = {
+  groom: 'groom',
+  execute: 'execute',
+  capture: 'capture'
+};
+
+/**
+ * The button's word: one of the three actions, and nothing else.
  *
  * An idea used to read `groom → task`, on the reasoning that grooming *moves*
  * it out of the column you clicked in and the label should warn about that.
@@ -58,7 +103,7 @@ export function deriveAction(item: BacklogItem): AgentAction | null {
  * a signature change away at every call site.
  */
 export function actionLabel(_item: BacklogItem, action: AgentAction): string {
-  return action === 'execute' ? 'execute' : 'groom';
+  return ACTION_LABEL[action];
 }
 
 /** Lowest to highest. Order is the whole meaning — do not sort this. */

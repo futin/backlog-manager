@@ -1,31 +1,137 @@
 import { elapsedSince, formatCreated } from '../../lib/item-age';
 import { isInProgress, progressLabel } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
-import { stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { DispatchButton } from './DispatchButton';
-import type { AgentsStatus, BacklogItem, RunStage } from '../../../../shared/types';
+import type { AgentsStatus, BacklogItem, RunQueueItem, RunStage } from '../../../../shared/types';
 
 /**
- * The `RunStage` values that earn a card a chip at all — a literal list
- * rather than "everything not terminal and not pending", because that
- * broader formula would also catch `preflight`, and Task 11's own brief
- * enumerates exactly these six as "shown" without it. Preflight is a real
+ * The `RunStage` values that mean the orchestrator is working this item right
+ * now — a literal list rather than "everything not terminal and not pending",
+ * because that broader formula would also catch `preflight`, and Task 11's own
+ * brief enumerates exactly these six as "shown" without it. Preflight is a real
  * pipeline stage (it sits between `pending` and `dispatched` in RunStage's
  * own documented order — see shared/types.ts) but a usually-instant one for
- * an already-groomed item, and a card that flickered a chip on for the
+ * an already-groomed item, and a card that flickered a marker on for the
  * fraction of a poll cycle preflight actually takes would read as noise
- * rather than as a state anyone could act on. `needs-answers` is handled as
- * its own case beside this list (a warning chip, not this one) rather than
- * folded in, because it means the opposite of "this is progressing" — see
- * the render below.
+ * rather than as a state anyone could act on.
+ *
+ * Task 9 turned what these six earn from a footer chip into the card's own
+ * live bar, in cyan: "which of these twelve is being worked" is a question
+ * asked of a whole column at once, and a 9.5px chip in a card's foot could no
+ * more answer it than the 3px amber inset the hand-run bar replaced could.
+ * The two stages below are the same claim's other half.
  *
  * Exported for the same reason REFACTOR_KINDS above is: so a test can
- * assert against the exact list the badge renders from, not a restatement
- * of it.
+ * assert against the exact list the card renders from, not a restatement
+ * of it. Also read by BoardView (the column rank) and RunDrawer (its own
+ * active count) — one list, three readers, none of them restating it.
  */
 export const ACTIVE_RUN_STAGES: readonly RunStage[] = [
   'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
 ];
+
+/**
+ * The two `RunStage` values that mean the run has STOPPED and will not
+ * restart until a person does something — the exact opposite claim to the six
+ * above, and the one thing on this board worth surfacing above running work.
+ *
+ * `parked` earns a marker here it never had as a chip. It belongs with
+ * `needs-answers` on the only test that matters for this bar: the pipeline is
+ * not moving and no amount of waiting will change that. STAGE_TONE
+ * (lib/run-stage.ts) already groups exactly these two under its `warn` tone
+ * for the same stated reason, so this list is that grouping read from the
+ * card's side rather than a second opinion about it.
+ *
+ * Amber, where the six above are cyan: the theme's legend reads amber as "a
+ * human is involved here" (the hand-run bar's own colour and rationale, a few
+ * rules down in styles.css), which is precisely true of a blocked run and
+ * precisely false of a running one.
+ *
+ * Exported on the same terms as its neighbour, and read by the same two
+ * outside callers that read it.
+ */
+export const ATTENTION_RUN_STAGES: readonly RunStage[] = ['needs-answers', 'parked'];
+
+/**
+ * What this card needs from a fresh run's queue entry: the stage, and the
+ * first-arrival stamps to age it against. A narrow pick rather than the whole
+ * `RunQueueItem` because everything else on that shape (sessionId, worktree,
+ * verification output, questions) belongs to RunDrawer, and a card that
+ * accepted it would invite reading fields the card has no room to render.
+ */
+export type RunCardState = Pick<RunQueueItem, 'stage' | 'stageAt'>;
+
+/** The bar's three volatile facts, in a shape a test can assert directly. */
+export type LiveBar = {
+  /** The word(s) the bar prints: a run stage, or `progressLabel`'s wording. */
+  label: string;
+  /** `run` → cyan (the orchestrator, unattended); `human` → amber. */
+  tone: 'run' | 'human';
+  /** The stamp to age against, or null when nothing here can be aged. */
+  anchor: string | null;
+  /** The bar's title attribute — the one place the exact stamp is legible. */
+  title: string;
+};
+
+/**
+ * Which bar a card wears, or null for none. Exported and pure so the
+ * precedence below is testable without a render, and so the ordering is
+ * stated once in one place rather than as nested ternaries in JSX.
+ *
+ * The precedence, top wins:
+ *   1. an attention stage  → amber, labelled with the stage
+ *   2. an active stage     → cyan, labelled with the stage
+ *   3. `isInProgress(item)` → amber, labelled by `progressLabel` (unchanged)
+ *   4. none of those       → no bar
+ *
+ * Run facts outrank the file's own marker (1–2 over 3) because the run payload
+ * is re-polled every 5s while it is fresh, where a `started:` stamp can be
+ * arbitrarily stale — a leftover hand-run stamp must not mask a live run's
+ * actual stage. In practice the two rarely co-occur at all: `backlog-execute`
+ * runs inside the per-item worktree and stamps the worktree's copy of the item
+ * file, never the main tree's copy this board renders (task-9's own Goal
+ * section has the full finding), which is exactly why a run's stage is the
+ * ONLY thing that can say an orchestrated item is live.
+ *
+ * The anchor prefers `stageAt.dispatched` over the current stage's own
+ * arrival, and that is not a fallback ordering — it is the reading. `stageAt`
+ * keeps FIRST arrivals only (shared/types.ts), so a `fixing` → `reviewing`
+ * loop does not re-stamp either one; anchoring on the current stage would
+ * still under-report a long item as "2m in reviewing" rather than "40m in the
+ * orchestrator's hands", which is the analogue of `started:` and the thing a
+ * reader scanning a column actually wants. `needs-answers` needs the fallback
+ * because its route (pending → preflight → needs-answers) never visits
+ * `dispatched` at all, and there the current stage's arrival IS the right
+ * reading: how long it has been waiting on you.
+ */
+export function liveBarFor(item: BacklogItem, run?: RunCardState): LiveBar | null {
+  const stage = run?.stage;
+  if (stage !== undefined
+    && (ATTENTION_RUN_STAGES.includes(stage) || ACTIVE_RUN_STAGES.includes(stage))) {
+    const anchor = run?.stageAt.dispatched ?? run?.stageAt[stage] ?? null;
+    return {
+      label: stage,
+      tone: ATTENTION_RUN_STAGES.includes(stage) ? 'human' : 'run',
+      anchor,
+      // The stage word is already on the bar, so the title's job is only the
+      // stamp behind it — omitted entirely rather than trailing an `undefined`
+      // when there is none, the same rule the elapsed reading follows.
+      title: anchor === null ? stage : `${stage} since ${anchor}`
+    };
+  }
+  if (isInProgress(item)) {
+    return {
+      label: progressLabel(item),
+      tone: 'human',
+      anchor: item.started,
+      // Literal `in progress`, not `progressLabel`'s wording: this string
+      // names the stored KEY the stamp came from, which is the same key
+      // whether the phase reads grooming, executing or nothing at all.
+      title: `in progress since ${item.started}`
+    };
+  }
+  return null;
+}
 
 /**
  * The two `kind:` values a refactor may carry. An enum here rather than a
@@ -45,7 +151,7 @@ export const REFACTOR_KINDS: readonly string[] = ['chore', 'debt'];
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
 export function ItemCard(
-  { item, hues, onOpen, agents, onDispatch, now, stale, runStage, runBlock }: {
+  { item, hues, onOpen, agents, onDispatch, now, stale, run, runBlock }: {
     item: BacklogItem;
     hues: ProjectHues;
     onOpen: () => void;
@@ -71,28 +177,41 @@ export function ItemCard(
      * has already left the Board by the time a card renders (`leavesBoard`).
      * The prop is not narrowed to tasks anyway, because the rule about which
      * sections survive belongs to the board's filter, not to the card's
-     * markup — Archive (Task 6) renders the same card for the sections that
-     * did leave, and it should be able to mark them too.
+     * markup.
+     *
+     * ArchiveView renders this same card for the sections that DID leave and
+     * deliberately passes nothing here — every card in its three stale columns
+     * is stale by construction, so a marker on all of them carries no
+     * information, exactly as `groomed` on a task would not. Its column
+     * headings say it once instead. The prop stays open to that surface all
+     * the same; what it does not have is a caller that always sets it.
      */
     stale?: boolean;
     /**
-     * This card's position in a fresh orchestrator run's queue, or undefined
-     * when no such run currently says anything about it. Looked up by
-     * BoardView, not derived here — this component stays a pure function of
-     * whatever it is handed, the same discipline `now` above already follows,
-     * and RunStrip.tsx carries the long version of why the source is a run
-     * payload rather than anything on `item` itself.
+     * This card's entry in a fresh orchestrator run's queue, or undefined when
+     * no such run currently says anything about it. Looked up by BoardView, not
+     * derived here — this component stays a pure function of whatever it is
+     * handed, the same discipline `now` above already follows, and RunStrip.tsx
+     * carries the long version of why the source is a run payload rather than
+     * anything on `item` itself.
+     *
+     * The stage AND its stamps, in one prop rather than two: they are two
+     * halves of a single volatile fact, and a card handed a stage from one poll
+     * with stamps from another would print an elapsed for a stage it is not
+     * showing. `runBlock` below is a genuinely different question off the same
+     * payload and stays its own prop for the reason stated there.
      */
-    runStage?: RunStage;
+    run?: RunCardState;
     /**
      * Why a run forbids dispatching this item, or null/undefined when none
      * does — passed straight through to `DispatchButton`.
      *
-     * Deliberately a SECOND prop rather than something derived from `runStage`
+     * Deliberately a SECOND prop rather than something derived from `run`
      * beside it: the two answer different questions off the same payload.
-     * `runStage` decides whether this card shows a live stage badge and reads
-     * `ACTIVE_RUN_STAGES` above, which correctly excludes `pending` and
-     * `preflight`; the block reads `RUN_CLAIMED_STAGES` (shared/types.ts),
+     * `run` decides whether this card shows a live bar and reads
+     * `ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES` above, which correctly exclude
+     * `pending` and `preflight`; the block reads `RUN_CLAIMED_STAGES`
+     * (shared/types.ts),
      * which must INCLUDE them — a pending item is already claimed even though
      * a badge for it would be noise. Collapsing the two would break one rule
      * or the other. See `runClaimBlock` (shared/agent.ts) for who computes it.
@@ -101,19 +220,26 @@ export function ItemCard(
   }
 ) {
   const at = now ?? Date.now();
-  // See item-progress.ts for why this is two conditions, not one: `started`
-  // outlives the work, so `status` is what tells a live item apart from an
-  // archived one that kept its stamp as history.
-  const inProgress = isInProgress(item);
-  // null when `started` is not a value this can age (a hand-edited file — the
-  // CLI writes a UTC timestamp, and older files a bare date). The bar still
-  // renders; it just drops the reading rather than printing NaN into it.
-  const elapsed = inProgress ? elapsedSince(item.started, at) : null;
+  /* One derivation for the whole marker — see `liveBarFor` above for the
+     precedence and for why a run's stage outranks the item file's own stamp.
+     `isInProgress` is no longer read directly here: it is row 3 of that
+     precedence, and reading it separately is how a card ends up amber-bordered
+     while its bar is cyan. */
+  const bar = liveBarFor(item, run);
+  /* null when the anchor is not a value this can age — a hand-edited `started`
+     (the CLI writes a UTC timestamp, and older files a bare date), or a queue
+     entry carrying no stamp for the stage it reports. The bar still renders; it
+     just drops the reading rather than printing NaN into it. */
+  const elapsed = bar === null || bar.anchor === null ? null : elapsedSince(bar.anchor, at);
   const created = formatCreated(item.created, at);
 
   return (
     <div
-      className={inProgress ? 'board-card board-card-live' : 'board-card'}
+      className={
+        bar === null ? 'board-card'
+          : bar.tone === 'run' ? 'board-card board-card-live board-card-live-run'
+            : 'board-card board-card-live'
+      }
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -130,7 +256,7 @@ export function ItemCard(
           of its own: that moved down to .board-card-face so the in-progress bar
           between them can be full-width. */}
       <div className="board-card-main">
-        {/* The in-progress marker, as a bar across the top of the face rather
+        {/* The live marker, as a bar across the top of the face rather
             than a hairline down its edge. "Which of these twelve is anyone on"
             is a question asked of a whole column at once, and 3px of amber
             inset on one card could not answer it at a glance.
@@ -138,19 +264,37 @@ export function ItemCard(
             "a human is involved here", and the card someone is actively on is
             the one that is true of. It is also why the dispatch tab beside it
             is cyan or mustard and never amber.
+            Task 9 gave the same bar a cyan tone for the orchestrator's own six
+            working stages, reading that legend from the other side: no human is
+            involved in those, which is exactly what makes cyan right for them
+            and amber wrong. A run BLOCKED on a person keeps amber — see
+            ATTENTION_RUN_STAGES. The stage word replaced the footer chip that
+            used to carry it, rather than being added beside it: one card
+            reading `reviewing` twice, two lines apart, in the same colour, is
+            not twice as informative.
             The bar owns no padding of its own beyond its inline padding — it
             sits OUTSIDE .board-card-face precisely so it can reach the face's
             left and right edges. It stops at the tab's seam, which is correct:
             the tab is the item's next step and keeps its own identity. */}
-        {inProgress && (
-          <div className="board-card-live-bar" title={`in progress since ${item.started}`}>
-            {/* Names which skill actually holds the item ('grooming' /
-                'executing') rather than the old generic wording every live
-                card used to carry — see item-progress.ts for why an empty
-                phase still falls back to it instead of rendering nothing.
-                The title attribute above is unaffected: it keeps naming the
-                stored `started` value regardless of which activity this is. */}
-            <span>{progressLabel(item)}</span>
+        {bar !== null && (
+          <div
+            /* Two tones of one bar, not two bars: the base rule owns the
+               padding, the --card-pad-x alignment, the --on-accent ink pairing
+               and the compact-density retune, and the cyan modifier overrides
+               nothing but the fill. A second bar would have had to re-derive
+               all four. */
+            className={bar.tone === 'run' ? 'board-card-live-bar board-card-live-bar-run' : 'board-card-live-bar'}
+            title={bar.title}
+          >
+            {/* Either the run's own stage word (`reviewing`, `needs-answers`)
+                or which skill a hand-run session holds the item with
+                ('grooming' / 'executing') — see `liveBarFor` for the
+                precedence, and item-progress.ts for why an empty phase falls
+                back to the old generic wording instead of rendering nothing.
+                The word is always printed, so the tone is never the only thing
+                carrying the state — the same rule the run chips follow with
+                their glyphs. */}
+            <span>{bar.label}</span>
             {/* Absent rather than blank when the value cannot be aged: the words
                 beside it already carry the fact, and half a marker beats a lie.
                 The exact stored value is in the title above and spelled out in
@@ -219,38 +363,23 @@ export function ItemCard(
                 means, and the footer already carries three other words in the
                 same register. */}
             {stale ? <span className="board-card-stale">stale</span> : null}
-            {/* Last among the footer markers, deliberately: kind/groomed/done
-                are all facts the item FILE holds, permanent until the next
-                edit; this one is the most volatile thing on the card by far —
-                sourced from a run payload that can go stale between one poll
-                and the next (RunStrip.tsx has the long version) — so it reads
-                last, after the stable facts, not ahead of them.
-                `ACTIVE_RUN_STAGES` is the literal "shown" list Task 11's brief
-                enumerates; `needs-answers` is its own warning-toned branch
-                because it means the opposite of progress, not a fine-grained
-                shade of it; anything else — terminal stages, `pending`,
-                `preflight`, or no run mentioning this item at all — renders
-                nothing, the same silence-is-correct rule the kind badge above
-                already follows for a kind it does not recognise. */}
-            {runStage !== undefined
-              && (ACTIVE_RUN_STAGES.includes(runStage) || runStage === 'needs-answers') ? (
-                /* Which stages get a chip is unchanged — the seven above, and
-                   silence for the other seven. What the chip LOOKS like now
-                   comes from lib/run-stage.ts, shared with the drawer and the
-                   strip, so a stage never reads one way on a card and another
-                   in the drawer behind it. For these seven that map produces
-                   exactly the two tones this branch used to hardcode; the
-                   condition stays a literal list rather than "does it have a
-                   tone", because every stage has a tone now and the question
-                   the card is asking is the narrower one Task 11 set: is this
-                   item being worked on right this moment. */
-                <span className={stageChipClass(runStage)}>
-                  <span className="board-card-stage-glyph" aria-hidden="true">
-                    {stageGlyph(runStage)}
-                  </span>
-                  {runStage}
-                </span>
-              ) : null}
+            {/* Task 11's run-stage chip used to sit here, last among the
+                footer markers. Task 9 did not move it or re-tone it — it
+                DELETED it, and the deletion is the point rather than a
+                side-effect: the chip's condition was the six ACTIVE_RUN_STAGES
+                plus `needs-answers`, and every one of those seven now renders
+                the live bar above instead. Keeping the chip behind a "unless
+                the bar already said it" guard would have left a branch that
+                provably cannot fire, which reads to the next person as working
+                code and is the exact shape a stale rule takes.
+                Nothing was lost with it. The bar prints the same stage word in
+                the same legend's colours, with the elapsed the chip never had,
+                across the card's whole width instead of 9.5px of its foot.
+                `stageChipClass`/`stageGlyph` (lib/run-stage.ts) and every
+                `.board-card-stage*` rule in styles.css stay exactly as they
+                are — RunDrawer chips all fourteen stages and is now their only
+                caller, which is why those names still read as the board's own
+                and did not move with the chip. */}
           </div>
         </div>
       </div>

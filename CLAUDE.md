@@ -39,8 +39,7 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 - `client/src/` — React SPA: side rail (Board / Runs / Archive / Settings —
   `SECTIONS` in `SideRail.tsx` is the one runtime list of them, and
   `resolveSection` in `App.tsx` maps a stored value that names no tab, the
-  legacy `'projects'` included, onto Board; Archive is a placeholder until
-  its own chunk lands), board (four
+  legacy `'projects'` included, onto Board), board (four
   fixed columns — refactors/ideas/bugs/tasks; out-of-scope has no Board
   column at all and belongs to Archive; stale items leave it too, see
   Invariants — card drawer,
@@ -55,7 +54,14 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   verification output; fed by `lib/run-stats.ts`, a pure statistics lib, and
   `hooks/useOrchestratorArchive.ts`, which fetches on mount and window focus
   only — no polling interval, since history moves at run boundaries, not on
-  a live heartbeat), Settings. Fed by `lib/agents.ts` (same-origin
+  a live heartbeat), archive (`ArchiveView.tsx`: four columns —
+  refactors/ideas/bugs/out-of-scope — grouped under sticky month subheaders
+  keyed on `updated ?? created` (`lib/item-month.ts`), project filter and
+  search only, no status or sort control; the same cards, drawer and launch
+  sheet the board uses, no run strip), Settings. Board and Archive share one
+  persisted project filter, declared in `lib/view-keys.ts` rather than exported
+  from either — they are separate lazy chunks, and an import between them would
+  undo the split. Fed by `lib/agents.ts` (same-origin
   fetches), `hooks/useAgents.ts` (status poll on mount and window focus),
   and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
   run is fresh).
@@ -67,7 +73,14 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   calls and the registry's only writer;
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is
   `backlog-orchestrate`'s own CLI and the run file's only writer (see
-  Invariants).
+  Invariants). `skills/backlog-orchestrate/references/` holds the two parts
+  its SKILL.md deliberately does **not** carry inline, because a run re-reads
+  its whole body on every one of its several hundred turns: `recovery.md` (all
+  of `--resume`/`--abort`, read in full before either) and `rationale.md` (the
+  measurements behind the rules). **Start orchestrator runs from the board,
+  not by typing the trigger into a terminal** — the board spawns `claude -p`,
+  and headless sessions were measured flooring ~50k against an interactive
+  session's ~68k.
 - `agents/` — the plugin's own agents, one file each, discovered from this
   root-level directory by Claude Code's own convention (no
   `.claude-plugin/plugin.json` declaration needed). Currently one:
@@ -237,7 +250,17 @@ happened.
   disagreement. The prompt is the only client field taken outright; unknown
   `model`/`effort` drop rather than reject. The controller rebuilds the
   dispatch body field by field — a new field reaches the service only when
-  added there too.
+  added there too — and checks `action` with `isAgentAction`, never a
+  hand-written comparison chain: that chain is a second copy of the
+  vocabulary, and it is the copy that goes stale.
+  **`AgentAction` has three members**, and the third is why the two archives no
+  longer share a branch: `deriveAction` returns `capture` for an out-of-scope
+  item, checked by SECTION and BEFORE the `status !== 'open'` line that would
+  otherwise swallow a `terminal` item. A `done/` item still derives `null` —
+  history genuinely has no next step, where a rejection does. Capture spawns
+  `backlog-capture` for a **new** item citing `from: <id>`; the original stays
+  rejected and `moveItem` still refuses every move out of `out-of-scope/`.
+  Archive's Out of scope column is the only surface that renders the control.
 - **The orchestrate spawn prompt is composed server-side.**
   `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal
   `/backlog-orchestrate` — `backlog-orchestrate`'s own `trigger:` — and

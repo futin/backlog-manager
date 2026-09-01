@@ -2289,3 +2289,75 @@ test('verify --cwd pointed at a real linked worktree is untouched by the refusal
   assert.equal(rows.length, 1)
   assert.equal(rows[0].ok, true)
 })
+
+// --- the references split: what left the body must stay reachable ----------
+// SKILL.md is injected in full into every turn of a run, and a run is several
+// hundred turns long — 60,168 chars of it, measured off a real run's
+// transcript, against backlog-execute's 10,736. So the two parts a *clean* run
+// never reads (the recovery path, and the evidence behind the rules) live in
+// references/ and are read on demand. These cases pin the two ways that split
+// can go wrong: a rule that lost its story also losing itself, and a reference
+// nothing points at.
+
+const REFERENCES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'references')
+
+test('the body\'s recovery stub points at references/recovery.md', () => {
+  // The failure this guards is narrow and expensive: §10 gets moved out and
+  // the pointer does not follow, leaving an unattended run with no instruction
+  // at the one moment it is already in trouble.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  assert.ok(text.includes('references/recovery.md'), 'SKILL.md no longer names references/recovery.md')
+  assert.ok(fs.existsSync(path.join(REFERENCES, 'recovery.md')), 'references/recovery.md is gone')
+})
+
+test('references/recovery.md keeps all four reconcile verdicts', () => {
+  // `reconcile` prints exactly one of four suggestions per item. A recovery
+  // doc missing one strands a run on the case it dropped, with no other file
+  // saying what that word means.
+  const text = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8')
+  for (const verdict of ['resume-session', 'redispatch-after-stop', 'inspect', 'park']) {
+    assert.ok(text.includes(verdict), `recovery.md no longer explains the "${verdict}" verdict`)
+  }
+})
+
+test('references/recovery.md still bills a resumed session rather than abandoning it', () => {
+  // This is the ruling that deliberately contradicts backlog-groom, which
+  // prescribes `stop --abandon` for a marker that looks identical. A
+  // re-layout is exactly how a surprising rule gets "corrected" back to the
+  // sibling skill's version by someone reading only one of them.
+  const text = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8')
+  assert.ok(
+    text.includes('`--abandon` is not used'),
+    'recovery.md no longer states that a resumed session is billed, not abandoned',
+  )
+})
+
+test('the body keeps the rules whose stories moved to references/', () => {
+  // One assertion per rule, each naming the rule rather than the string, so a
+  // failure says which rule was lost instead of "substring not found". Every
+  // one of these had a paragraph of evidence moved out from under it.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const RULES = [
+    ['git revert -m 1', 'undoing a completed merge is a revert'],
+    ['reset --hard', 'and never a hard reset'],
+    ['--no-ff', 'every item merges as its own merge commit'],
+    ['( cd ', 'worktree-scoped backlog.mjs calls run in a subshell'],
+    ['--permission-mode auto', 'the dispatch rung'],
+    ['BM_PLUGIN_ROOT', "step 8's launcher carries its paths in named env variables"],
+    ['grep -qxF', 'the info/exclude append is checked first, whole-line and fixed-string'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+})
+
+test('every file under references/ is named by the body', () => {
+  // An unreferenced reference is a file no session will ever open. Reading
+  // them is not automatic — the body has to say when.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const files = fs.readdirSync(REFERENCES).filter((f) => f.endsWith('.md'))
+  assert.ok(files.length > 0, 'references/ has no .md files')
+  for (const f of files) {
+    assert.ok(text.includes(`references/${f}`), `references/${f} is never named in SKILL.md`)
+  }
+})
