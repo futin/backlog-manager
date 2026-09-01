@@ -217,13 +217,30 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
                       </div>
                     )}
                     {verify !== null && (
-                      <div className="run-drawer-item-verify">
-                        <span className="run-drawer-item-verify-cmd">{verify.cmd}</span>
-                        <span className={verify.ok ? 'run-drawer-item-verify-ok' : 'run-drawer-item-verify-bad'}>
-                          {verify.ok ? 'ok' : 'failed'}
-                        </span>
+                      // A <details>, not a state toggle, and it carries the
+                      // wrapper's own class so the existing flex-row rule
+                      // applies unchanged — no new stylesheet selector, which
+                      // is what lets this and the tail-box task merge in
+                      // either order.
+                      //   `open={!verify.ok}` is a one-way seed, not control:
+                      // React writes the attribute only when the prop's VALUE
+                      // changes, so a tail someone expanded by hand survives
+                      // the 5s poll re-render useOrchestratorRuns fires while
+                      // a run is fresh. A useState toggle would have to
+                      // re-derive that on every render and lose it.
+                      //   Collapsed, never dropped: a green tail is still the
+                      // proof the command actually ran. What must stay legible
+                      // without expanding — what ran, and whether it passed —
+                      // is exactly what the summary holds.
+                      <details className="run-drawer-item-verify" open={!verify.ok}>
+                        <summary className="run-drawer-item-verify-summary">
+                          <span className="run-drawer-item-verify-cmd">{verify.cmd}</span>
+                          <span className={verify.ok ? 'run-drawer-item-verify-ok' : 'run-drawer-item-verify-bad'}>
+                            {verify.ok ? 'ok' : 'failed'}
+                          </span>
+                        </summary>
                         <span className="run-drawer-item-verify-tail">{verify.tail}</span>
-                      </div>
+                      </details>
                     )}
                   </div>
                 );
