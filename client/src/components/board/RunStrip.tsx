@@ -52,8 +52,8 @@ type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
  * "this item is executing right now" exists at all is the run file
  * `useOrchestratorRuns` already polls for a completely different reason
  * (Task 10), so that payload — not the item — is this strip's only possible
- * source, and it is ItemCard's `runStage` prop's source too (see
- * BoardView's own comment on the id→stage lookup for the other half of
+ * source, and it is ItemCard's `run` prop's source too (see
+ * BoardView's own comment on the id→entry lookup for the other half of
  * this).
  *
  * The flip side of that same fact is why a stale run must render nothing at
