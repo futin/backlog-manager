@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { fetchArchivedRun } from '../../lib/agents';
+import { pickAuthority } from '../../lib/run-authority';
 import { itemStageSpans, itemWallMs, runWallMs } from '../../lib/run-stats';
 import {
   RUN_STATUS_CLASS, RUN_STATUS_GLYPH, stageChipClass, stageGlyph, STAGE_TONE
@@ -28,35 +29,40 @@ import type {
  * "how far along," which a finished run has no use for; this pane answers
  * "where did the time go," which the stepper cannot.
  *
- * ---- Data source: summary vs. live, and why rows read from BOTH ----
+ * ---- Data source: three tiers, one rule, one function ----
  *
  * `summary` (an `OrchestratorArchiveRun`) is the one prop guaranteed to be
  * populated the instant this component mounts — it is what RunsView already
- * held before a row was even clicked. It drives the header stamps, the four
- * base count chips, and every ROW's id/title/stage/stageAt/fixLoops: an
- * `ArchiveQueueItem` differs from a full `RunQueueItem` in exactly one way
- * (`verification[].tail` stripped to keep the archive listing's payload
- * bounded — see `ArchiveQueueItem`'s own doc comment), so every field this
- * pane needs for a row except the verification tail is already sitting on
- * `summary.queue` with no fetch required at all.
+ * held before a row was even clicked. `live`, when given, is a DIFFERENT
+ * run object — the live poll's own entry for this exact runId, strictly
+ * fresher than `summary` because `useOrchestratorRuns` polls every five
+ * seconds while `useOrchestratorArchive` (the source of `summary`) fetches
+ * only on mount and window focus. `fetchedRun` (state, below) is a third
+ * view: the full run file this pane fetches on demand for an ARCHIVED
+ * selection, which lands strictly after `summary` was read and is therefore
+ * at least as fresh — and which is the ONLY thing that can ever correct a
+ * run that just stopped being live: a fix round found that the moment a
+ * live run finishes, `live` goes `null` on the very next render (the
+ * server's `fresh` flag flips), and falling back to `summary` at that exact
+ * point reproduced a stale "running" header with an ever-growing elapsed
+ * time and item rows frozen at their last-known live stage — while the
+ * fetch this pane had *already issued* for that same transition sat unused.
  *
- * `live`, when given, is a DIFFERENT run object — the live poll's own entry
- * for this exact runId — and RunsView.tsx's own comment on `mergeRuns`
- * states plainly why this pane, not that one, is the thing that reads it:
- * "Task 7 is what will render a selected live run's actual queue from the
- * live object directly." The reason is freshness, not shape:
- * `useOrchestratorArchive` (the source of `summary`) fetches only on mount
- * and window focus, so a `summary` entry for a run that is STILL RUNNING can
- * be minutes stale while `useOrchestratorRuns` (the source of `live`) polls
- * every five seconds. Reading rows off `summary` regardless would make an
- * actively-progressing run look frozen behind the pane RunsView built
- * specifically to watch it live. So: `live` present -> every row, the base
- * chip counts, AND the header's status/wall-time all read off `live`
- * instead, including its own verification tails (a live payload never has
- * them stripped). `live` absent -> everything reads off `summary`, and only
- * the tail text is worth fetching at all, since the rest of an ARCHIVED
- * run's own summary can never go stale (the run is over; nothing about it
- * changes again).
+ * `pickAuthority` (`lib/run-authority.ts`) is the fix, and its own doc
+ * comment is the one place this three-tier precedence is written down —
+ * `RunsView.tsx`'s row-level version of the same rule imports the same
+ * function rather than re-deriving the order, specifically so the two
+ * surfaces this feature puts side by side can never again disagree about
+ * which one is telling the truth about a given run. `live` wins whenever it
+ * exists; otherwise `fetchedRun` wins once it lands; `summary` is the
+ * fallback until either shows up. Rows follow the identical precedence
+ * (`live !== null` -> `fetchedRun !== null` -> archive) rather than reading
+ * `pickAuthority`'s own return value, only because a live/fetched queue
+ * item (`RunQueueItem`, with a verification tail) and an archived one
+ * (`ArchiveQueueItem`, without) are different TypeScript shapes — the
+ * precedence itself is the same rule, just applied a second time because
+ * the two possible winners need two different row-mapping functions
+ * (`rowsFromLive` vs `rowsFromArchive`) to read.
  */
 
 /** The run-level fields the header and base chips are computed from — the
@@ -162,34 +168,42 @@ export function RunDetail(
   // durations that disagree with each other at a rung boundary.
   const now = Date.now();
 
-  // See the file header comment's "Data source" section for why `live`,
-  // when present, is the authority for every one of these — not just tails.
-  const runForHeader: RunFields = live ?? summary;
-  const rows: DetailRow[] = live !== null ? rowsFromLive(live.queue) : rowsFromArchive(summary.queue);
-  const attention = runForHeader.attention;
+  // The file header's "Data source" section names the rule; `pickAuthority`
+  // (lib/run-authority.ts) is its one implementation. `live` wins whenever
+  // it exists (freshest, by construction); otherwise the just-landed
+  // `fetchedRun` wins; `summary` is the fallback until either shows up —
+  // and critically, that fallback is no longer permanent once `live` goes
+  // `null` (a run finishing), because `fetchedRun` is already in flight for
+  // exactly that transition (see the effect above) and replaces `summary`
+  // itself, not merely one field on it, the moment it lands.
+  const authority: RunFields = pickAuthority([live, fetchedRun], summary);
+  const attention = authority.attention;
 
-  // The tail patch-in for the ARCHIVED path only: once `fetchedRun` lands,
-  // every row's `verify.tail` (still `null` from `rowsFromArchive` above)
-  // is filled in by matching on item id — the fetched run is the same run
-  // file `summary` was already built from, so id and "last verification
-  // entry" line up exactly. Left as a no-op map on the live path (`rows`
-  // there already has tails from `rowsFromLive`) and while nothing has
-  // landed yet, which is exactly "rows render immediately, tails fill in
-  // later" from the brief.
-  const rowsWithTails: DetailRow[] = live !== null || fetchedRun === null
-    ? rows
-    : rows.map((row) => {
-      if (row.verify === null) return row;
-      const full = fetchedRun.queue.find((q) => q.id === row.id);
-      const tail = full !== undefined && full.verification.length > 0
-        ? full.verification[full.verification.length - 1].tail
-        : null;
-      return { ...row, verify: { ...row.verify, tail } };
-    });
+  // Rows follow the SAME precedence as `authority` above, restated here
+  // (rather than derived from `authority` itself) only because a live/
+  // fetched queue item and an archived one are different TypeScript shapes
+  // — `rowsFromLive` reads a full `RunQueueItem[]` (verification tails
+  // included), `rowsFromArchive` reads a stripped `ArchiveQueueItem[]`. The
+  // ORDER of the three checks below is not a second decision to keep in
+  // sync with `pickAuthority`'s: it can only ever produce the same winner,
+  // since `live`/`fetchedRun`/`summary` are the identical three values in
+  // the identical order. This replaces the old `rowsWithTails` id-matching
+  // patch-in entirely — that map only ever corrected a row's verification
+  // TAIL once a fetch landed; every other field (stage, stageAt, fixLoops)
+  // stayed frozen at whatever `summary` said, which is exactly how a
+  // finished run's rows used to keep reading their last live-known stage
+  // forever. Reading the whole row set off `fetchedRun` once it exists
+  // fixes that: every field on a fetched-authority row is as fresh as the
+  // header stamps built from the same object.
+  const rows: DetailRow[] = live !== null
+    ? rowsFromLive(live.queue)
+    : fetchedRun !== null
+      ? rowsFromLive(fetchedRun.queue)
+      : rowsFromArchive(summary.queue);
 
-  const merged = rowsWithTails.filter((r) => r.stage === 'merged').length;
-  const skipped = rowsWithTails.filter((r) => r.stage === 'skipped').length;
-  const fixLoopsTotal = rowsWithTails.reduce((sum, r) => sum + r.fixLoops, 0);
+  const merged = rows.filter((r) => r.stage === 'merged').length;
+  const skipped = rows.filter((r) => r.stage === 'skipped').length;
+  const fixLoopsTotal = rows.reduce((sum, r) => sum + r.fixLoops, 0);
   // `ACTIVE_RUN_STAGES` (ItemCard.tsx) rather than RunDrawer's own
   // re-derivation of the same list — the exact import the brief's own
   // interfaces section names, and the one RunDrawer.tsx already reuses for
@@ -197,16 +211,16 @@ export function RunDetail(
   const active = live !== null ? live.queue.filter((q) => ACTIVE_RUN_STAGES.includes(q.stage)).length : 0;
   const queued = live !== null ? live.queue.filter((q) => q.stage === 'pending').length : 0;
 
-  const startedClock = formatClock(runForHeader.startedAt);
-  const wall = runWallMs(runForHeader, now);
+  const startedClock = formatClock(authority.startedAt);
+  const wall = runWallMs(authority, now);
 
   return (
     <>
       <div className="run-detail-head">
         <span className="run-detail-id">{summary.runId}</span>
-        <span className={`runs-status ${RUN_STATUS_CLASS[runForHeader.status]}`}>
-          <span aria-hidden="true">{RUN_STATUS_GLYPH[runForHeader.status]}</span>
-          {runForHeader.status}
+        <span className={`runs-status ${RUN_STATUS_CLASS[authority.status]}`}>
+          <span aria-hidden="true">{RUN_STATUS_GLYPH[authority.status]}</span>
+          {authority.status}
         </span>
         {/* Each half renders only if its own stamp parsed — RunDrawer's own
             null-tolerant join, restated here rather than re-derived: a run
@@ -264,7 +278,7 @@ export function RunDetail(
 
       <div className="run-detail-heading">Items</div>
       <div className="run-drawer-queue" data-testid="run-detail-items">
-        {rowsWithTails.map((row) => {
+        {rows.map((row) => {
           const spans = itemStageSpans(row);
           const wallItem = itemWallMs(row);
           return (
@@ -360,7 +374,7 @@ export function RunDetail(
         // log of what happened, not a live filter over queue", so the same
         // item can legitimately earn a second entry later in the same run.
         attention.map((a, i) => {
-          const row = rowsWithTails.find((r) => r.id === a.id);
+          const row = rows.find((r) => r.id === a.id);
           return (
             <div
               key={`${a.id}-${a.kind}-${i}`}

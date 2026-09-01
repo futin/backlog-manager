@@ -196,6 +196,89 @@ describe('RunDetail', () => {
     expect(mockFetchArchivedRun).not.toHaveBeenCalled();
   });
 
+  // I1: a whole-branch review found that when a live run finishes, `live`
+  // goes `null` on RunDetail's very next render (the server's own `fresh`
+  // flag flips) — and the OLD implementation (`runForHeader = live ??
+  // summary`) fell straight back to `summary`, the archive snapshot fetched
+  // BEFORE the finish. That reproduced a header stuck on "running" with
+  // elapsed time still climbing, and item rows frozen at their last-known
+  // LIVE stage, even though the very fetch this pane issues for exactly
+  // this transition (`live !== null` flipping is one of the effect's own
+  // dependencies) would have told it the truth once it landed. This test
+  // pins the fix: once `fetchedRun` lands, it must become the authority for
+  // the WHOLE row (not just a verification tail), replacing `summary`
+  // outright.
+  it('adopts the freshly fetched run once a live selection goes stale, instead of freezing on the archived summary', async () => {
+    const staleSummary: OrchestratorArchiveRun = {
+      runId: RUN_ID,
+      project: PROJECT,
+      status: 'running', // stale: this archive snapshot predates the finish
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:15:00.000Z',
+      maxItems: null,
+      current: true,
+      attention: [],
+      queue: [
+        archiveItem('a-1', 'merged', {
+          stageAt: { pending: '2026-09-01T09:00:00.000Z', merged: '2026-09-01T09:10:00.000Z' }
+        }),
+        archiveItem('a-2', 'reviewing') // stale: a-2 hadn't merged yet as of this snapshot
+      ]
+    };
+    const runningLive: OrchestratorRun = {
+      runId: RUN_ID,
+      project: PROJECT,
+      status: 'running',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:12:00.000Z',
+      maxItems: null,
+      attention: [],
+      queue: [
+        liveItem('a-1', 'merged', {
+          stageAt: { pending: '2026-09-01T09:00:00.000Z', merged: '2026-09-01T09:10:00.000Z' }
+        }),
+        liveItem('a-2', 'reviewing')
+      ]
+    };
+    // What `fetchArchivedRun` returns once the run has actually finished —
+    // the truth this pane's own effect goes and fetches the moment `live`
+    // disappears.
+    const freshFetched: OrchestratorRun = {
+      runId: RUN_ID,
+      project: PROJECT,
+      status: 'done',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:20:00.000Z',
+      maxItems: null,
+      attention: [],
+      queue: [
+        liveItem('a-1', 'merged', {
+          stageAt: { pending: '2026-09-01T09:00:00.000Z', merged: '2026-09-01T09:10:00.000Z' }
+        }),
+        liveItem('a-2', 'merged', {
+          stageAt: { pending: '2026-09-01T09:00:00.000Z', merged: '2026-09-01T09:20:00.000Z' }
+        })
+      ]
+    };
+    mockFetchArchivedRun.mockResolvedValue(freshFetched);
+
+    const { rerender } = render(<RunDetail summary={staleSummary} live={runningLive} />);
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-item-a-2')).toHaveTextContent('reviewing');
+    // No fetch yet — `live` is present, so there is nothing to correct.
+    expect(mockFetchArchivedRun).not.toHaveBeenCalled();
+
+    // The run finishes: RunsView's own next render (once the live poll's
+    // `fresh` flag flips) passes live={null} for this same selection.
+    rerender(<RunDetail summary={staleSummary} live={null} />);
+
+    // The pane must show what the fresh fetch found, not what the stale
+    // `staleSummary` still says.
+    await screen.findByText('done');
+    expect(screen.queryByText('running')).not.toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-item-a-2')).toHaveTextContent('merged');
+  });
+
   it('stale fetch resolution is ignored', async () => {
     const resolvers: Record<string, (run: OrchestratorRun) => void> = {};
     mockFetchArchivedRun.mockImplementation((_project: string, runId: string) => (

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, type RenderResult } from '@testing-library/react';
+import { act, render, screen, waitFor, type RenderResult } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -10,7 +10,7 @@ import RunsView from '../client/src/components/runs/RunsView';
 import { dayLabel } from '../client/src/lib/run-stats';
 import type {
   ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
-  OrchestratorRunsPayload, RunStage, VerificationSummary
+  OrchestratorRunsPayload, RunQueueItem, RunStage, VerificationSummary
 } from '../shared/types';
 
 // Task 6 consumes the two archive/live fetchers through the real hooks
@@ -61,6 +61,32 @@ function item(
     fixLoops: over.fixLoops ?? 0,
     stageAt: over.stageAt ?? {},
     verification: over.verification ?? [],
+    questions: [],
+    note: null
+  };
+}
+
+/**
+ * The full-shaped (tail-bearing) counterpart to `item()` above — what the
+ * LIVE poll payload's own `queue` actually carries (`RunQueueItem`, not the
+ * tail-stripped `ArchiveQueueItem`). Used only by the I2 test below, which
+ * needs a live entry with a real, non-empty queue: every OTHER test in this
+ * file uses `LIVE_RUNS`' own deliberately-empty `queue: []` (see that
+ * fixture's own comment for why), since fix round 2 is exactly what makes a
+ * live entry's queue matter to a ROW's own rendering for the first time.
+ */
+function liveQueueItem(id: string, stage: RunStage): RunQueueItem {
+  return {
+    id,
+    title: `${id} title`,
+    stage,
+    sessionId: null,
+    worktree: null,
+    branch: null,
+    permissionMode: null,
+    fixLoops: 0,
+    stageAt: {},
+    verification: [],
     questions: [],
     note: null
   };
@@ -343,5 +369,183 @@ describe('RunsView', () => {
     await waitFor(() => {
       expect(mockFetchArchivedRun).toHaveBeenCalledWith(RUN_DONE_BETA.project, RUN_DONE_BETA.runId);
     });
+  });
+
+  // I4: `LIVE_RUNS` (used by every test above) has exactly one entry and it
+  // is always `fresh: true` — no fixture anywhere before this test supplied
+  // the ONE case `mergeRuns`' `.filter((r) => r.fresh)` gate exists to
+  // reject: a run that IS in the live payload (the board has heard from it)
+  // but is NOT fresh (its heartbeat has gone stale — RUN_STALE_MS). Without
+  // this test, deleting that `.filter` leaves every other test in this file
+  // green: the row would still gain the live class and get pinned, since
+  // nothing before this exercised the `fresh: false` branch at all.
+  it('does not pin or accent a run whose live-payload entry has gone stale (fresh: false)', async () => {
+    const staleLive: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
+
+    const { container } = await renderRunsView(ARCHIVE_RUNS, staleLive);
+
+    // No "live" pinned heading at all — RUN_LIVE sorts into ordinary
+    // history by its own startedAt (the oldest run in this fixture — see
+    // the pin test's own premise assertion above), not pinned above every
+    // day group the way a naive "present in the live payload at all" check
+    // would render it.
+    const headings = Array.from(container.querySelectorAll('.runs-day-heading')).map((el) => el.textContent);
+    expect(headings).not.toContain('live');
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).not.toHaveClass('runs-row-live');
+  });
+
+  // I2: a whole-branch review found that a live-backed row's merged/total
+  // and status read the ARCHIVE snapshot (`mergeRuns` used to drop the live
+  // payload's queue entirely) while `RunDetail` beside it reads the 5s live
+  // poll — same run, two different merged counts on one screen. This
+  // fixture makes the archive snapshot deliberately STALE (1/2 merged,
+  // `running`) and the live entry deliberately AHEAD of it (2/2 merged,
+  // `done`), so a row still reading the archive would print `1/2` and
+  // `running` where the fix makes it print `2/2` and `done`.
+  it("a live-backed row reads its merged/total and status off the live entry, not the stale archive snapshot", async () => {
+    const archiveEntry = run({
+      runId: 'run-20260901-090000',
+      project: '/abs/gamma',
+      status: 'running', // stale: this archive snapshot predates what the live poll now knows
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:05:00.000Z',
+      current: true,
+      queue: [
+        item('g-1', 'merged'),
+        item('g-2', 'reviewing') // archive's stale snapshot: still "in progress"
+      ]
+    });
+    const liveEntry: OrchestratorRunsPayload['runs'][number] = {
+      runId: archiveEntry.runId,
+      project: archiveEntry.project,
+      status: 'done', // the live poll already knows it finished
+      startedAt: archiveEntry.startedAt,
+      updatedAt: '2026-09-01T09:10:00.000Z',
+      maxItems: null,
+      attention: [],
+      queue: [
+        liveQueueItem('g-1', 'merged'),
+        liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
+      ],
+      fresh: true,
+      pastRuns: 0
+    };
+
+    await renderRunsView([archiveEntry], [liveEntry]);
+
+    const row = screen.getByTestId(`runs-row-${archiveEntry.runId}`);
+    expect(row).toHaveTextContent('2/2');
+    expect(row).not.toHaveTextContent('1/2');
+    expect(row).toHaveTextContent('done');
+  });
+
+  // M3: `mergeRuns` used to dedupe on bare `runId`, contradicting
+  // `Selection` (and the detail-slot lookup) elsewhere in this same file —
+  // both of which key on `{project, runId}` precisely because a `runId` is
+  // a second-precision timestamp, not a global counter, and could in
+  // principle collide across two different projects' state directories.
+  // This fixture IS that collision. A `runId`-only dedupe would silently
+  // drop one of these two rows from the list entirely.
+  it('keeps both runs when two different projects happen to share a runId ({project, runId} dedupe)', async () => {
+    const sharedRunId = 'run-20260901-120000';
+    const runOne = run({
+      runId: sharedRunId,
+      project: '/abs/collide-one',
+      status: 'done',
+      startedAt: '2026-09-01T12:00:00.000Z',
+      updatedAt: '2026-09-01T12:05:00.000Z',
+      queue: [item('c1-1', 'merged')]
+    });
+    const runTwo = run({
+      runId: sharedRunId,
+      project: '/abs/collide-two',
+      status: 'done',
+      startedAt: '2026-09-01T12:00:00.000Z',
+      updatedAt: '2026-09-01T12:05:00.000Z',
+      queue: [item('c2-1', 'merged')]
+    });
+
+    await renderRunsView([runOne, runTwo], []);
+
+    // Both rows render, sharing the same `data-testid` (it is built off the
+    // bare `runId` too, unaffected by this fix) — a `runId`-only dedupe
+    // would keep only the FIRST and this would find one, not two.
+    expect(screen.getAllByTestId(`runs-row-${sharedRunId}`)).toHaveLength(2);
+  });
+
+  // I3: `useOrchestratorArchive`'s own `refresh()` used to be returned and
+  // never called by this view, so a run starting (or a fresh set otherwise
+  // changing) while the tab stayed open and focused never updated the
+  // archive listing at all — no focus event, no new mount, nothing. This
+  // test proves the fix WITHOUT relying on a focus event (which would also
+  // trigger `useOrchestratorArchive`'s own independent focus listener,
+  // masking whether RunsView's own new effect fired): it arms
+  // `useOrchestratorRuns`' 5s poll with an already-fresh run at mount, then
+  // has that poll's NEXT tick report a SECOND project's run as newly fresh
+  // — a state change with no focus event anywhere in the sequence.
+  it("refetches the archive listing when the live poll's set of fresh runs changes, with no focus event", async () => {
+    jest.useFakeTimers();
+    try {
+      const archiveAlpha = run({
+        runId: 'run-20260901-090000',
+        project: '/abs/alpha-i3',
+        status: 'running',
+        startedAt: '2026-09-01T09:00:00.000Z',
+        updatedAt: '2026-09-01T09:00:00.000Z',
+        queue: []
+      });
+      const liveAlpha: OrchestratorRunsPayload['runs'][number] = {
+        runId: archiveAlpha.runId,
+        project: archiveAlpha.project,
+        status: 'running',
+        startedAt: archiveAlpha.startedAt,
+        updatedAt: archiveAlpha.updatedAt,
+        maxItems: null,
+        queue: [],
+        attention: [],
+        fresh: true,
+        pastRuns: 0
+      };
+
+      mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha] } satisfies OrchestratorRunsPayload);
+
+      render(<RunsView />);
+      // Flushes the mount-time fetches (both hooks') and whatever effects
+      // their landed state triggers — `advanceTimersByTimeAsync(0)` reaches
+      // a real microtask-queue drain without any fake time actually
+      // elapsing, the same technique test/orchestrator-hook.test.tsx uses
+      // for the identical reason.
+      await act(async () => { await jest.advanceTimersByTimeAsync(0); });
+
+      const archiveCallsAfterMount = mockArchive.mock.calls.length;
+      // `useOrchestratorRuns`' own polling interval is armed here (a fresh
+      // run already exists from mount), so a real 5s tick — not a focus
+      // event — is what makes it notice this SECOND project's run.
+      const liveBeta: OrchestratorRunsPayload['runs'][number] = {
+        runId: 'run-20260901-093000',
+        project: '/abs/beta-i3',
+        status: 'running',
+        startedAt: '2026-09-01T09:30:00.000Z',
+        updatedAt: '2026-09-01T09:30:00.000Z',
+        maxItems: null,
+        queue: [],
+        attention: [],
+        fresh: true,
+        pastRuns: 0
+      };
+      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta] } satisfies OrchestratorRunsPayload);
+
+      await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+
+      // The archive listing was re-fetched strictly because the live poll's
+      // OWN set of fresh runs changed — no focus event fired anywhere in
+      // this test. Without the fix, `refreshArchive` is never called after
+      // mount, so this count would never move no matter how many poll
+      // ticks pass.
+      expect(mockArchive.mock.calls.length).toBeGreaterThan(archiveCallsAfterMount);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

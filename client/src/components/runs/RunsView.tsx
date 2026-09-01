@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
+import { pickAuthority } from '../../lib/run-authority';
 import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH } from '../../lib/run-stage';
 import { aggregateRuns, dayKey, dayLabel, runWallMs } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
-import type { OrchestratorArchiveRun, OrchestratorRun } from '../../../../shared/types';
+import type { OrchestratorArchiveRun, OrchestratorRun, RunStage } from '../../../../shared/types';
 
 /**
  * Runs — the board's third surface: history of every backlog-orchestrate run
@@ -39,58 +40,104 @@ import type { OrchestratorArchiveRun, OrchestratorRun } from '../../../../shared
  * the start; the task brief that drove this file's first version dropped it
  * in transcription, and it is restored here rather than left as a filed
  * discrepancy.
+ *
+ * Fix round 2: a whole-branch review caught this file disagreeing with
+ * itself and with `RunDetail` about which source describes a live-backed
+ * run. Two symptoms, one cause. The cause: `mergeRuns` used to drop the live
+ * payload's queue entirely and read every row's merged/total, status and
+ * wall time off the (possibly minutes-stale) archive snapshot, while
+ * `RunDetail` sitting beside the selected row read the 5s live poll — same
+ * run, two different merged counts, on one screen. The other symptom was
+ * this list never noticing a run that started (or finished) while the tab
+ * stayed open and focused, because `useOrchestratorArchive`'s own refresh
+ * was fetched and thrown away. Both are fixed together: `MergedRun` now
+ * carries the fresh live entry itself (not just a boolean), `RunRow` reads
+ * its numbers through `pickAuthority` (`lib/run-authority.ts`) — the same
+ * function `RunDetail` uses, so the two surfaces can no longer independently
+ * pick different winners — and an effect below re-fetches the archive
+ * listing the moment the live poll's own set of fresh runs changes.
  */
 
-/** One row of the merged run list: the archive's own record of the run, plus whether it is currently being heard from live. */
+/** One row of the merged run list: the archive's own record of the run, plus the fresh live entry backing it, if any. */
 interface MergedRun {
   run: OrchestratorArchiveRun;
   /**
-   * True only when this run's `runId` also appears in the live poll payload
-   * AND that live entry's own `fresh` flag is true. Being "in the live
-   * payload at all" is not enough on its own — a run that has gone stale
-   * (heartbeat older than `RUN_STALE_MS`) is exactly the case RunStrip.tsx
-   * already renders nothing special for, and this list makes the same call:
-   * the live accent means "the board is actually still hearing from this
-   * process right now", not merely "this is the most recent run.json".
+   * The live poll's own entry for this run, but ONLY when that entry's
+   * `fresh` flag is true — `null` otherwise, including when the run appears
+   * in the live payload at all but has gone stale. Being "in the live
+   * payload at all" is not enough on its own — a run whose heartbeat is
+   * older than `RUN_STALE_MS` is exactly the case RunStrip.tsx already
+   * renders nothing special for, and this list makes the same call: the
+   * live accent (and, per fix round 2, the live NUMBERS) mean "the board is
+   * actually still hearing from this process right now", not merely "this
+   * is the most recent run.json".
+   *
+   * Carried as the object itself, not a boolean, because of fix round 2:
+   * `RunRow` needs this run's actual `queue`/`status`/`startedAt`/
+   * `updatedAt` to compute merged/total and wall time through
+   * `pickAuthority`, the same freshest-wins rule `RunDetail` applies to its
+   * own header. Deriving `isLive` from this field (`live !== null`) rather
+   * than keeping a separate boolean would be one more way to say the same
+   * thing; keeping both is deliberate — `isLive` reads as intent at every
+   * call site (pinning, the `runs-row-live` class), where `!== null` would
+   * make a reader stop and ask what null means here.
    */
+  live: LiveRun | null;
   isLive: boolean;
 }
 
 type LiveRun = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
 /**
+ * `{project, runId}` as one string — the same composite identity `Selection`
+ * below already carries, for the same reason: a `runId` is a second-
+ * precision timestamp, not a global counter, so two different projects'
+ * state directories could in principle produce the same one. Every place in
+ * this file that has to treat two run records as "the same run" — the
+ * archive/live dedupe in `mergeRuns`, and the live-run-changed effect in
+ * `RunsView` — builds the key this same way, so a future edit cannot key one
+ * check on `runId` alone while the rest of the file keys on both (which is
+ * exactly the inconsistency a whole-branch review flagged: `mergeRuns` used
+ * to dedupe on bare `runId`, silently dropping a real run on the one-in-
+ * however-many chance two projects' runs collide on the same second).
+ */
+function runKey(project: string, runId: string): string {
+  return `${project} ${runId}`;
+}
+
+/**
  * Folds the archive listing and the live poll into one row list.
  *
- * The archive is the master list, per the design doc: every row painted
- * below reads its id, project, queue counts and timestamps off the ARCHIVE
- * entry, never off the live one. That is deliberate, not an oversight — the
- * live payload's own queue is dropped entirely by this function (only
- * `runId` and `fresh` are read off it) because Task 7 is what will render a
- * selected live run's actual queue from the live object directly; this list
- * only needs the live payload to answer one yes/no question per row.
- *
- * One consequence worth stating: a run that has JUST started, before the
- * next archive fetch (mount or window focus — `useOrchestratorArchive` has
- * no poll of its own) has picked it up, will not appear as a row at all yet,
- * live or not. That is the same lag the design doc accepts elsewhere for the
- * same hook, and it self-corrects the next time this tab is focused.
+ * The archive is still the identity source for every row — id, project,
+ * and which runs exist at all come from the archive listing only, per the
+ * design doc, and a run that has JUST started, before the next archive
+ * fetch (mount, window focus, or fix round 2's own targeted refresh below)
+ * has picked it up, will not appear as a row at all yet. What changed in fix
+ * round 2 is that the row's live-fronted NUMBERS no longer come from the
+ * archive once a fresh live entry exists: `live` now carries that entry
+ * itself (not just a yes/no flag) so `RunRow` can read merged/total, status
+ * and wall time off it through the same `pickAuthority` rule `RunDetail`
+ * uses — see `MergedRun.live`'s own doc comment for why the object, not a
+ * boolean, is what has to be carried.
  *
  * Dedupe is defensive, not load-bearing: two archive entries should never
- * share a `runId` in practice (each is either the one `run.json` or one
- * `runs/<runId>.json` file per project, and the id embeds a timestamp), but
- * a hand-edited or corrupted state directory could produce one anyway, and
- * silently keeping the FIRST occurrence (in the archive endpoint's own
- * per-project descending order) is a safer failure than rendering the same
- * run twice in one list.
+ * share a `{project, runId}` in practice (each is either the one `run.json`
+ * or one `runs/<runId>.json` file per project, and the id embeds a
+ * timestamp), but a hand-edited or corrupted state directory could produce
+ * one anyway, and silently keeping the FIRST occurrence (in the archive
+ * endpoint's own per-project descending order) is a safer failure than
+ * rendering the same run twice in one list.
  */
 function mergeRuns(archiveRuns: readonly OrchestratorArchiveRun[], liveRuns: readonly LiveRun[]): MergedRun[] {
-  const freshByRunId = new Map(liveRuns.filter((r) => r.fresh).map((r) => [r.runId, true]));
+  const freshByKey = new Map(liveRuns.filter((r) => r.fresh).map((r) => [runKey(r.project, r.runId), r]));
   const seen = new Set<string>();
   const merged: MergedRun[] = [];
   for (const run of archiveRuns) {
-    if (seen.has(run.runId)) continue;
-    seen.add(run.runId);
-    merged.push({ run, isLive: freshByRunId.has(run.runId) });
+    const key = runKey(run.project, run.runId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const live = freshByKey.get(key) ?? null;
+    merged.push({ run, live, isLive: live !== null });
   }
   return merged;
 }
@@ -196,9 +243,14 @@ function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
 const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed'];
 
 /**
- * Merged-stage items over the row's whole queue — the same ratio the tiles
+ * Merged-stage items over a run's whole queue — the same ratio the tiles
  * above compute across every run in scope (`aggregateRuns`' own
  * `itemsQueued`/`itemsMerged`, Task 3), read here for one run at a time.
+ * Takes any object with a `.queue` of stage-bearing items rather than
+ * `OrchestratorArchiveRun` specifically — fix round 2's own change, so
+ * `RunRow` can call this on WHICHEVER object `pickAuthority` names as the
+ * authority (the archive record, or a fresh `LiveRun`), not only the
+ * archive one.
  *
  * `total` is deliberately the RAW `queue.length` — fix round 1's own
  * flagged-but-ruled-on discrepancy: `RunStrip.tsx`'s live strip computes its
@@ -220,8 +272,17 @@ const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', '
  * history being reported, not noise to filter out of it. A future reader
  * who notices the two numbers disagree on the same run should find that
  * reasoning here rather than assume one of the two is a bug.
+ *
+ * That reasoning once claimed the detail pane "surfaces skipped items
+ * explicitly" — a whole-branch review found that inaccurate and asked for
+ * the correction: the item this ruling is actually about is `ungroomed`, a
+ * different `RunStage` with no chip of its own in `RunDetail`'s four count
+ * chips. It still isn't hidden — it shows up as an item ROW carrying an
+ * `ungroomed` stage chip, same as any other stage — but a reader looking
+ * for a "skipped" count to explain the mismatch would not find one, because
+ * that is not where this stage surfaces.
  */
-function queueCounts(run: OrchestratorArchiveRun): { merged: number; total: number } {
+function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { merged: number; total: number } {
   return { merged: run.queue.filter((q) => q.stage === 'merged').length, total: run.queue.length };
 }
 
@@ -233,6 +294,20 @@ function queueCounts(run: OrchestratorArchiveRun): { merged: number; total: numb
  * reasoned-about pieces sharing one line, and giving the whole thing a name
  * makes the list's own render method read as "one row per merged run" rather
  * than a wall of JSX.
+ *
+ * Fix round 2: `merged`/`total`, the status chip, and `wall` are computed
+ * off `authority` — `pickAuthority([row.live], run)`, `lib/run-authority.ts`
+ * — not off `run` (the archive record) directly. `row.live` is `null`
+ * whenever this row is not currently live-backed, in which case `authority`
+ * collapses to `run` and every number below is exactly what it always was.
+ * When `row.live` IS present, this is the one place that freshest-wins rule
+ * actually changes what renders: the live poll's own queue/status/wall
+ * time win over whatever the archive snapshot beside them still says,
+ * which is what stops this row from printing a different merged count than
+ * `RunDetail` reads for the SAME run a few hundred pixels to the right.
+ * `run.project`/`run.runId` are read straight off `run` regardless — those
+ * are identity fields that cannot change between the two sources for what
+ * is, by construction, the same run file.
  */
 function RunRow({
   row, now, isSelected, onSelect
@@ -243,8 +318,9 @@ function RunRow({
   onSelect: () => void;
 }): JSX.Element {
   const { run } = row;
-  const { merged, total } = queueCounts(run);
-  const wall = runWallMs(run, now);
+  const authority = pickAuthority([row.live], run);
+  const { merged, total } = queueCounts(authority);
+  const wall = runWallMs(authority, now);
 
   return (
     <button
@@ -255,13 +331,13 @@ function RunRow({
       onClick={onSelect}
     >
       <span className="runs-row-head">
-        <span className={`runs-status ${RUN_STATUS_CLASS[run.status]}`}>
+        <span className={`runs-status ${RUN_STATUS_CLASS[authority.status]}`}>
           {/* aria-hidden: the status word right beside it is the accessible
               answer, the same "colour and glyph restate the word, never
               replace it" rule run-stage.ts's own doc comment states for the
               per-item chips this row deliberately does NOT reuse. */}
-          <span aria-hidden="true">{RUN_STATUS_GLYPH[run.status]}</span>
-          {run.status}
+          <span aria-hidden="true">{RUN_STATUS_GLYPH[authority.status]}</span>
+          {authority.status}
         </span>
         <span className="runs-row-project">{projectLabel(run.project)}</span>
         <span className="runs-row-count">{merged}/{total}</span>
@@ -278,10 +354,51 @@ interface Selection {
 }
 
 export default function RunsView() {
-  const { runs: archiveRuns } = useOrchestratorArchive();
+  const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
   const { runs: liveRuns } = useOrchestratorRuns();
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [selected, setSelected] = useState<Selection | null>(null);
+
+  // I3's fix: the one signal that tells this view "run history just moved"
+  // without adding a poll of its own — `useOrchestratorArchive`'s own doc
+  // comment explains why it deliberately has none, and a whole-branch review
+  // found the consequence of taking that at face value: this view held onto
+  // `refresh` and never called it, so a run that started (or finished)
+  // while the tab stayed open and focused never showed up here at all — for
+  // a project's very first run, the page kept reading "no runs yet" while
+  // RunStrip on the Board showed it live a click away.
+  //
+  // The set of currently-FRESH live runIds is exactly the "did anything
+  // change at a run boundary" signal the design doc's own reasoning already
+  // grants this hook: a run starting adds a key, a run finishing (or going
+  // stale) removes one. Comma-joined into one sorted string, not compared as
+  // an array, because `liveRuns` is a brand-new array reference on every 5s
+  // poll tick even when its fresh SET hasn't changed at all — depending on
+  // the array itself would re-fire this effect (and re-fetch the archive)
+  // every 5s for no reason, exactly the redundant-request cost
+  // `useOrchestratorArchive` was built to avoid.
+  const freshRunKey = liveRuns
+    .filter((r) => r.fresh)
+    .map((r) => runKey(r.project, r.runId))
+    .sort()
+    .join('\n');
+
+  // Skips the call this effect would otherwise make on the very FIRST
+  // render: `useOrchestratorArchive`'s own mount-time fetch already covers
+  // "what does history look like right now", so re-fetching again before
+  // `freshRunKey` has had any chance to actually CHANGE would just be a
+  // second, redundant request for the same instant. `useRef`'s initializer
+  // captures whatever `freshRunKey` is on this component's first call, so
+  // the effect's own first run always finds `lastFreshRunKey.current`
+  // already equal to it and does nothing; only a LATER render, where
+  // `freshRunKey` has moved on from that captured value, updates the ref and
+  // fires the refresh.
+  const lastFreshRunKey = useRef(freshRunKey);
+  useEffect(() => {
+    if (lastFreshRunKey.current === freshRunKey) return;
+    lastFreshRunKey.current = freshRunKey;
+    refreshArchive();
+  }, [freshRunKey, refreshArchive]);
 
   // One clock reading for the whole render, threaded into every derivation
   // that needs "now" below (the aggregate tiles and every row's own wall
@@ -341,9 +458,17 @@ export default function RunsView() {
   // once is what keeps the two render sites from drifting on the
   // `isSelected` comparison — the pin fix (round 1) is exactly the kind of
   // change that used to have to be applied in two places at once.
+  //
+  // `key` is `runKey(...)`, not bare `run.runId` — the same M3 fix as
+  // `mergeRuns`' own dedupe, and for the identical reason: two different
+  // projects' runs could in principle share a `runId` (a second-precision
+  // timestamp, not a global counter), and React's own reconciliation reads
+  // `key` for identity exactly the way this list already treats it
+  // everywhere else. A bare `runId` key would silently misbehave on a
+  // collision the dedupe fix above no longer drops from the list.
   const renderRows = (rows: readonly MergedRun[]): JSX.Element[] => rows.map((row) => (
     <RunRow
-      key={row.run.runId}
+      key={runKey(row.run.project, row.run.runId)}
       row={row}
       now={now}
       isSelected={selectedRow !== undefined
@@ -401,11 +526,26 @@ export default function RunsView() {
               </div>
               <div className="runs-tile-label">avg item</div>
             </div>
-            <div className="runs-tile" data-testid="runs-tile-fixloops">
+            {/* "fix loops / merged" read as the MERGED-ONLY reading R1
+                deliberately rejected (`RunAggregates.fixLoopsPerMerged`'s own
+                doc comment): the numerator sums fix loops across every
+                QUEUED item, including ones that never merged, because rework
+                spent on an item that was ultimately parked or fix-exhausted
+                is still cost this run paid on the way to whatever it did
+                merge. The math never changed; only the label was wrong, so a
+                reader who checked the number against the old caption could
+                reasonably conclude a bug that was never there. "rework /
+                merge" plus the `title` below spells out what a reader would
+                otherwise only find in run-stats.ts. */}
+            <div
+              className="runs-tile"
+              data-testid="runs-tile-fixloops"
+              title="Total fix loops across every queued item, including ones that never merged, divided by how many did merge — what each merge cost in rework."
+            >
               <div className="runs-tile-value">
                 {aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}
               </div>
-              <div className="runs-tile-label">fix loops / merged</div>
+              <div className="runs-tile-label">rework / merge</div>
             </div>
             <div className="runs-tile" data-testid="runs-tile-verify">
               <div className="runs-tile-value">
@@ -455,25 +595,17 @@ export default function RunsView() {
                 `orderedRows[0]` (this variable's own fallback) is never
                 actually empty. The guard below is defensive typing, not a
                 real empty-selection case this pane has to design for.
-                  `liveRuns` — not `selectedRow.run`'s own fields — is where
-                the LIVE object comes from: `MergedRun.isLive` only ever
-                answers "is a fresh live entry backing this row" (see that
-                field's own doc comment), never carries the entry itself,
-                because `mergeRuns` above deliberately drops the live
-                payload's queue for every row but the selected one. Matched
-                on project AND runId, not runId alone, even though
-                `isLive`'s own computation only checks the latter — the
-                `Selection` interface's own comment already flags a runId as
-                only informally unique across projects, and this lookup can
-                afford to be the stricter of the two. */}
+                  `selectedRow.live` (fix round 2) — not a fresh lookup into
+                `liveRuns` — is where the LIVE object comes from: `mergeRuns`
+                already did the project-AND-runId-matched lookup once, when
+                it built this row, and carries the result on `MergedRun`
+                itself (see that field's own doc comment for why the object,
+                not a boolean, is what it keeps). Re-deriving the same match
+                here would be a second place that lookup could drift from
+                the first. */}
             <div className="runs-detail" data-testid="run-detail-slot">
               {selectedRow !== undefined && (
-                <RunDetail
-                  summary={selectedRow.run}
-                  live={selectedRow.isLive
-                    ? (liveRuns.find((r) => r.project === selectedRow.run.project && r.runId === selectedRow.run.runId) ?? null)
-                    : null}
-                />
+                <RunDetail summary={selectedRow.run} live={selectedRow.live} />
               )}
             </div>
           </div>

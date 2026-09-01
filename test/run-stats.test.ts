@@ -367,12 +367,32 @@ describe('aggregateRuns', () => {
   });
 });
 
+// I5: a regex-shape assertion (`/^\d{4}-\d{2}-\d{2}$/`, `/^(mon|tue|...)...$/`)
+// passes for a UTC implementation, a local one, a wrong day entirely, or a
+// `WEEKDAYS`/`MONTHS` table with an off-by-one baked in — the classic bug for
+// a hand-rolled `getDay()`/`getMonth()` lookup. The plan itself mandated
+// exactly this regex (a "plans give test cases, not verbatim code" failure in
+// miniature: the implementer transcribed a weak assertion because the plan
+// supplied it literally), so the fix is here, not in the implementation.
+//
+// The construction below is timezone-independent WITHOUT re-implementing
+// `dayKey`/`dayLabel`'s own local-time logic in the test: `new Date(2026, 8,
+// 1, 12, 0, 0)` builds "September 1st, 2026, noon" in whatever timezone this
+// process runs in — there is no real-world UTC offset (they all fall well
+// inside +/-14h) that can push a LOCAL noon across a day boundary into Aug 31
+// or Sep 2, so `.toISOString()` of that instant, read back by `dayKey`/
+// `dayLabel` (both of which convert back to LOCAL components before
+// formatting), reproduces the exact same local date this test built,
+// regardless of which timezone the machine running it uses. The exact expected
+// values (`'2026-09-01'`, `'tue 1 sep'`) are pinned against the real calendar
+// (September 1st, 2026 is a Tuesday), not derived from `WEEKDAYS`/`MONTHS`
+// themselves — which is exactly what lets an off-by-one in either table fail
+// this test instead of silently agreeing with it.
+const NOON_SEP_1_2026 = new Date(2026, 8, 1, 12, 0, 0).toISOString();
+
 describe('dayKey', () => {
-  // The exact key depends on the machine's local timezone (by design — see
-  // the design doc's "grouped by day (startedAt)" run list), so the
-  // assertion is a shape, not a literal value.
   it('formats a parseable stamp as a local YYYY-MM-DD key', () => {
-    expect(dayKey('2026-09-01T15:07:01.181Z')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(dayKey(NOON_SEP_1_2026)).toBe('2026-09-01');
   });
 
   it('is null for a stamp that does not parse', () => {
@@ -381,13 +401,8 @@ describe('dayKey', () => {
 });
 
 describe('dayLabel', () => {
-  // Same local-time caveat as dayKey — hand-rolled, fixed English weekday and
-  // month names, matched by a regex specifically so the suite passes in
-  // every timezone and locale a CI runner might use.
   it('formats a parseable stamp as "weekday day month", lowercase', () => {
-    expect(dayLabel('2026-09-01T15:07:01.181Z')).toMatch(
-      /^(mon|tue|wed|thu|fri|sat|sun) \d{1,2} (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/
-    );
+    expect(dayLabel(NOON_SEP_1_2026)).toBe('tue 1 sep');
   });
 
   it('is null for a stamp that does not parse', () => {
