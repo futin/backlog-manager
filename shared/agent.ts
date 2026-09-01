@@ -1,4 +1,7 @@
-import type { AgentsStatus, BacklogItem, PermissionMode } from './types';
+import { RUN_CLAIMED_STAGES } from './types';
+import type {
+  AgentsStatus, BacklogItem, OrchestratorRunsPayload, PermissionMode
+} from './types';
 
 /**
  * agent.ts — what a card's button does, decided once for both sides.
@@ -266,6 +269,61 @@ export function dispatchGate(item: BacklogItem, status: AgentsStatus): DispatchG
 export function dispatchBlock(item: BacklogItem, status: AgentsStatus): string | null {
   const gate = dispatchGate(item, status);
   return gate.control === 'enabled' ? null : gate.reason;
+}
+
+/**
+ * Why an orchestrator run forbids dispatching this item right now, or null
+ * when none does.
+ *
+ * The fourth kind of dispatch block, and the only one that reads something
+ * other than an item file and a dashboard status. It exists because the two
+ * things it compares can never learn about each other on their own: an
+ * orchestrator run works each item inside its own git worktree and nothing
+ * reaches `main` until the item merges, so while a run has `task-7` at
+ * `reviewing`, the `task-7` file `/api/items` scans on `main` looks untouched
+ * — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item
+ * is not lying; it is telling the truth about `main`. "This item is claimed by
+ * a run" therefore exists in exactly one place, the run payload, and every
+ * surface that needs it has to be handed it explicitly.
+ *
+ * ONE function doing the whole lookup — the project match, the id match and
+ * the freshness filter together — rather than a stage-to-reason helper each
+ * caller invokes after its own lookup. Those three lines are exactly the part
+ * a second copy gets subtly wrong, and `environmentBlock` above records that
+ * having already happened once in this very file: `orchestrate()` once
+ * reimplemented one of `dispatchGate`'s five lines and silently dropped the
+ * other four.
+ *
+ * `fresh`, not `status === 'running'`: a stale run has stopped reporting, and
+ * freshness is already the rule every other run-derived surface uses (the run
+ * strip renders nothing for a stale run, and the board's badge map is built
+ * from fresh runs only). A crashed run may still hold a worktree, so blocking
+ * on staleness is arguable — but that is a recovery problem `--resume` and
+ * `--abort` own, and cards dead until someone runs one of those is a worse
+ * failure than the double-dispatch this exists to prevent.
+ *
+ * `runs` is the payload shape `GET /api/orchestrator/runs` answers with, which
+ * is what both callers already hold: the board from `useOrchestratorRuns`, the
+ * server from `OrchestratorService.runs()`.
+ */
+export function runClaimBlock(
+  item: BacklogItem,
+  runs: OrchestratorRunsPayload['runs']
+): string | null {
+  for (const run of runs) {
+    // The registry's absolute path on both sides — `OrchestratorRun.project`
+    // and `BacklogItem.projectPath` are documented as the same string. Never
+    // the display name: two checkouts of one repo share a name and never a
+    // path, and only the path is what the run itself reports.
+    if (!run.fresh || run.project !== item.projectPath) continue;
+    const claimed = run.queue.find(
+      (q) => q.id === item.id && RUN_CLAIMED_STAGES.includes(q.stage)
+    );
+    if (claimed !== undefined) {
+      return `an orchestrator run is working this item (${claimed.stage})`;
+    }
+  }
+  return null;
 }
 
 /**

@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { join } from 'node:path';
@@ -6,6 +8,12 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { item, makeProject, makeRegistry } from './helpers/store';
+import rawFixture from './fixtures/orchestrator-run.json';
+import type { OrchestratorRun, RunStage } from '../shared/types';
+
+// Plain JSON, so TS widens its string fields to `string` rather than the
+// literal unions (`RunStage`) the run-claim case below turns on.
+const runFixture = rawFixture as OrchestratorRun;
 
 const GROOMED_BUG = item('bug-2', 'a known bug', '## Symptom\n\nit breaks\n\n## Cause\n\na typo\n\n## Fix\n\nfix the typo\n');
 const RAW_BUG = item('bug-1', 'a fresh bug', '## Symptom\n\nit breaks\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n');
@@ -29,6 +37,8 @@ function stubDashboard(over: Record<string, unknown> = {}) {
 
 describe('POST /api/agents/plan', () => {
   let app: INestApplication;
+  let tmpRoot: string;
+  let orchHome: string;
   const env = { ...process.env };
   // See the same constant in test/agents-dispatch.test.ts: a mock left on
   // global.fetch is inherited by whatever runs next in this worker, where a
@@ -42,6 +52,16 @@ describe('POST /api/agents/plan', () => {
       { leaf: 'ideas/open', filename: 'idea-1-an-idea.md', content: IDEA },
       { leaf: 'out-of-scope', filename: 'oos-1-declined.md', content: OOS }
     ]);
+
+    // A fresh, empty BM_ORCH_HOME per case. plan() now consults the
+    // orchestrator's run files, and without this the suite reads the
+    // developer's real ~/.backlog-manager/orchestrator/ and answers on
+    // whatever run happens to be live on their machine — see the same guard,
+    // stated at length, in test/orchestrator-start.test.ts.
+    tmpRoot = mkdtempSync(join(tmpdir(), 'bm-plan-'));
+    orchHome = join(tmpRoot, 'orchestrator');
+    process.env.BM_ORCH_HOME = orchHome;
+
     process.env.BM_AGENTS = 'on';
     process.env.BM_AGENTS_URL = 'http://dash.test:4173';
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -56,7 +76,24 @@ describe('POST /api/agents/plan', () => {
     await app.close();
     process.env = { ...env };
     global.fetch = realFetch;
+    rmSync(tmpRoot, { recursive: true, force: true });
   });
+
+  /* The layout orchestrate.mjs's own runFilePath() writes — duplicated here
+     for the reason test/orchestrator-start.test.ts's copy records: that
+     script is standalone, with no exported package boundary into this TS
+     project. */
+  function writeRun(id: string, stage: RunStage): void {
+    const run: OrchestratorRun = {
+      ...runFixture,
+      project: projectPath,
+      updatedAt: new Date().toISOString(),
+      queue: [{ ...runFixture.queue[0], id, stage }]
+    };
+    const dir = join(orchHome, encodeURIComponent(run.project));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+  }
 
   const post = (body: unknown) =>
     request(app.getHttpServer()).post('/api/agents/plan').send(body as object);
@@ -133,5 +170,28 @@ describe('POST /api/agents/plan', () => {
     const res = await post({ itemPath: itemPath('ideas/open', 'idea-1-an-idea.md') }).expect(201);
     expect(res.body.allowedModes).toEqual(['plan']);
     expect(res.body.blocked).toContain('unreachable');
+  });
+
+  /* `blocked` is filled, not thrown, for the same reason every other block on
+     this route is: the sheet that asked can explain the state, where a failed
+     request just fails. A sheet opened after a run claimed the item shows the
+     reason instead of a launch button — and the dispatch route re-checks it
+     anyway for the sheet that was already open (see test/agents-dispatch). */
+  it('reports a run claim as the reason the launch is blocked', async () => {
+    stubDashboard();
+    writeRun('bug-2', 'verifying');
+    const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
+    expect(res.body.blocked).toContain('verifying');
+  });
+
+  /* The negative half, on the same route: a run that has finished with the
+     item leaves the sheet exactly as it was. Without this, a `blocked` that
+     was accidentally set for every item in any run file at all would still
+     pass the case above. */
+  it('leaves the launch unblocked for an item the run has merged', async () => {
+    stubDashboard();
+    writeRun('bug-2', 'merged');
+    const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
+    expect(res.body.blocked).toBeUndefined();
   });
 });

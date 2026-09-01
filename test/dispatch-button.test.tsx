@@ -9,7 +9,31 @@ import BoardView from '../client/src/components/board/BoardView';
 import { DispatchButton } from '../client/src/components/board/DispatchButton';
 import { ItemDrawer } from '../client/src/components/board/ItemDrawer';
 import { buildProjectHues } from '../client/src/lib/project-hue';
-import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
+import rawFixture from './fixtures/orchestrator-run.json';
+import type {
+  AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
+  RunStage
+} from '../shared/types';
+
+/* Plain JSON, so TS widens its string fields to `string` rather than the
+   literal unions (`RunStage`) the run-claim cases below turn on — the same
+   cast every other suite reading this fixture makes. */
+const runFixture = rawFixture as OrchestratorRun;
+type RunPayload = OrchestratorRunsPayload['runs'][number];
+
+/** One fresh run for `/abs/alpha` — the path `fakeItem` carries — holding
+ *  exactly the ids given, all at one stage. Built off the contract fixture so
+ *  the queue entries stay the real shape with only id and stage replaced. */
+function runFor(ids: string[], stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
+  return {
+    ...runFixture,
+    project: '/abs/alpha',
+    queue: ids.map((id) => ({ ...runFixture.queue[0], id, stage })),
+    fresh: true,
+    pastRuns: 0,
+    ...over
+  };
+}
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
@@ -87,6 +111,58 @@ describe('DispatchButton', () => {
 
   it('renders nothing while the status is still unknown', () => {
     const { container } = render(<DispatchButton item={fakeItem()} status={null} onDispatch={() => {}} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  /*
+   * The fourth kind of block, and the only one whose reason comes in as a prop
+   * rather than being derived here: "an orchestrator run has already claimed
+   * this item" lives in the run payload alone, which this leaf has no access to
+   * (see runClaimBlock in shared/agent.ts for why the item file cannot say it).
+   * It disables with the reason rather than hiding, exactly like the
+   * project-visibility block: it IS about this card, and it names a state the
+   * reader can go and look at in the run strip above.
+   */
+  it('disables with the run\'s reason when a run has claimed the item', () => {
+    render(
+      <DispatchButton
+        item={fakeItem()} status={READY} onDispatch={() => {}}
+        runBlock="an orchestrator run is working this item (reviewing)"
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('reviewing'));
+    // Same accessibility contract the project-visibility reason has: a tooltip
+    // alone is announced unreliably, so the reason has to be a real description.
+    const describedBy = btn.getAttribute('aria-describedby');
+    expect(document.getElementById(String(describedBy))).toHaveTextContent('reviewing');
+  });
+
+  it('dispatches nothing when a run-claimed button is clicked', async () => {
+    const onDispatch = jest.fn();
+    render(
+      <DispatchButton
+        item={fakeItem()} status={READY} onDispatch={onDispatch}
+        runBlock="an orchestrator run is working this item (reviewing)"
+      />
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'execute' }));
+    expect(onDispatch).not.toHaveBeenCalled();
+  });
+
+  /* Order preserved: an ENVIRONMENT-level block still hides the control
+     outright, and a run claim must not resurrect it as a disabled button. That
+     ordering is the "an environment-level block hides the dispatch control;
+     only the per-item one disables it" invariant, and a new block folded in
+     ahead of the hidden check is exactly how it would be lost. */
+  it('still renders nothing when the environment hides the control, run claim or not', () => {
+    const { container } = render(
+      <DispatchButton
+        item={fakeItem()} status={{ ...READY, enabled: false }} onDispatch={() => {}}
+        runBlock="an orchestrator run is working this item (reviewing)"
+      />
+    );
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -223,9 +299,17 @@ const PROJECTS: ProjectSummary[] = [
 
 describe('the board wiring', () => {
   const realFetch = global.fetch;
+  /* What the stub answers `/api/orchestrator/runs` with, per case. Mutable
+     rather than a parameter because every case below renders BoardView the
+     same way and only this list varies; the default is the empty payload the
+     endpoint itself returns for a project that has never run the
+     orchestrator, so every pre-existing case in this describe keeps behaving
+     exactly as it did before runs entered the picture. */
+  let RUNS: RunPayload[] = [];
 
   beforeEach(() => {
     localStorage.clear();
+    RUNS = [];
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
       // `text`, not `json`, for this one route — ItemDrawer's effect calls
@@ -239,6 +323,7 @@ describe('the board wiring', () => {
         return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') } as Response);
       }
       const payload = url.includes('/api/agents/status') ? READY
+        : url.includes('/api/orchestrator/runs') ? ({ runs: RUNS } satisfies OrchestratorRunsPayload)
         : url.includes('/api/agents/plan') ? {
           action: 'execute', prompt: 'do it', project: 'alpha',
           allowedModes: ['plan', 'acceptEdits'], defaultMode: 'acceptEdits'
@@ -369,5 +454,64 @@ describe('the board wiring', () => {
     expect(await screen.findByRole('dialog', { name: /dispatch idea-1/ })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'launch' })).toBeEnabled();
     expect(screen.queryByText(/launched · /)).not.toBeInTheDocument();
+  });
+
+  /*
+   * The bug's own repro, at the layer it was reported from: while a run holds
+   * `task-1`, that card's tear-off tab must be dead. The idea card is the
+   * control — the run's queue does not mention it, so it stays live, which is
+   * what distinguishes "the claimed card is disabled" from "the board disabled
+   * everything the moment any run appeared".
+   */
+  it('disables the tab of a card a fresh run has claimed, leaving an unqueued sibling live', async () => {
+    RUNS = [runFor(['task-1'], 'reviewing')];
+    render(<BoardView />);
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+
+    const taskCard = screen.getByText('a task').closest('.board-card') as HTMLElement;
+    await waitFor(() =>
+      expect(within(taskCard).getByRole('button', { name: 'execute' }))
+        .toHaveAttribute('aria-disabled', 'true')
+    );
+    expect(within(taskCard).getByRole('button', { name: 'execute' }))
+      .toHaveAttribute('title', expect.stringContaining('reviewing'));
+
+    const ideaCard = screen.getByText('an idea').closest('.board-card') as HTMLElement;
+    expect(within(ideaCard).getByRole('button', { name: 'groom' }))
+      .toHaveAttribute('aria-disabled', 'false');
+  });
+
+  /* The second render site, from the same payload — the drawer chip was passed
+     no run data at all, which is half of what made this bug three surfaces
+     saying "go ahead" instead of one. */
+  it('disables the drawer chip for a claimed item, from the same run payload', async () => {
+    RUNS = [runFor(['task-1'], 'merging')];
+    render(<BoardView />);
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByText('a task'));
+    const drawer = await screen.findByRole('dialog', { name: 'a task' });
+    await waitFor(() => expect(within(drawer).queryByText('loading…')).not.toBeInTheDocument());
+
+    await waitFor(() =>
+      expect(within(drawer).getByRole('button', { name: 'execute' }))
+        .toHaveAttribute('aria-disabled', 'true')
+    );
+    expect(within(drawer).getByRole('button', { name: 'execute' }))
+      .toHaveAttribute('title', expect.stringContaining('merging'));
+  });
+
+  /* Staleness, at the board layer: a run that has stopped reporting renders no
+     strip and badges no card, and it must not hold the dispatch control hostage
+     either — recovering a crashed run is `--resume`/`--abort`'s job, and a
+     permanently dead card is the worse failure. */
+  it('leaves the tab live when the run holding the item has gone stale', async () => {
+    RUNS = [runFor(['task-1'], 'reviewing', { fresh: false })];
+    render(<BoardView />);
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+
+    const taskCard = screen.getByText('a task').closest('.board-card') as HTMLElement;
+    expect(within(taskCard).getByRole('button', { name: 'execute' }))
+      .toHaveAttribute('aria-disabled', 'false');
   });
 });

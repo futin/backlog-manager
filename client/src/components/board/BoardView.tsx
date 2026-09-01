@@ -7,7 +7,7 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { isInProgress } from '../../lib/item-progress';
 import { buildProjectHues } from '../../lib/project-hue';
-import { projectDispatchGate } from '../../../../shared/agent';
+import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
@@ -293,6 +293,21 @@ export default function BoardView() {
   const runStageFor = (item: BacklogItem): RunStage | undefined =>
     runStagesByProject.get(item.projectPath)?.get(item.id);
 
+  /*
+   * The dispatch half of the same run payload: why a run forbids dispatching
+   * this item, or null. Fed to BOTH render sites below — the card's tear-off
+   * tab and the drawer's chip — since they are two independent buttons for one
+   * item, and only one of them being run-aware is half of the bug this fixes.
+   *
+   * Deliberately reading the FULL `runs` list rather than going through
+   * `runStagesByProject` above: `runClaimBlock` applies its own `fresh` filter
+   * (see its doc comment), so routing it through a map already filtered to
+   * fresh runs would put that rule in two places, and the map's stage list is
+   * the badge's rule (`ACTIVE_RUN_STAGES`), not this one — `pending` and
+   * `preflight` block dispatch while showing no badge at all.
+   */
+  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs);
+
   // Looked up from the FULL `runs` list, not `freshRuns` above — the drawer
   // has to keep showing a run that just went stale (that is the entire
   // point of `openRunProject`'s own comment), and `freshRuns` has already
@@ -533,6 +548,7 @@ export default function BoardView() {
                       onDispatch={() => openLaunchSheet(item)}
                       now={now}
                       runStage={runStageFor(item)}
+                      runBlock={runBlockFor(item)}
                     />
                   ))}
                 </div>
@@ -551,6 +567,7 @@ export default function BoardView() {
           // Goes through `openLaunchSheet`, not `setDispatching` directly —
           // see that function's own comment for why.
           onDispatch={() => openLaunchSheet(open)}
+          runBlock={runBlockFor(open)}
         />
       )}
       {openRun !== null && (

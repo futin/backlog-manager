@@ -297,6 +297,41 @@ export type RunStage =
   | 'failed' | 'skipped' | 'needs-answers' | 'ungroomed' | 'parked';
 
 /**
+ * The stages at which a run still OWNS the item — the eight non-terminal
+ * members of `RunStage` above, and the whole input to `runClaimBlock`
+ * (shared/agent.ts), which is what disables a card's dispatch control while
+ * an orchestrator run is working it.
+ *
+ * Lives here rather than beside that function because it is a partition of
+ * `RunStage`, not a fact about dispatch: a new stage added to the union three
+ * lines up has to be classified as claimed-or-finished in the same edit, and
+ * the only place a reader will look for that decision is next to the union
+ * itself. `test/agents-shared.test.ts` pins the partition against a
+ * `Record<RunStage, true>` literal, so the compiler forces a new member into
+ * that test and the test then forces it into one of the two halves.
+ *
+ * `pending` and `preflight` are IN this list deliberately, which is the one
+ * judgement call here. A pending item is already claimed — the run will reach
+ * it without asking anyone — so a manual session that grooms or archives it
+ * first leaves the run dispatching into an item that moved under it. The six
+ * members left out (`merged`, `failed`, `skipped`, `needs-answers`,
+ * `ungroomed`, `parked`) are the run's exits: it is finished with that item
+ * and a human picking it up by hand is the intended next move. `parked` most
+ * of all — a park exists precisely to hand the item back to a person, so
+ * blocking it would break the one recovery path it was built for.
+ *
+ * NOT the same list as `ACTIVE_RUN_STAGES` (client ItemCard.tsx), and the two
+ * must not be unified: that one answers "does this card show a live stage
+ * badge" and correctly EXCLUDES `pending`/`preflight` (a badge that flickers
+ * on for the fraction of a poll cycle preflight takes is noise). They overlap
+ * by six members today and are answering different questions.
+ */
+export const RUN_CLAIMED_STAGES: readonly RunStage[] = [
+  'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing',
+  'fixing', 'verifying', 'merging'
+];
+
+/**
  * One row of the verify step's output, kept verbatim rather than summarised
  * to a pass/fail count: `tail` is the last few lines of the command's own
  * output, which is what a human actually needs to tell a flaky test from a
