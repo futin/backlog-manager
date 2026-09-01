@@ -1136,3 +1136,133 @@ body {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
   overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
+
+/* ---------------------------------------------- Runs section (Task 6)
+   RunsView.tsx: the stat-tile header, project filter, and day-grouped run
+   list for the orchestration archive. Deliberately built from the same
+   materials as the live run strip/drawer above rather than a new visual
+   language of its own — strip-paper surfaces, hairline borders, 2px radii,
+   mono type for ids/numbers/durations — because this section and that one
+   are answering the same underlying question ("what has the orchestrator
+   done") at two different distances (live glance vs. browsable history),
+   and a reader should not have to relearn what a colour means when they
+   move from one to the other. `.board`/`.board-bar`/`.board-title`/
+   `.board-select`/`.board-note` are reused wholesale from the Board section
+   above for the same reason ArchiveView already reuses them: this is a
+   fourth section header/toolbar shaped exactly like the first one, not a
+   new kind of thing. */
+
+/* Five tiles across on a wide screen. `minmax(0, 1fr)` rather than a bare
+   `1fr`: a tile's own content (the by-status substat line especially) is
+   allowed to be wider than an even fifth of the row, and a bare `1fr` would
+   let that content blow the grid track open instead of wrapping inside it. */
+.runs-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: var(--group-gap) }
+.runs-tile {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 10px 12px;
+}
+/* Tabular figures: five tiles sitting in a row is exactly the layout where a
+   proportional "1" and a proportional "4" claim different amounts of visual
+   weight for the same digit count, which reads as the row being unevenly
+   important rather than as five equally-weighted numbers. */
+.runs-tile-value {
+  font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.runs-tile-label {
+  font-family: var(--display); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+}
+/* The "runs" tile's by-status breakdown — the one tile whose single headline
+   number (a bare run count) says the least on its own, so it is the one that
+   earns a second line. Wraps rather than truncates: four short words are
+   worth keeping legible over keeping the tile's own height fixed. */
+.runs-tile-substat { display: flex; flex-wrap: wrap; gap: 4px 8px; font-family: var(--mono); font-size: 9.5px; color: var(--ink3) }
+.runs-tile-substat-item { white-space: nowrap }
+
+@media (max-width: 700px) {
+  /* Two across rather than one: five tiles stacked full-width each would push
+     the list and detail pane (already stacking under this same breakpoint,
+     see .runs-split below) below a full screen of nothing but numbers. */
+  .runs-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+}
+
+/* The master-detail split: run list on the left at a fixed width (wide
+   enough for a project label and a merged/total count without wrapping on
+   an ordinary project name, narrow enough that the detail pane — the reason
+   this layout exists at all, per the design doc's own rejection of a dense
+   ledger table — keeps the room). `align-items: start` so a short list does
+   not stretch to match a tall detail pane's height, which would leave a
+   column of empty strip paper under the last day group for no reason. */
+.runs-split { display: grid; grid-template-columns: 200px 1fr; gap: var(--group-gap); align-items: start }
+.runs-list { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
+.runs-day { display: flex; flex-direction: column; gap: 6px }
+.runs-day-heading {
+  font-family: var(--display); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+}
+.runs-day-rows { display: flex; flex-direction: column; gap: 6px }
+
+/* One row, matching .run-strip's own button reset and paper surface — a
+   real <button> for the same free keyboard activation RunStrip.tsx's own
+   comment already argues for, not a div with a click handler bolted on. */
+.runs-row {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
+  font-family: var(--font); font-size: 11px; color: var(--ink2);
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 7px 10px; cursor: pointer; transition: border-color .15s;
+}
+.runs-row:hover { border-color: var(--hairline2) }
+/* The selected row's own marker — a cyan rule, not a background fill, so it
+   reads as "this is what the pane on the right is showing" without also
+   competing with the live marker below for the same visual register. */
+.runs-row[aria-current='true'] { border-color: var(--cyan) }
+/* The live marker (Task 6's own case for it): a run that is both matched
+   into the live poll payload AND still reporting a fresh heartbeat gets a
+   left accent bar, the same inset-shadow idiom the rail's own `.rail-link.on`
+   uses for "this is the live one" rather than a border colour, which
+   `[aria-current]` above has already claimed for a different fact (is this
+   the one currently open in the detail pane). A row can be both at once —
+   selected AND live — and the two markers are visually independent for
+   exactly that reason. */
+.runs-row-live { box-shadow: inset 2px 0 0 var(--cyan) }
+.runs-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+/* The run-level status chip. Its own small class rather than a reuse of
+   .board-card-stage: see RunsView.tsx's own comment on RUN_STATUS_GLYPH for
+   why a RUN's status (running/done/aborted/failed) and an ITEM's stage
+   (RunStage's fourteen members) are different vocabularies that only
+   happen to share one spelling. The colour tokens are the same four
+   run-stage.ts already uses for its own tones, though — cyan/green/amber/red
+   mean the same thing everywhere in this app. */
+.runs-status { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 10px; font-weight: 600 }
+.runs-status-live { color: var(--cyan) }
+.runs-status-done { color: var(--green) }
+.runs-status-warn { color: var(--amber) }
+.runs-status-bad { color: var(--red) }
+.runs-row-project {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--ink);
+}
+/* Pushed to the row's right margin, matching .run-drawer-item-time's own
+   `margin-left: auto` reasoning: a reader scanning the list top to bottom
+   for "which of these merged the most" wants that number in a stable column,
+   not wherever the status word and project label happened to leave room. */
+.runs-row-count { margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
+.runs-row-wall { font-family: var(--mono); font-size: 10px; color: var(--ink3); font-variant-numeric: tabular-nums }
+
+/* The detail pane. Task 7 replaces its contents; the paper-and-hairline
+   surface and the minimum height (so an empty/placeholder pane does not
+   collapse to a sliver beside a tall run list) are what this task owns. */
+.runs-detail {
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 12px; min-height: 160px; font-family: var(--mono); font-size: 11px; color: var(--ink3);
+}
+
+/* The same 700px rail breakpoint the rest of the app switches on (see the
+   phone rail rules near the top of this file) — one column, list above
+   detail, rather than a second narrower threshold invented for this
+   section alone. */
+@media (max-width: 700px) {
+  .runs-split { grid-template-columns: 1fr }
+}
