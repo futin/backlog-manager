@@ -74,18 +74,32 @@ that is groom's job.
    `from: <id>` line into the new item's frontmatter, which is how a promotion records
    what it came from, and promotion is `backlog-groom`'s job — capture doesn't do it just
    because the new item was clearly inspired by an existing one. "This reminded me of
-   bug-4" is not a promotion, and citing bug-4 would claim it was.
+   bug-4, still open over in `bugs/open/`" is not a promotion, and citing it would claim
+   it was.
 
-   **The one exception: reviving something already ruled out of scope.** If the request is
-   to revive, un-reject or reconsider a specific `oos-N` — bring back a thing that was
-   decided against — then the citation is required, not banned: pass `--from oos-N`, or
-   add the same `from: oos-N` line by hand in step 3 the way `tags:` is added there. Two
-   reasons it is capture's job and nobody else's. Rejection is terminal, so nothing comes
-   back by being moved — `move` refuses every move out of `out-of-scope/`, deliberately,
-   because the rejection is the record and it stays on it. And `backlog-groom` refuses an
-   item already in `out-of-scope/` outright (its own first refusal), so there is no other
-   skill that can file the reviving item at all. What comes back is a NEW item that cites
-   the old one; the original stays rejected, where it is, untouched.
+   **The one exception: reviving an item that lives in `out-of-scope/`.** If the request
+   is to revive, un-reject or reconsider a specific item that is sitting in that
+   directory — bring back a thing that was decided against — then the citation is
+   required, not banned: pass `--from <id>` naming it, or add the same `from: <id>` line
+   by hand in step 3 the way `tags:` is added there.
+
+   **The trigger is the directory, never the id's prefix, and this is the part that is
+   easy to get wrong.** A rejection does not rename anything: `move <id> out-of-scope` is
+   a rename of the file's location only, so a bug rejected last month is still `bug-N`
+   and a task is still `task-N`, sitting in `out-of-scope/`. The `oos-` prefix is minted
+   only for something rejected at capture time with no section of its own, so it is the
+   minority spelling, not the shape to look for. `bug-4` above and a rejected `bug-9` are
+   the same shape and opposite answers — what separates them is which directory each one
+   is in. If you are not certain, `backlog.mjs show <id>` prints the item's path on its
+   first line; a path under `out-of-scope/` is the exception, anything else is the ban.
+
+   Two reasons this is capture's job and nobody else's. Rejection is terminal, so nothing
+   comes back by being moved — `move` refuses every move out of `out-of-scope/`,
+   deliberately, because the rejection is the record and it stays on it. And
+   `backlog-groom` refuses an item already in `out-of-scope/` outright (its own first
+   refusal), so there is no other skill that can file the reviving item at all. What comes
+   back is a NEW item that cites the old one; the original stays rejected, where it is,
+   untouched.
 
    **Filing several items in one request: finish each capture before starting the next.**
    `new` derives the id by looking at the files already on disk, so it hands out the *same*

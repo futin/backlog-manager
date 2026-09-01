@@ -175,8 +175,10 @@ session would very plausibly have filed the revived item with no link back to
 the rejection, which is the one thing the settled decision requires.
 
 Fixed on both sides. `skills/backlog-capture/SKILL.md` keeps the ban and carves
-one explicit exception for reviving an `oos-N`, with the two reasons it is
-capture's job and nobody else's: `move` refuses every move out of
+one explicit exception for reviving an item that lives in `out-of-scope/`
+(see fix round 2 — the first wording of that exception said `oos-N`, which is
+the minority spelling), with the two reasons it is capture's job and nobody
+else's: `move` refuses every move out of
 `out-of-scope/`, so nothing comes back by being moved, and `backlog-groom`
 refuses an item already there outright, so no other skill can file the reviving
 item at all. `composePrompt` now names BOTH routes to the citation — the
@@ -187,6 +189,42 @@ the prompt reaches is still running the skill version that bans the flag. The
 hand-written line is a route that old version already models for `tags:` and
 `kind:` and never bans. A new test pins both routes so the second is not
 "simplified" away once the skill catches up.
+
+```
+$ pnpm test
+Test Suites: 41 passed, 41 total
+Tests:       636 passed, 636 total
+
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run test:skills
+# tests 264
+# pass 264
+# fail 0
+```
+
+### Fix round 2 — the exception triggered on a prefix most rejections don't have
+
+Round 1's exception was written in terms of `oos-N`, and that is the minority
+spelling: `move <id> out-of-scope` relocates a file and never renames it, so a
+rejected bug is still `bug-N`. `backlog.mjs` says so at the id-minting comment —
+`out-of-scope/` is a graveyard holding dead items from every section, and the
+`oos-` prefix is minted only for something rejected at capture with no section
+of its own. This repo's single out-of-scope item is `bug-1`. So the prompt emits
+`--from bug-1`, which matched the ban's own `bug-4` counter-example in the
+paragraph directly above rather than the exception below it — round 1's failure
+again, now for the common case.
+
+Wording only. The exception now triggers on the DIRECTORY an item lives in, uses
+a bare `<id>` placeholder, states outright that a rejection never renames and
+that the prefix is not the signal, contrasts `bug-4` (open, in `bugs/open/`)
+against a rejected `bug-9` as the same shape with opposite answers, and points
+at `show <id>` — whose first line is the path — for anyone unsure. The ban's
+counter-example gained its directory too, so both sides of the contrast are
+stated the same way. `prompt.util.ts` needed no change: it already interpolates
+`item.id` and its comment never assumed a prefix. README's one `oos-N` was
+corrected alongside.
 
 ```
 $ pnpm test

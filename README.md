@@ -213,8 +213,10 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   is finished, and both halves come back by their own route — a stale item by
   dispatching a **groom**, which refreshes `updated:` and puts it back on the
   Board at the next load; a rejected one by dispatching a **capture**, which
-  files a *new* item citing `from: oos-N` and leaves the original rejected on
-  the record. As everywhere else, the board writes nothing; the spawned session
+  files a *new* item citing `from: <id>` and leaves the original rejected on
+  the record. (That id keeps whatever prefix it always had — a rejection moves
+  a file, it never renames one, so most rejected items are still `bug-N` or
+  `task-N`.) As everywhere else, the board writes nothing; the spawned session
   does.
 - `shared/` — `types.ts` (registry and API shapes, defined once and imported
   by both sides), `agent.ts` (`deriveAction` and `dispatchGate` — the single
