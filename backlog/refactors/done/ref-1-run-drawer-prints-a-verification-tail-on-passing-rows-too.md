@@ -4,6 +4,9 @@ title: Run drawer prints a verification tail on passing rows too
 created: 2026-08-31
 kind: chore
 tags: client, orchestrator
+promoted-to: task-7, task-8
+updated: 2026-09-01T07:20:15Z
+groom-elapsed: 160
 ---
 
 ## What exists today

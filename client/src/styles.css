@@ -751,7 +751,48 @@ body {
 .run-drawer-item-verify-cmd { color: var(--ink2) }
 .run-drawer-item-verify-ok { color: var(--green); font-weight: 600 }
 .run-drawer-item-verify-bad { color: var(--red); font-weight: 600 }
-.run-drawer-item-verify-tail { color: var(--ink3) }
+/* The tail is captured output — up to the last 20 lines of a verify command —
+   and the drawer it sits in is the one a human opens *after* an unattended run,
+   to read the ATTENTION section. Unbounded, twenty lines of one row's output set
+   the drawer's height and push that section below the fold, so the tail gets its
+   own bounded, scrollable box.
+     flex-basis/min-width: the parent is `display: flex; flex-wrap: wrap`, so
+   without a full-width basis the tail shares a line with the cmd span and the
+   ok/failed chip when it is short and takes its own when it is long — a scroll
+   container that moves rows depending on its content length is not a box anyone
+   can read. `min-width: 0` because a flex item's default `min-width: auto`
+   refuses to shrink below its intrinsic content width, which would silently
+   override both properties below on a single long line.
+     white-space: runVerifyCommand joins those lines with \n, and a plain span
+   with no declaration collapses every one of them into a space — what the drawer
+   showed before this rule was one run-on paragraph, not twenty lines. pre-wrap
+   rather than pre: pre would trade this vertical overflow for a horizontal one.
+   overflow-wrap covers what pre-wrap will not break at all — one unbroken token
+   (a long path, a base64 blob) inside a cap that counts characters, not lines.
+     max-height in em so it tracks the parent's 10px mono size under
+   --font-scale rather than pinning a pixel height; overflow-y auto, not scroll,
+   so a two-line tail carries no permanent scrollbar gutter. overscroll-behavior
+   because .drawer-body is itself overflow-y: auto — chaining a wheel gesture
+   past the tail's end into the drawer behind it reads as the drawer randomly
+   jumping while you read output. */
+.run-drawer-item-verify-tail {
+  color: var(--ink3);
+  /* display: block is load-bearing, and it is the one declaration here that
+     cannot be reasoned out from the markup alone — measured in Chrome after
+     the disclosure landed. A <details> does NOT make its non-summary children
+     flex items of itself: they are slotted into the UA's ::details-content
+     box, so nothing blockifies this span. Left inline, it reported
+     clientHeight 0 against a 517px rendered box — max-height, overflow-y and
+     flex-basis are all simply ignored on a non-replaced inline box, which put
+     the drawer straight back to the unbounded tail this rule exists to stop.
+     white-space survived (inline boxes honour it), which is exactly why the
+     regression looked fine in a screenshot. Neither test suite can see this:
+     jsdom performs no layout. */
+  display: block;
+  flex-basis: 100%; min-width: 0;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 10em; overflow-y: auto; overscroll-behavior: contain;
+}
 
 /* OrchestrateSheet's own queue-preview rows reuse .run-drawer-item/-head/-id/
    -title verbatim (same "bordered row inside a sheet body" shape as the run

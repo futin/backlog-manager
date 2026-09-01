@@ -89,6 +89,58 @@ describe('RunDrawer', () => {
     expect(screen.getByTestId('run-drawer-item-task-21')).not.toHaveTextContent('pnpm');
   });
 
+  // The fixture's four verification rows are ALL `ok: true` (and
+  // orchestrator-strip.test.tsx reads the same file), so the failing cases
+  // below build their queue inline through runPayload's override rather than
+  // editing a fixture two suites share.
+  const failingQueue = () => [
+    {
+      ...fixture.queue.find((q) => q.id === 'bug-14')!,
+      id: 'bug-99',
+      verification: [{ cmd: 'pnpm run build', ok: false, tail: 'error TS2554: wrong arity' }],
+    },
+    ...fixture.queue.filter((q) => q.id !== 'bug-14'),
+  ];
+
+  it("collapses a passing row's tail and leaves a failing row's open", () => {
+    const { rerender } = render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    // bug-14's last row is `pnpm run typecheck`, ok: true.
+    const pass = screen.getByTestId('run-drawer-item-bug-14').querySelector('details');
+    expect(pass).not.toBeNull();
+    expect(pass!.open).toBe(false);
+
+    rerender(<RunDrawer run={runPayload({ queue: failingQueue() })} onClose={() => {}} />);
+    const fail = screen.getByTestId('run-drawer-item-bug-99').querySelector('details');
+    expect(fail).not.toBeNull();
+    expect(fail!.open).toBe(true);
+    // Open on arrival means the output is readable without a click — the
+    // whole point of gating on `ok` rather than collapsing everything.
+    expect(fail).toHaveTextContent('error TS2554: wrong arity');
+  });
+
+  it('keeps the command and the pass mark in the summary, so collapsing hides output and never identity', () => {
+    const { rerender } = render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    const passSummary = screen.getByTestId('run-drawer-item-bug-14').querySelector('summary')!;
+    expect(passSummary).toHaveTextContent('pnpm run typecheck');
+    expect(passSummary).toHaveTextContent('ok');
+    // The tail lives outside the summary — that separation is what the
+    // collapse actually acts on.
+    expect(passSummary).not.toHaveTextContent('Found 0 errors.');
+
+    rerender(<RunDrawer run={runPayload({ queue: failingQueue() })} onClose={() => {}} />);
+    const failSummary = screen.getByTestId('run-drawer-item-bug-99').querySelector('summary')!;
+    expect(failSummary).toHaveTextContent('pnpm run build');
+    expect(failSummary).toHaveTextContent('failed');
+  });
+
+  it('renders no disclosure at all for an item that never reached verify', () => {
+    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    // task-21 has `verification: []`. Guards the `verify !== null` gate
+    // against being folded into the new ok/failed conditional — "no rows"
+    // must stay a different case from "rows that passed".
+    expect(screen.getByTestId('run-drawer-item-task-21').querySelector('details')).toBeNull();
+  });
+
   it('shows pipeline chip counts against the fixture: 3 merged, 1 active, 1 queued, 3 attention', () => {
     render(<RunDrawer run={runPayload()} onClose={() => {}} />);
     // merged: bug-14, task-16, task-9. active (ACTIVE_RUN_STAGES,
