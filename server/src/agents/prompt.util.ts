@@ -56,7 +56,24 @@ export function composePrompt(item: BacklogItem, action: AgentAction): string {
     // only link back to the reasoning that rejected it); and the original left
     // alone (the rejection record IS the point — see the design's own
     // "promotion out of Archive").
-    return `${head} It was ruled out of scope. File a NEW item that revives it, citing the original as from: ${item.id} in the new item's frontmatter. Leave ${item.id} itself exactly where it is — the rejection stays on the record.`;
+    //
+    // BOTH routes to that citation are named, and the redundancy is load-
+    // bearing rather than belt-and-braces. `--from <id>` is the flag that
+    // writes the `from:` line (backlog.mjs's `new`), and until this change
+    // `backlog-capture`'s SKILL.md banned it outright — "capture doesn't do it,
+    // even when the new item was clearly inspired by an existing one" — with a
+    // rationale that reads as a ban on the citation itself, not on one spelling
+    // of it. That skill now carries an explicit revive exception, but
+    // `skills/` is a publishing boundary: an install is a copy of the pushed
+    // HEAD, so until this branch is committed, pushed and `pnpm run
+    // plugin:sync` has run, every session this prompt reaches is still running
+    // the version that bans the flag. Naming the hand-written line as the
+    // second route is what keeps the citation reachable under the OLD skill
+    // too — its step 3 already has the reader adding `tags:` and `kind:` to
+    // frontmatter by hand and bans only `status:`. Do not "simplify" this to
+    // one route on the grounds that the skill now allows the flag; the two
+    // sides ship independently and this is the seam.
+    return `${head} It was ruled out of scope. File a NEW item that revives it, and give that new item a from: ${item.id} line in its frontmatter — either by passing --from ${item.id} to the backlog tool's new command, or by writing that line into the frontmatter by hand the way a tags: line is added. The citation is required: it is the revived item's only link back to the rejection. Leave ${item.id} itself exactly where it is — the rejection stays on the record.`;
   }
   // Refactors share this branch, not the fallback at the bottom: grooming one
   // promotes it into a task exactly as grooming an idea does, so the

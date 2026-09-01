@@ -70,9 +70,22 @@ that is groom's job.
    node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new <section> "<title>"
    ```
 
-   Never pass `--from <id>` here. That flag exists for promoting an existing item into a
-   new section, and promotion is `backlog-groom`'s job — capture doesn't do it, even when
-   the new item was clearly inspired by an existing one.
+   Never pass `--from <id>` here, with the single exception below. That flag writes a
+   `from: <id>` line into the new item's frontmatter, which is how a promotion records
+   what it came from, and promotion is `backlog-groom`'s job — capture doesn't do it just
+   because the new item was clearly inspired by an existing one. "This reminded me of
+   bug-4" is not a promotion, and citing bug-4 would claim it was.
+
+   **The one exception: reviving something already ruled out of scope.** If the request is
+   to revive, un-reject or reconsider a specific `oos-N` — bring back a thing that was
+   decided against — then the citation is required, not banned: pass `--from oos-N`, or
+   add the same `from: oos-N` line by hand in step 3 the way `tags:` is added there. Two
+   reasons it is capture's job and nobody else's. Rejection is terminal, so nothing comes
+   back by being moved — `move` refuses every move out of `out-of-scope/`, deliberately,
+   because the rejection is the record and it stays on it. And `backlog-groom` refuses an
+   item already in `out-of-scope/` outright (its own first refusal), so there is no other
+   skill that can file the reviving item at all. What comes back is a NEW item that cites
+   the old one; the original stays rejected, where it is, untouched.
 
    **Filing several items in one request: finish each capture before starting the next.**
    `new` derives the id by looking at the files already on disk, so it hands out the *same*

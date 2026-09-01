@@ -162,3 +162,42 @@ $ pnpm run test:skills
 $ pnpm run typecheck
 $ tsc --noEmit
 ```
+
+### Fix round 1 — the revive citation was banned by the skill it dispatches
+
+Review found the capture prompt asking for a `from: <id>` line that
+`backlog-capture`'s own SKILL.md forbade. Not a near-miss: `--from <id>` is
+precisely what writes that frontmatter key (`backlog.mjs`'s `new`, `data.from`),
+so the banned flag and the required citation were the same act, and the ban's
+rationale — "capture doesn't do it, even when the new item was clearly inspired
+by an existing one" — covered the substance rather than the spelling. A headless
+session would very plausibly have filed the revived item with no link back to
+the rejection, which is the one thing the settled decision requires.
+
+Fixed on both sides. `skills/backlog-capture/SKILL.md` keeps the ban and carves
+one explicit exception for reviving an `oos-N`, with the two reasons it is
+capture's job and nobody else's: `move` refuses every move out of
+`out-of-scope/`, so nothing comes back by being moved, and `backlog-groom`
+refuses an item already there outright, so no other skill can file the reviving
+item at all. `composePrompt` now names BOTH routes to the citation — the
+`--from` flag and the hand-written frontmatter line — and that redundancy is
+load-bearing rather than tidy: `skills/` is a publishing boundary, so until this
+branch is committed, pushed and `pnpm run plugin:sync` has run, every session
+the prompt reaches is still running the skill version that bans the flag. The
+hand-written line is a route that old version already models for `tags:` and
+`kind:` and never bans. A new test pins both routes so the second is not
+"simplified" away once the skill catches up.
+
+```
+$ pnpm test
+Test Suites: 41 passed, 41 total
+Tests:       636 passed, 636 total
+
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run test:skills
+# tests 264
+# pass 264
+# fail 0
+```

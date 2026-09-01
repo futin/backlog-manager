@@ -94,9 +94,36 @@ describe('composePrompt', () => {
     // reasoning that rejected it), and the original left where it is.
     expect(p).toMatch(/new item/i);
     expect(p).toMatch(/leave/i);
+    // The citation is stated as REQUIRED, not merely mentioned. A session
+    // reading it as one suggestion among several is the failure this whole
+    // arm exists to prevent — the revived item with no link back.
+    expect(p).toMatch(/required/i);
     // And never the groom or execute wording — capture is neither.
     expect(p).not.toContain('backlog-manager:backlog-groom');
     expect(p).not.toMatch(/concrete enough/i);
+  });
+
+  it('names both routes to the citation, so it survives the old capture skill too', () => {
+    /*
+     * `--from <id>` is the flag that writes the `from:` frontmatter line, and
+     * `backlog-capture`'s SKILL.md banned it outright until this change — with
+     * a rationale ("capture doesn't do it, even when the new item was clearly
+     * inspired by an existing one") that reads as a ban on the citation itself
+     * rather than on one spelling of it. The skill now carries a revive
+     * exception, but `skills/` is a publishing boundary: an install is a copy
+     * of the pushed HEAD, so every session this prompt reaches before the next
+     * `plugin:sync` is still running the version that bans the flag.
+     *
+     * So the prompt names the hand-written frontmatter line as well — a route
+     * the OLD skill's own step 3 already models for `tags:` and `kind:` and
+     * never bans. This case is what stops the second route being "simplified"
+     * away on the grounds that the skill now permits the first one; the two
+     * sides ship independently.
+     */
+    const p = composePrompt(fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null }), 'capture');
+    expect(p).toContain('--from oos-2');
+    expect(p).toMatch(/by hand/i);
+    expect(p).toMatch(/frontmatter/i);
   });
 
   it('never emits a slash command — headless expansion of those is unverified', () => {
