@@ -5,7 +5,9 @@ import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { useSettings } from '../../hooks/useSettings';
 import { isInProgress } from '../../lib/item-progress';
+import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { ItemCard } from './ItemCard';
@@ -118,6 +120,11 @@ function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
  */
 export default function BoardView() {
   const { items: index, projects, loading, error } = useBoard();
+  /* Task 5: only `staleDays` is read here, but the whole control comes back —
+     `useSettings` falls back to the defaults outside a provider (see its own
+     comment), which is what lets every board test that never mounts one still
+     get the documented 30-day window rather than undefined. */
+  const { settings } = useSettings();
   const [open, setOpen] = useState<BacklogItem | null>(null);
   const { status: agents } = useAgents();
   // Task 11: the orchestrator's own view of any project's queue, polled live
@@ -218,7 +225,10 @@ export default function BoardView() {
       ? isInProgress(i)
       : status === 'all' || i.status === status);
 
-  const visible = all.filter(matches);
+  /* Everything the toolbar admits, before the staleness split below. Named
+     rather than inlined because `hasLive` has to be computed off THIS set —
+     see its own comment for why that is not just an ordering convenience. */
+  const matched = all.filter(matches);
 
   /* One clock for the whole board, and only while something needs one. An
      in-progress card's elapsed reading is the only thing here that goes stale
@@ -226,9 +236,36 @@ export default function BoardView() {
      anyone touches the tab, and the item fetches only refresh on mount and
      focus. Gated on the rendered items so a board with nothing live installs no
      interval; passed down as a value so the cards stay pure and their tests
-     never have to fake a timer. */
-  const hasLive = visible.some(isInProgress);
+     never have to fake a timer.
+
+     Computed on `matched` rather than on `visible` below, which reads like a
+     bug and is not: `useNow` is a hook, so it cannot be called after a filter
+     that itself needs the clock it returns, and the two sets agree on this
+     question anyway. An in-progress item is never stale (item-stale.ts
+     sequences that rule ahead of the arithmetic on purpose), so staleness can
+     only ever remove cards that answer `false` here — the `.some` is
+     identical either way. */
+  const hasLive = matched.some(isInProgress);
   const now = useNow(hasLive);
+
+  /* Task 5: the Board/Archive split. Everything the toolbar matched, minus the
+     open refactors, ideas and bugs nobody has touched inside the window — those
+     are Archive's half (Task 6) and this is the same predicate read from the
+     other side, never a second copy of the rule. Tasks are exempt by
+     construction inside `leavesBoard`, so a stale one is still here below,
+     carrying the marker `staleFor` hands its card.
+
+     Applied AFTER `matches` rather than folded into it so the two narrowings
+     stay separable: `matches` is what the toolbar says, this is what the
+     calendar says, and only the second one can be changed from Settings. */
+  const visible = matched.filter((i) => !leavesBoard(i, settings.staleDays, now));
+
+  /* The marker a surviving stale card wears — in practice only ever a task,
+     since `leavesBoard` has already taken every other stale section out of
+     `visible`. Computed here rather than in ItemCard for the same reason `now`
+     and `runStage` are: the card stays a pure function of its props, with no
+     opinion about the window or the clock. */
+  const staleFor = (item: BacklogItem): boolean => isStale(item, settings.staleDays, now);
 
   const missing = registered.filter((p) => p.missing);
   const warnings = [
@@ -551,6 +588,7 @@ export default function BoardView() {
                       // directly — see that function's own comment for why.
                       onDispatch={() => openLaunchSheet(item)}
                       now={now}
+                      stale={staleFor(item)}
                       runStage={runStageFor(item)}
                       runBlock={runBlockFor(item)}
                     />

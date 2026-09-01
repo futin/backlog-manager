@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
+import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
 
@@ -40,7 +41,14 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // `Section`/`ItemStatus` below — the annotation is what keeps them narrowed.
   const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: CREATED, started: '', tags: [],
-    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
+    // Fresh by default, and RELATIVE, so Task 5's staleness split leaves this
+    // suite's fixtures on the Board whatever day it runs. `created` stays the
+    // fixed `aug 20` the meta-line assertion needs, and an `updated` stamp is
+    // exactly what stops that literal month from silently archiving every
+    // fixture here once the calendar passes the window — the fallback to
+    // `created` is a real rule (see item-stale.test.ts), just not one this
+    // suite's shared fixture should be sitting on.
+    updated: agoISO(0), phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over
@@ -102,6 +110,28 @@ beforeEach(() => {
 
 async function renderBoard() {
   render(<BoardView />);
+  await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
+}
+
+/*
+ * The same render, inside a real `SettingsProvider`. Every other case here
+ * renders BoardView bare, which is deliberate and stays that way: `useSettings`
+ * falls back to `DEFAULT_SETTINGS` outside a provider (see its own comment), so
+ * a bare board is a board on the documented 30-day window with no fixture
+ * setup at all.
+ *
+ * That fallback is also why a staleness-window test cannot just write to
+ * localStorage and render bare — nothing outside the provider reads storage,
+ * so the write would be silently ignored and the test would pass for the wrong
+ * reason. Mounting the provider is what puts the stored value on the path the
+ * app actually uses.
+ */
+async function renderBoardWithSettings() {
+  render(
+    <SettingsProvider>
+      <BoardView />
+    </SettingsProvider>
+  );
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 
@@ -517,6 +547,137 @@ describe('BoardView', () => {
     await renderBoard();
     await userEvent.type(screen.getByLabelText('Search items'), 'zzz');
     expect(screen.getByText('no matches')).toBeInTheDocument();
+  });
+
+  /*
+   * Task 5 — the Board/Archive split, seen from the Board's side. The
+   * predicate's own arithmetic is pinned in test/item-stale.test.ts against a
+   * fixed instant; what these cases prove is the wiring: that BoardView reads
+   * it at all, reads the window from Settings rather than a constant, and
+   * applies the task exemption where the design put it.
+   *
+   * Every fixture here sets `updated` explicitly, including the fresh ones —
+   * the shared builder's default is already fresh, but a staleness test whose
+   * fresh case depends on a default defined ninety lines away is a test that
+   * stops meaning anything the day that default changes.
+   */
+  const STALE_STAMP = agoISO(200 * 24 * 60 * 60 * 1000);
+  const FRESH_STAMP = agoISO(2 * 24 * 60 * 60 * 1000);
+
+  it('drops a stale refactor, idea and bug off the board', async () => {
+    stubItems([
+      fakeItem({ id: 'ref-7', title: 'old refactor', section: 'refactors', groomed: null, updated: STALE_STAMP }),
+      fakeItem({ id: 'idea-7', title: 'old idea', section: 'ideas', groomed: null, updated: STALE_STAMP }),
+      fakeItem({ id: 'bug-7', title: 'old bug', updated: STALE_STAMP }),
+      fakeItem({ id: 'bug-8', title: 'recent bug', updated: FRESH_STAMP })
+    ]);
+    await renderBoard();
+    expect(screen.queryByText('old refactor')).not.toBeInTheDocument();
+    expect(screen.queryByText('old idea')).not.toBeInTheDocument();
+    expect(screen.queryByText('old bug')).not.toBeInTheDocument();
+    expect(screen.getByText('recent bug')).toBeInTheDocument();
+  });
+
+  // The exemption the design argues for at length: a task is committed work,
+  // so one rotting for months is a fact to be made to look at rather than one
+  // to tidy away. It keeps its column and says so on its face.
+  it('keeps a stale task on the board and marks it', async () => {
+    stubItems([
+      fakeItem({ id: 'task-7', title: 'old task', section: 'tasks', groomed: true, updated: STALE_STAMP })
+    ]);
+    await renderBoard();
+    const card = screen.getByText('old task').closest('.board-card') as HTMLElement;
+    const marker = within(card).getByText('stale');
+    expect(marker).toHaveClass('board-card-stale');
+    // Beside the meta line, not inside it — the same nowrap-with-ellipsis
+    // clipping the groomed marker had to be moved out of.
+    expect(marker.closest('.board-card-meta')).toBeNull();
+    expect(marker.closest('.board-card-foot')).not.toBeNull();
+  });
+
+  it('marks no fresh task', async () => {
+    stubItems([
+      fakeItem({ id: 'task-8', title: 'new task', section: 'tasks', groomed: true, updated: FRESH_STAMP })
+    ]);
+    await renderBoard();
+    expect(screen.queryByText('stale')).not.toBeInTheDocument();
+  });
+
+  // `started` outranks the arithmetic: someone is on this right now, so
+  // "nobody has touched it in months" is simply false however old the stamp.
+  it('keeps an in-progress item with a stale stamp, unmarked', async () => {
+    stubItems([
+      fakeItem({
+        id: 'idea-8', title: 'live idea', section: 'ideas', groomed: null,
+        updated: STALE_STAMP, started: agoISO(30 * 60 * 1000)
+      })
+    ]);
+    await renderBoard();
+    expect(screen.getByText('live idea')).toBeInTheDocument();
+    expect(screen.queryByText('stale')).not.toBeInTheDocument();
+  });
+
+  // A done item is finished, not neglected, and the Board's `Done` filter is
+  // the only surface that shows it — so staleness must not reach it. Without
+  // the `status === 'open'` condition in `isStale`, this bug vanishes from
+  // every view the app has.
+  it('still shows a long-finished bug under the done filter', async () => {
+    stubItems([
+      fakeItem({ id: 'bug-9', title: 'ancient fix', status: 'done', updated: STALE_STAMP }),
+      // A live card purely so the board renders its columns rather than the
+      // "no matches" empty state under the default open filter — the done
+      // item is the one under test and is invisible until the filter moves.
+      fakeItem({ id: 'bug-13', title: 'something open', updated: FRESH_STAMP })
+    ]);
+    await renderBoard();
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
+    expect(screen.getByText('ancient fix')).toBeInTheDocument();
+    expect(screen.queryByText('stale')).not.toBeInTheDocument();
+  });
+
+  // The window is a setting, not a constant: the same item is on the board
+  // under the 30-day default and gone under a 7-day one. This is the
+  // "changing the window in Settings visibly moves items between the two
+  // surfaces" half of the task's own done-when, asserted at the seam where
+  // the setting reaches the filter.
+  const TEN_DAYS = agoISO(10 * 24 * 60 * 60 * 1000);
+  const tenDayFixture = () => stubItems([
+    fakeItem({ id: 'bug-10', title: 'ten days quiet', updated: TEN_DAYS }),
+    fakeItem({ id: 'bug-13', title: 'yesterday', updated: FRESH_STAMP })
+  ]);
+
+  it('keeps a ten-day-old bug under the default window', async () => {
+    tenDayFixture();
+    await renderBoardWithSettings();
+    expect(screen.getByText('ten days quiet')).toBeInTheDocument();
+  });
+
+  // The same item, the same fixture, one stored setting different. Together
+  // with the case above this is the task's own done-when — "changing the
+  // window in Settings visibly moves items between the two surfaces" —
+  // asserted at the seam where the stored value reaches the filter, which is
+  // the part a click in Settings cannot prove on its own.
+  it('drops that same bug once the stored window is seven days', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ staleDays: 7 }));
+    tenDayFixture();
+    await renderBoardWithSettings();
+    // The fresh sibling is what makes the absence mean "archived" rather than
+    // "the board never rendered".
+    expect(screen.getByText('yesterday')).toBeInTheDocument();
+    expect(screen.queryByText('ten days quiet')).not.toBeInTheDocument();
+  });
+
+  // An item whose `created` is old and whose `updated` was never written —
+  // which is every file on disk the day this ships. The fallback is what makes
+  // that first load archive genuinely old work rather than nothing at all.
+  it('falls back to created when no updated stamp was ever written', async () => {
+    stubItems([
+      fakeItem({ id: 'bug-11', title: 'never stamped', created: daysAgoDate(200), updated: '' }),
+      fakeItem({ id: 'bug-12', title: 'filed today', created: daysAgoDate(0), updated: '' })
+    ]);
+    await renderBoard();
+    expect(screen.queryByText('never stamped')).not.toBeInTheDocument();
+    expect(screen.getByText('filed today')).toBeInTheDocument();
   });
 
   it('surfaces scan errors and missing projects as a warning line', async () => {

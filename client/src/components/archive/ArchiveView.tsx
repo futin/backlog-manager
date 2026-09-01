@@ -13,7 +13,12 @@
  * What it describes is the design's Archive (docs/superpowers/specs/
  * 2026-08-30-board-growth-design.md): open items whose `updated:` stamp has
  * fallen outside the staleness window, plus everything ever ruled out of
- * scope. Both halves can come back, by different routes — a stale item
+ * scope. Task 5 landed the first half of that split ahead of this view — the
+ * Board evicts those items now (`lib/item-stale.ts`), and until the columns
+ * below exist they are listed nowhere at all. That gap is exactly why the
+ * note names them: a card that left the Board with no surface admitting to
+ * holding it is the one reading of this screen that would be alarming, and
+ * it is the reading a stale `coming soon` would have left in place. Both halves can come back, by different routes — a stale item
  * through a groom session, which refreshes `updated:` and returns it to the
  * Board, and an out-of-scope one through a *new* item citing it, since
  * `moveItem` refuses every move out of `out-of-scope/` and the rejection
@@ -33,9 +38,11 @@ export default function ArchiveView() {
         <div className="board-title">Archive</div>
       </div>
       <p className="board-note">
-        Nothing here yet. Archive will hold open items nobody has touched in a
-        while, alongside everything already ruled out of scope — so the Board
-        can stay the things that are actually live.
+        No columns here yet. The Board has already stopped showing open items
+        nobody has touched inside the staleness window — they are still on
+        disk, and this is where they will be listed, alongside everything
+        already ruled out of scope. Tasks are never among them: a stale task
+        keeps its column on the Board and is marked instead.
         <br />
         Neither half is a dead end: grooming a stale item brings it straight
         back to the Board, and an out-of-scope one comes back as a new item

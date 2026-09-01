@@ -50,6 +50,24 @@ describe('SettingsView', () => {
     expect(document.documentElement.dataset.theme).toBe('daylight');
   });
 
+  // Task 5: the staleness window, which is the only Board-scoped setting on
+  // this page and the one control that changes what the board SHOWS rather
+  // than how it looks. Asserted through storage rather than through the
+  // board: what this test owns is that the row exists, is labelled, and
+  // commits the value the board later reads — board.test.tsx owns what the
+  // board does with it.
+  it('persists the staleness window from the Board group', async () => {
+    renderView();
+    const row = screen.getByText('Archive after').closest('.set-row') as HTMLElement;
+    await userEvent.click(within(row).getByRole('button', { name: '7d' }));
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
+    expect(stored.staleDays).toBe(7);
+    // The default is what is pressed before anything is clicked, so the row
+    // states the window in force rather than leaving it to be inferred.
+    expect(within(row).getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(row).getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('has no bionic reading rows', async () => {
     renderView();
     expect(screen.queryByText(/Bionic/)).not.toBeInTheDocument();

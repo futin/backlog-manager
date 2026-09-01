@@ -350,7 +350,7 @@ body {
    clipped to `· gr…`. They inherit nothing from that line (they are its
    siblings), so the mono family and size are restated here.
    Groomed is quiet confirmation, not an alarm; done is history and dims. */
-.board-card-groomed, .board-card-done, .board-card-kind {
+.board-card-groomed, .board-card-done, .board-card-kind, .board-card-stale {
   flex: none; font-family: var(--mono); font-size: 10.5px; white-space: nowrap;
 }
 .board-card-groomed { color: var(--green) }
@@ -363,6 +363,17 @@ body {
    marker are already three signals competing in one strip, and a fourth hue
    there would cost more than it told anyone. */
 .board-card-kind { color: var(--ink3) }
+/* Task 5: an open item nobody has touched inside the staleness window. Only a
+   task can actually wear it on the Board — every other stale section has left
+   for Archive by then (item-stale.ts, `leavesBoard`), and the whole reason a
+   task stays is so this word can be on it.
+   Mustard, the theme's own "incomplete/pending". Not amber, which is reserved
+   for the live bar directly above it and means the opposite — a human is on
+   this right now. Not red: six quiet weeks on a task is a thing to look at,
+   not a failure, and the board has exactly one danger colour to spend. Not
+   --ink3 like the kind badge either, which would be the wrong register in the
+   other direction: this one IS asking for something. */
+.board-card-stale { color: var(--mustard) }
 /* Task 11: the orchestrator's own live per-card marker (ItemCard's
    `runStage` prop) — the one footer marker whose source is a run payload
    rather than the item file, and the reason it is shaped as an actual chip

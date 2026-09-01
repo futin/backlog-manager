@@ -74,6 +74,19 @@ export interface Settings {
   dispatchDefaultModel: DispatchDefault;
   /** Same as `dispatchDefaultModel`, for the effort picker. */
   dispatchDefaultEffort: DispatchDefault;
+  /**
+   * Days. How long an open item may go untouched before it leaves the Board
+   * for Archive (`client/src/lib/item-stale.ts`).
+   *
+   * A client setting rather than a server one, and per-device like everything
+   * else here, because Board-versus-Archive is a VIEW decision: the server
+   * already returns the whole corpus and the split is drawn over it here. It
+   * writes nothing to any item file, so two devices disagreeing about the
+   * window costs nothing but two different readings of the same store —
+   * which is the point, since the phone glancing at what is live this week
+   * and the laptop planning a quarter want different answers.
+   */
+  staleDays: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -83,7 +96,8 @@ export const DEFAULT_SETTINGS: Settings = {
   landing: 'last',
   linkBase: 'http://127.0.0.1:5174',
   dispatchDefaultModel: '',
-  dispatchDefaultEffort: ''
+  dispatchDefaultEffort: '',
+  staleDays: 30
 };
 
 /**
@@ -95,11 +109,29 @@ export const DEFAULT_SETTINGS: Settings = {
  * honouring rather than snapping.
  */
 export const LIMITS = {
-  fontScale: { min: 80, max: 130 }
+  fontScale: { min: 80, max: 130 },
+  /**
+   * A day, not an hour, is the floor: the stamp this window is compared
+   * against can be a bare `YYYY-MM-DD` (see item-stale.ts), so anything
+   * finer than a day is a precision the data cannot answer to. The ceiling
+   * is ten years, which is not a real preference so much as the point past
+   * which "archive on staleness" has been turned off — and a value that
+   * large means exactly that, so it is honoured rather than rejected.
+   */
+  staleDays: { min: 1, max: 3650 }
 } as const;
 
 /** The stops the Text size row offers. A subset of LIMITS, not its definition. */
 export const FONT_SCALES = [90, 100, 110, 120];
+
+/**
+ * The stops the staleness row offers — a subset of LIMITS, same as
+ * FONT_SCALES. A week is "what is live right now", a fortnight is a sprint,
+ * a month is the default the design argued for, and a quarter is for a board
+ * nobody wants narrowed much at all. A hand-edited value between or beyond
+ * them still works; these are the four worth one click.
+ */
+export const STALE_WINDOWS = [7, 14, 30, 90];
 
 /** The key this app's own settings live under. */
 export const SETTINGS_STORAGE_KEY = 'backlog-manager.settings';
@@ -112,6 +144,27 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   const n = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+/**
+ * A bounded count of days, or the DEFAULT — not the nearest bound — for
+ * anything at or below zero.
+ *
+ * That asymmetry with `clampInt` above is the whole reason this is its own
+ * function. `fontScale: 10` plainly means "as small as you allow", so
+ * snapping it to the minimum honours the intent. A staleness window of `0`
+ * or `-5` has no such reading: taken literally it would empty the Board of
+ * every refactor, idea and bug at once, on the strength of a value nobody
+ * can have meant, and the reader would be left staring at a board that looks
+ * broken with no clue that a number in localStorage is why. Above the
+ * ceiling is the opposite case and clamps normally — `99999` and `3650` mean
+ * the same thing (never archive), so there is nothing to second-guess.
+ */
+function clampDays(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+  if (!Number.isFinite(n)) return fallback;
+  const days = Math.round(n);
+  return days < min ? fallback : Math.min(max, days);
 }
 
 /**
@@ -184,6 +237,10 @@ export function clampSettings(raw: unknown): Settings {
     ),
     dispatchDefaultEffort: pickOne(
       s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort
+    ),
+    staleDays: clampDays(
+      s.staleDays, DEFAULT_SETTINGS.staleDays,
+      LIMITS.staleDays.min, LIMITS.staleDays.max
     )
   };
 }

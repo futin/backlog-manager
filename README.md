@@ -191,9 +191,19 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   columns, a click-to-open drawer rendering the item's Markdown body, plus a
   dispatch button — on the card and again in the drawer — that opens a
   launch sheet onto `../claude-agents-dashboard`), and Settings (five themes,
-  density, text scale, landing section — all per-device, in `localStorage`,
-  never sent to the server — plus a Claude Agents group reporting that
-  dashboard's status).
+  density, text scale, landing section, the staleness window — all per-device,
+  in `localStorage`, never sent to the server — plus a Claude Agents group
+  reporting that dashboard's status).
+
+  The Board shows what is live: an open refactor, idea or bug nobody has
+  touched inside the staleness window (30 days by default, `Settings → Board →
+  Archive after`) leaves it for Archive on its own. "Touched" is the `updated:`
+  stamp every `start`/`stop` writes, falling back to `created` for a file that
+  predates the stamp — **so the first load after upgrading moves genuinely old,
+  never-touched items off the Board.** Nothing is lost: grooming one refreshes
+  the stamp and it is back at the next load. Tasks are the exception and never
+  leave — a task rotting for six weeks is a fact to look at, so it keeps its
+  column and gains a `stale` marker instead.
 - `shared/` — `types.ts` (registry and API shapes, defined once and imported
   by both sides), `agent.ts` (`deriveAction` and `dispatchGate` — the single
   implementation of what a dispatch click does and whether it may happen,

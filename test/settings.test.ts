@@ -1,24 +1,26 @@
 import { SECTIONS } from '../client/src/components/SideRail';
-import { DEFAULT_SETTINGS, FONT_SCALES, THEMES, clampSettings } from '../client/src/lib/settings';
+import {
+  DEFAULT_SETTINGS, FONT_SCALES, LIMITS, STALE_WINDOWS, THEMES, clampSettings
+} from '../client/src/lib/settings';
 import { EFFORTS, MODELS } from '../shared/agent';
 
 describe('clampSettings', () => {
   it('passes a valid object through', () => {
     const s = clampSettings({
       theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high'
+      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14
     });
     expect(s).toEqual({
       theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
       linkBase: 'http://127.0.0.1:5174',
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high'
+      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14
     });
   });
 
   it('falls back per field, independently', () => {
     const s = clampSettings({
       theme: 'neon', density: 7, fontScale: 'big', landing: 'guides',
-      dispatchDefaultModel: 'gpt', dispatchDefaultEffort: 7
+      dispatchDefaultModel: 'gpt', dispatchDefaultEffort: 7, staleDays: 'soon'
     });
     expect(s).toEqual(DEFAULT_SETTINGS);
   });
@@ -33,9 +35,30 @@ describe('clampSettings', () => {
     expect(clampSettings('x')).toEqual(DEFAULT_SETTINGS);
   });
 
-  it('offers five themes and four font stops (UI contract)', () => {
+  /**
+   * The staleness window is the one numeric setting that does NOT snap to its
+   * nearest bound on the low side — see `clampDays`. Zero and negatives are
+   * not "archive as aggressively as you allow", they are values nobody can
+   * have meant, and honouring them literally would empty three of the four
+   * Board columns with nothing on screen to explain why.
+   */
+  it('clamps a zero, negative or non-numeric staleness window to the default', () => {
+    expect(clampSettings({ staleDays: 0 }).staleDays).toBe(DEFAULT_SETTINGS.staleDays);
+    expect(clampSettings({ staleDays: -5 }).staleDays).toBe(DEFAULT_SETTINGS.staleDays);
+    expect(clampSettings({ staleDays: 'soon' }).staleDays).toBe(DEFAULT_SETTINGS.staleDays);
+    expect(clampSettings({}).staleDays).toBe(DEFAULT_SETTINGS.staleDays);
+  });
+
+  it('keeps a real staleness window, and clamps one past the ceiling', () => {
+    expect(clampSettings({ staleDays: 7 }).staleDays).toBe(7);
+    expect(clampSettings({ staleDays: 1 }).staleDays).toBe(1);
+    expect(clampSettings({ staleDays: 99999 }).staleDays).toBe(LIMITS.staleDays.max);
+  });
+
+  it('offers five themes, four font stops and four staleness stops (UI contract)', () => {
     expect(THEMES).toHaveLength(5);
     expect(FONT_SCALES).toEqual([90, 100, 110, 120]);
+    expect(STALE_WINDOWS).toEqual([7, 14, 30, 90]);
   });
 });
 

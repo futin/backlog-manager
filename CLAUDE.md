@@ -40,7 +40,8 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   included, onto Board; Archive is a placeholder until its own chunk lands),
   board (four
   fixed columns — refactors/ideas/bugs/tasks; out-of-scope has no Board
-  column at all and belongs to Archive — card drawer,
+  column at all and belongs to Archive; stale items leave it too, see
+  Invariants — card drawer,
   dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
   a toolbar Orchestrate control opening `OrchestrateSheet` (previews the
   queue and selects a subset of it — `ids` rides along only for a strict
@@ -102,6 +103,22 @@ happened.
   non-empty), never stored; status is the directory, never frontmatter. Ideas,
   refactors and out-of-scope derive `null`, not `false` — grooming is not a
   state they have, and for the first two the state they wait in is *promoted*.
+- **Board-versus-Archive is derived from `updated ?? created`, never
+  stored.** `isStale`/`leavesBoard` (`client/src/lib/item-stale.ts`) are the
+  one implementation, read by BoardView now and by Archive later, so an item
+  can never be in both surfaces or neither. Four rules the predicate encodes
+  and no caller may re-decide: an item **in progress** is never stale
+  (`started` outranks the arithmetic); a **done or rejected** item is never
+  stale (staleness is about neglected work, and a done item is only reachable
+  through the Board's own Done filter); an **unparseable or absent** pair of
+  stamps reads as fresh, because a malformed file has to stay where someone
+  will see it; and a **task never leaves the Board**, it gains a `stale`
+  marker instead. The window is a client setting (`staleDays`, default 30) —
+  a view decision over a corpus the server already returns whole — and it is
+  the one numeric setting whose clamp falls back to the DEFAULT rather than
+  the nearest bound below `min`, because `0` would silently empty three
+  columns.
+
 - **`refactors/` is a peer section, not a facet on ideas**: ideas are new,
   refactors are existing things that should be improved. Prefix `ref` (short
   because the card's meta line is ~118px of nowrap), lifecycle identical to
