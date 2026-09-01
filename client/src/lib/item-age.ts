@@ -83,8 +83,13 @@ export function elapsedSince(started: string, now: number = Date.now()): string 
  * and `ago` on another (Catalan, same abbreviation slot) is a date two people
  * cannot talk about. Lowercase to sit with the mono meta line it prints into
  * rather than shouting over it.
+ *
+ * Exported for `item-month.ts`, which labels Archive's month subheaders and
+ * needs exactly this list for exactly this reason — a heading that reads a
+ * different month name per machine is the same problem one size up. Imported
+ * rather than copied so the locale decision above is stated once.
  */
-const MONTHS = [
+export const MONTHS = [
   'jan', 'feb', 'mar', 'apr', 'may', 'jun',
   'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
 ];

@@ -82,10 +82,59 @@ describe('composePrompt', () => {
     expect(p).toMatch(/do not commit or push/i);
   });
 
+  it('asks capture for a NEW item citing the rejection, and to leave the original alone', () => {
+    const oos = fakeItem({ id: 'oos-2', title: 'Priority field', section: 'out-of-scope', status: 'terminal', groomed: null });
+    const p = composePrompt(oos, 'capture');
+    expect(p).toContain('backlog-manager:backlog-capture');
+    expect(p).toContain('oos-2');
+    expect(p).toContain('from: oos-2');
+    // The three things this sentence has to carry, each a way it goes wrong
+    // when left out: a NEW item (or the session tries to move a file `moveItem`
+    // refuses to move), the citation (or the revival loses its link back to the
+    // reasoning that rejected it), and the original left where it is.
+    expect(p).toMatch(/new item/i);
+    expect(p).toMatch(/leave/i);
+    // The citation is stated as REQUIRED, not merely mentioned. A session
+    // reading it as one suggestion among several is the failure this whole
+    // arm exists to prevent — the revived item with no link back.
+    expect(p).toMatch(/required/i);
+    // And never the groom or execute wording — capture is neither.
+    expect(p).not.toContain('backlog-manager:backlog-groom');
+    expect(p).not.toMatch(/concrete enough/i);
+  });
+
+  it('names both routes to the citation, so it survives the old capture skill too', () => {
+    /*
+     * `--from <id>` is the flag that writes the `from:` frontmatter line, and
+     * `backlog-capture`'s SKILL.md banned it outright until this change — with
+     * a rationale ("capture doesn't do it, even when the new item was clearly
+     * inspired by an existing one") that reads as a ban on the citation itself
+     * rather than on one spelling of it. The skill now carries a revive
+     * exception, but `skills/` is a publishing boundary: an install is a copy
+     * of the pushed HEAD, so every session this prompt reaches before the next
+     * `plugin:sync` is still running the version that bans the flag.
+     *
+     * So the prompt names the hand-written frontmatter line as well — a route
+     * the OLD skill's own step 3 already models for `tags:` and `kind:` and
+     * never bans. This case is what stops the second route being "simplified"
+     * away on the grounds that the skill now permits the first one; the two
+     * sides ship independently.
+     */
+    const p = composePrompt(fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null }), 'capture');
+    expect(p).toContain('--from oos-2');
+    expect(p).toMatch(/by hand/i);
+    expect(p).toMatch(/frontmatter/i);
+  });
+
   it('never emits a slash command — headless expansion of those is unverified', () => {
     for (const item of [fakeItem(), fakeItem({ section: 'ideas', groomed: null })]) {
       expect(composePrompt(item, 'groom')).not.toContain('/backlog');
     }
+    // The capture arm included: the item file that settled this action wrote it
+    // as "spawns /backlog-capture", which names the skill and does not license
+    // the slash spelling — this module's own rule wins.
+    expect(composePrompt(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null }), 'capture'))
+      .not.toContain('/backlog');
   });
 
   it('collapses a title that would break the one-line quoting', () => {
@@ -104,9 +153,10 @@ describe('composePrompt', () => {
     for (const item of [
       fakeItem(),
       fakeItem({ section: 'ideas', groomed: null }),
-      fakeItem({ section: 'tasks', groomed: true })
+      fakeItem({ section: 'tasks', groomed: true }),
+      fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null })
     ]) {
-      for (const action of ['groom', 'execute'] as const) {
+      for (const action of ['groom', 'execute', 'capture'] as const) {
         expect(composePrompt(item, action)).not.toContain(item.path);
         expect(composePrompt(item, action)).not.toContain(item.projectPath);
       }

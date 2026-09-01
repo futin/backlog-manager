@@ -1,3 +1,15 @@
+/*
+ * Type-only, and deliberately so: `shared/agent.ts` imports a VALUE from this
+ * file (`RUN_CLAIMED_STAGES`), so on paper the two now reference each other.
+ * An `import type` is erased before any bundler, Nest build or runtime sees
+ * it, so no cycle exists outside the type checker — and the alternative is
+ * spelling the action union out by hand in the two request/response shapes
+ * below, which is the exact duplication `deriveAction` living in one shared
+ * module exists to rule out. Do not "break the cycle" by re-inlining the
+ * union.
+ */
+import type { AgentAction } from './agent';
+
 /** The registry file's shape — written only by skills/backlog/tools/backlog.mjs,
  *  read by the server. */
 export interface RegistryProject {
@@ -201,7 +213,7 @@ export interface AgentsStatus {
  * it, and dispatch re-resolves it from `itemPath` anyway.
  */
 export interface AgentPlan {
-  action: 'groom' | 'execute';
+  action: AgentAction;
   /** The composed default. The sheet may edit it before dispatching. */
   prompt: string;
   /** Display name of the project the session will run in. */
@@ -222,7 +234,7 @@ export interface AgentPlan {
 export interface AgentDispatchRequest {
   itemPath: string;
   /** Checked against the server's own derivation, never obeyed. */
-  action: 'groom' | 'execute';
+  action: AgentAction;
   prompt: string;
   permissionMode: PermissionMode;
   /**

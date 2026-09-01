@@ -9,6 +9,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { isInProgress } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
+import { PROJECT_KEY } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { ItemCard } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
@@ -18,7 +19,10 @@ import { RunDrawer } from './RunDrawer';
 import { RunStrip } from './RunStrip';
 import type { BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
 
-const PROJECT_KEY = 'backlog-manager.project';
+/* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
+   the two surfaces are separate lazy chunks — see lib/view-keys.ts for why a
+   shared module rather than an export off this file. The two below stay local
+   because Archive has neither control. */
 const STATUS_KEY = 'backlog-manager.status';
 const SORT_KEY = 'backlog-manager.sort';
 

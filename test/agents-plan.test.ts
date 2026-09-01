@@ -19,6 +19,11 @@ const GROOMED_BUG = item('bug-2', 'a known bug', '## Symptom\n\nit breaks\n\n## 
 const RAW_BUG = item('bug-1', 'a fresh bug', '## Symptom\n\nit breaks\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n');
 const IDEA = item('idea-1', 'an idea', '## Sketch\n\nsomething\n');
 const OOS = item('oos-1', 'declined', '## Why not\n\nno\n');
+/* A done item is what "no next step at all" means now that a rejection has
+   one. Its own fixture rather than a reused one: the case below has to act on
+   an item whose `status` is `done` specifically, and every other file in this
+   store is open or terminal. */
+const DONE_BUG = item('bug-9', 'a fixed bug', '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfixed\n');
 
 let projectPath: string;
 
@@ -50,6 +55,7 @@ describe('POST /api/agents/plan', () => {
       { leaf: 'bugs/open', filename: 'bug-1-a-fresh-bug.md', content: RAW_BUG },
       { leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG },
       { leaf: 'ideas/open', filename: 'idea-1-an-idea.md', content: IDEA },
+      { leaf: 'bugs/done', filename: 'bug-9-a-fixed-bug.md', content: DONE_BUG },
       { leaf: 'out-of-scope', filename: 'oos-1-declined.md', content: OOS }
     ]);
 
@@ -133,9 +139,20 @@ describe('POST /api/agents/plan', () => {
     expect(res.body.prompt).toContain('backlog-manager:backlog-execute');
   });
 
-  it('404s an item with no next step', async () => {
+  it('plans a capture for an out-of-scope item — Archive\'s promotion path', async () => {
     stubDashboard();
-    await post({ itemPath: itemPath('out-of-scope', 'oos-1-declined.md') })
+    const res = await post({ itemPath: itemPath('out-of-scope', 'oos-1-declined.md') }).expect(201);
+    expect(res.body.action).toBe('capture');
+    expect(res.body.prompt).toContain('backlog-manager:backlog-capture');
+    expect(res.body.prompt).toContain('from: oos-1');
+  });
+
+  it('404s an item with no next step — a DONE one, not a rejected one', async () => {
+    // The distinction the third action introduced: history genuinely has no
+    // next step, where a rejection does. This case used to be the
+    // out-of-scope file, one line above.
+    stubDashboard();
+    await post({ itemPath: itemPath('bugs/done', 'bug-9-a-fixed-bug.md') })
       .expect(404, { error: 'nothing to dispatch for this item' });
   });
 
