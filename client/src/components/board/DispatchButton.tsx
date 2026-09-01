@@ -14,9 +14,15 @@ import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
  *  - And an ENVIRONMENT-level block (dispatch off, dashboard unreachable, no
  *    CLAUDE_BIN, remote answers off) renders nothing either: see
  *    `dispatchGate` in shared/agent.ts for why those four hide the control
- *    while the per-item one disables it. The short version is that a control
+ *    while the per-item ones disable it. The short version is that a control
  *    disabled on every single card, for a reason that is not about any of
  *    them, is noise; "BM_AGENTS is off" belongs in Settings, which reports it.
+ *
+ * There are TWO per-item blocks, not one: the dashboard cannot see this item's
+ * project (derived here, from `status`), and an orchestrator run has already
+ * claimed this item (handed in as `runBlock`, because nothing in the item file
+ * or the status payload can know it). Both disable with their reason; see the
+ * `blocked` line below for why they read in that order.
  *
  * `status` is trusted here exactly as typed: making it honest at runtime is
  * `fetchAgentsStatus`'s job (`lib/agents.ts`), the one place a JSON body
@@ -35,7 +41,7 @@ import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
  * coloured by the same rules in styles.css.
  */
 export function DispatchButton(
-  { item, status, onDispatch, variant = 'chip' }: {
+  { item, status, onDispatch, variant = 'chip', runBlock = null }: {
     item: BacklogItem;
     status: AgentsStatus | null;
     onDispatch: () => void;
@@ -43,6 +49,21 @@ export function DispatchButton(
      *  card's tear-off edge and needs the card to be a flex row around it;
      *  `chip` stands on its own anywhere, which is why it is the default. */
     variant?: 'tab' | 'chip';
+    /**
+     * Why an orchestrator run forbids dispatching this item right now, or null.
+     *
+     * A prop rather than a derivation, unlike every other state this component
+     * decides for itself: the answer lives in the run payload alone
+     * (`GET /api/orchestrator/runs`), which this leaf has no access to and no
+     * business fetching forty times per board. `runClaimBlock`
+     * (shared/agent.ts) is what produces the string, once, from the run list
+     * the board already holds — see its doc comment for why the item file
+     * cannot carry this fact at all.
+     *
+     * Optional and defaulted so every caller that has no run data to give
+     * (the older tests, any future read-only view) behaves exactly as before.
+     */
+    runBlock?: string | null;
   }
 ) {
   // Stable per mounted button, and unique across the forty of them a board can
@@ -56,7 +77,17 @@ export function DispatchButton(
   const gate = dispatchGate(item, status);
   if (gate.control === 'hidden') return null;
 
-  const blocked = gate.control === 'disabled' ? gate.reason : null;
+  /*
+   * Order is the invariant, not a preference: ENVIRONMENT-level → per-item
+   * project visibility → run claim. The first still returns `null` above (no
+   * control at all — see the file comment and `dispatchGate` for why), and the
+   * other two disable with a reason. The run claim reads LAST of the three
+   * because it is the most volatile and the least fundamental: with dispatch
+   * off or the project invisible there is nothing to say about a run, and a
+   * reason naming a stage would send the reader to watch a queue when what
+   * needs fixing is the dashboard.
+   */
+  const blocked = (gate.control === 'disabled' ? gate.reason : null) ?? runBlock;
 
   // The action IS the tone class: `groom` and `execute` are the two
   // AgentAction values, so the palette can never drift from the derivation.
@@ -70,12 +101,12 @@ export function DispatchButton(
         // aria-disabled, NOT the `disabled` attribute, and the guard in
         // onClick is what actually makes it inert. A `disabled` button is
         // removed from the tab order and from the accessibility tree's
-        // interactive surface, so a keyboard user cannot reach it — and this
-        // is now the ONLY disabled state there is, the one case where the
-        // reason names a specific project and a specific fix. `title` on an
-        // unreachable element is announced unreliably at best; the
-        // aria-describedby span below is what makes it dependable, and it is
-        // only readable if the control can be focused at all.
+        // interactive surface, so a keyboard user cannot reach it — and both
+        // disabled states there are name something specific and actionable
+        // (which project the dashboard cannot see; which run stage owns this
+        // item). `title` on an unreachable element is announced unreliably at
+        // best; the aria-describedby span below is what makes it dependable,
+        // and it is only readable if the control can be focused at all.
         aria-disabled={blocked !== null}
         aria-describedby={blocked === null ? undefined : reasonId}
         onClick={(e) => {
@@ -128,10 +159,13 @@ export function DispatchButton(
           action word, and folding a two-line explanation into it would make
           every screen reader announce the whole sentence as the control's
           name. A description is the right slot for "why this cannot be used
-          right now", and it is the only place in the UI that states this
-          condition at all — Settings reports a project *count*, not which
-          projects are missing. Rendered as a sibling rather than a child so
-          its text stays out of the button's accessible name. */}
+          right now", and for the project-visibility reason it is the only
+          place in the UI that states the condition at all — Settings reports
+          a project *count*, not which projects are missing. (The run-claim
+          reason has the run strip above the columns as a second telling, but
+          the strip names a queue, not this card.) Rendered as a sibling rather
+          than a child so its text stays out of the button's accessible
+          name. */}
       {blocked !== null && <span id={reasonId} className="sr-only">{blocked}</span>}
     </>
   );

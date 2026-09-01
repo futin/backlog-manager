@@ -1,8 +1,12 @@
 import {
   EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction, dispatchBlock,
-  dispatchGate, isItemId, modesUpTo, pickFrom, projectDispatchGate
+  dispatchGate, isItemId, modesUpTo, pickFrom, projectDispatchGate, runClaimBlock
 } from '../shared/agent';
-import type { AgentsStatus, BacklogItem } from '../shared/types';
+import rawFixture from './fixtures/orchestrator-run.json';
+import { RUN_CLAIMED_STAGES } from '../shared/types';
+import type {
+  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, RunQueueItem, RunStage
+} from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
@@ -317,5 +321,100 @@ describe('isItemId', () => {
     expect(isItemId(7)).toBe(false);
     expect(isItemId(['task-1'])).toBe(false);
     expect(isItemId(null)).toBe(false);
+  });
+});
+
+/*
+ * The fourth kind of dispatch block: an item an orchestrator run has already
+ * claimed. Cast for the same reason every other suite that reads this fixture
+ * casts it — the file is plain JSON, so TS widens its string fields to
+ * `string` rather than the narrower literal unions (`RunStage` above all,
+ * which is the entire vocabulary these cases turn on).
+ */
+const runFixture = rawFixture as OrchestratorRun;
+
+type RunPayload = OrchestratorRunsPayload['runs'][number];
+
+/** One fresh run for `/abs/alpha` (the path `fakeItem` carries) holding
+ *  exactly one queue entry, at whatever stage the case is about. Built off
+ *  the contract fixture rather than a hand-rolled queue item so the shape
+ *  stays the real one, with only the two fields each case varies replaced. */
+function runWith(stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
+  const entry: RunQueueItem = { ...runFixture.queue[0], id: 'bug-1', stage };
+  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, ...over };
+}
+
+/*
+ * The six stages a run has FINISHED with an item at. Written out here rather
+ * than derived as "everything RUN_CLAIMED_STAGES omits", because deriving it
+ * from the thing under test is how a partition test proves nothing: if
+ * RUN_CLAIMED_STAGES lost a member, a derived complement would gain it and
+ * both halves would still agree.
+ */
+const TERMINAL_STAGES: readonly RunStage[] = [
+  'merged', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
+];
+
+describe('runClaimBlock', () => {
+  it('names the stage for every stage a run still owns the item at', () => {
+    for (const stage of RUN_CLAIMED_STAGES) {
+      const reason = runClaimBlock(fakeItem(), [runWith(stage)]);
+      expect(reason).not.toBeNull();
+      // The stage itself, not a generic "a run has this": which stage it is
+      // tells the reader whether to wait a moment or go look at the run.
+      expect(reason).toContain(stage);
+    }
+  });
+
+  /* The half that keeps this from being a blanket "any run mentioning this
+     item blocks it". A run that merged, failed, skipped, parked or bounced an
+     item is DONE with it, and a human picking it up by hand is the intended
+     next move — `parked` most of all, since a park exists precisely to hand
+     the item back to a person. */
+  it('allows dispatch once the run has left the item at a terminal stage', () => {
+    for (const stage of TERMINAL_STAGES) {
+      expect(runClaimBlock(fakeItem(), [runWith(stage)])).toBeNull();
+    }
+  });
+
+  /* Staleness is the same rule every other run-derived surface already
+     applies (RunStrip renders nothing, BoardView's badge map is built from
+     fresh runs only). A crashed run may well still hold a worktree, but that
+     is what `--resume`/`--abort` are for: cards dead until someone runs one
+     of those is a worse failure than the one this block exists to prevent. */
+  it('allows dispatch when the only run holding the item has gone stale', () => {
+    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { fresh: false })])).toBeNull();
+  });
+
+  /* Ids are only sequential within one project's own store, so two checkouts
+     can both hold `bug-1` — matching on id alone would block a card in a
+     project no run is touching at all. */
+  it('ignores a run for a different project holding the same id', () => {
+    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { project: '/abs/other' })])).toBeNull();
+  });
+
+  it('allows dispatch when the right project\'s fresh run does not mention this item', () => {
+    expect(runClaimBlock(fakeItem({ id: 'task-99' }), [runWith('reviewing')])).toBeNull();
+  });
+
+  it('allows dispatch when there are no runs at all', () => {
+    expect(runClaimBlock(fakeItem(), [])).toBeNull();
+  });
+
+  /* The test that fails the day a new `RunStage` member is added and left
+     unclassified. `Record<RunStage, ...>` is what does the work: TS refuses
+     the object literal below if it omits a member, so the compiler forces
+     the new stage into this file, and the two assertions then force it into
+     one of the two lists rather than into neither. */
+  it('partitions every RunStage member into exactly one of claimed or terminal', () => {
+    const everyStage: Record<RunStage, true> = {
+      pending: true, preflight: true, dispatched: true, inspecting: true, reviewing: true,
+      fixing: true, verifying: true, merging: true, merged: true, failed: true,
+      skipped: true, 'needs-answers': true, ungroomed: true, parked: true
+    };
+    const all = Object.keys(everyStage) as RunStage[];
+
+    expect([...RUN_CLAIMED_STAGES, ...TERMINAL_STAGES].sort()).toEqual([...all].sort());
+    expect(RUN_CLAIMED_STAGES.filter((s) => TERMINAL_STAGES.includes(s))).toEqual([]);
   });
 });

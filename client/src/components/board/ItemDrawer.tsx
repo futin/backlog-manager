@@ -181,7 +181,7 @@ marked.use({
  * make that refresh pay for content nobody is looking at.
  */
 export function ItemDrawer(
-  { item, hues, onClose, agents, onDispatch }: {
+  { item, hues, onClose, agents, onDispatch, runBlock }: {
     item: BacklogItem;
     hues: ProjectHues;
     onClose: () => void;
@@ -189,6 +189,15 @@ export function ItemDrawer(
      *  without dispatch at all (older tests, and any future read-only view). */
     agents?: AgentsStatus | null;
     onDispatch?: () => void;
+    /**
+     * Why an orchestrator run forbids dispatching this item, or null/undefined
+     * when none does — passed straight through to `DispatchButton`, and looked
+     * up by BoardView from the same run payload the card's own copy of this
+     * prop comes from. Both render sites need it: they render two independent
+     * buttons for one item, and a drawer chip that stayed live while the card
+     * tab went dead is half of the bug this exists to fix.
+     */
+    runBlock?: string | null;
   }
 ) {
   const [body, setBody] = useState<string | null>(null);
@@ -255,7 +264,9 @@ export function ItemDrawer(
           <span className={`pill ${hues.classFor(item.project)}`}>{item.project}</span>
           <span className="drawer-title">{item.title}</span>
           {onDispatch && (
-            <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} />
+            <DispatchButton
+              item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock}
+            />
           )}
           <button className="drawer-close" onClick={onClose}>close</button>
         </div>

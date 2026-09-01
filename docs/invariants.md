@@ -405,12 +405,13 @@ Its `POST /api/spawn` takes a `dirName` resolved against projects active
 inside its `LOOKBACK_HOURS` (24 by default), so a quiet repo has no key to
 send. Accepted, not worked around: the alternative is teaching that app to
 take an absolute path, which widens the widest write surface it has. This is
-the one block that leaves a control on screen: the button's own `title` and
-its visually-hidden `aria-describedby` span carry the per-item reason (it
-names the path, and nothing else in the UI does), while Settings lists the
-host-level setup — including the two fixes for this one, a session in that
-repo or a higher `LOOKBACK_HOURS`. Environment-level blocks render no button
-at all; see the `dispatchGate` section below. Never derive a `dirName` from
+one of the two blocks that leave a control on screen (the other is a live
+orchestrator run's claim — see the `dispatchGate` section below): the button's
+own `title` and its visually-hidden `aria-describedby` span carry the per-item
+reason (it names the path, and nothing else in the UI does), while Settings
+lists the host-level setup — including the two fixes for this one, a session in
+that repo or a higher `LOOKBACK_HOURS`. Environment-level blocks render no
+button at all; see that same section below. Never derive a `dirName` from
 a path to route around this. The membership check behind it
 (`status.projectPaths.includes(item.projectPath)`, in `dispatchGate`,
 `shared/agent.ts`) is a raw string compare, not a realpath one, even though
@@ -423,7 +424,7 @@ project whose path reaches its git root through a symlink can show a
 disabled button even with a live session inside `LOOKBACK_HOURS`, if the
 dashboard's own recorded path and the registry's do not match byte-for-byte.
 
-## Environment-level blocks hide the dispatch control; per-item disables it
+## Environment-level blocks hide the dispatch control; per-item ones disable it
 
 `dispatchGate` (`shared/agent.ts`) answers with
 `hidden` / `disabled` / `enabled`, and `dispatchBlock` is the flattened
@@ -434,8 +435,44 @@ any one card, all four are true of every card at once, and none is fixable
 from the board, so they render no button. That is what makes the promise in
 the spec and `.env.example` — with `BM_AGENTS` off the board "renders
 exactly as it does today" and "shows no dispatch buttons" — literally true;
-do not "improve" it into a disabled button on forty cards. The
-project-visibility block is the opposite case and keeps its button.
+do not "improve" it into a disabled button on forty cards.
+
+The per-item blocks are the opposite case and keep their button. There are
+**two** of them, not one, and only the first is anything `dispatchGate` itself
+can answer:
+
+- **The dashboard cannot see this item's project** — `dispatchGate`'s own fifth
+  line, the section above.
+- **An orchestrator run has already claimed this item** — `runClaimBlock`
+  (`shared/agent.ts`), which reads the run payload rather than the item. It has
+  to: a run works each item inside its own git worktree and nothing reaches
+  `main` until the item merges, so while a run holds `task-7` at `reviewing` the
+  `task-7` file `/api/items` scans on `main` looks untouched — no `started:`, no
+  `phase:`, nothing `isInProgress` could key off. The item is not lying; it is
+  telling the truth about `main`. Claimed means a stage in
+  `RUN_CLAIMED_STAGES` (`shared/types.ts`) on a run that is *fresh*: the eight
+  non-terminal stages, `pending` and `preflight` included, because a pending
+  item is already the run's and a manual session that grooms or archives it
+  first leaves the run dispatching into an item that moved under it. The six
+  exits (`merged`, `failed`, `skipped`, `needs-answers`, `ungroomed`, `parked`)
+  are out — the run is finished with the item, and a human picking it up by
+  hand is the intended next move, `parked` most of all. That list is
+  deliberately NOT `ACTIVE_RUN_STAGES` (client `ItemCard.tsx`), which answers
+  "does this card show a live stage badge" and correctly excludes
+  `pending`/`preflight`; the two overlap by six members and must not be
+  unified. This block is checked on the board and again in `dispatch()`, the
+  second being the one that holds: the launch sheet fetches its plan once on
+  mount, so a sheet left open while a run starts still shows an enabled launch
+  button, and only the server sees the run as it is at click time.
+
+`DispatchButton` reads all three in one order — environment-hidden, then
+project visibility, then the run claim — most fundamental first, so the reason
+on screen names the thing to fix rather than a symptom of it. With dispatch off
+or the project invisible there is nothing worth saying about a run.
+
+This was bug-4: the run claim existed nowhere in the ladder, so a card an
+unattended run already owned kept a live dispatch tab, and clicking it spawned
+a second session against an item held in another worktree on `backlog/<id>`.
 
 ## One run per project, checked twice
 

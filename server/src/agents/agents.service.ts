@@ -9,7 +9,7 @@ import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import {
   clampMode, deriveAction, dispatchBlock, isItemId, modesUpTo, pickFrom, projectDispatchGate,
-  EFFORTS, MODELS, PERMISSION_LADDER
+  runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
 import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
@@ -213,7 +213,15 @@ export class AgentsService {
       // more is wanted, and the ceiling clamps this down on hosts that cap
       // lower, so a stricter dashboard is never widened from here.
       defaultMode: clampMode('auto', status.spawnMaxPermission),
-      blocked: dispatchBlock(item, status) ?? undefined
+      // Two blocks, one field, in the order the reader has to fix them: the
+      // dashboard ladder first (nothing about a run matters if dispatch is off
+      // or the project is invisible), then the run claim. `runClaimBlock` does
+      // its own project/id/freshness matching against the run payload — see
+      // its doc comment for why that lookup lives in one place rather than
+      // being re-derived on each side.
+      blocked: dispatchBlock(item, status)
+        ?? runClaimBlock(item, this.orchestrator.runs().runs)
+        ?? undefined
     };
   }
 
@@ -258,6 +266,24 @@ export class AgentsService {
       // contacted, so there is no gateway to be bad. That case and "answered
       // and said no" both get 409 — a state the reader can go and change.
       throw new HttpException({ error: blocked }, status.enabled && !status.reachable ? 502 : 409);
+    }
+
+    // The run-claim block, re-checked here rather than trusted from `plan()`.
+    // This is the layer that actually holds: LaunchSheet fetches its plan once
+    // on mount, so a sheet left open while a run claims the item still shows an
+    // enabled launch button, and only this call sees the run as it is at click
+    // time. Same reasoning as the orchestrate lock's own re-check below —
+    // "every other path capable of triggering a write re-checks it".
+    //
+    // 409 and no `code`: `RUN_IN_PROGRESS_CODE` stays the one and only coded
+    // 409 in this app (see its doc comment in shared/types.ts for the incident
+    // that rule exists to prevent a repeat of), and nothing needs to tell this
+    // refusal apart from dispatch's other 409s programmatically. Deliberately
+    // not 502 either — an orchestrator run is local state, with no upstream to
+    // blame for it.
+    const claimed = runClaimBlock(item, this.orchestrator.runs().runs);
+    if (claimed !== null) {
+      throw new HttpException({ error: claimed }, 409);
     }
 
     const cfg = readAgentsConfig();

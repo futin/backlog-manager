@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { join } from 'node:path';
@@ -6,6 +8,13 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { item, makeProject, makeRegistry } from './helpers/store';
+import rawFixture from './fixtures/orchestrator-run.json';
+import type { OrchestratorRun, RunStage } from '../shared/types';
+
+// Same cast every suite reading this fixture makes: it is plain JSON, so TS
+// widens its string fields to `string` rather than the literal unions
+// (`RunStage` above all) the run-claim cases below turn on.
+const runFixture = rawFixture as OrchestratorRun;
 
 const GROOMED_BUG = item('bug-2', 'a known bug', '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n');
 const RAW_BUG = item('bug-1', 'a fresh bug', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n');
@@ -41,6 +50,8 @@ function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } =
 
 describe('POST /api/agents/dispatch', () => {
   let app: INestApplication;
+  let tmpRoot: string;
+  let orchHome: string;
   const env = { ...process.env };
   // Captured once so every case — including the ones that replace
   // global.fetch outright rather than calling stubDashboard() — hands the
@@ -55,6 +66,18 @@ describe('POST /api/agents/dispatch', () => {
       { leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG },
       { leaf: 'out-of-scope', filename: 'oos-1-declined.md', content: OOS }
     ]);
+
+    // A fresh, empty BM_ORCH_HOME per case — the same guard
+    // orchestrator-start.test.ts states at length: dispatch() now consults
+    // the orchestrator's run files, and without this the suite would read
+    // the developer's real ~/.backlog-manager/orchestrator/ and pass or fail
+    // on whatever run happens to be live on their machine. Deliberately not
+    // created (only its parent is): a project with no run yet has no
+    // directory at all, and that must read as "no run", not fail.
+    tmpRoot = mkdtempSync(join(tmpdir(), 'bm-dispatch-'));
+    orchHome = join(tmpRoot, 'orchestrator');
+    process.env.BM_ORCH_HOME = orchHome;
+
     process.env.BM_AGENTS = 'on';
     process.env.BM_AGENTS_URL = 'http://dash.test:4173';
     process.env.BM_AGENTS_TOKEN = 's3cret';
@@ -70,7 +93,26 @@ describe('POST /api/agents/dispatch', () => {
     await app.close();
     process.env = { ...env };
     global.fetch = realFetch;
+    rmSync(tmpRoot, { recursive: true, force: true });
   });
+
+  /* The exact layout orchestrate.mjs's own runFilePath() writes, duplicated
+     here for the reason orchestrator-start.test.ts's copy already records:
+     that script is standalone, with no exported package boundary into this
+     TS project. `bug-2` is the id every dispatch case below acts on, so the
+     queue holds exactly that one entry at whatever stage the case is about. */
+  function writeRun(stage: RunStage, over: Partial<OrchestratorRun> = {}): void {
+    const run: OrchestratorRun = {
+      ...runFixture,
+      project: projectPath,
+      updatedAt: new Date().toISOString(),
+      queue: [{ ...runFixture.queue[0], id: 'bug-2', stage }],
+      ...over
+    };
+    const dir = join(orchHome, encodeURIComponent(run.project));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+  }
 
   const bugPath = (name: string) => join(projectPath, 'backlog', 'bugs/open', name);
   const post = (body: unknown) =>
@@ -241,5 +283,71 @@ describe('POST /api/agents/dispatch', () => {
     const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
     expect(body.model).toBeUndefined();
     expect(body.effort).toBeUndefined();
+  });
+
+  /*
+   * The run-claim block, and the layer that actually holds: the launch sheet
+   * fetches its plan once on mount, so a sheet left open while a run claims
+   * the item still shows an enabled launch button, and only the server sees
+   * the run as it is at click time. Same reasoning as the orchestrate lock's
+   * own re-check.
+   */
+  it('refuses to dispatch an item a fresh run is working, naming the stage', async () => {
+    const sent = stubDashboard();
+    writeRun('reviewing');
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
+    expect(res.body.error).toContain('reviewing');
+    // Nothing was spawned — the refusal is not merely reported after the fact.
+    expect(sent.some((c) => c.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  /* `RUN_IN_PROGRESS_CODE` stays the one and only coded 409 in this app (see
+     its own doc comment for the incident that rule exists to prevent). Nothing
+     needs to tell this refusal apart from dispatch's other 409s
+     programmatically, so it carries no code — asserted, because a `code` added
+     here later is exactly the drift that comment forbids. */
+  it('sends no machine-readable code on the run-claim refusal', async () => {
+    stubDashboard();
+    writeRun('reviewing');
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
+    expect(res.body.code).toBeUndefined();
+  });
+
+  /* The run is FINISHED with this item, and a human picking it up by hand is
+     the intended next move — the whole reason the block reads a stage list
+     rather than "is this id in a queue". */
+  it('dispatches an item the run has already merged', async () => {
+    stubDashboard();
+    writeRun('merged');
+    await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(201);
+  });
+
+  /* Staleness, the other half of that filter. `updatedAt` is pushed well past
+     RUN_STALE_MS rather than merely old-ish, so this case cannot start passing
+     for the wrong reason if that threshold is ever raised. */
+  it('dispatches an item held only by a stale run', async () => {
+    stubDashboard();
+    writeRun('reviewing', { updatedAt: '2020-01-01T00:00:00.000Z' });
+    await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(201);
+  });
+
+  /* Precedence. `dispatchBlock` runs first, so an item that is BOTH claimed by
+     a run and in a project the dashboard cannot see reports the dashboard —
+     the more fundamental block, and the one the reader has to fix first. */
+  it('reports the dashboard block, not the run claim, when both apply', async () => {
+    global.fetch = jest.fn((input: RequestInfo | URL) =>
+      Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(
+          String(input).endsWith('/api/management')
+            ? { projects: [] }
+            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+        )
+      } as Response)
+    ) as jest.Mock;
+    writeRun('reviewing');
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
+    expect(res.body.error).toContain('cannot see');
+    expect(res.body.error).not.toContain('reviewing');
   });
 });

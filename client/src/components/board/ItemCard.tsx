@@ -45,7 +45,7 @@ export const REFACTOR_KINDS: readonly string[] = ['chore', 'debt'];
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
 export function ItemCard(
-  { item, hues, onOpen, agents, onDispatch, now, runStage }: {
+  { item, hues, onOpen, agents, onDispatch, now, runStage, runBlock }: {
     item: BacklogItem;
     hues: ProjectHues;
     onOpen: () => void;
@@ -69,6 +69,20 @@ export function ItemCard(
      * payload rather than anything on `item` itself.
      */
     runStage?: RunStage;
+    /**
+     * Why a run forbids dispatching this item, or null/undefined when none
+     * does — passed straight through to `DispatchButton`.
+     *
+     * Deliberately a SECOND prop rather than something derived from `runStage`
+     * beside it: the two answer different questions off the same payload.
+     * `runStage` decides whether this card shows a live stage badge and reads
+     * `ACTIVE_RUN_STAGES` above, which correctly excludes `pending` and
+     * `preflight`; the block reads `RUN_CLAIMED_STAGES` (shared/types.ts),
+     * which must INCLUDE them — a pending item is already claimed even though
+     * a badge for it would be noise. Collapsing the two would break one rule
+     * or the other. See `runClaimBlock` (shared/agent.ts) for who computes it.
+     */
+    runBlock?: string | null;
   }
 ) {
   const at = now ?? Date.now();
@@ -217,6 +231,7 @@ export function ItemCard(
       {onDispatch && (
         <DispatchButton
           item={item} status={agents ?? null} onDispatch={onDispatch} variant="tab"
+          runBlock={runBlock}
         />
       )}
     </div>
