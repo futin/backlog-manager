@@ -1,6 +1,7 @@
 import { POLL_MS } from '../../hooks/useOrchestratorRuns';
 import { elapsedSince } from '../../lib/item-age';
 import { projectLabel } from '../../lib/project-label';
+import { stageChipClass, stageGlyph } from '../../lib/run-stage';
 import type { OrchestratorRun, RunStage } from '../../../../shared/types';
 
 /**
@@ -122,7 +123,23 @@ export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPa
       <span className="run-strip-bar" aria-hidden="true">
         <span className="run-strip-bar-fill" style={{ width: `${pct}%` }} />
       </span>
-      {current && <span className="run-strip-current">{current.id} · {current.stage}</span>}
+      {/* The id stays plain text and the stage becomes a chip: they are two
+          different kinds of fact sitting in one phrase — which item (stable,
+          it is the item's name) and what it is doing (the most volatile thing
+          on this strip). Chipping the stage with the same class the card and
+          drawer use means the reader learns one visual language once. The
+          `·` separator goes with it: a chip is its own delimiter. */}
+      {current && (
+        <span className="run-strip-current">
+          {current.id}
+          <span className={stageChipClass(current.stage)}>
+            <span className="board-card-stage-glyph" aria-hidden="true">
+              {stageGlyph(current.stage)}
+            </span>
+            {current.stage}
+          </span>
+        </span>
+      )}
       {run.attention.length > 0 && (
         <span className="run-strip-attention">{run.attention.length} needs attention</span>
       )}
