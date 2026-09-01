@@ -47,16 +47,22 @@ files either, except for one narrow case in pre-flight (see below).
 
 ## Where commands run, and why it is not negotiable
 
-**Every `orchestrate.mjs` command runs with the project root as its cwd.
-Never from inside a worktree this run created.** The tool resolves *which
-project it is acting on* by walking up from its own cwd to the first `.git`
-it finds. A linked worktree has its own `.git` (a file, not a directory), so
-running the tool from inside one does not error — it silently keys the run
-file under the worktree's path, a directory nothing else ever reads. The run
-appears to vanish: the board shows nothing, `status` reports "no run exists",
-and the state you thought you were writing is intact somewhere nobody looks.
-A loud failure would be safer; this one is quiet, which is exactly why the
-rule belongs here rather than in the tool.
+**This session's cwd must be the project root every time `orchestrate.mjs`
+is called — whatever put it somewhere else.** Never a worktree this run
+created. The tool resolves *which project it is acting on* by walking up
+from its own cwd to the first `.git` it finds, and a linked worktree has its
+own `.git` (a file, not a directory), so a worktree cwd used to resolve to
+the worktree itself and key the run file under a directory nothing else ever
+reads — the run appeared to vanish, quietly, with `status` reporting "no run
+exists" for a live run.
+
+Since bug-2 the tool refuses that outright: a cwd inside a linked worktree
+(and a `--project` pointed at one) exits `1` with a message naming both the
+worktree and the project root to re-run from. The failure is loud now, but
+the rule is unchanged and still yours to keep — a refusal mid-run is still a
+run that stopped. Note the scope: **anything** that leaves the shell inside a
+worktree arms it, not just the `cd`s this file prescribes. The run that
+surfaced this was broken by a one-off `pnpm exec jest --version` probe.
 
 Everything that genuinely concerns a worktree takes its path as an explicit
 flag instead of implying it from cwd: `stage --worktree`, `verify --cwd`, and
@@ -69,12 +75,14 @@ inside the worktree for the same reason in reverse — asking *that* tree, and
 only that tree, whether the item is in it is the entire point of the call.
 
 **That exception runs in a subshell — `( cd <worktree> && … )` — never a bare
-`cd`.** A bare `cd` persists as the session's working directory for every
-later command, and from there `orchestrate.mjs` resolves the project to the
-worktree: `watch` starts exiting `3` ("no run exists") on every call, §4 tells
-you to call `watch` again as many times as it takes, and an unattended run
-loops until somebody kills it. The parentheses keep the move inside one child
-shell that exits with the command. The two `sh -c 'cd … && exec claude …'`
+`cd`.** Still mandatory, and now one instance of the wider rule above rather
+than its whole extent. A bare `cd` persists as the session's working
+directory for every later command, and from there every `orchestrate.mjs`
+call refuses with exit `1` until something changes back — an unattended run
+stops dead. (Before the tool refused, it did something worse: `watch` exited
+`3`, "no run exists", §4 told you to call `watch` again as many times as it
+takes, and the run looped until somebody killed it.) The parentheses keep the
+move inside one child shell that exits with the command. The two `sh -c 'cd … && exec claude …'`
 dispatch lines below are the same discipline by another spelling: `sh -c` is
 already its own process, so the `cd` inside it never reaches this session.
 
@@ -83,7 +91,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | Code | Meaning |
 |---|---|
 | `0` | success |
-| `1` | bad args, an unknown item id, an unknown stage or kind, or missing required input — **nothing is ever written on a `1`** |
+| `1` | bad args, an unknown item id, an unknown stage or kind, missing required input, or a cwd (or `--project`) inside a linked worktree — **nothing is ever written on a `1`** |
 | `3` | no run exists for this project — and, for `watch` only, "budget elapsed, child still alive" |
 | `4` | lock held: a `run.json` still marked `running` (fresh *or* stale) refusing a plain `init` |
 | `5` | `verify` only: nothing resolvable to verify with |

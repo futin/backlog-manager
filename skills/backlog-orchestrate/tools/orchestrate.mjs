@@ -159,11 +159,115 @@ function archivePath(archiveDir, runId) {
   return candidate
 }
 
-// Walks up from `startDir` looking for a `.git` entry (a directory for a
-// normal clone, a file for a linked worktree or submodule — existsSync
-// covers both), exactly the git-root walk backlog.mjs's own resolveRoot
-// does. Duplicated rather than imported for the standalone reason in this
-// file's header comment.
+// Is `dir` the top of a LINKED GIT WORKTREE? Returns a
+// `{ worktree, gitdir, projectRoot }` description if so, or null for
+// anything else — an ordinary clone, a main working tree, a submodule
+// working tree, or a directory with no `.git` at all.
+//
+// The whole discriminator is what `<dir>/.git` IS, and it takes two small
+// reads rather than a `git rev-parse` subprocess in front of every command:
+//
+//   - a DIRECTORY — ordinary clone or main tree. Not a worktree.
+//   - a FILE whose `gitdir:` target contains a `commondir` entry — a linked
+//     worktree. This is the case that has to be refused.
+//   - a FILE whose target has NO `commondir` — a submodule working tree.
+//     Not a worktree, and resolving it to itself is the correct answer.
+//
+// That last case is why "`.git` is a file" is not on its own a sufficient
+// test, and the distinction was verified against real git plumbing rather
+// than assumed: a worktree gitdir (`<main>/.git/worktrees/<name>`) carries
+// `HEAD commondir gitdir index logs refs`, a submodule gitdir
+// (`<super>/.git/modules/<name>`) carries `HEAD config description hooks
+// index info logs objects packed-refs refs`. `commondir` is present in
+// exactly one of them. The test suite builds a real submodule for exactly
+// this case, so a future git that changes the layout fails loudly here
+// instead of silently refusing inside every submodule.
+//
+// Both pointers can be relative, and both are resolved against the right
+// base: the `.git` file's `gitdir:` against the directory holding that file
+// (a submodule's is written relative, and git can be configured to write
+// relative worktree pointers too), and `commondir` against the gitdir
+// itself (`../..` in practice). `projectRoot` — the main working tree,
+// i.e. the common git dir's parent — is best-effort and may come back null:
+// a bare main repo has no working tree to name, and refusing while naming
+// only the worktree and its gitdir still beats answering wrongly.
+export function linkedWorktreeInfo(dir) {
+  const gitEntry = path.join(dir, '.git')
+  let stat
+  try {
+    stat = fs.statSync(gitEntry)
+  } catch {
+    return null
+  }
+  if (!stat.isFile()) return null
+
+  let pointer
+  try {
+    pointer = fs.readFileSync(gitEntry, 'utf8')
+  } catch {
+    return null
+  }
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(pointer)
+  if (!match) return null
+  const gitdir = path.resolve(dir, match[1])
+
+  let commonRaw
+  try {
+    commonRaw = fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim()
+  } catch {
+    // No commondir — a submodule (or a gitdir this process cannot read, in
+    // which case refusing on a guess would be worse than the status quo).
+    return null
+  }
+  const commonDir = path.resolve(gitdir, commonRaw)
+
+  // The main tree is the common git dir's parent, but only when that common
+  // dir actually IS a `.git` directory inside a working tree. A bare main
+  // repo's common dir is the repository itself (`/srv/foo.git`), whose
+  // parent is not a checkout of anything.
+  let projectRoot = null
+  if (path.basename(commonDir) === '.git') {
+    try {
+      if (fs.statSync(commonDir).isDirectory()) projectRoot = path.dirname(commonDir)
+    } catch {
+      projectRoot = null
+    }
+  }
+
+  return { worktree: dir, gitdir, projectRoot }
+}
+
+// The one refusal message, shared by the two entry points that can arrive
+// at a worktree (cwd-derived, in resolveProjectRoot below, and
+// `--project`-derived, in cmdInit). Actionable by construction: the
+// operator who trips this is mid-run and possibly unattended, so the
+// message names the directory that is wrong AND the directory to re-run
+// from, without shelling out to git for either.
+//
+// Exit 1, never 3. Code 3 means "no run exists," which is exactly the
+// answer this bug used to give for a perfectly healthy run — an unattended
+// loop treating 3 as "nothing to do" would read the run as absent. Code 1
+// is "a problem with THIS call, independent of run state; nothing is ever
+// written," which is precisely what this is.
+function refuseLinkedWorktree(info) {
+  const where = info.projectRoot
+    ? `its project root is ${info.projectRoot} — re-run this command from there`
+    : `its shared git dir is ${info.gitdir}, whose main working tree could not be determined (a bare main repo?) — re-run this command from the project root`
+  throw new OrchestrateError(
+    `${info.worktree} is a linked git worktree, not a project root; ${where}. orchestrate.mjs keys a run under the project's own path, so a worktree would write to a location nothing else ever reads`,
+    1,
+  )
+}
+
+// Walks up from `startDir` looking for a `.git` entry, exactly the git-root
+// walk backlog.mjs's own resolveRoot does. Duplicated rather than imported
+// for the standalone reason in this file's header comment — and no longer
+// byte-identical to it: this walk refuses a linked worktree (see
+// linkedWorktreeInfo above) where backlog.mjs's deliberately resolves one
+// to itself. The two tools want opposite answers from the same shape,
+// because the headless `backlog-execute` sessions this orchestrator
+// dispatches run backlog.mjs INSIDE a worktree on purpose — the item file
+// they read and stamp is the worktree's own copy.
 //
 // Every command but `init` uses this — not a `--project` flag — to decide
 // which project's run.json it means. That asymmetry is deliberate, not an
@@ -177,34 +281,34 @@ function archivePath(archiveDir, runId) {
 // per-item worktrees Task 5 creates are a separate concern: the headless
 // sessions that do the actual item work run `backlog.mjs` inside those
 // worktrees, never `orchestrate.mjs` — this tool's own commands never run
-// from inside one). Task 1's own spike confirmed backlog.mjs's identical
-// walk resolves each worktree to itself rather than chasing the worktree
-// pointer back to the main tree, which is exactly why this walk is safe to
-// reuse verbatim: the orchestrator's own cwd is the main tree throughout,
-// so there is no worktree-vs-main ambiguity for this file to worry about.
+// from inside one).
 //
-// That safety depends entirely on the orchestrator loop actually honoring
-// its own contract, and the failure mode if it doesn't is worth spelling
-// out: if any `orchestrate.mjs` command were ever invoked with a per-item
-// worktree as its cwd, this walk would NOT error. A linked worktree has its
-// own `.git` (a file, not a directory, pointing at the shared gitdir), so
-// `existsSync` finds it immediately and happily returns the WORKTREE's own
-// path as "the project" — `projectDir` then keys the run under
-// `encodeURIComponent(<worktree path>)`, a directory nobody else ever
-// looks at, since every other command (and the server, Task 8) reads
-// state keyed by the registered project's own path. The run would appear
-// to vanish — no error, no crash, just state silently written to the
-// wrong key — which is far harder to notice and debug than the loud "no
-// .git found" refusal above. This is exactly why the skill (Task 7) must
-// always invoke this tool from the project root and never from inside a
-// worktree it created: per-item paths (`--worktree`, `--branch` on
-// `stage`) are passed as explicit flag values instead of being implied by
-// cwd.
+// bug-2 is why that contract is now enforced here rather than only stated
+// in the skill. The contract used to be prose alone, and prose can only
+// bind the commands it knows about: the trap was armed by anything at all
+// that left the session's cwd inside a worktree — in the run that surfaced
+// it, an ad-hoc `pnpm exec jest --version` probe, a command the skill has
+// no reason to mention. Every later call then resolved to the worktree,
+// whose `.git` is a file the old `existsSync` test could not tell from a
+// directory, and reported exit 3, "no run exists," for a live and healthy
+// run. Nothing was corrupted and nothing said the project had been
+// misidentified; the run simply appeared to vanish. Refusing on cwd here
+// costs two small reads on a path already being stat'ed and turns that
+// silent wrong answer into a loud, actionable one.
+//
+// What is deliberately NOT checked: `stage --worktree`, `stage --branch`
+// and `verify --cwd`. Those name a per-item worktree on purpose — they are
+// the very mechanism that keeps this tool's own cwd in the main tree — so
+// the check belongs on cwd-derived and `--project`-derived roots only.
 export function resolveProjectRoot(startDir = process.cwd()) {
   const resolvedStart = path.resolve(startDir)
   let dir = resolvedStart
   for (;;) {
-    if (fs.existsSync(path.join(dir, '.git'))) return dir
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      const worktree = linkedWorktreeInfo(dir)
+      if (worktree) refuseLinkedWorktree(worktree)
+      return dir
+    }
     const parent = path.dirname(dir)
     if (parent === dir) {
       throw new OrchestrateError(
@@ -920,6 +1024,17 @@ function cmdInit(argv) {
   if (!project || !path.isAbsolute(project)) {
     throw new OrchestrateError(INIT_USAGE, 1)
   }
+
+  // The same worktree refusal resolveProjectRoot applies to a cwd-derived
+  // root, applied here to the `--project`-derived one — bug-2's second
+  // entry point. init is the one command that never walks up from cwd, so
+  // without this a worktree path handed straight to `--project` would key a
+  // run under a directory nothing else ever reads, and every subsequent
+  // command (correctly resolving the real project root) would report exit 3
+  // for a run that was written successfully. Checked here, before --max is
+  // even parsed, so the "nothing written when init refuses" guarantee holds.
+  const projectWorktree = linkedWorktreeInfo(project)
+  if (projectWorktree) refuseLinkedWorktree(projectWorktree)
 
   let maxItems = null
   if (maxArg !== undefined) {

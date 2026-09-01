@@ -3,8 +3,10 @@ id: bug-2
 title: A bare cd into a worktree silently re-keys orchestrate.mjs to the wrong project
 created: 2026-08-31
 tags: orchestrate, cli
-updated: 2026-09-01T10:09:09Z
+updated: 2026-09-01T12:19:01Z
 groom-elapsed: 102
+started: 2026-09-01T12:10:16Z
+execute-elapsed: 525
 ---
 
 ## Symptom
@@ -183,3 +185,73 @@ so explicitly. They become wrong the moment the code lands.
   `resolveProjectRoot` header comment in `orchestrate.mjs` (~40 lines, currently
   asserting "this walk would NOT error"). That comment is the single most wrong artefact
   after the change and should be rewritten, not patched.
+
+## Outcome
+
+2026-09-01 — Fixed as specified. `resolveProjectRoot` now consults a new
+`linkedWorktreeInfo(dir)` helper before returning: `<dir>/.git` a directory →
+return `dir` as before; a file whose `gitdir:` target holds a `commondir` →
+refuse (exit `1`, naming the worktree and the project root to re-run from);
+a file whose target has no `commondir` (a submodule) → return `dir`,
+unchanged. `cmdInit` runs the same helper over its validated `--project`
+value, before `--max` is parsed and before anything touches disk. `stage
+--worktree/--branch` and `verify --cwd` are untouched. No `git` subprocess:
+both pointers are read from disk and resolved relative to the right base,
+and `projectRoot` degrades to null (message names the worktree and gitdir
+only) when the common dir's parent is not a working tree.
+
+The `commondir` discriminator was re-confirmed empirically before the fix
+was written, against real git plumbing (git 2.50.1) rather than assumed:
+
+```
+--- .git file:
+gitdir: /Users/…/backlog-manager/.git/worktrees/bug-2
+--- gitdir listing:
+HEAD ORIG_HEAD commondir gitdir index logs refs
+--- submodule gitdir listing (<super>/.git/modules/sub):
+HEAD config description hooks index info logs objects packed-refs refs
+--- commondir present in the submodule gitdir? NO
+```
+
+Seven cases added to `skills/backlog-orchestrate/tools/orchestrate.test.mjs`
+(the bug's own list; case 3's regression is the suite's existing "resolve the
+project from cwd via the nearest `.git` ancestor" test, left untouched and
+green). Watched red first: the four guard/regression cases passed against the
+unfixed tool, the three refusal cases failed with `expected the worktree
+refusal, got status 0/3` — the exact conflation the bug is about.
+
+The original symptom, re-run in the very worktree this fix was written in:
+
+```
+$ node skills/backlog-orchestrate/tools/orchestrate.mjs heartbeat
+/Users/…/backlog-manager/.worktrees/bug-2 is a linked git worktree, not a
+project root; its project root is /Users/…/backlog-manager — re-run this
+command from there. orchestrate.mjs keys a run under the project's own
+path, so a worktree would write to a location nothing else ever reads
+exit=1
+```
+
+Verification, all three suites from a clean run:
+
+```
+$ pnpm run test:skills
+1..259
+# tests 259
+# pass 259
+# fail 0
+
+$ pnpm test
+Test Suites: 33 passed, 33 total
+Tests:       473 passed, 473 total
+
+$ pnpm run typecheck
+$ tsc --noEmit
+```
+
+Prose moved with the code, all three places the bug named: SKILL.md's "Where
+commands run" section (the "a loud failure would be safer" line is gone, the
+rule is widened from the two prescribed `cd` sites to *this session's cwd,
+whatever put it elsewhere*, and the exit-code table's `1` row names the new
+refusal), the `CLAUDE.md` invariant, and `docs/invariants.md`'s long-form
+version. The ~40-line `resolveProjectRoot` header comment asserting "this
+walk would NOT error" was rewritten rather than patched.
