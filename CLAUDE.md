@@ -66,7 +66,14 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   calls and the registry's only writer;
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is
   `backlog-orchestrate`'s own CLI and the run file's only writer (see
-  Invariants).
+  Invariants). `skills/backlog-orchestrate/references/` holds the two parts
+  its SKILL.md deliberately does **not** carry inline, because a run re-reads
+  its whole body on every one of its several hundred turns: `recovery.md` (all
+  of `--resume`/`--abort`, read in full before either) and `rationale.md` (the
+  measurements behind the rules). **Start orchestrator runs from the board,
+  not by typing the trigger into a terminal** — the board spawns `claude -p`,
+  and headless sessions were measured flooring ~50k against an interactive
+  session's ~68k.
 - `agents/` — the plugin's own agents, one file each, discovered from this
   root-level directory by Claude Code's own convention (no
   `.claude-plugin/plugin.json` declaration needed). Currently one:
