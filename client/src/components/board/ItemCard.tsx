@@ -45,7 +45,7 @@ export const REFACTOR_KINDS: readonly string[] = ['chore', 'debt'];
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
 export function ItemCard(
-  { item, hues, onOpen, agents, onDispatch, now, runStage, runBlock }: {
+  { item, hues, onOpen, agents, onDispatch, now, stale, runStage, runBlock }: {
     item: BacklogItem;
     hues: ProjectHues;
     onOpen: () => void;
@@ -60,6 +60,21 @@ export function ItemCard(
      * rendered on its own.
      */
     now?: number;
+    /**
+     * Task 5: whether nobody has touched this item inside the staleness
+     * window. Decided by BoardView (`isStale`, lib/item-stale.ts) and handed
+     * down, never computed here — the window is a setting and the age needs a
+     * clock, and this component owns neither, the same discipline `now` and
+     * `runStage` already follow.
+     *
+     * In practice this is only ever true on a task: every other stale section
+     * has already left the Board by the time a card renders (`leavesBoard`).
+     * The prop is not narrowed to tasks anyway, because the rule about which
+     * sections survive belongs to the board's filter, not to the card's
+     * markup — Archive (Task 6) renders the same card for the sections that
+     * did leave, and it should be able to mark them too.
+     */
+    stale?: boolean;
     /**
      * This card's position in a fresh orchestrator run's queue, or undefined
      * when no such run currently says anything about it. Looked up by
@@ -191,6 +206,19 @@ export function ItemCard(
               <span className="board-card-groomed">groomed</span>
             ) : null}
             {item.status === 'done' ? <span className="board-card-done">done</span> : null}
+            {/* Task 5. After `done`, before the run chip, which is where it
+                belongs on both counts: it is a fact derived from the file (so
+                it sits with kind/groomed/done rather than with the volatile
+                run chip), but it is the only one of those derived against a
+                clock and a setting rather than read straight off a key, so it
+                reads last among them.
+                Nothing else on the card can say this. `created` in the meta
+                line is the wrong date — an item filed in March and groomed
+                last week is not stale — and the live bar is the opposite
+                claim. Word rather than a glyph: `stale` is exactly what it
+                means, and the footer already carries three other words in the
+                same register. */}
+            {stale ? <span className="board-card-stale">stale</span> : null}
             {/* Last among the footer markers, deliberately: kind/groomed/done
                 are all facts the item FILE holds, permanent until the next
                 edit; this one is the most volatile thing on the card by far —

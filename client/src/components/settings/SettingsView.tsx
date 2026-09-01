@@ -1,7 +1,9 @@
 import { Segmented, SettingsGroup, SettingsRow } from './SettingsRow';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
-import { FONT_SCALES, THEMES, type Landing, type ThemeId } from '../../lib/settings';
+import {
+  FONT_SCALES, STALE_WINDOWS, THEMES, type Landing, type ThemeId
+} from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import type { AgentsStatus } from '../../../../shared/types';
 
@@ -162,6 +164,26 @@ export default function SettingsView() {
               <option key={l.value} value={l.value}>{l.label}</option>
             ))}
           </select>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Board · this device">
+        <SettingsRow
+          name="Archive after"
+          hint={
+            <>
+              How long an open item may go untouched before it leaves the Board
+              for Archive. Grooming one brings it straight back — the stamp this
+              reads is written by every start and stop. Tasks never leave: a
+              stale one keeps its column and is marked instead.
+            </>
+          }
+        >
+          <Segmented
+            value={settings.staleDays}
+            options={STALE_WINDOWS.map((v) => ({ value: v, label: `${v}d` }))}
+            onChange={(staleDays) => update({ staleDays })}
+          />
         </SettingsRow>
       </SettingsGroup>
 

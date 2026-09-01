@@ -48,8 +48,8 @@ const railTabs = (): HTMLElement[] =>
 const markedTabs = (): HTMLElement[] =>
   railTabs().filter((t) => t.getAttribute('aria-current') === 'page');
 
-/** The Archive placeholder's opening words — matched loosely so copy can breathe. */
-const ARCHIVE_NOTE = /Archive will hold open items/;
+/** A phrase from the Archive placeholder — matched loosely so copy can breathe. */
+const ARCHIVE_NOTE = /open items nobody has touched/;
 
 describe('the section rail', () => {
   beforeEach(() => {
