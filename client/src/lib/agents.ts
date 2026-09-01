@@ -1,9 +1,10 @@
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, OrchestratorRunsPayload, PermissionMode
+  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, OrchestratorArchivePayload,
+  OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, PermissionMode
 } from '../../../shared/types';
 
 /**
- * agents.ts — the board's five calls into its own API.
+ * agents.ts — the board's seven calls into its own API.
  *
  * Same-origin, every one of them: the dashboard's origin is server-side
  * configuration this page never learns, which is both why the bearer token
@@ -160,6 +161,80 @@ export async function fetchOrchestratorRuns(): Promise<OrchestratorRunsPayload> 
     throw new Error('malformed /api/orchestrator/runs response');
   }
   return data;
+}
+
+/**
+ * Same reasoning and the same "lies quietly" profile as `isOrchestratorRunsPayload`
+ * above, applied to the archive listing (Task 1) instead of the live one:
+ * `RunsView` (Task 6) holds this payload's `runs` array in hook state and
+ * dereferences `runId`, `project`, `current`, and `queue` on every row it
+ * renders — a row list, a project filter, and the "is this the live entry"
+ * accent all read straight off those four fields. A wrong-shaped
+ * `current` (say a string, or simply absent because a future server change
+ * dropped it) would not throw on its own; it would just render every row as
+ * neither current nor archived, or crash three renders later the first time
+ * something maps over a `queue` that turned out not to be an array. Checking
+ * those four here, once, at the one place a malformed response can still be
+ * turned into a clean `throw` instead of a slow-motion downstream failure,
+ * is the same trade `isOrchestratorRunsPayload` already makes for `fresh`.
+ * `runs` itself still needs the `Array.isArray` guard first for the same
+ * reason too: an unguarded `.every` on a non-array throws before any of this
+ * even matters.
+ */
+function isOrchestratorArchivePayload(data: unknown): data is OrchestratorArchivePayload {
+  return (
+    typeof data === 'object' && data !== null &&
+    Array.isArray((data as OrchestratorArchivePayload).runs) &&
+    (data as OrchestratorArchivePayload).runs.every((run) => (
+      typeof run === 'object' && run !== null &&
+      typeof (run as OrchestratorArchiveRun).runId === 'string' &&
+      typeof (run as OrchestratorArchiveRun).project === 'string' &&
+      typeof (run as OrchestratorArchiveRun).current === 'boolean' &&
+      Array.isArray((run as OrchestratorArchiveRun).queue)
+    ))
+  );
+}
+
+/** `GET /api/orchestrator/archive` (Task 1) — every run the orchestrator
+ *  state directory has ever recorded, across every project, verification
+ *  tails already stripped by the server. */
+export async function fetchOrchestratorArchive(): Promise<OrchestratorArchivePayload> {
+  const data = await unwrap<OrchestratorArchivePayload>(await fetch('/api/orchestrator/archive'));
+  // Thrown, not returned-anyway, mirroring fetchOrchestratorRuns above: a
+  // caller gets a clean rejection rather than a payload that looks real
+  // until some row's render reads the wrong field out of it.
+  if (!isOrchestratorArchivePayload(data)) {
+    throw new Error('malformed /api/orchestrator/archive response');
+  }
+  return data;
+}
+
+/**
+ * `GET /api/orchestrator/archive/run` (Task 2) — one archived run, verbatim,
+ * tails included: the detail pane's one fetch, made only when a viewer
+ * actually opens that run. Unlike `fetchOrchestratorArchive` above this
+ * function carries no shape guard, and deliberately so — the response is
+ * rendered exactly once, by the same pane that issued the fetch, in the same
+ * round trip; there is no hook state for a malformed shape to lie quietly
+ * inside of, so a downstream `undefined` read fails exactly where and when
+ * it happened rather than needing to be pre-empted here. A 404 (unknown run,
+ * unregistered project, a runId shaped like path traversal — every failure
+ * mode the controller has collapses to the same 404, on purpose) already
+ * arrives as an `ApiError` via `unwrap`, which is the one failure this
+ * caller actually needs to branch on.
+ *
+ * GET, with `project`/`runId` as query params rather than a POST body: this
+ * mirrors the server's own transport choice (there is no body on a GET to
+ * put an absolute path in), not the POST-for-path-privacy pattern
+ * `fetchAgentPlan`/`startOrchestrate` follow below — `project` already rides
+ * unmodified in every `/api/orchestrator/archive` listing entry this call's
+ * caller already has in hand, so putting it in a query string here discloses
+ * nothing that response didn't already hand the client.
+ */
+export async function fetchArchivedRun(project: string, runId: string): Promise<OrchestratorRun> {
+  return unwrap<OrchestratorRun>(await fetch(
+    `/api/orchestrator/archive/run?project=${encodeURIComponent(project)}&runId=${encodeURIComponent(runId)}`
+  ));
 }
 
 /**
