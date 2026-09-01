@@ -333,3 +333,90 @@ build exit=0
 Not committed — `backlog-execute` never does. Note for whoever picks this up:
 the `skills/` half of this diff changes nothing in an installed plugin until
 it is committed, pushed, and `pnpm run plugin:sync` runs.
+
+### Review round 1 — two Important findings, both fixed
+
+2026-09-01. Both were real; both were verified against the files before
+anything was changed.
+
+**1. `SKILL.md` — the fix loop reached Commit without the denials gate.**
+Step 7's `verdict: fix` path is resume → `watch` → commit (step 6) → review,
+and it never passes back through step 5, where the gate had been added. So a
+fix-loop session refused a call would have had that work committed and merged
+with exit code, result subtype and `is_error` all reporting success — the exact
+failure this bug's whole change exists to prevent, reappearing one section
+over. Step 7 now runs the same check on the fix session's own transcript
+before committing, and a non-zero count sends the item to the fix-exhausted
+menu rather than spending its second loop on a session that could not work.
+
+The fix loop also now writes to `<dir>/logs/<id>-fix-<n>.jsonl` rather than
+reusing step 5's `-retry-1` name — a second loop was otherwise free to
+overwrite the first one's evidence, which matters more now that the
+transcript is a thing the loop reads a verdict out of.
+
+**2. `orchestrate.test.mjs` — the "no result event at all" test tested
+nothing new.** It pointed at `stream-noinit.jsonl`, which does carry a
+`result` event (one with no `permission_denials` key) and does end in a
+newline, so it was parsed: the test was a second copy of the absent-field
+case above it, and `readPermissionDenials`'s actual no-result-event branch —
+the loop never matching, so the initial `[]` is returned — was uncovered. It
+now points at a new `stream-no-result.jsonl` fixture: init, a tool_use and a
+tool_result, and no result event, the shape of a session killed mid-flight.
+
+A third change, not asked for but implied by the first: a structural guard
+test (`every step that runs a headless session checks its transcript for
+denials before committing`) parses `SKILL.md` into sections and asserts that
+both §5 and §7 — the two paths that run a session and then commit its work —
+carry the `denials --jsonl` call. Finding 1 was a gate added to one of two
+paths, which is the kind of gap prose review catches once and then stops
+catching; this makes it a test failure instead.
+
+Both new tests were mutation-checked rather than merely watched to pass.
+Removing the fix-loop denials check from step 7, then reverting the
+`readPermissionDenials` initial `[]`:
+
+```
+###### MUTATION A: remove the fix-loop denials check from step 7 ######
+not ok 97 - every step that runs a headless session checks its transcript for denials before committing
+# pass 96
+# fail 1
+
+###### MUTATION B: break readPermissionDenials' no-result-event return ######
+not ok 92 - readPermissionDenials returns no denials for a transcript that has no result event at all
+# pass 96
+# fail 1
+
+###### RESTORED ######
+# tests 97
+# pass 97
+# fail 0
+```
+
+Mutation B is also the proof that finding 2 was real: under it, *only* the
+rewritten test fails. The absent-field test still passes, because it reaches
+a result event and reassigns — so the old `stream-noinit.jsonl` version of
+this test would not have caught it either.
+
+Re-verification, fresh:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+typecheck exit=0
+
+$ pnpm test
+Test Suites: 33 passed, 33 total
+Tests:       473 passed, 473 total
+Snapshots:   0 total
+Time:        25.423 s
+Ran all test suites.
+
+$ pnpm run test:skills
+# tests 253
+# pass 253
+# fail 0
+
+$ pnpm run build
+build exit=0
+✓ built in 774ms
+```

@@ -1923,6 +1923,7 @@ const STREAM_DENIAL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'f
 const STREAM_NO_DENIALS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-denials.jsonl')
 const STREAM_DENIAL_PARTIAL_TAIL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial-partial-tail.jsonl')
 const STREAM_TWO_RESULTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-two-results.jsonl')
+const STREAM_NO_RESULT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-result.jsonl')
 
 test('readPermissionDenials returns the denial recorded on the result event', () => {
   const denials = readPermissionDenials(STREAM_DENIAL)
@@ -1953,7 +1954,14 @@ test('readPermissionDenials returns no denials for a transcript that has no resu
   // The crashed-session shape watch already knows about: the child died
   // before it could summarise anything. "No denials recorded" is the honest
   // answer — step 5 judges that run by the item file, as it always has.
-  assert.deepEqual(readPermissionDenials(STREAM_NOINIT), [])
+  //
+  // Its own fixture rather than the reused stream-noinit.jsonl, which was
+  // the first thing this test pointed at and was wrong: that file DOES carry
+  // a result event (one with no permission_denials key), so this test was a
+  // second copy of the absent-field case above it and the branch it is named
+  // for — the loop never matching a result event at all, so the initial []
+  // is what comes back — went uncovered.
+  assert.deepEqual(readPermissionDenials(STREAM_NO_RESULT), [])
 })
 
 test('denials --jsonl prints the denial count and the denials themselves', (t) => {
@@ -1998,4 +2006,39 @@ test('a queue item starts with a null permissionMode, before any dispatch has ch
 
   const item = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-8')
   assert.equal(item.permissionMode, null)
+})
+
+test('every step that runs a headless session checks its transcript for denials before committing', () => {
+  // The structural half of the denials gate, and the one a reading of step 5
+  // alone misses. Two paths in this file run a session and then commit its
+  // work: step 5 (dispatch → Inspect → Commit) and step 7's fix loop
+  // (resume → watch → Commit, reaching Commit WITHOUT passing back through
+  // step 5). The gate was added to the first and not the second, so a fix
+  // loop's denial would have been committed and merged with every other
+  // signal reporting success — which is exactly the shape of bug this whole
+  // check exists to catch, reappearing one section over.
+  //
+  // Asserted by section rather than by line number so the file can keep
+  // growing, which it does constantly. If a section is renamed, update the
+  // titles here — do not delete the case.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const sections = new Map()
+  let current = null
+  for (const line of text.split('\n')) {
+    if (line.startsWith('## ')) {
+      current = line.slice(3).trim()
+      sections.set(current, [])
+    } else if (current !== null) {
+      sections.get(current).push(line)
+    }
+  }
+  const MUST_CHECK = ['5. Inspect what the session left behind', '7. Review']
+  for (const title of MUST_CHECK) {
+    assert.ok(sections.has(title), `section not found (renamed?): ${title}`)
+    const body = sections.get(title).join('\n')
+    assert.ok(
+      body.includes('orchestrate.mjs" denials --jsonl'),
+      `section "${title}" runs a session and then commits, but never checks its transcript for denials`
+    )
+  }
 })

@@ -702,11 +702,31 @@ cannot afford ten full reports in this session's context.
   item's `fixLoops` and echoes the new value back, so the line prints
   `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then resume the item's own
   executor session with the findings pasted in — step 5's retry line
-  unchanged, every flag included and `--verbose` among them — then `watch` it
-  out as in step 4, commit again (step 6), and review again with a fresh
-  report path (`<dir>/reviews/<id>-2.md`). Paste the findings as the reviewer
-  wrote them — they name `file:line`, and paraphrasing them into "fix the
-  review comments" hands the session a puzzle instead of a task.
+  unchanged, every flag included and `--verbose` among them, writing to this
+  loop's own transcript (`<dir>/logs/<id>-fix-<n>.jsonl`, `<n>` matching the
+  `fixLoops` you just read back, so a second loop never overwrites the first
+  one's evidence) — then `watch` it out as in step 4, **check that transcript
+  for denials before committing anything**, commit again (step 6), and review
+  again with a fresh report path (`<dir>/reviews/<id>-2.md`). Paste the
+  findings as the reviewer wrote them — they name `file:line`, and
+  paraphrasing them into "fix the review comments" hands the session a puzzle
+  instead of a task.
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
+  ```
+
+  **This is the same gate step 5 runs, and it is not optional here.** A fix
+  loop is a headless session under `--permission-mode auto` exactly like the
+  first one, so it can be refused a call exactly like the first one — and this
+  path reaches Commit without passing through step 5, so nothing else on it
+  would ever look. A refused fix session is the worst-placed denial in the
+  whole loop: it has already been told what is wrong, so whatever it produced
+  instead of the refused command looks like a response to the review, and the
+  next reviewer reads a diff that was shaped by a command that never ran. A
+  non-zero `count` means **do not commit this loop's work** — treat it as the
+  fix loop failing, and take it to the fix-exhausted menu below rather than
+  spending the second loop on a session that was not actually able to work.
 
 **At most two fix loops per item, counted in the run file — not in your own
 head.** `fixLoops` is what `--fix-loop` maintains, and reading the ceiling off

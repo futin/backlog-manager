@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"c48a2f70-1d63-4e95-b207-6a9f3e1c8d40","tools":["Bash","Read","Edit"],"permissionMode":"auto"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01KilledMidFlight","name":"Bash","input":{"command":"pnpm test"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_01KilledMidFlight","is_error":false,"content":"Tests: 44 passed"}]}}
