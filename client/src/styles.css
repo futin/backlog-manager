@@ -374,14 +374,20 @@ body {
    --ink3 like the kind badge either, which would be the wrong register in the
    other direction: this one IS asking for something. */
 .board-card-stale { color: var(--mustard) }
-/* Task 11: the orchestrator's own live per-card marker (ItemCard's
-   `runStage` prop) — the one footer marker whose source is a run payload
-   rather than the item file, and the reason it is shaped as an actual chip
-   (border + tinted fill) rather than plain coloured text like its three
-   siblings above. Those three state a fact the file holds until the next
+/* Task 11: the orchestrator's own per-stage chip — the one marker whose source
+   is a run payload rather than an item file, and the reason it is shaped as an
+   actual chip (border + tinted fill) rather than plain coloured text like the
+   card's footer markers above. Those state a fact the file holds until the next
    edit; this one can be gone by the next poll, and the border is what
    tells a reader "this one can retract itself" at a glance, before they
    have read a single word of it.
+     Task 9 left every one of these rules untouched and took away one of their
+   two callers: ItemCard's own footer chip is gone, because all seven stages it
+   chipped now render as the card's own live bar instead (the run-tone modifier
+   at the end of this section). RunDrawer chips all fourteen stages and is the
+   only caller left, which is why these names still read as the board's own —
+   they are still the board's legend, just no longer painted on a card. The
+   stale marker above is unrelated and still a card's.
    Colour: cyan, not green or amber, and both exclusions are deliberate.
    Green is `.board-card-groomed`'s own colour a few lines up, and a bug
    that is both groomed AND mid-run would otherwise show two green markers
@@ -457,10 +463,10 @@ body {
   color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
   background: color-mix(in srgb, var(--amber) 10%, var(--strip));
 }
-/* failed: RunDrawer's own addition (fix round 1) — ItemCard never chips this
-   stage at all (it's outside ACTIVE_RUN_STAGES and isn't needs-answers), so
-   this variant exists for the drawer's per-row chip (RunDrawer.tsx's own
-   stageClass), not the card's. Red/danger rather than the default cyan:
+/* failed: RunDrawer's own addition (fix round 1) — the card never chipped this
+   stage at all even when it still had a chip (it's outside ACTIVE_RUN_STAGES and
+   isn't needs-answers), so this variant has always existed for the drawer's
+   per-row chip alone. Red/danger rather than the default cyan:
    RunAttention.kind has no `failed` member, so a failed item never earns a
    box in the Attention section the way needs-answers/parked/fix-exhausted
    do — this chip is the only place in the drawer a failure is visible at
@@ -507,6 +513,27 @@ body {
   flex: none; white-space: nowrap; letter-spacing: .04em;
   text-transform: none; font-size: 10.5px;
 }
+/* Task 9: the same bar, in the tone the board's colour legend already assigns
+   to "the orchestrator is running this, without a human" — cyan, the exact
+   argument .board-card-stage above makes at length for the run chips. No new
+   palette entry was added for this, in any of the five themes, and none should
+   be: the meaning already had a colour, and a second cyan-ish token would have
+   been a synonym for it that the next reader has to tell apart.
+   A modifier over the base rule, not a rule of its own: the padding, the
+   --card-pad-x alignment that lines the label up with the title beneath it, the
+   --on-accent ink pairing and the compact-density retune are all inherited, and
+   the ONLY declarations here are the two colours. A sibling bar would have had
+   to re-derive four tuned values to change one.
+   --on-accent on filled --cyan is an established pairing, not a new bet:
+   .dispatch-chip.execute:hover is the same fill with the same ink, and the ink
+   inverts with the palette (near-black on the four dark themes, near-white on
+   the light one, where --cyan is a dark teal).
+   Only the six ACTIVE_RUN_STAGES reach this class. A run blocked on a person
+   (ATTENTION_RUN_STAGES) keeps the base rule's amber, which is the same legend
+   read the other way: a question waiting on you is a human's turn, not
+   progress. */
+.board-card-live-run { border-color: var(--cyan) }
+.board-card-live-bar-run { background: var(--cyan) }
 
 /* ---------------------------------------------- Settings section */
 .mdetail-label {

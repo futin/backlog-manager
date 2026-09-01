@@ -11,7 +11,8 @@ import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
-import { ItemCard } from './ItemCard';
+import { ACTIVE_RUN_STAGES, ATTENTION_RUN_STAGES, ItemCard } from './ItemCard';
+import type { RunCardState } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
@@ -69,8 +70,8 @@ const COLUMNS: { section: Section; label: string; slug: string }[] = [
  * unparseable value sorts predictably instead of NaN-scrambling the list.
  *
  * A record keyed on `SortKey`, not the three-branch if/else this used to be:
- * `sortItems` below gives every sort a shared primary key (in-progress
- * first), and a primary key that has to run in front of whichever comparator
+ * `sortItems` below gives every sort a shared primary key (live work
+ * first — `liveRank`), and a primary key that has to run in front of whichever comparator
  * is selected can only be written once against a record's shared call site —
  * three separate branches would each need their own copy of it.
  */
@@ -81,17 +82,52 @@ const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem) => number> =
 };
 
 /**
- * 0 for a card someone is actively on, 1 for everything else. Lower sorts
- * first, so this is the primary key every sort shares: in-progress cards
- * float to the top of the column no matter which comparator is selected, and
- * whichever one is selected still decides order *within* each half — two
- * live cards do not collapse to file order against each other just because
- * they tied on rank.
+ * The primary sort key every comparator shares, and the board's one answer to
+ * "is anybody on this right now". Lower sorts first, so live cards float to the
+ * top of their column no matter which comparator is selected, and whichever one
+ * is selected still decides order *within* each rank — two live cards do not
+ * collapse to file order against each other just because they tied.
+ *
+ *   0 — a fresh run is BLOCKED on a person (`ATTENTION_RUN_STAGES`).
+ *   1 — a fresh run is working it (`ACTIVE_RUN_STAGES`), or a hand-run session
+ *       has stamped `started:` on the file (`isInProgress`).
+ *   2 — everything else.
+ *
+ * Rank 0 sits above running work because it is the only one of the three that
+ * is waiting on the reader: a run that has stopped and will not restart on its
+ * own is the single most actionable thing a column can contain.
+ *
+ * Hand-run and orchestrator-run live work deliberately TIE at rank 1. Both mean
+ * "somebody is on this", and there is no reading under which one of them
+ * deserves to sit above the other — the selected sort orders them against each
+ * other exactly as it always has.
+ *
+ * Three readers, and they must not disagree: this rank orders the columns, its
+ * `< 2` half is the Status filter's `started` predicate, and the same `< 2` half
+ * gates the board's clock (`hasLive`). It is also, by construction, exactly the
+ * set of cards `liveBarFor` (ItemCard.tsx) draws a bar for — the rank and the
+ * marker are the same claim, one sorted and one painted, which is why neither
+ * restates the other's stage lists.
  */
-const inProgressRank = (item: BacklogItem): 0 | 1 => (isInProgress(item) ? 0 : 1);
+const liveRank = (item: BacklogItem, stage: RunStage | undefined): 0 | 1 | 2 => {
+  if (stage !== undefined && ATTENTION_RUN_STAGES.includes(stage)) return 0;
+  if ((stage !== undefined && ACTIVE_RUN_STAGES.includes(stage)) || isInProgress(item)) return 1;
+  return 2;
+};
 
-/** Onto a copy, never in place — the array belongs to the fetched index. */
-function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
+/**
+ * Onto a copy, never in place — the array belongs to the fetched index.
+ *
+ * `stageFor` is threaded in rather than read off the item: an orchestrated
+ * item's file says nothing about the run working it (see `liveBarFor`'s own
+ * comment for why), so the primary key can no longer be a pure function of one
+ * item and the lookup has to come from the caller that holds the run payload.
+ */
+function sortItems(
+  items: BacklogItem[],
+  sort: SortKey,
+  stageFor: (item: BacklogItem) => RunStage | undefined
+): BacklogItem[] {
   const out = [...items];
   /* The `??` is not defensive noise, and the `SortKey` type is not a promise
      that it can't fire. `sort` arrives from localStorage through
@@ -112,7 +148,7 @@ function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
      "all".) The asymmetry is the point — a degraded board a user can reason
      about is a different class of problem from a page that isn't there. */
   const compare = COMPARATORS[sort] ?? COMPARATORS.created;
-  out.sort((a, b) => inProgressRank(a) - inProgressRank(b) || compare(a, b));
+  out.sort((a, b) => liveRank(a, stageFor(a)) - liveRank(b, stageFor(b)) || compare(a, b));
   return out;
 }
 
@@ -171,8 +207,8 @@ export default function BoardView() {
    * own file-level comment). Storing the clicked object would freeze the
    * drawer at whatever the pipeline looked like at click time — exactly the
    * "frozen pipeline that looks live" this feature exists to rule out. Keyed
-   * on `project` rather than `runId` for the same reason `runStagesByProject`
-   * below already is: `runs` is one entry PER PROJECT (Task 8's own doc
+   * on `project` rather than `runId` for the same reason `runEntriesByProject`
+   * above already is: `runs` is one entry PER PROJECT (Task 8's own doc
    * comment on OrchestratorRunsPayload), so a project path is a stable
    * handle across every poll for as long as the SAME run is what that
    * project is on — including after it goes stale, since a stale run stays
@@ -208,6 +244,49 @@ export default function BoardView() {
   const knownPaths = new Set(registered.map((p) => p.path));
   const projectValue = knownPaths.has(project) ? project : ALL;
 
+  /* Fresh runs only: a stale one has already gone silent as far as RunStrip
+     is concerned (see its own comment on why), and a card's live bar is the
+     same claim in miniature — "this item is being worked right now" — so it
+     has to go silent on exactly the same condition, not linger because this
+     map forgot to check. That single `fresh` filter is the ONLY thing
+     unpinning a card when a run's heartbeat stops; there is deliberately no
+     second check downstream, and test/orchestrator-strip.test.tsx pins this
+     one in place so a future refactor sourcing the map from `runs` fails here
+     rather than leaving a dead run pinning cards to the top of a column
+     forever.
+
+     Declared this high up — well above the strip that renders from it — because
+     `matches` and `hasLive` just below now need the run's own view of an item:
+     the Status filter's "In progress" and the board's ticking clock both have
+     to count orchestrated work, and an orchestrated item's FILE says nothing
+     about the run working it (ItemCard's `liveBarFor` has the full finding). */
+  const freshRuns = runs.filter((run) => run.fresh);
+
+  /* The id→queue-entry lookup, one map per fresh run, keyed by the run's own
+     `project` — the registry's absolute path, the exact string
+     `BacklogItem.projectPath` already carries on every item (shared/types.ts
+     documents both as "the same string"). Every card below is matched to a run
+     by comparing that path directly, never by deriving a project identity from
+     `item.path` or from the display name on its pill — two checkouts of the
+     same repo would share the name but never the path, and only the path is
+     what the run itself reports.
+
+     The narrow `{ stage, stageAt }` record rather than the bare stage this used
+     to carry: the card's bar reads an elapsed off `stageAt`, and rather than the
+     whole `RunQueueItem` (whose sessionId/worktree/verification belong to
+     RunDrawer) it carries exactly what a card can render. */
+  const runEntriesByProject = new Map<string, Map<string, RunCardState>>();
+  for (const run of freshRuns) {
+    runEntriesByProject.set(
+      run.project,
+      new Map(run.queue.map((q) => [q.id, { stage: q.stage, stageAt: q.stageAt }]))
+    );
+  }
+  const runEntryFor = (item: BacklogItem): RunCardState | undefined =>
+    runEntriesByProject.get(item.projectPath)?.get(item.id);
+  /** The rank's and the filter's half of the same lookup — neither needs `stageAt`. */
+  const runStageFor = (item: BacklogItem): RunStage | undefined => runEntryFor(item)?.stage;
+
   const needle = query.trim().toLowerCase();
   const matches = (i: BacklogItem): boolean =>
     (projectValue === ALL || i.projectPath === projectValue) &&
@@ -225,8 +304,16 @@ export default function BoardView() {
     // claims to list live work. With the section gone from the board entirely,
     // both the bypass and the ordering rule it needed are moot.
     i.section !== 'out-of-scope' &&
+    /* `liveRank(...) < 2`, not `isInProgress`. The two used to be the same
+       question and stopped being one the moment a run could work an item
+       without stamping the file this board reads: resolving "In progress"
+       through the file's `started:` alone hid exactly the items the
+       orchestrator was working — the precise opposite of what this view is
+       for. Expressed as the rank rather than as its own copy of the two stage
+       lists so the filter and the column order can never disagree about which
+       cards are live. */
     (status === 'started'
-      ? isInProgress(i)
+      ? liveRank(i, runStageFor(i)) < 2
       : status === 'all' || i.status === status);
 
   /* Everything the toolbar admits, before the staleness split below. Named
@@ -234,22 +321,34 @@ export default function BoardView() {
      see its own comment for why that is not just an ordering convenience. */
   const matched = all.filter(matches);
 
-  /* One clock for the whole board, and only while something needs one. An
-     in-progress card's elapsed reading is the only thing here that goes stale
-     with no event at all — `20m` is wrong sixty seconds later whether or not
-     anyone touches the tab, and the item fetches only refresh on mount and
-     focus. Gated on the rendered items so a board with nothing live installs no
-     interval; passed down as a value so the cards stay pure and their tests
-     never have to fake a timer.
+  /* One clock for the whole board, and only while something needs one. A live
+     card's elapsed reading is the only thing here that goes stale with no event
+     at all — `20m` is wrong sixty seconds later whether or not anyone touches
+     the tab, and the item fetches only refresh on mount and focus. Gated on the
+     rendered items so a board with nothing live installs no interval; passed
+     down as a value so the cards stay pure and their tests never have to fake a
+     timer.
+
+     `liveRank(...) < 2`, not `isInProgress`: it is the same predicate the rank
+     and the Status filter read, and it has to be, because an orchestrator-active
+     card's bar carries an elapsed of its own. Left at `isInProgress` the reading
+     on those cards would freeze at whatever it said on first paint — a board
+     that looks live and is lying about how long by however long the tab has
+     been open.
 
      Computed on `matched` rather than on `visible` below, which reads like a
      bug and is not: `useNow` is a hook, so it cannot be called after a filter
-     that itself needs the clock it returns, and the two sets agree on this
-     question anyway. An in-progress item is never stale (item-stale.ts
-     sequences that rule ahead of the arithmetic on purpose), so staleness can
-     only ever remove cards that answer `false` here — the `.some` is
-     identical either way. */
-  const hasLive = matched.some(isInProgress);
+     that itself needs the clock it returns. The two sets agree in every case
+     the file can decide — an in-progress item is never stale (item-stale.ts
+     sequences that rule ahead of the arithmetic on purpose) — and where they
+     could disagree, they disagree harmlessly: `isStale` reads the item FILE, so
+     a long-untouched open bug an orchestrator has just picked up is still stale
+     by the file's own reckoning and still leaves for Archive, which at worst
+     installs an interval for a card that is not on screen. Widening staleness to
+     consult the run payload would put a third reader on these stage lists and
+     change what ArchiveView shows, which is a different decision from this
+     one. */
+  const hasLive = matched.some((i) => liveRank(i, runStageFor(i)) < 2);
   const now = useNow(hasLive);
 
   /* Task 5: the Board/Archive split. Everything the toolbar matched, minus the
@@ -276,13 +375,6 @@ export default function BoardView() {
     ...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`),
     ...(index?.errors ?? [])
   ];
-
-  // Fresh runs only: a stale one has already gone silent as far as RunStrip
-  // is concerned (see its own comment on why), and a card badge is the same
-  // claim in miniature — "this item is executing right now" — so it has to
-  // go silent on exactly the same condition, not linger because this map
-  // forgot to check.
-  const freshRuns = runs.filter((run) => run.fresh);
 
   /*
    * Task 13's toolbar button. Four conditions, matching the brief's own
@@ -322,22 +414,6 @@ export default function BoardView() {
   // SOME string for a title attribute).
   const orchestrateProjectName = registered.find((p) => p.path === projectValue)?.name ?? projectValue;
 
-  // The id→stage lookup Task 11's brief asks for, one map per fresh run,
-  // keyed by the run's own `project` — the registry's absolute path, the
-  // exact string `BacklogItem.projectPath` already carries on every item
-  // (shared/types.ts documents both as "the same string"). This is the
-  // "association BoardView already knows" the brief points at: every card
-  // below is matched to a run by comparing that path directly, never by
-  // deriving a project identity from `item.path` or from the display name
-  // on its pill — two checkouts of the same repo would share the name but
-  // never the path, and only the path is what the run itself reports.
-  const runStagesByProject = new Map<string, Map<string, RunStage>>();
-  for (const run of freshRuns) {
-    runStagesByProject.set(run.project, new Map(run.queue.map((q) => [q.id, q.stage])));
-  }
-  const runStageFor = (item: BacklogItem): RunStage | undefined =>
-    runStagesByProject.get(item.projectPath)?.get(item.id);
-
   /*
    * The dispatch half of the same run payload: why a run forbids dispatching
    * this item, or null. Fed to BOTH render sites below — the card's tear-off
@@ -345,11 +421,12 @@ export default function BoardView() {
    * item, and only one of them being run-aware is half of the bug this fixes.
    *
    * Deliberately reading the FULL `runs` list rather than going through
-   * `runStagesByProject` above: `runClaimBlock` applies its own `fresh` filter
+   * `runEntriesByProject` above: `runClaimBlock` applies its own `fresh` filter
    * (see its doc comment), so routing it through a map already filtered to
-   * fresh runs would put that rule in two places, and the map's stage list is
-   * the badge's rule (`ACTIVE_RUN_STAGES`), not this one — `pending` and
-   * `preflight` block dispatch while showing no badge at all.
+   * fresh runs would put that rule in two places, and the map's stage lists are
+   * the live bar's rule (`ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES`), not this
+   * one — `pending` and `preflight` block dispatch while showing no marker at
+   * all.
    */
   const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs);
 
@@ -528,7 +605,7 @@ export default function BoardView() {
           flight is live, actionable information, where the warnings below
           are a standing fact about the registry that will still be true the
           next time this board loads. RunStrip filters its own staleness (see
-          its file-level comment) — `freshRuns` here exists for the id→stage
+          its file-level comment) — `freshRuns` here exists for the id→entry
           map above, not to protect this render, but reusing it keeps this
           from ever mounting a strip only to have it immediately render null. */}
       {freshRuns.length > 0 && (
@@ -570,7 +647,9 @@ export default function BoardView() {
       ) : (
         <div className="board-columns">
           {COLUMNS.map((col) => {
-            const colItems = sortItems(visible.filter((i) => i.section === col.section), sort);
+            const colItems = sortItems(
+              visible.filter((i) => i.section === col.section), sort, runStageFor
+            );
             return (
               <div className={`board-col board-col-${col.slug}`} key={col.section} data-testid="board-col">
                 <div className="board-col-h">
@@ -593,7 +672,10 @@ export default function BoardView() {
                       onDispatch={() => openLaunchSheet(item)}
                       now={now}
                       stale={staleFor(item)}
-                      runStage={runStageFor(item)}
+                      /* The whole queue entry, not just its stage: the
+                         card's bar reads an elapsed off `stageAt`. See
+                         `runEntriesByProject` for why one prop and not two. */
+                      run={runEntryFor(item)}
                       runBlock={runBlockFor(item)}
                     />
                   ))}
