@@ -310,7 +310,7 @@ duplicated list has to survive. Note the controller rebuilds the dispatch
 body field by field, so a new field reaches the service only when it is
 added there too.
 
-## The orchestrate spawn prompt is a server-side constant
+## The orchestrate spawn prompt is composed server-side
 
 `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal string
 `/backlog-orchestrate` — `backlog-orchestrate`'s own `SKILL.md` declares
@@ -324,12 +324,53 @@ queue to the skill," so there is nothing legitimate for a caller to vary.
 `AgentOrchestrateRequest` (the body shape `POST /api/agents/orchestrate`
 accepts) has no `prompt` field to begin with, and `AgentsController`'s
 handler rebuilds the service call field by field from `project`, `model`,
-`effort`, and `permissionMode` alone — so a `prompt` sent in the request
-body is not validated and rejected, it is simply never read. That is the
-same mechanism `dispatch` already relies on for every field outside its own
-request type, applied here to the one field that would otherwise be the
+`effort`, `permissionMode` and `ids` alone — so a `prompt` sent in the
+request body is not validated and rejected, it is simply never read. That is
+the same mechanism `dispatch` already relies on for every field outside its
+own request type, applied here to the one field that would otherwise be the
 sole way an attacker-controlled cross-origin request could make an
 unattended, headless session do anything at all.
+
+`ids` is the one thing a caller can put into that string, and it is not an
+exception to the rule above so much as the clearest statement of it. The
+board's Orchestrate sheet can narrow a run to a subset of the queue, which
+means the spawned session has to be told `/backlog-orchestrate task-3 bug-7`
+rather than the bare trigger — `--ids` is a flag `orchestrate.mjs`'s own
+`init` and `plan` have always taken, and `SKILL.md` documents the trigger as
+`/backlog-orchestrate [ids…] [--max N]`. What makes that safe is that the
+server never *accepts* prompt text, it *composes* the prompt out of the
+constant plus values that have passed two independent checks (`resolveIds`,
+`agents.service.ts`):
+
+1. **Shape** — `isItemId` (`shared/agent.ts`), the same
+   `^[a-z]+-\d+$` `backlog.mjs`'s own `ID_SHAPE` enforces. What survives is
+   a bare identifier: no whitespace, no path separator, no shell
+   metacharacter, and no newline to split the one-line prompt with.
+2. **Membership** — the id must name an *open bug or task* in *the project
+   being orchestrated*, scanned per request. Scoped to that one project
+   deliberately, unlike `findItem`'s registry-wide walk: `bug-2` exists in
+   most stores, and accepting another project's id would hand `--ids` a
+   value that `init` then exits `1` on, inside a headless session nobody is
+   watching.
+
+Shape alone is far too weak (`bug-999` passes it); membership alone would be
+running a directory scan over attacker-shaped strings. Together they mean
+the only thing a caller can put in that prompt is the id of one of this
+project's real, runnable items. Malformed input is a 400 and a file
+disagreement is a 409, matching the split `dispatch` already makes — and the
+409s here are deliberately uncoded, because `RUN_IN_PROGRESS_CODE` is the
+one 409 this endpoint has that a machine needs to tell apart.
+
+Two smaller rules ride along, both about the difference between *absent* and
+*empty*. An absent `ids` means "the whole queue" and produces the bare
+constant. An explicitly empty `ids` is a 400, never silently read as
+"everything" — that is `parseIdsArg`'s own distinction in `orchestrate.mjs`
+(`--ids ''` must not mean "give me everything") enforced one layer up, at
+the only place a browser can reach. And the sheet sends `ids` **only when
+the selection is a strict subset**: a full explicit list is a different
+instruction from no list at all, because it freezes the run to the queue as
+it stood when the sheet opened, dropping anything groomed and committed
+while the reader was looking at it.
 
 ## The browser never talks to the dashboard
 

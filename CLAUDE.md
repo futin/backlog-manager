@@ -41,7 +41,9 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   board (five
   fixed columns — bugs/ideas/tasks/out-of-scope/refactors — card drawer,
   dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
-  a toolbar Orchestrate control opening `OrchestrateSheet`, and a run strip
+  a toolbar Orchestrate control opening `OrchestrateSheet` (previews the
+  queue and selects a subset of it — `ids` rides along only for a strict
+  subset, so an untouched sheet still starts a whole-queue run), and a run strip
   above the columns — `RunStrip`/`RunDrawer` — showing every project's
   orchestrator runs), Settings. Fed by `lib/agents.ts` (same-origin
   fetches), `hooks/useAgents.ts` (status poll on mount and window focus),
@@ -195,11 +197,21 @@ happened.
   `model`/`effort` drop rather than reject. The controller rebuilds the
   dispatch body field by field — a new field reaches the service only when
   added there too.
-- **The orchestrate spawn prompt is a server-side constant.**
+- **The orchestrate spawn prompt is composed server-side.**
   `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal
   `/backlog-orchestrate` — `backlog-orchestrate`'s own `trigger:` — and
   `POST /api/agents/orchestrate`'s body has no `prompt` field to begin with,
-  so a caller-supplied one is not rejected, it is simply never read. The
+  so a caller-supplied one is not rejected, it is simply never read. The one
+  thing a caller can put into that string is `ids`, the board's item
+  selection, and only after `resolveIds` proves every entry both *is* an id
+  (`isItemId`, `shared/agent.ts` — the same `^[a-z]+-\d+$` `backlog.mjs`
+  enforces, so no whitespace, path separator, shell metacharacter or newline
+  survives) and *names* an open bug or task in **this** project (a per-request
+  scan scoped to `req.project`, deliberately not `findItem`'s registry-wide
+  walk). 400 for a malformed list, 409 for one the files disagree with, both
+  uncoded. An absent `ids` means the whole queue; an explicitly empty one is
+  a 400, never "everything" — `parseIdsArg`'s own distinction in
+  `orchestrate.mjs`, enforced at the only layer a browser reaches. The
   "derive, never accept" rule dispatch already follows, applied to a route
   with no item file to derive anything from at all.
 - **The browser never talks to the dashboard.** Every call goes board → this

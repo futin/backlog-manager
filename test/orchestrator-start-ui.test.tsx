@@ -533,6 +533,196 @@ describe('OrchestrateSheet', () => {
     expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
   });
 
+  // =====================================================================
+  // The item selector — checkboxes over the preview rows, so a run can be
+  // narrowed to a subset of the queue instead of always draining all of it.
+  //
+  // The contract these cases defend, in one line: `ids` rides along ONLY
+  // when the selection is a strict subset. Everything else about the
+  // request, and every case above, is unchanged — which is itself pinned,
+  // because "starts with exactly the picked project/model/effort/
+  // permissionMode" asserts the whole body with toEqual and fails the
+  // moment an `ids` key appears in a request that did not narrow anything.
+  // =====================================================================
+
+  /** Three queueable rows: two tasks and a bug, in board order. Every one
+   *  overrides `path` as well as `id` for the reason the preview case above
+   *  already gives — `fakeItem`'s default path names task-1, and `queue`
+   *  keys on `item.path`. */
+  const THREE = [
+    fakeItem({ id: 'bug-1', title: 'A bug', section: 'bugs', groomed: true, path: '/abs/alpha/backlog/bugs/open/bug-1.md' }),
+    fakeItem({ id: 'task-1', title: 'A task', section: 'tasks', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md' }),
+    fakeItem({ id: 'task-2', title: 'Another task', section: 'tasks', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-2.md' })
+  ];
+
+  const boxFor = (id: string): HTMLInputElement =>
+    screen.getByRole('checkbox', { name: new RegExp(id) }) as HTMLInputElement;
+
+  /* Everything checked on open, and this is the case that keeps the control
+     from changing what the sheet MEANS. Someone who opens Orchestrate and
+     presses start without noticing the checkboxes has always got a
+     whole-queue drain, and must keep getting one. */
+  it('checks every previewed row when it opens', () => {
+    renderSheet({ items: THREE });
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes).toHaveLength(3);
+    expect(boxes.every((b) => (b as HTMLInputElement).checked)).toBe(true);
+  });
+
+  /* The regression the whole "strict subset" rule exists for. An untouched
+     sheet must send the request it sent before this feature existed — no
+     `ids` key at all — because a full list is not the same instruction: it
+     freezes the run to a snapshot of the queue taken when the sheet opened,
+     and an item groomed and committed in the meantime would be silently
+     dropped from a run the user believes is draining everything. */
+  it('sends no ids at all when nothing was unchecked', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits' });
+  });
+
+  it('sends exactly the still-checked ids, in board order, once one is unchecked', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(boxFor('task-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha', permissionMode: 'acceptEdits', ids: ['bug-1', 'task-2']
+    });
+  });
+
+  /* Refused on this side rather than left to the server's 400. The server
+     check is the one that matters (a non-browser caller reaches it too), but
+     a disabled button with a reason beside it is a better answer than a
+     round trip that comes back an error, and it is the only place that can
+     explain the distinction: unchecking everything means "run nothing",
+     which is never what anyone wants, and is emphatically not the same as
+     "run everything". */
+  it('disables start, with a reason, when every row is unchecked', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+
+    expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    expect(screen.getByText(/pick at least one/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    expect(calls).toHaveLength(0);
+  });
+
+  it('re-enables start as soon as one row is checked again', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+    await userEvent.click(boxFor('task-2'));
+
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha', permissionMode: 'acceptEdits', ids: ['task-2']
+    });
+  });
+
+  /* The subtle one, and the reason "strict subset" is a rule rather than an
+     optimisation: a round trip through select-none and select-all lands on
+     the same SET the sheet opened with, so it must land on the same REQUEST
+     too. An implementation that tracked "has the user touched anything"
+     instead of comparing the selection to the queue sends an explicit
+     three-id list here and quietly re-introduces the snapshot problem the
+     case above describes. */
+  it('goes back to sending no ids after select-none then select-all', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+    await userEvent.click(screen.getByRole('button', { name: /select all/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits' });
+  });
+
+  /* An ungroomed item is a legal pick. The run really will queue it, gate
+     it and report it as ungroomed — information, not an error — which is the
+     same reasoning the preview itself is built on (see `queue`'s comment in
+     OrchestrateSheet.tsx). Disabling its checkbox would be this screen
+     claiming an authority over the gate that it explicitly does not have. */
+  it('lets an ungroomed row be selected like any other', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({
+      items: [
+        ...THREE,
+        fakeItem({
+          id: 'bug-2', title: 'Ungroomed bug', section: 'bugs', groomed: false,
+          path: '/abs/alpha/backlog/bugs/open/bug-2.md'
+        })
+      ]
+    });
+
+    expect(boxFor('bug-2')).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+    await userEvent.click(boxFor('bug-2'));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha', permissionMode: 'acceptEdits', ids: ['bug-2']
+    });
+  });
+
+  /* The existing disclaimer promises the run may re-gate an item to a
+     different VERDICT. It says nothing about the run ignoring most of the
+     list, so a narrowed selection needs its own sentence — this is the last
+     screen before a multi-hour unattended operation. */
+  it('says the run is narrowed once a subset is selected, and not before', async () => {
+    renderSheet({ items: THREE });
+    expect(screen.queryByText(/only the 2 selected/i)).not.toBeInTheDocument();
+
+    await userEvent.click(boxFor('task-1'));
+    expect(screen.getByText(/only the 2 selected/i)).toBeInTheDocument();
+  });
+
+  /* Zero selected is narrowed too, arithmetically, and the sentence above
+     renders as "only the 0 selected items will run" if it is gated on
+     `narrowed` alone — a promise about a run that cannot start, sitting
+     directly above the message explaining that it cannot. Caught by looking
+     at the real sheet, not by the case above, which never reaches zero. */
+  it('drops the narrowed sentence entirely when nothing is selected', async () => {
+    renderSheet({ items: THREE });
+
+    await userEvent.click(screen.getByRole('button', { name: /select none/i }));
+
+    expect(screen.queryByText(/selected item/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/pick at least one/i)).toBeInTheDocument();
+  });
+
+  /* An empty queue is not an empty selection. There are no rows to check, so
+     there is nothing to narrow, and the sheet keeps its pre-selector
+     behaviour: start stays live and sends a plain whole-queue request. The
+     preview is only an approximation of the gate (its own disclaimer says
+     so), so refusing to start here would be the board overruling the tool on
+     the strength of a derivation it already admits is not authoritative. */
+  it('leaves start live for an empty queue, with no ids and no checkboxes', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: [fakeItem({ status: 'done' })] });
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits' });
+  });
+
   it('closes on Escape', async () => {
     const { onClose } = renderSheet();
     await userEvent.keyboard('{Escape}');

@@ -102,6 +102,28 @@ export function OrchestrateSheet(
   const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Which previewed rows are selected, by item id, or `null` for "the whole
+   * queue" — the state this sheet opens in and the state it must be able to
+   * return to.
+   *
+   * `null` rather than "a set holding every id" is the entire mechanism
+   * behind the strict-subset rule below, and it is worth being explicit
+   * about why a plain full set is wrong. A full set and `null` describe the
+   * same selection but not the same INSTRUCTION: an explicit list freezes
+   * the run to the queue as it stood when this sheet opened, so an item
+   * groomed and committed while someone was reading the list would be
+   * silently dropped from a run they believe is draining everything. Keeping
+   * "no restriction" as its own value means the untouched sheet — and a
+   * sheet toggled all the way off and all the way back on — sends the
+   * request it sent before this control existed, byte for byte.
+   *
+   * Keyed by id, not by path: ids are what the request carries and what the
+   * orchestrator's own `--ids` flag takes, so there is no second identity to
+   * keep in step. (The rows themselves still key on `item.path`, which is
+   * what React needs and what stays unique across sections.)
+   */
+  const [selected, setSelected] = useState<Set<string> | null>(null);
 
   // Same shape as LaunchSheet's and RunDrawer's own Escape effect —
   // independently duplicated a third time rather than factored out, matching
@@ -156,6 +178,45 @@ export function OrchestrateSheet(
     .map((item) => ({ item, action: deriveAction(item) }))
     .filter((row): row is { item: BacklogItem; action: AgentAction } => row.action !== null);
 
+  /**
+   * The selection, resolved against the queue as it stands right now.
+   *
+   * Everything below is derived rather than stored, which is what keeps
+   * `selected` from drifting out of step with `queue`: an id that has left
+   * the queue since it was ticked simply stops appearing here, so a stale
+   * id can never reach the request.
+   *
+   * `narrowed` is the strict-subset test the whole request shape turns on,
+   * and it is deliberately a comparison against the queue rather than a
+   * "has the user touched anything" flag. Select-none followed by
+   * select-all lands back on the full queue, and must therefore land back
+   * on the full-queue REQUEST — a touched-flag would send an explicit list
+   * there and quietly reintroduce the snapshot problem `selected`'s own
+   * comment describes.
+   */
+  const queueIds = queue.map(({ item }) => item.id);
+  const isSelected = (id: string): boolean => selected === null || selected.has(id);
+  const selectedIds = queueIds.filter(isSelected);
+  const narrowed = selectedIds.length < queueIds.length;
+  /** Nothing ticked, with rows to tick — refused below. An EMPTY QUEUE is
+   *  not this state: there is nothing to narrow, so the sheet keeps its
+   *  pre-selector behaviour and starts a plain whole-queue run. Refusing
+   *  there would be the board overruling the orchestrator's own gate on the
+   *  strength of a preview that says outright it is not authoritative. */
+  const emptySelection = queueIds.length > 0 && selectedIds.length === 0;
+
+  const toggle = (id: string): void => {
+    // `prev ?? queueIds` is where "the whole queue" becomes an explicit set:
+    // the first tick has to start from everything, because that is what the
+    // sheet has been showing since it opened.
+    setSelected((prev) => {
+      const next = new Set(prev ?? queueIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const start = (): void => {
     setBusy(true);
     setError(null);
@@ -167,6 +228,15 @@ export function OrchestrateSheet(
       // "no flag" from a genuinely missing key rather than an empty string.
       ...(model === '' ? {} : { model }),
       ...(effort === '' ? {} : { effort }),
+      // The same absent-not-empty convention, for the field it matters most
+      // on: `ids` rides along ONLY for a strict subset. A full list would be
+      // a different instruction from no list at all (see `selected` and
+      // `narrowed` above), and an EMPTY list is refused outright by the
+      // server — `parseIdsArg` in orchestrate.mjs keeps "no flag" and "an
+      // explicit empty selection" apart precisely so that `--ids ''` cannot
+      // silently mean "everything", and `emptySelection` above is what stops
+      // this sheet from ever posing that question.
+      ...(narrowed ? { ids: selectedIds } : {}),
       permissionMode: mode
     })
       .then(() => {
@@ -223,22 +293,74 @@ export function OrchestrateSheet(
           <div className="sheet-note">
             preview — the run re-gates every item itself the moment it
             starts, so this list is not the final word on what actually runs.
+            {/* The disclaimer above promises the run may re-gate an item to
+                a different VERDICT. It says nothing about the run skipping
+                most of the list, so a narrowed selection needs its own
+                sentence: this is the last screen before a multi-hour
+                unattended operation, and "I thought it was draining
+                everything" is not something anyone finds out cheaply. */}
+            {narrowed && selectedIds.length > 0 && (
+              <> only the {selectedIds.length} selected {selectedIds.length === 1 ? 'item' : 'items'} will run.</>
+            )}
           </div>
 
           {queue.length === 0 ? (
             <div className="drawer-empty">nothing groomed and open in this project</div>
           ) : (
-            <div className="run-drawer-queue" data-testid="orchestrate-queue">
-              {queue.map(({ item, action }) => (
-                <div key={item.path} className="run-drawer-item">
-                  <div className="run-drawer-item-head">
-                    <span className="run-drawer-item-id">{item.id}</span>
-                    <span className="run-drawer-item-title">{item.title}</span>
-                    <span className={`orchestrate-preview-action ${action}`}>{actionLabel(item, action)}</span>
+            <>
+              {/* Buttons rather than a tri-state header checkbox: an
+                  indeterminate checkbox has no accessible state a screen
+                  reader reads usefully without extra aria, and "all" and
+                  "none" are two different intentions here rather than two
+                  positions of one control — `selected === null` (no
+                  restriction) and a full explicit set are not the same
+                  request, and only "select all" can get back to the first. */}
+              <div className="orchestrate-select-actions">
+                <span className="sheet-note">{selectedIds.length} of {queueIds.length} selected</span>
+                <button
+                  type="button"
+                  className="drawer-close"
+                  onClick={() => setSelected(null)}
+                  disabled={!narrowed}
+                >
+                  select all
+                </button>
+                <button
+                  type="button"
+                  className="drawer-close"
+                  onClick={() => setSelected(new Set())}
+                  disabled={selectedIds.length === 0}
+                >
+                  select none
+                </button>
+              </div>
+
+              <div className="run-drawer-queue" data-testid="orchestrate-queue">
+                {queue.map(({ item, action }) => (
+                  <div key={item.path} className="run-drawer-item">
+                    <div className="run-drawer-item-head">
+                      {/* Labelled by id, which is both unique in this list
+                          and the exact string the request carries — so the
+                          accessible name names the thing being selected
+                          rather than describing it. Never disabled for an
+                          ungroomed row: the run really will queue it, gate
+                          it and report it, and this screen has no authority
+                          to decide otherwise (see `queue` above). */}
+                      <input
+                        type="checkbox"
+                        className="orchestrate-select"
+                        aria-label={`select ${item.id}`}
+                        checked={isSelected(item.id)}
+                        onChange={() => toggle(item.id)}
+                      />
+                      <span className="run-drawer-item-id">{item.id}</span>
+                      <span className="run-drawer-item-title">{item.title}</span>
+                      <span className={`orchestrate-preview-action ${action}`}>{actionLabel(item, action)}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>
           )}
 
           {/* Same one-row grouping LaunchSheet's own `.sheet-row` uses for
@@ -281,9 +403,18 @@ export function OrchestrateSheet(
 
           {error !== null && <div className="sheet-error">{error}</div>}
 
+          {/* Refused here as well as server-side, and the wording is why:
+              the server's 400 is correct but arrives after a round trip and
+              cannot say what this can — unticking everything means "run
+              nothing", which is never what anyone wants and is emphatically
+              not the same as "run everything". */}
+          {emptySelection && (
+            <div className="sheet-note">pick at least one item, or select all to drain the queue.</div>
+          )}
+
           <div className="sheet-actions">
             <button className="drawer-close" onClick={onClose}>cancel</button>
-            <button className="sheet-launch" onClick={start} disabled={busy}>
+            <button className="sheet-launch" onClick={start} disabled={busy || emptySelection}>
               {busy ? 'starting…' : 'start'}
             </button>
           </div>
