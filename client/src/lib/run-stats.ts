@@ -264,9 +264,36 @@ export interface RunAggregates {
  * fact "there is nothing here to measure yet," which matters most for the
  * empty-history case (a freshly registered project) where every tile would
  * otherwise print a red 0% for having done nothing at all.
+ *
+ * `runs`' element type is a structural shape, not `OrchestratorArchiveRun`
+ * itself — the same generalization `RunsView.tsx`'s own `queueCounts`
+ * already made, and for the identical reason: a re-review found the
+ * aggregate tiles this function feeds still reading the archive record for
+ * a live-backed run while `RunRow` beside them had already been fixed to
+ * read `pickAuthority([row.live], row.run)` (`lib/run-authority.ts`) — so
+ * mid-run, an item merging would tick the row's own count up while these
+ * tiles kept reporting whatever the last archive fetch saw, minutes stale,
+ * inches away on the same screen. `RunsView` now maps every run in scope
+ * through that same `pickAuthority` call before handing the list here, so
+ * this function has to accept whichever of the two concrete shapes
+ * (`OrchestratorArchiveRun` or a fresh live `OrchestratorRun`) that
+ * produces — a fixed `OrchestratorArchiveRun` parameter would force a cast
+ * at the call site, exactly the kind of "trust me" seam a future edit could
+ * silently get wrong again. The shape below names only the fields this
+ * function actually reads (`status`, and a `.queue` of items carrying
+ * `stage`/`fixLoops`/`stageAt`/`verification[].ok`), which both concrete
+ * run types satisfy without narrowing.
  */
 export function aggregateRuns(
-  runs: readonly OrchestratorArchiveRun[],
+  runs: readonly {
+    status: OrchestratorArchiveRun['status'];
+    queue: readonly {
+      stage: RunStage;
+      fixLoops: number;
+      stageAt: Partial<Record<RunStage, string>>;
+      verification: readonly { ok: boolean }[];
+    }[];
+  }[],
   // Accepted but not read below — see the comment ahead of the return
   // statement for why "average run wall time" is deliberately not one of
   // these seven numbers, and why the parameter stays in the signature

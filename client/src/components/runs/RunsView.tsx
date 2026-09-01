@@ -56,6 +56,16 @@ import type { OrchestratorArchiveRun, OrchestratorRun, RunStage } from '../../..
  * function `RunDetail` uses, so the two surfaces can no longer independently
  * pick different winners — and an effect below re-fetches the archive
  * listing the moment the live poll's own set of fresh runs changes.
+ *
+ * Fix round 3: round 2 fixed the ROW but left the aggregate stat tiles
+ * behind — a follow-up re-review found `aggregateRuns` still fed the raw
+ * archive record for every run, live-backed included, so a run's row could
+ * tick `1/6 -> 2/6` on the live poll while the "merged / queued" tile beside
+ * it stayed frozen on the stale archive count for the run's entire
+ * duration. Same cause as round 2 (a call site reading `m.run` instead of
+ * asking `pickAuthority` who the current authority is), just a second call
+ * site that had not been touched yet. See the comment immediately above
+ * `aggregateRuns`'s own call below for the specifics.
  */
 
 /** One row of the merged run list: the archive's own record of the run, plus the fresh live entry backing it, if any. */
@@ -450,7 +460,20 @@ export default function RunsView() {
       : undefined
   ) ?? orderedRows[0];
 
-  const aggregates = aggregateRuns(filtered.map((m) => m.run), now);
+  // Fix round 3: this used to be `filtered.map((m) => m.run)` — the
+  // ARCHIVE record for every run, live-backed or not. A re-review caught
+  // the consequence: `RunRow` (above) had already been fixed to read
+  // merged/total and status off `pickAuthority([row.live], row.run)`, but
+  // the tiles below still summed the raw archive snapshot, so an item
+  // merging mid-run ticked the pinned row's own count up (1/6 -> 2/6) while
+  // this "merged / queued" tile a few tiles away stayed frozen at whatever
+  // the last archive fetch saw — the exact I2 defect class (row and tile
+  // disagreeing about one run's numbers), relocated from the detail pane to
+  // the aggregate tiles rather than fixed everywhere at once. Mapping
+  // through the same `pickAuthority` call `RunRow` already uses closes it
+  // the same way: every run in scope contributes its freshest known queue,
+  // not whichever snapshot happened to be sitting in the archive payload.
+  const aggregates = aggregateRuns(filtered.map((m) => pickAuthority([m.live], m.run)), now);
 
   // Shared by the pinned region and every day group below: both render the
   // same kind of thing (a list of `RunRow`s against the one `selectedRow`

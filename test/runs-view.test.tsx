@@ -10,7 +10,7 @@ import RunsView from '../client/src/components/runs/RunsView';
 import { dayLabel } from '../client/src/lib/run-stats';
 import type {
   ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
-  OrchestratorRunsPayload, RunQueueItem, RunStage, VerificationSummary
+  OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, VerificationSummary
 } from '../shared/types';
 
 // Task 6 consumes the two archive/live fetchers through the real hooks
@@ -69,13 +69,18 @@ function item(
 /**
  * The full-shaped (tail-bearing) counterpart to `item()` above — what the
  * LIVE poll payload's own `queue` actually carries (`RunQueueItem`, not the
- * tail-stripped `ArchiveQueueItem`). Used only by the I2 test below, which
- * needs a live entry with a real, non-empty queue: every OTHER test in this
- * file uses `LIVE_RUNS`' own deliberately-empty `queue: []` (see that
- * fixture's own comment for why), since fix round 2 is exactly what makes a
- * live entry's queue matter to a ROW's own rendering for the first time.
+ * tail-stripped `ArchiveQueueItem`). Takes the same narrow "only override
+ * what this case cares about" `over` shape as `item()`, for the same
+ * reason: fix round 3's own `LIVE_RUNS` fixture (below) now needs a live
+ * queue with real verification entries of its own, not just a bare stage,
+ * to exercise the aggregate-tile fix the same way the I2 test's own
+ * bespoke fixture already exercises the row fix.
  */
-function liveQueueItem(id: string, stage: RunStage): RunQueueItem {
+function liveQueueItem(
+  id: string,
+  stage: RunStage,
+  over: { fixLoops?: number; stageAt?: Partial<Record<RunStage, string>>; verification?: RunVerification[] } = {}
+): RunQueueItem {
   return {
     id,
     title: `${id} title`,
@@ -84,9 +89,9 @@ function liveQueueItem(id: string, stage: RunStage): RunQueueItem {
     worktree: null,
     branch: null,
     permissionMode: null,
-    fixLoops: 0,
-    stageAt: {},
-    verification: [],
+    fixLoops: over.fixLoops ?? 0,
+    stageAt: over.stageAt ?? {},
+    verification: over.verification ?? [],
     questions: [],
     note: null
   };
@@ -196,12 +201,26 @@ const ARCHIVE_RUNS = [RUN_LIVE, RUN_DONE_ALPHA, RUN_DONE_BETA, RUN_FAILED_BETA];
 
 /**
  * The one entry the live poll payload carries — RUN_LIVE's own runId and
- * project, `fresh: true`. Its `queue` is deliberately `[]`: the design's own
- * "archive listing is the master list" rule means every row RunsView paints
- * (id, stage counts, wall time) reads off the ARCHIVE entry above, never off
- * this one — the live object exists only to answer "is this run still being
- * heard from right now", which is exactly and only what `fresh` says. Task 7
- * is what will actually read a live run's queue.
+ * project, `fresh: true`. Its `queue` used to be `[]` on the theory that
+ * "the archive listing is the master list" meant every row read merged/
+ * total off the ARCHIVE entry above, never off this one — that was true of
+ * the FIRST version of this file, but fix round 2 made a fresh live entry's
+ * queue exactly what `RunRow` reads through `pickAuthority`, and round 3
+ * made it what the aggregate tiles read too. A `queue: []` fixture renders
+ * `0/0` for RUN_LIVE's own numbers, which is not just unrealistic (no real
+ * orchestrator run ever reports an empty queue) but actively hides bugs in
+ * either fix: a row or a tile that regressed to reading the archive instead
+ * of this entry would print RUN_LIVE's real archive numbers, and nothing
+ * here would notice the swap if this queue could never disagree with it.
+ *
+ * So this queue is deliberately AHEAD of `RUN_LIVE`'s own archive snapshot
+ * (which has `a-1` merged, `a-2` still `reviewing`) rather than mirroring
+ * it: here `a-2` has ALSO merged, modelling the live poll knowing about
+ * progress the last archive fetch could not yet have seen. Any assertion
+ * anywhere in this file that reads RUN_LIVE's merged/total or the aggregate
+ * tiles is therefore already proof the fix reads live, not archive — see
+ * "renders the aggregate tile numbers for the current filter" below for the
+ * hand-checked arithmetic this produces.
  */
 const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
   {
@@ -211,7 +230,11 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
     startedAt: RUN_LIVE.startedAt,
     updatedAt: RUN_LIVE.updatedAt,
     maxItems: null,
-    queue: [],
+    queue: [
+      liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
+      // live-ahead-of-archive: the archive's own a-2 is still "reviewing".
+      liveQueueItem('a-2', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] })
+    ],
     attention: [],
     fresh: true,
     pastRuns: 2
@@ -324,12 +347,21 @@ describe('RunsView', () => {
   it('renders the aggregate tile numbers for the current filter', async () => {
     await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
 
-    // itemsMerged=4 (a-1, a-3, a-4, b-1) of itemsQueued=6 (2+2+1+1).
-    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('4/6');
+    // RUN_LIVE is live-backed, so it contributes its LIVE_RUNS queue (a-1
+    // merged, a-2 ALSO merged — ahead of the archive's a-2 "reviewing")
+    // through `pickAuthority`, not its archive snapshot. itemsMerged=5
+    // (a-1, a-2, a-3, a-4, b-1) of itemsQueued=6 (2+2+1+1). Before fix round
+    // 3 this read the archive record for every run, including RUN_LIVE, and
+    // printed 4/6 (a-2 still counted as "reviewing") — a number that would
+    // have disagreed with RUN_LIVE's own row, which round 2 already fixed
+    // to print 2/2.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('5/6');
 
-    // verifyOk=4 of verifyTotal=5 (a-1 ok, a-2 none, a-3 ok, a-4 ok, b-1 ok,
-    // b-2 failed) => 80%, rounded to 0 decimals.
-    expect(screen.getByTestId('runs-tile-verify')).toHaveTextContent('80%');
+    // verifyOk=5 of verifyTotal=6 (a-1 ok, a-2 ok [live], a-3 ok, a-4 ok,
+    // b-1 ok, b-2 failed) => 83%, rounded to 0 decimals. Before fix round 3:
+    // verifyOk=4 of verifyTotal=5 (a-2's live verification entry was never
+    // counted at all) => 80%.
+    expect(screen.getByTestId('runs-tile-verify')).toHaveTextContent('83%');
   });
 
   it('renders the empty state and nothing else for empty payloads', async () => {
@@ -437,6 +469,62 @@ describe('RunsView', () => {
     expect(row).toHaveTextContent('2/2');
     expect(row).not.toHaveTextContent('1/2');
     expect(row).toHaveTextContent('done');
+  });
+
+  // Fix round 3: a follow-up re-review found the row fix above (I2) did not
+  // reach the aggregate tiles a few pixels away — `aggregateRuns` was still
+  // fed `filtered.map((m) => m.run)`, the raw archive record, so a
+  // live-backed run's items merging mid-run moved the ROW's own count
+  // (I3's refresh effect does not re-fire for this — merges don't change
+  // the FRESH set, only starts/finishes/staleness do) while the "merged /
+  // queued" tile stayed frozen at whatever the last archive fetch saw.
+  // With exactly one run in scope (as here) that is a flat contradiction:
+  // one screen printing two different merged counts for the same run.
+  //
+  // Reuses the identical archive-behind/live-ahead fixture the row test
+  // above already built (archive: g-1 merged, g-2 still reviewing = 1/2;
+  // live: g-1 AND g-2 merged = 2/2) specifically so this test is provably
+  // the SAME scenario, just asserting the OTHER surface — a reader who
+  // sees this test pass and the row test above pass has direct proof the
+  // two can no longer disagree, which neither test alone would establish.
+  it('the aggregate merged/queued tile agrees with a live-backed row instead of freezing on the archive snapshot', async () => {
+    const archiveEntry = run({
+      runId: 'run-20260901-090000',
+      project: '/abs/gamma',
+      status: 'running',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:05:00.000Z',
+      current: true,
+      queue: [
+        item('g-1', 'merged'),
+        item('g-2', 'reviewing') // archive's stale snapshot: still "in progress"
+      ]
+    });
+    const liveEntry: OrchestratorRunsPayload['runs'][number] = {
+      runId: archiveEntry.runId,
+      project: archiveEntry.project,
+      status: 'done',
+      startedAt: archiveEntry.startedAt,
+      updatedAt: '2026-09-01T09:10:00.000Z',
+      maxItems: null,
+      attention: [],
+      queue: [
+        liveQueueItem('g-1', 'merged'),
+        liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
+      ],
+      fresh: true,
+      pastRuns: 0
+    };
+
+    await renderRunsView([archiveEntry], [liveEntry]);
+
+    // Single run in scope, so the tile's own denominator is unambiguous:
+    // it must read the same 2/2 the row reads, never the archive's 1/2.
+    // Before the fix, this tile printed "1/2" while the row (asserted the
+    // same way as the test above) printed "2/2" on the same screen.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('2/2');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('1/2');
+    expect(screen.getByTestId(`runs-row-${archiveEntry.runId}`)).toHaveTextContent('2/2');
   });
 
   // M3: `mergeRuns` used to dedupe on bare `runId`, contradicting

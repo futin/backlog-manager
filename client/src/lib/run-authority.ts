@@ -57,10 +57,22 @@
  * share (status, startedAt, updatedAt, attention, a `.queue` of
  * stage-bearing items) — which a union assigns into just as safely as any
  * single member would.
+ *
+ * `undefined` is accepted in `preferred` alongside `null` (a review found
+ * the original signature only guarded `null`, so a future caller reading an
+ * optional field — `foo?: Bar`, where a missing candidate reads back as
+ * `undefined` rather than `null` — would have `undefined` treated as a real
+ * winner and returned as "the authority" from the one module whose whole
+ * job is to make exactly that bug class impossible). Both are "this tier
+ * has nothing to say" and are skipped identically; the return type
+ * `NonNullable<A> | F` makes the guarantee a type-level fact rather than a
+ * convention every caller has to trust: it is not possible for this
+ * function to hand back `undefined` as a chosen candidate, only ever a real
+ * `A` or the `fallback`.
  */
-export function pickAuthority<A, F = A>(preferred: readonly (A | null)[], fallback: F): A | F {
+export function pickAuthority<A, F = A>(preferred: readonly (A | null | undefined)[], fallback: F): NonNullable<A> | F {
   for (const candidate of preferred) {
-    if (candidate !== null) return candidate;
+    if (candidate !== null && candidate !== undefined) return candidate as NonNullable<A>;
   }
   return fallback;
 }
