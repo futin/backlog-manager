@@ -86,20 +86,39 @@ which project's run file it means, because every one of them (`stage`,
 invoked by the orchestrator loop itself, whose own cwd is the project root
 for the run's entire lifetime; `init` is the exception because it can
 plausibly run from somewhere else — a server endpoint spawning the
-orchestrator before its child process has even changed directory. The
-failure mode if that contract were ever broken is silent, not loud: a linked
-worktree carries its own `.git` (a file, not a directory, pointing at the
-shared gitdir), so `existsSync` finds it immediately and happily resolves
-the WORKTREE's own path as "the project" instead of erroring — the run
-would then be keyed under `encodeURIComponent(<worktree path>)`, a directory
-nobody else ever reads, since the server and every other command key by the
-registered project's own path. The run would not crash; it would just
-appear to vanish, which is far harder to notice and debug than a loud "no
-`.git` found" refusal. This is exactly why the skill must always invoke
-`orchestrate.mjs` from the project root and never from inside a worktree it
-created — the per-item worktree and branch a command needs are passed as
-explicit values instead (`stage --worktree <path> --branch <name>`,
-`verify --cwd <dir>`), never implied by cwd.
+orchestrator before its child process has even changed directory.
+
+The contract used to be enforced by prose alone, and bug-2 is the record of
+why that was not enough. A linked worktree carries its own `.git` (a file,
+not a directory, pointing at the shared gitdir), so the old `existsSync`
+test — which cannot tell a file from a directory — found it immediately and
+resolved the WORKTREE's own path as "the project" instead of erroring. The
+run was then keyed under `encodeURIComponent(<worktree path>)`, a directory
+nobody else ever reads, while every other command and the server kept
+keying by the registered project's own path. Nothing crashed and nothing was
+corrupted; the run simply appeared to vanish, reported as exit `3`, "no run
+exists" — the same code an unattended loop reads as "nothing to do." A prose
+rule can only bind the commands the prose knows about, and the trap was
+armed by anything at all that left the shell inside a worktree: the run that
+surfaced it was broken by a one-off `pnpm exec jest --version` probe.
+
+`resolveProjectRoot` now refuses instead, and so does `init` over its
+validated `--project` value (the one command that never walks up from cwd,
+and therefore the same hole from the other side). Exit `1` — a problem with
+this call, nothing written — deliberately not `3`, which is the exact
+conflation the bug was about. The discriminator is not "`.git` is a file":
+it is whether the `gitdir:` target contains a `commondir` entry. A worktree
+gitdir has one, a submodule gitdir does not, so a submodule working tree
+still resolves to itself as it always did. The refusal names both the
+worktree and the project root to re-run from, derived from those same two
+files without shelling out to git, and degrades to naming the worktree and
+its gitdir when the main tree cannot be determined (a bare main repo).
+
+The invariant itself is unchanged — it just crashes loudly now instead of
+answering wrongly. The per-item worktree and branch a command needs are
+still passed as explicit values (`stage --worktree <path> --branch <name>`,
+`verify --cwd <dir>`), never implied by cwd, and those flags are deliberately
+exempt from the check: they name a worktree on purpose.
 
 ## `agents/` is part of the plugin's publish surface
 

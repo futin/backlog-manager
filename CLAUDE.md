@@ -156,12 +156,17 @@ happened.
 - **`orchestrate.mjs` is always invoked from the project root, never from
   inside a per-item worktree.** Every command but `init` resolves "which
   project" by walking up from its own cwd to the nearest `.git`, exactly like
-  `backlog.mjs`'s identical walk; run from inside a worktree it created, that
-  same walk would find the worktree's own `.git` first and silently key the
-  run under the worktree's path instead of erroring — the run would appear to
-  vanish, not crash loudly. Worktree-scoped commands take that path as an
-  explicit flag instead (`stage --worktree`/`--branch`, `verify --cwd`),
-  never implied by cwd.
+  `backlog.mjs`'s identical walk — except that this one **refuses** a linked
+  worktree (exit `1`, naming the worktree and the project root to re-run
+  from) where `backlog.mjs`'s deliberately resolves one to itself. It used to
+  resolve it too, silently keying the run under the worktree's path and
+  reporting exit `3`, "no run exists," for a live run; that was bug-2. `init`
+  runs the same refusal over its `--project` value, the one command that
+  never walks up from cwd. The discriminator is a `commondir` entry in the
+  `gitdir:` target, not "`.git` is a file" — a submodule working tree still
+  resolves to itself. Worktree-scoped commands take that path as an explicit
+  flag instead (`stage --worktree`/`--branch`, `verify --cwd`), never implied
+  by cwd, and those flags are exempt from the check.
 - **Editing `skills/` changes nothing until it is committed, pushed, and
   `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD,
   never the working tree — git is the publishing boundary, and the sync

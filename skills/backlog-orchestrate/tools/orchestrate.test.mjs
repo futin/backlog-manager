@@ -2042,3 +2042,139 @@ test('every step that runs a headless session checks its transcript for denials 
     )
   }
 })
+
+// --- bug-2: a cwd inside a linked worktree must refuse loudly, never resolve --
+// The whole point of these cases is the DIFFERENCE between the two ways a
+// `.git` entry can be a file. A linked worktree's gitdir carries a
+// `commondir`; a submodule's does not — verified empirically against real
+// git plumbing, not assumed, which is why case 6 below builds an actual
+// submodule rather than hand-rolling a `.git` file. Sniffing "`.git` is a
+// file" alone would refuse inside a submodule, where resolving the working
+// tree to itself is the correct answer.
+//
+// The refusal must exit 1, never 3: 3 is the ordinary "no run yet" answer,
+// and an unattended loop that reads 3 as "nothing to do" would read a
+// perfectly healthy run as absent. That conflation IS the bug.
+
+// A real linked worktree of `project`, on its own branch, with a real
+// commit behind it (git worktree add needs HEAD to resolve).
+function addWorktree(project, name, branch) {
+  commitEverything(project, 'seed')
+  const worktreePath = path.join(project, '.worktrees', name)
+  const added = spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', branch, 'HEAD'], { encoding: 'utf8' })
+  if (added.status !== 0) throw new Error(`git worktree add failed: ${added.stderr}`)
+  return worktreePath
+}
+
+test('a command run from inside a linked worktree refuses with exit 1 and names both the worktree and the project root', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-30', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const worktreePath = addWorktree(project, 'task-30', 'backlog/task-30')
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(worktreePath, home, 'heartbeat')
+
+  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`)
+  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'refusal must name the worktree it was run from')
+  assert.match(out.stderr, new RegExp(project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'refusal must name the project root to re-run from')
+  // The live run is untouched, and nothing was keyed under the worktree.
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the refusal must never write to the real run.json')
+  assert.equal(fs.existsSync(path.join(home, encodeURIComponent(worktreePath))), false, 'nothing may be keyed under the worktree path')
+})
+
+test('the worktree refusal fires from a subdirectory of the worktree too — the walk reaches its .git before any parent', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-31', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const worktreePath = addWorktree(project, 'task-31', 'backlog/task-31')
+  const nested = path.join(worktreePath, 'a', 'b')
+  fs.mkdirSync(nested, { recursive: true })
+
+  const out = run(nested, home, 'heartbeat')
+
+  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`)
+  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+})
+
+test('init --project pointed at a linked worktree refuses with exit 1 and writes nothing at all', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-32', 'Some task')
+  const worktreePath = addWorktree(project, 'task-32', 'backlog/task-32')
+
+  const out = run(project, home, 'init', '--project', worktreePath)
+
+  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`)
+  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when it refuses')
+})
+
+test('a directory in no git repository at all still exits 1 with the original "no .git found" message — the new refusal must not reword it', (t) => {
+  const { home } = orchFixture(t)
+  // A temp directory with no .git anywhere up its chain. macOS /tmp is
+  // itself inside no repository, so the walk runs to / and refuses there.
+  const orphan = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-orphan-')))
+  t.after(() => fs.rmSync(orphan, { recursive: true, force: true }))
+
+  const out = run(orphan, home, 'heartbeat')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /no \.git found/)
+})
+
+test('a submodule working tree resolves to itself and is never refused — commondir, not "\.git is a file", is the discriminator', (t) => {
+  const { home } = orchFixture(t)
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-submodule-')))
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }))
+
+  // A real submodule, because the entire claim under test is what git's own
+  // plumbing writes: a submodule gitdir (<super>/.git/modules/<name>) has no
+  // `commondir` entry, a worktree gitdir (<main>/.git/worktrees/<name>) does.
+  // `protocol.file.allow=always` is required for a local-path submodule on
+  // git >= 2.38.
+  const inner = path.join(scratch, 'inner')
+  const superRepo = path.join(scratch, 'super')
+  fs.mkdirSync(inner)
+  fs.mkdirSync(superRepo)
+  const ident = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test']
+  for (const repo of [inner, superRepo]) {
+    assert.equal(spawnSync('git', ['-C', repo, 'init', '-q'], { encoding: 'utf8' }).status, 0)
+    fs.writeFileSync(path.join(repo, 'seed.txt'), 'seed\n')
+    spawnSync('git', ['-C', repo, 'add', '-A'], { encoding: 'utf8' })
+    assert.equal(spawnSync('git', ['-C', repo, ...ident, 'commit', '-qm', 'seed'], { encoding: 'utf8' }).status, 0)
+  }
+  const added = spawnSync(
+    'git',
+    ['-C', superRepo, '-c', 'protocol.file.allow=always', ...ident, 'submodule', 'add', '-q', inner, 'sub'],
+    { encoding: 'utf8' },
+  )
+  assert.equal(added.status, 0, added.stderr)
+  const submodule = path.join(superRepo, 'sub')
+  assert.equal(fs.statSync(path.join(submodule, '.git')).isFile(), true, 'fixture sanity: a submodule .git is a file')
+
+  // init keys the run under the submodule's own path (no refusal), and a
+  // later command run from inside it finds that same run.
+  assert.equal(run(submodule, home, 'init', '--project', submodule).status, 0)
+  const out = run(submodule, home, 'heartbeat')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.existsSync(runFile(home, submodule)), true, 'the submodule must resolve to itself, exactly as before')
+})
+
+test('verify --cwd pointed at a real linked worktree is untouched by the refusal — the flag names a worktree deliberately', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-33', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const worktreePath = addWorktree(project, 'task-33', 'backlog/task-33')
+  fs.writeFileSync(
+    path.join(worktreePath, 'backlog', 'verify.json'),
+    JSON.stringify({ commands: ['node -e "process.exit(0)"'] }),
+  )
+
+  const out = run(project, home, 'verify', 'task-33', '--cwd', worktreePath, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const rows = JSON.parse(out.stdout)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].ok, true)
+})
