@@ -379,14 +379,65 @@ body {
    six stages this chip is for (dispatched..merging): those are the
    orchestrator running WITHOUT a human. Amber is saved for the warning
    variant just below, where a human genuinely is the blocker. Reuses
-   .dispatch-chip's own color-mix idiom rather than a new technique. */
+   .dispatch-chip's own color-mix idiom rather than a new technique.
+     A pill (999px) rather than the 2px radius the rest of the board uses, and
+   the ONE place that departs from it: every other 2px-cornered thing here is
+   a container the reader's eye can rest in, where this is a status token that
+   has to be told apart from its neighbours in a dense row at a glance. The
+   full round is what makes it read as a badge instead of another small box.
+   The leading glyph (.board-card-stage-glyph) is why the tone can afford to
+   be the fine distinction it is: colour is never alone in carrying the
+   state. */
 .board-card-stage {
-  flex: none; display: inline-flex; align-items: center;
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
   font-family: var(--mono); font-size: 9.5px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
-  padding: 1px 6px; border: 1px solid; border-radius: 2px;
+  padding: 1.5px 7px 1.5px 6px; border: 1px solid; border-radius: 999px;
   color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline));
   background: color-mix(in srgb, var(--cyan) 10%, var(--strip));
+}
+/* Sized off the chip's own font rather than a fixed px: the glyphs are text,
+   and at 9.5px a ✓ set at 1em sits visually smaller than the uppercase word
+   beside it. The line-height pin keeps a ⚠ (a taller glyph than ●) from
+   stretching the chip's box a half-pixel and making one chip in a row sit
+   differently from the rest. */
+.board-card-stage-glyph { font-size: 1.15em; line-height: 1; opacity: .9 }
+/* Only the active tone pulses, and only this glyph does — not the whole chip:
+   a pulsing border on six of fourteen stages would make a busy queue strobe.
+   Two seconds, and a floor of .45 rather than 0, so it reads as a heartbeat
+   rather than a blink. Honoured for everyone who has not asked otherwise;
+   the reduced-motion block at the end of this file turns it off. */
+.board-card-stage .board-card-stage-glyph { animation: stage-pulse 2s ease-in-out infinite }
+.board-card-stage-done .board-card-stage-glyph,
+.board-card-stage-bad .board-card-stage-glyph,
+.board-card-stage-warn .board-card-stage-glyph,
+.board-card-stage-idle .board-card-stage-glyph,
+.board-card-stage-muted .board-card-stage-glyph { animation: none }
+@keyframes stage-pulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
+/* merged: the run's one success exit. Green — the colour .board-card-groomed
+   and the verify-ok mark already use for "this passed" — because sharing the
+   active cyan made a finished item and a running one the same colour in a
+   list built to tell them apart. The doubled marker .board-card-stage's own
+   comment warned about (green groomed dot + green chip) is not a concern
+   here: an item that has MERGED is no longer an open groomed card at all. */
+.board-card-stage-done {
+  color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--green) 10%, var(--strip));
+}
+/* pending/preflight: waiting, and not a problem. Deliberately the quietest
+   chip on the board — a whole-queue run puts a dozen of these on screen at
+   once, and they must recede behind the one or two rows actually moving. */
+.board-card-stage-idle {
+  color: var(--ink3); border-color: var(--hairline);
+  background: var(--strip);
+}
+/* skipped/ungroomed: never worked, never will be this run. Dimmer than idle
+   (no background lift at all, dashed edge) because these are the only rows a
+   reader can safely skip entirely — the dash says "not a step that happened"
+   in the same way the – glyph does. */
+.board-card-stage-muted {
+  color: var(--ink3); border-style: dashed; border-color: var(--hairline);
+  background: none; opacity: .8;
 }
 /* needs-answers: the run is blocked on a person, not progressing — amber,
    matching the in-progress bar's own "a human is involved here" legend
@@ -522,6 +573,12 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important }
+  /* The blanket rule above stops the stage chip's pulse by running it once,
+     instantly — which lands it on its LAST keyframe, opacity .45, leaving the
+     glyph permanently half-faded. Cancelling the animation outright instead
+     restores the glyph's own resting opacity, so a reader who asked for less
+     motion gets a still chip rather than a dimmed one. */
+  .board-card-stage-glyph { animation: none !important; opacity: .9 }
 }
 /* touch: iOS Safari zooms the viewport when a focused field's font size is under
    16px, and never zooms back out on blur. Text-entry fields only — a <select>
@@ -634,8 +691,14 @@ body {
   background: var(--steel); overflow: hidden;
 }
 .run-strip-bar-fill { display: block; height: 100%; background: var(--good) }
+/* inline-flex, not the plain inline box this was: the stage half is now a
+   chip (see RunStrip.tsx's own comment on why), and a chip in a text run
+   sitting on a text baseline rides half a pixel low next to the mono id.
+   The `overflow: hidden` + ellipsis stay for the id, which is the half that
+   can actually be long enough to need them. */
 .run-strip-current {
-  flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink2);
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 10px; color: var(--ink2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
 }
 /* Amber, matching both the in-progress bar's and the card badge's

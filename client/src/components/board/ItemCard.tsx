@@ -1,6 +1,7 @@
 import { elapsedSince, formatCreated } from '../../lib/item-age';
 import { isInProgress, progressLabel } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
+import { stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem, RunStage } from '../../../../shared/types';
 
@@ -189,11 +190,25 @@ export function ItemCard(
                 `preflight`, or no run mentioning this item at all — renders
                 nothing, the same silence-is-correct rule the kind badge above
                 already follows for a kind it does not recognise. */}
-            {runStage !== undefined && ACTIVE_RUN_STAGES.includes(runStage) ? (
-              <span className="board-card-stage">{runStage}</span>
-            ) : runStage === 'needs-answers' ? (
-              <span className="board-card-stage board-card-stage-warn">{runStage}</span>
-            ) : null}
+            {runStage !== undefined
+              && (ACTIVE_RUN_STAGES.includes(runStage) || runStage === 'needs-answers') ? (
+                /* Which stages get a chip is unchanged — the seven above, and
+                   silence for the other seven. What the chip LOOKS like now
+                   comes from lib/run-stage.ts, shared with the drawer and the
+                   strip, so a stage never reads one way on a card and another
+                   in the drawer behind it. For these seven that map produces
+                   exactly the two tones this branch used to hardcode; the
+                   condition stays a literal list rather than "does it have a
+                   tone", because every stage has a tone now and the question
+                   the card is asking is the narrower one Task 11 set: is this
+                   item being worked on right this moment. */
+                <span className={stageChipClass(runStage)}>
+                  <span className="board-card-stage-glyph" aria-hidden="true">
+                    {stageGlyph(runStage)}
+                  </span>
+                  {runStage}
+                </span>
+              ) : null}
           </div>
         </div>
       </div>

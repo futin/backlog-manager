@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 
 import { projectLabel } from '../../lib/project-label';
+import { stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
-import type { OrchestratorRun, RunQueueItem, RunStage, RunVerification } from '../../../../shared/types';
+import type { OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
 
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
@@ -72,34 +73,6 @@ function staleNote(run: RunPayload): string | null {
   return `no heartbeat${age} — resume or abort from the terminal`;
 }
 
-/**
- * The tone for one queue item's stage chip. Extends ItemCard's own two-tone
- * system (`.board-card-stage` cyan default, `.board-card-stage-warn` amber
- * for needs-answers, "the run is blocked on a person") with exactly the one
- * new tone fix round 1 asked for: `.board-card-stage-bad` (red — `--red` is
- * theme.css's own "danger thresholds" token) for `failed`. That one earns a
- * dedicated tone rather than sharing the default cyan `merged` and every
- * other stage still uses, because `RunAttention.kind` has no `failed`
- * member (shared/types.ts) — a failed item never earns its own box in the
- * Attention section below the way needs-answers/parked/fix-exhausted do, so
- * this chip is the ONLY place in the whole drawer a person ever sees that it
- * failed at all; sharing merged's colour there made a failure read as a
- * success at a glance, which the text alone could correct but the chip
- * shouldn't have to be read that closely to catch.
- *
- * `parked` reuses the warn tone rather than getting a third new one: it IS
- * one of `RunAttention`'s three kinds — the same "blocked on a person"
- * bucket as needs-answers — and already gets its own amber box in the
- * Attention section, so repainting its chip amber here repeats a signal the
- * palette already has a name for rather than inventing a fourth colour.
- * Every other stage, `merged` included, is unchanged: this fix round asked
- * for exactly these two stages to move, not a wider retune of the system.
- */
-function stageClass(stage: RunStage): string {
-  if (stage === 'needs-answers' || stage === 'parked') return 'board-card-stage board-card-stage-warn';
-  if (stage === 'failed') return 'board-card-stage board-card-stage-bad';
-  return 'board-card-stage';
-}
 
 /**
  * The run drawer: the detail view behind a run strip (RunStrip.tsx), and the
@@ -199,15 +172,26 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
                     <div className="run-drawer-item-head">
                       <span className="run-drawer-item-id">{q.id}</span>
                       <span className="run-drawer-item-title">{q.title}</span>
-                      {/* Tone from stageClass (this file's own doc comment
-                          on it has the full reasoning) — cyan default, amber
-                          for needs-answers/parked, red for failed. Unlike the
+                      {/* Tone and glyph from lib/run-stage.ts, shared with
+                          the card and the strip — six tones over RunStage's
+                          fourteen members, with the stage word itself always
+                          printed beside them for the finer detail. Unlike the
                           card, EVERY stage gets a chip here (the card only
-                          chips seven of RunStage's fourteen members — its six
+                          chips seven of the fourteen — its six
                           ACTIVE_RUN_STAGES plus needs-answers — and renders
                           nothing for the other seven); the drawer's job is
-                          the full picture. */}
-                      <span className={stageClass(q.stage)}>
+                          the full picture, which is exactly why the tone map
+                          had to become total: this is the one surface where
+                          `merged`, `skipped` and `pending` are all on screen
+                          at once, and the old cyan-by-default ladder painted
+                          all three as work in progress.
+                            The glyph is aria-hidden: the stage word beside it
+                          is the accessible answer, matching how the strip's
+                          own live dot defers to the word next to it. */}
+                      <span className={stageChipClass(q.stage)}>
+                        <span className="board-card-stage-glyph" aria-hidden="true">
+                          {stageGlyph(q.stage)}
+                        </span>
                         {q.stage}
                       </span>
                     </div>

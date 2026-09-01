@@ -64,6 +64,60 @@ describe('RunDrawer', () => {
     }
   });
 
+  /**
+   * The tone map's whole purpose, asserted on the surface that proves it: the
+   * drawer is the one place `merged`, `pending`, `ungroomed`, `needs-answers`
+   * and a live stage are all on screen at once. Before lib/run-stage.ts the
+   * chip's class ladder fell through to the ACTIVE tone for everything it did
+   * not name, so four of this fixture's seven rows — three merged and one
+   * pending — rendered as "the orchestrator is working on this right now".
+   *
+   * The fixture's own stages drive the expectations rather than a restated
+   * list, so a fixture edit cannot leave this passing against stages it no
+   * longer contains.
+   */
+  it('tones each queue row by what its stage means, not by a cyan default', () => {
+    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    const expected: Record<string, string | null> = {
+      merged: 'board-card-stage-done',
+      'needs-answers': 'board-card-stage-warn',
+      ungroomed: 'board-card-stage-muted',
+      pending: 'board-card-stage-idle',
+      // reviewing is one of the six ACTIVE_RUN_STAGES: the bare base class,
+      // no modifier — null here means "assert there is no modifier at all",
+      // which is what keeps the active tone from quietly gaining one.
+      reviewing: null
+    };
+    for (const q of fixture.queue) {
+      const chip = screen.getByTestId(`run-drawer-item-${q.id}`).querySelector('.board-card-stage');
+      expect(chip).not.toBeNull();
+      const modifier = expected[q.stage];
+      if (modifier === null) {
+        expect((chip as HTMLElement).className.trim()).toBe('board-card-stage');
+      } else {
+        expect(chip as HTMLElement).toHaveClass(modifier);
+      }
+    }
+  });
+
+  /**
+   * Colour is never the only carrier of state (the same rule the strip's live
+   * dot follows). The glyph is decorative — the stage word beside it is the
+   * accessible answer — so it must be hidden from the accessibility tree, or
+   * a screen reader reads "check merged" and the redundancy becomes noise.
+   */
+  it('leads every chip with a glyph hidden from the accessibility tree', () => {
+    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    for (const q of fixture.queue) {
+      const glyph = screen
+        .getByTestId(`run-drawer-item-${q.id}`)
+        .querySelector('.board-card-stage-glyph');
+      expect(glyph).not.toBeNull();
+      expect((glyph as HTMLElement).textContent?.trim()).not.toEqual('');
+      expect(glyph as HTMLElement).toHaveAttribute('aria-hidden', 'true');
+    }
+  });
+
   it('renders the fix-loop count only when greater than zero, and pluralizes it', () => {
     render(<RunDrawer run={runPayload()} onClose={() => {}} />);
     // bug-14: fixLoops 1 (singular). task-9: fixLoops 2 (plural, and also
