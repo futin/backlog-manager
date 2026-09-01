@@ -3,6 +3,9 @@ id: task-8
 title: Collapse a passing verification tail behind a disclosure
 created: 2026-09-01
 from: ref-1
+updated: 2026-09-01T08:14:07Z
+started: 2026-09-01T08:06:08Z
+execute-elapsed: 479
 ---
 
 ## Goal
@@ -49,6 +52,13 @@ the row into a `<details>` and move the tail inside it:
 - The tail keeps `className="run-drawer-item-verify-tail"` and becomes the
   `<details>`'s non-summary child.
 
+**Pre-flight answer (backlog-orchestrate, 2026-09-01):** this item is being
+executed by a headless session with no browser, so the two visual
+confirmations below are *not* yours to make. Implement the primary shape,
+cover the behaviour in jsdom (Test cases), and stop there — the operator runs
+the visual check after the merge and owns the outcome. Keep both notes as
+written: they are what tells that person what to look at.
+
 Two things to confirm in the browser before calling this done, because neither
 is decidable from the source alone:
 
@@ -94,6 +104,74 @@ also reads.
 
 - `pnpm test` green, with case 5 unedited.
 - `pnpm run typecheck` and `pnpm run build` green.
-- The drawer was actually opened in a browser and shows a closed green row and
-  an open failed one, per the two confirmations in the Plan.
+- The visual check in the Plan's two notes is deferred to the operator, per the
+  pre-flight answer above — a headless session must not claim it, and must not
+  park the item over it either.
 - `client/src/styles.css` shows no diff.
+
+## Outcome
+
+2026-09-01 — Implemented as the primary shape the Plan specifies, with no
+fallback needed at the source level: the verify row in
+`client/src/components/board/RunDrawer.tsx` is now a
+`<details className="run-drawer-item-verify" open={!verify.ok}>` whose
+`<summary className="run-drawer-item-verify-summary">` holds the existing
+cmd span and the conditional `ok`/`failed` span, with the unchanged
+`run-drawer-item-verify-tail` span as its non-summary child. No state, no new
+stylesheet selector, `client/src/styles.css` byte-identical.
+
+Four new cases in `test/orchestrator-drawer.test.tsx`, covering the Plan's
+five: collapsed-when-passing and open-when-failing (one test), summary keeps
+command + pass word for both rows (one test), and no `<details>` at all for
+task-21's empty `verification` (one test). The failing row is built inline
+through `runPayload({ queue: ... })` as specified — the shared fixture, which
+`orchestrator-strip.test.tsx` also reads, was not touched. Case 5 is satisfied
+by construction: `git diff` on the test file shows **zero** deleted lines, so
+the pre-existing tail assertion at line 79 is unedited and still green —
+proof the tail was collapsed, not dropped.
+
+Red-green verified rather than assumed: with `RunDrawer.tsx` reverted and the
+new tests in place, the two behavioural cases went red (`2 failed, 15 passed`)
+and the empty-verification guard stayed green, as a guard should.
+
+The two browser confirmations in the Plan remain the operator's, per the
+pre-flight answer — not claimed here. Note for whoever runs them: the
+companion half of `ref-1` (commit 2fb0f04) has already landed on this base, so
+the tail box is already bounded and `flex-basis: 100%`; note 2's wrap concern
+should not reproduce. Note 1 (the disclosure marker on a flex `<details>`) is
+still genuinely open and undecidable from source.
+
+Verification output:
+
+```
+$ pnpm test
+Test Suites: 33 passed, 33 total
+Tests:       444 passed, 444 total
+Snapshots:   0 total
+Time:        81.879 s, estimated 92 s
+Ran all test suites.
+
+$ pnpm run typecheck
+$ tsc --noEmit
+exit:0
+
+$ pnpm run build
+dist/assets/SettingsView-VNF_cYQj.js                                18.94 kB │ gzip:   2.89 kB
+dist/assets/BoardView-Lf0cKPsA.js                                  105.56 kB │ gzip:  21.93 kB
+dist/assets/index-Erz6wNud.js                                      338.31 kB │ gzip: 102.66 kB
+✓ built in 1.40s
+
+$ git diff --stat -- client/src/styles.css
+(no output — untouched)
+```
+
+Red phase, for the record:
+
+```
+$ git checkout -- client/src/components/board/RunDrawer.tsx
+$ npx jest test/orchestrator-drawer.test.tsx --runInBand
+    ✕ collapses a passing row's tail and leaves a failing row's open (10 ms)
+    ✕ keeps the command and the pass mark in the summary, so collapsing hides output and never identity (5 ms)
+    ✓ renders no disclosure at all for an item that never reached verify (5 ms)
+Tests:       2 failed, 15 passed, 17 total
+```
