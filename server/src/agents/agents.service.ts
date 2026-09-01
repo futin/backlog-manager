@@ -456,7 +456,31 @@ export class AgentsService {
       // for a feature whose entire purpose is watching a run that is
       // actually happening.
       name: orchestrateSessionName(req.project),
-      permissionMode: clampMode(req.permissionMode ?? '', status.spawnMaxPermission),
+      // Defaulted here, before clampMode, rather than inside it: an ABSENT
+      // field and an UNRECOGNISED one deserve opposite answers, and clampMode
+      // cannot tell them apart once both have become the same string. Its
+      // floor-on-unknown rule is right and stays as it is — a mode nobody
+      // recognises cannot be placed on the ladder — but "the caller expressed
+      // no preference" is not a nonsensical request, and flooring it to `plan`
+      // starts a run that cannot write a file, create a worktree, commit or
+      // merge, answers 201, and then reports nothing about why nothing
+      // happened. Only `undefined` and `''` count as absent — `''` because
+      // that is what a "no pick" select submits everywhere else in this app
+      // (see pickFrom). Anything else, including the non-string the
+      // controller's Partial type cannot rule out, is a caller asking for
+      // something this build does not recognise, so it goes to clampMode
+      // untouched and floors there exactly as it does today.
+      //
+      // `auto` and not the ceiling — the same trade plan() spells out for a
+      // dispatched session (see its `defaultMode`): a session that stops on
+      // the first tool call it cannot self-approve does nothing, while asking
+      // for the most a host allows is how a convenience becomes an incident.
+      // The ceiling still clamps this down on a stricter dashboard, so this
+      // can never widen what a host permits.
+      permissionMode: clampMode(
+        req.permissionMode === undefined || req.permissionMode === '' ? 'auto' : req.permissionMode,
+        status.spawnMaxPermission
+      ),
       model: pickFrom(req.model, MODELS),
       effort: pickFrom(req.effort, EFFORTS)
       // No `remoteControl`. That flag is what gives a spawned session's
