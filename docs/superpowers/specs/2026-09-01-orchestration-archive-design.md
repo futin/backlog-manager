@@ -56,9 +56,11 @@ and a roomier view than the drawer.
   by `cmdInit` when a new run supersedes a finished one. Same shape as
   `run.json`. `<runId>` is `run-YYYYMMDD-HHMMSS`, with a `-<n>` suffix
   on collision (see `archivePath`).
-- Per queue item: `stage`, `stageAt` (one ISO stamp per stage —
-  re-entering a stage on a fix loop **overwrites** its stamp),
-  `fixLoops`, `verification[] {cmd, ok, tail}`, `questions`, `note`,
+- Per queue item: `stage`, `stageAt` (one ISO stamp per stage — the
+  **first arrival** only, per `RunQueueItem`'s own doc: a fix loop
+  revisits `reviewing`/`fixing` without adding a second key, so this
+  is a shape record, not an event log), `fixLoops`,
+  `verification[] {cmd, ok, tail}`, `questions`, `note`,
   `permissionMode`, `sessionId`, `worktree`, `branch`.
 
 The single-writer/single-reader invariant is unchanged in spirit and
@@ -190,10 +192,12 @@ Pure functions, no React, jest-tested:
 
 - `itemStageSpans(item)` — sort `stageAt` entries by timestamp; spans
   are consecutive deltas, labeled by the earlier stage; terminal stage
-  gets a zero span. **Documented approximation**: fix loops overwrite
-  revisited stages' stamps, so looped stages fold into the latest
-  pass; sorting by time (never by nominal stage order) keeps every
-  span non-negative regardless.
+  gets a zero span. **Documented approximation**: `stageAt` records
+  only each stage's first arrival, so a fix loop's second pass through
+  `reviewing`/`fixing` is invisible — its time folds into whichever
+  stage's stamp came earliest before the next recorded arrival.
+  Sorting by time (never by nominal stage order) keeps every span
+  non-negative regardless.
 - `itemWallMs(item)` — last stamp minus first stamp; `null` when
   fewer than two stamps parse.
 - `runWallMs(run, now)` — `updatedAt − startedAt` for finished runs,
