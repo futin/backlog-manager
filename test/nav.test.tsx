@@ -7,10 +7,10 @@ import '@testing-library/jest-dom';
 
 import { App, resolveSection } from '../client/src/App';
 import { SECTIONS } from '../client/src/components/SideRail';
-import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
+import { SETTINGS_STORAGE_KEY, clampSettings } from '../client/src/lib/settings';
 
 /*
-  Board and Settings are stubbed; Archive deliberately is not.
+  Board and Settings are stubbed; Archive and Runs deliberately are not.
 
   The subject here is the shell — which section a stored value resolves to,
   which tab is marked, what gets written back. Rendering the real BoardView to
@@ -20,10 +20,12 @@ import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
   component properly. A stub whose whole content is a findable string keeps
   each assertion pointed at the shell.
 
-  Archive is left real because "the tab renders the section it names" is a
-  claim about the actual component, and a stub would assert it against itself.
-  It is no longer a placeholder, so it now fetches like the Board does — hence
-  the `beforeEach` stub below, which is the whole cost of keeping it real.
+  Archive and Runs are left real because "the tab renders the section it
+  names" is a claim about the actual component, and a stub would assert it
+  against itself. Archive is no longer a placeholder, so it now fetches like
+  the Board does — hence the `beforeEach` stub below, which is the whole cost
+  of keeping it real. Runs needs no such stub: the case here only reaches its
+  empty state, which is a heading and a fixed string with nothing to fetch.
 
   `require` inside the factories rather than the imports above, because
   jest.mock is hoisted above them and may not close over module scope.
@@ -66,6 +68,13 @@ const ARCHIVE_ITEM = {
   section: 'out-of-scope', status: 'terminal', project: 'alpha', projectPath: '/abs/alpha',
   groomed: null, path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
 };
+
+/**
+ * RunsView's empty state — final copy, not a placeholder, so this is matched
+ * exactly rather than by a loose phrase the way ARCHIVE_MARK is: there is no
+ * surrounding prose here for a regex to leave room to breathe in.
+ */
+const RUNS_EMPTY = 'no runs yet';
 
 describe('the section rail', () => {
   beforeEach(() => {
@@ -151,7 +160,7 @@ describe('the section rail', () => {
   it('marks exactly one tab as the current page, and moves the mark on a switch', async () => {
     render(<App />);
 
-    expect(railTabs().map((t) => t.textContent)).toEqual(['Board', 'Archive', 'Settings']);
+    expect(railTabs().map((t) => t.textContent)).toEqual(['Board', 'Runs', 'Archive', 'Settings']);
     expect(markedTabs()).toHaveLength(1);
     expect(markedTabs()[0]).toHaveTextContent('Board');
 
@@ -160,6 +169,31 @@ describe('the section rail', () => {
     expect(markedTabs()).toHaveLength(1);
     expect(markedTabs()[0]).toHaveTextContent('Archive');
     expect(await screen.findByText(ARCHIVE_MARK)).toBeInTheDocument();
+  });
+
+  /*
+    Its own test, separate from the order assertion folded into "marks
+    exactly one tab" above, because that one's subject is the *mark* moving
+    and this one's subject is the *rail* itself — Board's companions first,
+    per the design spec, with Runs seated between Board and Archive rather
+    than after Settings where a careless append would have landed it.
+  */
+  it('shows four tabs in order: Board, Runs, Archive, Settings', () => {
+    render(<App />);
+
+    expect(railTabs().map((t) => t.textContent)).toEqual(['Board', 'Runs', 'Archive', 'Settings']);
+  });
+
+  it('clicking Runs renders the runs view', async () => {
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Runs' }));
+
+    expect(markedTabs()[0]).toHaveTextContent('Runs');
+    // Exact match, not a loose phrase like ARCHIVE_MARK: this is the shell's whole
+    // body, and Task 6 keeps this exact string for the genuinely-empty case
+    // rather than treating it as placeholder copy to improve on later.
+    expect(await screen.findByText(RUNS_EMPTY)).toBeInTheDocument();
   });
 
   it('gives no tab aria-expanded — every tab is a plain section switch', async () => {
@@ -175,7 +209,10 @@ describe('the section rail', () => {
 
 describe('resolveSection', () => {
   it('passes every section the rail actually has straight through', () => {
-    expect(SECTIONS).toEqual(['board', 'archive', 'settings']);
+    // Runs sits between Board and Archive here too — this list is read
+    // straight off SideRail's TABS, so an out-of-order entry here would mean
+    // the rail itself drifted, not just this test.
+    expect(SECTIONS).toEqual(['board', 'runs', 'archive', 'settings']);
     for (const s of SECTIONS) expect(resolveSection(s)).toBe(s);
   });
 
@@ -183,5 +220,20 @@ describe('resolveSection', () => {
     // 'Board' is in here for the case: the compare is exact, not case-folded.
     const strays = ['projects', 'guides', 'Board', '', null, undefined, 7, { section: 'archive' }];
     for (const raw of strays) expect(resolveSection(raw)).toBe('board');
+  });
+
+  /*
+    Not exercised by the loop above: that one calls `resolveSection`, not
+    `clampSettings`, and the two guard different things — a stored *section*
+    versus a stored *landing preference*. This is the "settings' LANDINGS
+    all derive from it too" half of SideRail's own comment on SECTIONS: the
+    only way `clampSettings({ landing: 'runs' })` could keep the value is if
+    `lib/settings.ts`'s derived `LANDINGS` (`['last', ...SECTIONS]`) actually
+    picked up the new tab, rather than a hand-copied list sitting one entry
+    behind SideRail.tsx the way SettingsView's *labeled* LANDINGS would if
+    nobody had touched it.
+  */
+  it('clampSettings accepts the new section as a landing value too', () => {
+    expect(clampSettings({ landing: 'runs' }).landing).toBe('runs');
   });
 });

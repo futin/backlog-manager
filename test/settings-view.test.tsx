@@ -93,7 +93,7 @@ describe('SettingsView', () => {
     renderView();
     const picker = screen.getByLabelText('Opens on');
     expect(within(picker).getAllByRole('option').map((o) => o.textContent))
-      .toEqual(['Last used', 'Board', 'Archive', 'Settings']);
+      .toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Settings']);
 
     // Archive rather than Board, because Board is what an unrecognised value
     // resolves to anyway — picking it could pass on a picker that stored

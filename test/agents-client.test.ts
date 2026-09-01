@@ -1,13 +1,35 @@
 import {
-  ApiError, dispatchAgent, fetchAgentPlan, fetchAgentsStatus, fetchOrchestratorRuns, sessionUrl, startOrchestrate
+  ApiError, dispatchAgent, fetchAgentPlan, fetchAgentsStatus, fetchArchivedRun, fetchOrchestratorArchive,
+  fetchOrchestratorRuns, sessionUrl, startOrchestrate
 } from '../client/src/lib/agents';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { AgentDispatchRequest, OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
+import type {
+  AgentDispatchRequest, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
+  VerificationSummary
+} from '../shared/types';
 
 // Same translation orchestrator-shapes.test.ts (Task 8) uses: the fixture is
 // plain JSON, so TS would otherwise widen its string fields to `string`
 // instead of the narrower literal unions (`RunStage`, etc).
 const fixture = rawFixture as OrchestratorRun;
+
+// An OrchestratorArchiveRun built from the same OrchestratorRun fixture,
+// tails summarised away the same way OrchestratorService.archive itself does
+// (test/orchestrator-archive.test.ts's own service suite) — so a case
+// asserting `fetchOrchestratorArchive` round-trips a payload is checking
+// against the actual shape the real endpoint answers with, not a
+// hand-rolled approximation of it.
+function archiveRun(overrides: Partial<OrchestratorArchiveRun> = {}): OrchestratorArchiveRun {
+  return {
+    ...fixture,
+    current: true,
+    queue: fixture.queue.map((item) => ({
+      ...item,
+      verification: item.verification.map(({ cmd, ok }): VerificationSummary => ({ cmd, ok }))
+    })),
+    ...overrides
+  };
+}
 
 const REQ: AgentDispatchRequest = {
   itemPath: '/abs/alpha/backlog/tasks/open/task-1.md',
@@ -205,6 +227,60 @@ describe('the orchestrator calls', () => {
   it('throws the server error string on a fresh-run conflict', async () => {
     stub({ ok: false, status: 409, body: { error: `a fresh run already exists (${fixture.runId})` } });
     await expect(startOrchestrate({ project: '/abs/alpha' })).rejects.toThrow(fixture.runId);
+  });
+});
+
+// Task 4: the archive listing and per-run detail calls RunsView (Task 6/7)
+// builds on. Same direct, function-level coverage the live calls above get —
+// a change to either call's shape fails here first rather than as a mystery
+// in the (not-yet-written) hook or component suites that consume them.
+describe('the orchestrator archive calls', () => {
+  it('reads the archive listing from the same-origin API', async () => {
+    const body: OrchestratorArchivePayload = { runs: [archiveRun()] };
+    const calls = stub({ ok: true, body });
+    await expect(fetchOrchestratorArchive()).resolves.toEqual(body);
+    expect(calls[0].url).toBe('/api/orchestrator/archive');
+    expect(calls[0].init).toBeUndefined();
+  });
+
+  // isOrchestratorArchivePayload's own comment in client/src/lib/agents.ts
+  // explains why this shallow a check earns its place: RunsView (Task 6)
+  // dereferences `runId`/`project`/`current`/`queue` on every row of every
+  // run in this list, so a payload missing all four is exactly the "lies
+  // quietly in hook state" risk the existing guards already exist to rule
+  // out for the live-run payload — this is the same rationale applied to
+  // the archive one.
+  it('throws on a malformed archive payload', async () => {
+    stub({ ok: true, body: { runs: [{}] } });
+    await expect(fetchOrchestratorArchive()).rejects.toThrow('malformed');
+  });
+
+  // GET, with the query string the controller actually reads
+  // (server/src/orchestrator/orchestrator.controller.ts's `archivedRun`) —
+  // unlike fetchAgentPlan/startOrchestrate above, this one has no body to
+  // put an absolute path in, so the query string IS the transport. The
+  // space in the fixture project path is deliberate: it is what proves this
+  // assertion is checking real `encodeURIComponent` output rather than a
+  // literal `%20` that happened to be typed correctly by hand.
+  it('hits the right URL for a single archived run', async () => {
+    const calls = stub({ ok: true, body: fixture });
+    await fetchArchivedRun('/tmp/my project', 'run-20260901-150701');
+    const project = encodeURIComponent('/tmp/my project');
+    const runId = encodeURIComponent('run-20260901-150701');
+    expect(calls[0].url).toBe(`/api/orchestrator/archive/run?project=${project}&runId=${runId}`);
+    expect(calls[0].init).toBeUndefined();
+  });
+
+  // No shape guard on this call (see fetchArchivedRun's own comment): the
+  // response is rendered once by the pane that fetched it, and a 404 already
+  // arrives as an ApiError via `unwrap` — this pins that path specifically,
+  // the same way `startOrchestrate`'s own 409 case above pins ApiError for
+  // the live-run call.
+  it('surfaces a 404 as an ApiError with status 404', async () => {
+    stub({ ok: false, status: 404, body: { error: 'not found' } });
+    const err = await fetchArchivedRun('/abs/alpha', 'run-20260901-150701').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(404);
   });
 });
 

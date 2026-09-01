@@ -41,6 +41,7 @@ const DENSITIES = [
 const LANDINGS: { value: Landing; label: string }[] = [
   { value: 'last', label: 'Last used' },
   { value: 'board', label: 'Board' },
+  { value: 'runs', label: 'Runs' },
   { value: 'archive', label: 'Archive' },
   { value: 'settings', label: 'Settings' }
 ];

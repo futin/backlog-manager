@@ -28,6 +28,44 @@ it; `orchestrate.mjs`'s own "Hard limits" section states the rule for the
 skill side too — never hand-edit the run file, never `rm` it to get past an
 exit code `4`, never write it from the server or the client.
 
+The same one reader now also covers `runs/`, the archive directory
+`cmdInit` writes to when a new run supersedes a finished one (`archivePath`,
+`orchestrate.mjs`) — before this feature nothing ever read it back, so a
+project's whole run history sat on disk with no surface showing it beyond
+the drawer's own `pastRuns` count. `OrchestratorService.archive()` walks
+every project directory under `orchHome()`, reading both `run.json` and
+every `runs/*.json` sibling through the same skip-and-warn `readOneRun`
+helper `runs()` already used for the current file alone, and returns them
+flattened across all projects with `current: boolean` marking which entry
+is the active `run.json` — a run file's own contents say nothing about
+where it lives (`runId`/`status`/`startedAt` are identical in shape whether
+the file is `run.json` or `runs/<runId>.json`), so the flag is the only way
+a client can tell "the run still being superseded" from "one of however
+many came before it." Verification tails are stripped to `{cmd, ok}`
+(`VerificationSummary`, `shared/types.ts`) before the payload leaves the
+service, because a tail is roughly 90% of a run file's bytes — a real 19KB
+file is mostly test output — and `archive()` has to hold every run a
+project has ever produced in one response rather than just its current one;
+`archivedRun(project, runId)` exists for the one run a reader actually
+opens, and serves that file verbatim, tail included. Two guards run before
+either caller-supplied value reaches the filesystem: `RUN_ID_RE`
+(`^run-\d{8}-\d{6}(-\d+)?$`) rejects anything not shaped like a run id,
+closing off traversal before the first `path.join`, and
+`encodeURIComponent(project)` is then checked for string equality against
+an entry `readdirSync(orchHome())` actually returned — the same
+allowlist-by-listing shape `server/src/items/allow.util.ts` uses for item
+bodies, so an unregistered project path is never joined into a probe, only
+compared against names the filesystem already listed. Every failure this
+can produce — a malformed runId, an unknown project, no archived file and
+no matching `run.json` either — collapses to the same `null`, and the
+controller turns all of them into the same 404: `GET /api/items/body`'s own
+stance, that the caller has no business learning which check failed. Both
+new methods call `orchHome()` fresh per request exactly as `runs()` does,
+and cache nothing — the single-writer rule above is untouched by any of
+this; `orchestrate.mjs` remains the only process that ever writes a byte
+under `orchHome()`, this service only reads more of what was already
+there.
+
 ## `backlog-orchestrate` is the only skill that commits or merges
 
 Every other skill in this repo edits item files and nothing else;
