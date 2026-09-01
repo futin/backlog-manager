@@ -30,15 +30,17 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 
 - `server/src/` — Nest: `health/`, `items/` (`/api/items`, `/api/projects`,
   `/api/items/body`), `agents/` (the one outbound-calling module — status,
-  plan, dispatch, orchestrate), `orchestrator/` (`GET /api/orchestrator/runs`,
-  a read-only view of the run file — see Invariants), `registry/` (read-only
-  view of the registry file), `static.ts` (serves `client/dist` only when
-  built).
-- `client/src/` — React SPA: side rail (Board / Archive / Settings — `SECTIONS`
-  in `SideRail.tsx` is the one runtime list of them, and `resolveSection` in
-  `App.tsx` maps a stored value that names no tab, the legacy `'projects'`
-  included, onto Board; Archive is a placeholder until its own chunk lands),
-  board (four
+  plan, dispatch, orchestrate), `orchestrator/` (`GET /api/orchestrator/runs`
+  for the live board strip, plus `GET /api/orchestrator/archive` and
+  `GET /api/orchestrator/archive/run` for run history — all three a
+  read-only view of the run-state directory, current run and archived
+  `runs/` alike — see Invariants), `registry/` (read-only view of the
+  registry file), `static.ts` (serves `client/dist` only when built).
+- `client/src/` — React SPA: side rail (Board / Runs / Archive / Settings —
+  `SECTIONS` in `SideRail.tsx` is the one runtime list of them, and
+  `resolveSection` in `App.tsx` maps a stored value that names no tab, the
+  legacy `'projects'` included, onto Board; Archive is a placeholder until
+  its own chunk lands), board (four
   fixed columns — refactors/ideas/bugs/tasks; out-of-scope has no Board
   column at all and belongs to Archive; stale items leave it too, see
   Invariants — card drawer,
@@ -47,7 +49,13 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   queue and selects a subset of it — `ids` rides along only for a strict
   subset, so an untouched sheet still starts a whole-queue run), and a run strip
   above the columns — `RunStrip`/`RunDrawer` — showing every project's
-  orchestrator runs), Settings. Fed by `lib/agents.ts` (same-origin
+  orchestrator runs), Runs (`RunsView` — aggregate stat tiles, a project
+  filter, a day-grouped run list with fresh live runs pinned above history,
+  and a persistent detail pane with per-item stage-time bars and
+  verification output; fed by `lib/run-stats.ts`, a pure statistics lib, and
+  `hooks/useOrchestratorArchive.ts`, which fetches on mount and window focus
+  only — no polling interval, since history moves at run boundaries, not on
+  a live heartbeat), Settings. Fed by `lib/agents.ts` (same-origin
   fetches), `hooks/useAgents.ts` (status poll on mount and window focus),
   and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
   run is fresh).
@@ -91,7 +99,17 @@ happened.
   rather than importing the `.mjs` tool, reads it fresh on every request, and
   never writes or caches it — a running orchestrator re-stamps the file on
   every heartbeat, and `GET /api/orchestrator/runs` exists to let the board
-  watch that happen live.
+  watch that happen live. The same one reader now also covers `runs/`, the
+  directory `cmdInit` archives a project's superseded `run.json` into before
+  starting the next one, over two more read-only endpoints:
+  `GET /api/orchestrator/archive` lists every run a project has ever
+  produced, current and archived alike, tails stripped to `{cmd, ok}` and
+  each entry flagged `current: boolean`; `GET /api/orchestrator/archive/run`
+  serves one run file verbatim, gated by a runId regex and an
+  allowlist-by-directory-listing on the project before either check touches
+  the filesystem, 404 for every failure alike. Both stay as fresh-per-request
+  and cache-nothing as `runs()` always has — the single-writer rule is
+  unchanged; only the one reader's reach grew.
 - **Item files are read-only to the server and client**; every write goes
   through the skills. Dispatch writes no item files either — the spawned
   session runs the skills, which remain the only writers.
