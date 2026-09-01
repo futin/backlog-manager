@@ -260,13 +260,47 @@ describe('OrchestratorController.archivedRun', () => {
     expect(result?.queue[0].verification[0].tail).toBe('the tail');
   });
 
-  it('serves the current run when runId matches run.json', () => {
+  it('serves the current run when runId matches run.json, without warning about the archived-file miss', () => {
     const project = '/abs/project-b';
     const run = makeRun({ project, runId: 'run-20260901-150701' });
     writeCurrent(orchHome, run);
 
-    const result = controller.archivedRun(project, 'run-20260901-150701');
-    expect(result).toEqual(run);
+    // No runs/<runId>.json exists for this project at all — this is the
+    // fix-round-1 regression case: archivedRun() always probes that path
+    // first, and for a request naming the current run (this test's whole
+    // scenario) that probe misses every time. Before the fix, readOneRun's
+    // plain ENOENT handling logged that expected miss as if it were a
+    // problem; pinning `console.warn` was never called proves the "no
+    // archived file with this name" path stays quiet on this normal,
+    // successful, 200-returning request.
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = controller.archivedRun(project, 'run-20260901-150701');
+      expect(result).toEqual(run);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('still warns when an archived file exists under the requested name but is corrupt', () => {
+    const project = '/abs/project-h';
+    const runId = 'run-20260901-150701';
+    // A file DOES exist at runs/<runId>.json — unlike the miss case above,
+    // this is a real problem (broken JSON under a name the filename-trusting
+    // archived branch expected to be able to parse straight through), not
+    // the "genuinely not there" ENOENT the fix's `expectMiss` flag exists to
+    // quiet. It must still warn, and — with no run.json to fall back to
+    // either — still 404, exactly as before the fix.
+    writeArchived(orchHome, project, `${runId}.json`, 'not json');
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expectNotFound(() => controller.archivedRun(project, runId));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(`runs/${runId}.json`));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('404 for a well-formed runId that exists nowhere', () => {

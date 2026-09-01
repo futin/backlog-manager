@@ -78,19 +78,49 @@ function countPastRuns(runsDir: string): number {
  * folded into the warning so a skipped archived file names itself
  * (`runs/run-20260831-211011.json for "…"`) rather than borrowing
  * `run.json`'s own wording for a file that isn't `run.json`.
+ *
+ * `expectMiss` (default false) exists for one more caller: `archivedRun()`'s
+ * speculative probe of `runs/<runId>.json` (below) tries that exact path
+ * before knowing whether an archived file with that name exists at all — for
+ * a request naming the *current* run (arguably the most common shape a
+ * request takes), it never will, and that miss is not a problem to report,
+ * just the probe finding out "no, check run.json instead." Passing
+ * `expectMiss: true` keeps THAT ONE outcome — the file genuinely absent,
+ * `ENOENT` — silent. Every other way this function can fail still warns
+ * exactly as before, `expectMiss` or not: a permission error, truncated
+ * JSON, a file that parses but isn't shaped like a run. Those are facts
+ * about a file that exists and is broken, which is a different situation
+ * from a file that was never there to begin with, and only the caller
+ * making a speculative "does this exist" probe knows to read an absence as
+ * the harmless answer to its own question rather than as a problem.
  */
-function readOneRun(path: string, label: string): OrchestratorRun | null {
+function readOneRun(path: string, label: string, expectMiss = false): OrchestratorRun | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
   } catch (e) {
-    // Covers both "not valid JSON" and "doesn't exist at all" (a missing
-    // run.json reads as ENOENT here, same as runs() treats it) — a project
-    // dir that only ever has runs/ and no current run.json is a legitimate
-    // shape (a crashed-then-cleaned run), so this is skip-and-warn, not a
-    // reason to fail the whole payload.
-    const message = e instanceof Error ? e.message : String(e);
-    console.warn(`orchestrator: ${label} is unreadable or not valid JSON, skipping (${message})`);
+    // `.code`, not `e instanceof Error`: a plain property read survives
+    // across the realm boundary Jest's node test environment puts between a
+    // built-in fs error (constructed in Node's own realm) and this module's
+    // `Error` global (rebound inside the test VM context) — `instanceof`
+    // does not, so it silently evaluates false here for every fs error, the
+    // same reason the fallback branch below (`String(e)`, not `e.message`)
+    // already fires in this suite's own warning output. Guarding with
+    // `typeof e === 'object'` first, not just casting straight to
+    // ErrnoException, is what keeps this safe for the JSON.parse branch too:
+    // a SyntaxError has no `.code` at all, so `code === 'ENOENT'` is simply
+    // false for it rather than throwing on a read from `null`/`undefined`.
+    const code = typeof e === 'object' && e !== null ? (e as NodeJS.ErrnoException).code : undefined;
+    const isExpectedMiss = expectMiss && code === 'ENOENT';
+    if (!isExpectedMiss) {
+      // Covers both "not valid JSON" and "doesn't exist at all" (a missing
+      // run.json reads as ENOENT here, same as runs() treats it) — a project
+      // dir that only ever has runs/ and no current run.json is a legitimate
+      // shape (a crashed-then-cleaned run), so this is skip-and-warn, not a
+      // reason to fail the whole payload.
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`orchestrator: ${label} is unreadable or not valid JSON, skipping (${message})`);
+    }
     return null;
   }
   if (!isPlausibleRun(parsed)) {
@@ -303,10 +333,15 @@ export class OrchestratorService {
     // Archived first: an archived run's filename IS the claim (orchestrate.mjs
     // never writes runs/<runId>.json under any name but its own runId), so a
     // direct read needs no further check once it parses and passes
-    // isPlausibleRun. readOneRun's skip-and-warn on a missing file is exactly
-    // the outcome wanted here too — "no archived file with this name" is not
-    // an error, it just means falling through to run.json below.
-    const archived = readOneRun(join(dir, 'runs', `${runId}.json`), `runs/${runId}.json for "${project}"`);
+    // isPlausibleRun. `expectMiss: true` is what this call site is FOR —
+    // this is exactly the speculative probe readOneRun's own doc comment
+    // describes: "no archived file with this name" is the routine outcome
+    // for any request naming the current run (it lives in run.json, never
+    // in runs/), not an error worth a log line, so it stays quiet here and
+    // falls through to run.json below. A corrupt or implausible file that
+    // DOES exist under this name is still a real problem and still warns —
+    // expectMiss only silences the "genuinely not there" ENOENT case.
+    const archived = readOneRun(join(dir, 'runs', `${runId}.json`), `runs/${runId}.json for "${project}"`, true);
     if (archived) return archived;
 
     // Fall back to the current run — but only when ITS OWN runId field
