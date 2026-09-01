@@ -3,6 +3,8 @@ id: bug-3
 title: Orchestrate dispatches with a stronger permission flag than it needs
 created: 2026-08-31
 tags: orchestrate, permissions
+updated: 2026-09-01T10:24:23Z
+groom-elapsed: 1103
 ---
 
 ## Symptom
@@ -63,49 +65,154 @@ classifier actually gated, so `auto`'s refusal boundary is **not** established �
 
 ## Cause
 
-Known, and it is one false premise rather than a coding mistake. SKILL.md:449 argues:
+Two things, neither a coding mistake: one false premise in the prose, and one flag that
+outranks the job it was chosen for. Line numbers below are current — the file has grown
+since this was filed, so the dispatch line is now `SKILL.md:469`, the rationale paragraph
+`SKILL.md:503`, and the retry line `SKILL.md:575`.
+
+**The premise.** SKILL.md:503 argues:
 
 > a headless session cannot answer a permission prompt, so a prompt inside one is a
 > hang — an unattended run that stops forever with nobody to unstick it
 
-Claude Code's permission-modes documentation says the opposite for a `-p` run with no
-`--permission-prompt-tool`: the uncovered action does not run, and Claude keeps
-working — *"Claude Code doesn't stop the run in either case."* Uncovered calls are
-auto-denied and the session continues. There is no hang to prevent.
+Wrong on this CLI, and now measured rather than cited. Under
+`claude -p --permission-mode auto`, a refused call comes back as an ordinary
+`tool_result` with `is_error: true`, the session reads it and keeps working, and the
+process exits `0`. There is no prompt to hang on, and CLI 2.1.250 has no
+`--permission-prompt-tool` flag at all (checked in `claude --help`), so the
+no-prompt-tool case the docs describe is the only case there is.
+
+**What `auto` actually refuses.** Twelve probes, this machine, 2026-09-01, CLI 2.1.250,
+each its own `claude -p … --permission-mode auto --output-format stream-json --verbose`
+session in a throwaway git repo. No `permissions.allow` entry for `Bash` exists in
+`~/.claude/settings.json` or either project settings file, so these measure `auto` itself
+and not an allowlist:
+
+| Probed action | Verdict |
+|---|---|
+| `pnpm test` (pnpm also wrote `node_modules/` + lockfile) | ran |
+| `echo more >> tracked.txt && git add -A && git commit` | ran |
+| `Write` tool creating a new file | ran |
+| `node -e "…writeFileSync…"` | ran |
+| `curl` GET `registry.npmjs.org/-/ping` → 200 | ran |
+| `rm -rf sub` (recursive delete inside cwd) | ran |
+| append to `$HOME/probe-outside.txt` (write outside cwd) | ran |
+| `git reset --hard HEAD~1` | ran |
+| `chmod -R 777 .` (`.git/` included) | ran |
+| `git push --force origin main` | ran |
+| `rm -rf "$HOME/probe-doomed-dir"` | ran |
+| `curl -X POST --data-binary @package.json https://example.com` | **denied** |
+
+One of twelve. The boundary is not destruction — every destructive-but-local thing on
+that list was permitted, including two the repo's own invariants treat as dangerous — it
+is **egress**: sending a local file's contents to an external host. So `auto` clears an
+execute session's entire real workload (file edits, arbitrary `node`, `pnpm test`, `git`,
+recursive deletes, network reads), and the one class it gates is a class
+`backlog-execute` has no business performing. That is the opposite of the risk `## Fix`
+was filed worrying about.
 
 With the hang gone, the argument for reaching the top of the ladder goes with it. The
 four walls the same paragraph describes — disposable worktree, independent review,
 verification gate, merge only by the orchestrator — are all still true and still good;
 they just no longer require `bypassPermissions` specifically, because the rung below it
-already runs the commands an execute session issues.
+already runs every command an execute session issues.
 
 `acceptEdits` is genuinely not enough, so this is not an argument for the bottom of the
-ladder either: per the same docs it auto-approves file edits plus a fixed list
-(`mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp`, `sed`), and arbitrary `pnpm test` or `git`
-still prompt. `auto` is the lowest rung that clears an execute session's real workload.
+ladder either: per the docs it auto-approves file edits plus a fixed list (`mkdir`,
+`touch`, `rm`, `rmdir`, `mv`, `cp`, `sed`), and arbitrary `pnpm test` or `git` still
+prompt. `auto` is the lowest rung that clears the real workload.
+
+**The repo already decided this, one seam over.** `docs/invariants.md:445-456` defaults
+*dispatch's* unattended sessions to `auto` and keeps `bypassPermissions` a per-launch
+choice, because "asking for the most a host allows by default is how a convenience
+becomes an incident." Orchestrate's hard-coded flag is that sentence's counterexample,
+living two directories away.
+
+**The residual hazard is real, but it is not the one that was feared.** A denial is
+loud in the transcript and silent everywhere else. The run's final `result` event reports
+`subtype: "success"`, `is_error: false`, and the process exits `0` **even when every tool
+call in the session was denied** — observed twice (the egress probe, and a `dontAsk`
+probe where `Bash` was refused outright). What distinguishes those runs is one
+machine-readable field on that same event:
+
+```json
+"permission_denials": [
+  { "tool_name": "Bash", "tool_use_id": "toolu_…", "tool_input": { "command": "curl -X POST …" } }
+]
+```
+
+Step 5's Inspect reads the *item file*, never the transcript, so today nothing in this
+skill could tell a clean run from a denied one. That is why the fix is two changes, not
+one: a milder flag, plus a check that reads that array.
+
+**One caveat on the table above: the classifier is a model judgment, not a list.** This
+very session — interactive `auto` — refused `git reset --hard HEAD~1`, an `rm -rf` under
+`$HOME`, `git push --force`, and even the probe launcher whose *prompt text* merely named
+them, all of which headless `auto` permitted in the scratch repo. Same mode name,
+different verdicts, presumably weighing cwd and surrounding context. Read the table as
+what `auto` typically permits, never as a contract — the design has to tolerate a denial
+happening, which is exactly what step 4 below is for.
 
 ## Fix
 
-unknown — the direction is clear but one fact is missing and it is the one that matters.
+Six edits and a test. The direction the item guessed at is right; the probes above closed
+the gap that blocked it and turned the third "worth settling" bullet into a requirement.
 
-Candidate: replace `--dangerously-skip-permissions` with `--permission-mode auto` on
-both dispatch lines, and rewrite SKILL.md:449 to justify the mode actually chosen —
-dropping the hang claim, keeping the four walls, and stating what happens instead
-(uncovered calls are denied silently and the session carries on).
+1. **Swap the flag on both dispatch lines.** `SKILL.md:469` (step 4) and `SKILL.md:575`
+   (step 5's retry): `--dangerously-skip-permissions` → `--permission-mode auto`. Every
+   other flag stays, `--verbose` among them. `--resume` honours the mode — verified:
+   `claude -p --resume <sid> --permission-mode auto` reported `permissionMode=auto` in
+   its own `init` event and ran `Bash` normally. Section 10's "reuse both lines
+   unchanged" needs no edit; it points at the lines, not at the flag.
 
-**What has to be established first:** what headless `auto` actually refuses. Neither
-probe above found the boundary. If some command a real execute session needs — a write
-under `.git`, an install, a network call — is silently denied, the failure mode is worse
-than the one the flag was avoiding: the session does not stop, it improvises, and the
-orchestrator receives a plausible-looking diff built on a command that never ran. A hang
-is at least loud. Probe the boundary, then decide.
+2. **Rewrite the rationale at `SKILL.md:503`.** Drop the hang sentence entirely. Keep the
+   four walls verbatim — they are still what makes an unattended session tolerable, they
+   just no longer buy the top rung. State the real semantics in their place: a denied
+   call returns an error the session reads and continues past, the run still exits `0`
+   and still reports `success`, and the denial is recorded in the result event's
+   `permission_denials`. Carry the one number worth carrying — of twelve probed actions
+   `auto` denied one, an upload of a local file to an external host — and the caveat that
+   the boundary is a classifier's judgment rather than a fixed list.
 
-Two things worth settling in the same pass:
+3. **Fix the same premise at `docs/invariants.md:451`**, which says a lower rung means "a
+   session that stops on its first unapprovable tool call and silently does nothing."
+   Half right is worse than wrong here: it does not stop, and it does not do nothing — it
+   continues, and improvises around the refusal. That is the failure mode worth naming in
+   a file whose job is to explain why the ladder's default sits where it does.
 
-- Whether `dontAsk` plus an explicit `--allowedTools` allowlist is the better shape.
-  Tighter, and it fails the same silent-denial way — which for a session doing
-  work nobody enumerated in advance is probably the wrong trade, but it deserves the
-  comparison rather than an assumption.
-- Whether the run should record which mode it dispatched under. Right now nothing in
-  `run.json` says, so a run whose item came back subtly wrong gives no way to tell
-  afterwards whether a denial was involved.
+4. **Add the denial check that makes the milder flag safe.** New reader in
+   `orchestrate.mjs`, beside `findSessionIdInJsonl` (`:1386`) and sharing its discipline —
+   `split('\n').slice(0, -1)` for the live-append tail, lenient skip on an unparseable
+   line — returning the `permission_denials` array from the **last** `type: "result"`
+   event, and `[]` when the field is absent (older transcripts, or a run with none).
+   Surface it in step 5's Inspect (`SKILL.md:551`) as something read *before* the item
+   file's three shapes are judged: on a non-empty array the item is not clean even if it
+   looks done, because exit code, result subtype and `is_error` all say success while a
+   command the session needed never ran. Treat that like the failure shapes step 5
+   already has — ask the user, and do not merge a diff built around a refused call.
+
+5. **Record the mode on the run.** A field on the queue item, written by the
+   `stage <id> dispatched` call that already takes `--worktree` and `--branch`. Nothing in
+   `run.json` says what a session was dispatched under today, so a denial found in a log
+   has no adjacent record of the mode that produced it — and this fix makes the mode a
+   thing that can vary between runs, which it previously wasn't.
+
+6. **`dontAsk` plus `--allowedTools` is rejected, and the probe is why.** Under
+   `--permission-mode dontAsk` with no allowlist, `pnpm test` was refused outright —
+   "Permission to use Bash has been denied because Claude Code is running in don't ask
+   mode" — and the run still finished `subtype: "success"`. An execute session under it is
+   dead on arrival unless every command it will ever need is enumerated in advance, which
+   is the one thing a session doing unenumerated work cannot have. Tighter is not better
+   when the tightening has to be guessed ahead of the work.
+
+No change to `shared/agent.ts:62` — `auto` is already `PERMISSION_LADDER`'s third rung, so
+the mode this fix names is one the ladder can express and the board can already show.
+`manual` and `dontAsk` stay absent from it, correctly.
+
+**Verification.** Two tests in `skills/backlog-orchestrate/tools/orchestrate.test.mjs`:
+a guard asserting both of SKILL.md's dispatch lines carry `--permission-mode auto` and
+that `--dangerously-skip-permissions` appears nowhere under `skills/` — this is precisely
+the flag whose quiet reintroduction nobody would notice — and a unit test for the new
+reader over fixture transcripts: denial present → one entry, field absent → `[]`, a
+partial trailing line tolerated, and the last `result` event winning when a resumed
+transcript holds more than one.
