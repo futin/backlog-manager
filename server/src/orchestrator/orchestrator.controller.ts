@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 
 import { OrchestratorService } from './orchestrator.service';
-import type { OrchestratorRunsPayload } from '../../../shared/types';
+import type { OrchestratorArchivePayload, OrchestratorRunsPayload } from '../../../shared/types';
 
 /**
  * Feature-prefixed like AgentsController (`api/agents`), not flat like
@@ -16,5 +16,10 @@ export class OrchestratorController {
   @Get('runs')
   runs(): OrchestratorRunsPayload {
     return this.orchestrator.runs();
+  }
+
+  @Get('archive')
+  archive(): OrchestratorArchivePayload {
+    return this.orchestrator.archive();
   }
 }

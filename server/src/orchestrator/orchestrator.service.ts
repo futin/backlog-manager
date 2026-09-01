@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 
 import { RUN_STALE_MS } from '../../../shared/types';
-import type { OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
+import type {
+  OrchestratorArchivePayload,
+  OrchestratorArchiveRun,
+  OrchestratorRun,
+  OrchestratorRunsPayload
+} from '../../../shared/types';
 
 /**
  * `$BM_ORCH_HOME` when set, else `~/.backlog-manager/orchestrator/` — must
@@ -51,6 +56,58 @@ function countPastRuns(runsDir: string): number {
   } catch {
     return 0;
   }
+}
+
+/**
+ * Parses and validates one run file at `path`, skip-and-warn on failure —
+ * the exact behaviour `runs()` inlines for `run.json` alone, factored out
+ * here because `archive()` (below) performs this same read twice per
+ * project: once for `run.json`, once per `runs/*.json` sibling. `label` is
+ * folded into the warning so a skipped archived file names itself
+ * (`runs/run-20260831-211011.json for "…"`) rather than borrowing
+ * `run.json`'s own wording for a file that isn't `run.json`.
+ */
+function readOneRun(path: string, label: string): OrchestratorRun | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (e) {
+    // Covers both "not valid JSON" and "doesn't exist at all" (a missing
+    // run.json reads as ENOENT here, same as runs() treats it) — a project
+    // dir that only ever has runs/ and no current run.json is a legitimate
+    // shape (a crashed-then-cleaned run), so this is skip-and-warn, not a
+    // reason to fail the whole payload.
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn(`orchestrator: ${label} is unreadable or not valid JSON, skipping (${message})`);
+    return null;
+  }
+  if (!isPlausibleRun(parsed)) {
+    console.warn(`orchestrator: ${label} parsed but is not a run, skipping`);
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * Builds a new `OrchestratorArchiveRun` from a parsed run rather than
+ * mutating the parsed object in place — `run` may still be aliased to
+ * nothing else today, but the whole point of building fresh objects at
+ * every level (the run, its queue array, each item, each verification
+ * entry) is that `archive()` never has to reason about aliasing as this
+ * shape picks up more differences from `OrchestratorRun` later. Today the
+ * only difference is verification tails stripped to `{cmd, ok}` (see
+ * `VerificationSummary`'s doc comment in shared/types.ts for why) plus the
+ * `current` flag this function is also responsible for stamping.
+ */
+function toArchiveEntry(run: OrchestratorRun, current: boolean): OrchestratorArchiveRun {
+  return {
+    ...run,
+    queue: run.queue.map((item) => ({
+      ...item,
+      verification: item.verification.map(({ cmd, ok }) => ({ cmd, ok }))
+    })),
+    current
+  };
 }
 
 /**
@@ -110,6 +167,70 @@ export class OrchestratorService {
       const fresh = parsed.status === 'running' && Date.now() - Date.parse(parsed.updatedAt) < RUN_STALE_MS;
       const pastRuns = countPastRuns(join(dir, 'runs'));
       runs.push({ ...parsed, fresh, pastRuns });
+    }
+
+    return { runs };
+  }
+
+  /**
+   * Every run this orchestrator state directory has ever recorded, across
+   * every project — the archive view's (Task 4) data source. Where runs()
+   * exists for the live board strip (one entry per project, `fresh`/
+   * `pastRuns` annotated, tails intact because a live run's own detail is
+   * what the drawer renders from directly), this exists for browsing
+   * history: every project's `run.json` *and* every `runs/*.json` sibling,
+   * flattened into one list with tails stripped so the payload's size
+   * tracks run count rather than run count times average test-output size.
+   */
+  archive(): OrchestratorArchivePayload {
+    const root = orchHome();
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      // Same empty-state reasoning as runs(): no state directory at all
+      // means nothing has ever run here, not an error.
+      return { runs: [] };
+    }
+
+    const runs: OrchestratorArchiveRun[] = [];
+    for (const name of entries) {
+      const dir = join(root, name);
+      const projectRuns: OrchestratorArchiveRun[] = [];
+
+      // run.json — this project's current/latest run, if any. Absent is a
+      // legitimate shape (a crashed-then-cleaned project dir with only
+      // archived history left, or one whose only run never finished
+      // writing this file) — readOneRun already skip-and-warns on it, so
+      // there is nothing further to do here beyond checking for null.
+      const current = readOneRun(join(dir, 'run.json'), `run.json for "${name}"`);
+      if (current) projectRuns.push(toArchiveEntry(current, true));
+
+      // runs/ — every run this project has archived, one file per
+      // superseded run. A project with only ever one run has no runs/ dir
+      // at all, which is exactly as unremarkable as countPastRuns treats
+      // it above: no warning, no entries, just an empty read.
+      let runFiles: string[];
+      try {
+        runFiles = readdirSync(join(dir, 'runs'));
+      } catch {
+        runFiles = [];
+      }
+      for (const file of runFiles) {
+        const archived = readOneRun(join(dir, 'runs', file), `runs/${file} for "${name}"`);
+        if (archived) projectRuns.push(toArchiveEntry(archived, false));
+      }
+
+      // Newest first within this project. Plain string comparison is
+      // correct here, not just convenient: a runId embeds a second-
+      // precision timestamp (run-YYYYMMDD-HHMMSS), and a `-2` collision
+      // suffix sorts after its unsuffixed base under '<' the same way
+      // "abc" sorts before "abcd" — the suffixed run was archived later,
+      // so descending order correctly puts it first. Projects themselves
+      // are appended in readdirSync order rather than interleaved; the
+      // client re-sorts the flattened list globally (Task 4).
+      projectRuns.sort((a, b) => (a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0));
+      runs.push(...projectRuns);
     }
 
     return { runs };

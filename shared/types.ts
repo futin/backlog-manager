@@ -490,3 +490,52 @@ export interface OrchestratorRun {
 export interface OrchestratorRunsPayload {
   runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number }>;
 }
+
+/**
+ * `RunVerification` with `tail` removed. `tail` is the last few lines of a
+ * verify command's own output — useful for diagnosing one run in the live
+ * drawer, but it is also ~90% of a run file's bytes (a real 19KB file is
+ * mostly test output), and `GET /api/orchestrator/archive` (Task 1) has to
+ * hold every run a project has ever produced in one payload rather than
+ * just its current run. Keeping `cmd`/`ok` and dropping `tail` is what makes
+ * that payload's size grow with run *count* instead of run count times
+ * average test-output size; the detail endpoint (Task 2) still serves the
+ * full `RunVerification` with `tail` intact for the one run a user actually
+ * opens.
+ */
+export type VerificationSummary = Pick<RunVerification, 'cmd' | 'ok'>;
+
+/** `RunQueueItem` with its verification list summarised the same way. */
+export type ArchiveQueueItem = Omit<RunQueueItem, 'verification'> & {
+  verification: VerificationSummary[];
+};
+
+/**
+ * `OrchestratorRun` as the archive listing returns it: tails stripped from
+ * every queue item's verification list, plus `current`. `current` exists
+ * because a finished run's own file is not proof of where it lives — the
+ * latest run for a project stays in `run.json` until the *next* `init`
+ * archives it into `runs/<runId>.json`, so `runId`/`status`/`startedAt`
+ * alone cannot tell the client "this is the newest run" from "this is one
+ * of however many came before it." Without this flag the archive view
+ * (Task 4) would have no way to distinguish the entry it should treat as
+ * live-until-superseded from ordinary history.
+ */
+export type OrchestratorArchiveRun = Omit<OrchestratorRun, 'queue'> & {
+  queue: ArchiveQueueItem[];
+  /** true when this entry came from run.json (the current/latest run),
+   *  false for an archived runs/<runId>.json file. */
+  current: boolean;
+};
+
+/**
+ * `GET /api/orchestrator/archive` (Task 1) — every run the orchestrator
+ * state directory has ever recorded, across every project, flat like
+ * `OrchestratorRunsPayload`. Unlike that payload this carries no `fresh` or
+ * `pastRuns` annotation: those exist for the live board strip's "is this
+ * run still going" question, which an archive view (Task 4, built for
+ * browsing history rather than watching a live run) does not ask.
+ */
+export interface OrchestratorArchivePayload {
+  runs: OrchestratorArchiveRun[];
+}
