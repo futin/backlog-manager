@@ -774,7 +774,7 @@ offer is scoped here rather than left to be inferred.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> verifying
 mkdir -p "<dir>/verify"
 rm -f "<dir>/verify/<id>.status" "<dir>/verify/<id>.out" "<dir>/verify/<id>.pid"
-nohup sh -c 'node "$1/skills/backlog-orchestrate/tools/orchestrate.mjs" verify <id> --cwd "$PWD/.worktrees/<id>" > "<dir>/verify/<id>.out" 2>&1; echo $? > "<dir>/verify/<id>.status"' sh "$CLAUDE_PLUGIN_ROOT" > /dev/null 2>&1 &
+nohup env BM_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" BM_RUN_DIR="<dir>" sh -c 'node "$BM_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" verify <id> --cwd "$PWD/.worktrees/<id>" > "$BM_RUN_DIR/verify/<id>.out" 2>&1; echo $? > "$BM_RUN_DIR/verify/<id>.status"' > /dev/null 2>&1 &
 echo $! > "<dir>/verify/<id>.pid"
 ```
 
@@ -793,7 +793,7 @@ unattended loop, which is the one place this design cannot afford one.
 Detached, the ceiling stops applying to the suite and applies only to the
 polling, which is built to be re-called.
 
-Four details in those lines, none of them the same as step 4's:
+Five details in those lines, none of them the same as step 4's:
 
 - **`rm -f` first, and it is a merge-gate rule rather than housekeeping.**
   `<dir>` belongs to the *run*, not to the attempt: nothing removes these
@@ -823,12 +823,27 @@ Four details in those lines, none of them the same as step 4's:
   deliberately the wrapper `sh`, because the wrapper is what outlives `node`
   long enough to write `.status`. `exec` would replace it and the exit code —
   the one thing this whole step exists to produce — would be lost.
-- **`$1`, not `$CLAUDE_PLUGIN_ROOT`, inside the quotes.** The quotes have to
-  stay single so `$?` reaches the inner shell instead of being expanded by
-  this one, and passing the plugin root as a positional argument keeps the
-  path correct whether or not that variable is exported into a child. `$PWD`
-  needs no such care — every shell sets it, which is why step 4's line can
-  use it directly.
+- **Named `env` variables inside the quotes, never a positional.** The quotes
+  have to stay single so `$?` reaches the inner shell instead of being
+  expanded by this one, which rules out writing `$CLAUDE_PLUGIN_ROOT` in
+  there directly; `env` sets both names for the child without the outer shell
+  touching anything. The obvious alternative — pass them positionally and read
+  `$1`/`$2` — is the one thing that must not be done here, and the reason is
+  not style: **slash-command argument substitution rewrites `$N` in this file
+  before the session ever reads it, fenced code included.** Invoked as
+  `/backlog-orchestrate bug-2 bug-3 …`, an earlier version of this very line
+  arrived in the session as `node "bug-3/skills/…"`, with this bullet rewritten
+  to match so it read as deliberate rather than corrupt. That failure was loud
+  by luck; a substitution producing a readable path would fail silently, and
+  this is the launcher the merge gate depends on. Keep the plugin root and the
+  run directory in `BM_PLUGIN_ROOT` / `BM_RUN_DIR`, and do not reintroduce a
+  `$N` anywhere in this file. `$PWD` needs none of this care — every shell sets
+  it and no substitution pass touches it, which is why step 4's line uses it
+  directly.
+- **`BM_RUN_DIR` also retires the `<dir>` placeholder inside this command.**
+  Every other `<dir>` in this file is pasted once; here it was pasted three
+  times into one line, and each paste was a chance to redirect an attempt's
+  output at the wrong run's directory. Substitute it once, into `env`.
 - **The tool still runs from the project root.** `nohup` inherits this
   session's cwd and there is no `cd` anywhere in the line; the worktree is
   named by `--cwd`, which is exactly what that flag is for (see "Where
@@ -961,6 +976,37 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" atte
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
 ```
 
+**Second precondition: the main tree's uncommitted paths must not overlap the
+branch's.** A dirty main tree is fine — this run does not get to demand a
+clean one — but only as long as the dirt sits somewhere the branch does not
+touch. Test that rather than assuming it, because the answer changes during a
+run: the person whose repo this is may edit anything at any moment, and the
+item most likely to collide is the one whose subsystem they are working in.
+
+```bash
+git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
+{ git -C "$PWD" diff --name-only; git -C "$PWD" diff --cached --name-only; } | sort -u > "<dir>/verify/<id>.dirty-paths"
+comm -12 "<dir>/verify/<id>.branch-paths" "<dir>/verify/<id>.dirty-paths"
+```
+
+Empty output means merge. Non-empty output names the exact files that will
+refuse, and it is what makes the park detail actionable — "merge refused"
+sends the user hunting, "`ItemCard.tsx` is uncommitted and this branch also
+touches it" does not. Both scratch files go under the run's `<dir>`, never
+`/tmp` and never the repo. `diff --cached` is not optional: a *staged*
+uncommitted change refuses the merge exactly as an unstaged one does, and a
+`git diff`-only probe reads clean over it.
+
+On a non-empty intersection, do not stash, commit, or check anything out on
+the user's behalf — their uncommitted work is theirs, and this is the same
+boundary abort's preservation branch draws. Take the worktree-side resolve
+below if it applies, otherwise park with the overlapping paths named:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "merge would be refused: <paths> are uncommitted in the main tree and this branch also touches them — commit or stash them, then merge backlog/<id> by hand"
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+```
+
 Otherwise merge:
 
 ```bash
@@ -969,12 +1015,28 @@ git -C "$PWD" merge --no-ff --no-edit backlog/<id>
 
 `--no-ff` so every item is one identifiable merge commit in `main`'s history
 even when it could have fast-forwarded; `--no-edit` so no editor opens in a
-session that has no terminal to open one in. A dirty main tree is fine as
-long as the dirt does not overlap the branch's paths — which is why the
-pre-flight amendment rule above insists the item file is only ever edited
-inside the worktree.
+session that has no terminal to open one in.
 
-**On conflict:**
+**Two different failures, and they take different commands. Do not conflate
+them.**
+
+**A pre-merge refusal** — git declined before touching anything:
+
+```
+error: Your local changes to the following files would be overwritten by merge:
+	client/src/components/board/ItemCard.tsx
+Please commit your changes or stash them before you merge.
+```
+
+Nothing was modified, there is no `MERGE_HEAD`, and **`git merge --abort` is
+the wrong command** — it errors with `fatal: There is no merge to abort`. The
+tree is already in the state an abort would have restored. This is what the
+overlap probe above is for; reaching it means the probe was skipped or the
+tree changed in the seconds since. Handle it exactly as the probe's non-empty
+branch does — park with the paths named, or resolve worktree-side — and issue
+no `--abort`.
+
+**A conflict** — the merge started and left markers behind:
 
 ```bash
 git -C "$PWD" merge --abort
@@ -985,6 +1047,36 @@ branch exactly as they are, and continue with the next item. A conflict means
 `main` moved under the run (the user pushed, or an earlier item in this same
 run touched the same lines); resolving it is a human's judgement call, and
 the branch is the thing that makes that possible later.
+
+**When `main` moved under the run, resolving on the *branch* side is better
+than parking — and it is the only option that keeps the merge gate honest.**
+Both failures above have the same root cause: `main` is no longer the commit
+this item was verified against. Merging into it anyway would put content into
+`main` that nothing green ever ran — every individual step was green, and the
+combination was never tested. That is a hole in the "never merges red" hard
+limit which is invisible precisely because nothing reports red.
+
+So bring `main` into the worktree, prove the combination there, and only then
+merge out:
+
+```bash
+git -C "$PWD/.worktrees/<id>" merge --no-edit main
+```
+
+- **It merges cleanly** — re-run **all of step 8** against the combined
+  content, starting with its `rm -f`. This is exactly the second-attempt case
+  that rule exists for, and skipping it reads the first attempt's `0` for a
+  suite that never saw `main`'s changes. Green, then merge to `main` as above,
+  which is now conflict-free. Red, then it is an ordinary §8 failure: a fix
+  loop if the shared ceiling allows one, a park if it does not.
+- **It conflicts** — park, per the conflict branch above. Resolving real
+  content conflicts is a human judgement call and that has not changed;
+  what changed is that this is now the *second* thing tried, not the first.
+
+Nothing here touches the user's working tree: the merge, the resolution and
+the verification all happen inside a worktree this run created, which is the
+same reason the pre-flight amendment rule insists the item file is only ever
+edited there.
 
 **Undoing a merge that already completed is `git revert -m 1 <merge-sha>`,
 never `git reset --hard`.** This was proved empirically before this skill was
