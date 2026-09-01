@@ -47,6 +47,18 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
   );
 }
 
+/**
+ * `run-YYYYMMDD-HHMMSS`, optionally suffixed `-<n>` for a same-second
+ * collision — the exact shape `archivePath` (orchestrate.mjs) mints, and
+ * `archivedRun()` below's first guard. Tested before anything else touches
+ * the filesystem: the threat this exists to name is traversal
+ * (`../../etc/passwd`-shaped input), and the only way to be sure a
+ * traversal-shaped runId never reaches `path.join` is to reject it before
+ * the first join, not to join first and hope the result stays inside a
+ * directory this service intended.
+ */
+const RUN_ID_RE = /^run-\d{8}-\d{6}(-\d+)?$/;
+
 /** Directory-entry count for one project's archived-runs folder, 0 when it
  *  doesn't exist yet (no run for this project has ever been superseded by a
  *  later `init` — see orchestrate.mjs's own archiving comment on cmdInit). */
@@ -234,5 +246,77 @@ export class OrchestratorService {
     }
 
     return { runs };
+  }
+
+  /**
+   * One run file, verbatim (tails included) — the detail pane's data source
+   * (Task 2), the companion to archive() above: that method lists every run
+   * with tails stripped so the payload scales with run count, this one
+   * fetches a single run in full for the one entry a user actually opens.
+   *
+   * Two guards run in order before either `project` or `runId` — both
+   * caller-supplied, both riding in as raw query-string values by the time
+   * they reach the controller — is allowed anywhere near a filesystem path:
+   *
+   *   1. RUN_ID_RE above rejects anything not shaped like a run id, so a
+   *      traversal or shell-metacharacter payload never survives to be
+   *      joined into a path at all.
+   *   2. `encodeURIComponent(project)` is checked for *string equality*
+   *      against an entry `readdirSync(orchHome())` actually returned — the
+   *      same allowlist-by-listing shape server/src/items/allow.util.ts uses
+   *      for item bodies. The raw `project` string is never path.joined
+   *      first and then checked; it is only ever compared against names the
+   *      filesystem already listed, so an unregistered path can't be probed
+   *      into existing.
+   *
+   * Every failure below — bad runId shape, missing state dir, unregistered
+   * project, no matching archived file AND no matching run.json — collapses
+   * to the same `null`. The controller turns every one of those into an
+   * identical 404: GET /api/items/body's own stance, that the caller has no
+   * business learning which check failed.
+   */
+  archivedRun(project: string, runId: string): OrchestratorRun | null {
+    if (!RUN_ID_RE.test(runId)) return null;
+
+    const root = orchHome();
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      // Same empty-state reasoning as runs()/archive(): no state directory
+      // at all means nothing has ever run here, which is indistinguishable
+      // from "this project was never registered" as far as this guard cares.
+      return null;
+    }
+
+    // Guard 2 itself: encodeURIComponent(project) is compared against the
+    // listing, never joined into a path before this check runs. A raw
+    // project string that happens to share a directory listing's *prefix*
+    // (e.g. the registered path minus its last segment) fails this exact
+    // string-equality test the same as one that shares nothing at all —
+    // there is no startsWith here to fool.
+    const encoded = encodeURIComponent(project);
+    if (!entries.includes(encoded)) return null;
+
+    const dir = join(root, encoded);
+
+    // Archived first: an archived run's filename IS the claim (orchestrate.mjs
+    // never writes runs/<runId>.json under any name but its own runId), so a
+    // direct read needs no further check once it parses and passes
+    // isPlausibleRun. readOneRun's skip-and-warn on a missing file is exactly
+    // the outcome wanted here too — "no archived file with this name" is not
+    // an error, it just means falling through to run.json below.
+    const archived = readOneRun(join(dir, 'runs', `${runId}.json`), `runs/${runId}.json for "${project}"`);
+    if (archived) return archived;
+
+    // Fall back to the current run — but only when ITS OWN runId field
+    // matches what was requested. Unlike the archived file above, run.json's
+    // filename says nothing about which run it holds (it is always literally
+    // "run.json"), so this is the one branch where archivedRun has to check
+    // content rather than trust a path's existence.
+    const current = readOneRun(join(dir, 'run.json'), `run.json for "${project}"`);
+    if (current && current.runId === runId) return current;
+
+    return null;
   }
 }
