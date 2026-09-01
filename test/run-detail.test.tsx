@@ -264,6 +264,24 @@ describe('RunDetail', () => {
     expect(bar.children[0]).toHaveClass('run-seg-idle');
     expect(bar.children[1]).toHaveClass('run-seg-active');
 
+    // The width proportionality itself — fix round 1's own addition. The two
+    // spans above are deliberately UNEVEN (10s vs. 65s, a 6.5x difference,
+    // not two spans that merely happen to divide the bar in half), so this
+    // is the one assertion in this suite that would actually fail two ways
+    // a regression could plausibly take: dropping `flexGrow` from the
+    // segment's inline style entirely (the property goes missing, so
+    // `toHaveStyle` fails on an absent match rather than a wrong one), or
+    // giving every segment equal weight regardless of its own span (both
+    // segments would read the same `flexGrow`, which could never equal both
+    // 10000 and 65000 at once). Asserting only the segment COUNT and the
+    // tone CLASS, as the rest of this test already does, would pass under
+    // either of those regressions — the proportional width is the feature
+    // this pane exists to show (RunDetail.tsx's own file header: "where did
+    // the time go," the one question RunDrawer's stepper cannot answer),
+    // so it is the one property this suite cannot leave unpinned.
+    expect(bar.children[0]).toHaveStyle({ flexGrow: '10000', flexBasis: '0' });
+    expect(bar.children[1]).toHaveStyle({ flexGrow: '65000', flexBasis: '0' });
+
     expect(screen.getByTestId('run-detail-caption-c-1')).toHaveTextContent(
       `pending ${formatSpanCompact(10_000)} · dispatched ${formatSpanCompact(65_000)}`
     );

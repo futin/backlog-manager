@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 
 import { fetchArchivedRun } from '../../lib/agents';
 import { itemStageSpans, itemWallMs, runWallMs } from '../../lib/run-stats';
-import { stageChipClass, stageGlyph, STAGE_TONE } from '../../lib/run-stage';
+import {
+  RUN_STATUS_CLASS, RUN_STATUS_GLYPH, stageChipClass, stageGlyph, STAGE_TONE
+} from '../../lib/run-stage';
 import { formatClock, formatSpanCompact } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from '../board/ItemCard';
 import type {
@@ -56,30 +58,6 @@ import type {
  * run's own summary can never go stale (the run is over; nothing about it
  * changes again).
  */
-
-/** The status chip's tone vocabulary — deliberately duplicated from
- *  RunsView.tsx's own `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` rather than
- *  imported. RunsView.tsx is the module that mounts THIS component, so an
- *  import the other way would be a circular dependency between two files
- *  whose only relationship is "parent renders child" — a live ES binding
- *  can survive that in practice, but it is a fragile thing to lean on for
- *  four lines of plumbing neither file has any other reason to share. Kept
- *  in sync by hand precisely because it is this small — the same trade
- *  `run-stats.ts`'s own duplicated `parseStamp` makes against `run-time.ts`
- *  for the identical reason. */
-const STATUS_GLYPH: Record<OrchestratorRun['status'], string> = {
-  running: '●',
-  done: '✓',
-  aborted: '⚠',
-  failed: '✕'
-};
-
-const STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
-  running: 'runs-status-live',
-  done: 'runs-status-done',
-  aborted: 'runs-status-warn',
-  failed: 'runs-status-bad'
-};
 
 /** The run-level fields the header and base chips are computed from — the
  *  slice `OrchestratorRun` and `OrchestratorArchiveRun` already share, so
@@ -226,8 +204,8 @@ export function RunDetail(
     <>
       <div className="run-detail-head">
         <span className="run-detail-id">{summary.runId}</span>
-        <span className={`runs-status ${STATUS_CLASS[runForHeader.status]}`}>
-          <span aria-hidden="true">{STATUS_GLYPH[runForHeader.status]}</span>
+        <span className={`runs-status ${RUN_STATUS_CLASS[runForHeader.status]}`}>
+          <span aria-hidden="true">{RUN_STATUS_GLYPH[runForHeader.status]}</span>
           {runForHeader.status}
         </span>
         {/* Each half renders only if its own stamp parsed — RunDrawer's own

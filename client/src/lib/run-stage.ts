@@ -1,4 +1,4 @@
-import type { RunStage } from '../../../shared/types';
+import type { OrchestratorRun, RunStage } from '../../../shared/types';
 
 /**
  * The visual register a run stage is read in. Six tones, not fourteen: a
@@ -77,3 +77,63 @@ export function stageChipClass(stage: RunStage): string {
   const tone = STAGE_TONE[stage];
   return tone === 'active' ? 'board-card-stage' : `board-card-stage board-card-stage-${tone}`;
 }
+
+/**
+ * ---- RUN status vs. ITEM stage — two vocabularies that share one file on
+ * purpose, and must never share one map ----
+ *
+ * `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` below look like they could just be
+ * `stageGlyph`/`stageChipClass` again, and that similarity is exactly the
+ * trap: they answer a different question about a different value. Every
+ * export above this comment keys on `RunStage` — the fourteen-member,
+ * per-ITEM pipeline union (`pending`, `reviewing`, `merged`, ...). These two
+ * key on `OrchestratorRun['status']` — the whole RUN's own four-member
+ * lifecycle (`running | done | aborted | failed`), which shares only one
+ * spelling (`failed`) with `RunStage` and means something different even
+ * there: an item's `failed` is one queue entry that could not be fixed, a
+ * run's `failed` is the whole orchestrator process dying. Calling
+ * `stageGlyph(run.status)` would not compile without a cast, and with one it
+ * would silently read `undefined` out of `STAGE_TONE` for `running`, `done`
+ * and `aborted` — none of which are `RunStage` members at all.
+ *
+ * So this is a second, small, total map over a different four-word union,
+ * not a variant of `STAGE_TONE` and not mergeable into it without
+ * conflating two different things a reader could be asking about a run (its
+ * OWN status, vs. the status of one item inside it). The tone VOCABULARY it
+ * reuses — cyan-for-live, green-for-success, amber-for-needs-a-look,
+ * red-for-broken — is deliberately the same one `STAGE_TONE` uses, so a
+ * colour never means one thing on an item chip and another on a run chip;
+ * only the KEY the colour is looked up by differs.
+ *
+ * Lives here, beside `STAGE_TONE`, rather than in either component that
+ * reads it (`RunsView.tsx`'s run-list rows, `RunDetail.tsx`'s header) for
+ * the reason this whole section exists: two components independently
+ * needing "the run status's glyph and class" is exactly the shape that
+ * produces a silently-drifting duplicate if each one owns its own copy —
+ * which is what happened here once already (Task 7 first duplicated this
+ * pair into `RunDetail.tsx` rather than reaching for a shared home, reading
+ * "don't import RunsView.tsx, that would cycle" as "there is no shared
+ * home" instead of "the shared home is a third file"). `lib/run-stage.ts` is
+ * that third file: both components already import from it for `RunStage`'s
+ * own vocabulary, and it cannot cycle with either — a plain data module,
+ * with no import of its own pointing back at either component.
+ */
+export const RUN_STATUS_GLYPH: Record<OrchestratorRun['status'], string> = {
+  running: '●',
+  done: '✓',
+  aborted: '⚠',
+  failed: '✕'
+};
+
+/** The run-status chip's class list — `.runs-status-*` (styles.css),
+ *  deliberately NOT `stageChipClass`'s `.board-card-stage-*` family: the two
+ *  chip designs (a run-list row's status word vs. a queue item's stage
+ *  badge) were built as separate visual components with their own CSS, and
+ *  reusing one's classes for the other's markup would apply padding/shape
+ *  rules tuned for a different chip shape. */
+export const RUN_STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
+  running: 'runs-status-live',
+  done: 'runs-status-done',
+  aborted: 'runs-status-warn',
+  failed: 'runs-status-bad'
+};

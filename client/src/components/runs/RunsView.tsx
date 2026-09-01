@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
+import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH } from '../../lib/run-stage';
 import { aggregateRuns, dayKey, dayLabel, runWallMs } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
@@ -180,35 +181,16 @@ function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
 }
 
 /**
- * The run-level status tone map — deliberately NOT `lib/run-stage.ts`'s
- * `stageGlyph`/`stageChipClass`. Those two operate on `RunStage`, the
- * fourteen-member per-ITEM pipeline union (`pending`, `reviewing`, `merged`,
- * ...); a row here reports the whole RUN's own `status` field, a completely
- * separate four-member union (`running | done | aborted | failed`) that
- * shares only one spelling (`failed`) with the other and means something
- * different even there. Calling `stageGlyph(run.status)` would not compile
- * without a cast, and with one it would silently read `undefined` out of
- * `STAGE_TONE` for `running`, `done` and `aborted`, none of which are
- * `RunStage` members. This is a second, small, total map over a different
- * four-word union — the tone VOCABULARY it reuses (cyan-for-live,
- * green-for-success, amber-for-needs-a-look, red-for-broken) is identical to
- * `STAGE_TONE`'s, per the brief's own instruction, but the two maps cannot
- * be merged into one without conflating two different questions a reader
- * could ask about a run.
+ * `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` (imported above) key on the whole
+ * RUN's own `status`, deliberately not `lib/run-stage.ts`'s `stageGlyph`/
+ * `stageChipClass`, which key on one ITEM's `RunStage` — a different union
+ * that shares only one spelling (`failed`) and means something different
+ * even there. Both pairs now live in `lib/run-stage.ts` itself (fix round 1
+ * hoisted these two out of here — `RunDetail.tsx` needed the identical pair
+ * for its own header and had, at first, duplicated rather than shared them);
+ * see that file's own comment, right beside `STAGE_TONE`, for the full
+ * reasoning on why the two vocabularies cannot be merged into one map.
  */
-const RUN_STATUS_GLYPH: Record<OrchestratorRun['status'], string> = {
-  running: '●',
-  done: '✓',
-  aborted: '⚠',
-  failed: '✕'
-};
-
-const RUN_STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
-  running: 'runs-status-live',
-  done: 'runs-status-done',
-  aborted: 'runs-status-warn',
-  failed: 'runs-status-bad'
-};
 
 /** Reading order for the tiles' by-status breakdown — active state first, then the three ways a run can have left it, worst-sounding last. */
 const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed'];
