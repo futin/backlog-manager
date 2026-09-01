@@ -60,10 +60,13 @@ rule belongs here rather than in the tool.
 
 Everything that genuinely concerns a worktree takes its path as an explicit
 flag instead of implying it from cwd: `stage --worktree`, `verify --cwd`, and
-plain `git -C <path>` for git. There is exactly one exception in this whole
-skill, called out where it happens: `backlog.mjs stop` in the resume and abort
-paths runs *inside* the worktree, because the item file it clears the marker
-on is the worktree's own copy.
+plain `git -C <path>` for git. There are exactly two exceptions in this whole
+skill, both `backlog.mjs` rather than `orchestrate.mjs`, and both called out
+where they happen: `backlog.mjs stop` in the resume and abort paths runs
+*inside* the worktree, because the item file it clears the marker on is the
+worktree's own copy; and §4's post-checkout probe runs `backlog.mjs show`
+inside the worktree for the same reason in reverse — asking *that* tree, and
+only that tree, whether the item is in it is the entire point of the call.
 
 **That exception runs in a subshell — `( cd <worktree> && … )` — never a bare
 `cd`.** A bare `cd` persists as the session's working directory for every
@@ -124,6 +127,19 @@ minute:
 - **`ungroomed`** — the gate refused it, with the reason on the `-` lines.
   Never dispatched, never a failure: it is a groom job, and the user should
   see it named here rather than discover it missing later.
+
+  One of those reasons is not a grooming problem at all and reads
+  differently: `not committed on main — the worktree this run creates from
+  main would not contain backlog/…`. The gate reads each candidate's content
+  **at the ref a worktree is created from**, not off the working copy,
+  because that ref's bytes are the only ones a dispatched session will ever
+  see. An item groomed a minute ago and not yet committed is therefore
+  refused, and the fix is a `git commit` of `backlog/` on `main`, not a
+  groom. The orchestrator will not make that commit for you: it commits
+  inside a per-item worktree, on `backlog/<id>` alone, and nowhere else.
+  (`plan` and `init` both take `--base <ref>` for a repository whose trunk is
+  not called `main`; nothing in this file passes it, and the default is the
+  same literal `main` §4's `worktree add` uses.)
 - **`needs-answers`** — the gate passed, but the item still carries an open
   question (a `TBD`, a question line in the plan, a `## Done when` naming a
   command this project cannot resolve). Still a candidate; see pre-flight.
@@ -373,6 +389,44 @@ not block it: the new worktree checks out `main`'s HEAD commit, not the
 working copy. Creating a worktree on a *new* branch while `main` itself is
 checked out in the main tree is legal — the branches differ, so nothing is
 locked.
+
+**Then prove the item survived the checkout, before writing any pre-flight
+answer and before dispatching anything.** That same sentence — the worktree
+checks out `main`'s *commit*, not the working copy — is also how an item can
+be missing from the tree the session is about to run in: an item groomed but
+never committed, which is the normal state of an item the moment grooming
+finishes, exists only in the main tree. Ask `backlog.mjs` from inside the new
+worktree, so its own `.git`-ancestor walk resolves to the worktree and not to
+the main tree (a subshell, per the rules at the top of this file):
+
+```bash
+( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" show <id> ); echo "present=$?"
+```
+
+- **`present=0`** — the item is in the worktree. Carry on below.
+- **`present=1`** — it is not. Park, and keep the worktree and the branch
+  exactly as every other park path in this file does: delete nothing, `prune`
+  nothing, `-D` nothing.
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<id> is not present in the worktree checked out from main — commit backlog/ on main, then re-run"
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  ```
+
+§1's gate refuses an uncommitted item before a run ever starts, so on the
+ordinary path this probe never fires. It is here because it catches strictly
+more than that gate can: a project root the gate could not read as a git work
+tree at all (it falls back to the working copy there, deliberately), a main
+tree not actually on `main`, an item committed only on some other branch, a
+race between the gate and this checkout, and any future drift between the ref
+`worktree add` uses on the line above and the one the gate defaults to.
+
+What it prevents is not a crash. A session dropped into a worktree with no
+item file does not fail — `backlog.mjs show` exits `1` there, the session
+reads that as a lookup problem, searches, finds the one copy that does exist
+in the main tree, and works *that* one: the branch ends up carrying code with
+no lifecycle move on it, the item gets archived as a loose uncommitted change
+in somebody else's tree, and every stage of this run reports success.
 
 Then keep the new directory out of everybody's `git status`, idempotently:
 

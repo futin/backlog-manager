@@ -384,7 +384,16 @@ function listOpenItems(backlogDir, section) {
 // ungroomed by construction (no recognizable `## Plan`/`## Fix` will ever be
 // found in a body of `''`).
 function readItemForGate(absPath) {
-  const text = fs.readFileSync(absPath, 'utf8')
+  return parseItemForGate(fs.readFileSync(absPath, 'utf8'))
+}
+
+// The same narrow read, applied to bytes that never came off the working
+// tree at all: the gate below hands this a blob read out of `<base>` with
+// `git show`, because the content a dispatched session will actually see is
+// whatever the worktree gets from that ref, not the file sitting on disk
+// here. Split out of readItemForGate rather than copied so the two can never
+// drift into parsing the same item two different ways.
+function parseItemForGate(text) {
   const lines = text.split('\n')
   if (lines[0] !== '---') return { title: '', body: '' }
   let i = 1
@@ -585,6 +594,61 @@ function parseIdsArg(idsArg) {
   return idsArg.split(',').map((s) => s.trim()).filter((s) => s !== '')
 }
 
+// The ref a worktree is created from, and therefore the ref the gate reads.
+// SKILL.md §4 hardcodes the same literal in its `git worktree add
+// .worktrees/<id> -b backlog/<id> main`; `--base` exists so that coupling is
+// explicit and so a repository whose trunk is named something else is
+// workable. Deliberately NOT recorded in run.json: that would be a
+// shared/types.ts schema change for a value the loop can just pass on each
+// `plan` call.
+const BASE_REF_DEFAULT = 'main'
+
+// Generous, because the failure mode of the default 1MB is a truncated blob
+// silently gating as ungroomed rather than a loud error. An item file this
+// size would be pathological; the ceiling exists so that if one ever is, the
+// gate still reads all of it.
+const GIT_BLOB_MAX_BUFFER = 16 * 1024 * 1024
+
+// Returns a `(repo-relative path) => string | null` reader for `<base>`, or
+// null when this projectRoot has no usable git view to read from at all — in
+// which case buildGatedQueue falls back to the working copy exactly as it
+// always did (`plan` stays usable against a bare store; this tool's own
+// fixtures/store/ is precisely that, and so is a fresh `git init` with no
+// commits yet, where `main` resolves to nothing). The fallback is not a hole
+// in the fix: SKILL.md §4's post-checkout probe runs unconditionally and
+// catches every case this layer cannot see.
+//
+// `--show-toplevel` is compared against projectRoot rather than trusting
+// `--is-inside-work-tree`: a --project path that merely SITS INSIDE some
+// other repository (a scratch directory under one, say) would answer "yes,
+// a work tree" and then have every repo-relative path computed against the
+// wrong root — silently gating each item against a blob that has nothing to
+// do with it. Only a directory that is itself the top of a work tree is
+// accepted; anything else takes the fallback.
+//
+// Every git call here is a read: `rev-parse` and `show` never touch the
+// index or the working tree, which is what keeps `plan`'s "writes nothing"
+// guarantee true now that it covers git state too.
+function blobReaderAt(projectRoot, base) {
+  const top = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+  if (top.status !== 0) return null
+  let toplevel
+  let root
+  try {
+    toplevel = fs.realpathSync(top.stdout.trim())
+    root = fs.realpathSync(projectRoot)
+  } catch {
+    return null
+  }
+  if (toplevel !== root) return null
+  const resolved = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' })
+  if (resolved.status !== 0) return null
+  return (relPath) => {
+    const shown = spawnSync('git', ['-C', projectRoot, 'show', `${base}:${relPath}`], { encoding: 'utf8', maxBuffer: GIT_BLOB_MAX_BUFFER })
+    return shown.status === 0 ? shown.stdout : null
+  }
+}
+
 // The queue builder itself: reads every open bug and task under
 // `<projectRoot>/backlog`, gates each one, and returns them in the exact
 // order the brief specifies (bugs oldest-first, then tasks oldest-first).
@@ -595,7 +659,7 @@ function parseIdsArg(idsArg) {
 // code path." Never throws for "no backlog store" (see listOpenItems) —
 // only for an --ids entry that names nothing this store has, which is a
 // usage error regardless of which caller asked.
-function buildGatedQueue(projectRoot, { ids, maxItems = null } = {}) {
+function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DEFAULT } = {}) {
   const backlogDir = path.join(projectRoot, 'backlog')
   const bugs = listOpenItems(backlogDir, 'bugs').sort((a, b) => a.num - b.num)
   const tasks = listOpenItems(backlogDir, 'tasks').sort((a, b) => a.num - b.num)
@@ -622,10 +686,57 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null } = {}) {
   // cycle discovering that the item after the cap happens to be ungroomed
   // either — the cap bounds how much of the queue this run will ever look
   // at, not just how many items it will end up dispatching.
+  // One gate verdict for one candidate, read from the bytes the worktree
+  // this run would create is actually going to hold — see blobReaderAt above
+  // for why that is the ref and not the file on disk. Three outcomes:
+  //
+  //   - no git view at all (readBlob === null) → the working copy, exactly
+  //     as this function always did, and no extra reason;
+  //   - the item is absent from <base> → refused before its content is ever
+  //     looked at, because there is no content to look at: the session
+  //     dispatched into that worktree would find nothing there. The reason
+  //     names the path rather than just the condition, since "not committed"
+  //     alone leaves the reader guessing which of their items it means;
+  //   - present → gated through the UNCHANGED gateItem, on those bytes. That
+  //     also closes the sibling case: an item committed while ungroomed and
+  //     groomed only in the working copy used to read `ready` and dispatch
+  //     into a worktree holding the ungroomed version, where backlog-execute
+  //     refuses it and the whole item is spent for nothing.
+  //
+  // The verdict stays `ungroomed` rather than a new stage value: a new one
+  // would mean a new member in RUN_STAGES here, in shared/types.ts's
+  // RunStage, in the server's view of it, in the run drawer and in docs/,
+  // for a state whose handling is byte-identical to the one that already
+  // exists (record it with a note, move to the next item). "Groomed but
+  // uncommitted" genuinely is not ungroomed — the distinction lives in the
+  // reason string, which is the thing the drawer actually shows.
+  //
+  // The title for a missing blob comes off the working copy, the only copy
+  // that exists; for a present one it comes off the blob, so that everything
+  // this function reports about an item describes the same bytes.
+  const readBlob = blobReaderAt(projectRoot, base)
+  const gateEntry = (entry) => {
+    if (readBlob === null) {
+      const { title, body } = readItemForGate(entry.path)
+      return { title, ...gateItem(entry.section, body, projectRoot) }
+    }
+    const relPath = path.relative(projectRoot, entry.path).split(path.sep).join('/')
+    const committed = readBlob(relPath)
+    if (committed === null) {
+      return {
+        title: readItemForGate(entry.path).title,
+        gate: 'ungroomed',
+        reasons: [`not committed on ${base} — the worktree this run creates from ${base} would not contain ${relPath}`],
+        questions: [],
+      }
+    }
+    const { title, body } = parseItemForGate(committed)
+    return { title, ...gateItem(entry.section, body, projectRoot) }
+  }
+
   let readyCount = 0
   return ordered.map((entry) => {
-    const { title, body } = readItemForGate(entry.path)
-    const { gate, reasons, questions } = gateItem(entry.section, body, projectRoot)
+    const { title, gate, reasons, questions } = gateEntry(entry)
     const beyondMax = maxItems !== null && readyCount >= maxItems
     if (gate === 'ready') readyCount++
     return { id: entry.id, title, gate, reasons, questions, beyondMax }
@@ -774,16 +885,21 @@ function branchExists(projectRoot, branch) {
 // command style, so the contract for "what does `stage` do" lives entirely
 // inside cmdStage and not spread across a bigger switch.
 
-const INIT_USAGE = 'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N]'
+const INIT_USAGE = 'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>]'
 
 function cmdInit(argv) {
   let project
   let idsArg
   let maxArg
+  // Defaulted at the flag rather than left undefined for buildGatedQueue to
+  // fill in, so that `--base ''` is a base ref of '' (which resolves to
+  // nothing and takes the fallback) rather than silently meaning `main`.
+  let base = BASE_REF_DEFAULT
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project') project = argv[++i]
     else if (argv[i] === '--ids') idsArg = argv[++i]
     else if (argv[i] === '--max') maxArg = argv[++i]
+    else if (argv[i] === '--base') base = argv[++i]
   }
 
   // Validated before anything else touches disk: an unusable --project is a
@@ -840,7 +956,7 @@ function cmdInit(argv) {
   // loop. Every item that makes the cut starts exactly like every queue
   // item always has: `pending`, via the same makeQueueItem every other
   // caller already uses.
-  const gated = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems })
+  const gated = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base })
   const queue = gated.filter((item) => !item.beyondMax).map((item) => makeQueueItem(item.id, item.title, stamp))
 
   const root = orchHome()
@@ -944,7 +1060,7 @@ function cmdInit(argv) {
   return 0
 }
 
-const PLAN_USAGE = 'usage: orchestrate.mjs plan --project <abs path> [--ids a,b,c] [--max N] [--json]'
+const PLAN_USAGE = 'usage: orchestrate.mjs plan --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--json]'
 
 // Previews a run without starting one: the exact queue `init` would build
 // for these flags, printed rather than written. This is what lets a human
@@ -956,11 +1072,13 @@ function cmdPlan(argv) {
   let project
   let idsArg
   let maxArg
+  let base = BASE_REF_DEFAULT
   let json = false
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project') project = argv[++i]
     else if (argv[i] === '--ids') idsArg = argv[++i]
     else if (argv[i] === '--max') maxArg = argv[++i]
+    else if (argv[i] === '--base') base = argv[++i]
     else if (argv[i] === '--json') json = true
   }
 
@@ -989,7 +1107,7 @@ function cmdPlan(argv) {
   // writing. That is what lets a caller (a UI's queue preview, or a human
   // sanity-checking a run before committing to it) call this as many times
   // as it wants without ever risking a run's own state.
-  const queue = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems })
+  const queue = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base })
 
   if (json) {
     console.log(JSON.stringify(queue))

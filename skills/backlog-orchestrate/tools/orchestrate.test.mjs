@@ -914,6 +914,207 @@ test('init builds its queue from the real gate: bugs oldest-first then tasks old
   assert.ok(written.queue.every((q) => q.stage === 'pending'), 'every queued item should start pending regardless of its own gate result')
 })
 
+// --- bug-5: the gate reads the ref the worktree is built from, not the disk -
+// The defect this section pins: an item groomed but not yet committed on
+// `main` gated `ready`, got a worktree created from `main`'s commit, and was
+// dispatched into a tree whose `backlog/` did not contain it — the session
+// then found the only copy that existed (the main tree's) by absolute path
+// and archived the item there, splitting one item across two trees while
+// every stage reported success. `plan`/`init` gated the working copy; the
+// worktree is built from a commit. These cases pin the fix: the gate now
+// reads each candidate's blob at `--base` (default `main`), which is the
+// only content the dispatched session will ever see.
+//
+// `planGitFixture` is `planFixture` plus a real repository: the trunk is
+// pinned to `main` with `symbolic-ref` rather than `init -b main` so the
+// branch name is this suite's own choice and not whatever
+// `init.defaultBranch` happens to be on the machine running it, and a
+// README.md rides along in the first commit purely so case 7 has a tracked
+// NON-item file it can dirty. Every non-git `planFixture` case above stays
+// exactly as it is — those are the fallback's regression test.
+function planGitFixture(t) {
+  const { home, project } = planFixture(t)
+  spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' })
+  spawnSync('git', ['-C', project, 'symbolic-ref', 'HEAD', 'refs/heads/main'], { encoding: 'utf8' })
+  fs.writeFileSync(path.join(project, 'README.md'), 'fixture store\n')
+  commitEverything(project, 'fixture store')
+  return { home, project }
+}
+
+// The one uncommitted item cases 2, 4 and 5 share. Its repo-relative path is
+// a literal rather than something derived, because case 2 asserts the gate's
+// reason names that exact path — a derived value on both sides could agree
+// with itself while both were wrong.
+const TASK_9_REL = 'backlog/tasks/open/task-9-uncommitted-when-the-run-starts.md'
+const TASK_9_BODY = `---
+id: task-9
+title: Uncommitted when the run starts
+created: 2026-09-01
+---
+
+## Plan
+
+A real plan, groomed in the working copy and committed nowhere.
+`
+
+function writeTask9(project) {
+  fs.writeFileSync(path.join(project, TASK_9_REL), TASK_9_BODY)
+}
+
+function git(project, ...args) {
+  return spawnSync('git', ['-C', project, ...args], { encoding: 'utf8' })
+}
+
+// Case 1: the ordinary path is unchanged — an item that is both committed
+// and groomed still reads ready. Without this, every case below could pass
+// on a gate that had simply started refusing everything.
+test('plan on a git store: a task committed on main with a real ## Plan is ready, with empty reasons', (t) => {
+  const { home, project } = planGitFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-1', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ready')
+  assert.deepEqual(item.reasons, [])
+})
+
+// Case 2: the defect itself. A groomed item that exists only in the working
+// copy is refused, and the reason names the path the worktree would not
+// contain — that path is the whole point of the message, since "not
+// committed" alone leaves the reader guessing which of their items it means.
+test('plan on a git store: an item groomed only in the working copy is ungroomed, and the reason names the path the worktree would lack', (t) => {
+  const { home, project } = planGitFixture(t)
+  writeTask9(project)
+
+  const out = plan(project, home, '--ids', 'task-9', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ungroomed')
+  assert.equal(item.reasons.length, 1, `expected exactly one reason, got ${JSON.stringify(item.reasons)}`)
+  assert.match(item.reasons[0], /not committed/i)
+  assert.ok(item.reasons[0].includes(TASK_9_REL), `reason should name ${TASK_9_REL}: ${item.reasons[0]}`)
+})
+
+// Case 3: the sibling defect the same root cause implies. bug-2 is committed
+// with `## Fix` still the `unknown` placeholder; grooming it in the working
+// copy alone used to read `ready` and dispatch into a worktree holding the
+// UNGROOMED version, where backlog-execute refuses it and the whole item is
+// spent for nothing. This is the case that proves the gate reads the
+// committed blob rather than the file on disk — the disk copy here is
+// perfectly groomed.
+test('plan on a git store: a bug groomed only in the working copy still gates on the committed placeholder', (t) => {
+  const { home, project } = planGitFixture(t)
+  const file = path.join(project, 'backlog', 'bugs', 'open', 'bug-2-settings-hue-swatch-preview-lags-one-theme-change-behind.md')
+  const groomed = fs.readFileSync(file, 'utf8').replace(
+    /## Fix\n\nunknown/,
+    '## Fix\n\nSubscribe the swatch to the theme store instead of reading the hue once at mount.',
+  )
+  assert.ok(groomed.includes('Subscribe the swatch'), 'fixture bug-2 no longer has the "## Fix\\n\\nunknown" shape this case rewrites')
+  fs.writeFileSync(file, groomed)
+
+  const out = plan(project, home, '--ids', 'bug-2', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ungroomed', 'the worktree would hold the committed placeholder, not the working copy')
+  assert.ok(item.reasons.some((r) => /fix/i.test(r)), `expected the ordinary placeholder reason, got ${JSON.stringify(item.reasons)}`)
+})
+
+// Case 4: --base is honoured, and the coupling it exists for is real — the
+// same item reads differently depending on which ref the worktree would be
+// created from. task-9 is committed on `trunk` only; `main` never sees it.
+test('plan --base gates against the named ref: an item committed on trunk alone is ready there and uncommitted on main', (t) => {
+  const { home, project } = planGitFixture(t)
+  writeTask9(project)
+  assert.equal(git(project, 'checkout', '-q', '-b', 'trunk').status, 0)
+  commitEverything(project, 'task-9 on trunk only')
+  assert.equal(git(project, 'checkout', '-q', 'main').status, 0)
+  // `checkout main` took the file back off disk; the working copy has to
+  // hold it again for it to be a candidate at all (the candidate list is a
+  // directory read — only the GATE moved to the ref).
+  writeTask9(project)
+
+  const onMain = plan(project, home, '--ids', 'task-9', '--json')
+  const onTrunk = plan(project, home, '--ids', 'task-9', '--base', 'trunk', '--json')
+
+  assert.equal(onMain.status, 0, onMain.stderr)
+  assert.equal(onTrunk.status, 0, onTrunk.stderr)
+  assert.equal(JSON.parse(onMain.stdout)[0].gate, 'ungroomed')
+  assert.equal(JSON.parse(onTrunk.stdout)[0].gate, 'ready')
+})
+
+// Case 5: init queues by membership exactly as before, and the knock-on the
+// fix has on --max is the correct one — an uncommitted item is not ready, so
+// it no longer consumes the single ready slot and task-1 lands inside the
+// cap instead of being pushed past it. The cap bounds how many items a run
+// will DISPATCH.
+test('init on a git store: an uncommitted item stays in the queue and no longer consumes a --max slot', (t) => {
+  const { home, project } = planGitFixture(t)
+  writeTask9(project)
+
+  const out = run(project, home, 'init', '--project', project, '--ids', 'task-9,task-1', '--max', '1')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(written.queue.map((q) => q.id), ['task-9', 'task-1'])
+})
+
+// Case 6: `plan` still writes nothing — now including git state, since the
+// gate reads git for the first time. A `cat-file`/`show` read must never
+// touch the index or the working tree. The tree snapshot deliberately covers
+// `backlog/` rather than the whole project: `.git`'s own internals move for
+// reasons that have nothing to do with this tool, and `status --porcelain` +
+// `rev-parse HEAD` are the two observations that actually matter here.
+test('plan on a git store writes nothing: the store, the state dir, git status and HEAD are all unchanged', (t) => {
+  const { home, project } = planGitFixture(t)
+  writeTask9(project)
+  const before = snapshotTree(path.join(project, 'backlog'))
+  const homeBefore = fs.readdirSync(home)
+  const statusBefore = git(project, 'status', '--porcelain').stdout
+  const headBefore = git(project, 'rev-parse', 'HEAD').stdout
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(snapshotTree(path.join(project, 'backlog')), before)
+  assert.deepEqual(fs.readdirSync(home), homeBefore)
+  assert.equal(git(project, 'status', '--porcelain').stdout, statusBefore)
+  assert.equal(git(project, 'rev-parse', 'HEAD').stdout, headBefore)
+})
+
+// Case 7: a dirty main tree is normal, not an error. Uncommitted changes to
+// something that is not an item file say nothing about whether any item is
+// committed, and the gate must not read them as a reason to refuse.
+test('plan on a git store: an unrelated dirty tracked file changes no verdict', (t) => {
+  const { home, project } = planGitFixture(t)
+  fs.writeFileSync(path.join(project, 'README.md'), 'fixture store, edited and not committed\n')
+
+  const out = plan(project, home, '--ids', 'task-1', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ready')
+  assert.deepEqual(item.reasons, [])
+})
+
+// Case 8: the fallback is silent. A store that is not a git work tree at all
+// (this tool's own fixtures/store is precisely that) gates the working copy
+// exactly as it always did, and says nothing about commits — otherwise every
+// non-git case above would start carrying a reason it never asked for.
+test('plan against a store that is not a git work tree falls back to the working copy and mentions no commit', (t) => {
+  const { home, project } = planFixture(t)
+
+  const out = plan(project, home, '--ids', 'task-1', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const [item] = JSON.parse(out.stdout)
+  assert.equal(item.gate, 'ready')
+  assert.deepEqual(item.reasons, [])
+  assert.ok(!/commit/i.test(out.stdout + out.stderr), `fallback should say nothing about commits: ${out.stdout}${out.stderr}`)
+})
+
 // --- Fix round 1 (Important): pidAlive's zombie fallback ------------------
 // `process.kill(pid, 0)` alone can't tell a live process from an unreaped
 // zombie (see pidAlive's own long comment for the full reasoning and the

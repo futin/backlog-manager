@@ -44,6 +44,24 @@ prints the item's absolute path on line 1, then its frontmatter — **never the 
 Read the file at that path yourself to see the actual headings; there's no tool command
 that prints the body, and none is needed.
 
+**That command is the only way to locate an item file, and an exit `1` from it is a stop
+condition, not a lookup problem.** `show` resolves the store by walking up from this
+session's own cwd to the nearest `.git`, so what it answers is "does *this tree* have this
+item" — and a worktree is a tree of its own. If it exits `1`, say the item is not in this
+tree and stop. Never `grep`, `find` or glob for the file; never work an absolute path
+belonging to another tree, even when one plainly exists and plainly holds the item you
+were asked for.
+
+That last sentence is not hypothetical. An orchestrator run created a worktree from
+`main`'s commit, dispatched a session for an item that had been groomed but never
+committed, and the item was simply absent from that worktree. `show` exited `1`, the
+session searched, found the only copy that existed — the main tree's — appended
+`## Outcome` to it and moved it to `done/` there. The code changes landed correctly on the
+branch; the item's whole lifecycle landed in a tree the branch would never carry, as a
+loose uncommitted change with no commit of its own, and every stage of the run reported
+success. Refusing takes one sentence and loses nothing: the item is still there, still
+open, and whoever committed it can re-run.
+
 If that path resolves under `ideas/`, `refactors/` or `out-of-scope/`, stop — wrong skill
 for this id (see Hard limits below). If it's already under a `done/` directory, there's nothing left
 to execute — say so instead of proceeding.
@@ -195,6 +213,11 @@ leaves `started` in place as the historical record of when the work began, since
   inspects only a task's `## Plan` and a bug's `## Fix`, so a refactor that got past this
   check would find no rule to fail. The id has to be checked here, before `start` is ever
   reached.
+- **Writes only under the repo root `show` resolved.** Every write this skill makes — the
+  `start`/`stop` markers, the `## Outcome` append, the `move` to `done/` — lands inside the
+  one tree `backlog.mjs` resolved from this session's own cwd. Another checkout of the same
+  repository is another tree: writing into it from here produces changes on nobody's branch,
+  attributable to no commit, in a working copy this session was never given.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a
   hard limit, not a suggestion: no proof, no archive.
 
