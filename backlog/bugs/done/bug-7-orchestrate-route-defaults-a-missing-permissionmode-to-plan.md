@@ -3,6 +3,9 @@ id: bug-7
 title: Orchestrate route defaults a missing permissionMode to plan
 created: 2026-09-01
 tags: server, agents, orchestrator
+updated: 2026-09-01T13:52:08Z
+started: 2026-09-01T13:45:15Z
+execute-elapsed: 413
 ---
 
 ## Symptom
@@ -84,3 +87,52 @@ Test cases (test/ has server suites for the agents routes; put these with them):
   unchanged clamping behaviour;
 - body with `permissionMode: 'nonsense'` → still the floor, `plan`. This is the case the
   fix must NOT change: an unrecognised request is not a missing one.
+
+## Outcome
+
+2026-09-01 — Fixed. `AgentsService.orchestrate()` now defaults an absent
+`permissionMode` to `auto` *before* `clampMode` sees it, instead of handing
+`clampMode` an empty string and taking its floor-on-unknown answer. `clampMode`
+and `modesUpTo` are untouched, as the Fix required.
+
+One deliberate deviation from the Fix's literal snippet: it used
+`typeof req.permissionMode === 'string' && req.permissionMode !== ''`, which
+also defaults a NON-string (a JSON `7`, which the controller's `Partial` type
+cannot rule out) to `auto` — today such a value floors. That conflicts with
+this bug's own Cause, which turns entirely on "expressed no preference" and
+"asked for something unrecognised" deserving opposite answers: a number is
+present and unrecognised, not absent. The condition shipped is
+`req.permissionMode === undefined || req.permissionMode === '' ? 'auto' : req.permissionMode`,
+so `''` (the "no pick" a select submits, per `pickFrom`'s own convention) and a
+missing field default, while a non-string, a `null` and a junk string all reach
+`clampMode` unchanged and floor there. A test pins that case alongside the four
+the Fix listed.
+
+`test/orchestrator-start.test.ts` gained a permission-mode block (five cases:
+absent → `auto`; absent under an `acceptEdits` ceiling → `acceptEdits`;
+`bypassPermissions` under an `auto` ceiling → `auto`; `nonsense` → `plan`;
+non-string `7` → `plan`) and its `stubDashboard` helper took a `ceiling`
+parameter — with the ceiling hard-coded at `acceptEdits`, "the default applied"
+and "the ceiling clamped it" are indistinguishable. The existing whole-spawn-body
+assertion had pinned the bug itself (`permissionMode: 'plan'` for a body with no
+mode) and now expects `acceptEdits`.
+
+Red-green verified: the three affected cases failed against the unfixed service
+(`Expected: "auto" / Received: "plan"`) before the change.
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+(exit 0, no output)
+
+$ pnpm test
+Test Suites: 35 passed, 35 total
+Tests:       515 passed, 515 total
+Snapshots:   0 total
+Time:        38.539 s, estimated 51 s
+Ran all test suites.
+```
+
+(The first full run had one failure in `test/agents-dispatch.test.ts`
+— `Parse Error: Expected HTTP/, RTSP/ or ICE/`, a supertest connection flake in
+a suite this change does not touch. It passed alone and on the full rerun above.)

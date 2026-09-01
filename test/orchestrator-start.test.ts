@@ -38,7 +38,15 @@ interface Sent { url: string; init?: RequestInit }
  * The three URLs it answers (/api/health, /api/management, /api/spawn) are
  * every call AgentsService.orchestrate can make, same as dispatch.
  */
-function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true }) {
+function stubDashboard(
+  spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true },
+  // The host's permission ceiling, as its /api/health reports it. A
+  // parameter rather than the fixed 'acceptEdits' this suite used to hard-code
+  // because the permission-mode cases below turn on the difference between a
+  // ceiling at or above the default and one under it — with a single ceiling
+  // "the default was applied" and "the ceiling clamped it" are the same value.
+  ceiling: string = 'acceptEdits'
+) {
   const sent: Sent[] = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -54,7 +62,7 @@ function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } =
       json: () => Promise.resolve(
         url.endsWith('/api/management')
           ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+          : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: ceiling }
       )
     } as Response);
   }) as jest.Mock;
@@ -340,14 +348,83 @@ describe('POST /api/agents/orchestrate', () => {
       // registry display name — this is why the expectation is computed
       // rather than a literal string like dispatch's test can use).
       name: `orchestrate ${basename(projectPath)}`,
-      // No permissionMode was sent; the ceiling here is 'acceptEdits', and
-      // an absent/unrecognised mode floors to the ladder's lowest allowed
-      // rung ('plan'), the same rule clampMode applies for dispatch.
-      permissionMode: 'plan'
+      // No permissionMode was sent, so the server's own default ('auto',
+      // the same one plan() hands the launch sheet) applies and the
+      // 'acceptEdits' ceiling then clamps it down to that. NOT the ladder
+      // floor: an absent field is "no preference", not "a request nobody
+      // recognises" — see the permission-mode block below, which pins both
+      // halves of that distinction.
+      permissionMode: 'acceptEdits'
       // model/effort are absent entirely, not merely falsy: JSON.stringify
       // drops an undefined value outright, which is what proves the flag
       // never reaches the dashboard's argv at all.
     });
+  });
+
+  // --- The permission mode the spawn is actually started with -------------
+  //
+  // The route runs a whole unattended queue: worktrees, commits, merges. A
+  // session that cannot write a file does none of that, answers 201 anyway,
+  // and reports nothing about why — which is why the absent-field case gets
+  // a real server-side default here rather than the ladder floor. The two
+  // halves worth keeping apart are "the caller expressed no preference"
+  // (default it) and "the caller asked for something unrecognised" (floor
+  // it); every case below exists to pin one of them, and clampMode itself is
+  // deliberately unchanged.
+
+  /** The permission mode the dashboard was asked to spawn with, or undefined
+   *  if nothing was spawned at all. */
+  function spawnedMode(sent: Sent[]): string | undefined {
+    const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
+    if (!spawn) return undefined;
+    return JSON.parse(String(spawn.init?.body)).permissionMode as string | undefined;
+  }
+
+  /* The bug itself: a body carrying only `project` — a curl, a script, a
+     future client, or the sheet dropping the field while keeping the rest.
+     'auto' and not the ceiling, the same trade plan() documents for a
+     dispatched session: asking for the most a host allows is how a
+     convenience becomes an incident. */
+  it('defaults an absent permissionMode to auto, not the ladder floor', async () => {
+    const sent = stubDashboard({ ok: true }, 'auto');
+    await post({ project: projectPath }).expect(201);
+    expect(spawnedMode(sent)).toBe('auto');
+  });
+
+  /* The default is a request, not an override — a stricter host still wins,
+     so this change can never widen what a dashboard permits. */
+  it('clamps the absent-mode default down to a stricter ceiling', async () => {
+    const sent = stubDashboard({ ok: true }, 'acceptEdits');
+    await post({ project: projectPath }).expect(201);
+    expect(spawnedMode(sent)).toBe('acceptEdits');
+  });
+
+  /* Existing clamping, unchanged: a recognised mode above the ceiling lands
+     ON the ceiling. */
+  it('still clamps an explicit mode above the ceiling down to it', async () => {
+    const sent = stubDashboard({ ok: true }, 'auto');
+    await post({ project: projectPath, permissionMode: 'bypassPermissions' }).expect(201);
+    expect(spawnedMode(sent)).toBe('auto');
+  });
+
+  /* The case the fix must NOT change, and the reason the default is applied
+     before clampMode rather than inside it: an unrecognised string cannot be
+     placed on the ladder, so it floors. Defaulting it to 'auto' instead
+     would turn every typo into a privilege escalation. */
+  it('still floors an unrecognised mode — an unknown request is not a missing one', async () => {
+    const sent = stubDashboard({ ok: true }, 'auto');
+    await post({ project: projectPath, permissionMode: 'nonsense' }).expect(201);
+    expect(spawnedMode(sent)).toBe('plan');
+  });
+
+  /* The controller forwards this field unvalidated, and its `Partial` type
+     cannot rule out a non-string — so a JSON number is a shape the service
+     genuinely receives. Not a missing field: the caller sent something, it
+     just is not a mode, which is the floor case. */
+  it('floors a non-string permissionMode rather than defaulting it', async () => {
+    const sent = stubDashboard({ ok: true }, 'auto');
+    await post({ project: projectPath, permissionMode: 7 }).expect(201);
+    expect(spawnedMode(sent)).toBe('plan');
   });
 
   // =======================================================================
