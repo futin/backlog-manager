@@ -2,6 +2,7 @@ import { POLL_MS } from '../../hooks/useOrchestratorRuns';
 import { elapsedSince } from '../../lib/item-age';
 import { projectLabel } from '../../lib/project-label';
 import { stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { formatSpanCompact, runElapsedMs } from '../../lib/run-time';
 import type { OrchestratorRun, RunStage } from '../../../../shared/types';
 
 /**
@@ -92,6 +93,20 @@ export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPa
   // one it must not crash or print "NaN" over.
   const age = elapsedSince(run.updatedAt);
 
+  // How long the whole run has been going — a different question from the
+  // heartbeat beside it, and the one people actually ask about an unattended
+  // run they left going. `live`/`3m` says whether the board is still hearing
+  // from the process; this says how long that process has been at it. Ticks
+  // on its own because `useOrchestratorRuns` re-renders this every 5s while
+  // the run is fresh, so no clock of its own is needed here (contrast
+  // `useNow`, which exists precisely for the cards that get no such poll).
+  //
+  // `null` — an unparseable `startedAt` — renders NOTHING rather than a dash:
+  // the heartbeat slot next to it already owns the "—" placeholder for its
+  // own unparseable case, and two dashes in a row would read as one broken
+  // field rather than as two separate readings, one of which is fine.
+  const elapsed = runElapsedMs(run);
+
   // A label only — NOT the key anything is matched on. BoardView's own
   // lookup (see its comment on runStageFor) compares `run.project` to
   // `item.projectPath` directly, both already the same absolute registry
@@ -116,6 +131,11 @@ export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPa
       <span className={live ? 'run-strip-dot run-strip-dot-live' : 'run-strip-dot'} aria-hidden="true" />
       <span className="run-strip-project">{label}</span>
       <span className="run-strip-heartbeat">{live ? 'live' : age ?? '—'}</span>
+      {elapsed !== null && (
+        <span className="run-strip-elapsed" data-testid="run-strip-elapsed">
+          {formatSpanCompact(elapsed)}
+        </span>
+      )}
       <span className="run-strip-count">{merged}/{total}</span>
       {/* Purely a graphical restatement of the count just printed — hidden
           from the accessibility tree so a screen reader is not made to sit

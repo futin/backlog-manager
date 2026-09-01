@@ -679,6 +679,19 @@ body {
   text-transform: uppercase; letter-spacing: .06em; color: var(--ink);
 }
 .run-strip-heartbeat { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+/* The run's own total, sitting immediately after the heartbeat because the
+   two are read as a pair — "still being heard from" then "for how long" —
+   and separating them would make the reader hunt. Dimmer than the count and
+   quieter than the project name: it is context for everything else on the
+   strip, never the thing the strip is about. `font-variant-numeric:
+   tabular-nums` matters here specifically: this is one of only two readings
+   on the board that reticks on its own (5s while the run is fresh), and
+   proportional digits make it visibly jitter its neighbours sideways as the
+   minutes roll over. */
+.run-strip-elapsed {
+  flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3);
+  font-variant-numeric: tabular-nums;
+}
 .run-strip-count { flex: none; font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink) }
 /* The bar restates merged/total graphically (aria-hidden in the markup, for
    that exact reason) — it does NOT track a separate "processed" fraction
@@ -807,6 +820,57 @@ body {
    also listed under Attention, needs nobody's intervention any more. The
    amber warning belongs to the attention entry when there genuinely is one. */
 .run-drawer-item-fixloops { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+/* `margin-left: auto` rather than a grid column: the head is a wrapping flex
+   row (id / title / chip / this), and on a narrow drawer the title's own
+   `min-width: 140px` pushes the chip and this reading onto a second line,
+   where auto-margin keeps them right-aligned and a fixed column would leave
+   a hole. Tabular figures for the same reason the strip's total has them,
+   plus one this row has on its own: a column of durations only supports
+   "which of these took longest" at a glance if the digits line up. */
+.run-drawer-item-time {
+  flex: none; margin-left: auto; font-family: var(--mono); font-size: 10px;
+  color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* The active row's in-stage caption. Same size and colour as the fix-loop
+   line it sits beside — both are secondary readings about the row, and
+   giving this one its own weight would make every active row shout over the
+   finished ones. */
+.run-drawer-item-stage-note { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+
+/* The seven-dot pipeline stepper. A plain flex row of fixed dots with a
+   1px connector drawn as the gap's own background: `flex: 1` segments would
+   stretch the track to the drawer's full width and imply the stages are
+   evenly weighted in time, which they emphatically are not (inspecting runs
+   minutes, merging runs seconds). Fixed dots and fixed gaps keep it a
+   position indicator rather than a time axis it cannot honestly be. */
+.run-stepper { display: flex; align-items: center; gap: 5px; margin-top: 2px }
+.run-stepper-dot {
+  flex: none; width: 6px; height: 6px; border-radius: 50%;
+  box-sizing: border-box; position: relative;
+}
+/* Every dot but the first draws its own connector backwards into the gap, so
+   the track is one continuous line without a wrapper element per segment.
+   aria-hidden is unnecessary on a pseudo-element — it is never in the
+   accessibility tree to begin with. */
+.run-stepper-dot + .run-stepper-dot::before {
+  content: ''; position: absolute; right: 100%; top: 50%;
+  width: 5px; height: 1px; background: var(--hairline2);
+}
+/* Visited and left behind: solid, in the same green --good the strip's own
+   progress fill uses for merged work. */
+.run-stepper-dot-filled { background: var(--good) }
+/* Here right now: the ring, cyan — the exact tone lib/run-stage.ts gives
+   every active stage, so a reader who has learned the chip colours already
+   knows this one. The box-shadow is the ring rather than a border so the dot
+   keeps its 6px footprint and the track stays level. */
+.run-stepper-dot-current {
+  background: var(--cyan); box-shadow: 0 0 0 2px color-mix(in srgb, var(--cyan) 35%, transparent);
+}
+/* Never entered — including a stage genuinely skipped between two visited
+   ones (a clean merge has no `fixing` key), which is a fact worth seeing,
+   not a gap to paper over. Hollow, not absent: the reader still needs to
+   know the stage exists to know it was not needed. */
+.run-stepper-dot-hollow { background: transparent; border: 1px solid var(--hairline2) }
 .run-drawer-item-verify {
   display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
   font-family: var(--mono); font-size: 10px;

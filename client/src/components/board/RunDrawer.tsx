@@ -2,8 +2,12 @@ import { useEffect } from 'react';
 
 import { projectLabel } from '../../lib/project-label';
 import { stageChipClass, stageGlyph } from '../../lib/run-stage';
+import {
+  formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
+  itemDoneClock, itemDurationMs, runElapsedMs, stepperDots
+} from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
-import type { OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
+import type { OrchestratorRun, RunQueueItem, RunStage, RunVerification } from '../../../../shared/types';
 
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
@@ -89,6 +93,122 @@ function staleNote(run: RunPayload): string | null {
 
 
 /**
+ * The stages a row prints no time at all for.
+ *
+ * `ungroomed` and `skipped` are the two exits where no work happened: the gate
+ * turned the item away, or the run never got to it. A duration measured across
+ * either is a measurement of nothing — the seconds the orchestrator spent
+ * reading a file and deciding not to queue it — and printing one would put a
+ * number in the same column where its neighbours carry real work, inviting the
+ * comparison. Blank is the honest reading; the row's chip already says why.
+ */
+const TIMELESS_STAGES: readonly RunStage[] = ['ungroomed', 'skipped'];
+
+/**
+ * The row's right-hand time reading: what a person scanning the queue wants
+ * without opening anything — how long each item took, and when the finished
+ * ones finished.
+ *
+ * Three shapes, because a queue row is in one of three situations and they
+ * answer different questions. A finished row gets `<duration> · <HH:MM>`: both
+ * halves matter and neither implies the other — the duration is the cost, the
+ * clock time is what lets a person line the item up against something else
+ * that happened this morning. An active row gets `<duration> elapsed`, with
+ * the word carrying the tense the finished rows do not need. A `pending` row
+ * gets an em dash: not "0s", which claims a measurement, but the typographic
+ * mark for a field with nothing in it yet.
+ *
+ * A `null` duration degrades to whichever half survives rather than blanking
+ * the row: a terminal row with a stamp for its exit but nothing before it can
+ * still honestly say WHEN it ended even when it cannot say how long it took.
+ */
+function RowTime({ item, now }: { item: RunQueueItem; now: number }): JSX.Element | null {
+  if (TIMELESS_STAGES.includes(item.stage)) return null;
+
+  if (item.stage === 'pending') {
+    return <span className="run-drawer-item-time" data-testid={`run-drawer-time-${item.id}`}>—</span>;
+  }
+
+  const duration = itemDurationMs(item, now);
+  const span = duration === null ? null : formatSpan(duration);
+  const terminal = isTerminalStage(item.stage);
+  const done = terminal ? itemDoneClock(item) : null;
+
+  const text = terminal
+    ? [span, done].filter((part) => part !== null).join(' · ')
+    : span === null ? '' : `${span} elapsed`;
+
+  if (text === '') return null;
+  return <span className="run-drawer-item-time" data-testid={`run-drawer-time-${item.id}`}>{text}</span>;
+}
+
+/**
+ * The seven-dot pipeline stepper under a queue row: where this item is, what
+ * it has been through, and — the part no other element on the row carries —
+ * what is still ahead of it.
+ *
+ * Rendered for every row but `ungroomed`, which never entered the pipeline at
+ * all: seven hollow dots under it would draw a progress track for an item that
+ * has no progress to make, where the absence of the track says exactly that.
+ * A `pending` row DOES get one, hollow throughout, because it is going to
+ * enter — the empty track is the promise.
+ *
+ * Each dot names its stage in a native `title` (hover) and the same text as an
+ * `aria-label`, per the design: hover is mouse-only, and a dot that only a
+ * mouse can identify is a dot half the readers cannot use. `role="img"` is
+ * what makes that label actually reach a screen reader — `aria-label` on a
+ * bare `<span>` sits on the `generic` role, which prohibits naming, so without
+ * the role the attribute is present in the DOM and silently ignored by the
+ * only readers it exists for. The cost is honest and worth stating: this is
+ * seven more nodes in the accessibility tree per row. The row's stage chip
+ * still prints the current stage in words for everyone, so nobody has to walk
+ * the dots to learn the one fact that matters most.
+ */
+function RowStepper({ item }: { item: RunQueueItem }): JSX.Element | null {
+  if (item.stage === 'ungroomed') return null;
+
+  return (
+    <div className="run-stepper" data-testid={`run-drawer-stepper-${item.id}`}>
+      {stepperDots(item).map((dot) => (
+        <span
+          key={dot.stage}
+          className={`run-stepper-dot run-stepper-dot-${dot.state}`}
+          data-stage={dot.stage}
+          role="img"
+          title={dot.label}
+          aria-label={dot.label}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The caption under an active row: `now reviewing · 3m 20s in stage`.
+ *
+ * Answers the question the stepper's ringed dot raises but cannot answer —
+ * "it is at reviewing, but has it been there ten seconds or forty minutes?" —
+ * which is the whole difference between a run that is working and one that is
+ * wedged. Terminal rows get nothing: their time reading is already final.
+ *
+ * Carries the same blur `inStageMs` documents: `stageAt` keeps first arrivals
+ * only, so on a second pass through `reviewing` this measures from the first
+ * pass. The row's own `N fix loops` line, rendered a few lines below whenever
+ * that has happened, is the visible tell that this number spans more than the
+ * current attempt.
+ */
+function RowStageCaption({ item, now }: { item: RunQueueItem; now: number }): JSX.Element | null {
+  if (isTerminalStage(item.stage) || item.stage === 'pending') return null;
+  const ms = inStageMs(item, now);
+  if (ms === null) return null;
+  return (
+    <div className="run-drawer-item-stage-note" data-testid={`run-drawer-stage-note-${item.id}`}>
+      now {item.stage} · {formatSpan(ms)} in stage
+    </div>
+  );
+}
+
+/**
  * The run drawer: the detail view behind a run strip (RunStrip.tsx), and the
  * only place a user can see WHY an item was skipped or parked rather than
  * just THAT a run is progressing. Read-only, deliberately — v1 has no
@@ -117,6 +237,28 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
   const label = projectLabel(run.project);
   const note = staleNote(run);
 
+  // One clock read per render, threaded down to every row, rather than each
+  // derivation calling Date.now() for itself: a drawer that measured its
+  // seven rows against seven instants could render two of them a millisecond
+  // apart and, at a rung boundary, print durations that do not add up against
+  // each other. Re-read on every render rather than held in state, which is
+  // what makes these readings tick — `useOrchestratorRuns` re-renders this
+  // component every 5s while the run is fresh (BoardView keeps the open
+  // drawer wired to the polled payload rather than to a snapshot taken at
+  // click time), so the poll that refreshes the data refreshes the clock with
+  // it and no interval of this component's own is needed.
+  const now = Date.now();
+
+  // `started HH:MM · 1h 04m elapsed` — the run-level answer to the two
+  // questions the per-row readings below only answer item by item. Its own
+  // span rather than an extension of the status line beside it: that line's
+  // exact text is asserted character for character by the drawer suite, and
+  // more to the point the two are different KINDS of fact — what this run is
+  // and how many came before it, versus when it began and how long it has
+  // been going.
+  const elapsed = runElapsedMs(run, now);
+  const startedClock = formatClock(run.startedAt);
+
   // Four counts, not a fifth "current item" pointer: the per-item rows below
   // already print every item's own stage, so a top-of-drawer pointer at
   // "the" current one would only restate a row a few lines down. These four
@@ -143,6 +285,18 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
           <span data-testid="run-drawer-past">
             {run.status} · {run.pastRuns} past run{run.pastRuns === 1 ? '' : 's'}
           </span>
+          {/* Each half appears only if its own stamp parsed: a run file with a
+              readable `startedAt` and a corrupt `updatedAt` can still say when
+              it began, and one with neither renders no node at all rather than
+              an empty separator hanging in the meta line. */}
+          {(startedClock !== null || elapsed !== null) && (
+            <span data-testid="run-drawer-time">
+              {[
+                startedClock === null ? null : `started ${startedClock}`,
+                elapsed === null ? null : `${formatSpanCompact(elapsed)} elapsed`
+              ].filter((part) => part !== null).join(' · ')}
+            </span>
+          )}
         </div>
         <div className="drawer-body">
           {/* First, ahead of everything else: see staleNote's own comment
@@ -208,7 +362,15 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
                         </span>
                         {q.stage}
                       </span>
+                      {/* Last in the head, so it lands at the right margin
+                          behind the title's own `flex: 1` — the column a
+                          reader's eye runs down when the question is "which
+                          of these took the longest", which is exactly the
+                          question a row-by-row reading answers worst. */}
+                      <RowTime item={q} now={now} />
                     </div>
+                    <RowStepper item={q} />
+                    <RowStageCaption item={q} now={now} />
                     {q.fixLoops > 0 && (
                       <div className="run-drawer-item-fixloops">
                         {q.fixLoops} fix loop{q.fixLoops === 1 ? '' : 's'}
