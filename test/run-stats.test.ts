@@ -289,6 +289,67 @@ describe('aggregateRuns', () => {
     expect(result.avgItemWallMs).toBe(200_000);
   });
 
+  // Fix round 1: case 8 above cannot tell "sum fixLoops/verification over
+  // ALL queued items" apart from "sum over merged items only" — every
+  // non-merged item in that fixture (bug-4, and every item in the running
+  // run) happens to carry fixLoops: 0 and verification: [], so the two
+  // readings land on the same numbers by coincidence, not by test design.
+  // This case exists solely to rule the "merged only" reading out:
+  // `bug-unmerged` never merges (stage 'failed') but still carries 5 fix
+  // loops and two verification entries of its own.
+  //
+  //   all-items reading (what aggregateRuns implements, per its own doc
+  //   comment and RunAggregates's field comments):
+  //     fixLoopsPerMerged = (1 + 0 + 5) fix loops / 2 merged     = 3
+  //     verifyPassRate    = (1 + 0 + 1) ok / (1 + 0 + 2) entries = 2/3
+  //
+  //   merged-only reading (the alternative this pins against):
+  //     fixLoopsPerMerged = (1 + 0) fix loops / 2 merged         = 0.5
+  //     verifyPassRate    = (1 + 0) ok / (1 + 0) entries         = 1
+  //
+  // If aggregateRuns is ever changed to sum over merged items only, this
+  // test fails loudly instead of silently agreeing with case 8's fixture.
+  it('sums fixLoops and verification over ALL queued items, not merged ones only', () => {
+    const run = archiveRun({
+      status: 'done',
+      queue: [
+        archiveItem({
+          id: 'bug-m1',
+          stage: 'merged',
+          fixLoops: 1,
+          verification: [{ cmd: 'pnpm test', ok: true }],
+          stageAt: { pending: at(0), merged: at(10_000) }
+        }),
+        archiveItem({
+          id: 'bug-m2',
+          stage: 'merged',
+          fixLoops: 0,
+          verification: [],
+          stageAt: { pending: at(0), merged: at(20_000) }
+        }),
+        // Never merges — must still contribute to the "all items" sums
+        // above, but must NOT count toward itemsMerged, the divisor for
+        // both ratios.
+        archiveItem({
+          id: 'bug-unmerged',
+          stage: 'failed',
+          fixLoops: 5,
+          verification: [
+            { cmd: 'pnpm test', ok: true },
+            { cmd: 'pnpm lint', ok: false }
+          ],
+          stageAt: { pending: at(0), dispatched: at(5_000), failed: at(30_000) }
+        })
+      ]
+    });
+
+    const result = aggregateRuns([run], T0);
+
+    expect(result.itemsMerged).toBe(2);
+    expect(result.fixLoopsPerMerged).toBe(3);
+    expect(result.verifyPassRate).toBeCloseTo(2 / 3);
+  });
+
   // Case 9: the empty-list floor. Every ratio is null (nothing to divide by)
   // rather than 0 or NaN — 0 would misreport "a 0% pass rate" for a run
   // history that simply does not exist yet.

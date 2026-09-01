@@ -205,9 +205,33 @@ export interface RunAggregates {
   itemsQueued: number;
   /** Mean `itemWallMs` over merged items whose wall time is known; `null` when none qualify. */
   avgItemWallMs: number | null;
-  /** Total `fixLoops` spent across every queued item, divided by how many actually merged; `null` when nothing merged (nothing to divide by, and the number would be either infinite or a lie). */
+  /**
+   * Total `fixLoops` spent across EVERY queued item in scope — including
+   * ones that never merged — divided by how many DID merge. Deliberately
+   * NOT `sum(fixLoops of merged items only) / merged`: rework spent on an
+   * item that was ultimately parked or fix-exhausted is still cost this
+   * run paid on the way to whatever it did merge, and a caption reading
+   * "average fix loops per merge" would understate that cost if the
+   * numerator only counted the items that happened to succeed. Pinned
+   * against the "merged only" alternative by a dedicated fixture in
+   * `test/run-stats.test.ts` (`aggregateRuns` describe block) where a
+   * never-merged item carries fix loops of its own specifically so the two
+   * readings diverge — case 8, the main aggregate fixture, cannot tell them
+   * apart on its own, because every non-merged item there happens to carry
+   * zero. `null` when nothing merged (nothing to divide by, and the number
+   * would be either infinite or a lie).
+   */
   fixLoopsPerMerged: number | null;
-  /** `ok` verification entries over all verification entries, across every item; `null` when no run in scope has recorded any. */
+  /**
+   * `ok` verification entries over ALL verification entries recorded by
+   * EVERY item in scope, merged or not. Deliberately not scoped to merged
+   * items only: a verify failure that correctly kept an item from merging
+   * is exactly the signal this rate exists to surface, and excluding
+   * non-merged items would hide a run's failures from its own pass-rate
+   * tile. Pinned the same way `fixLoopsPerMerged` is, by the same
+   * dedicated fixture — see that field's comment. `null` when no run in
+   * scope has recorded any verification entries at all.
+   */
   verifyPassRate: number | null;
 }
 
@@ -227,6 +251,13 @@ export interface RunAggregates {
  * not, for the same reason a failing verify run is exactly the kind of
  * signal this rate exists to surface — restricting it to merged items would
  * hide every failure that (correctly) kept an item from merging at all.
+ *
+ * Both "all items, not just merged" readings are asserted by a dedicated
+ * fixture in `test/run-stats.test.ts` where a never-merged item carries its
+ * own nonzero fix loops and verification entries, chosen specifically so the
+ * "merged items only" alternative would produce a different number — the
+ * main aggregate fixture (case 8) cannot rule that alternative out on its
+ * own, because every non-merged item in it happens to carry zero of both.
  *
  * Every ratio is `null`, never `0` or `NaN`, when its denominator is zero:
  * `0` would misreport "we tried and every result was bad" for the different
