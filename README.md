@@ -9,7 +9,9 @@ The skills write items into whatever project they were run in, one Markdown
 file per item under that project's own `backlog/`. Every `init` or `new` call
 registers the project's absolute path in `~/.backlog-manager/registry.json`.
 This app reads that registry and renders every registered project's items in
-five fixed columns — bugs, ideas, tasks, out-of-scope, refactoring.
+four fixed columns — refactoring, ideas, bugs, tasks. Items that were decided
+against are not on the board at all: out-of-scope is a record rather than
+queue work, and it lives in Archive.
 
 - **No auth, no database.** The registry file and each project's `backlog/`
   directory ARE the data; there is nothing here to log into.
