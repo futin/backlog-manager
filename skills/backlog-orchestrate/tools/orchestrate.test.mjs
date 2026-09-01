@@ -1919,6 +1919,117 @@ test('no command anywhere under skills/ passes --dangerously-skip-permissions', 
   assert.deepEqual(offenders, [], `--dangerously-skip-permissions is back in:\n${offenders.join('\n')}`)
 })
 
+// --- bug-9: no positional parameters in a published skill body --------------
+
+test('no fenced block under skills/ reads a positional parameter', () => {
+  // Slash-command argument substitution rewrites `$1`..`$9` in a SKILL.md
+  // BEFORE the session reads it, and it does not exempt fenced code. Invoked
+  // as `/backlog-orchestrate bug-2 bug-3 …`, step 8's verify launcher once
+  // arrived in a live session as `node "bug-3/skills/…"` — with the bullet
+  // explaining the positional rewritten to match, so it read as deliberate.
+  //
+  // That corruption never touches disk, so no amount of reading the file
+  // finds it; this guard is the only thing standing between a future edit and
+  // a silent recurrence. Carry paths in named `env` variables instead.
+  //
+  // Fenced blocks only. Prose has to be able to say `$1` in order to explain
+  // why it must not be used — the same allowance the flag guard above makes,
+  // for the same reason.
+  const offenders = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') continue
+        walk(full)
+      } else if (entry.isFile() && full.endsWith('.md')) {
+        let inFence = false
+        for (const line of fs.readFileSync(full, 'utf8').split('\n')) {
+          if (line.startsWith('```')) { inFence = !inFence; continue }
+          // `$0` is excluded deliberately: it names the shell itself, is not
+          // an argument, and no substitution pass rewrites it.
+          if (inFence && /\$\{?[1-9]\b/.test(line)) {
+            offenders.push(`${full}: ${line.trim()}`)
+          }
+        }
+      }
+    }
+  }
+  walk(SKILLS_ROOT)
+  assert.deepEqual(offenders, [], `a positional parameter is back in a fenced block:\n${offenders.join('\n')}`)
+})
+
+// --- bug-8: the merge gate's two failures are not the same failure --------
+
+test('SKILL.md keeps merge --abort under the conflict branch only', () => {
+  // A pre-merge refusal ("your local changes would be overwritten") and a
+  // conflict are different states: the first never started, has no MERGE_HEAD,
+  // and answers `git merge --abort` with `fatal: There is no merge to abort`.
+  // Collapsing the two branches back into one is the plausible future edit —
+  // they sit adjacent and read alike — and it would send an unattended run to
+  // a failing command at the one gate with no margin for an unhandled state.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const aborts = text.split('\n').filter((l) => l.includes('merge --abort') && !l.trimStart().startsWith('*'))
+  // One in a fenced block (the conflict recovery), and prose references that
+  // explain when it does NOT apply. The fenced occurrence is the one pinned.
+  const fenced = []
+  let inFence = false
+  for (const line of text.split('\n')) {
+    if (line.startsWith('```')) { inFence = !inFence; continue }
+    if (inFence && line.includes('merge --abort')) fenced.push(line.trim())
+  }
+  assert.equal(fenced.length, 1, `expected exactly 1 executable merge --abort, found ${fenced.length}:\n${fenced.join('\n')}`)
+  assert.ok(aborts.length >= 1)
+  // And the refusal must be named as its own case somewhere in step 9, so the
+  // distinction survives a reader who only skims the fences.
+  assert.ok(
+    text.includes('would be overwritten by merge'),
+    'step 9 no longer names the pre-merge refusal as a distinct failure',
+  )
+})
+
+test('step 9 probes the main tree for paths the branch also touches', () => {
+  // The precondition used to be "is HEAD refs/heads/main" and nothing else,
+  // so an item could pass review and verification and then have its merge
+  // refused by uncommitted work — observed live on bug-4, run-20260901-112815.
+  // `diff --cached` is the half most likely to be dropped as redundant: a
+  // STAGED change refuses the merge exactly as an unstaged one does.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  assert.ok(text.includes('diff --name-only main...backlog/<id>'), 'step 9 lost the branch-paths probe')
+  assert.ok(text.includes('diff --cached --name-only'), 'step 9 lost the staged half of the dirty-paths probe')
+  assert.ok(text.includes('comm -12'), 'step 9 lost the intersection of the two path lists')
+})
+
+test('step 9 documents resolving on the branch side before parking', () => {
+  // Merging into a `main` that moved after step 8 puts content into main that
+  // nothing green ever ran — every step green, the combination untested. The
+  // recovery (merge main INTO the worktree, re-verify there, merge out) is
+  // what keeps "never merges red" true, so it has to stay written down.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  assert.ok(
+    text.includes('.worktrees/<id>" merge --no-edit main'),
+    'step 9 lost the worktree-side merge of main',
+  )
+  assert.ok(
+    /re-run \*\*all of step 8\*\*/.test(text),
+    'step 9 no longer requires re-verification after the worktree-side merge',
+  )
+})
+
+test('step 8\'s verify launcher carries its paths in named env variables', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const launcher = text.split('\n').filter((l) => l.includes('orchestrate.mjs" verify'))
+  assert.equal(launcher.length, 1, `expected exactly 1 verify launcher line, found ${launcher.length}`)
+  const line = launcher[0]
+  assert.ok(line.includes('BM_PLUGIN_ROOT'), `verify launcher lost BM_PLUGIN_ROOT: ${line}`)
+  assert.ok(line.includes('BM_RUN_DIR'), `verify launcher lost BM_RUN_DIR: ${line}`)
+  // The single quotes are the whole reason env is needed rather than plain
+  // interpolation: `$?` must reach the inner shell, not this one. A rewrite
+  // that switched them to double quotes would capture the OUTER shell's exit
+  // code into .status — a merge gate reading the wrong command's answer.
+  assert.ok(line.includes("sh -c 'node"), `verify launcher's script body is no longer single-quoted: ${line}`)
+})
+
 const STREAM_DENIAL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial.jsonl')
 const STREAM_NO_DENIALS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-denials.jsonl')
 const STREAM_DENIAL_PARTIAL_TAIL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial-partial-tail.jsonl')
