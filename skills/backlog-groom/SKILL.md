@@ -231,6 +231,17 @@ called out in the steps themselves — there is exactly one such place, step 1's
    four task headings — `## Goal`, `## Plan`, `## Test cases`, `## Done when` — filled in
    for real. `## Plan` is the one heading `backlog-execute` gates on, but a task that's
    actually executable needs all four answered, not just that one.
+
+   `## Test cases` and `## Done when` are read by a headless `backlog-execute` session —
+   under the orchestrator that session has no interactive browser pane and nobody
+   watching the screen, so every check must be one it can run itself. When the change is
+   user-visible in the browser (client code, anything rendered) and the project's
+   `.mcp.json` configures a browser MCP server — this repo's is Playwright — write the
+   browser check as an executable test case that begins with the literal words
+   `In the browser (playwright MCP tools):` followed by the page to open, the action to
+   take, and the thing that must be visible. The prefix is what tells the executing
+   session which tool the check runs on; a check phrased for a human ("visual
+   inspection", "verify manually") is a check that session skips.
 5. Only now edit the idea: add a `promoted-to: task-N` line inside its existing
    frontmatter block, before the closing `---`, leaving every other line untouched.
 6. Release the marker on the idea — not on the task step 3 just created; nobody has
@@ -262,6 +273,14 @@ task carrying `from: idea-N` already exists before creating a second one.
 2. Edit `## Cause` and `## Fix` **in the bug's own file**, replacing `unknown` with the
    real answer. No new file, no promotion, no id churn — a bug stays a bug from capture
    through to done, so the whole story of one defect lives in one place.
+
+   When the defect is user-visible in the browser and the project's `.mcp.json`
+   configures a browser MCP server — this repo's is Playwright — end `## Fix` with the
+   browser check that proves the defect gone, beginning with the literal words
+   `In the browser (playwright MCP tools):` followed by the page to open, the action to
+   take, and the expected result. Same reason a task's `## Test cases` carries one — the
+   headless session that executes this fix can drive that browser, and it only will if
+   the fix names the tool.
 3. Release the marker:
 
    ```bash
