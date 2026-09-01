@@ -595,16 +595,15 @@ body {
 }
 
 /* ---------------------------------------------- board columns
-   Four fixed columns — bugs, ideas, tasks, out-of-scope — in the store's own
-   order. auto-fit would reflow by width alone and put out-of-scope under bugs
-   on some widths; the type axis is the board's whole point, so the column
-   count is stepped explicitly instead. align-items:start keeps a short column
-   from stretching to its tallest neighbour. */
-/* Five columns while Refactoring and Out of scope share the board. The design
-   settles at four per surface once out-of-scope moves to Archive; until that
-   chunk lands, five is what there is to lay out, and minmax(0, 1fr) is what
-   keeps the extra one from overflowing the row rather than shrinking with it. */
-.board-columns { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--card-gap); align-items: start }
+   Four fixed columns — refactoring, ideas, bugs, tasks — in the design's
+   order, out-of-scope having moved off this surface to Archive. auto-fit
+   would reflow by width alone and drop a column under its neighbour on some
+   widths; the type axis is the board's whole point, so the column count is
+   stepped explicitly instead. minmax(0, 1fr) keeps a column with a long
+   unbroken title shrinking with the row rather than overflowing it, and
+   align-items:start keeps a short column from stretching to its tallest
+   neighbour. */
+.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--card-gap); align-items: start }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 

@@ -3,6 +3,9 @@ id: task-4
 title: Board columns: reorder to Refactoring Ideas Bugs Tasks and evict out-of-scope
 created: 2026-08-30
 tags: client, board
+updated: 2026-09-01T15:13:36Z
+started: 2026-09-01T15:08:17Z
+execute-elapsed: 319
 ---
 
 ## Goal
@@ -48,3 +51,35 @@ Done items become a filter value rather than a view: `Open` and
 
 `pnpm test` is green, including the existing board test that asserts
 out-of-scope is hidden.
+
+## Outcome
+
+2026-09-01 — done. `COLUMNS` in `BoardView.tsx` is now the design's four —
+Refactoring · Ideas · Bugs · Tasks — with the out-of-scope entry gone, and
+`matches` drops `i.section === 'out-of-scope'` outright rather than relying on
+there being no column to land in: `visible` also drives the "no matches" empty
+state and the `hasLive` clock, so a card the board cannot show must not be
+counted. The status bypass (`i.section === 'out-of-scope' || …`) and the
+ordering comment that only existed to defend running the `'started'` branch in
+front of it both went with it, together as the plan required. `.board-columns`
+stepped from `repeat(5, …)` to `repeat(4, …)`; the `oos` slug had no CSS of its
+own to remove. CLAUDE.md's "five fixed columns" line followed.
+
+Tests: the five-column order/count assertion became a four-column one, the
+per-column card count is now asserted for every column instead of only Bugs,
+the done-filter test asserts done items land in their own type columns, and the
+out-of-scope regression guard was rewritten to sweep all four status values —
+`open`, `started`, `done`, `all` — since `all` is the value a re-added bypass
+would look most correct beneath. The three sort tests read Bugs at index 2 now.
+
+```
+$ pnpm test
+Test Suites: 38 passed, 38 total
+Tests:       566 passed, 566 total
+Snapshots:   0 total
+Time:        98.022 s
+Ran all test suites.
+
+$ pnpm run typecheck
+$ tsc --noEmit
+```

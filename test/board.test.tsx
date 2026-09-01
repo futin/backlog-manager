@@ -131,18 +131,16 @@ describe('BoardView', () => {
     expect(screen.queryByText('Projects')).not.toBeInTheDocument();
   });
 
-  it('renders the five columns with counts of what they hold (open by default)', async () => {
+  it('renders the four columns with counts of what they hold (open by default)', async () => {
     await renderBoard();
     const cols = screen.getAllByTestId('board-col');
-    // Refactoring last, not in the design's eventual position: reordering the
-    // board (and evicting out-of-scope to Archive) is a separate chunk, so this
-    // assertion pins where the column actually is today rather than where it
-    // is going. When that chunk lands, this line is the one that should fail.
+    // The design's order, and exactly four of them: out-of-scope has no
+    // column on this surface at all any more — it belongs to Archive.
     expect(cols.map((c) => within(c).getByTestId('col-name').textContent))
-      .toEqual(['Bugs', 'Ideas', 'Tasks', 'Out of scope', 'Refactoring']);
-    // done task-9 and done ref-2 hidden by the default open filter; oos unaffected
+      .toEqual(['Refactoring', 'Ideas', 'Bugs', 'Tasks']);
+    // done task-9 and done ref-2 hidden by the default open filter
     expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['2', '1', '1', '1', '1']);
+      .toEqual(['1', '1', '2', '1']);
     // col-count renders colItems.length, an array length — assert the DOM
     // actually holds that many cards so a key-driven card omission would fail
     // this test instead of passing unnoticed behind a correct-looking number.
@@ -155,8 +153,12 @@ describe('BoardView', () => {
     // of dispatchable vs. archived items, independent of any card going
     // missing); cards were always what this assertion meant to prove, so
     // counting them directly says that outright instead of through a proxy
-    // this task's own UI broke.
-    expect(cols[0].querySelectorAll('.board-card')).toHaveLength(2);
+    // this task's own UI broke. Asserted for every column, not just the
+    // busiest one: the reorder moved which index each section sits at, and a
+    // per-column check is what makes a header land on the wrong stack of
+    // cards fail here rather than somewhere downstream.
+    expect(cols.map((c) => String(c.querySelectorAll('.board-card').length)))
+      .toEqual(cols.map((c) => within(c).getByTestId('col-count').textContent));
     expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
@@ -384,13 +386,19 @@ describe('BoardView', () => {
     expect(within(betaTask).getByText('beta').className).not.toBe(alphaOnBug.className);
   });
 
-  it('status filter: done shows only done items in the three queue columns', async () => {
+  // Done is a filter value over the same four type columns, not a view of its
+  // own: a done task renders in Tasks, under the Tasks header, exactly where
+  // its open siblings do.
+  it('status filter: done shows only done items, inside their own type columns', async () => {
     await renderBoard();
     await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
-    expect(screen.getByText('finished task')).toBeInTheDocument();
+    const cols = screen.getAllByTestId('board-col');
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
+      .toEqual(['1', '0', '0', '1']);
+    // ref-2 in Refactoring, task-9 in Tasks — not pooled into one "done" list.
+    expect(within(cols[0]).getByText('oddly classified')).toBeInTheDocument();
+    expect(within(cols[3]).getByText('finished task')).toBeInTheDocument();
     expect(screen.queryByText('a bug')).not.toBeInTheDocument();
-    // out-of-scope is flat and stays put
-    expect(screen.getByText('declined thing')).toBeInTheDocument();
   });
 
   it('status select offers open, in progress, done and all, in that order', async () => {
@@ -407,24 +415,28 @@ describe('BoardView', () => {
     // started but done, and everything else carries no stamp at all.
     const cols = screen.getAllByTestId('board-col');
     expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['1', '0', '0', '0', '0']);
+      .toEqual(['0', '0', '1', '0']);
     expect(screen.getByText('groomed bug')).toBeInTheDocument();
     expect(screen.queryByText('a bug')).not.toBeInTheDocument();
+    // task-9 is done but carries a started stamp — "started but no longer
+    // open" stays excluded.
+    expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
-  // The regression guard for the out-of-scope ordering: oos-1 is terminal, so
-  // it would leak through under 'started' if the out-of-scope bypass ran
-  // before the 'started' branch — this is the case that ordering bug would
-  // actually break. task-9 (done, but carrying a started stamp) is asserted
-  // alongside it as a plain sanity check that "started but no longer open"
-  // stays excluded too. Both are asserted separately from the case above,
-  // even though its counts already imply this, so a future edit that re-adds
-  // the bypass fails a test whose name says what broke.
-  it('status filter: in progress hides out-of-scope items even though they bypass open and done', async () => {
+  // The eviction, asserted at every status value rather than only the default.
+  // out-of-scope used to BYPASS the status predicate (Open/Done/All showed it
+  // regardless of status, and only 'started' was ordered in front of the
+  // bypass to keep a terminal card out of a live-work view). With the section
+  // off the board entirely there is no value it can reappear under — including
+  // 'all', the one a re-added bypass would look most correct beneath.
+  it('renders no out-of-scope item in any column, at any status filter value', async () => {
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
-    expect(screen.queryByText('declined thing')).not.toBeInTheDocument();
-    expect(screen.queryByText('finished task')).not.toBeInTheDocument();
+    for (const value of ['open', 'started', 'done', 'all']) {
+      await userEvent.selectOptions(screen.getByLabelText('Status'), value);
+      expect(screen.queryByText('declined thing')).not.toBeInTheDocument();
+      // Nor a column to put it in.
+      expect(screen.queryByText('Out of scope')).not.toBeInTheDocument();
+    }
   });
 
   it('project filter narrows every column by projectPath', async () => {
@@ -446,7 +458,8 @@ describe('BoardView', () => {
       fakeItem({ id: 'bug-mid-idle', title: 'mid-idle', created: daysAgoDate(5) })
     ]);
     await renderBoard();
-    const bugsCol = screen.getAllByTestId('board-col')[0];
+    // Index 2: Bugs is the third column now — Refactoring · Ideas · Bugs · Tasks.
+    const bugsCol = screen.getAllByTestId('board-col')[2];
     const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
     // old-live jumps both newer idle cards; the two idle cards still read
     // newest-first between themselves, proving the tiebreak comparator ran.
@@ -466,7 +479,8 @@ describe('BoardView', () => {
     ]);
     await renderBoard();
     await userEvent.selectOptions(screen.getByLabelText('Sort'), 'name');
-    const bugsCol = screen.getAllByTestId('board-col')[0];
+    // Index 2: Bugs is the third column now — Refactoring · Ideas · Bugs · Tasks.
+    const bugsCol = screen.getAllByTestId('board-col')[2];
     const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
     expect(titles).toEqual(['alpha-live', 'zulu-live', 'beta-idle', 'yankee-idle']);
   });
@@ -489,7 +503,8 @@ describe('BoardView', () => {
       fakeItem({ id: 'bug-mid', title: 'mid-idle', created: daysAgoDate(5) })
     ]);
     await renderBoard();
-    const bugsCol = screen.getAllByTestId('board-col')[0];
+    // Index 2: Bugs is the third column now — Refactoring · Ideas · Bugs · Tasks.
+    const bugsCol = screen.getAllByTestId('board-col')[2];
     const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
     // Rendering at all is only half the assertion. The other half is that the
     // fallback IS the `created` comparator — the fetched order here is
