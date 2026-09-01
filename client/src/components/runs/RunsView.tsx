@@ -28,6 +28,15 @@ import type { OrchestratorArchiveRun, OrchestratorRun } from '../../../../shared
  * state (`selected`) rather than owning it: the list has to know what is
  * selected to draw the `aria-current` row highlight and the live marker
  * regardless of which task renders the detail pane behind it.
+ *
+ * Fix round 1: a fresh (still-heartbeating) live run is PINNED above every
+ * day group, not merely sorted first by `startedAt` — see `splitPinned`'s
+ * own comment for the case a pure chronological sort gets backwards (a run
+ * still going since days ago beside a different project's run that merely
+ * finished more recently). This was the approved design doc's decision from
+ * the start; the task brief that drove this file's first version dropped it
+ * in transcription, and it is restored here rather than left as a filed
+ * discrepancy.
  */
 
 /** One row of the merged run list: the archive's own record of the run, plus whether it is currently being heard from live. */
@@ -90,22 +99,46 @@ function parseStartedAt(iso: string): number {
   return Number.isNaN(at) ? -Infinity : at;
 }
 
+/** Newest first, by `startedAt`. Used within one region at a time (the pinned rows, or the history rows) — see `splitPinned` below for why the two regions are never sorted together. */
+function sortByStartedAtDesc(rows: readonly MergedRun[]): MergedRun[] {
+  return [...rows].sort((a, b) => parseStartedAt(b.run.startedAt) - parseStartedAt(a.run.startedAt));
+}
+
 /**
- * Newest first, by `startedAt`. Ties (down to the same millisecond — a real
- * possibility only for two runs that started in the same second on the same
- * project, since `runId` itself is a second-precision timestamp) break in
- * favour of the live-backed entry, which is the concrete meaning behind the
- * design doc's "the newest run (live one wins if present)": in the ordinary
- * case a running run's `startedAt` already IS the most recent one, so this
- * tie-break rarely fires — it exists for the edge the plain timestamp
- * comparison cannot settle on its own.
+ * Splits the filtered row list into the pinned region and the history below
+ * it — fix round 1's own correction of this file's first version, which
+ * sorted every row by `startedAt` alone and only ever put a live run first
+ * BY COINCIDENCE (a running run's own `startedAt` is usually the most recent
+ * one, since a new run only starts once the last one finished). The design
+ * doc's actual decision, restated explicitly here because the task brief
+ * that drove the first version of this file dropped it in transcription: "a
+ * fresh, running run sorts above all history regardless of its startedAt" —
+ * not merely first within its own day, and not merely first because it
+ * happens to be newest. The case this earns its keep on is exactly the one
+ * a pure timestamp sort gets backwards: a run that has been going since
+ * three days ago, sitting beside one project's freshly-finished run from
+ * this morning. Chronologically the finished one is "newer"; the one still
+ * running is the one a person opened this page to actually watch, and it
+ * has to render first regardless.
+ *
+ * `isLive` is exactly the gate this needs, not `run.status === 'running'`
+ * — see `MergedRun.isLive`'s own doc comment: it is already `run.fresh` as
+ * the live poll's own server-side RUN_STALE_MS check computes it, not a
+ * bare status read. A `running` run whose heartbeat has gone stale is a
+ * crashed process, not a live one, and belongs in history with everything
+ * else — pinning it would be presenting a guess (is it still going?) as a
+ * fact, the same call RunStrip.tsx's own file comment makes for rendering
+ * nothing at all over a stale run rather than a frozen last-known state.
+ *
+ * More than one project can have a fresh run at once, so `pinned` is sorted
+ * among ITSELF by `startedAt` descending too — the newest of the currently-
+ * running runs still leads the pinned region, which is the one place the
+ * old pure-chronological ordering was already correct and is kept.
  */
-function sortRows(rows: readonly MergedRun[]): MergedRun[] {
-  return [...rows].sort((a, b) => {
-    const diff = parseStartedAt(b.run.startedAt) - parseStartedAt(a.run.startedAt);
-    if (diff !== 0) return diff;
-    return Number(b.isLive) - Number(a.isLive);
-  });
+function splitPinned(rows: readonly MergedRun[]): { pinned: MergedRun[]; history: MergedRun[] } {
+  const pinned = sortByStartedAtDesc(rows.filter((r) => r.isLive));
+  const history = sortByStartedAtDesc(rows.filter((r) => !r.isLive));
+  return { pinned, history };
 }
 
 /** One day's worth of rows under one heading. */
@@ -179,7 +212,32 @@ const RUN_STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
 /** Reading order for the tiles' by-status breakdown — active state first, then the three ways a run can have left it, worst-sounding last. */
 const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed'];
 
-/** One `merged`-stage item over the row's whole queue — the same ratio the tiles compute across every run in scope, read for one run at a time. */
+/**
+ * Merged-stage items over the row's whole queue — the same ratio the tiles
+ * above compute across every run in scope (`aggregateRuns`' own
+ * `itemsQueued`/`itemsMerged`, Task 3), read here for one run at a time.
+ *
+ * `total` is deliberately the RAW `queue.length` — fix round 1's own
+ * flagged-but-ruled-on discrepancy: `RunStrip.tsx`'s live strip computes its
+ * own `merged/total` by first filtering OUT every `ungroomed` item ("an
+ * ungroomed item was never queueable work to begin with", that file's own
+ * comment), so the identical run can print two different totals on the two
+ * surfaces. That mismatch is real and it stays, on purpose, rather than
+ * being reconciled by changing either one: this page's whole reason to
+ * exist is to report what a run actually queued, and its own aggregate
+ * tiles sitting inches above this row already commit to that same raw
+ * denominator (`aggregateRuns` sums `run.queue.length` with no exclusion at
+ * all) — a row that quietly excluded `ungroomed` here would disagree with
+ * the tiles on THIS page while agreeing with a DIFFERENT page, which is a
+ * worse inconsistency than the one it would "fix". RunStrip is answering a
+ * different question ("how much of the real work is done") for a different
+ * reader (someone watching a run progress live, for whom an item the gate
+ * never even queued is noise); this page is answering "what did this run's
+ * queue actually contain", for which an ungroomed entry is part of the
+ * history being reported, not noise to filter out of it. A future reader
+ * who notices the two numbers disagree on the same run should find that
+ * reasoning here rather than assume one of the two is a bug.
+ */
 function queueCounts(run: OrchestratorArchiveRun): { merged: number; total: number } {
   return { merged: run.queue.filter((q) => q.stage === 'merged').length, total: run.queue.length };
 }
@@ -260,24 +318,57 @@ export default function RunsView() {
     .sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)));
 
   const filtered = projectFilter === 'all' ? merged : merged.filter((m) => m.run.project === projectFilter);
-  const sorted = sortRows(filtered);
-  const groups = groupByDay(sorted);
+  // Pinning is computed AFTER filtering, not before: a project filter that
+  // hides the only fresh run in scope must not leave a phantom "live" group
+  // heading over an empty rows list, and the design's own "newest VISIBLE
+  // run" wording for the default selection below only makes sense read
+  // against whatever the filter currently shows.
+  const { pinned, history } = splitPinned(filtered);
+  const groups = groupByDay(history);
+
+  // Reading order top to bottom: the pinned region first (regardless of its
+  // own startedAt — see splitPinned's own comment for why), then history
+  // newest-day-first. Selection defaults to whatever leads that order — the
+  // fresh run if one is visible, otherwise the newest historical row — which
+  // is the concrete, order-following meaning of "the newest run (live one
+  // wins if present)" now that "live wins" is a real precedence rather than
+  // a same-millisecond tie-break.
+  const orderedRows = [...pinned, ...history];
 
   // The design brief's own wording is "defaulting to the newest VISIBLE run"
   // — visible, not newest overall — which is exactly why this is derived
-  // from `sorted` (the FILTERED, sorted list) rather than from `merged`
-  // directly. A `selected` pointer that no longer names a row in the current
-  // filter (the project filter just changed out from under it, or the row it
-  // named was dropped by a refetch) falls back the same way: `find` returns
-  // `undefined` and the newest visible row takes over rather than the detail
-  // pane silently pointing at a run the list can no longer show.
+  // from `orderedRows` (the FILTERED, ordered list) rather than from
+  // `merged` directly. A `selected` pointer that no longer names a row in
+  // the current filter (the project filter just changed out from under it,
+  // or the row it named was dropped by a refetch) falls back the same way:
+  // `find` returns `undefined` and the first row in reading order takes over
+  // rather than the detail pane silently pointing at a run the list can no
+  // longer show.
   const selectedRow = (
     selected !== null
-      ? sorted.find((r) => r.run.project === selected.project && r.run.runId === selected.runId)
+      ? orderedRows.find((r) => r.run.project === selected.project && r.run.runId === selected.runId)
       : undefined
-  ) ?? sorted[0];
+  ) ?? orderedRows[0];
 
   const aggregates = aggregateRuns(filtered.map((m) => m.run), now);
+
+  // Shared by the pinned region and every day group below: both render the
+  // same kind of thing (a list of `RunRow`s against the one `selectedRow`
+  // and `now` this render already computed), and factoring the `.map` out
+  // once is what keeps the two render sites from drifting on the
+  // `isSelected` comparison — the pin fix (round 1) is exactly the kind of
+  // change that used to have to be applied in two places at once.
+  const renderRows = (rows: readonly MergedRun[]): JSX.Element[] => rows.map((row) => (
+    <RunRow
+      key={row.run.runId}
+      row={row}
+      now={now}
+      isSelected={selectedRow !== undefined
+        && selectedRow.run.project === row.run.project
+        && selectedRow.run.runId === row.run.runId}
+      onSelect={() => setSelected({ project: row.run.project, runId: row.run.runId })}
+    />
+  ));
 
   return (
     <div className="board">
@@ -343,22 +434,27 @@ export default function RunsView() {
 
           <div className="runs-split">
             <div className="runs-list" data-testid="runs-list">
+              {/* The pinned region: reuses the exact `.runs-day`/
+                  `.runs-day-heading`/`.runs-day-rows` chrome the history
+                  groups below use, rather than inventing a second visual
+                  language for "here is a region" — the "live" heading is
+                  what tells a reader this group is not a calendar day like
+                  its neighbours, the same way `groupByDay`'s own `unknown`
+                  heading already marks an unparseable-date group without a
+                  different box or colour of its own. Rendered only when at
+                  least one row is actually pinned, so a project filter with
+                  no fresh run in scope shows no heading for a region with
+                  nothing under it. */}
+              {pinned.length > 0 && (
+                <div className="runs-day" data-testid="runs-day-live">
+                  <div className="runs-day-heading">live</div>
+                  <div className="runs-day-rows">{renderRows(pinned)}</div>
+                </div>
+              )}
               {groups.map((group) => (
-                <div key={group.key} className="runs-day">
+                <div key={group.key} className="runs-day" data-testid={`runs-day-${group.key}`}>
                   <div className="runs-day-heading">{group.label}</div>
-                  <div className="runs-day-rows">
-                    {group.rows.map((row) => (
-                      <RunRow
-                        key={row.run.runId}
-                        row={row}
-                        now={now}
-                        isSelected={selectedRow !== undefined
-                          && selectedRow.run.project === row.run.project
-                          && selectedRow.run.runId === row.run.runId}
-                        onSelect={() => setSelected({ project: row.run.project, runId: row.run.runId })}
-                      />
-                    ))}
-                  </div>
+                  <div className="runs-day-rows">{renderRows(group.rows)}</div>
                 </div>
               ))}
             </div>

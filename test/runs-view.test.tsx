@@ -74,6 +74,17 @@ function run(over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun
  * suite's grouping assertions honest regardless of which timezone actually
  * runs the test.
  *
+ * RUN_LIVE's own `startedAt` is fix round 1's deliberate change: it is set
+ * BEFORE both day groups (Aug 25, three days ahead of the earlier of the
+ * two), not after them — the fixture equivalent of "a run that has been
+ * going since three days ago, sitting beside a run that merely finished
+ * more recently". A fixture where the live run also happened to be the
+ * chronologically newest one would let every ordering/selection assertion
+ * below pass whether or not RunsView actually pins fresh runs above
+ * history, since a plain `startedAt` sort would put it first anyway — this
+ * is exactly the case the review that prompted this fix round called out by
+ * name ("a fixture where the live run is also the newest proves nothing").
+ *
  * Every number below (merged counts, wall times, fix loops, verification
  * pass/fail) was chosen so `aggregateRuns`' own arithmetic lands on a clean,
  * hand-checked value — see the comment beside each assertion below for the
@@ -83,16 +94,16 @@ function run(over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun
  * fractions in the assertions would blur that line.
  */
 const RUN_LIVE = run({
-  runId: 'run-20260831-120000',
+  runId: 'run-20260825-090000',
   project: '/abs/alpha',
   status: 'running',
-  startedAt: '2026-08-31T12:00:00.000Z',
+  startedAt: '2026-08-25T09:00:00.000Z',
   updatedAt: '2026-08-31T12:05:00.000Z',
   current: true,
   queue: [
     // merged, 10-minute wall time
     item('a-1', 'merged', {
-      stageAt: { pending: '2026-08-31T09:00:00.000Z', merged: '2026-08-31T09:10:00.000Z' },
+      stageAt: { pending: '2026-08-25T09:00:00.000Z', merged: '2026-08-25T09:10:00.000Z' },
       verification: [{ cmd: 'pnpm test', ok: true }]
     }),
     // still moving — two fix loops already spent on it, no verification yet
@@ -190,16 +201,41 @@ beforeEach(() => {
 });
 
 describe('RunsView', () => {
-  it('groups runs by day, newest first, with rows inside a day ordered by startedAt desc', async () => {
+  // Also the "would fail without the pin" case the review asked for: RUN_LIVE's
+  // own `startedAt` (2026-08-25) is BEFORE both day groups' runs, so a plain
+  // startedAt-descending sort with no pinning would print it LAST, under its
+  // own day heading — not first, and not under a "live" heading at all. The
+  // self-check below pins that premise so a future edit that accidentally
+  // makes RUN_LIVE the chronologically newest run again cannot silently
+  // defeat what this test is actually proving.
+  it('pins the fresh live run above every day group, even though its startedAt is the oldest in scope', async () => {
+    expect(Date.parse(RUN_LIVE.startedAt)).toBeLessThan(Date.parse(RUN_DONE_BETA.startedAt));
+
     const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
 
     const headings = Array.from(container.querySelectorAll('.runs-day-heading')).map((el) => el.textContent);
-    // Both days' labels are read off the real `dayLabel` function against
-    // this fixture's own timestamps, never hand-typed — a hand-typed
-    // "tue 1 sep" would silently pass or fail depending on the machine's
-    // timezone, exactly the flakiness dayLabel's own doc comment warns
-    // dayKey/dayLabel's LOCAL-time behaviour can cause.
-    expect(headings).toEqual([dayLabel(RUN_LIVE.startedAt), dayLabel(RUN_DONE_BETA.startedAt)]);
+    expect(headings[0]).toBe('live');
+
+    const rowIds = Array.from(container.querySelectorAll('.runs-row'))
+      .map((el) => el.getAttribute('data-testid'));
+    expect(rowIds[0]).toBe(`runs-row-${RUN_LIVE.runId}`);
+
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_LIVE.runId);
+  });
+
+  it('groups history by day under the pinned live region, newest first, with rows inside a day ordered by startedAt desc', async () => {
+    const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const headings = Array.from(container.querySelectorAll('.runs-day-heading')).map((el) => el.textContent);
+    // "live" leads (see the pin test above), then the two day headings —
+    // read off the real `dayLabel` function against this fixture's own
+    // timestamps, never hand-typed: a hand-typed "tue 1 sep" would silently
+    // pass or fail depending on the machine's timezone, exactly the
+    // flakiness dayLabel's own doc comment warns dayKey/dayLabel's
+    // LOCAL-time behaviour can cause. RUN_DONE_ALPHA is alone in the Aug 31
+    // group now that RUN_LIVE (also Aug-31-adjacent by nothing but its own
+    // runId) is pinned out of history entirely.
+    expect(headings).toEqual(['live', dayLabel(RUN_DONE_ALPHA.startedAt), dayLabel(RUN_DONE_BETA.startedAt)]);
 
     const rowIds = Array.from(container.querySelectorAll('.runs-row'))
       .map((el) => el.getAttribute('data-testid'));
@@ -211,7 +247,7 @@ describe('RunsView', () => {
     ]);
   });
 
-  it('defaults selection to the newest run', async () => {
+  it('defaults selection to the pinned live run', async () => {
     await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
     expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_LIVE.runId);
   });
