@@ -777,6 +777,18 @@ body {
    jumping while you read output. */
 .run-drawer-item-verify-tail {
   color: var(--ink3);
+  /* display: block is load-bearing, and it is the one declaration here that
+     cannot be reasoned out from the markup alone — measured in Chrome after
+     the disclosure landed. A <details> does NOT make its non-summary children
+     flex items of itself: they are slotted into the UA's ::details-content
+     box, so nothing blockifies this span. Left inline, it reported
+     clientHeight 0 against a 517px rendered box — max-height, overflow-y and
+     flex-basis are all simply ignored on a non-replaced inline box, which put
+     the drawer straight back to the unbounded tail this rule exists to stop.
+     white-space survived (inline boxes honour it), which is exactly why the
+     regression looked fine in a screenshot. Neither test suite can see this:
+     jsdom performs no layout. */
+  display: block;
   flex-basis: 100%; min-width: 0;
   white-space: pre-wrap; overflow-wrap: anywhere;
   max-height: 10em; overflow-y: auto; overscroll-behavior: contain;

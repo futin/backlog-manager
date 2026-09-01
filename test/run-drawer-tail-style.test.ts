@@ -62,6 +62,11 @@ describe('run drawer verification tail stylesheet rule', () => {
   // particular height — a future 10em → 12em is a design tweak, not a
   // regression, so the assertion is on the properties, not their values.
   it('bounds its height and scrolls instead of growing', () => {
+    // display: block first — max-height and overflow-y are inert on an inline
+    // box, and the tail IS inline by default inside <details>'s
+    // ::details-content slot (see the rule's own comment). Asserting the two
+    // properties without this one would guard a bound that does not apply.
+    expect(block).toMatch(/(^|[\s;])display\s*:\s*block\b/);
     expect(block).toMatch(/(^|[\s;])max-height\s*:/);
     expect(block).toMatch(/(^|[\s;])overflow-y\s*:\s*auto\b/);
   });
