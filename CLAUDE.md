@@ -38,8 +38,9 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   in `SideRail.tsx` is the one runtime list of them, and `resolveSection` in
   `App.tsx` maps a stored value that names no tab, the legacy `'projects'`
   included, onto Board; Archive is a placeholder until its own chunk lands),
-  board (five
-  fixed columns — bugs/ideas/tasks/out-of-scope/refactors — card drawer,
+  board (four
+  fixed columns — refactors/ideas/bugs/tasks; out-of-scope has no Board
+  column at all and belongs to Archive — card drawer,
   dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
   a toolbar Orchestrate control opening `OrchestrateSheet` (previews the
   queue and selects a subset of it — `ids` rides along only for a strict

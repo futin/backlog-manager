@@ -34,26 +34,27 @@ type SortKey = 'created' | 'name' | 'project';
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
 /**
- * Fixed column order — the store's own section order, not alphabetical.
+ * Fixed column order — the design's order (Refactoring · Ideas · Bugs ·
+ * Tasks), not the store's directory order and not alphabetical. It reads
+ * left-to-right as increasing commitment: a refactor is a wish, an idea is a
+ * proposal, a bug is work that found us, a task is work we chose and planned.
  *
- * Refactoring is APPENDED rather than placed where the design wants it
- * (Refactoring · Ideas · Bugs · Tasks, with out-of-scope evicted to Archive).
- * That reordering is its own chunk, deliberately: it changes what every
- * existing column-position assertion means, and doing it in the same change
- * that introduces the section would make one diff answer two questions. Until
- * then the board is five columns wide — see .board-columns in styles.css,
- * which had to widen with it.
+ * Out-of-scope has no column here at all. A rejected item is terminal — it is
+ * a record, not queue work — and it gets its own column in Archive instead
+ * (Task 6). That eviction is why `matches` below drops the section outright
+ * rather than relying on there being no column to land in: filtering at the
+ * column level would leave rejected cards counted in `visible`, which decides
+ * the "no matches" empty state and whether the board installs a live clock.
  *
- * `slug` is the CSS hook (`.board-col-<slug>`), not the section name, which is
- * why out-of-scope's is `oos`: it is a class-name fragment. Refactoring's
- * matches its section because there is nothing to shorten.
+ * `slug` is the CSS hook (`.board-col-<slug>`), not the section name. Every
+ * one of the four matches its section now that `oos` — the one abbreviation,
+ * and only ever a class-name fragment — is gone with its column.
  */
 const COLUMNS: { section: Section; label: string; slug: string }[] = [
-  { section: 'bugs', label: 'Bugs', slug: 'bugs' },
+  { section: 'refactors', label: 'Refactoring', slug: 'refactors' },
   { section: 'ideas', label: 'Ideas', slug: 'ideas' },
-  { section: 'tasks', label: 'Tasks', slug: 'tasks' },
-  { section: 'out-of-scope', label: 'Out of scope', slug: 'oos' },
-  { section: 'refactors', label: 'Refactoring', slug: 'refactors' }
+  { section: 'bugs', label: 'Bugs', slug: 'bugs' },
+  { section: 'tasks', label: 'Tasks', slug: 'tasks' }
 ];
 
 /**
@@ -99,7 +100,7 @@ function sortItems(items: BacklogItem[], sort: SortKey): BacklogItem[] {
      `else`, so this restores behaviour rather than adding a new rule.
      Deliberately NOT matched by the Status select below, which reads the same
      unvalidated storage and is left unguarded on purpose: a stale status value
-     just matches nothing in the three queue columns, leaving a visibly
+     just matches nothing in the four type columns, leaving a visibly
      narrowed board whose cause is the select sitting right above it and whose
      fix is one click. (The Project select goes further still and fails open to
      "all".) The asymmetry is the point — a degraded board a user can reason
@@ -200,19 +201,22 @@ export default function BoardView() {
   const matches = (i: BacklogItem): boolean =>
     (projectValue === ALL || i.projectPath === projectValue) &&
     (needle === '' || i.title.toLowerCase().includes(needle)) &&
-    // The 'started' branch is tested BEFORE the out-of-scope bypass below,
-    // and that ordering is load-bearing, not arbitrary. The bypass is correct
-    // for Open/Done/All because out-of-scope is flat and terminal, so those
-    // three genuinely have no opinion about it. 'started' is different: it is
-    // a claim about live work, and a rejected out-of-scope card is never
-    // live, no matter what its (possibly stale) `started` stamp says. Running
-    // the bypass first would fill this view with terminal cards under a
-    // heading that promises otherwise — exactly the regression the "hides
-    // out-of-scope" board test guards against.
+    // The Board is queue work only; rejected items belong to Archive (Task 6).
+    // Dropped here rather than left to fall through a column that no longer
+    // exists, so `visible` — which drives the "no matches" empty state and the
+    // `hasLive` clock — never counts a card the board cannot show.
+    //
+    // This one predicate replaces what used to be a status *bypass* for the
+    // section (`i.section === 'out-of-scope' || …`), which existed so
+    // Open/Done/All showed rejected cards regardless of their status, and which
+    // the 'started' branch below had to be ordered in front of so a terminal
+    // card carrying a stale `started` stamp could not leak into a view that
+    // claims to list live work. With the section gone from the board entirely,
+    // both the bypass and the ordering rule it needed are moot.
+    i.section !== 'out-of-scope' &&
     (status === 'started'
       ? isInProgress(i)
-      // out-of-scope is flat and terminal — Open/Done/All have no say there
-      : i.section === 'out-of-scope' || status === 'all' || i.status === status);
+      : status === 'all' || i.status === status);
 
   const visible = all.filter(matches);
 
