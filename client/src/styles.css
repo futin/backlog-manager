@@ -1217,11 +1217,58 @@ body {
    fourth section header/toolbar shaped exactly like the first one, not a
    new kind of thing. */
 
-/* Five tiles across on a wide screen. `minmax(0, 1fr)` rather than a bare
-   `1fr`: a tile's own content (the by-status substat line especially) is
-   allowed to be wider than an even fifth of the row, and a bare `1fr` would
-   let that content blow the grid track open instead of wrapping inside it. */
-.runs-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: var(--group-gap) }
+/* The range control (Task 7, design doc: "Range") — Today / This week /
+   This month / All as a segmented button group sitting in `.board-tools`
+   ahead of the project `<select>`, not a fifth `<select>` beside it. A
+   `<select>` is the right shape for the project filter (an open-ended,
+   growing list of project names nobody has memorised the position of), but
+   the wrong one for four FIXED choices a person flips between constantly
+   while reading history: opening a dropdown, reading four words and closing
+   it again is three actions for what a row of always-visible buttons makes
+   one, and "always visible" also means the CURRENTLY active range reads at a
+   glance, which a collapsed `<select>` cannot offer. `role="group"` +
+   `aria-label="Range"` name the whole cluster for assistive tech the way a
+   `<fieldset>` would without that element's own block layout; each button's
+   own `aria-pressed` (not a shared radio input) states ITS membership in
+   that group, matching the semantics an exclusive toggle-button set is
+   supposed to carry. */
+.runs-seg { display: inline-flex; background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; overflow: hidden }
+.runs-seg > button {
+  border: 0; background: transparent; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .04em; color: var(--ink2); padding: 4px 10px; cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.runs-seg > button + button { border-left: 1px solid var(--hairline) }
+.runs-seg > button:hover { color: var(--ink) }
+/* The pressed range's own marker is the identical cyan-bottom-rule idiom the
+   rail already wears for "this is the current one" once IT lies down into a
+   horizontal row at phone width (`.rail-link.on` inside that section's own
+   700px block, near the top of this file) — a segmented group is a
+   horizontal row from the moment it exists, so it reaches for that row
+   variant of the idiom directly rather than the rail's own default left-edge
+   bar, which reads as a vertical list's marker, not a row's. */
+.runs-seg > button[aria-pressed="true"] {
+  color: var(--ink); background: var(--strip-hi); box-shadow: inset 0 -2px 0 var(--cyan);
+}
+/* The same cyan-rule-for-focus idiom `.board-select:focus` already uses on
+   the project select beside this group, restated as a `box-shadow` rather
+   than a `border-color` swap: a plain button here carries no border of its
+   own to recolour (only the hairline BETWEEN buttons above), so the ring has
+   to be painted rather than borrowed from an existing edge. */
+.runs-seg > button:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--cyan) }
+
+/* Five even tiles plus a sixth, wider one on a wide screen (the sixth is
+   Task 7's own "machine time by stage" tile, added below). `minmax(0, 1fr)`
+   on the first five, unchanged since before Task 7: a tile's own content
+   (the by-status substat line especially) is allowed to be wider than an
+   even sixth of the row, and a bare `1fr` would let that content blow the
+   grid track open instead of wrapping inside it. The sixth column,
+   `minmax(300px, 2.3fr)`, is not just another `1fr` slot: `StageBars`' own
+   80px-label/track/60px-value row (see that widget's own CSS block further
+   down) needs real width to stay legible, so this floors the column at a
+   width it can actually lay that row out in, then lets it claim roughly
+   twice a plain tile's share of whatever space is left over. */
+.runs-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(300px, 2.3fr); gap: 8px; margin-bottom: var(--group-gap) }
 .runs-tile {
   display: flex; flex-direction: column; gap: 4px; min-width: 0;
   background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
@@ -1246,11 +1293,54 @@ body {
 .runs-tile-substat { display: flex; flex-wrap: wrap; gap: 4px 8px; font-family: var(--mono); font-size: 9.5px; color: var(--ink3) }
 .runs-tile-substat-item { white-space: nowrap }
 
+/* The wide sixth tile (Task 7). `.runs-tile-wide` layers onto the plain
+   `.runs-tile` base above rather than replacing it — the same strip/border/
+   radius/padding still apply — overriding only the gap: the plain tiles
+   stack a bare number over a label over an optional substat line, where this
+   one stacks a HEADING ROW over a seven-row `StageBars` widget, and those
+   two blocks want more air between them than a number wants from its own
+   caption. It shares this row's grid rather than getting a row of its own
+   below the other five; the `@media` blocks further down are what peel it
+   back onto its own full-width row once a narrower screen can no longer
+   afford it a whole sixth column. */
+.runs-tile-wide { gap: 8px }
+/* The tile's own heading row: a label on the left (matching every other
+   tile's `.runs-tile-label`) and the range-scoped caveat
+   (`${RANGE_SCOPE[range]} · queue wait excluded`) pushed to the right edge by
+   `margin-left: auto` below — the same "label left, caveat right, one flex
+   row" shape `.run-detail-heading`/`.run-detail-sub` already use for the
+   per-run version of this exact rollup, restated here (rather than shared)
+   because this tile is not a heading over a whole section the way that one
+   is, just the top of one tile among six. */
+.runs-tile-head { display: flex; align-items: baseline; gap: 8px }
+.runs-tile-head .runs-tile-substat { margin-left: auto }
+
+/* A tablet width still has room for three even tiles a row, but not six —
+   the wide tile drops to its own full-width row underneath rather than
+   fighting the other five for a third of a narrowing column, which is
+   exactly the room `StageBars`' 80px-label/track/60px-value row layout needs
+   to stay legible. This block has to come BEFORE the 700px one below in
+   source order: both apply at once under 700px, and the narrower block's own
+   `.runs-tiles` column count has to win the conflict there, the same
+   mobile-first cascade the rest of this file's breakpoints already follow. */
+@media (max-width: 900px) {
+  .runs-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)) }
+  .runs-tile-wide { grid-column: 1 / -1 }
+}
+
 @media (max-width: 700px) {
   /* Two across rather than one: five tiles stacked full-width each would push
      the list and detail pane (already stacking under this same breakpoint,
      see .runs-split below) below a full screen of nothing but numbers. */
   .runs-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  /* Restated rather than left to inherit silently from the 900px block
+     above (this value does not actually change at this narrower width — the
+     wide tile already spans the full row below 900px, this block only ever
+     changes the OTHER five tiles' column count): a reader landing on THIS
+     block to answer "what does the phone layout do" should not have to also
+     read the 900px block above it to learn the wide tile is still
+     full-width here too. */
+  .runs-tile-wide { grid-column: 1 / -1 }
 }
 
 /* The master-detail split: run list on the left at a fixed width (wide

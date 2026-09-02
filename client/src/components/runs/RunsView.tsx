@@ -4,10 +4,13 @@ import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
+import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
 import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH } from '../../lib/run-stage';
-import { aggregateRuns, dayKey, dayLabel, runWallMs } from '../../lib/run-stats';
+import { aggregateRuns, dayKey, dayLabel, runStageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
+import { StageBars } from './StageBars';
+import type { RunRange } from '../../lib/run-range';
 import type { OrchestratorArchiveRun, OrchestratorRun, RunStage } from '../../../../shared/types';
 
 /**
@@ -66,6 +69,35 @@ import type { OrchestratorArchiveRun, OrchestratorRun, RunStage } from '../../..
  * asking `pickAuthority` who the current authority is), just a second call
  * site that had not been touched yet. See the comment immediately above
  * `aggregateRuns`'s own call below for the specifics.
+ *
+ * Task 7 adds the range control (design doc: "Range") — a segmented Today /
+ * This week / This month / All group in the toolbar (`RUN_RANGES`-driven,
+ * `lib/run-range.ts`), component state exactly like `projectFilter` (not
+ * persisted, so a reload always opens back on "all runs" rather than
+ * silently reopening on whatever a person left it on). It scopes the tiles,
+ * the list, AND a new sixth tile together, composed with — not instead of —
+ * the existing project filter: range narrows `merged` down to `inScope`
+ * first, then the project filter narrows `inScope` down to `filtered`
+ * exactly as it always narrowed `merged` before this task, so "this
+ * project, this week" and "everything, today" are both just the same two
+ * filters applied in the same fixed order. The sixth tile, `.runs-tile-wide`
+ * (`data-testid="runs-tile-machine"`), sums `runStageTotals` (Task 2) across
+ * every run `filtered` currently holds through `StageBars` (Task 4) — the
+ * identical "where did the time go" reading `RunDetail`'s own rollup gives
+ * for one run, now folded across however many runs the range/project
+ * combination leaves in view, and reading its stat off the SAME
+ * `pickAuthority`-resolved authority `aggregates` above already reads, for
+ * the identical fix-round-2/3 reason: a live-backed run's still-open span
+ * has to come from its fresh live queue, never a stale archive snapshot
+ * frozen mid-run.
+ *
+ * Emptying the range (or the range-and-project combination) does not empty
+ * this whole section the way `merged.length === 0` does: the tiles, the
+ * range control and the project select all stay mounted (a range is a VIEW
+ * over an unchanged corpus, not a reason to hide that the corpus exists —
+ * and a person needs the controls still on screen to widen back out of the
+ * empty combination they just created), and only `.runs-list` swaps its
+ * pinned-region-plus-day-groups for one `no runs in this range` note.
  */
 
 /** One row of the merged run list: the archive's own record of the run, plus the fresh live entry backing it, if any. */
@@ -367,6 +399,11 @@ export default function RunsView() {
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
   const { runs: liveRuns } = useOrchestratorRuns();
   const [projectFilter, setProjectFilter] = useState<string>('all');
+  // Component state, not persisted — same as `projectFilter` immediately
+  // above, and for the same reason: a saved range would silently reopen the
+  // section scoped to whatever a person last looked at instead of the
+  // default "all runs" view a fresh visit should show.
+  const [range, setRange] = useState<RunRange>('all');
   const [selected, setSelected] = useState<Selection | null>(null);
 
   // I3's fix: the one signal that tells this view "run history just moved"
@@ -422,12 +459,22 @@ export default function RunsView() {
   const merged = mergeRuns(archiveRuns, liveRuns);
 
   // Every project seen anywhere in the (unfiltered) merged list — computed
-  // off `merged`, not off `filtered` below, so switching the filter to one
-  // project never removes the very option that would switch back to another.
+  // off `merged`, not off `inScope`/`filtered` below, so narrowing EITHER
+  // the range or the project filter never removes an option that would
+  // switch back: a project with no runs in the selected range must still
+  // appear in this select, or there would be no way to widen back to it.
   const projects = Array.from(new Set(merged.map((m) => m.run.project)))
     .sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)));
 
-  const filtered = projectFilter === 'all' ? merged : merged.filter((m) => m.run.project === projectFilter);
+  // Range scoping runs BEFORE the project filter, not merely alongside it:
+  // `inRange` reads only `startedAt` (lib/run-range.ts's own file header
+  // states why that field, and no other, is what a range window is keyed
+  // on), so this pass can run directly off `merged` with no dependency on
+  // which project is currently selected, and the project filter below then
+  // narrows whatever the range already left in scope exactly the way it
+  // always narrowed `merged` before this task existed.
+  const inScope = merged.filter((m) => inRange(m.run.startedAt, range, now));
+  const filtered = projectFilter === 'all' ? inScope : inScope.filter((m) => m.run.project === projectFilter);
   // Pinning is computed AFTER filtering, not before: a project filter that
   // hides the only fresh run in scope must not leave a phantom "live" group
   // heading over an empty rows list, and the design's own "newest VISIBLE
@@ -475,6 +522,20 @@ export default function RunsView() {
   // not whichever snapshot happened to be sitting in the archive payload.
   const aggregates = aggregateRuns(filtered.map((m) => pickAuthority([m.live], m.run)), now);
 
+  // Task 7's own generalization of the identical fix-round-3 rule
+  // immediately above: the wide "machine time by stage" tile sums
+  // `runStageTotals` (lib/run-stats.ts, Task 2) over the SAME
+  // `pickAuthority`-resolved authority every other cross-run number on this
+  // page already reads, for the identical reason — a live-backed run's
+  // still-open span has to come from its fresh live queue, not a stale
+  // archive snapshot frozen mid-run. `runStageTotals` itself gates that open
+  // span on `status === 'running'` (that function's own doc comment has the
+  // full reasoning for why an archived, stopped run must never contribute
+  // one), which is exactly why `pickAuthority`'s result — carrying a real
+  // `status`, live or archived — is what gets passed to it, never a bare
+  // `.queue` plucked out on its own.
+  const machine = sumStageTotals(filtered.map((m) => runStageTotals(pickAuthority([m.live], m.run), now)));
+
   // Shared by the pinned region and every day group below: both render the
   // same kind of thing (a list of `RunRow`s against the one `selectedRow`
   // and `now` this render already computed), and factoring the `.map` out
@@ -507,6 +568,27 @@ export default function RunsView() {
         <div className="board-title">Runs</div>
         {merged.length > 0 && (
           <div className="board-tools">
+            {/* The range control (Task 7) — see styles.css's own `.runs-seg`
+                comment for why this is a segmented button group and not a
+                fifth `<select>` beside the project one. `role="group"` +
+                `aria-label` name the whole cluster for assistive tech the
+                way a `<fieldset>` would without that element's own layout;
+                each button's own `aria-pressed` (not a shared radio input)
+                states ITS membership in the group, matching the semantics
+                an exclusive toggle set is supposed to carry. */}
+            <div className="runs-seg" role="group" aria-label="Range" data-testid="runs-range">
+              {RUN_RANGES.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  data-testid={`runs-range-${r}`}
+                  aria-pressed={r === range}
+                  onClick={() => setRange(r)}
+                >
+                  {RANGE_BUTTON[r]}
+                </button>
+              ))}
+            </div>
             <select
               className="board-select"
               aria-label="Project"
@@ -543,11 +625,21 @@ export default function RunsView() {
               <div className="runs-tile-value">{aggregates.itemsMerged}/{aggregates.itemsQueued}</div>
               <div className="runs-tile-label">merged / queued</div>
             </div>
+            {/* "avg item work" (Task 7), not "avg item": `avgItemWorkMs`
+                (RunAggregates' own doc comment has the full reasoning) is
+                `itemDurationMs` averaged over merged items — first
+                non-pending arrival to the terminal stamp — which deliberately
+                EXCLUDES the queue-wait interval a bare "avg item" reading
+                would leave a person assuming is included. The substat states
+                the exclusion outright, matching how the wide tile below (and
+                RunDetail's own rollup) already caveat the identical number
+                rather than leaving it implicit. */}
             <div className="runs-tile" data-testid="runs-tile-avg-item">
               <div className="runs-tile-value">
                 {aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}
               </div>
-              <div className="runs-tile-label">avg item</div>
+              <div className="runs-tile-label">avg item work</div>
+              <div className="runs-tile-substat">queue wait excluded</div>
             </div>
             {/* "fix loops / merged" read as the MERGED-ONLY reading R1
                 deliberately rejected (`RunAggregates.fixLoopsPerMerged`'s own
@@ -576,33 +668,68 @@ export default function RunsView() {
               </div>
               <div className="runs-tile-label">verify pass</div>
             </div>
+            {/* The sixth, wide tile (Task 7) — `machine` (computed above,
+                right beside `aggregates`) summed across whatever `filtered`
+                currently holds, rendered through the identical `StageBars`
+                widget `RunDetail`'s own per-run rollup already uses (Task 4),
+                so the two read as one visual vocabulary at two different
+                scopes: one run there, however many runs the range/project
+                combination leaves in view here. `RANGE_SCOPE[range]` states
+                which scope this particular rendering is, since — unlike
+                RunDetail's rollup, which is always "this one run" — this
+                tile's own meaning changes every time the range control does. */}
+            <div className="runs-tile runs-tile-wide" data-testid="runs-tile-machine">
+              <div className="runs-tile-head">
+                <div className="runs-tile-label">machine time by stage</div>
+                <span className="runs-tile-substat">{RANGE_SCOPE[range]} · queue wait excluded</span>
+              </div>
+              <StageBars totals={machine} testId="runs-tile-machine-bars" />
+            </div>
           </div>
 
           <div className="runs-split">
             <div className="runs-list" data-testid="runs-list">
-              {/* The pinned region: reuses the exact `.runs-day`/
-                  `.runs-day-heading`/`.runs-day-rows` chrome the history
-                  groups below use, rather than inventing a second visual
-                  language for "here is a region" — the "live" heading is
-                  what tells a reader this group is not a calendar day like
-                  its neighbours, the same way `groupByDay`'s own `unknown`
-                  heading already marks an unparseable-date group without a
-                  different box or colour of its own. Rendered only when at
-                  least one row is actually pinned, so a project filter with
-                  no fresh run in scope shows no heading for a region with
-                  nothing under it. */}
-              {pinned.length > 0 && (
-                <div className="runs-day" data-testid="runs-day-live">
-                  <div className="runs-day-heading">live</div>
-                  <div className="runs-day-rows">{renderRows(pinned)}</div>
-                </div>
+              {filtered.length === 0 ? (
+                // Task 7's own empty state — a DIFFERENT fact from "no runs
+                // yet" above (`merged.length === 0`), which stays reachable
+                // only for a project with a genuinely empty history. This one
+                // fires when the range/project combination leaves nothing in
+                // `filtered` even though `merged` is not empty — the tiles,
+                // the range control and the project select all stay mounted
+                // around it (see this file's own header comment for why),
+                // and no day groups render alongside it: `pinned`/`groups`
+                // are themselves derived from `filtered`, so they are already
+                // empty here regardless — this note exists for the READER,
+                // not because the markup below would otherwise render
+                // something wrong.
+                <div className="drawer-empty" data-testid="runs-empty-range">no runs in this range</div>
+              ) : (
+                <>
+                  {/* The pinned region: reuses the exact `.runs-day`/
+                      `.runs-day-heading`/`.runs-day-rows` chrome the history
+                      groups below use, rather than inventing a second visual
+                      language for "here is a region" — the "live" heading is
+                      what tells a reader this group is not a calendar day like
+                      its neighbours, the same way `groupByDay`'s own `unknown`
+                      heading already marks an unparseable-date group without a
+                      different box or colour of its own. Rendered only when at
+                      least one row is actually pinned, so a project filter with
+                      no fresh run in scope shows no heading for a region with
+                      nothing under it. */}
+                  {pinned.length > 0 && (
+                    <div className="runs-day" data-testid="runs-day-live">
+                      <div className="runs-day-heading">live</div>
+                      <div className="runs-day-rows">{renderRows(pinned)}</div>
+                    </div>
+                  )}
+                  {groups.map((group) => (
+                    <div key={group.key} className="runs-day" data-testid={`runs-day-${group.key}`}>
+                      <div className="runs-day-heading">{group.label}</div>
+                      <div className="runs-day-rows">{renderRows(group.rows)}</div>
+                    </div>
+                  ))}
+                </>
               )}
-              {groups.map((group) => (
-                <div key={group.key} className="runs-day" data-testid={`runs-day-${group.key}`}>
-                  <div className="runs-day-heading">{group.label}</div>
-                  <div className="runs-day-rows">{renderRows(group.rows)}</div>
-                </div>
-              ))}
             </div>
 
             {/* RunDetail (Task 7) owns everything inside this wrapper; the

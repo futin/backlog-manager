@@ -7,7 +7,8 @@ import '@testing-library/jest-dom';
 
 import { fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns } from '../client/src/lib/agents';
 import RunsView from '../client/src/components/runs/RunsView';
-import { dayLabel } from '../client/src/lib/run-stats';
+import { RUN_RANGES } from '../client/src/lib/run-range';
+import { MACHINE_STAGES, dayLabel } from '../client/src/lib/run-stats';
 import type {
   ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
   OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, VerificationSummary
@@ -241,6 +242,76 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
   }
 ];
 
+/**
+ * Task 7's own fixtures for the range control (`lib/run-range.ts`) and the
+ * wide "machine time by stage" tile it feeds — built from the REAL
+ * `Date.now()` at test-run time, unlike every fixed-date fixture above,
+ * because `rangeStart`/`inRange` compute their windows against the actual
+ * wall clock `RunsView` reads via its own `now = Date.now()`; a literal past
+ * date could never honestly exercise "is this inside TODAY".
+ *
+ * `RUN_A` started 60 seconds ago: inside every one of the four windows,
+ * `today` included. `RUN_B` started 40 days ago: outside `today`, `week`
+ * AND `month` no matter what day this suite happens to run on — 40 days
+ * exceeds the longest possible month (31 days) and the longest possible walk
+ * back to a Monday (6 days), so it always crosses at least one month
+ * boundary and at least one Monday regardless of where "today" falls in
+ * either. Only `all` ever shows both. Different projects, so a project
+ * filter can isolate one from the other (case 3 below).
+ *
+ * Each carries one merged item whose OWN internal timing is independent of
+ * its run's `startedAt` above — nothing in this codebase cross-checks that
+ * an item's `stageAt` falls within its run's start/end window;
+ * `runStageTotals` only ever compares an item's own stamps against each
+ * other and against `now`. `dispatched` and `merged` sit one second and then
+ * five (A) or ten (B) minutes apart on a fixed, literal 2026-01-01 timeline,
+ * chosen only to give the wide tile's `dispatched` row a clean, hand-checked
+ * sum once both runs are in scope (case 6 below) — the run's own real-time
+ * `startedAt` above is what the RANGE control reads, this timeline is what
+ * `runStageTotals` reads, and neither has any reason to agree with the
+ * other.
+ */
+const RUN_A_STARTED_AT = new Date(Date.now() - 60_000).toISOString();
+const RUN_B_STARTED_AT = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+
+const RUN_A = run({
+  runId: 'run-range-a',
+  project: '/abs/range-a',
+  status: 'done',
+  startedAt: RUN_A_STARTED_AT,
+  updatedAt: RUN_A_STARTED_AT,
+  queue: [
+    // dispatched -> merged: exactly 5 minutes, the span `runStageTotals`
+    // credits to the `dispatched` stage (`pending` -> `dispatched` is also
+    // a recorded span, but MACHINE_STAGES drops every `pending` span).
+    item('ra-1', 'merged', {
+      stageAt: {
+        pending: '2026-01-01T00:00:00.000Z',
+        dispatched: '2026-01-01T00:00:01.000Z',
+        merged: '2026-01-01T00:05:01.000Z'
+      }
+    })
+  ]
+});
+
+const RUN_B = run({
+  runId: 'run-range-b',
+  project: '/abs/range-b',
+  status: 'done',
+  startedAt: RUN_B_STARTED_AT,
+  updatedAt: RUN_B_STARTED_AT,
+  queue: [
+    // dispatched -> merged: exactly 10 minutes.
+    item('rb-1', 'merged', {
+      stageAt: {
+        pending: '2026-01-01T00:00:00.000Z',
+        dispatched: '2026-01-01T00:00:01.000Z',
+        merged: '2026-01-01T00:10:01.000Z'
+      }
+    })
+  ]
+});
+
 async function renderRunsView(archiveRuns: OrchestratorArchiveRun[], liveRuns: OrchestratorRunsPayload['runs'] = []): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
   mockRuns.mockResolvedValue({ runs: liveRuns } satisfies OrchestratorRunsPayload);
@@ -357,11 +428,72 @@ describe('RunsView', () => {
     // to print 2/2.
     expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('5/6');
 
+    // avgItemWorkMs (Task 7's own addition — this assertion did not exist
+    // before this task; CONSTRAINTS.md's R2/amendments deferred it here on
+    // purpose). `itemDurationMs` (run-time.ts) measures from an item's
+    // FIRST NON-PENDING `stageAt` arrival — `startedAtMs`'s own rule, which
+    // skips only `pending` and keeps everything else, `preflight` included —
+    // to its terminal stamp, never from `dispatched` specifically. RUN_LIVE's
+    // own two merged items (a-1, a-2, read live through `pickAuthority`)
+    // carry NO `stageAt` at all in the `LIVE_RUNS` fixture above (only
+    // `verification` was ever given them), so `startedAtMs` finds nothing to
+    // call "earliest" and `itemDurationMs` returns `null` for both —
+    // EXCLUDED from the average entirely, not counted as a zero. The three
+    // ARCHIVE-only merged items (a-3, a-4, b-1) each recorded only `pending`
+    // and their own terminal `merged` stamp, with no intermediate arrival of
+    // any kind in between — so `startedAtMs`, skipping `pending` and taking
+    // the earliest of whatever remains, finds only `merged` ITSELF, and
+    // measures an item's "start" and "end" off the identical stamp: end -
+    // start = 0 for all three. avgItemWorkMs = (0 + 0 + 0) / 3 = 0 ->
+    // formatSpanCompact(0) = "0s" — a degenerate number, but the honest one
+    // this fixture's own stageAt data (never a `dispatched` entry) actually
+    // produces once the correct rule is applied to it.
+    expect(screen.getByTestId('runs-tile-avg-item')).toHaveTextContent('avg item work');
+    expect(screen.getByTestId('runs-tile-avg-item')).toHaveTextContent('0s');
+
     // verifyOk=5 of verifyTotal=6 (a-1 ok, a-2 ok [live], a-3 ok, a-4 ok,
     // b-1 ok, b-2 failed) => 83%, rounded to 0 decimals. Before fix round 3:
     // verifyOk=4 of verifyTotal=5 (a-2's live verification entry was never
     // counted at all) => 80%.
     expect(screen.getByTestId('runs-tile-verify')).toHaveTextContent('83%');
+  });
+
+  // Task 7's own case: `runStageTotals`' open span (Task 2's own fix-round-1
+  // rule) is gated on the RUN's status being `running` — RUN_LIVE's live
+  // authority already satisfies that half, but neither of ITS two queue
+  // items (a-1, a-2, both `merged` in the `LIVE_RUNS` fixture above) is
+  // itself in a non-terminal MACHINE_STAGES stage for the open span to ever
+  // fire against, so nothing built on the shared fixtures proves this path
+  // actually reaches the WIDE tile the way `run-stats.test.ts` already
+  // proves it for `runStageTotals` in isolation.
+  //
+  // This test extends that same live-backed scenario with its OWN LOCAL
+  // copy of the live queue — `a-2` moves from `merged` to `fixing` here —
+  // rather than editing the shared `LIVE_RUNS` constant every other test in
+  // this file (this one included, immediately above) also renders against:
+  // doing that globally would also change the "renders the aggregate tile
+  // numbers" test's own pinned 5/6 merged and 83% verify totals, two
+  // hand-checked numbers that test's own comments derive in full and that
+  // this case has no reason to disturb just to prove a different, orthogonal
+  // property of a different tile.
+  it("extends the live-backed run's queue so a fixing item's open span reaches the wide tile", async () => {
+    const liveRunsWithFixingItem: OrchestratorRunsPayload['runs'] = [
+      {
+        ...LIVE_RUNS[0],
+        queue: [
+          LIVE_RUNS[0].queue[0],
+          // No later stamp than `fixing` itself — this is what makes it
+          // "still open": `runStageTotals` credits it `now - stageAt.fixing`
+          // rather than a closed span between two recorded arrivals.
+          liveQueueItem('a-2', 'fixing', { fixLoops: 2, stageAt: { fixing: '2026-08-25T09:20:00.000Z' } })
+        ]
+      }
+    ];
+
+    await renderRunsView(ARCHIVE_RUNS, liveRunsWithFixingItem);
+
+    const fixingValue = screen.getByTestId('runs-tile-machine-bars-fixing').querySelector('.run-bars-value')?.textContent;
+    expect(fixingValue).not.toBe('—');
   });
 
   it('renders the empty state and nothing else for empty payloads', async () => {
@@ -635,5 +767,101 @@ describe('RunsView', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  // Task 7: the range control (design doc: "Range") — a segmented Today /
+  // This week / This month / All group that scopes the tiles, the list, and
+  // the wide "machine time by stage" tile together, composed with (not
+  // instead of) the existing project filter.
+  it('renders the four range buttons, defaulting to All', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByTestId('runs-range')).toHaveAttribute('aria-label', 'Range');
+
+    for (const r of RUN_RANGES) {
+      expect(screen.getByTestId(`runs-range-${r}`)).toHaveAttribute('aria-pressed', r === 'all' ? 'true' : 'false');
+    }
+  });
+
+  it('narrows the run list to the clicked range, and restores it on clicking back to All', async () => {
+    await renderRunsView([RUN_A, RUN_B], []);
+
+    await userEvent.click(screen.getByTestId('runs-range-today'));
+
+    // RUN_B started 40 days ago — out of `today`'s window regardless of
+    // which day this suite runs on (see RUN_A/RUN_B's own fixture comment).
+    expect(screen.getByTestId(`runs-row-${RUN_A.runId}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`runs-row-${RUN_B.runId}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('1');
+    expect(screen.getByTestId('runs-range-today')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('runs-range-all')).toHaveAttribute('aria-pressed', 'false');
+
+    await userEvent.click(screen.getByTestId('runs-range-all'));
+
+    // Widening back to `all` restores both rows — this is not merely "the
+    // filter cleared", it is proof the range narrowing above never dropped
+    // RUN_B from `merged` (the unfiltered corpus), only from `filtered`.
+    expect(screen.getByTestId(`runs-row-${RUN_A.runId}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`runs-row-${RUN_B.runId}`)).toBeInTheDocument();
+  });
+
+  it('composes the range filter with the project filter down to the range-empty state', async () => {
+    await renderRunsView([RUN_A, RUN_B], []);
+
+    await userEvent.click(screen.getByTestId('runs-range-today'));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), RUN_B.project);
+
+    // `today` already excludes RUN_B on its own (case above); narrowing the
+    // PROJECT filter to RUN_B's project on top of it excludes RUN_A too
+    // (different project), so the intersection is empty even though neither
+    // filter alone would be.
+    expect(screen.getByTestId('runs-empty-range')).toHaveTextContent('no runs in this range');
+    expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('0');
+    expect(screen.getByTestId('runs-tile-avg-item')).toHaveTextContent('—');
+    expect(screen.getByTestId('runs-tile-fixloops')).toHaveTextContent('—');
+    expect(screen.getByTestId('runs-tile-verify')).toHaveTextContent('—');
+    for (const stage of MACHINE_STAGES) {
+      expect(screen.getByTestId(`runs-tile-machine-bars-${stage}`)).toHaveTextContent('—');
+    }
+
+    // The combination emptied the visible rows, but the project SELECT still
+    // offers both projects — `projects` derives from `merged`, never from
+    // the range/project-filtered list, so a range that empties a project
+    // must not also remove the option that would switch back to it.
+    const optionValues = Array.from(
+      screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')
+    ).map((o) => o.getAttribute('value'));
+    expect(optionValues).toEqual(expect.arrayContaining([RUN_A.project, RUN_B.project]));
+  });
+
+  it('sums machine time by stage across the runs in range, in the wide tile', async () => {
+    const { container } = await renderRunsView([RUN_A, RUN_B], []);
+
+    // All seven MACHINE_STAGES rows always render, in pipeline order,
+    // whether or not this fixture recorded a millisecond in every one of
+    // them — StageBars.tsx's own "always seven, always ordered" contract.
+    const barRowIds = Array.from(container.querySelectorAll('[data-testid^="runs-tile-machine-bars-"]'))
+      .map((el) => el.getAttribute('data-testid'));
+    expect(barRowIds).toEqual(MACHINE_STAGES.map((stage) => `runs-tile-machine-bars-${stage}`));
+
+    const dispatchedValue = () =>
+      screen.getByTestId('runs-tile-machine-bars-dispatched').querySelector('.run-bars-value')?.textContent;
+
+    // A's own `dispatched` span is 5 minutes, B's is 10 (see their shared
+    // fixture comment above). Summed under `all` (both runs in scope):
+    // 5 + 10 = 15 minutes. Read off the row's own `.run-bars-value` text
+    // node directly, not the row's whole `toHaveTextContent`, because "5m"
+    // is a substring of "15m" — a stale, unfiltered "15m" left on screen by
+    // a broken range filter would falsely satisfy a plain substring check
+    // against "5m" below.
+    expect(dispatchedValue()).toBe('15m');
+    expect(screen.getByTestId('runs-tile-machine')).toHaveTextContent('all runs · queue wait excluded');
+
+    await userEvent.click(screen.getByTestId('runs-range-today'));
+
+    // B (40 days ago) drops out of scope under `today` — only A's own
+    // 5-minute span remains.
+    expect(dispatchedValue()).toBe('5m');
+    expect(screen.getByTestId('runs-tile-machine')).toHaveTextContent('today · queue wait excluded');
   });
 });
