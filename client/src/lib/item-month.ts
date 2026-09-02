@@ -1,4 +1,5 @@
 import { MONTHS } from './item-age';
+import { lastTouched } from './item-touched';
 import type { BacklogItem } from '../../../shared/types';
 
 /**
@@ -50,17 +51,11 @@ function stampMs(stamp: string): number | null {
 }
 
 /**
- * The stamp this item is grouped by: `updated` when it has one, `created`
- * otherwise.
- *
- * The same precedence and the same fallback `isStale` reads (item-stale.ts),
- * and it has to be the same one: Archive's contents are decided by that
- * predicate, so grouping them by a different date would sort a column by a
- * number nobody used to decide it was there.
+ * The same stamp `isStale` reads, via the same function — Archive's contents
+ * are decided by that predicate, so grouping them by a different date would
+ * sort a column by a number nobody used to decide it was there.
  */
-function groupStamp(item: BacklogItem): string {
-  return item.updated !== '' ? item.updated : item.created;
-}
+const groupStamp = lastTouched;
 
 /**
  * `YYYY-MM` for this item, or `UNDATED` when neither stamp is present or

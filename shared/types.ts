@@ -83,6 +83,19 @@ export interface BacklogItem {
    */
   updated: string;
   /**
+   * Committer date (`%cI`, so ISO 8601 with an offset — a third stamp shape
+   * beside the bare date and the `Z` timestamp) of the last commit touching
+   * this item's file. `''` for an untracked file, a project outside git, or an
+   * unavailable git.
+   *
+   * Derived from git rather than the file, because `updated:` has one writer
+   * and the file has several editors — a groom session that writes Cause/Fix
+   * without `start --as groom` leaves it silent. Surfaced verbatim, same
+   * contract as `created`/`updated`/`started`: the client owns the precedence
+   * between the three (`lib/item-touched.ts`).
+   */
+  lastCommit: string;
+  /**
    * Which clock is currently running: `'groom'` while a groom session holds
    * the item, `'execute'` while an execute session does. `stop` removes the
    * key entirely, so a stopped item legitimately has no `phase` — that state

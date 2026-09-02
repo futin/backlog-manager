@@ -52,7 +52,7 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     // fixture here once the calendar passes the window — the fallback to
     // `created` is a real rule (see item-stale.test.ts), just not one this
     // suite's shared fixture should be sitting on.
-    updated: agoISO(0), phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
+    updated: agoISO(0), lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over

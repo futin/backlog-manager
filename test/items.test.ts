@@ -167,6 +167,9 @@ describe('GET /api/items and /api/projects', () => {
     expect(bug1.updated).toBe('');
     expect(bug1.groomElapsed).toBe(0);
     expect(bug1.executeElapsed).toBe(0);
+    // A temp store is not a git repo, so the whole index exercises the degrade
+    // path: no history to read, and the scan still answers rather than throwing.
+    expect(index.items.every((i) => i.lastCommit === '')).toBe(true);
 
     // Every new key present at once: still parses, still bugs/open, groomed
     // still derives from the body — none of it lands in errors[] (asserted
