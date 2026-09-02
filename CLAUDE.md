@@ -134,11 +134,15 @@ happened.
   non-empty), never stored; status is the directory, never frontmatter. Ideas,
   refactors and out-of-scope derive `null`, not `false` — grooming is not a
   state they have, and for the first two the state they wait in is *promoted*.
-- **Board-versus-Archive is derived from `updated ?? created` and the run
-  payload, never stored.** `isStale`/`leavesBoard`
+- **Board-versus-Archive is derived from `updated ?? lastCommit ?? created`
+  and the run payload, never stored.** `isStale`/`leavesBoard`
   (`client/src/lib/item-stale.ts`) are the one implementation, read by both
   BoardView and ArchiveView, so an item can never be in both surfaces or
-  neither. Five rules the predicate encodes and no caller may re-decide: an
+  neither; `lastTouched` (`client/src/lib/item-touched.ts`) is the one
+  implementation of the three-rung precedence, read by `isStale` and by
+  Archive's month grouping so a column can never be ordered by a date nobody
+  used to decide its contents. Five rules the predicate encodes and no caller
+  may re-decide: an
   item **in progress** is never stale (`started` outranks the arithmetic); an
   item a **fresh orchestrator run holds** is never stale either, which is why
   both functions take `runs` — required, no `[]` default, because a default
@@ -161,6 +165,27 @@ happened.
   the one numeric setting whose clamp falls back to the DEFAULT rather than
   the nearest bound below `min`, because `0` would silently empty three
   columns.
+
+- **The middle rung of "last touched" comes from git, not the item file.**
+  `updated:` has exactly one writer (`backlog.mjs start`/`stop`) while the item
+  file has several editors, so a groom session that writes Cause and Fix
+  through the editor without `start --as groom` leaves the frontmatter silent —
+  and ixray's bug-7 aged off the Board on a five-week-old `created:` five days
+  after it was groomed. `lastCommit` (`server/src/items/git-dates.util.ts`) is
+  the committer date of the last commit touching the file, read once per scan
+  with `git log --name-only --relative`, keyed relative to the *project* path
+  because a registered directory need not be a repo root. Every failure — no
+  git, no repo, untracked file, timeout — degrades to `created`, never throws:
+  an unreadable history must not 500 every project's board. **The container
+  needs `git` installed and `safe.directory` in system config** (Dockerfile);
+  without either the degrade path is silent and the fix is host-only, which is
+  how it first shipped invisible. The result is memoised per project against
+  the mtimes of `index` and `logs/HEAD` — the one cache in `items/`, and it is
+  a memo rather than the stale cache `ItemsService` refuses because it is keyed
+  on the files git rewrites whenever the answer can change; with neither file
+  present there is no key that can move and it recomputes instead. It exists
+  because the call costs 84–396ms per project and `scanProject` runs on both
+  `/api/items` and `/api/projects`.
 
 - **`refactors/` is a peer section, not a facet on ideas**: ideas are new,
   refactors are existing things that should be improved. Prefix `ref` (short

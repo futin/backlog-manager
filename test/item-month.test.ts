@@ -11,7 +11,7 @@ import type { BacklogItem } from '../shared/types';
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   return {
     id: 'bug-1', title: 'a bug', created: '2026-03-01', started: '', updated: '',
-    phase: '', groomElapsed: 0, executeElapsed: 0, kind: '', tags: [],
+    lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '', tags: [],
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md',
     ...over
@@ -29,6 +29,13 @@ describe('monthKey', () => {
 
   it('falls back to created when updated is empty', () => {
     expect(monthKey(fakeItem({ created: '2026-03-01', updated: '' }))).toBe('2026-03');
+  });
+
+  it('groups by lastCommit when updated is absent', () => {
+    // Same precedence as isStale, so a column ordered by month matches the
+    // dates that decided which items are in it.
+    expect(monthKey(fakeItem({ created: '2026-03-01', lastCommit: '2026-08-28T17:02:39+02:00' })))
+      .toBe('2026-08');
   });
 
   it('reads a bare YYYY-MM-DD updated as well as a timestamp', () => {

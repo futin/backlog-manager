@@ -26,9 +26,22 @@ WORKDIR /app
 # child and is what actually fixes that. This is the second layer: it keeps the
 # failure from coming back silently if the spawn ever grows a wrapper again.
 # Installed before the dependency layers so a package.json edit does not redo it.
+#
+# git, because the scan derives each item's `lastCommit` from it
+# (server/src/items/git-dates.util.ts). Its absence degrades silently to the
+# `created` fallback, which is exactly the staleness bug that rung exists to
+# fix — so the container has to carry it or the fix is host-only.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends procps \
+  && apt-get install -y --no-install-recommends procps git \
   && rm -rf /var/lib/apt/lists/*
+
+# The project mounts are read-only host paths owned by the host user while this
+# container runs as root, which trips git's dubious-ownership refusal. It has to
+# go in system config: `safe.directory` is only honoured from protected
+# configuration, so neither `-c` nor GIT_CONFIG_* would work. `*` is not a
+# boundary being crossed — the mounts are read-only and the tool is
+# loopback-only.
+RUN git config --system --add safe.directory '*'
 
 # pnpm, via corepack, so the version the image installs with is the one
 # package.json's `packageManager` field names rather than whatever npm happens

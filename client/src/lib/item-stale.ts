@@ -1,5 +1,6 @@
 import { daysSince } from './item-age';
 import { isInProgress } from './item-progress';
+import { lastTouched } from './item-touched';
 import { runHoldsItem } from '../../../shared/agent';
 import type { BacklogItem, OrchestratorRunsPayload } from '../../../shared/types';
 
@@ -75,13 +76,10 @@ function ageInDays(stamp: string, now: number): number | null {
  * Three rules, each of which exists to stop an item disappearing for a reason
  * that is not neglect:
  *
- * 1. **`updated` first, `created` as the fallback.** `updated` is stamped by
- *    every `start` and every `stop` (see the invariant in CLAUDE.md), so it is
- *    the honest "last touched". Every file written before that key existed has
- *    none, and for those the creation date is the only evidence there is. That
- *    fallback is why the first load after this ships moves genuinely old,
- *    never-touched items to Archive — the correct answer, and one the release
- *    note has to say out loud because it will look abrupt.
+ * 1. **`updated ?? lastCommit ?? created`**, the precedence `lastTouched`
+ *    owns (item-touched.ts). The git rung is there because `updated` has one
+ *    writer and the item file has several editors — without it, an item
+ *    groomed five days ago aged off the Board on a five-week-old `created`.
  * 2. **An unparseable or absent pair is FRESH, not stale.** A malformed file is
  *    a thing to go and fix, and the way anyone notices it is that it is still
  *    on the board. Vanishing it into Archive would hide the one item that most
@@ -137,7 +135,7 @@ export function isStale(
   if (item.status !== 'open') return false;
   if (isInProgress(item) || runHoldsItem(item, runs)) return false;
 
-  const stamp = item.updated !== '' ? item.updated : item.created;
+  const stamp = lastTouched(item);
   if (stamp === '') return false;
 
   const age = ageInDays(stamp, now);

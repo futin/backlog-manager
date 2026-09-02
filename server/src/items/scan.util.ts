@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { lastCommitDates } from './git-dates.util';
 import { ItemParseError, clampPhase, deriveGroomed, parseElapsed, parseFrontmatter } from './parse.util';
 import type { BacklogItem, ItemStatus, RegistryProject, Section } from '../../../shared/types';
 
@@ -41,6 +42,8 @@ export function scanProject(project: RegistryProject): { items: BacklogItem[]; e
   const items: BacklogItem[] = [];
   const errors: string[] = [];
   const backlog = join(project.path, 'backlog');
+  // Once per scan, not per item: it shells out to git.
+  const commits = lastCommitDates(project.path);
 
   for (const leaf of LEAVES) {
     const dir = join(backlog, leaf.rel);
@@ -63,6 +66,9 @@ export function scanProject(project: RegistryProject): { items: BacklogItem[]; e
           // field means and why phase/the elapsed buckets clamp instead of
           // rejecting a hand-edited value.
           updated: fm.fields.updated ?? '',
+          // Built as a literal POSIX path, not via join(), to match the shape
+          // `git log --relative` prints on every platform.
+          lastCommit: commits.get(`backlog/${leaf.rel}/${name}`) ?? '',
           phase: clampPhase(fm.fields.phase),
           groomElapsed: parseElapsed(fm.fields['groom-elapsed']),
           executeElapsed: parseElapsed(fm.fields['execute-elapsed']),

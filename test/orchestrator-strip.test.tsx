@@ -138,7 +138,7 @@ describe('BoardView: run strips and card live bars', () => {
   function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     const base: BacklogItem = {
       id: 'task-14', title: 'wire the heartbeat', created: '2026-08-20', started: '', tags: [],
-      updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
+      updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
       section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
       groomed: true, path: '/abs/alpha/backlog/tasks/open/task-14-wire-the-heartbeat.md',
       ...over

@@ -13,7 +13,7 @@ import type {
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   const base: BacklogItem = {
     id: 'bug-1', title: 'a bug', created: '', started: '', tags: [],
-    updated: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
+    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
   };
@@ -102,6 +102,48 @@ describe('isStale', () => {
     expect(isStale(fakeItem({ ...old, status: 'done' }), WINDOW, NOW, [])).toBe(false);
     expect(isStale(fakeItem({ ...old, status: 'terminal', section: 'out-of-scope' }), WINDOW, NOW, []))
       .toBe(false);
+  });
+
+  /*
+   * The middle rung. `updated` has one writer while the item file has several
+   * editors, so a groomed item can carry a months-old `created` and nothing
+   * else — which is how a bug groomed five days earlier left the Board.
+   */
+  it('reads lastCommit when there is no updated stamp', () => {
+    const groomed = fakeItem({ created: dateAgo(35), lastCommit: stampAgo(5 * DAY) });
+    expect(isStale(groomed, WINDOW, NOW, [])).toBe(false);
+    expect(leavesBoard(groomed, WINDOW, NOW, [])).toBe(false);
+  });
+
+  it('is stale when created and lastCommit are both outside the window', () => {
+    const item = fakeItem({ created: dateAgo(35), lastCommit: stampAgo(35 * DAY) });
+    expect(isStale(item, WINDOW, NOW, [])).toBe(true);
+  });
+
+  it('reads updated, not lastCommit, when both are present', () => {
+    const item = fakeItem({ updated: stampAgo(2 * DAY), lastCommit: stampAgo(200 * DAY) });
+    expect(isStale(item, WINDOW, NOW, [])).toBe(false);
+  });
+
+  it('reads lastCommit, not created, when both are present', () => {
+    const item = fakeItem({ created: dateAgo(3), lastCommit: stampAgo(200 * DAY) });
+    expect(isStale(item, WINDOW, NOW, [])).toBe(true);
+  });
+
+  it('treats an unparseable lastCommit as fresh rather than reaching created', () => {
+    // Precedence is on presence, not validity: a broken file stays on the
+    // Board where someone will notice it.
+    const item = fakeItem({ created: dateAgo(90), lastCommit: 'whenever' });
+    expect(isStale(item, WINDOW, NOW, [])).toBe(false);
+  });
+
+  it('ages a lastCommit carrying a UTC offset exactly', () => {
+    // `%cI` writes the committer's offset, not `Z` — the only rung whose stamp
+    // does, and it must neither read as a bare date nor parse to NaN.
+    const outside = new Date(NOW - (WINDOW * DAY + 3600_000)).toISOString().replace('Z', '+00:00');
+    const inside = new Date(NOW - (WINDOW * DAY - 3600_000)).toISOString().replace('Z', '+00:00');
+    expect(isStale(fakeItem({ lastCommit: outside }), WINDOW, NOW, [])).toBe(true);
+    expect(isStale(fakeItem({ lastCommit: inside }), WINDOW, NOW, [])).toBe(false);
   });
 
   it('is false for a future stamp', () => {
