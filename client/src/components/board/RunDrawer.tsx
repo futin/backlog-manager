@@ -6,7 +6,7 @@ import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runElapsedMs, stepperDots
 } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
-import { RowTime, TIMELESS_STAGES } from './RunRowTime';
+import { RowTime } from './RunRowTime';
 import type { OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
 
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
