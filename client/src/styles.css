@@ -1433,3 +1433,77 @@ body {
 .run-seg-warn { background: var(--amber) }
 .run-seg-idle { background: var(--mustard) }
 .run-seg-muted { background: var(--ink3) }
+
+/* ---------------------------------------------- run stage bars (Task 4)
+   StageBars.tsx: the seven-row "where did the time go" widget, rendered
+   twice — once per run (Task 6, inside .runs-detail) and once summed across
+   a whole visible range (Task 7, the wide toolbar tile) — so its rules live
+   in their own block rather than folding into either caller's own section.
+
+   ONE SERIES, ONE HUE. Unlike the per-item .run-detail-stagebar above (whose
+   segments are different STAGES packed into the same bar, and therefore need
+   one tone per stage to stay legible), every bar here is the same series —
+   one stage's own total on its own row — so there is exactly one thing for
+   colour to distinguish (a filled row from an empty one), not seven.
+   `--cyan` is not an arbitrary choice for that one hue: it is the tone six
+   of these seven stages already wear on their own item chip (`.board-card-
+   stage`, the `active` tone, above). The only `MACHINE_STAGES` member that
+   chip does NOT colour cyan is `preflight` (it renders `.board-card-stage-
+   idle` there, grouped with the quiet "waiting, not a problem" tone) — but
+   this widget is answering "how much orchestrator time", not "what stage is
+   this item in", and `runStageTotals` already counts `preflight` as machine
+   time on that basis. Lending it the same cyan as its six neighbours keeps
+   the set reading as what it is — one measurement taken seven times — rather
+   than carving out a visual exception for a distinction this widget was
+   never asked to draw.
+
+   THE ROW SET IS FIXED AND ORDERED — always all seven `MACHINE_STAGES`
+   entries, always in that constant's own pipeline order, whether or not a
+   given run/range ever recorded a millisecond in one of them (StageBars.tsx
+   prints `—` for an absent stage rather than omitting its row). This is what
+   keeps the per-run instance and the range-wide instance comparable at a
+   glance: `fixing` sits at row 5 of both, every time, so a reader moving
+   from the card to the tile is never re-scanning a reshuffled list.
+
+   THE VALUE IS INK, NOT CYAN. This codebase's colour vocabulary keeps data
+   colour off text on purpose (CONSTRAINTS.md: "text never wears a data
+   colour" — values print in --ink/--ink2/--ink3 regardless of what tone the
+   thing beside them uses). The bar is the data-coloured element; the number
+   restating that same measurement in words is the PRECISE reading a bar's
+   length can only approximate, and colouring it to match would make it read
+   as decoration rather than as the figure to actually trust. `--ink3` for
+   the `-none` modifier is the same muted tone the rest of this app already
+   uses for "nothing recorded" (`.board-card-stage-idle`, `.run-detail-
+   time`), not a new one invented for this widget.
+
+   NO IN-BAR LABEL, NO TRACK BACKGROUND. A label baked into the fill would
+   have to sit on top of it for a long bar and past its end for a short one —
+   two layouts fighting for the six pixels of height a widget built to
+   summarise seven rows in the space of one has no room to referee. The row's
+   own label/value columns already say both things (which stage, how long)
+   in a fixed place. A visible track background would be worse than
+   redundant: an empty track painted the same as a filled one would make
+   "nothing was ever recorded here" indistinguishable from "a value too small
+   to see" — exactly the confusion the `—`/no-fill pairing on an absent stage
+   (StageBars.tsx's `ms > 0` guard) exists to prevent. The 1px `--hairline2`
+   rule on the track's left edge is the one mark every row keeps regardless —
+   a shared baseline the bars grow from, not a value of its own. */
+.run-bars { display: flex; flex-direction: column; gap: 5px }
+.run-bars-row {
+  display: grid; grid-template-columns: 80px 1fr 60px;
+  align-items: center; gap: 8px;
+}
+.run-bars-label { font-family: var(--mono); font-size: 10px; color: var(--ink2) }
+.run-bars-track { position: relative; height: 6px; border-left: 1px solid var(--hairline2) }
+/* Same floor as .run-detail-seg above and for the identical reason: a
+   genuinely brief stage (a few seconds) must stay a visible sliver next to
+   one that took most of an hour, not shrink to nothing beside it. */
+.run-bars-fill {
+  position: absolute; left: 0; top: 0; height: 6px;
+  background: var(--cyan); border-radius: 0 3px 3px 0; min-width: 2px;
+}
+.run-bars-value {
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink);
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.run-bars-value-none { color: var(--ink3) }
