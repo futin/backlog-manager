@@ -361,15 +361,23 @@ export function RunDetail(
                 <RowTime item={row} now={now} testIdPrefix="run-detail-item-time" />
               </div>
 
-              {/* The queue-wait / preflight lead line (Task 6) — the two
-                  numbers `RowTime`'s `itemDurationMs` deliberately excludes
-                  from "how long did this take" (this file's own header has
-                  the real-run defect that exclusion fixed), restored here
-                  as CONTEXT for why a queue was long rather than folded
-                  back into any total. Omitted entirely, not rendered
-                  empty, when NEITHER half is known: a `pending` item has
-                  not started queueing out yet, and a hand-edited or
-                  corrupt `stageAt` has nothing honest to report either. */}
+              {/* The queue-wait / preflight lead line (Task 6). Only
+                  `queueWait` is something `RowTime`'s `itemDurationMs`
+                  actually excludes — `pending`, the one interval
+                  `startedAtMs` (run-time.ts) drops (this file's own header
+                  has the real-run defect that exclusion fixed) — so it is
+                  genuine CONTEXT the head reading has no room for.
+                  `preflightSpan` is a different kind of number:
+                  `itemDurationMs` KEEPS `preflight` (`startedAtMs` treats
+                  the gate check as work on this item, the same way
+                  `MACHINE_STAGES`, run-stats.ts, counts `preflight` toward
+                  the run-level rollup above), so this figure is a
+                  BREAKDOWN of time already sitting inside the head reading,
+                  not a second thing subtracted from it. Omitted entirely,
+                  not rendered empty, when NEITHER half is known: a
+                  `pending` item has not started queueing out yet, and a
+                  hand-edited or corrupt `stageAt` has nothing honest to
+                  report either. */}
               {(queueWait !== null || preflightSpan !== undefined) && (
                 <div className="run-detail-lead" data-testid={`run-detail-lead-${row.id}`}>
                   {[

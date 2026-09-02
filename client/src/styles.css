@@ -1405,14 +1405,15 @@ body {
    reflowing this run-scoped instance too. */
 .run-detail-rollup .run-bars-row { grid-template-columns: 80px 1fr 60px }
 
-/* One item card's queue-wait / preflight lead line (Task 6) — the two
-   numbers `itemDurationMs` deliberately excludes from "how long did this
-   item take" (RunRowTime.tsx's own file header has the real-run defect that
-   exclusion fixed), printed here as CONTEXT between the card's head and its
-   StageTrack rather than folded back into any total. Same size/colour as
-   `.run-detail-time` above (the run-level equivalent of this same
-   "secondary, muted context" register) rather than a new one invented for
-   an item-scoped reading. */
+/* One item card's queue-wait / preflight lead line (Task 6) — printed here
+   as CONTEXT between the card's head and its StageTrack, not folded back
+   into any total. Only the `queue` half is something the head reading
+   above actually excludes (`itemDurationMs` drops `pending`, never
+   `preflight` — see RunDetail.tsx's own comment on this element for the
+   full "breakdown, not a second exclusion" reasoning behind the
+   `preflight` half). Same size/colour as `.run-detail-time` above (the
+   run-level equivalent of this same "secondary, muted context" register)
+   rather than a new one invented for an item-scoped reading. */
 .run-detail-lead { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
 
 /* ---------------------------------------------- run stage bars (Task 4)

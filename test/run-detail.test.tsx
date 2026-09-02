@@ -376,7 +376,11 @@ describe('RunDetail', () => {
     render(<RunDetail summary={summary} live={null} />);
 
     const time = screen.getByTestId('run-detail-item-time-q-1');
-    // 11:41 minus 11:17 (the earliest NON-pending stamp) = 25 minutes flat.
+    // 11:41 minus 11:16 (preflight, the earliest non-pending arrival) = 25
+    // minutes flat. `preflight` counts as work here — `itemDurationMs`
+    // excludes only `pending` — so the start point is NOT `dispatched`
+    // (11:17); anchoring on that stamp instead would silently drop
+    // preflight's own minute from the reading.
     expect(time).toHaveTextContent(`25m 00s · ${formatClock('2026-09-01T11:41:00.000Z')}`);
     // The wrong, queue-wait-inclusive reading (11:41 minus the 09:00
     // `pending` stamp) would print 2h 41m — asserted absent by name, not
