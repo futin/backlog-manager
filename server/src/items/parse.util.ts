@@ -76,20 +76,30 @@ export function sectionText(body: string, heading: string): string {
  * and execute is exactly what backlog-execute refuses on a bug whose Fix is
  * unknown — so the board promised work the skill would bounce.
  *
- * Hence three parts. Markdown emphasis is stripped from both ends, so
+ * Hence four parts. Markdown emphasis is stripped from both ends, so
  * `**Unknown**` is the same answer as `Unknown`. The bare word alone still
- * matches, which is the sentinel backlog-capture actually writes. And the word
- * may be followed by punctuation or a dash and then keep going for a whole
+ * matches, which is the sentinel backlog-capture actually writes. The word may
+ * be followed by punctuation or a dash and then keep going for a whole
  * paragraph — `[\s\S]*` rather than `.*` because `^`/`$` are not multiline
- * here and that tail routinely spans lines.
+ * here and that tail routinely spans lines. And the word may *end its line*
+ * and be followed by a paragraph starting on the next one, which is the shape
+ * a careful capture actually writes: the sentinel on its own line, then prose
+ * explaining why the answer is deliberately deferred. That shape is what the
+ * first version of this pattern missed: it had only the same-line
+ * continuation, so two open bugs whose Cause read `unknown\n\nThe mechanism is
+ * not in doubt …` both derived as groomed and both showed an execute button
+ * that backlog-execute refuses.
  *
  * What it deliberately does NOT match is a sentence that merely opens with the
- * word: "Unknown option passed to X" is a real cause, so whitespace alone
- * after the word is not enough — punctuation or a dash has to follow. The bias
- * runs one way on purpose: a false "ungroomed" costs a groom that had little
- * to do, while a false "groomed" spends a whole session to be refused.
+ * word: "Unknown option passed to X" is a real cause, so more prose on the
+ * SAME line as the word means this is not the sentinel. That is why the run
+ * between the word and the alternation is `[ \t*_`]*` and not `[\s*_`]*` —
+ * it must not swallow the newline the third branch exists to see, and spaces
+ * or tabs trailing the word are the only thing allowed to sit in front of it.
+ * The bias runs one way on purpose: a false "ungroomed" costs a groom that had
+ * little to do, while a false "groomed" spends a whole session to be refused.
  */
-const UNKNOWN = /^[\s*_`#]*unknown[\s*_`]*(?:$|[.,:;!?\-–—][\s\S]*$)/i;
+const UNKNOWN = /^[\s*_`#]*unknown[ \t*_`]*(?:$|\r?\n[\s\S]*$|[.,:;!?\-–—][\s\S]*$)/i;
 
 /**
  * `phase` frontmatter is `groom` | `execute` while work is live, and the key

@@ -106,6 +106,27 @@ describe('deriveGroomed', () => {
     expect(deriveGroomed('bugs', '## Cause\n\nunknown, so far.\n\n## Fix\n\nx\n')).toBe(false);
   });
 
+  // The shape a careful capture actually writes, and the one the first version
+  // of this pattern missed: the sentinel alone on its line, then a paragraph
+  // saying why the answer is being deferred. Two open bugs looked like this
+  // and both showed an execute button. Only spaces may sit between
+  // the word and the newline — anything else on that line is prose about the
+  // word, covered by the test below.
+  it('bug whose unknown is followed by a deferral paragraph is not groomed', () => {
+    const cause = '## Cause\n\nunknown\n\nThe mechanism is not in doubt \u2014 the digest covers\n'
+      + 'one of three published paths.\n\n## Fix\n\nUse <=.\n';
+    expect(deriveGroomed('bugs', cause)).toBe(false);
+
+    const fix = '## Cause\n\nThe check uses < instead of <=.\n\n## Fix\n\nunknown\n\n'
+      + 'Worth weighing when this is groomed:\n\n- hash all of PUBLISHED_PATHS\n';
+    expect(deriveGroomed('bugs', fix)).toBe(false);
+
+    expect(deriveGroomed('bugs', '## Cause\n\n**Unknown**\n\nThree shapes.\n\n## Fix\n\nx\n'))
+      .toBe(false);
+    expect(deriveGroomed('bugs', '## Cause\n\nunknown   \n\nStill digging.\n\n## Fix\n\nx\n'))
+      .toBe(false);
+  });
+
   // The other side of that bias. A cause is allowed to be about the word.
   it('bug whose Cause merely opens with the word is groomed', () => {
     const body = '## Cause\n\nUnknown option names reach renderFrontmatter and survive as\n'
