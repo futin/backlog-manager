@@ -3,6 +3,8 @@ id: bug-10
 title: plugin:sync reports in sync for an install missing agents/
 created: 2026-09-01
 tags: plugin, sync, agents
+updated: 2026-09-02T07:37:12Z
+groom-elapsed: 115
 ---
 
 ## Symptom
@@ -72,40 +74,167 @@ claude plugin install  backlog-manager@backlog-manager-marketplace -y
 
 ## Cause
 
-unknown
+Two independent causes, one per finding the capture left open.
 
-The mechanism is not in doubt — the digest covers one of three published paths
-— but the fix is a judgement call this capture should not pre-empt, and there
-is a second, separate finding tangled up with it that wants its own diagnosis
-before either is settled:
+**1. The short-circuit measures one third of the publish surface.** Lines
+140-141 hash `<repo>/skills` against `<install>/skills` and nothing else;
+line 143 pairs that with `install.gitCommitSha === head` and returns. Because
+`agents/` is never hashed on either side, an install with no `agents/`
+directory at all is byte-for-byte indistinguishable from a complete one.
+`PUBLISHED_PATHS` (line 41) already names all three paths and is already used
+correctly for the dirty check at line 153, so the digest is the single line
+that disagrees with the rest of the script.
 
-**a sync run rewrites `sparsePaths` back to `[".claude-plugin", "skills"]`.**
-Observed twice on 2026-09-01: the entry was edited to include `agents` and a
-successful sync installed `agents/`; a later sync run from a different session
-reverted the entry and the install lost `agents/` again. Whether that is
-`claude plugin marketplace update` restoring a default, something in the
-uninstall/install pair, or this script, was not established. It matters because
-it decides what a fix has to defend against: if the entry cannot be relied on
-to persist, then hashing `agents` correctly still leaves a machine that
-silently drops the agent on the next unrelated sync, and the durable fix may
-have to assert or repair `sparsePaths` rather than merely notice its effect.
+The commit check cannot cover for it, which is why this is a real gap rather
+than redundancy: `gitCommitSha` records which commit the install was cloned
+from, not which paths the sparse checkout actually wrote out of it. The same
+sha legitimately produces an install with `agents/` or without it, depending
+entirely on machine-local `sparsePaths`. Nothing in the install record
+distinguishes the two.
+
+Measured 2026-09-02: `diff -r` is clean between the repo and the install for
+all three of `skills`, `.claude-plugin` and `agents`, so hashing all three
+introduces no standing drift — the fix cannot turn the short-circuit into a
+reinstall-on-every-run loop.
+
+**2. The `sparsePaths` reversion is Claude Code's own config reconcile — not
+this script, and not `claude plugin marketplace update`.**
+`~/.claude/plugins/known_marketplaces.json` is a *materialized cache*. The
+declaration it is built from is `~/.claude/settings.json` →
+`extraKnownMarketplaces["backlog-manager-marketplace"].source.sparsePaths`,
+which still reads `[".claude-plugin", "skills"]` and has never had `agents`
+added to it.
+
+Claude Code 2.1.250 reconciles cache from declaration on session start (the
+startup path that logs `Installing N marketplace(s) in background`, and the
+headless plugin-install path alongside it). For every declared marketplace it
+deep-compares the declared `source` object against the materialized one; any
+difference at all classifies the entry `sourceChanged` and re-materializes it
+**from the declaration**, which re-runs
+`git sparse-checkout set --cone -- <declared paths>` in the marketplace clone.
+
+So hand-editing `known_marketplaces.json` does not merely fail to persist —
+it is precisely what *triggers* the revert, on the next session start, started
+from any project. The edit makes cache and declaration disagree, and the
+reconciler resolves every disagreement in the declaration's favour.
+
+Evidence on this machine, all consistent with that mechanism and with nothing
+else:
+
+- install record `installedAt 2026-09-01T18:41:23Z`, and the install copy does
+  carry `agents/backlog-reviewer.md` (mtime 20:41 local) — the edit worked
+  while it lasted.
+- the marketplace clone was re-sparsed at 18:44:00Z (clone dir mtime 20:44
+  local, three minutes after the install, matching the entry's `lastUpdated`)
+  and now has no `agents/` at all; its `.git/info/sparse-checkout` lists only
+  `/.claude-plugin/` and `/skills/`.
+- the live `known_marketplaces.json` and all three
+  `known_marketplaces.json.bak-*` snapshots show the two-path list.
+- corroboration: `guide-manager-marketplace` declares four paths
+  (`.claude-plugin`, `skills`, `bin`, `assets`) in that same settings block,
+  and its cache entry has carried all four unchanged since 2026-08-28. A
+  declared path persists; an undeclared one cannot.
+
+The install is currently ahead of the clone — it has `agents/`, the clone does
+not — so the next reinstall through any route drops the agent again until the
+declaration is fixed.
+
+What this means for the invariant: `CLAUDE.md` and `docs/invariants.md` both
+point at `known_marketplaces.json` as "the marketplace's own `sparsePaths`
+(machine-local)". That file is the cache, not the control. The lever is
+`extraKnownMarketplaces` in `settings.json`, and once `agents` is declared
+there the reconciler drives both the cache and the sparse checkout to match it
+without anyone editing either.
 
 ## Fix
 
-unknown
+The judgement call the capture deliberately left open, decided here: **the
+script reads the declaration and reports on it; it never writes machine-local
+state.**
 
-Worth weighing when this is groomed, and deliberately not decided here:
+Two reasons, and the second is the one that settles it. Writing
+`known_marketplaces.json` is guaranteed transient — that file is the cache the
+reconciler overwrites, so writing it *is* cause 2, performed deliberately.
+Writing `settings.json` would mean a repo script editing the user's own
+config, and the declaration legitimately lives at any of several tiers (user,
+project, local or managed settings, or `--sparse` on
+`claude plugin marketplace add`), so the repo cannot know that the tier it can
+see is the tier that governs. Detection plus a post-install hard failure that
+names the exact key makes the invariant self-diagnosing without crossing that
+boundary at all.
 
-- Hash all of `PUBLISHED_PATHS` rather than `skills` alone, so the digest
-  measures the actual publish surface. Smallest change, and it makes the
-  message honest. It does not address the `sparsePaths` reversion above.
-- Treat a published path that is missing from the install as a reinstall
-  trigger outright, independent of any digest — a missing directory is not a
-  content difference and arguably should not need one to be noticed.
-- Have the script assert `sparsePaths` covers `PUBLISHED_PATHS` and say so
-  loudly (or repair it) when it does not. This is the only option that touches
-  the half `CLAUDE.md` says the repo does not control, so it deserves the most
-  scrutiny: it means the repo writing machine-local state, and whether that is
-  a boundary worth crossing to make an invariant self-enforcing is the real
-  question.
-- Whatever is chosen, the `in sync` message should name what it compared.
+Four changes to `scripts/sync-plugin.mjs`:
+
+1. **Digest the whole publish surface.** Replace the two single-path
+   `hashTree` calls with a pair of exported pure helpers — one that maps
+   `PUBLISHED_PATHS` to per-path digests for a given root, and one that takes
+   two such maps and returns the paths whose digests differ, in
+   `PUBLISHED_PATHS` order. `hashTree` already returns `''` for a missing
+   root, so an absent `agents/` surfaces as drift with no separate existence
+   check: one mechanism covers both of the first two options the capture
+   listed. Short-circuit only when that drift list is empty *and*
+   `install.gitCommitSha === head`.
+2. **Both messages name what was compared.** In sync: name the paths that
+   matched, not "same skills as the working tree". Proceeding: name the paths
+   that drifted, so the reason for a reinstall is legible before it starts.
+3. **The post-install verification checks the same list** (it currently
+   re-hashes `skills` alone, line 189), and its failure message becomes the
+   diagnosis. A reinstall that completes and *still* lacks a published path is
+   the sparse-checkout shortfall by elimination, so the message must name
+   `~/.claude/settings.json` →
+   `extraKnownMarketplaces.<marketplace>.source.sparsePaths`, state that
+   `known_marketplaces.json` is a reconciled cache whose edits are reverted on
+   the next session start, and exit non-zero. This is the load-bearing half of
+   the fix: it converts "the reviewer agent silently is not there" into a red
+   sync that says which file to edit.
+4. **A read-only pre-flight warning before the uninstall.** If
+   `~/.claude/settings.json` parses and declares this marketplace with a
+   `sparsePaths` array that does not cover `PUBLISHED_PATHS`, print a warning
+   naming the missing paths and the full key, then continue. Warn, never
+   refuse: the file the script can read is one tier of several, and a machine
+   declaring at another tier — or declaring no `sparsePaths` at all, which
+   clones the full repo and is perfectly correct — must not be blocked by a
+   check that cannot see it. Step 3 remains the authoritative one. Its
+   placement before the uninstall is only so the actionable line is not buried
+   under install output; it must never be able to abort between the uninstall
+   and the install, which is the window that leaves the machine with no plugin.
+
+**Tests** — `scripts/sync-plugin.test.mjs`, `node --test` via
+`pnpm run test:skills`, alongside the existing `publishBlocker` and `hashTree`
+cases, which stay as they are:
+
+- identical digest maps produce an empty drift list.
+- an install missing `agents` entirely (digest `''` against a non-empty repo
+  digest) is reported as drifted — the bug's exact case, and the one that
+  fails against today's code.
+- a differing `.claude-plugin` is reported too, and when more than one path
+  differs they come back in `PUBLISHED_PATHS` order.
+- the per-root digest helper keys every entry of `PUBLISHED_PATHS` over a
+  fixture root, including one that does not exist on disk (value `''`).
+- the `sparsePaths` pre-flight helper — pure, taking a parsed settings object
+  and a marketplace name — returns the missing paths for
+  `[".claude-plugin", "skills"]`, empty for a declaration listing all three,
+  empty for a declaration carrying no `sparsePaths` key at all (full clone),
+  and empty for absent settings or an absent marketplace entry.
+
+**Docs.** `CLAUDE.md`'s "`agents/` is part of the plugin's publish surface"
+invariant and `docs/invariants.md:135-145` both name
+`known_marketplaces.json` as the machine-local half. Correct both: the
+declaration is `extraKnownMarketplaces` in `~/.claude/settings.json`, the
+cache is `known_marketplaces.json` and is reconciled from it on session start,
+and the sync now measures every entry of `PUBLISHED_PATHS` and fails loudly
+when an install comes up short.
+
+**One manual machine step, outside the repo and not something any code change
+here can do:** add `"agents"` to
+`extraKnownMarketplaces["backlog-manager-marketplace"].source.sparsePaths` in
+`~/.claude/settings.json`, start a Claude Code session so the reconcile
+re-sparses the clone, then run `pnpm run plugin:sync`.
+
+**Verification.** `pnpm run test:skills` green. Then, against the real
+install: remove `agents/` from the install copy by hand and confirm
+`pnpm run plugin:sync` no longer reports "in sync" but names `agents` and
+reinstalls; confirm `ls "$INSTALL/agents"` shows `backlog-reviewer.md`
+afterwards; restart Claude Code and confirm
+`backlog-manager:backlog-reviewer` resolves as a dispatchable agent. No
+browser check applies — none of this is visible in the board.
