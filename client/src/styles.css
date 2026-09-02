@@ -1553,13 +1553,21 @@ body {
    entering the CURRENT node, and only that one — carries a slow cyan
    gradient animated across itself; `.run-track-dot-current` carries its own
    pulsing ring. Every other dot, segment and value on the track is a static
-   read that only changes when a fresh `now` re-renders it. Both animations
-   are already covered by this file's `@media (prefers-reduced-motion:
-   reduce)` block above (the blanket `* { animation-duration: .01ms }`
-   rule), which is why no new media rule is added here — a reader who has
-   asked for less motion gets the sweep frozen mid-gradient and the ring
-   frozen at its first frame, both close enough to "a plain cyan line/dot"
-   to read as intentional rather than broken. */
+   read that only changes when a fresh `now` re-renders it.
+
+   NEITHER ANIMATION IS COVERED BY THE FILE'S BLANKET REDUCED-MOTION RULE
+   near the top of the file — for two different reasons, spelled out in
+   full where the fix actually lives, this block's own `@media
+   (prefers-reduced-motion: reduce)` carve-out at the end of this section.
+   In short: that blanket rule is `* { animation-duration: .01ms
+   !important; ... }`, and the universal selector never matches generated
+   content on a `::before`/`::after` — the sweep is this file's first
+   pseudo-element animation, so that gap was never exercised before it. The
+   ring sits on a real element and IS reached by the blanket rule, but only
+   enough to freeze it on its last keyframe rather than stop it, the same
+   trap `.board-card-stage-glyph`'s own override (also top of file) already
+   hit and fixed with an explicit `animation: none` — this block does the
+   same, for the same reason. */
 .run-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-top: 8px }
 .run-track-node {
   position: relative; display: flex; flex-direction: column; align-items: center;
@@ -1648,4 +1656,38 @@ body {
      ellipsising into unreadability. */
   .run-track-name { font-size: 8px }
   .run-track-val { font-size: 10.5px }
+}
+/* This section's own reduced-motion carve-out — kept inside the run-track
+   block itself, rather than folded into the blanket rule near the top of
+   the file, so a later deletion elsewhere in the file (Task 6 removes
+   `.run-detail-stagebar`) can never strand it.
+
+   The sweep needs a rule of its own because the blanket
+   `* { animation-duration: .01ms !important; ... }` cannot reach it at
+   all: `*` matches real elements, never the generated content a
+   `::before`/`::after` paints, and `[data-in="live"]::before` is the first
+   pseudo-element animation this file has ever had — the gap simply was
+   never exercised before it. Left alone, a reduced-motion reader would
+   still watch the gradient slide indefinitely; the blanket rule has no
+   opinion on it either way. The fallback below is a solid `--cyan` fill,
+   the spec's own stated rendering of the entering segment under reduced
+   motion.
+
+   `.run-track-dot-current` IS a real element, so the blanket rule does
+   reach it — but only far enough to floor `animation-duration` and
+   `animation-iteration-count`, which plays the ring keyframes once,
+   instantly, and parks the dot on the LAST frame rather than stopping it:
+   a permanent 6px, 10%-cyan halo around the current node, not its plain
+   resting state. `.board-card-stage-glyph`'s own override above (this
+   file's only other animated-then-reduced element) hit this identical
+   freeze-vs-cancel gap first; the fix is the one used there too —
+   `animation: none` outright, which the blanket rule can't contest because
+   it never sets `animation-name`, only the timing properties.
+
+   Neither line below needs `!important`: each shares its selector with
+   its own unconditional rule earlier in this section, so plain source
+   order — this block comes after both — is enough to win. */
+@media (prefers-reduced-motion: reduce) {
+  .run-track-node[data-in="live"]::before { animation: none; background: var(--cyan) }
+  .run-track-dot-current { animation: none }
 }
