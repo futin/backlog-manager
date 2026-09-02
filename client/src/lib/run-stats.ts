@@ -1,4 +1,5 @@
 import { isTerminalStage, itemDurationMs } from './run-time';
+import { RUN_STALE_MS } from '../../../shared/types';
 import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
 
 /**
@@ -140,11 +141,40 @@ export function itemStageSpans(item: Pick<RunQueueItem, 'stageAt'>): StageSpan[]
  * for a run that has already finished, `now − startedAt` for one still
  * `running`. The same fork `run-time.ts`'s `runElapsedMs` makes for the live
  * board, restated here rather than imported because that function's
- * signature is keyed on the LIVE payload's `fresh` flag (a `RUN_STALE_MS`
- * heartbeat check with no equivalent in an archived run, which cannot go
- * stale — it is either still running right now or it is finished forever)
- * — a genuinely different question asked of a genuinely different shape,
- * not a primitive worth sharing.
+ * signature is keyed on the LIVE payload's own `fresh` flag, which
+ * `OrchestratorArchiveRun` carries no equivalent of at all (live or
+ * archived, there is no `fresh` field on this shape — see `runStageTotals`
+ * below for what a function that has to derive freshness for ITSELF from
+ * `updatedAt` does instead) — a genuinely different question asked of a
+ * genuinely different shape, not a primitive worth sharing.
+ *
+ * CORRECTED (final-review fix wave): this comment used to justify skipping a
+ * freshness check by claiming an archived run "cannot go stale — it is
+ * either still running right now or it is finished forever." That claim is
+ * false, and it is exactly the false comfort that made `runStageTotals`'
+ * OWN former `status === 'running'` gate look sufficient on its own below —
+ * a CRASHED orchestrator leaves `run.json` at `status: "running"` forever
+ * (`orchestrate.mjs init` refuses to overwrite one; recovery is
+ * `--resume`/`--abort` only — this repo's own "One run per project, checked
+ * twice" invariant), so a `running` archived run genuinely CAN be stale:
+ * nobody has heard from that process in hours or days, and `status` alone
+ * never says so.
+ *
+ * `runStageTotals` below now checks `updatedAt`'s own freshness before
+ * trusting a `running` status at all. This function still does NOT, and
+ * that is a KNOWN, DELIBERATE gap this fix wave leaves alone rather than a
+ * repeat of the same oversight: a crashed run's `runWallMs` reading (`now -
+ * startedAt`, unconditionally, for any `status: 'running'` run) grows just
+ * as unboundedly as `runStageTotals`' open span used to, and that behaviour
+ * predates this branch entirely. It is safe to leave open here for a
+ * different reason than "it cannot happen" — this is a single PER-RUN
+ * reading, printed once beside that same run's own `running` status chip,
+ * where a person looking at it can see the chip itself is what looks wrong;
+ * it is never summed silently across a whole range the way `runStageTotals`'
+ * open span is (via `sumStageTotals`), which is what made THAT number's
+ * unbounded growth — one dead item quietly inflating a tile that looks like
+ * a fixed total for the whole visible range — the more urgent defect to
+ * close.
  *
  * `null` when `startedAt` will not parse, for either branch: there is no
  * honest number to report without a start to measure from. A `running` run
@@ -277,12 +307,71 @@ export type StageTotals = Partial<Record<RunStage, number>>;
  * the boundary the closed span already stopped counting at, so the open
  * span now measures only the genuinely uncounted tail: from that later
  * stamp to `now`.
+ *
+ * FIX ROUND 2 (final-review wave): the run-level gate above — `status ===
+ * 'running'` — is right but was INCOMPLETE on its own, for a case fix round
+ * 1 did not anticipate: a CRASHED orchestrator leaves `run.json` at
+ * `status: "running"` forever. `orchestrate.mjs init` refuses to overwrite
+ * a run file already at that status, fresh or stale — recovery is
+ * `--resume`/`--abort` only (this repo's own "One run per project, checked
+ * twice" invariant) — so `status` alone cannot tell a run still genuinely
+ * being worked apart from one whose process died hours or days ago and
+ * simply never got the chance to write anything else. `GET
+ * /api/orchestrator/archive` serves that frozen file verbatim, and the live
+ * poll's own merge drops it (a stale entry is never `fresh`, so
+ * `pickAuthority` never picks it as a live winner) — so the archive path
+ * was still handing this function a `running` run of arbitrarily old
+ * heartbeat, and crediting its frozen item `now - stamp` forever: the exact
+ * unbounded-growth failure the `status` gate above exists to prevent,
+ * reached through the one door that gate left open, both to this run's own
+ * rollup and — via `sumStageTotals` — to the wide tile summing every run in
+ * scope.
+ *
+ * The fix mirrors `runElapsedMs` (run-time.ts), which already forks on
+ * exactly this distinction for the live board: `now − startedAt` while
+ * genuinely live, `updatedAt − startedAt` once not, gated on `status ===
+ * 'running' && fresh`. This function cannot read that same `fresh` flag —
+ * `OrchestratorArchiveRun` carries no `fresh` field at all, live-backed or
+ * archived (see `runWallMs`'s own corrected comment above for the identical
+ * fact stated from that function's side) — so freshness has to be derived
+ * here instead of trusted from a passed-in flag: the same `RUN_STALE_MS`
+ * heartbeat check the server performs once for the live payload, measured
+ * here directly against `updatedAt`. While fresh, the open span still ends
+ * at `now`, unchanged from fix round 1. Once stale, it ends at `updatedAt`
+ * instead — frozen at the run's own last confirmed heartbeat, the same
+ * honest reading `runElapsedMs`'s own comment gives for a process nobody
+ * knows the state of, rather than at whatever instant the archive happens
+ * to be read.
+ *
+ * An `updatedAt` that will not parse is treated as NOT fresh — an
+ * unparseable heartbeat is not evidence a process is still alive, so it
+ * cannot earn the `now`-ticking branch — but it also leaves no honest
+ * instant to freeze the open span AT. Such an item's open span contributes
+ * nothing at all in that case, beyond the closed spans already summed above
+ * for it: the same "skip rather than fabricate" rule this file applies to
+ * every other unparseable stamp (see `parsedArrivals` above), rather than
+ * either extreme a less careful reading might reach for — crediting `now`
+ * anyway (silently un-fixing the very bug this round closes) or throwing
+ * (a hand-editable run file is exactly the kind of input this whole module
+ * exists to survive).
  */
 export function runStageTotals(
-  run: { status: OrchestratorRun['status']; queue: readonly Pick<RunQueueItem, 'stage' | 'stageAt'>[] },
+  run: {
+    status: OrchestratorRun['status'];
+    updatedAt: string;
+    queue: readonly Pick<RunQueueItem, 'stage' | 'stageAt'>[];
+  },
   now: number
 ): StageTotals {
   const totals: StageTotals = {};
+
+  // This run's own heartbeat freshness — see FIX ROUND 2 above for why it
+  // must be DERIVED here (RUN_STALE_MS measured against `updatedAt`) rather
+  // than read off a `fresh` flag the way the live board's `runElapsedMs`
+  // can. Computed once, outside the item loop, since it depends only on the
+  // run itself, never on which item the loop happens to be measuring.
+  const updated = parseStamp(run.updatedAt);
+  const fresh = updated !== null && now - updated < RUN_STALE_MS;
 
   for (const item of run.queue) {
     for (const span of itemStageSpans(item)) {
@@ -303,7 +392,19 @@ export function runStageTotals(
         // true of it.
         const arrivals = parsedArrivals(item);
         const start = Math.max(arrivals[arrivals.length - 1].at, currentAt);
-        totals[item.stage] = (totals[item.stage] ?? 0) + Math.max(0, now - start);
+        if (fresh) {
+          totals[item.stage] = (totals[item.stage] ?? 0) + Math.max(0, now - start);
+        } else if (updated !== null) {
+          // Stale, but with an honest last-heartbeat instant to freeze the
+          // span at — FIX ROUND 2's own branch. Never `now` here: that is
+          // precisely the unbounded reading a crashed run's frozen item must
+          // not be credited with.
+          totals[item.stage] = (totals[item.stage] ?? 0) + Math.max(0, updated - start);
+        }
+        // else: `updatedAt` itself will not parse. Not fresh (per `fresh`'s
+        // own `updated !== null` half above) and with no honest instant to
+        // freeze at either, this item's open span adds nothing on top of
+        // its closed spans (already summed above) for this render.
       }
     }
   }
@@ -348,6 +449,19 @@ export interface RunAggregates {
    * single item, so this average now answers "how long did merging an item
    * actually take," not "how long, including everything else queued ahead
    * of it, did an item sit between its first and last stamp."
+   *
+   * A GENUINE `0` from `itemDurationMs` — a merged item whose only recorded
+   * arrival is its own terminal stamp, so start and end read the identical
+   * instant — COUNTS toward this mean, deliberately, and this is a real
+   * behaviour change from the deleted rule: old `itemWallMs` returned `null`
+   * (excluded outright) for any item with fewer than two recorded stamps,
+   * where `itemDurationMs` finds one non-`pending` arrival to measure both
+   * ends from and reports the honest `0` instead. Keeping it is the same
+   * principle the rest of this task applies everywhere else — an item that
+   * genuinely took under a second of measured work is a real data point, and
+   * silently dropping it would be exactly the kind of quiet exclusion this
+   * whole rewrite exists to remove, just aimed at a `0` instead of a
+   * `pending` leg this time.
    */
   avgItemWorkMs: number | null;
   /**

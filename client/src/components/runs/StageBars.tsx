@@ -10,8 +10,8 @@ import type { StageTotals } from '../../lib/run-stats';
  * until this file, never rendered anywhere.
  *
  * Rendered twice, and knows nothing about either caller: once inside the
- * per-run detail pane over a single run's own `runStageTotals(authority,
- * now)` (Task 6), and once as a wide toolbar tile over `sumStageTotals`
+ * per-run detail pane over a single run's own `runStageTotals(source, now)`
+ * (Task 6), and once as a wide toolbar tile over `sumStageTotals`
  * folded across every run in the visible range (Task 7). This component only
  * ever takes the already-derived totals plus a `testId` to namespace its
  * rows under — no fetching, no arithmetic beyond the one `pct` below —

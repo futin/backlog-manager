@@ -28,12 +28,13 @@
  * "this week" out loud.
  *
  * Pure arithmetic only — no fetching, no React, no `Date.now()` called
- * internally. `now` is always a parameter, the rule `run-time.ts` and
- * `run-stats.ts` both state in their own headers for the same reason: a
- * caller rendering several of these against one screen has to take a single
- * clock reading and thread it through everything, or two reads a
- * millisecond apart can disagree about which side of a boundary "now" falls
- * on.
+ * internally. `now` is always a parameter — the same convention
+ * `run-stats.ts`'s own file header states outright ("`now` is always a
+ * parameter, never read internally via `Date.now()`") — for the reason that
+ * header credits to `RunDrawer.tsx`: a caller rendering several of these
+ * against one screen has to take a single clock reading and thread it
+ * through everything, or two reads a millisecond apart can disagree about
+ * which side of a boundary "now" falls on.
  */
 
 /** The four range choices, in the toolbar's left-to-right order. */

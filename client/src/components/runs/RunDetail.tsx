@@ -202,13 +202,28 @@ export function RunDetail(
   // `null` (a run finishing), because `fetchedRun` is already in flight for
   // exactly that transition (see the effect above) and replaces `summary`
   // itself, not merely one field on it, the moment it lands.
-  const authority: RunFields = pickAuthority([live, fetchedRun], summary);
+  //
+  // `source` holds the WHOLE winning object, not a projection of it —
+  // `runStageTotals` below needs a real `.queue` of `{stage, stageAt}` items
+  // plus the run's own `status`/`updatedAt` (its open-span credit is gated
+  // on the run's status AND heartbeat freshness, never on `live` alone —
+  // see that function's own doc comment for why), which only the
+  // unprojected object still carries. `authority` used to be a SECOND call
+  // to `pickAuthority`, returning the identical winner under the narrower
+  // `RunFields` type — restating the same precedence a second time just to
+  // get a different type is exactly the kind of duplicate this component's
+  // own reuse rule (file header) argues against, so it is now `source`
+  // itself, narrowed by a plain assignment: structural typing accepts a
+  // wider object wherever the narrower `Pick` is expected, so the
+  // projection costs nothing beyond the type annotation.
+  const source: OrchestratorRun | OrchestratorArchiveRun = pickAuthority([live, fetchedRun], summary);
+  const authority: RunFields = source;
   const attention = authority.attention;
 
-  // Rows follow the SAME precedence as `authority` above, restated here
-  // (rather than derived from `authority` itself) only because a live/
-  // fetched queue item and an archived one are different TypeScript shapes
-  // — `rowsFromLive` reads a full `RunQueueItem[]` (verification tails
+  // Rows follow the SAME precedence as `source`/`authority` above, restated
+  // here (rather than derived from either) only because a live/fetched
+  // queue item and an archived one are different TypeScript shapes —
+  // `rowsFromLive` reads a full `RunQueueItem[]` (verification tails
   // included), `rowsFromArchive` reads a stripped `ArchiveQueueItem[]`. The
   // ORDER of the three checks below is not a second decision to keep in
   // sync with `pickAuthority`'s: it can only ever produce the same winner,
@@ -226,16 +241,6 @@ export function RunDetail(
     : fetchedRun !== null
       ? rowsFromLive(fetchedRun.queue)
       : rowsFromArchive(summary.queue);
-
-  // One more view of the same live -> fetchedRun -> summary precedence as
-  // `authority`/`rows` above, but as the WHOLE object rather than either of
-  // their narrower projections (`authority` is a `RunFields` slice; `rows`
-  // is already flattened into `DetailRow[]`). `runStageTotals` below needs
-  // a real `.queue` of `{stage, stageAt}` items plus the run's own
-  // `status` (its open-span credit is gated on `status === 'running'`,
-  // never on `live` alone — see that function's own doc comment for why),
-  // which only this unprojected object still carries.
-  const source: OrchestratorRun | OrchestratorArchiveRun = live ?? fetchedRun ?? summary;
 
   const merged = rows.filter((r) => r.stage === 'merged').length;
   const skipped = rows.filter((r) => r.stage === 'skipped').length;

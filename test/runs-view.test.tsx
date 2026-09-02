@@ -146,8 +146,21 @@ const RUN_LIVE = run({
       stageAt: { pending: '2026-08-25T09:00:00.000Z', merged: '2026-08-25T09:10:00.000Z' },
       verification: [{ cmd: 'pnpm test', ok: true }]
     }),
-    // still moving — two fix loops already spent on it, no verification yet
-    item('a-2', 'reviewing', { fixLoops: 2 })
+    // still moving — two fix loops already spent on it, no verification yet.
+    // `stageAt` carries a real `reviewing` arrival (final-review wave,
+    // Important 1's own fixture fix) rather than the bare default `{}`
+    // `item()` would otherwise leave it at: an empty `stageAt` meant this
+    // was, and always had been, the ONLY `status: 'running'` archive fixture
+    // in this whole suite that could never actually reach `runStageTotals`'
+    // open-span arithmetic no matter what that arithmetic did — a whole-
+    // branch review named this exact gap as the reason nothing here would
+    // have caught a crashed run inflating the wide tile without bound. See
+    // "freezes the wide tile's open span..." below for the case this now
+    // makes possible.
+    item('a-2', 'reviewing', {
+      fixLoops: 2,
+      stageAt: { pending: '2026-08-25T09:00:00.000Z', reviewing: '2026-08-25T12:05:00.000Z' }
+    })
   ]
 });
 
@@ -494,6 +507,41 @@ describe('RunsView', () => {
 
     const fixingValue = screen.getByTestId('runs-tile-machine-bars-fixing').querySelector('.run-bars-value')?.textContent;
     expect(fixingValue).not.toBe('—');
+  });
+
+  // Final-review wave, Important 1: the SAME "does not pin or accent..."
+  // (I4) scenario above — RUN_LIVE's own live-payload entry gone stale
+  // (`fresh: false`), so `pickAuthority` falls back to RUN_LIVE's ARCHIVE
+  // record — but read through the WIDE tile this time, not the row. That
+  // fallback is what a whole-branch review found this suite could reach
+  // without ever actually exercising `runStageTotals`' open-span arithmetic,
+  // because RUN_LIVE's own archive-shaped `a-2` used to carry no `stageAt`
+  // at all (`item()`'s own inert default) — see that fixture's own comment,
+  // above, for the fix. With a real `reviewing` arrival now on it, this
+  // fallback lands on a genuinely live item in a MACHINE_STAGES stage for
+  // the first time.
+  //
+  // RUN_LIVE's own `updatedAt` (2026-08-31T12:05, unchanged from every other
+  // test in this file) is a fixed past date no real run of this suite can
+  // ever land on, so `runStageTotals` must read it as a dead heartbeat —
+  // always, regardless of which real day actually executes this file — and
+  // freeze `a-2`'s open span there rather than at `RunsView`'s own
+  // `Date.now()`. `a-2`'s `reviewing` arrival (2026-08-25T12:05) is chosen
+  // to make that frozen span a clean, hand-checked 144 hours (exactly 6
+  // days) to `updatedAt`. Were the pre-fix code path still active, this same
+  // fixture would instead credit `Date.now() - reviewing` — a number that
+  // grows with the real calendar and could never be pinned to a fixed string
+  // at all, which is exactly the "passes by accident" gap this case closes:
+  // nobody could have written a deterministic assertion against the OLD
+  // formula for a fixed-past fixture like this one.
+  it("freezes the wide tile's open span at a stale archived run's last heartbeat, not real time", async () => {
+    const staleLive: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
+
+    await renderRunsView(ARCHIVE_RUNS, staleLive);
+
+    const reviewingValue = screen.getByTestId('runs-tile-machine-bars-reviewing')
+      .querySelector('.run-bars-value')?.textContent;
+    expect(reviewingValue).toBe('144h 00m');
   });
 
   it('renders the empty state and nothing else for empty payloads', async () => {

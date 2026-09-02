@@ -1695,7 +1695,7 @@ body {
 }
 .run-track-name {
   font-family: var(--mono); font-size: 10px; color: var(--ink2); letter-spacing: .02em;
-  margin-top: 3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .run-track-name-hollow { color: var(--ink3) }
 .run-track-name-current { color: var(--ink) }

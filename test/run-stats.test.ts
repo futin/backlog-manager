@@ -283,6 +283,71 @@ describe('runStageTotals', () => {
     expect(runStageTotals(run, T0 + 80_000)).toEqual({ dispatched: 10_000, reviewing: 60_000 });
   });
 
+  // Fix round 2 (final-review wave, Important 1): a CRASHED run — `status`
+  // still `"running"` forever, because `orchestrate.mjs init` refuses to
+  // overwrite a run file already at that status, and recovery is only
+  // `--resume`/`--abort` (this repo's own "One run per project, checked
+  // twice" invariant) — whose last heartbeat (`updatedAt`) is long past
+  // `RUN_STALE_MS`. `status === 'running'` alone used to be enough to open a
+  // live span (case 9 above proves the run-level gate is needed AT ALL, and
+  // remains true — a fresh `running` run still ticks to `now` there); this
+  // case proves the gate ALSO needs `updatedAt`'s own freshness, the same
+  // fork `runElapsedMs` (run-time.ts) already makes for a shape with a real
+  // `fresh` flag of its own. The item's open span must freeze at
+  // `updatedAt`, never grow to `now` — otherwise the exact unbounded-span
+  // defect the status-only gate was built to prevent in fix round 1
+  // reappears through the one door that gate left open: a process nobody
+  // has heard from in hours still reporting `status: "running"` on disk.
+  it("freezes a crashed run's open span at its own last heartbeat, not now", () => {
+    const run = archiveRun({
+      status: 'running',
+      startedAt: at(0),
+      updatedAt: at(1_000_000), // last heartbeat, ~16.7 minutes after start
+      queue: [
+        archiveItem({
+          id: 'item-g',
+          stage: 'fixing',
+          stageAt: { pending: at(0), dispatched: at(10_000), fixing: at(30_000) }
+        })
+      ]
+    });
+
+    // now is a full day past the run's last heartbeat — an archive read long
+    // after a crash, not a slow poll tick that just missed one beat.
+    const now = T0 + 1_000_000 + 24 * 60 * 60 * 1000;
+
+    // dispatched->fixing (20_000, kept — unaffected by this fix) + fixing's
+    // open span FROZEN at updatedAt (1_000_000 - 30_000 = 970_000), never
+    // reaching the real `now` this test passes in.
+    expect(runStageTotals(run, now)).toEqual({ dispatched: 20_000, fixing: 970_000 });
+  });
+
+  // Companion to the case above: an `updatedAt` that will not parse reads as
+  // NOT fresh (an unparseable heartbeat is not evidence a process is still
+  // alive — it cannot earn the `now`-ticking branch) but also leaves no
+  // honest instant to freeze the open span AT, so the item's open span
+  // contributes nothing at all rather than fabricating one — only its
+  // closed spans stand. Pinned as its own case because "not fresh" and
+  // "frozen at updatedAt" are two different claims a single corrupt-heartbeat
+  // fixture tells apart: this run must fall into neither the fresh branch
+  // nor the frozen-number branch above.
+  it('adds no open span at all when the heartbeat itself will not parse', () => {
+    const run = archiveRun({
+      status: 'running',
+      startedAt: at(0),
+      updatedAt: 'garbage',
+      queue: [
+        archiveItem({
+          id: 'item-h',
+          stage: 'fixing',
+          stageAt: { pending: at(0), dispatched: at(10_000), fixing: at(30_000) }
+        })
+      ]
+    });
+
+    expect(runStageTotals(run, T0 + 90_000)).toEqual({ dispatched: 20_000 });
+  });
+
   // Case 10: an item that left the pipeline through a non-merge exit
   // (`parked`), in a running run. Its one completed span (pending->dispatched)
   // is dropped for the pending reason as always, but — unlike case 9 — it
