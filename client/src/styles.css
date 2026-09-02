@@ -1512,11 +1512,12 @@ body {
    a whole visible range (Task 7, the wide toolbar tile) — so its rules live
    in their own block rather than folding into either caller's own section.
 
-   ONE SERIES, ONE HUE. Unlike the per-item .run-detail-stagebar above (whose
-   segments are different STAGES packed into the same bar, and therefore need
-   one tone per stage to stay legible), every bar here is the same series —
-   one stage's own total on its own row — so there is exactly one thing for
-   colour to distinguish (a filled row from an empty one), not seven.
+   ONE SERIES, ONE HUE. Unlike the per-item .run-detail-stagebar (deleted in
+   Task 6; its segments were different STAGES packed into the same bar, and
+   therefore needed one tone per stage to stay legible), every bar here is
+   the same series — one stage's own total on its own row — so there is
+   exactly one thing for colour to distinguish (a filled row from an empty
+   one), not seven.
    `--cyan` is not an arbitrary choice for that one hue: it is the tone six
    of these seven stages already wear on their own item chip (`.board-card-
    stage`, the `active` tone, above). The only `MACHINE_STAGES` member that
@@ -1567,9 +1568,10 @@ body {
 }
 .run-bars-label { font-family: var(--mono); font-size: 10px; color: var(--ink2) }
 .run-bars-track { position: relative; height: 6px; border-left: 1px solid var(--hairline2) }
-/* Same floor as .run-detail-seg above and for the identical reason: a
-   genuinely brief stage (a few seconds) must stay a visible sliver next to
-   one that took most of an hour, not shrink to nothing beside it. */
+/* The same floor `.run-detail-seg` (deleted in Task 6) used to carry, for
+   the identical reason: a genuinely brief stage (a few seconds) must stay a
+   visible sliver next to one that took most of an hour, not shrink to
+   nothing beside it. */
 .run-bars-fill {
   position: absolute; left: 0; top: 0; height: 6px;
   background: var(--cyan); border-radius: 0 3px 3px 0; min-width: 2px;
@@ -1585,9 +1587,10 @@ body {
    scaled up to a seven-column grid spanning the Runs pane's own ~1000px
    item card, with each node's own duration printed underneath it — the
    centrepiece of this redesign, replacing `.run-detail-stagebar` and its
-   10px caption (Task 6 deletes both once this is wired in). The component's
-   own file header has the full reasoning for every judgement call below;
-   this block only restates what a reader of the CSS alone still needs.
+   10px caption, both deleted in Task 6 once this track was wired in. The
+   component's own file header has the full reasoning for every judgement
+   call below; this block only restates what a reader of the CSS alone
+   still needs.
 
    SEVEN EQUAL COLUMNS, NEVER SCALED TO DURATION — same refusal
    `.run-stepper`'s own comment states for the drawer's tiny version, "a
@@ -1731,8 +1734,8 @@ body {
 }
 /* This section's own reduced-motion carve-out — kept inside the run-track
    block itself, rather than folded into the blanket rule near the top of
-   the file, so a later deletion elsewhere in the file (Task 6 removes
-   `.run-detail-stagebar`) can never strand it.
+   the file, so Task 6's later deletion of `.run-detail-stagebar` elsewhere
+   in the file never stranded it.
 
    The sweep needs a rule of its own because the blanket
    `* { animation-duration: .01ms !important; ... }` cannot reach it at

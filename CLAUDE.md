@@ -48,13 +48,18 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   queue and selects a subset of it — `ids` rides along only for a strict
   subset, so an untouched sheet still starts a whole-queue run), and a run strip
   above the columns — `RunStrip`/`RunDrawer` — showing every project's
-  orchestrator runs), Runs (`RunsView` — aggregate stat tiles, a project
-  filter, a day-grouped run list with fresh live runs pinned above history,
-  and a persistent detail pane with per-item stage-time bars and
-  verification output; fed by `lib/run-stats.ts`, a pure statistics lib, and
-  `hooks/useOrchestratorArchive.ts`, which fetches on mount and window focus
-  only — no polling interval, since history moves at run boundaries, not on
-  a live heartbeat), archive (`ArchiveView.tsx`: four columns —
+  orchestrator runs), Runs (`RunsView` — aggregate stat tiles including a
+  wide "machine time by stage" tile, a Today / This week / This month / All
+  range control (calendar-aligned, local-time windows on a run's
+  `startedAt`, `lib/run-range.ts`) that scopes the tiles, the list and the
+  wide tile together, a project filter, a day-grouped run list with fresh
+  live runs pinned above history, and a persistent detail pane carrying
+  that same per-run "machine time by stage" rollup plus a full-width
+  seven-node `StageTrack` per item with durations printed under each node;
+  fed by `lib/run-range.ts` and `lib/run-stats.ts`, both pure statistics
+  libs, and `hooks/useOrchestratorArchive.ts`, which fetches on mount and
+  window focus only — no polling interval, since history moves at run
+  boundaries, not on a live heartbeat), archive (`ArchiveView.tsx`: four columns —
   refactors/ideas/bugs/out-of-scope — grouped under sticky month subheaders
   keyed on `updated ?? created` (`lib/item-month.ts`), project filter and
   search only, no status or sort control; the same cards, drawer and launch
@@ -358,6 +363,15 @@ happened.
 - **`linkBase` becomes an href**, so `clampSettings` routes it through
   `clampOrigin` — URL-parsed, `http(s)` only. The one settings key a
   hand-edited localStorage value could turn into script execution.
+- **"Queue wait is not work."** `itemDurationMs`
+  (`client/src/lib/run-time.ts`) is the one implementation of "how long did
+  this item take", read by the drawer's and the pane's `RowTime`, by
+  `aggregateRuns`' `avgItemWorkMs`, and by nothing else; machine time
+  (`runStageTotals`) excludes `pending` too. `run-stats.ts` used to carry a
+  second rule that spanned first stamp to last: real run
+  `run-20260901-112815` read bug-7 as 161m in the pane and 25m in the
+  drawer — the difference was the four items ahead of it in the queue.
+  `MACHINE_STAGES` is the closed list of what counts.
 
 ## Conventions
 

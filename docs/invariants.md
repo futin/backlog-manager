@@ -656,3 +656,50 @@ the mode that produced it sitting next to it.
 the browser's own parser, not a regex — and rejects any scheme but
 `http(s)`. It is the one settings key a hand-edited localStorage value could
 turn into script execution.
+
+## Queue wait is not work
+
+`itemDurationMs` (`client/src/lib/run-time.ts`) is the one implementation of
+"how long did this item take." It measures from an item's first
+non-`pending` `stageAt` arrival — `preflight` counts, because the gate check
+is the orchestrator doing work on this item; only `pending`, the interval
+where nothing is happening to the item at all, is dropped — to its terminal
+stamp, or to `now` while the item is still moving. Every surface that prints
+that reading calls it rather than deriving its own: the run drawer's row and
+the Runs section's detail-pane row, through the shared `RowTime`
+(`client/src/components/board/RunRowTime.tsx`), and `aggregateRuns`'
+`avgItemWorkMs` (`client/src/lib/run-stats.ts`), which averages it over
+every merged item. Nothing else in this codebase reads it.
+
+`run-stats.ts` used to carry a second implementation of the same question,
+answering it by spanning an item's literal first recorded stamp to its
+last — `pending` included. The two silently disagreed on a real run
+(`run-20260901-112815`): bug-7 read as 161 minutes of "how long did this
+item take" under that first-to-last reading and 25 minutes under
+`itemDurationMs` — the other 136 minutes were the four items ahead of it in
+the queue being worked while bug-7 waited its turn, not anything that
+happened to bug-7 itself. A queue worked one item at a time will always
+produce this gap for whichever item sits further back in it; folding queue
+wait back into a duration reading is exactly the bug this invariant exists
+to keep from recurring. The excluded interval is not thrown away —
+`itemQueueWaitMs` (same file) gives it its own reading, printed by the Runs
+pane as context beside the head time — but it is never added back into any
+"how long did this take" total anywhere in this codebase.
+
+Machine time makes the identical exclusion one level up, for the identical
+reason. `runStageTotals` (`client/src/lib/run-stats.ts`) — the "where did
+the time go" rollup behind `StageBars` — sums every item's per-stage spans
+against `MACHINE_STAGES`, the closed list of the seven stages that are the
+orchestrator actually working, and `pending` is not on it: summing every
+item's queue wait into a run's own "machine time" would report however many
+run-lengths of pure nothing on top of whatever the run actually did — the
+run-level version of the same mistake `itemDurationMs` exists to prevent at
+the item level.
+
+A new surface that needs to answer "how long did this item take" imports
+`itemDurationMs` and reads its result rather than subtracting `stageAt`
+stamps itself. That is not a style preference: it is the only way the
+drawer, the Runs pane, and any surface built after them are guaranteed to
+agree with each other, the same guarantee `RowTime`'s move out of the run
+drawer and into a shared component exists to make structural rather than
+coincidental.
