@@ -18,9 +18,9 @@ import type { StageTotals } from '../../lib/run-stats';
  * matching the "derive in lib/, render in components/" split the rest of
  * this feature keeps.
  *
- * NOT the per-item stage bar. The existing `.run-detail-stagebar`
- * (RunDetail.tsx, predating this redesign, slated for deletion once
- * `StageTrack.tsx` — Task 5 — replaces it) answers a different question: how
+ * NOT the per-item stage bar. The `.run-detail-stagebar`
+ * (RunDetail.tsx, predating this redesign, deleted in Task 6 once
+ * `StageTrack.tsx` — Task 5 — replaced it) answered a different question: how
  * ONE item's own time split across the stages it personally visited, drawn
  * as one bar per ITEM with a segment per stage. This widget answers "across
  * this whole run (or range), how much did each stage category cost in
