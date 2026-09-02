@@ -1507,3 +1507,145 @@ body {
   text-align: right; font-variant-numeric: tabular-nums;
 }
 .run-bars-value-none { color: var(--ink3) }
+
+/* ---------------------------------------------- stage track (Task 5)
+   StageTrack.tsx: RowStepper's drawer-sized dots (`.run-stepper*` above)
+   scaled up to a seven-column grid spanning the Runs pane's own ~1000px
+   item card, with each node's own duration printed underneath it — the
+   centrepiece of this redesign, replacing `.run-detail-stagebar` and its
+   10px caption (Task 6 deletes both once this is wired in). The component's
+   own file header has the full reasoning for every judgement call below;
+   this block only restates what a reader of the CSS alone still needs.
+
+   SEVEN EQUAL COLUMNS, NEVER SCALED TO DURATION — same refusal
+   `.run-stepper`'s own comment states for the drawer's tiny version, "a
+   position indicator, not a time axis": `merging` (seconds) and
+   `inspecting` (minutes) get the identical seventh of the grid, because a
+   track scaled to time would shrink the short stages to invisible slivers
+   beside the long ones. The number under each node is what answers "how
+   long" now — the geometry was never going to.
+
+   THE CONNECTOR IS TWO PSEUDO-ELEMENTS PER NODE, NOT ONE PER GAP. Each node
+   draws its own incoming half (`::before`, stopping short of the dot at its
+   own centre) and outgoing half (`::after`, starting just past it), the
+   same "no wrapper per segment" shape the drawer's `.run-stepper-dot`
+   connector uses, at `top: 6px` — the 10px dot's own vertical centre below
+   this node's `padding-top: 2px`.
+
+   EVERY `data-in`/`data-out` SELECTOR IS SCOPED TO `.run-track-node[...]`,
+   never left as the bare attribute selector a first draft of this spec
+   wrote it as. Nothing else in `client/` uses `data-in`/`data-out` today,
+   so the rendered result is identical either way — but a bare
+   `[data-in="done"]` would match any future element in the whole app
+   carrying that attribute, and scoping it here costs nothing.
+
+   HOLLOW-ON-GREEN: `[data-in="done"]`/`[data-out="done"]` are painted
+   solid `--good` regardless of whether the NODE they sit on is itself
+   filled or hollow — StageTrack.tsx computes both off `lastVisited` alone,
+   the highest-index node that is not hollow, not off the node's own state.
+   A stage an item passed through without ever stopping (no `stageAt` entry
+   at all) still sits on an unbroken green line between two visited
+   neighbours — `stepperDots`'s own comment calls that reading "the most
+   useful thing the row says," and this is the rule that keeps it visible
+   rather than papering over the gap.
+
+   THE SWEEP IS THE ONLY MOTION HERE. `[data-in="live"]` — the segment
+   entering the CURRENT node, and only that one — carries a slow cyan
+   gradient animated across itself; `.run-track-dot-current` carries its own
+   pulsing ring. Every other dot, segment and value on the track is a static
+   read that only changes when a fresh `now` re-renders it. Both animations
+   are already covered by this file's `@media (prefers-reduced-motion:
+   reduce)` block above (the blanket `* { animation-duration: .01ms }`
+   rule), which is why no new media rule is added here — a reader who has
+   asked for less motion gets the sweep frozen mid-gradient and the ring
+   frozen at its first frame, both close enough to "a plain cyan line/dot"
+   to read as intentional rather than broken. */
+.run-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-top: 8px }
+.run-track-node {
+  position: relative; display: flex; flex-direction: column; align-items: center;
+  gap: 3px; padding-top: 2px; min-width: 0;
+}
+.run-track-node::before, .run-track-node::after {
+  content: ''; position: absolute; top: 6px; height: 2px; background: var(--hairline);
+}
+.run-track-node::before { left: 0; right: calc(50% + 6px) }
+.run-track-node::after { left: calc(50% + 6px); right: 0 }
+.run-track-node[data-in="none"]::before, .run-track-node[data-out="none"]::after { display: none }
+.run-track-node[data-in="done"]::before, .run-track-node[data-out="done"]::after { background: var(--good) }
+/* The moving line: a 90°, three-stop gradient (soft cyan / full cyan / soft
+   cyan) at twice the node's own width, slid left across itself. The two
+   soft ends reuse `.run-stepper-dot-current`'s own 35%-cyan-into-transparent
+   mix above rather than a new figure, so the sweep's "dim" reads as the
+   same tone the app already uses for a cyan glow rather than a new one
+   invented for this animation alone. */
+.run-track-node[data-in="live"]::before {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--cyan) 35%, transparent),
+    var(--cyan),
+    color-mix(in srgb, var(--cyan) 35%, transparent)
+  );
+  background-size: 200% 100%;
+  animation: run-track-sweep 1.6s linear infinite;
+}
+@keyframes run-track-sweep {
+  from { background-position: 100% 0 }
+  to { background-position: -100% 0 }
+}
+.run-track-dot {
+  width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--hairline2);
+  background: var(--strip); box-sizing: border-box; z-index: 1;
+}
+.run-track-dot-filled { background: var(--good); border-color: var(--good) }
+/* Unlike the drawer's own current dot (`.run-stepper-dot-current`, a static
+   ring), this one pulses: at ten times the footprint, a static ring reads
+   as inert rather than as "still going," and telling a live run apart from
+   a finished one at a glance across the pane's full width is this track's
+   whole job. */
+.run-track-dot-current {
+  background: var(--cyan); border-color: var(--cyan);
+  animation: run-track-ring 2s ease-in-out infinite;
+}
+@keyframes run-track-ring {
+  from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 30%, transparent) }
+  to { box-shadow: 0 0 0 6px color-mix(in srgb, var(--cyan) 10%, transparent) }
+}
+.run-track-name {
+  font-family: var(--mono); font-size: 10px; color: var(--ink2); letter-spacing: .02em;
+  margin-top: 3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.run-track-name-hollow { color: var(--ink3) }
+.run-track-name-current { color: var(--ink) }
+/* Values never wear a data colour (CONSTRAINTS.md: "text never wears a data
+   colour") — `--ink` regardless of the dot beside them, the same restraint
+   `.run-bars-value` above keeps for the identical reason. `-when` is its
+   own modifier rather than a reuse of `-none`: a finish clock is a known
+   fact rendered in a different REGISTER (when it happened, not how long it
+   took), not an absent one — `--ink2` says "this is real, just not the
+   number the eye is scanning the row for," where `--ink3` says "nothing was
+   recorded here at all." */
+.run-track-val {
+  font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.run-track-val-none { color: var(--ink3); font-weight: 400 }
+.run-track-val-when { color: var(--ink2); font-weight: 400 }
+/* Absolutely positioned beside the dot rather than laid out inline with it:
+   the badge only ever appears on one column out of seven (`fixing`), and
+   reserving space for it on every node so the seven names/values still
+   line up under one another would waste the other six columns' worth of it
+   on a badge they can never show. */
+.run-track-loops {
+  position: absolute; left: calc(50% + 9px); top: -3px;
+  font-family: var(--mono); font-size: 9px; font-weight: 600; color: var(--ink);
+  background: var(--strip-hi); border: 1px solid var(--hairline2); border-radius: 2px;
+  padding: 0 3px; line-height: 14px; z-index: 2;
+}
+@media (max-width: 700px) {
+  /* The name and value are what can least afford to wrap or truncate on a
+     seven-column grid at phone width — dropping both half a step keeps
+     `inspecting` (the longest stage name) inside its own column instead of
+     ellipsising into unreadability. */
+  .run-track-name { font-size: 8px }
+  .run-track-val { font-size: 10.5px }
+}
