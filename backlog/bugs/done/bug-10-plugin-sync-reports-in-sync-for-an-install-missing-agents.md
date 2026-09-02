@@ -3,8 +3,10 @@ id: bug-10
 title: plugin:sync reports in sync for an install missing agents/
 created: 2026-09-01
 tags: plugin, sync, agents
-updated: 2026-09-02T07:37:12Z
+updated: 2026-09-02T08:19:11Z
 groom-elapsed: 115
+started: 2026-09-02T08:13:27Z
+execute-elapsed: 344
 ---
 
 ## Symptom
@@ -238,3 +240,100 @@ reinstalls; confirm `ls "$INSTALL/agents"` shows `backlog-reviewer.md`
 afterwards; restart Claude Code and confirm
 `backlog-manager:backlog-reviewer` resolves as a dispatchable agent. No
 browser check applies — none of this is visible in the board.
+
+## Outcome
+
+2026-09-02 — fixed as planned, in `scripts/sync-plugin.mjs`, plus the doc
+correction both halves of the cause called for. Nothing in the repo writes
+machine-local state, as the Fix decided.
+
+- `publishedDigests(root)` and `driftedPaths(repoDigests, installDigests)` are
+  new exported pure helpers. The short-circuit now compares every entry of
+  `PUBLISHED_PATHS` on both sides and fires only when the drift list is empty
+  *and* `install.gitCommitSha === head`. `hashTree`'s existing `''` for a
+  missing root is what makes an absent `agents/` read as drift, so there is no
+  second existence check to keep in sync.
+- Both messages name what was compared: `same skills, .claude-plugin, agents as
+  the working tree` when in sync, and `reinstalling — <paths> differ(s)` (or the
+  two commits, when only the sha moved) when not.
+- The post-install verification checks the same list, and its failure message is
+  the diagnosis: it names the paths, and when any of them is absent from the
+  install *entirely* — the sparse-checkout shortfall by elimination — it names
+  `~/.claude/settings.json` →
+  `extraKnownMarketplaces.<marketplace>.source.sparsePaths`, states that
+  `known_marketplaces.json` is a cache reconciled from it on the next session
+  start (so an edit there is reverted, and is itself what triggers the revert),
+  and exits non-zero.
+- A read-only pre-flight `missingSparsePaths(settings, marketplace)` warning
+  runs before the uninstall, warn-never-refuse, and cannot abort in the window
+  between the uninstall and the install.
+- `CLAUDE.md`'s publish-surface invariant, `docs/invariants.md`'s `agents/`
+  section and the stale `PUBLISHED_PATHS` comment in the script itself all named
+  `known_marketplaces.json` as the machine-local lever. All three now name
+  `extraKnownMarketplaces` in `settings.json` and record the cache relationship,
+  the digest gap and what the sync does about it.
+
+### Verification
+
+The bug's exact shape, measured against both logics — a fake install carrying
+`skills/` and `.claude-plugin/` copied from the repo and no `agents/` at all:
+
+```
+OLD logic (skills only) sees drift? false
+NEW logic drifted paths: ["agents"]
+live settings missing: ["agents"]
+```
+
+The first line is the bug: indistinguishable from a complete install. The third
+is the live declaration on this machine, which still lacks `agents`.
+
+The real sync, run from this branch — it names its reason, then refuses at the
+publish blocker without touching the install:
+
+```
+$ node scripts/sync-plugin.mjs
+reinstalling — installed commit 2834976, repo HEAD 6546713
+HEAD is 1 commit(s) ahead of origin/main. The marketplace clones from GitHub, so push first:
+  git push
+EXIT:1
+```
+
+`pnpm run test:skills` — the 9 new `scripts/sync-plugin.test.mjs` cases (digest
+map keying incl. a path absent on disk, empty drift for agreement, the missing
+`agents` case, a differing `.claude-plugin`, multi-path order, and the four
+`missingSparsePaths` cases) alongside the existing suite:
+
+```
+1..277
+# tests 277
+# suites 0
+# pass 277
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 33960.611625
+```
+
+`pnpm run typecheck` exit 0, and `pnpm test`:
+
+```
+Test Suites: 47 passed, 47 total
+Tests:       721 passed, 721 total
+Snapshots:   0 total
+Time:        61.586 s
+```
+
+### Not done here, and not doable here
+
+The live end-to-end check the Fix listed — reinstall, `ls "$INSTALL/agents"`,
+restart and confirm `backlog-manager:backlog-reviewer` resolves — still needs the
+one manual machine step the Fix already called out: add `"agents"` to
+`extraKnownMarketplaces["backlog-manager-marketplace"].source.sparsePaths` in
+`~/.claude/settings.json`, then start a session so the reconcile re-sparses the
+clone. Until that is done the marketplace clone has no `agents/`, so any
+reinstall — including one this sync performs — *drops* the agent from the
+install, which currently still has it from the transient cache edit of
+2026-09-01. That step was deliberately left to the user: it is the user's own
+config, at a tier this repo cannot know is the governing one, and the whole point
+of the Fix's judgement call was that no repo script writes it.
