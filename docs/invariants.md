@@ -170,7 +170,8 @@ load and are dispatchable). But an install is a copy of exactly two things:
 whatever `PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) tells `plugin:sync`
 to check for dirty/unpushed state and copy, and whatever the marketplace's
 own sparse checkout on the installing machine actually pulled down,
-recorded as `sparsePaths` in that machine's `known_marketplaces.json`.
+declared as `sparsePaths` in that machine's `~/.claude/settings.json` under
+`extraKnownMarketplaces.<marketplace>.source`.
 Sparse cone mode carries root-level *files* automatically but only the
 *directories* explicitly listed, so a root-level `agents/` reached neither
 list until this task — `backlog-manager:backlog-reviewer`
@@ -183,6 +184,45 @@ directory is on disk but `plugin:sync`'s hash/dirty logic never accounts for
 it. `sparsePaths` is machine state, one per install, and outside this
 repo's control — the repo can only ever carry its own half of this
 invariant.
+
+Which file holds that machine state is not a detail, and bug-10 is the
+record of getting it wrong twice over.
+`~/.claude/plugins/known_marketplaces.json` looks like the control and is
+only a cache: Claude Code reconciles it from the `extraKnownMarketplaces`
+declaration in `settings.json` on session start, deep-comparing the declared
+`source` object against the materialized one and re-running
+`git sparse-checkout set --cone -- <declared paths>` in the marketplace
+clone on any difference at all. So an `agents` added to the cache by hand
+survives until the next session start *and is itself what triggers the
+revert* — the edit is the difference the reconciler resolves in the
+declaration's favour. An install made in that window carries the agent while
+the clone behind it no longer does, which is exactly the state this machine
+was found in on 2026-09-02.
+
+The other half of bug-10 was the sync's own blindness to all of it.
+`plugin:sync` short-circuited on `hashTree('skills')` alone against a
+matching `gitCommitSha`, so an install whose sparse checkout had never
+written `agents/` was byte-for-byte indistinguishable from a complete one —
+and the short-circuit fired forever, because the one path it measured never
+moved. `gitCommitSha` cannot cover for that: it records which commit the
+install was cloned from, not which paths were written out of it, and the
+same sha legitimately yields an install with `agents/` or without. The sync
+now digests every entry of `PUBLISHED_PATHS` on both sides
+(`publishedDigests`/`driftedPaths`, exported and unit-tested), relies on
+`hashTree`'s existing `''`-for-a-missing-root to make an absent path read as
+drift rather than adding a second existence check to keep in sync, names the
+paths it compared in both the in-sync and the reinstalling message, and
+re-checks the same list after the reinstall. That last check is the
+load-bearing one: an install that completes and *still* has nothing at a
+published path is the sparse-checkout shortfall by elimination, so it exits
+non-zero naming the settings key to edit. A read-only pre-flight warning
+reads the declaration it can see and names any published path missing from
+it — warn, never refuse, because the declaration legitimately lives at any
+settings tier or in `marketplace add --sparse`, and a machine declaring no
+`sparsePaths` at all clones the whole repo and is perfectly correct. It runs
+before the uninstall so the actionable line is not buried under install
+output, and it can never abort in the window between the uninstall and the
+install, which is the one that would leave a machine with no plugin.
 
 ## `started:` and `phase:` are the lifecycle keys in frontmatter, and neither is a status
 

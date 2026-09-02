@@ -35,13 +35,21 @@ export const MARKETPLACE = 'backlog-manager-marketplace'
 // discovers skills, by walking a root-level directory in the installed copy,
 // so an agent left out of this list is invisible post-install even though it
 // sits right there in the repo. This list is only this script's half of that
-// fix — the sparse checkout on each installed machine carries its own
-// `sparsePaths` in `known_marketplaces.json`, and that copy needs `agents`
-// added too (or the marketplace re-added) before the agent actually resolves.
+// fix — the other half is each machine's own sparse checkout, declared in
+// ~/.claude/settings.json under
+// extraKnownMarketplaces.<marketplace>.source.sparsePaths (NOT in
+// known_marketplaces.json, which is a cache reconciled from it on session
+// start), and that declaration needs `agents` too before the agent resolves.
+// missingSparsePaths warns about the gap; the post-install check fails on it.
 export const PUBLISHED_PATHS = ['skills', '.claude-plugin', 'agents']
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const INSTALLED = join(homedir(), '.claude', 'plugins', 'installed_plugins.json')
+// The *declaration* of what the marketplace sparse-checks out. Its cache,
+// ~/.claude/plugins/known_marketplaces.json, is re-materialized from this file
+// on every session start, so this is the copy worth reading and the only one
+// worth telling anyone to edit. Read-only here: see missingSparsePaths.
+const SETTINGS = join(homedir(), '.claude', 'settings.json')
 
 const git = (args, cwd = REPO_ROOT) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
 
@@ -67,6 +75,54 @@ export function hashTree(root) {
     digest.update('\0')
   }
   return digest.digest('hex')
+}
+
+// One digest per published path, keyed by the path. This replaced a lone
+// hashTree('skills') pair that was the whole of bug-10: `agents/` was never
+// hashed on either side, so an install whose sparse checkout had never written
+// it at all was indistinguishable from a complete one, and the short-circuit
+// below declined to reinstall forever — the one path it measured never moved.
+//
+// hashTree answers '' for a root that is not there, so an absent path *is*
+// drift here with no separate existence check to keep in sync. `gitCommitSha`
+// cannot cover for this: it records which commit the install was cloned from,
+// not which paths the sparse checkout wrote out of it, and the same sha
+// legitimately yields an install with or without `agents/`.
+export function publishedDigests(root) {
+  return Object.fromEntries(PUBLISHED_PATHS.map((path) => [path, hashTree(join(root, path))]))
+}
+
+// The published paths whose digests disagree, in PUBLISHED_PATHS order rather
+// than object-key order, so the reason a reinstall is happening reads the same
+// way every run.
+export function driftedPaths(repoDigests, installDigests) {
+  return PUBLISHED_PATHS.filter((path) => repoDigests[path] !== installDigests[path])
+}
+
+// The published paths this machine's marketplace declaration leaves out of its
+// sparse checkout — the reason an install can come up short of the repo even
+// when the sync did everything right.
+//
+// Two silences are deliberate. No `sparsePaths` key at all clones the whole
+// repo, which carries every published path by definition. And a declaration
+// this script cannot see is not a declaration that is wrong: the lever
+// legitimately lives at any settings tier (user, project, local, managed) or in
+// `claude plugin marketplace add --sparse`, so an absent entry warns about
+// nothing. The post-install check is the authoritative one; this is a hint.
+export function missingSparsePaths(settings, marketplace = MARKETPLACE) {
+  const declared = settings?.extraKnownMarketplaces?.[marketplace]?.source?.sparsePaths
+  if (!Array.isArray(declared)) return []
+  return PUBLISHED_PATHS.filter((path) => !declared.includes(path))
+}
+
+// Absent, unreadable or malformed settings all mean the same thing to the
+// caller — nothing to hint from — so they collapse into one undefined.
+export function readSettings(settingsPath = SETTINGS) {
+  try {
+    return JSON.parse(readFileSync(settingsPath, 'utf8'))
+  } catch {
+    return undefined
+  }
 }
 
 // The installed record is the only thing that knows where the copy landed
@@ -137,13 +193,20 @@ function main() {
   }
 
   const head = git(['rev-parse', 'HEAD'])
-  const repoHash = hashTree(join(REPO_ROOT, 'skills'))
-  const installedHash = hashTree(join(install.installPath, 'skills'))
+  const repoDigests = publishedDigests(REPO_ROOT)
+  const drifted = driftedPaths(repoDigests, publishedDigests(install.installPath))
 
-  if (installedHash === repoHash && install.gitCommitSha === head) {
-    console.log(`in sync — installed v${install.version} is ${head.slice(0, 7)}, same skills as the working tree`)
+  if (drifted.length === 0 && install.gitCommitSha === head) {
+    // Name what was compared. The old wording — "same skills as the working
+    // tree" — was true and read as "the install is current", which is how an
+    // install with no agents/ at all went unnoticed through repeated syncs.
+    console.log(`in sync — installed v${install.version} is ${head.slice(0, 7)}, same ${PUBLISHED_PATHS.join(', ')} as the working tree`)
     return
   }
+
+  console.log(drifted.length > 0
+    ? `reinstalling — ${drifted.join(', ')} differ(s) from the working tree`
+    : `reinstalling — installed commit ${install.gitCommitSha?.slice(0, 7) ?? 'unknown'}, repo HEAD ${head.slice(0, 7)}`)
 
   // origin is the marketplace's actual source, so its idea of main is what
   // gets installed. Fetch before comparing or a stale ref makes a pushed
@@ -157,6 +220,18 @@ function main() {
   if (blocker) {
     console.error(blocker)
     process.exit(1)
+  }
+
+  // Before anything is removed, not after: the actionable line has to be
+  // readable rather than buried under install output. It only ever warns —
+  // aborting here is fine, but this check must never be able to abort between
+  // the uninstall and the install, the one window that leaves the machine with
+  // no plugin at all.
+  const undeclared = missingSparsePaths(readSettings())
+  if (undeclared.length > 0) {
+    console.warn(`warning: ${SETTINGS} declares this marketplace without ${undeclared.join(', ')} —`)
+    console.warn(`  extraKnownMarketplaces.${MARKETPLACE}.source.sparsePaths`)
+    console.warn('  the install will come up short of the repo until those are added there.')
   }
 
   const run = (args) => execFileSync('claude', args, { stdio: 'inherit' })
@@ -186,12 +261,29 @@ function main() {
     console.error('the plugin is no longer installed after the update')
     process.exit(1)
   }
-  if (hashTree(join(after.installPath, 'skills')) !== repoHash) {
-    // The cache directory is keyed by the version in plugin.json, so an
-    // update that carries new skills under an unchanged version has to
-    // overwrite in place. When it doesn't, a version bump is the lever.
-    console.error(`installed skills still differ from the repo at ${after.installPath}`)
+  const afterDigests = publishedDigests(after.installPath)
+  const stillDrifted = driftedPaths(repoDigests, afterDigests)
+  if (stillDrifted.length > 0) {
+    // This is the load-bearing half of the bug-10 fix: it turns "the reviewer
+    // agent silently is not there" into a red sync naming the file to edit.
+    console.error(`installed ${stillDrifted.join(', ')} still differ(s) from the repo at ${after.installPath}`)
     console.error(`installed commit ${after.gitCommitSha?.slice(0, 7) ?? 'unknown'}, repo HEAD ${head.slice(0, 7)}`)
+
+    // A reinstall that completed and still has *nothing* at a published path
+    // is the sparse-checkout shortfall by elimination — the clone never
+    // carried it, so no reinstall through any route can produce it.
+    const absent = stillDrifted.filter((path) => afterDigests[path] === '')
+    if (absent.length > 0) {
+      console.error(`\n${absent.join(', ')} ${absent.length === 1 ? 'is' : 'are'} absent from the install entirely, which is the sparse checkout, not this sync. Add ${absent.length === 1 ? 'it' : 'them'} here:`)
+      console.error(`  ${SETTINGS} → extraKnownMarketplaces.${MARKETPLACE}.source.sparsePaths`)
+      console.error('Not known_marketplaces.json — that file is a cache reconciled from the above on the next session start, so an edit to it is reverted (and is itself what triggers the revert).')
+      console.error('Then start a Claude Code session so the marketplace clone is re-sparsed, and run this again.')
+    } else {
+      // The cache directory is keyed by the version in plugin.json, so an
+      // update that carries new files under an unchanged version has to
+      // overwrite in place. When it doesn't, a version bump is the lever.
+      console.error('the install carries every published path but not the current bytes — a version bump in plugin.json is the lever.')
+    }
     process.exit(1)
   }
 

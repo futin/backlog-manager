@@ -223,13 +223,21 @@ happened.
   Code restart.
 - **`agents/` is part of the plugin's publish surface.** An install carries
   only what `PUBLISHED_PATHS` (`scripts/sync-plugin.mjs`) and the
-  marketplace's own `sparsePaths` (`known_marketplaces.json`, machine-local)
-  both list — Claude Code discovers a plugin's agents by the same directory
-  convention it uses for skills, so an agent left off either list is
-  invisible in an install even though it sits right there in the repo.
-  `backlog-manager:backlog-reviewer` (`agents/backlog-reviewer.md`) doesn't
-  exist post-install until both name `agents`; the repo only ever controls
-  the first.
+  marketplace's own `sparsePaths` both list — Claude Code discovers a
+  plugin's agents by the same directory convention it uses for skills, so an
+  agent left off either list is invisible in an install even though it sits
+  right there in the repo. `backlog-manager:backlog-reviewer`
+  (`agents/backlog-reviewer.md`) doesn't exist post-install until both name
+  `agents`; the repo only ever controls the first. **The machine-local half
+  is declared in `~/.claude/settings.json` →
+  `extraKnownMarketplaces.<marketplace>.source.sparsePaths`, not in
+  `known_marketplaces.json`** — that file is a cache Claude Code
+  re-materializes from the declaration on session start, so hand-editing it
+  is not merely transient, it is what *triggers* the revert. The sync now
+  measures every entry of `PUBLISHED_PATHS` on both sides (bug-10: it hashed
+  `skills` alone, so an install with no `agents/` at all reported "in sync"
+  and could never be repaired through the supported path) and fails loudly
+  after a reinstall that still comes up short, naming that settings key.
 - **Both processes bind `127.0.0.1` by default; loopback is the access
   control** (nothing has auth). `BM_BIND` is the single knob; compose sets
   `0.0.0.0` because there the loopback *publish* is the boundary.
