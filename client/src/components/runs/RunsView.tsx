@@ -545,7 +545,7 @@ export default function RunsView() {
             </div>
             <div className="runs-tile" data-testid="runs-tile-avg-item">
               <div className="runs-tile-value">
-                {aggregates.avgItemWallMs === null ? '—' : formatSpanCompact(aggregates.avgItemWallMs)}
+                {aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}
               </div>
               <div className="runs-tile-label">avg item</div>
             </div>

@@ -1,3 +1,4 @@
+import { inStageMs, isTerminalStage, itemDurationMs } from './run-time';
 import type { OrchestratorArchiveRun, RunQueueItem, RunStage } from '../../../shared/types';
 
 /**
@@ -6,6 +7,25 @@ import type { OrchestratorArchiveRun, RunQueueItem, RunStage } from '../../../sh
  * archive listing's own shape. No React, no fetching: `RunsView` calls these
  * against whatever payload `useOrchestratorArchive` already holds, the same
  * separation `run-time.ts` draws between deriving a number and rendering it.
+ *
+ * This module now IMPORTS three of that file's exports — `itemDurationMs`,
+ * `inStageMs`, `isTerminalStage` — where an earlier version of this file
+ * deliberately did not import anything from `run-time.ts` at all. The reason
+ * is that "how long did this item take" must have exactly one
+ * implementation, not two that quietly disagree. Before this change, this
+ * module answered that question itself, with its own `itemWallMs` — first
+ * recorded `stageAt` arrival to last, `pending` included — while
+ * `run-time.ts`'s `itemDurationMs` answered it by excluding `pending` (the
+ * queue-wait interval; see that function's own doc comment). Both numbers
+ * described the same item, and on a real run they diverged by the item's
+ * entire wait in line: `run-20260901-112815`'s bug-7 read 161 minutes in
+ * this module's stat tiles and 25 minutes in the drawer that reads
+ * `itemDurationMs` — the other 136 minutes were the four items ahead of it
+ * in the queue, not anything that happened to bug-7 itself. `itemWallMs` is
+ * gone now; every "how long" reading in this file goes through
+ * `run-time.ts`'s version instead, so the two surfaces this feature puts
+ * side by side cannot drift apart again — there is only one implementation
+ * left for either of them to read.
  *
  * Two conventions carried over from that file, deliberately unchanged here:
  *
@@ -44,16 +64,13 @@ import type { OrchestratorArchiveRun, RunQueueItem, RunStage } from '../../../sh
  */
 
 /**
- * `Date.parse`, but `null` instead of `NaN`. A duplicate of `run-time.ts`'s
- * own private `parseStamp` rather than an import of it: that function is not
- * exported (nothing outside that file currently needs it as its OWN thing),
- * and the instruction this module follows is "do not re-implement the
- * primitives `run-time.ts` exports" — `formatSpan`, `formatClock`,
- * `isTerminalStage`, and so on. A three-line stamp parser that neither file
- * exports is not one of those primitives; it is the one piece of plumbing
- * every derivation in both files necessarily starts from, and duplicating
- * three lines of plumbing costs less than adding a cross-file dependency
- * between two lib files that otherwise have no reason to import each other.
+ * `Date.parse`, but `null` instead of `NaN`. Still a duplicate of
+ * `run-time.ts`'s own private `parseStamp` rather than an import of it, even
+ * now that this file imports three of that module's OTHER exports (see the
+ * file header): `parseStamp` itself is not one of them because it isn't
+ * exported there either — nothing outside `run-time.ts` needs it as its own
+ * thing, so importing it here would just relocate the duplication, not
+ * remove it.
  */
 function parseStamp(iso: string | undefined): number | null {
   if (iso === undefined) return null;
@@ -63,13 +80,12 @@ function parseStamp(iso: string | undefined): number | null {
 
 /**
  * Every `stageAt` entry that parses, as `{stage, at}` pairs sorted ascending
- * by the parsed instant — the one pass `itemStageSpans` and `itemWallMs`
- * both build on, so the two can never disagree about which stamps count or
- * what order they fall in. Corrupt entries are dropped outright (not kept
- * with a `null` placeholder) precisely so a bad `pending` stamp does not
- * anchor a span at a fictitious zero point — see the `'garbage'` case in the
- * test suite, where dropping the entry entirely is what lets the remaining
- * two stamps span correctly against each other instead of against a hole.
+ * by the parsed instant — the one pass `itemStageSpans` builds its own
+ * output on. Corrupt entries are dropped outright (not kept with a `null`
+ * placeholder) precisely so a bad `pending` stamp does not anchor a span at
+ * a fictitious zero point — see the `'garbage'` case in the test suite,
+ * where dropping the entry entirely is what lets the remaining two stamps
+ * span correctly against each other instead of against a hole.
  */
 function parsedArrivals(item: Pick<RunQueueItem, 'stageAt'>): Array<{ stage: RunStage; at: number }> {
   const arrivals: Array<{ stage: RunStage; at: number }> = [];
@@ -120,27 +136,6 @@ export function itemStageSpans(item: Pick<RunQueueItem, 'stageAt'>): StageSpan[]
 }
 
 /**
- * The item's total time in the pipeline: its last recorded arrival minus its
- * first, over whichever stamps actually parse. `null` with fewer than two —
- * one lone stamp (or a `stageAt` with nothing parseable in it at all) has no
- * "first" and "last" to subtract, and `0` would misreport that as "this item
- * took no time" rather than "this item's duration is unknown."
- *
- * Unlike `run-time.ts`'s `itemDurationMs`, this never falls back to `now` for
- * a still-moving item — there is no `now` parameter here at all, on purpose.
- * `itemDurationMs` answers "how long has this been going," a live-render
- * question the run strip and drawer ask on every poll tick; `itemWallMs`
- * answers "how long did this take," the question `aggregateRuns` below asks
- * only of items that have actually finished (`stage === 'merged'`), where
- * the last recorded arrival already IS the end.
- */
-export function itemWallMs(item: Pick<RunQueueItem, 'stageAt'>): number | null {
-  const arrivals = parsedArrivals(item);
-  if (arrivals.length < 2) return null;
-  return arrivals[arrivals.length - 1].at - arrivals[0].at;
-}
-
-/**
  * How long a whole run took (or has taken so far): `updatedAt − startedAt`
  * for a run that has already finished, `now − startedAt` for one still
  * `running`. The same fork `run-time.ts`'s `runElapsedMs` makes for the live
@@ -172,28 +167,103 @@ export function runWallMs(
 }
 
 /**
- * Per-stage total milliseconds, summed over every queue item's own
- * `itemStageSpans` — "across this whole run, where did the time actually
- * go," the number behind the detail pane's stage-time breakdown (Task 6).
+ * Pipeline order. The seven stages that are the orchestrator working — never
+ * `pending`, never an exit.
  *
- * `Partial`, not a fully-keyed record defaulting absent stages to `0`: a
- * stage nothing in the queue ever spanned (every item merged clean with no
- * `fixing` span, say) is a fact worth keeping visible as "absent" rather
- * than flattening into the same `0` a stage that WAS visited but happened to
- * take no measurable time would also produce — a caller iterating
- * `Object.keys()` sees only the stages that actually happened anywhere in
- * this run.
+ * `pending` is left out on purpose, and it is the whole judgement call this
+ * constant makes: it is queue WAIT, not the orchestrator doing anything to
+ * this item, so a "where did the time go" total that included it would
+ * misreport a long queue as a long-running stage. This is the same
+ * exclusion `itemQueueWaitMs` (run-time.ts) makes for a single item's own
+ * reading, restated here as the list `runStageTotals` below filters against
+ * for a whole run's rollup. The six terminal stages (`merged`, `failed`,
+ * `skipped`, `needs-answers`, `ungroomed`, `parked`) are left out for the
+ * more obvious reason that they are exits, not places work happens — an
+ * item's OWN terminal stamp closes its last real span (see `itemStageSpans`)
+ * rather than opening a new one of its own.
+ */
+export const MACHINE_STAGES: readonly RunStage[] = [
+  'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
+];
+
+/** A run's (or several runs', via `sumStageTotals`) per-stage machine-time total, keyed by `RunStage`. */
+export type StageTotals = Partial<Record<RunStage, number>>;
+
+/**
+ * Per-stage total milliseconds of MACHINE TIME — the orchestrator actually
+ * working, never queue wait — across every item in the queue. "Across this
+ * whole run, where did the time actually go," the number behind the detail
+ * pane's stage-time breakdown (Task 6).
+ *
+ * Two things are deliberately excluded from the sum, both for the same
+ * underlying reason: this function answers "where did the ORCHESTRATOR'S
+ * time go," not "where did the WALL-CLOCK time between two stamps go."
+ *
+ *   - `pending` spans (`itemStageSpans` entries labeled `pending`, and the
+ *     implicit "still in pending" case for a live item — see the second
+ *     bullet) are dropped via the `MACHINE_STAGES.includes(span.stage)`
+ *     filter below. A run works its queue one item at a time; every OTHER
+ *     item's `pending` span is time this item spent waiting its turn, not
+ *     time the orchestrator was idle or the run was somehow slow. Summing
+ *     five items' queue waits into this total would report four run-lengths
+ *     of pure nothing on top of whatever the run actually did.
+ *   - A span labeled by a TERMINAL stage (`merged`, `parked`, ...) cannot
+ *     occur from `itemStageSpans` in the first place — a terminal arrival is
+ *     always the LAST recorded stamp, and `itemStageSpans` never opens a
+ *     span from the last stamp (see that function's own doc comment) — so
+ *     the only place a terminal stage could contribute is the open-span step
+ *     below, which is guarded against it explicitly by `isTerminalStage`.
+ *
+ * The one thing ADDED on top of `itemStageSpans`'s own completed spans is an
+ * OPEN span for a still-live item: `now` minus the current stage's own
+ * arrival, credited to that stage, but only when the item has not yet left
+ * the pipeline (`!isTerminalStage(item.stage)`) AND its current stage is one
+ * the orchestrator is actually working (`MACHINE_STAGES.includes(item.stage)`
+ * — false for `pending` itself, so a queued-but-not-yet-dispatched item adds
+ * nothing). Without this, a run's stage-time rollup would freeze mid-run at
+ * whatever the last COMPLETED span happened to be, understating — sometimes
+ * by hours — whichever stage is eating time on the item the run is on right
+ * now. A live run's rollup has to keep moving even between two items handing
+ * off a stamp to each other, and this open span is what makes it.
  */
 export function runStageTotals(
-  run: Pick<OrchestratorArchiveRun, 'queue'>
-): Partial<Record<RunStage, number>> {
-  const totals: Partial<Record<RunStage, number>> = {};
+  run: { queue: readonly Pick<RunQueueItem, 'stage' | 'stageAt'>[] },
+  now: number
+): StageTotals {
+  const totals: StageTotals = {};
+
   for (const item of run.queue) {
     for (const span of itemStageSpans(item)) {
+      if (!MACHINE_STAGES.includes(span.stage)) continue;
       totals[span.stage] = (totals[span.stage] ?? 0) + span.ms;
     }
+
+    if (!isTerminalStage(item.stage) && MACHINE_STAGES.includes(item.stage)) {
+      const open = inStageMs(item, now);
+      if (open !== null) totals[item.stage] = (totals[item.stage] ?? 0) + open;
+    }
   }
+
   return totals;
+}
+
+/**
+ * Field-wise sum of several `StageTotals` records — how the Runs section's
+ * stat tiles (Task 6) fold every run's own `runStageTotals` into one
+ * across-runs breakdown, the same "sum the per-item numbers, then let a
+ * caller decide the scope" shape `aggregateRuns` below uses for its own
+ * totals. `{}` for an empty list: no runs in scope means no stages to report
+ * on, which is a different fact from every stage reporting a `0` nobody
+ * measured.
+ */
+export function sumStageTotals(totals: readonly StageTotals[]): StageTotals {
+  const sum: StageTotals = {};
+  for (const t of totals) {
+    for (const stage of Object.keys(t) as RunStage[]) {
+      sum[stage] = (sum[stage] ?? 0) + (t[stage] ?? 0);
+    }
+  }
+  return sum;
 }
 
 /** The stat-tile header's numbers (design doc: "Header row" / "aggregate stat tiles"), across whatever runs are in scope (all, or one project's). */
@@ -203,8 +273,19 @@ export interface RunAggregates {
   itemsMerged: number;
   /** Total queue length across every run in scope — includes items that never merged. */
   itemsQueued: number;
-  /** Mean `itemWallMs` over merged items whose wall time is known; `null` when none qualify. */
-  avgItemWallMs: number | null;
+  /**
+   * Mean `itemDurationMs` (run-time.ts) over merged items whose work time is
+   * known; `null` when none qualify. Named `...WorkMs`, not `...WallMs`, on
+   * purpose — this used to mean "first stamp to last stamp, `pending`
+   * included" (the old `itemWallMs`, deleted along with the field this
+   * replaces), and that number silently double-counted queue wait as if it
+   * were part of the item's own duration. `itemDurationMs` excludes it, the
+   * same exclusion `itemQueueWaitMs` (run-time.ts) makes explicit for a
+   * single item, so this average now answers "how long did merging an item
+   * actually take," not "how long, including everything else queued ahead
+   * of it, did an item sit between its first and last stamp."
+   */
+  avgItemWorkMs: number | null;
   /**
    * Total `fixLoops` spent across EVERY queued item in scope — including
    * ones that never merged — divided by how many DID merge. Deliberately
@@ -294,10 +375,12 @@ export function aggregateRuns(
       verification: readonly { ok: boolean }[];
     }[];
   }[],
-  // Accepted but not read below — see the comment ahead of the return
-  // statement for why "average run wall time" is deliberately not one of
-  // these seven numbers, and why the parameter stays in the signature
-  // anyway.
+  // Genuinely read below now (it did not used to be — see the comment ahead
+  // of the return statement): every merged item's `itemDurationMs(item,
+  // now)` call needs it, the one clock reading this whole computation shares
+  // for the same reason every other now-taking derivation in this codebase
+  // does. "Average run wall time" is still deliberately not one of these
+  // seven numbers regardless — see that same comment for why.
   now: number
 ): RunAggregates {
   const byStatus: Record<OrchestratorArchiveRun['status'], number> = {
@@ -312,7 +395,7 @@ export function aggregateRuns(
   let totalFixLoops = 0;
   let verifyOk = 0;
   let verifyTotal = 0;
-  const mergedWallTimes: number[] = [];
+  const mergedWorkTimes: number[] = [];
 
   for (const run of runs) {
     byStatus[run.status] += 1;
@@ -328,36 +411,38 @@ export function aggregateRuns(
 
       if (item.stage === 'merged') {
         itemsMerged += 1;
-        const wall = itemWallMs(item);
-        if (wall !== null) mergedWallTimes.push(wall);
+        const work = itemDurationMs(item, now);
+        if (work !== null) mergedWorkTimes.push(work);
       }
     }
   }
 
-  const avgItemWallMs = mergedWallTimes.length === 0
+  const avgItemWorkMs = mergedWorkTimes.length === 0
     ? null
-    : mergedWallTimes.reduce((sum, ms) => sum + ms, 0) / mergedWallTimes.length;
+    : mergedWorkTimes.reduce((sum, ms) => sum + ms, 0) / mergedWorkTimes.length;
 
   const fixLoopsPerMerged = itemsMerged === 0 ? null : totalFixLoops / itemsMerged;
   const verifyPassRate = verifyTotal === 0 ? null : verifyOk / verifyTotal;
 
-  // `now` deliberately goes unread below: a per-run `runWallMs(run, now)`
-  // is NOT folded into these totals, because "average run wall time" would
-  // mix finished runs (a fixed span) with a `running` run (a span that
-  // grows every time this function is next called with a later `now`) into
-  // one number that visibly drifts between two calls a minute apart with no
-  // run in scope having actually changed. The parameter stays in the
-  // signature anyway — this module's own no-internal-Date.now() rule means
-  // any derivation that could need "now" must take it, and a caller already
-  // holding one clock reading for `runWallMs` on the selected run should not
-  // have to special-case the one aggregate function that happens not to
-  // need it yet.
+  // `now` IS genuinely read above now, via each merged item's
+  // `itemDurationMs(item, now)` call — though for every item that reaches
+  // this branch (`stage === 'merged'` is itself a terminal stage)
+  // `itemDurationMs` ignores the value it was handed and measures to the
+  // item's own terminal stamp instead (see that function's own doc
+  // comment), so `avgItemWorkMs` still cannot itself drift between two
+  // calls a minute apart. What stays true from before this task: a per-run
+  // `runWallMs(run, now)` is still NOT folded into these totals, because
+  // "average run wall time" would mix finished runs (a fixed span) with a
+  // `running` run (a span that keeps growing) into one number that WOULD
+  // drift between two calls with no run in scope having actually changed —
+  // exactly the drift `itemDurationMs` above turns out not to have, and
+  // `runWallMs` does.
   return {
     runs: runs.length,
     byStatus,
     itemsMerged,
     itemsQueued,
-    avgItemWallMs,
+    avgItemWorkMs,
     fixLoopsPerMerged,
     verifyPassRate
   };

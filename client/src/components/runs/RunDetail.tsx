@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
-import { itemStageSpans, itemWallMs, runWallMs } from '../../lib/run-stats';
+import { itemStageSpans, runWallMs } from '../../lib/run-stats';
 import {
   RUN_STATUS_CLASS, RUN_STATUS_GLYPH, stageChipClass, stageGlyph, STAGE_TONE
 } from '../../lib/run-stage';
-import { formatClock, formatSpanCompact } from '../../lib/run-time';
+import { formatClock, formatSpanCompact, itemDurationMs } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from '../board/ItemCard';
 import type {
   ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage
@@ -280,7 +280,7 @@ export function RunDetail(
       <div className="run-drawer-queue" data-testid="run-detail-items">
         {rows.map((row) => {
           const spans = itemStageSpans(row);
-          const wallItem = itemWallMs(row);
+          const wallItem = itemDurationMs(row, now);
           return (
             <div key={row.id} className="run-drawer-item" data-testid={`run-detail-item-${row.id}`}>
               <div className="run-drawer-item-head">

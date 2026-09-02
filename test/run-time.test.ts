@@ -1,6 +1,6 @@
 import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
-  itemDoneClock, itemDurationMs, runElapsedMs, stepperDots, STEPPER_STAGES
+  itemDoneClock, itemDurationMs, itemQueueWaitMs, runElapsedMs, stepperDots, STEPPER_STAGES
 } from '../client/src/lib/run-time';
 import type { OrchestratorRun, RunQueueItem, RunStage } from '../shared/types';
 
@@ -186,6 +186,46 @@ describe('itemDurationMs', () => {
   it('falls back to the last known arrival for a terminal stage that never stamped itself', () => {
     const item = queueItem('failed', { dispatched: at(0), inspecting: at(300_000) });
     expect(itemDurationMs(item, T0 + 99_000_000)).toBe(300_000);
+  });
+});
+
+describe('itemQueueWaitMs', () => {
+  // Case 1: preflight is the earliest NON-pending arrival, so the wait is
+  // measured to that stamp, not to whatever arrived after it (dispatched,
+  // here) — the same "earliest real work" reading startedAtMs itself uses,
+  // and preflight counts as real work for this same reason elsewhere in the
+  // file (itemDurationMs keeps it for an identical reason).
+  it('measures pending to the earliest non-pending arrival', () => {
+    const item = { stageAt: { pending: at(0), preflight: at(15_000), dispatched: at(40_000) } };
+    expect(itemQueueWaitMs(item)).toBe(15_000);
+  });
+
+  // Case 2: no preflight stamp at all — dispatched is then the earliest
+  // non-pending arrival, so the wait is measured to it instead.
+  it('measures pending to dispatched when there is no preflight stamp', () => {
+    const item = { stageAt: { pending: at(0), dispatched: at(20_000) } };
+    expect(itemQueueWaitMs(item)).toBe(20_000);
+  });
+
+  // Case 3: nothing has started yet — a pending-only item has not finished
+  // waiting, so there is no honest wait to report.
+  it('is null with only a pending stamp and nothing started yet', () => {
+    const item = { stageAt: { pending: at(0) } };
+    expect(itemQueueWaitMs(item)).toBeNull();
+  });
+
+  // Case 4: no pending stamp at all (a hand-edited or malformed file) leaves
+  // nothing to measure the wait FROM.
+  it('is null with no pending stamp to measure from', () => {
+    const item = { stageAt: { dispatched: at(20_000) } };
+    expect(itemQueueWaitMs(item)).toBeNull();
+  });
+
+  // Case 5: a corrupt pending stamp is the same fact as no pending stamp —
+  // there is no honest instant to start measuring the wait from.
+  it('is null when the pending stamp is unparseable', () => {
+    const item = { stageAt: { pending: 'garbage', dispatched: at(20_000) } };
+    expect(itemQueueWaitMs(item)).toBeNull();
   });
 });
 

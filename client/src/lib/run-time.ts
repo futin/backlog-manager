@@ -259,6 +259,38 @@ export function itemDurationMs(
 }
 
 /**
+ * How long this item sat in the queue before any work on it began: the gap
+ * from its `pending` stamp (every item gets one, at run `init`) to
+ * `startedAtMs` above — the earliest arrival that is NOT `pending`.
+ *
+ * This is the one interval `itemDurationMs` deliberately excludes, and this
+ * function exists to give that excluded interval a name and a number of its
+ * own rather than just discarding it. On a real run (`run-20260901-112815`)
+ * bug-7's four items ahead of it in the queue made the Runs pane's old
+ * first-stamp-to-last reading say 161 minutes while the drawer's
+ * `itemDurationMs` said the true 25 minutes of actual work — the other 136
+ * minutes were entirely this item sitting in line, not anything happening to
+ * it. So the pane prints this number beside the work-time reading, as
+ * CONTEXT for why a queue was long, and it is never added back into any
+ * "how long did this take" total anywhere in this codebase: folding queue
+ * wait back in is exactly the bug this whole module exists to not repeat.
+ *
+ * `null` when either stamp is missing or will not parse: a `pending`-only
+ * item has not finished waiting (there is no "arrived" instant to measure
+ * to yet), and an item with no `pending` stamp at all — a hand-edited or
+ * malformed file — has no instant to measure the wait FROM.
+ */
+export function itemQueueWaitMs(item: Pick<RunQueueItem, 'stageAt'>): number | null {
+  const pending = parseStamp(item.stageAt.pending);
+  if (pending === null) return null;
+
+  const started = startedAtMs(item);
+  if (started === null) return null;
+
+  return Math.max(0, started - pending);
+}
+
+/**
  * The clock time this item finished, for a row that has finished — the
  * terminal stage's own arrival, formatted `HH:MM`.
  *
