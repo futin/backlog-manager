@@ -1,5 +1,5 @@
-import { inStageMs, isTerminalStage, itemDurationMs } from './run-time';
-import type { OrchestratorArchiveRun, RunQueueItem, RunStage } from '../../../shared/types';
+import { isTerminalStage, itemDurationMs } from './run-time';
+import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
 
 /**
  * The statistics behind the Runs section's stat tiles (Task 6) and per-item
@@ -8,9 +8,9 @@ import type { OrchestratorArchiveRun, RunQueueItem, RunStage } from '../../../sh
  * against whatever payload `useOrchestratorArchive` already holds, the same
  * separation `run-time.ts` draws between deriving a number and rendering it.
  *
- * This module now IMPORTS three of that file's exports — `itemDurationMs`,
- * `inStageMs`, `isTerminalStage` — where an earlier version of this file
- * deliberately did not import anything from `run-time.ts` at all. The reason
+ * This module now IMPORTS two of that file's exports — `itemDurationMs`,
+ * `isTerminalStage` — where an earlier version of this file deliberately
+ * did not import anything from `run-time.ts` at all. The reason
  * is that "how long did this item take" must have exactly one
  * implementation, not two that quietly disagree. Before this change, this
  * module answered that question itself, with its own `itemWallMs` — first
@@ -66,7 +66,7 @@ import type { OrchestratorArchiveRun, RunQueueItem, RunStage } from '../../../sh
 /**
  * `Date.parse`, but `null` instead of `NaN`. Still a duplicate of
  * `run-time.ts`'s own private `parseStamp` rather than an import of it, even
- * now that this file imports three of that module's OTHER exports (see the
+ * now that this file imports two of that module's OTHER exports (see the
  * file header): `parseStamp` itself is not one of them because it isn't
  * exported there either — nothing outside `run-time.ts` needs it as its own
  * thing, so importing it here would just relocate the duplication, not
@@ -214,20 +214,72 @@ export type StageTotals = Partial<Record<RunStage, number>>;
  *     the only place a terminal stage could contribute is the open-span step
  *     below, which is guarded against it explicitly by `isTerminalStage`.
  *
- * The one thing ADDED on top of `itemStageSpans`'s own completed spans is an
- * OPEN span for a still-live item: `now` minus the current stage's own
- * arrival, credited to that stage, but only when the item has not yet left
- * the pipeline (`!isTerminalStage(item.stage)`) AND its current stage is one
- * the orchestrator is actually working (`MACHINE_STAGES.includes(item.stage)`
- * — false for `pending` itself, so a queued-but-not-yet-dispatched item adds
- * nothing). Without this, a run's stage-time rollup would freeze mid-run at
- * whatever the last COMPLETED span happened to be, understating — sometimes
- * by hours — whichever stage is eating time on the item the run is on right
- * now. A live run's rollup has to keep moving even between two items handing
- * off a stamp to each other, and this open span is what makes it.
+ * On top of `itemStageSpans`'s own completed spans, this adds an OPEN span
+ * for a still-live item — `now` minus (a corrected version of) the current
+ * stage's own arrival, credited to that stage — but ONLY when the RUN is
+ * itself `status === 'running'`. That run-level gate is fix round 1's
+ * addition, and the reason is `now`: for a run that has stopped —
+ * `done`/`aborted`/`failed` — whatever `stage` an item was frozen in when
+ * the run stopped is not "still happening," it is the last thing that
+ * happened before nobody was watching anymore. Crediting `now − stamp` to
+ * an aborted run's stranded `fixing` item would add however long it has
+ * been since the abort — hours, days, however stale the archive is read —
+ * as if the orchestrator were still working it. That single unbounded
+ * number does not just misreport one stage: Task 7 sums `runStageTotals`
+ * across every run in a selected range, so one dead item's ever-growing
+ * "open" span would keep inflating a RANGE total that should be fixed
+ * forever once every run in it has stopped, and the per-run stage bar
+ * (which scales every segment to the largest value in the set) would
+ * flatten every other, real stage into an invisible sliver beside it. The
+ * spec's own reasoning for the open span ("so the row for the stage it is
+ * in grows as the pane ticks") is about a live run specifically — an
+ * archived, stopped run was an omission in that reasoning, not something it
+ * argued for, so gating on it is filling a gap rather than overriding a
+ * decision. `status` is a REQUIRED field of the parameter, not optional
+ * with some default: every real caller already has it on hand (`RunDetail`'s
+ * resolved `source`, and Task 7's `pickAuthority(...)` result both carry a
+ * `status`), so there is no legitimate call site that would need a default,
+ * and an optional field is exactly the kind of gap a future caller could
+ * silently fall through — passing archived data without its `status` would
+ * otherwise resolve to whatever the default happened to be instead of
+ * failing to compile.
+ *
+ * The open span's OWN start is also corrected from what a first reading of
+ * the spec would produce, and this is fix round 1's second, unrelated fix
+ * living in the same function. `stageAt[item.stage]` is that stage's FIRST
+ * arrival only (`orchestrate.mjs` guards the write with `if (!(stage in
+ * item.stageAt))` — see this file's own KNOWN BLUR paragraph above), so an
+ * item that re-entered its current stage after a fix loop — `reviewing` →
+ * `fixing` → back to `reviewing`, with no fresh `stageAt.reviewing` key for
+ * the second visit — has a current-stage stamp that is now STALE: it points
+ * at the first visit, which chronologically precedes a LATER stamp
+ * (`fixing`'s own arrival) already recorded on the item. Naively opening the
+ * span at that stale stamp would credit the WHOLE interval from the first
+ * `reviewing` arrival to `now`, but the first-arrival-to-`fixing` portion of
+ * that interval is ALSO already counted once, as the closed `reviewing` span
+ * `itemStageSpans` produces from those same two stamps — so the item's
+ * second pass through `reviewing` would have its whole first pass counted
+ * TWICE. This is a different failure from the file's own accepted KNOWN
+ * BLUR: that paragraph accepts MIS-ATTRIBUTION (the second pass's real time
+ * folds invisibly into whichever span was open when the loop happened,
+ * rather than appearing as its own `reviewing` span) as a cost worth paying
+ * for keeping `stageAt` a shape record instead of a full event log; it does
+ * not accept DOUBLE-COUNTING the same interval into two different numbers
+ * that get summed together, which is an arithmetic error, not a blur. The
+ * fix is to open the live span from `max(the item's own latest parseable
+ * arrival across every stamp it has, stageAt[item.stage])` instead of from
+ * `stageAt[item.stage]` alone. For an item that never re-entered its current
+ * stage, that MAX is a no-op — the current stage's own arrival already IS
+ * the latest stamp the item has, because nothing chronologically later has
+ * been recorded — so no existing case's numbers move. For a re-entered
+ * stage, the max resolves to whatever LATER stage's stamp the item picked up
+ * on its way through the loop (`fixing`'s arrival, above), which is exactly
+ * the boundary the closed span already stopped counting at, so the open
+ * span now measures only the genuinely uncounted tail: from that later
+ * stamp to `now`.
  */
 export function runStageTotals(
-  run: { queue: readonly Pick<RunQueueItem, 'stage' | 'stageAt'>[] },
+  run: { status: OrchestratorRun['status']; queue: readonly Pick<RunQueueItem, 'stage' | 'stageAt'>[] },
   now: number
 ): StageTotals {
   const totals: StageTotals = {};
@@ -238,9 +290,21 @@ export function runStageTotals(
       totals[span.stage] = (totals[span.stage] ?? 0) + span.ms;
     }
 
-    if (!isTerminalStage(item.stage) && MACHINE_STAGES.includes(item.stage)) {
-      const open = inStageMs(item, now);
-      if (open !== null) totals[item.stage] = (totals[item.stage] ?? 0) + open;
+    if (run.status === 'running' && !isTerminalStage(item.stage) && MACHINE_STAGES.includes(item.stage)) {
+      const currentAt = parseStamp(item.stageAt[item.stage]);
+      if (currentAt !== null) {
+        // `parsedArrivals` re-parses every stamp on the item (including this
+        // same one), sorted ascending, so its last entry is the item's
+        // overall latest parseable arrival — never empty here, because
+        // `currentAt` just parsed successfully from one of exactly those
+        // entries. Taking the max against `currentAt` explicitly (rather
+        // than trusting that fact silently) is what makes the "no-op for a
+        // never-re-entered stage" claim above visible in the code, not just
+        // true of it.
+        const arrivals = parsedArrivals(item);
+        const start = Math.max(arrivals[arrivals.length - 1].at, currentAt);
+        totals[item.stage] = (totals[item.stage] ?? 0) + Math.max(0, now - start);
+      }
     }
   }
 

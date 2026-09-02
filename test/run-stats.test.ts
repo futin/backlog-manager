@@ -195,15 +195,19 @@ describe('runStageTotals', () => {
     expect(runStageTotals(run, T0 + 999_000)).toEqual({ dispatched: 60_000 });
   });
 
-  // Case 9: a live item still inside the pipeline. Its two recorded spans
-  // (pending->dispatched, dispatched->fixing) contribute the usual way, but
-  // being non-terminal it ALSO gets an open span for the stage it is
-  // sitting in right now (fixing, from its own arrival to `now`) — the
-  // "a live run's rollup must move" half of the behaviour: without this,
-  // runStageTotals would freeze mid-run at whatever the last completed span
-  // happened to be, understating the stage actually eating time right now.
-  it('adds an open span for a live item on top of its completed spans', () => {
+  // Case 9: a live item still inside the pipeline, in a RUNNING run. Its two
+  // recorded spans (pending->dispatched, dispatched->fixing) contribute the
+  // usual way, but being non-terminal it ALSO gets an open span for the
+  // stage it is sitting in right now (fixing, from its own arrival to
+  // `now`) — the "a live run's rollup must move" half of the behaviour:
+  // without this, runStageTotals would freeze mid-run at whatever the last
+  // completed span happened to be, understating the stage actually eating
+  // time right now. `status: 'running'` is load-bearing here after fix
+  // round 1 (below): without it this fixture would fall into the very next
+  // case instead, which is this same fixture with the run stopped.
+  it('adds an open span for a live item on top of its completed spans, in a running run', () => {
     const run = archiveRun({
+      status: 'running',
       queue: [
         archiveItem({
           id: 'item-c',
@@ -217,16 +221,84 @@ describe('runStageTotals', () => {
     expect(runStageTotals(run, T0 + 90_000)).toEqual({ dispatched: 20_000, fixing: 60_000 });
   });
 
+  // Fix round 1, Finding 1: the SAME live item as case 9 above, byte-for-byte,
+  // except the run itself has already stopped (`aborted` here; `done` and
+  // `failed` are the same case in different words). An archived run's item
+  // frozen mid-stage is not "still happening" — it is the last thing that
+  // happened before nobody was watching — so crediting `now - stamp` to it
+  // would add however long it has been since the run stopped (hours, days,
+  // however stale this archive read happens to be) as if the orchestrator
+  // were still working it. Only the two closed spans survive; `fixing` is
+  // absent entirely (not present at some frozen value) because its only
+  // possible contribution was the open span this status gate now excludes.
+  it('adds no open span at all for a non-running run, however far past its last stamp now is', () => {
+    const run = archiveRun({
+      status: 'aborted',
+      queue: [
+        archiveItem({
+          id: 'item-c',
+          stage: 'fixing',
+          stageAt: { pending: at(0), dispatched: at(10_000), fixing: at(30_000) }
+        })
+      ]
+    });
+    expect(runStageTotals(run, T0 + 90_000)).toEqual({ dispatched: 20_000 });
+  });
+
+  // Fix round 1, Finding 2: an item that RE-ENTERED its current stage after a
+  // fix loop — dispatched -> reviewing (T1) -> fixing (T2) -> back to
+  // reviewing now, with no fresh `stageAt.reviewing` key for the second visit
+  // (stageAt records first arrivals only). `stageAt.reviewing` is therefore
+  // STALE: it still points at T1, which is chronologically before `fixing`'s
+  // own later arrival (T2). Naively opening the live span at that stale T1
+  // would credit the whole T1-to-now interval to `reviewing` — but the T1-to-
+  // T2 portion of that interval is ALREADY counted once, as the closed
+  // `reviewing` span `itemStageSpans` produces from the T1/T2 stamps
+  // themselves. Opening the live span from `max(latest arrival, T1)` = T2
+  // instead measures only the genuinely uncounted tail (T2 to now), so
+  // `reviewing`'s total is `(T2-T1) + (now-T2)` exactly once — not the
+  // `(T2-T1) + (now-T1)` a stale-stamp reading would produce, which is
+  // `(T2-T1)` bigger than the truth: T1-to-T2 double-counted.
+  it('does not double-count a re-entered stage: the open span starts from the item\'s latest arrival, not the stale first one', () => {
+    const run = archiveRun({
+      status: 'running',
+      queue: [
+        archiveItem({
+          id: 'item-f',
+          stage: 'reviewing',
+          stageAt: {
+            pending: at(0),
+            dispatched: at(10_000),
+            reviewing: at(20_000), // T1: stale — first arrival only, second visit unstamped
+            fixing: at(50_000) // T2: chronologically AFTER the stale reviewing stamp
+          }
+        })
+      ]
+    });
+
+    // now = T0 + 80_000, i.e. 30_000ms past T2.
+    //   closed spans:  dispatched 10_000 (dispatched->reviewing), reviewing 30_000 (reviewing->fixing, T2-T1)
+    //   correct open:  reviewing += now-T2  = 30_000  =>  reviewing total 60_000
+    //   buggy open:    reviewing += now-T1  = 60_000  =>  reviewing total 90_000 (T1->T2 double-counted)
+    expect(runStageTotals(run, T0 + 80_000)).toEqual({ dispatched: 10_000, reviewing: 60_000 });
+  });
+
   // Case 10: an item that left the pipeline through a non-merge exit
-  // (`parked`). Its one completed span (pending->dispatched) is dropped for
-  // the pending reason as always, but — unlike case 9 — it gets NO open
-  // span for `parked`: `parked` is not in MACHINE_STAGES at all (it is an
-  // exit, not a place the orchestrator is working), and isTerminalStage
-  // would also refuse it a live span even if it were. Both guards land on
-  // the same fixture on purpose, so a future change that drops either one
-  // still fails this case.
+  // (`parked`), in a running run. Its one completed span (pending->dispatched)
+  // is dropped for the pending reason as always, but — unlike case 9 — it
+  // gets NO open span for `parked`: `parked` is not in MACHINE_STAGES at all
+  // (it is an exit, not a place the orchestrator is working), and
+  // isTerminalStage would also refuse it a live span even if it were. Both
+  // guards land on the same fixture on purpose, so a future change that
+  // drops either one still fails this case. `status: 'running'` is set
+  // explicitly (rather than left at archiveRun's 'done' default) so this
+  // case keeps pinning the ITEM-terminality guard specifically, not the
+  // run-status guard fix round 1 added above — a 'done' run would exclude
+  // the open span for a completely different reason and this case would
+  // stop testing what its own name says it tests.
   it('excludes a terminal-labelled span and adds no open span for a terminal item', () => {
     const run = archiveRun({
+      status: 'running',
       queue: [
         archiveItem({
           id: 'item-d',
@@ -239,15 +311,18 @@ describe('runStageTotals', () => {
   });
 
   // Case 11: a live item whose CURRENT stage is `pending` itself — still
-  // queued, not yet dispatched at all. It has no completed spans (a single
-  // stamp cannot span anything) and earns no open span either, because
-  // `pending` fails the `MACHINE_STAGES.includes(item.stage)` half of the
-  // open-span guard even though it passes `!isTerminalStage`. The result is
-  // the empty record, not `{ pending: ... }` — the whole point of this
-  // module is that a queued item contributes nothing to "where did the
+  // queued, not yet dispatched at all, in a running run (see case 10's own
+  // comment for why `status: 'running'` is set explicitly here too). It has
+  // no completed spans (a single stamp cannot span anything) and earns no
+  // open span either, because `pending` fails the
+  // `MACHINE_STAGES.includes(item.stage)` half of the open-span guard even
+  // though it passes both `!isTerminalStage` and `status === 'running'`. The
+  // result is the empty record, not `{ pending: ... }` — the whole point of
+  // this module is that a queued item contributes nothing to "where did the
   // orchestrator's time go" until it actually starts.
   it('is empty for a live item still sitting in pending', () => {
     const run = archiveRun({
+      status: 'running',
       queue: [archiveItem({ id: 'item-e', stage: 'pending', stageAt: { pending: at(0) } })]
     });
     expect(runStageTotals(run, T0 + 999_000)).toEqual({});
