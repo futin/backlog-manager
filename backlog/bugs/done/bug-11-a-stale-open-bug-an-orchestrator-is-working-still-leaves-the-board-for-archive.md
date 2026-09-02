@@ -3,8 +3,10 @@ id: bug-11
 title: A stale open bug an orchestrator is working still leaves the Board for Archive
 created: 2026-09-01
 tags: client, board, archive, orchestrator
-updated: 2026-09-02T07:35:12Z
+updated: 2026-09-02T09:00:42Z
 groom-elapsed: 306
+started: 2026-09-02T08:38:06Z
+execute-elapsed: 1356
 ---
 
 ## Symptom
@@ -210,3 +212,103 @@ long-untouched open bug at `dispatched`, open the Board at
 `http://127.0.0.1:5177/` — the bug's card is in the Bugs column with its live
 run bar, and it is first in that column; then open Archive from the side rail
 and confirm the same card is absent from its Bugs column.
+
+## Outcome
+
+2026-09-02 — fixed as planned, all six edits, no deviations to the design.
+The predicate now reads two sources: `runHoldsItem` (`shared/agent.ts`) is the
+run-payload half of the in-progress exemption `isStale` already had, and both
+`isStale` and `leavesBoard` take `runs` as a required parameter with no `[]`
+default, so the compiler asks every future caller which payload it is reading.
+
+What landed, in the Fix's own order:
+
+1. `ATTENTION_RUN_STAGES` moved from `client/src/components/board/ItemCard.tsx`
+   to `shared/types.ts` beside `RUN_CLAIMED_STAGES`. `ACTIVE_RUN_STAGES` stayed
+   on the card, as argued. Both importers repointed; no test imported it, so
+   the move was mechanical as predicted.
+2. `runHoldsItem(item, runs)` added next to `runClaimBlock`, with the
+   fresh/project/id lookup extracted into one private `runEntryAt(item, runs,
+   stages)` that both now call — the stage list is the only thing they differ
+   by. `RUN_HELD_STAGES` is composed from the two exported partitions.
+   `runClaimBlock`'s narrower rule is unchanged.
+3. `isStale(item, windowDays, now, runs)` / `leavesBoard(...)` — rule 3
+   rewritten to `isInProgress(item) || runHoldsItem(item, runs)`, sequenced
+   ahead of the arithmetic exactly where the old half sat. Module header's
+   "pure function of the item file" framing retired. One thing the Fix did not
+   anticipate: `now` had a `Date.now()` default, and a required parameter
+   cannot follow an optional one, so `now` is now required too. No caller ever
+   omitted it (both surfaces read a `useNow`, every test pins a fixed instant),
+   so nothing changed but the signature; it is documented in place.
+4. `BoardView.tsx` — `runs` passed at both call sites (`visible`, `staleFor`),
+   the full list rather than `freshRuns`. The 344-350 comment replaced; the
+   hook-ordering reason for computing `hasLive` on `matched` survives the
+   rewrite, and its "they disagree harmlessly" paragraph is gone.
+5. `ArchiveView.tsx` — `runs` passed to `leavesBoard`; the `useOrchestratorRuns`
+   and `runBlockFor` comments both rewritten. The block stays, as the narrow
+   rejected-mid-run case.
+6. `CLAUDE.md` — the Board-versus-Archive invariant now names five rules and
+   the run payload.
+
+Red-green was watched on all four suites before any source changed. The two
+unit suites failed to compile (`Module '"../shared/agent"' has no exported
+member 'runHoldsItem'`; `Expected 2-3 arguments, but got 4`), and both
+component suites failed on the real symptom rather than on types — the Bugs
+column rendered `['recent bug']` where the fix requires `['old bug', 'recent
+bug']`, and Archive still held the card a fresh run was working.
+
+One test-side defect of my own, caught by the suite: the Archive case first
+called `renderArchive` twice inside one `it`, which mounts a second tree while
+`column()` keeps querying the first. Split into two cases with the reason
+recorded in the file.
+
+Verification, all fresh:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+  (exit 0, no output)
+
+$ pnpm test
+Test Suites: 47 passed, 47 total
+Tests:       739 passed, 739 total
+Snapshots:   0 total
+Time:        40.375 s
+
+$ pnpm run test:skills
+# tests 277
+# suites 0
+# pass 277
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 40680.352125
+
+$ pnpm run build
+build exit: 0
+  (BoardView-C4pqz36N.js 44.55 kB and ArchiveView-Cmr_eYQK.js 9.10 kB still
+   separate chunks — the lazy split survives, no import between the surfaces)
+```
+
+Two honest notes:
+
+- **One intermittent failure, seen once.** The first full run after a `pnpm run
+  build` reported `1 failed, 738 passed`; the failing test's name was not
+  captured (only the summary was in view). Seven consecutive full-suite runs
+  since — four of them after that one — are 739/739 green, and the two suites
+  this bug touched passed 3/3 in isolation. Not reproduced and not attributed;
+  recorded here rather than left out so the next person who sees a one-off red
+  in this suite has a prior.
+- **The browser check in the Fix's test plan was NOT run.** It needs a live run
+  holding a stale bug at `dispatched`, and there is no honest way to produce
+  one from here: `run.json` has exactly one writer (`orchestrate.mjs`), so
+  hand-writing a payload to satisfy a test would break the invariant this fix
+  is built on top of, and `orchestrate.mjs` refuses to start a run from inside
+  a linked worktree (bug-2's rule) — which is where this session ran. What the
+  browser step would have shown is covered by `test/board.test.tsx` and
+  `test/archive.test.tsx`, which drive the real components through the real
+  `/api/orchestrator/runs` payload shape (the contract fixture) and assert both
+  presence-with-rank on the Board and absence from Archive. The one thing they
+  cannot cover is a runtime error in a real browser, and `pnpm run build`
+  succeeding plus the jsdom renders passing is the closest available proof.

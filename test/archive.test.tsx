@@ -6,7 +6,11 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import ArchiveView from '../client/src/components/archive/ArchiveView';
-import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
+import rawFixture from './fixtures/orchestrator-run.json';
+import type {
+  AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
+  RunQueueItem, RunStage
+} from '../shared/types';
 
 /*
  * Every clock-dependent fixture here is RELATIVE to the moment the suite runs,
@@ -58,14 +62,25 @@ const AGENTS_STATUS: AgentsStatus = {
   spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
 };
 
-const RUNS = { runs: [] };
+type RunPayload = OrchestratorRunsPayload['runs'][number];
 
-function stubItems(items: BacklogItem[], errors: string[] = []) {
+/** One fresh run for `/abs/alpha` holding exactly `id` at `stage`. Built off
+ *  the contract fixture, like every other suite that needs a run payload.
+ *  bug-11 is what gave this surface a reason to vary the runs it is handed:
+ *  before it, the only thing reading them here was `runClaimBlock`, which no
+ *  case in this file exercises. */
+function runHolding(id: string, stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
+  const fixture = rawFixture as OrchestratorRun;
+  const entry: RunQueueItem = { ...fixture.queue[0], id, stage };
+  return { ...fixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, ...over };
+}
+
+function stubItems(items: BacklogItem[], errors: string[] = [], runs: RunPayload[] = []) {
   const index: ItemsIndex = { items, errors };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/orchestrator/runs') ? RUNS
+    const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
+      : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects') ? PROJECTS : index;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
@@ -91,8 +106,10 @@ const ITEMS: BacklogItem[] = [
  * use either — it is outside the fetch-state ladder and is on screen from the
  * first paint.
  */
-async function renderArchive(items: BacklogItem[] = ITEMS, errors: string[] = []) {
-  stubItems(items, errors);
+async function renderArchive(
+  items: BacklogItem[] = ITEMS, errors: string[] = [], runs: RunPayload[] = []
+) {
+  stubItems(items, errors, runs);
   render(<ArchiveView />);
   await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
 }
@@ -145,6 +162,33 @@ describe('ArchiveView', () => {
     await renderArchive();
     expect(within(column('Refactoring')).getByText('stale refactor')).toBeInTheDocument();
     expect(within(column('Ideas')).getByText('stale idea')).toBeInTheDocument();
+    expect(within(column('Bugs')).getByText('stale bug')).toBeInTheDocument();
+  });
+
+  /*
+   * bug-11, from the side that proves the two surfaces stayed complementary.
+   * The Board case (test/board.test.tsx) shows the card arriving there; this
+   * one shows it leaving here, on the same predicate and the same payload. If
+   * the exemption had been written into BoardView's filter instead of into
+   * `leavesBoard`, this test is the one that would still be red — the item
+   * would be in both surfaces at once, which is the single thing the shared
+   * module exists to make impossible.
+   */
+  it('drops a stale bug a fresh run holds', async () => {
+    await renderArchive(ITEMS, [], [runHolding('bug-1', 'dispatched')]);
+    await waitFor(() =>
+      expect(within(column('Bugs')).queryByText('stale bug')).not.toBeInTheDocument());
+    // The other stale sections are untouched — this is one item's run, not a
+    // blanket "some run exists, empty the surface".
+    expect(within(column('Ideas')).getByText('stale idea')).toBeInTheDocument();
+  });
+
+  /* The control for the case above, and its own test rather than a second half
+     of it: `column()` searches the whole document, so a second `renderArchive`
+     in one case mounts a second tree and every query keeps answering out of
+     the first one. */
+  it('keeps that same bug once the run holding it has gone stale', async () => {
+    await renderArchive(ITEMS, [], [runHolding('bug-1', 'dispatched', { fresh: false })]);
     expect(within(column('Bugs')).getByText('stale bug')).toBeInTheDocument();
   });
 

@@ -2,6 +2,7 @@ import { elapsedSince, formatCreated } from '../../lib/item-age';
 import { isInProgress, progressLabel } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { DispatchButton } from './DispatchButton';
+import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
 import type { AgentsStatus, BacklogItem, RunQueueItem, RunStage } from '../../../../shared/types';
 
 /**
@@ -30,27 +31,23 @@ export const ACTIVE_RUN_STAGES: readonly RunStage[] = [
   'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
 ];
 
-/**
- * The two `RunStage` values that mean the run has STOPPED and will not
- * restart until a person does something — the exact opposite claim to the six
- * above, and the one thing on this board worth surfacing above running work.
+/*
+ * `ATTENTION_RUN_STAGES` — the two stages that mean the run has STOPPED and
+ * will not restart until a person does something — used to be declared right
+ * here, as the exact opposite claim to the six above. bug-11 moved it to
+ * shared/types.ts beside `RUN_CLAIMED_STAGES`, where its own doc comment now
+ * gives the reasoning; `client/src/lib/item-stale.ts` reads it to keep an
+ * item a run is blocked on out of Archive, and a lib module cannot import a
+ * React component.
  *
- * `parked` earns a marker here it never had as a chip. It belongs with
- * `needs-answers` on the only test that matters for this bar: the pipeline is
- * not moving and no amount of waiting will change that. STAGE_TONE
- * (lib/run-stage.ts) already groups exactly these two under its `warn` tone
- * for the same stated reason, so this list is that grouping read from the
- * card's side rather than a second opinion about it.
- *
- * Amber, where the six above are cyan: the theme's legend reads amber as "a
- * human is involved here" (the hand-run bar's own colour and rationale, a few
- * rules down in styles.css), which is precisely true of a blocked run and
- * precisely false of a running one.
- *
- * Exported on the same terms as its neighbour, and read by the same two
- * outside callers that read it.
+ * The card's use of it is unchanged and so is the rendering rule it encodes:
+ * amber where the six above are cyan, because the theme's legend reads amber
+ * as "a human is involved here" (the hand-run bar's own colour and rationale,
+ * a few rules down in styles.css) — precisely true of a blocked run and
+ * precisely false of a running one. `ACTIVE_RUN_STAGES` above stays here
+ * because it really is only a rendering fact: nothing outside the board asks
+ * which cards wear a cyan bar.
  */
-export const ATTENTION_RUN_STAGES: readonly RunStage[] = ['needs-answers', 'parked'];
 
 /**
  * What this card needs from a fresh run's queue entry: the stage, and the

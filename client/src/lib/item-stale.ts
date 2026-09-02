@@ -1,6 +1,7 @@
 import { daysSince } from './item-age';
 import { isInProgress } from './item-progress';
-import type { BacklogItem } from '../../../shared/types';
+import { runHoldsItem } from '../../../shared/agent';
+import type { BacklogItem, OrchestratorRunsPayload } from '../../../shared/types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -19,6 +20,19 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * date", item-progress.ts owns "is anyone on it", and this file owns only the
  * comparison between an age and the window. It delegates both halves rather
  * than re-parsing dates or re-reading `started`.
+ *
+ * **Two sources, not one.** This module used to be a pure function of the item
+ * file, and that framing was wrong rather than merely narrow (bug-11): a
+ * `backlog-orchestrate` run works each item inside its own git worktree and
+ * stamps `started:`/`phase:` on THAT copy, so the copy the registry points at
+ * — the one `/api/items` scans and both surfaces render — is silent for the
+ * whole run. An item a run had just picked up was therefore still "nobody has
+ * touched this in ninety days" by the file's own reckoning, and the one card
+ * the run strip and the column rank exist to point at was the one card not on
+ * the Board. So both predicates here now take the run payload as well, and
+ * `runHoldsItem` (shared/agent.ts) is the second half of the in-progress
+ * exemption they already had. Neither surface pays anything for it: both
+ * already hold that payload for their dispatch controls and their run strip.
  */
 
 /**
@@ -73,10 +87,23 @@ function ageInDays(stamp: string, now: number): number | null {
  *    on the board. Vanishing it into Archive would hide the one item that most
  *    needs looking at, and the item would then be invisible in both surfaces
  *    until someone thought to go looking in a directory.
- * 3. **In progress outranks any date arithmetic.** `started` means someone is
- *    on it right now; whatever the stamp says, "nobody has touched this in six
- *    weeks" is then simply false. Sequenced BEFORE the parse rather than folded
- *    in afterwards so no arithmetic can override it.
+ * 3. **Live work outranks any date arithmetic** — where "live" is the file
+ *    saying someone is on it, OR a fresh run saying so. `started` covers a
+ *    hand-run session; `runHoldsItem` covers an orchestrator run, which cannot
+ *    write to the file this predicate reads (see the module header). Whichever
+ *    of the two answers yes, "nobody has touched this in six weeks" is simply
+ *    false whatever the stamp says. Sequenced BEFORE the parse rather than
+ *    folded in afterwards so no arithmetic can override either half.
+ *
+ *    A run holds the item at every stage but its four true exits — including
+ *    `pending`, so starting a whole-queue run pulls every stale queued item
+ *    back onto the Board at once, and including `parked`/`needs-answers`,
+ *    where the run has stopped and is waiting for a person. Both are the
+ *    correct answer to the question this predicate asks: a queued item is
+ *    claimed work rather than neglected work, and an item asking a human a
+ *    question is the last card that should leave the human's surface. They
+ *    return to Archive when the run exits them at `failed`/`skipped`/
+ *    `ungroomed`; a merged one is in `done/` and stale to nobody.
  *
  * `status === 'open'` is the fourth condition, and the one that is easy to
  * miss: staleness is about work that is waiting and being neglected. A done
@@ -86,10 +113,29 @@ function ageInDays(stamp: string, now: number): number | null {
  * and a done item still has to be reachable through the Board's own `Done`
  * status filter however old it is. Answering "stale" for either would remove
  * it from the only surface that shows it.
+ *
+ * **`runs` is required and has no `[]` default, and that is the load-bearing
+ * part of bug-11's fix rather than a style preference.** A default is exactly
+ * what would let the next caller — a third surface, a future filter — read
+ * this predicate the old one-source way and reintroduce the bug silently,
+ * with nothing but a code review standing between it and an item that
+ * vanishes off the board while a run works it. The compiler asking every
+ * caller "which run payload?" is the whole value of the change; `[]` is
+ * always available to a caller that genuinely has none, and writing it is a
+ * decision rather than an omission. `now` lost its own `Date.now()` default
+ * in the same edit, for the plain reason that a required parameter cannot
+ * follow an optional one — no caller ever omitted it (both surfaces read a
+ * `useNow`, every test pins a fixed instant), so nothing changed but the
+ * signature.
  */
-export function isStale(item: BacklogItem, windowDays: number, now: number = Date.now()): boolean {
+export function isStale(
+  item: BacklogItem,
+  windowDays: number,
+  now: number,
+  runs: OrchestratorRunsPayload['runs']
+): boolean {
   if (item.status !== 'open') return false;
-  if (isInProgress(item)) return false;
+  if (isInProgress(item) || runHoldsItem(item, runs)) return false;
 
   const stamp = item.updated !== '' ? item.updated : item.created;
   if (stamp === '') return false;
@@ -114,7 +160,10 @@ export function isStale(item: BacklogItem, windowDays: number, now: number = Dat
  * keeps on the board.
  */
 export function leavesBoard(
-  item: BacklogItem, windowDays: number, now: number = Date.now()
+  item: BacklogItem,
+  windowDays: number,
+  now: number,
+  runs: OrchestratorRunsPayload['runs']
 ): boolean {
-  return item.section !== 'tasks' && isStale(item, windowDays, now);
+  return item.section !== 'tasks' && isStale(item, windowDays, now, runs);
 }

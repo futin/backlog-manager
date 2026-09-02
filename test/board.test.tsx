@@ -8,7 +8,11 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { buildProjectHues } from '../client/src/lib/project-hue';
-import type { AgentsStatus, BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
+import rawFixture from './fixtures/orchestrator-run.json';
+import type {
+  AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
+  RunQueueItem, RunStage
+} from '../shared/types';
 
 // `path` is derived after the spread rather than hard-coded: every other field
 // here is a shared default that `over` may or may not touch, but `path` must be
@@ -98,12 +102,34 @@ const AGENTS_STATUS: AgentsStatus = {
   spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
 };
 
+/*
+ * bug-11: the orchestrator runs endpoint, which BoardView has polled since
+ * task-9 and which staleness now reads too. Answered with a real empty
+ * payload rather than left to fall through to the items branch: the fall-
+ * through handed `fetchOrchestratorRuns` an `ItemsIndex`, which it rejects as
+ * malformed, so every case in this file was quietly exercising the hook's
+ * error path. Harmless while nothing but the run strip read it; not harmless
+ * once the Board/Archive split does.
+ */
+type RunPayload = OrchestratorRunsPayload['runs'][number];
+const NO_RUNS: OrchestratorRunsPayload = { runs: [] };
+
+/** One fresh run for `/abs/alpha` holding exactly `id` at `stage`. Built off
+ *  the contract fixture, like every other suite that needs a run payload, so
+ *  the shape stays the real one. */
+function runHolding(id: string, stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
+  const fixture = rawFixture as OrchestratorRun;
+  const entry: RunQueueItem = { ...fixture.queue[0], id, stage };
+  return { ...fixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, ...over };
+}
+
 beforeEach(() => {
   localStorage.clear();
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/projects') ? PROJECTS : ITEMS;
+      : url.includes('/api/orchestrator/runs') ? NO_RUNS
+        : url.includes('/api/projects') ? PROJECTS : ITEMS;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
 });
@@ -141,11 +167,12 @@ async function renderBoardWithSettings() {
 // grow to hold them: several tests above assert exact `col-count` numbers
 // against it, so a shared fixture is the one thing a sort-order test must
 // not touch.
-function stubItems(items: BacklogItem[]) {
+function stubItems(items: BacklogItem[], runs: RunPayload[] = []) {
   (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
     const url = String(input);
-    const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/projects') ? PROJECTS : { items, errors: [] };
+    const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
+      : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/projects') ? PROJECTS : { items, errors: [] };
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   });
 }
@@ -615,6 +642,55 @@ describe('BoardView', () => {
     await renderBoard();
     expect(screen.getByText('live idea')).toBeInTheDocument();
     expect(screen.queryByText('stale')).not.toBeInTheDocument();
+  });
+
+  /*
+   * bug-11 — the same rule read from its second source. A run stamps
+   * `started:` on its own worktree's copy of the item, so the copy this board
+   * renders is silent for the whole run and the case above cannot save it: the
+   * one card the run strip and the rank exist to point at was the one card not
+   * on the board. Ordering is asserted alongside presence because rendering it
+   * somewhere is only half the fix — `liveRank` ranks a dispatched item 1
+   * against the fresh sibling's 2, so it belongs at the top of the column.
+   */
+  it('keeps a stale bug a fresh run holds, at the top of its column', async () => {
+    stubItems(
+      [
+        fakeItem({ id: 'bug-7', title: 'old bug', updated: STALE_STAMP }),
+        fakeItem({ id: 'bug-8', title: 'recent bug', updated: FRESH_STAMP })
+      ],
+      [runHolding('bug-7', 'dispatched')]
+    );
+    await renderBoard();
+    // Index 2: Bugs is the third column — Refactoring · Ideas · Bugs · Tasks.
+    const bugsCol = screen.getAllByTestId('board-col')[2];
+    await waitFor(() => {
+      const titles = Array.from(bugsCol.querySelectorAll('.board-card-title'))
+        .map((el) => el.textContent);
+      expect(titles).toEqual(['old bug', 'recent bug']);
+    });
+  });
+
+  /* The control, and the reason the exemption is not "any run that mentions
+     the item": a run that stopped heartbeating is not working anything, so the
+     file's own reckoning is the honest one again and the card goes back to
+     Archive. Same fixture, same stage, one flag different. */
+  it('sends that same bug to Archive when the run holding it has gone stale', async () => {
+    stubItems(
+      [
+        fakeItem({ id: 'bug-7', title: 'old bug', updated: STALE_STAMP }),
+        fakeItem({ id: 'bug-8', title: 'recent bug', updated: FRESH_STAMP })
+      ],
+      [runHolding('bug-7', 'dispatched', { fresh: false })]
+    );
+    await renderBoard();
+    // The poll has to have actually landed before an absence means anything —
+    // otherwise this passes on a board that has not read the payload yet.
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/orchestrator/runs')
+    ));
+    expect(screen.getByText('recent bug')).toBeInTheDocument();
+    expect(screen.queryByText('old bug')).not.toBeInTheDocument();
   });
 
   // A done item is finished, not neglected, and the Board's `Done` filter is
