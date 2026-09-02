@@ -11,13 +11,14 @@ import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
-import { ACTIVE_RUN_STAGES, ATTENTION_RUN_STAGES, ItemCard } from './ItemCard';
+import { ACTIVE_RUN_STAGES, ItemCard } from './ItemCard';
 import type { RunCardState } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunDrawer } from './RunDrawer';
 import { RunStrip } from './RunStrip';
+import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
 import type { BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
 
 /* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
@@ -338,16 +339,18 @@ export default function BoardView() {
 
      Computed on `matched` rather than on `visible` below, which reads like a
      bug and is not: `useNow` is a hook, so it cannot be called after a filter
-     that itself needs the clock it returns. The two sets agree in every case
-     the file can decide — an in-progress item is never stale (item-stale.ts
-     sequences that rule ahead of the arithmetic on purpose) — and where they
-     could disagree, they disagree harmlessly: `isStale` reads the item FILE, so
-     a long-untouched open bug an orchestrator has just picked up is still stale
-     by the file's own reckoning and still leaves for Archive, which at worst
-     installs an interval for a card that is not on screen. Widening staleness to
-     consult the run payload would put a third reader on these stage lists and
-     change what ArchiveView shows, which is a different decision from this
-     one. */
+     that itself needs the clock it returns. That ordering constraint is the
+     whole reason and it is unrelated to which items the two sets contain.
+
+     The two sets now agree in every case, which they did not always: staleness
+     used to read the item FILE alone, so a long-untouched open bug an
+     orchestrator had just picked up was still stale by the file's own
+     reckoning and left for Archive — a card this clock was running for and no
+     column was showing. bug-11 widened `leavesBoard`/`isStale` to take the run
+     payload for exactly that reason, and the widening landed in item-stale.ts
+     rather than in the filter below so ArchiveView gets the same answer by
+     construction. `liveRank(...) < 2` and `leavesBoard` are consequently two
+     readings of one fact now, off one payload. */
   const hasLive = matched.some((i) => liveRank(i, runStageFor(i)) < 2);
   const now = useNow(hasLive);
 
@@ -360,15 +363,20 @@ export default function BoardView() {
 
      Applied AFTER `matches` rather than folded into it so the two narrowings
      stay separable: `matches` is what the toolbar says, this is what the
-     calendar says, and only the second one can be changed from Settings. */
-  const visible = matched.filter((i) => !leavesBoard(i, settings.staleDays, now));
+     calendar says, and only the second one can be changed from Settings.
+
+     The full `runs`, not `freshRuns`: `runHoldsItem` behind this applies its
+     own `fresh` filter (its doc comment says why), and routing a
+     pre-filtered list in would put that rule in two places — the same reason
+     `runBlockFor` below reads the full list. */
+  const visible = matched.filter((i) => !leavesBoard(i, settings.staleDays, now, runs));
 
   /* The marker a surviving stale card wears — in practice only ever a task,
      since `leavesBoard` has already taken every other stale section out of
      `visible`. Computed here rather than in ItemCard for the same reason `now`
      and `runStage` are: the card stays a pure function of its props, with no
      opinion about the window or the clock. */
-  const staleFor = (item: BacklogItem): boolean => isStale(item, settings.staleDays, now);
+  const staleFor = (item: BacklogItem): boolean => isStale(item, settings.staleDays, now, runs);
 
   const missing = registered.filter((p) => p.missing);
   const warnings = [

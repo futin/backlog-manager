@@ -344,6 +344,37 @@ export const RUN_CLAIMED_STAGES: readonly RunStage[] = [
 ];
 
 /**
+ * The two `RunStage` values that mean the run has STOPPED and will not restart
+ * until a person does something. Together with `RUN_CLAIMED_STAGES` above they
+ * are every stage a run still HOLDS the item at — `runHoldsItem`
+ * (shared/agent.ts) is that union, and `merged`/`failed`/`skipped`/`ungroomed`
+ * are the four true exits it leaves out.
+ *
+ * Moved here from `client/src/components/board/ItemCard.tsx` by bug-11, and
+ * the move is the interesting part. On the card these two were a rendering
+ * fact — which cards wear an amber bar rather than a cyan one, the theme's own
+ * "a human is involved here" legend — and its sibling `ACTIVE_RUN_STAGES` is
+ * still exactly that and still lives there. This list stopped being one the
+ * moment `client/src/lib/item-stale.ts` began reading it to decide Board
+ * versus Archive: a `lib/` module importing a React component to get a stage
+ * partition would invert the layering both surfaces depend on, and the
+ * partition is a fact about `RunStage` in any case. Which is the same argument
+ * `RUN_CLAIMED_STAGES` makes directly above — a new member of the union three
+ * dozen lines up has to be classified in the same edit, and the only place a
+ * reader will look for that decision is next to the union itself. There are
+ * now TWO such classifications, claimed-or-terminal and live-or-exited, and
+ * `test/agents-shared.test.ts` pins both against one `Record<RunStage, true>`
+ * literal so a new stage cannot satisfy one and be forgotten by the other.
+ *
+ * `parked` belongs here rather than with the claimed stages and that
+ * asymmetry is deliberate, not an oversight: a park exists precisely to hand
+ * the item back to a person, so it must NOT block a manual dispatch
+ * (`runClaimBlock` leaves it out for that reason) while it very much must keep
+ * the card on the surface that person is looking at.
+ */
+export const ATTENTION_RUN_STAGES: readonly RunStage[] = ['needs-answers', 'parked'];
+
+/**
  * One row of the verify step's output, kept verbatim rather than summarised
  * to a pass/fail count: `tail` is the last few lines of the command's own
  * output, which is what a human actually needs to tell a flaky test from a

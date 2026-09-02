@@ -1,6 +1,6 @@
-import { RUN_CLAIMED_STAGES } from './types';
+import { ATTENTION_RUN_STAGES, RUN_CLAIMED_STAGES } from './types';
 import type {
-  AgentsStatus, BacklogItem, OrchestratorRunsPayload, PermissionMode
+  AgentsStatus, BacklogItem, OrchestratorRunsPayload, PermissionMode, RunQueueItem, RunStage
 } from './types';
 
 /**
@@ -355,20 +355,95 @@ export function runClaimBlock(
   item: BacklogItem,
   runs: OrchestratorRunsPayload['runs']
 ): string | null {
+  const claimed = runEntryAt(item, runs, RUN_CLAIMED_STAGES);
+  return claimed === null
+    ? null
+    : `an orchestrator run is working this item (${claimed.stage})`;
+}
+
+/**
+ * The queue entry a FRESH run in this item's project holds this item at, when
+ * that stage is one of `stages` — or null.
+ *
+ * The three lines this hoists out of `runClaimBlock` (the freshness filter,
+ * the project match, the id match) are the ones its own doc comment above
+ * calls "exactly the part a second copy gets subtly wrong", and bug-11 needed
+ * a second caller asking the same lookup with a wider stage list. Hoisting
+ * rather than writing that second scan is the whole of the rule
+ * `environmentBlock` already records having learned the hard way in this very
+ * file. The stage list is the ONLY thing the two callers differ by, and it is
+ * therefore the only thing this takes as a parameter.
+ *
+ * Private on purpose: what callers outside this module need is a named
+ * question — "may I dispatch this" or "is a run holding this" — not a scan
+ * they parameterise themselves, which would be the vocabulary leaking back out
+ * one level.
+ */
+function runEntryAt(
+  item: BacklogItem,
+  runs: OrchestratorRunsPayload['runs'],
+  stages: readonly RunStage[]
+): RunQueueItem | null {
   for (const run of runs) {
     // The registry's absolute path on both sides — `OrchestratorRun.project`
     // and `BacklogItem.projectPath` are documented as the same string. Never
     // the display name: two checkouts of one repo share a name and never a
     // path, and only the path is what the run itself reports.
     if (!run.fresh || run.project !== item.projectPath) continue;
-    const claimed = run.queue.find(
-      (q) => q.id === item.id && RUN_CLAIMED_STAGES.includes(q.stage)
-    );
-    if (claimed !== undefined) {
-      return `an orchestrator run is working this item (${claimed.stage})`;
-    }
+    const found = run.queue.find((q) => q.id === item.id && stages.includes(q.stage));
+    if (found !== undefined) return found;
   }
   return null;
+}
+
+/**
+ * Every stage a run still HOLDS the item at: the eight it is actively working
+ * it through, plus the two it has stopped at waiting for a person. The
+ * complement is the four true exits — `merged`, `failed`, `skipped`,
+ * `ungroomed` — after which nobody is on the item at all.
+ *
+ * Composed from the two exported partitions rather than written out, which is
+ * the one place in this pair of lists that composing is right: both halves are
+ * hand-written next to `RunStage` itself (see their comments), so this union
+ * cannot silently gain or lose a member without one of them changing, and
+ * `test/agents-shared.test.ts` asserts the three-way partition against a
+ * `Record<RunStage, true>` literal in any case.
+ */
+const RUN_HELD_STAGES: readonly RunStage[] = [...RUN_CLAIMED_STAGES, ...ATTENTION_RUN_STAGES];
+
+/**
+ * Is a fresh orchestrator run holding this item — working it, or stopped on it
+ * waiting for a person?
+ *
+ * The second question over the same payload `runClaimBlock` reads, and the two
+ * differ by exactly two stages, which is the point rather than an accident.
+ * `runClaimBlock` answers "may a human dispatch this", and a `parked` or
+ * `needs-answers` item may be dispatched by hand — that is what parking is
+ * FOR. This answers "is this live work", and a run blocked on a question is
+ * the most live thing on the board: somebody is being asked something. Fold
+ * the two together and one of those two behaviours has to be given up.
+ *
+ * Exists because staleness cannot see a run any other way (bug-11). `isStale`
+ * (client/src/lib/item-stale.ts) exempts an item someone is working from its
+ * date arithmetic, but it read that fact from the item file's `started:` —
+ * and an orchestrator run stamps only its own worktree's copy, so the copy
+ * both surfaces render stays silent for the whole run. A long-untouched bug a
+ * run had just picked up therefore left the Board for Archive: the one card
+ * the run strip and the column rank exist to point at was the one card not on
+ * the board. Same principle `runClaimBlock`'s comment states above — the fact
+ * lives in exactly one place, the run payload, and every surface that needs it
+ * has to be handed it explicitly.
+ *
+ * `fresh`, for the reason `runClaimBlock` gives at length: a run that has
+ * stopped heartbeating is not working anything, and recovering it is
+ * `--resume`/`--abort`'s job. An item held by a crashed run goes back to being
+ * as stale as its file says it is, which is the honest answer.
+ */
+export function runHoldsItem(
+  item: BacklogItem,
+  runs: OrchestratorRunsPayload['runs']
+): boolean {
+  return runEntryAt(item, runs, RUN_HELD_STAGES) !== null;
 }
 
 /**

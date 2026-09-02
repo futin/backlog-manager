@@ -85,13 +85,22 @@ export default function ArchiveView() {
      same place. */
   const { settings } = useSettings();
   const { status: agents } = useAgents();
-  /* The run payload, for `runClaimBlock` alone — Archive renders no run strip
-     and no run drawer, because a run is queue work and this surface is what is
-     not queue work. The block still has to be here: a stale open item can sit
-     `pending` in a run's queue, and a dispatch control that stayed live on
-     Archive while the Board's went dead is exactly half of the bug that block
-     exists to close. The hook polls only while some run is fresh (see
-     useOrchestratorRuns), so an idle machine pays nothing for it. */
+  /* The run payload, read by two things here and still by no strip or drawer —
+     a run is queue work and this surface is what is not queue work.
+
+     `leavesBoard` below is the second reader and the newer one (bug-11): the
+     predicate that decides this surface's contents now takes the run payload,
+     because an orchestrator stamps `started:` only inside its own worktree
+     and so the item file both surfaces render cannot say a run is on it. That
+     is what keeps a long-untouched bug a run has picked up on the Board
+     instead of here. Archive gets it for free — the payload was already
+     fetched on this line for the other reader — and gets it by construction,
+     which is the point of the split living in lib/item-stale.ts rather than in
+     either surface's own filter.
+
+     `runClaimBlock` (`runBlockFor` below) is the older one. The hook polls
+     only while some run is fresh (see useOrchestratorRuns), so an idle machine
+     pays nothing for either. */
   const { runs } = useOrchestratorRuns();
 
   const [open, setOpen] = useState<BacklogItem | null>(null);
@@ -138,7 +147,7 @@ export default function ArchiveView() {
    * staleness rule, delegated — never re-decided here.
    */
   const archived = all.filter(
-    (i) => i.section === 'out-of-scope' || leavesBoard(i, settings.staleDays, now)
+    (i) => i.section === 'out-of-scope' || leavesBoard(i, settings.staleDays, now, runs)
   );
 
   const needle = query.trim().toLowerCase();
@@ -163,6 +172,19 @@ export default function ArchiveView() {
     ...(index?.errors ?? [])
   ];
 
+  /* Why a run forbids dispatching this card, or null — the same block the
+     Board's cards carry.
+
+     Its reachable case narrowed with bug-11 and the block stays anyway. It
+     used to be the common one: a stale open item sitting `pending` in a run's
+     queue, archived by the calendar while the run was about to reach it. That
+     item cannot land here at all now — a run holding it keeps it on the Board,
+     `pending` included. What remains is an item REJECTED while a run held it,
+     which enters this surface by section rather than by staleness and so is
+     not covered by the widened predicate at all. Narrow, but real, and
+     deleting the block would let exactly that card dispatch from Archive while
+     its equivalent on the Board is blocked — which is the half-fixed state the
+     block was added to close. */
   const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs);
 
   /* The same two overlays the Board has, with the same relationship: the sheet

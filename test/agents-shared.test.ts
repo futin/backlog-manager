@@ -1,10 +1,10 @@
 import {
   AGENT_ACTIONS, EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction,
   dispatchBlock, dispatchGate, isAgentAction, isItemId, modesUpTo, pickFrom, projectDispatchGate,
-  runClaimBlock
+  runClaimBlock, runHoldsItem
 } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
-import { RUN_CLAIMED_STAGES } from '../shared/types';
+import { ATTENTION_RUN_STAGES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type {
   AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, RunQueueItem, RunStage
 } from '../shared/types';
@@ -394,6 +394,22 @@ const TERMINAL_STAGES: readonly RunStage[] = [
   'merged', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
 ];
 
+/*
+ * The four stages a run has truly EXITED an item at — the complement of
+ * `runHoldsItem`'s answer rather than of `runClaimBlock`'s, and the reason
+ * the two lists above and below this comment both have to exist. A parked or
+ * needs-answers item is terminal to DISPATCH (nobody is going to move it but
+ * a human, which is what parking is for) and not terminal to the ITEM: the
+ * run still holds the worktree and is waiting, so bug-11's question — "is
+ * this item live work" — answers yes where `runClaimBlock`'s answers no.
+ *
+ * Written out by hand for the reason TERMINAL_STAGES above is: derived from
+ * the constants under test, a partition test proves nothing, because a
+ * constant that loses a member hands it straight to the derived complement
+ * and both halves still agree.
+ */
+const EXITED_STAGES: readonly RunStage[] = ['merged', 'failed', 'skipped', 'ungroomed'];
+
 describe('runClaimBlock', () => {
   it('names the stage for every stage a run still owns the item at', () => {
     for (const stage of RUN_CLAIMED_STAGES) {
@@ -455,5 +471,68 @@ describe('runClaimBlock', () => {
 
     expect([...RUN_CLAIMED_STAGES, ...TERMINAL_STAGES].sort()).toEqual([...all].sort());
     expect(RUN_CLAIMED_STAGES.filter((s) => TERMINAL_STAGES.includes(s))).toEqual([]);
+
+    /* The SECOND partition of the same fourteen members, the one bug-11
+       added: live (a run still holds the item, whether working it or blocked
+       on a person) versus exited. It shares the `Record<RunStage, true>`
+       literal above deliberately — one object the compiler forces a new
+       member into, and two independent classifications it then has to be
+       given, so a stage cannot be filed as claimed-or-terminal and left out
+       of live-or-exited. */
+    const live = [...RUN_CLAIMED_STAGES, ...ATTENTION_RUN_STAGES];
+    expect([...live, ...EXITED_STAGES].sort()).toEqual([...all].sort());
+    expect(live.filter((s) => EXITED_STAGES.includes(s))).toEqual([]);
+  });
+});
+
+/*
+ * bug-11: the same lookup asked the other question — "is this item live work",
+ * which is what keeps a stale open bug an orchestrator is working on the Board
+ * instead of in Archive. Every case here is the `runClaimBlock` case above it
+ * read against the wider stage set, plus the two attention stages, which are
+ * the whole reason this is a second function rather than a second caller.
+ */
+describe('runHoldsItem', () => {
+  it('holds the item at every stage a run still owns it', () => {
+    for (const stage of RUN_CLAIMED_STAGES) {
+      expect(runHoldsItem(fakeItem(), [runWith(stage)])).toBe(true);
+    }
+  });
+
+  /* The half that differs from `runClaimBlock`, and the reason bug-11's fix
+     could not simply reuse it: a parked or needs-answers run has STOPPED and
+     is waiting for a person. Dispatch is allowed (that is what parking hands
+     back), but the item is the last card that should leave the surface the
+     person is being asked to look at. */
+  it('holds the item at both stages a run is blocked on a person at', () => {
+    for (const stage of ATTENTION_RUN_STAGES) {
+      expect(runHoldsItem(fakeItem(), [runWith(stage)])).toBe(true);
+    }
+  });
+
+  it('releases the item at the four stages a run has exited it at', () => {
+    for (const stage of EXITED_STAGES) {
+      expect(runHoldsItem(fakeItem(), [runWith(stage)])).toBe(false);
+    }
+  });
+
+  /* The three lines the two functions share, asserted here as well as on
+     `runClaimBlock` — the extracted helper is what makes them one
+     implementation, and these are the cases that would notice if it stopped
+     being. */
+  it('releases the item when the only run holding it has gone stale', () => {
+    expect(runHoldsItem(fakeItem(), [runWith('reviewing', { fresh: false })])).toBe(false);
+  });
+
+  it('ignores a run for a different project holding the same id', () => {
+    expect(runHoldsItem(fakeItem(), [runWith('reviewing', { project: '/abs/other' })])).toBe(false);
+  });
+
+  it('releases an item the right project\'s fresh run does not mention', () => {
+    expect(runHoldsItem(fakeItem({ id: 'task-99' }), [runWith('reviewing')])).toBe(false);
+  });
+
+  it('releases the item when there are no runs at all', () => {
+    expect(runHoldsItem(fakeItem(), [])).toBe(false);
   });
 });

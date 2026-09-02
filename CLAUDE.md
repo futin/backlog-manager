@@ -134,17 +134,29 @@ happened.
   non-empty), never stored; status is the directory, never frontmatter. Ideas,
   refactors and out-of-scope derive `null`, not `false` — grooming is not a
   state they have, and for the first two the state they wait in is *promoted*.
-- **Board-versus-Archive is derived from `updated ?? created`, never
-  stored.** `isStale`/`leavesBoard` (`client/src/lib/item-stale.ts`) are the
-  one implementation, read by BoardView now and by Archive later, so an item
-  can never be in both surfaces or neither. Four rules the predicate encodes
-  and no caller may re-decide: an item **in progress** is never stale
-  (`started` outranks the arithmetic); a **done or rejected** item is never
+- **Board-versus-Archive is derived from `updated ?? created` and the run
+  payload, never stored.** `isStale`/`leavesBoard`
+  (`client/src/lib/item-stale.ts`) are the one implementation, read by both
+  BoardView and ArchiveView, so an item can never be in both surfaces or
+  neither. Five rules the predicate encodes and no caller may re-decide: an
+  item **in progress** is never stale (`started` outranks the arithmetic); an
+  item a **fresh orchestrator run holds** is never stale either, which is why
+  both functions take `runs` — required, no `[]` default, because a default
+  is what lets the next caller reintroduce bug-11 silently (`runHoldsItem`,
+  `shared/agent.ts`, is every stage but the four true exits, so `pending` and
+  `parked` both count, and it is a separate function from `runClaimBlock`
+  because a parked item must stay on the Board *and* stay hand-dispatchable);
+  a **done or rejected** item is never
   stale (staleness is about neglected work, and a done item is only reachable
   through the Board's own Done filter); an **unparseable or absent** pair of
   stamps reads as fresh, because a malformed file has to stay where someone
   will see it; and a **task never leaves the Board**, it gains a `stale`
-  marker instead. The window is a client setting (`staleDays`, default 30) —
+  marker instead. The second rule exists because the item file cannot know:
+  a run stamps `started:`/`phase:` on its own worktree's copy, so the copy the
+  registry points at is silent for the whole run — the same reason
+  `runClaimBlock` exists, and `ATTENTION_RUN_STAGES` moved to `shared/types.ts`
+  (beside `RUN_CLAIMED_STAGES`) so a `lib/` module could read it without
+  importing a React component. The window is a client setting (`staleDays`, default 30) —
   a view decision over a corpus the server already returns whole — and it is
   the one numeric setting whose clamp falls back to the DEFAULT rather than
   the nearest bound below `min`, because `0` would silently empty three
