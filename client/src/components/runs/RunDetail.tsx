@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 
+import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
-import { itemStageSpans, itemWallMs, runWallMs } from '../../lib/run-stats';
-import {
-  RUN_STATUS_CLASS, RUN_STATUS_GLYPH, stageChipClass, stageGlyph, STAGE_TONE
-} from '../../lib/run-stage';
-import { formatClock, formatSpanCompact } from '../../lib/run-time';
+import { itemStageSpans, runStageTotals, runWallMs } from '../../lib/run-stats';
+import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from '../board/ItemCard';
+import { RowTime } from '../board/RunRowTime';
+import { StageBars } from './StageBars';
+import { StageTrack } from './StageTrack';
 import type {
   ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage
 } from '../../../../shared/types';
@@ -23,11 +25,22 @@ import type {
  *
  * REUSE, not reinvention, is the organizing rule below: `.runs-status`
  * (RunsView's own run-level status chip), `.run-drawer-chip`/`.run-drawer-
- * item`/`.run-drawer-item-verify*` (RunDrawer's per-item chrome) are all
- * worn verbatim. The only genuinely new visual grammar this file needs is
- * the segmented per-item stage bar — RunDrawer's seven-dot stepper answers
- * "how far along," which a finished run has no use for; this pane answers
- * "where did the time go," which the stepper cannot.
+ * item`/`.run-drawer-item-verify*` (RunDrawer's per-item chrome), and now
+ * `RowTime` itself (`board/RunRowTime.tsx`) are all worn verbatim rather
+ * than reimplemented here. `RowTime` moved out of RunDrawer.tsx specifically
+ * so this pane could stop growing its own second reading of "how long did
+ * this item take": a real run (`run-20260901-112815`) once had bug-7 read a
+ * queue-wait-inclusive 161 minutes under this pane's own old arithmetic,
+ * against the correct 25 minutes `itemDurationMs` gives by excluding the
+ * four items queued ahead of it (full story: `RunRowTime.tsx`'s and
+ * `run-stats.ts`'s own file headers). Two things are genuinely new here
+ * instead: `StageTrack` (Task 5) in place of the old segmented per-item
+ * stage bar and its caption — RunDrawer's seven-dot stepper answers "how
+ * far along," which a finished run has no use for; the track answers
+ * "where did the time go," which the stepper cannot — and the run-level
+ * "machine time by stage" rollup (`StageBars` over `runStageTotals`, Task
+ * 6) that now answers the same question once per run instead of once per
+ * item.
  *
  * ---- Data source: three tiers, one rule, one function ----
  *
@@ -166,7 +179,20 @@ export function RunDetail(
   // shares this single instant rather than each calling Date.now() for
   // itself, so two readings taken a millisecond apart cannot print
   // durations that disagree with each other at a rung boundary.
-  const now = Date.now();
+  //
+  // `useNow`, not a bare `Date.now()`, because three readings on this pane
+  // now have to move on their own between poll ticks: the current node's
+  // duration and the fix-loop-free "elapsed" reading `StageTrack` prints
+  // for a still-running item, and the live rollup row `runStageTotals`
+  // credits to whichever stage that item is sitting in right now (see that
+  // function's own "OPEN span" paragraph). The 5s live poll alone would
+  // make all three jump in five-second steps instead of ticking smoothly.
+  // Gated on `live !== null`, exactly like `StageTrack`'s own reduced-
+  // motion sweep: an ARCHIVED selection has nothing left to tick — every
+  // stamp it can ever have is already written — so `useNow(false, ...)`
+  // installs no interval at all and this render stays a pure function of
+  // its props, matching every other archived-row reading on this pane.
+  const now = useNow(live !== null, 1_000);
 
   // The file header's "Data source" section names the rule; `pickAuthority`
   // (lib/run-authority.ts) is its one implementation. `live` wins whenever
@@ -176,13 +202,28 @@ export function RunDetail(
   // `null` (a run finishing), because `fetchedRun` is already in flight for
   // exactly that transition (see the effect above) and replaces `summary`
   // itself, not merely one field on it, the moment it lands.
-  const authority: RunFields = pickAuthority([live, fetchedRun], summary);
+  //
+  // `source` holds the WHOLE winning object, not a projection of it —
+  // `runStageTotals` below needs a real `.queue` of `{stage, stageAt}` items
+  // plus the run's own `status`/`updatedAt` (its open-span credit is gated
+  // on the run's status AND heartbeat freshness, never on `live` alone —
+  // see that function's own doc comment for why), which only the
+  // unprojected object still carries. `authority` used to be a SECOND call
+  // to `pickAuthority`, returning the identical winner under the narrower
+  // `RunFields` type — restating the same precedence a second time just to
+  // get a different type is exactly the kind of duplicate this component's
+  // own reuse rule (file header) argues against, so it is now `source`
+  // itself, narrowed by a plain assignment: structural typing accepts a
+  // wider object wherever the narrower `Pick` is expected, so the
+  // projection costs nothing beyond the type annotation.
+  const source: OrchestratorRun | OrchestratorArchiveRun = pickAuthority([live, fetchedRun], summary);
+  const authority: RunFields = source;
   const attention = authority.attention;
 
-  // Rows follow the SAME precedence as `authority` above, restated here
-  // (rather than derived from `authority` itself) only because a live/
-  // fetched queue item and an archived one are different TypeScript shapes
-  // — `rowsFromLive` reads a full `RunQueueItem[]` (verification tails
+  // Rows follow the SAME precedence as `source`/`authority` above, restated
+  // here (rather than derived from either) only because a live/fetched
+  // queue item and an archived one are different TypeScript shapes —
+  // `rowsFromLive` reads a full `RunQueueItem[]` (verification tails
   // included), `rowsFromArchive` reads a stripped `ArchiveQueueItem[]`. The
   // ORDER of the three checks below is not a second decision to keep in
   // sync with `pickAuthority`'s: it can only ever produce the same winner,
@@ -276,11 +317,36 @@ export function RunDetail(
         <div className="run-detail-error" data-testid="run-detail-error">couldn't load verification output</div>
       )}
 
+      {/* The run-level "machine time by stage" rollup (Task 6) — the same
+          `StageBars` widget Task 7's wide toolbar tile reuses, here fed
+          `source` (not `authority`) because it needs a real `.queue` and
+          `status` to sum over rather than either's narrower projection.
+          "queue wait excluded" is stated outright rather than left implicit
+          — `runStageTotals` already drops every `pending` span (see that
+          function's own doc comment), but a reader comparing this total
+          against a run's own wall-clock elapsed has no other way to know
+          why the two numbers do not add up. */}
+      <div className="run-detail-heading">
+        Machine time by stage
+        <span className="run-detail-sub">queue wait excluded</span>
+      </div>
+      <div className="run-detail-rollup">
+        <StageBars totals={runStageTotals(source, now)} testId="run-detail-machine" />
+      </div>
+
       <div className="run-detail-heading">Items</div>
       <div className="run-drawer-queue" data-testid="run-detail-items">
         {rows.map((row) => {
+          // `spans` now serves one purpose instead of colouring a whole
+          // per-item bar: finding the `preflight`-labelled gap (if any) for
+          // the lead line below. `queueWait`/`preflightSpan` are each
+          // `null`/`undefined` independently — either can be known without
+          // the other (see the two lead-omission cases in this file's own
+          // test suite) — so the lead line's own conditional checks both
+          // rather than gating on `spans.length` the way the old bar did.
           const spans = itemStageSpans(row);
-          const wallItem = itemWallMs(row);
+          const queueWait = itemQueueWaitMs(row);
+          const preflightSpan = spans.find((span) => span.stage === 'preflight');
           return (
             <div key={row.id} className="run-drawer-item" data-testid={`run-detail-item-${row.id}`}>
               <div className="run-drawer-item-head">
@@ -293,49 +359,50 @@ export function RunDetail(
                   <span className="board-card-stage-glyph" aria-hidden="true">{stageGlyph(row.stage)}</span>
                   {row.stage}
                 </span>
-                {wallItem !== null && (
-                  <span className="run-drawer-item-time">{formatSpanCompact(wallItem)}</span>
-                )}
+                {/* The shared `RowTime` (board/RunRowTime.tsx), not a
+                    second inline reading — see this file's own header for
+                    why growing a second "how long" implementation here is
+                    exactly the mistake this move exists to foreclose. */}
+                <RowTime item={row} now={now} testIdPrefix="run-detail-item-time" />
               </div>
 
-              {/* A stage bar with no spans renders NOTHING — not an empty
-                  rail — per the brief: an item with fewer than two parsed
-                  `stageAt` stamps (never dispatched, or corrupt timestamps)
-                  has no "where did the time go" story to tell, and an empty
-                  strip of the same height as a real bar would look like a
-                  rendering bug rather than the honest absence it is. */}
-              {spans.length > 0 && (
-                <>
-                  <div className="run-detail-stagebar" data-testid={`run-detail-stagebar-${row.id}`}>
-                    {spans.map((span, i) => (
-                      <span
-                        key={`${span.stage}-${i}`}
-                        // `run-seg-<tone>` — STAGE_TONE's own six-way map,
-                        // not a second stage->color ladder invented here.
-                        // Width proportional to the span's own share of
-                        // this item's total wall time: `flexGrow` set to
-                        // the raw millisecond count with `flexBasis: 0`
-                        // lets flexbox do that division for every segment
-                        // in one pass, with `.run-detail-seg`'s own
-                        // `min-width: 2px` (styles.css) as the floor that
-                        // keeps a genuinely brief stage visible rather than
-                        // shrinking to nothing beside a much longer one.
-                        className={`run-detail-seg run-seg-${STAGE_TONE[span.stage]}`}
-                        style={{ flexGrow: span.ms, flexBasis: 0 }}
-                      />
-                    ))}
-                  </div>
-                  <div className="run-detail-caption" data-testid={`run-detail-caption-${row.id}`}>
-                    {spans.map((span) => `${span.stage} ${formatSpanCompact(span.ms)}`).join(' · ')}
-                  </div>
-                </>
-              )}
-
-              {row.fixLoops > 0 && (
-                <div className="run-drawer-item-fixloops">
-                  {row.fixLoops} fix loop{row.fixLoops === 1 ? '' : 's'}
+              {/* The queue-wait / preflight lead line (Task 6). Only
+                  `queueWait` is something `RowTime`'s `itemDurationMs`
+                  actually excludes — `pending`, the one interval
+                  `startedAtMs` (run-time.ts) drops (this file's own header
+                  has the real-run defect that exclusion fixed) — so it is
+                  genuine CONTEXT the head reading has no room for.
+                  `preflightSpan` is a different kind of number:
+                  `itemDurationMs` KEEPS `preflight` (`startedAtMs` treats
+                  the gate check as work on this item, the same way
+                  `MACHINE_STAGES`, run-stats.ts, counts `preflight` toward
+                  the run-level rollup above), so this figure is a
+                  BREAKDOWN of time already sitting inside the head reading,
+                  not a second thing subtracted from it. Omitted entirely,
+                  not rendered empty, when NEITHER half is known: a
+                  `pending` item has not started queueing out yet, and a
+                  hand-edited or corrupt `stageAt` has nothing honest to
+                  report either. */}
+              {(queueWait !== null || preflightSpan !== undefined) && (
+                <div className="run-detail-lead" data-testid={`run-detail-lead-${row.id}`}>
+                  {[
+                    queueWait === null ? null : `queue ${formatSpanCompact(queueWait)}`,
+                    preflightSpan === undefined ? null : `preflight ${formatSpan(preflightSpan.ms)}`
+                  ].filter((part) => part !== null).join(' · ')}
                 </div>
               )}
+
+              {/* `StageTrack` (Task 5) replaces the old segmented per-item
+                  stage bar and its caption outright — deleted along with
+                  their CSS (`.run-detail-stagebar`/`-seg`/`-caption`, the
+                  six `.run-seg-*` tones). No conditional needed around it:
+                  the component's own `stage === 'ungroomed'` guard already
+                  returns `null` for the one item shape with nothing to
+                  draw. The fix-loop count that used to print as its own
+                  "N fix loop(s)" line now rides as `StageTrack`'s own
+                  badge on the `fixing` node instead — one reading of that
+                  count, not two. */}
+              <StageTrack item={row} now={now} />
 
               {row.verify !== null && (
                 // RunDrawer's own one-way-seed pattern, unchanged: React

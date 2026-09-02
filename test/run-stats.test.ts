@@ -1,5 +1,6 @@
 import {
-  itemStageSpans, itemWallMs, runWallMs, runStageTotals, aggregateRuns, dayKey, dayLabel
+  itemStageSpans, runWallMs, runStageTotals, sumStageTotals, MACHINE_STAGES,
+  aggregateRuns, dayKey, dayLabel
 } from '../client/src/lib/run-stats';
 import type { ArchiveQueueItem, OrchestratorArchiveRun, RunQueueItem, RunStage } from '../shared/types';
 
@@ -19,7 +20,7 @@ function at(offsetMs: number): string {
   return new Date(T0 + offsetMs).toISOString();
 }
 
-/** Just the one field itemStageSpans/itemWallMs read — never a whole RunQueueItem, which would bury it. */
+/** Just the one field itemStageSpans reads — never a whole RunQueueItem, which would bury it. */
 function withStageAt(stageAt: Partial<Record<RunStage, string>>): Pick<RunQueueItem, 'stageAt'> {
   return { stageAt };
 }
@@ -118,39 +119,6 @@ describe('itemStageSpans', () => {
   });
 });
 
-describe('itemWallMs', () => {
-  // Case 3 (wall half): fewer than two parseable stamps means there is no
-  // "first" and "last" to subtract, so this is null rather than 0 — 0 would
-  // read as "this item took no time," which is not the same fact.
-  it('is null with fewer than two parseable stamps', () => {
-    expect(itemWallMs(withStageAt({ pending: at(0) }))).toBeNull();
-    expect(itemWallMs(withStageAt({}))).toBeNull();
-  });
-
-  // Case 5: last recorded arrival minus first, off the case-1 fixture.
-  it('is the last arrival minus the first', () => {
-    const item = withStageAt({
-      pending: at(0),
-      dispatched: at(10_000),
-      reviewing: at(70_000),
-      merged: at(100_000)
-    });
-    expect(itemWallMs(item)).toBe(100_000);
-  });
-
-  // Case 4 (wall half): the corrupt `pending` stamp is excluded from both
-  // ends of the subtraction, so wall time is measured off what actually
-  // parsed (dispatched..merged), not off a phantom zero point.
-  it('excludes a corrupt stamp from both ends of the subtraction', () => {
-    const item = withStageAt({
-      pending: 'garbage',
-      dispatched: at(0),
-      merged: at(5_000)
-    });
-    expect(itemWallMs(item)).toBe(5_000);
-  });
-});
-
 describe('runWallMs', () => {
   // Case 6a: a finished run measures updatedAt - startedAt. `now` must not
   // matter here — a run that ended an hour ago must not read as having taken
@@ -177,14 +145,34 @@ describe('runWallMs', () => {
   });
 });
 
+describe('MACHINE_STAGES', () => {
+  // The seven stages that are the orchestrator actually working — never
+  // `pending` (queue wait, not work) and never one of the six exits. Pinned
+  // in this exact order because runStageTotals/aggregateRuns fixtures below
+  // build their expectations by reasoning about this list positionally, the
+  // same way STEPPER_STAGES (run-time.test.ts) is pinned for its callers.
+  it('names the seven pipeline stages in pipeline order', () => {
+    expect(MACHINE_STAGES).toEqual([
+      'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
+    ]);
+  });
+});
+
 describe('runStageTotals', () => {
-  // Case 7: two items whose spans both include a `dispatched` leg — the
-  // totals record must sum them rather than overwrite, and a stage neither
-  // item ever spanned (`merging`) must be absent from the record entirely,
-  // not present at 0 — Partial<Record<...>> is the whole point of the return
-  // type, and a caller iterating Object.keys() should not see zero-value
-  // noise for stages nothing touched.
-  it('sums each stage span across every item in the queue', () => {
+  // Case 7 (rewritten): two items whose spans both include a `pending` leg
+  // and a `dispatched` leg — the totals record must sum the `dispatched`
+  // legs across items, and `pending` must be ABSENT from the result now
+  // (not present at some summed value): pending is queue wait, not machine
+  // time, and runStageTotals's whole job is to answer "where did the
+  // orchestrator's OWN time go," not "how long did every item sit in the
+  // queue before its turn." A stage neither item ever spanned (`merging`)
+  // stays absent too, for the older reason this case always pinned —
+  // Partial<Record<...>> is the whole point of the return type, and a
+  // caller iterating Object.keys() should not see zero-value noise for a
+  // stage nothing touched. Both items are `merged` (archiveItem's default
+  // stage), so the extra `now` argument is inert here — pinning that is
+  // exactly what this case's second assertion below is for.
+  it('sums each MACHINE_STAGES span across every item, excluding pending', () => {
     const run = archiveRun({
       queue: [
         archiveItem({
@@ -197,12 +185,228 @@ describe('runStageTotals', () => {
         })
       ]
     });
-    expect(runStageTotals(run)).toEqual({
-      // item-a: pending 10_000, dispatched 30_000
-      // item-b: pending 20_000, dispatched 30_000
-      pending: 30_000,
+    expect(runStageTotals(run, T0)).toEqual({
+      // item-a: dispatched 30_000 (pending's 10_000 leg is dropped)
+      // item-b: dispatched 30_000 (pending's 20_000 leg is dropped)
       dispatched: 60_000
     });
+    // now must not matter for two terminal (merged) items — same totals
+    // however far past T0 the clock reads.
+    expect(runStageTotals(run, T0 + 999_000)).toEqual({ dispatched: 60_000 });
+  });
+
+  // Case 9: a live item still inside the pipeline, in a RUNNING run. Its two
+  // recorded spans (pending->dispatched, dispatched->fixing) contribute the
+  // usual way, but being non-terminal it ALSO gets an open span for the
+  // stage it is sitting in right now (fixing, from its own arrival to
+  // `now`) — the "a live run's rollup must move" half of the behaviour:
+  // without this, runStageTotals would freeze mid-run at whatever the last
+  // completed span happened to be, understating the stage actually eating
+  // time right now. `status: 'running'` is load-bearing here after fix
+  // round 1 (below): without it this fixture would fall into the very next
+  // case instead, which is this same fixture with the run stopped.
+  it('adds an open span for a live item on top of its completed spans, in a running run', () => {
+    const run = archiveRun({
+      status: 'running',
+      queue: [
+        archiveItem({
+          id: 'item-c',
+          stage: 'fixing',
+          stageAt: { pending: at(0), dispatched: at(10_000), fixing: at(30_000) }
+        })
+      ]
+    });
+    // pending->dispatched (10_000, dropped: pending) + dispatched->fixing
+    // (20_000, kept) + fixing->now (90_000 - 30_000 = 60_000, open span)
+    expect(runStageTotals(run, T0 + 90_000)).toEqual({ dispatched: 20_000, fixing: 60_000 });
+  });
+
+  // Fix round 1, Finding 1: the SAME live item as case 9 above, byte-for-byte,
+  // except the run itself has already stopped (`aborted` here; `done` and
+  // `failed` are the same case in different words). An archived run's item
+  // frozen mid-stage is not "still happening" — it is the last thing that
+  // happened before nobody was watching — so crediting `now - stamp` to it
+  // would add however long it has been since the run stopped (hours, days,
+  // however stale this archive read happens to be) as if the orchestrator
+  // were still working it. Only the two closed spans survive; `fixing` is
+  // absent entirely (not present at some frozen value) because its only
+  // possible contribution was the open span this status gate now excludes.
+  it('adds no open span at all for a non-running run, however far past its last stamp now is', () => {
+    const run = archiveRun({
+      status: 'aborted',
+      queue: [
+        archiveItem({
+          id: 'item-c',
+          stage: 'fixing',
+          stageAt: { pending: at(0), dispatched: at(10_000), fixing: at(30_000) }
+        })
+      ]
+    });
+    expect(runStageTotals(run, T0 + 90_000)).toEqual({ dispatched: 20_000 });
+  });
+
+  // Fix round 1, Finding 2: an item that RE-ENTERED its current stage after a
+  // fix loop — dispatched -> reviewing (T1) -> fixing (T2) -> back to
+  // reviewing now, with no fresh `stageAt.reviewing` key for the second visit
+  // (stageAt records first arrivals only). `stageAt.reviewing` is therefore
+  // STALE: it still points at T1, which is chronologically before `fixing`'s
+  // own later arrival (T2). Naively opening the live span at that stale T1
+  // would credit the whole T1-to-now interval to `reviewing` — but the T1-to-
+  // T2 portion of that interval is ALREADY counted once, as the closed
+  // `reviewing` span `itemStageSpans` produces from the T1/T2 stamps
+  // themselves. Opening the live span from `max(latest arrival, T1)` = T2
+  // instead measures only the genuinely uncounted tail (T2 to now), so
+  // `reviewing`'s total is `(T2-T1) + (now-T2)` exactly once — not the
+  // `(T2-T1) + (now-T1)` a stale-stamp reading would produce, which is
+  // `(T2-T1)` bigger than the truth: T1-to-T2 double-counted.
+  it('does not double-count a re-entered stage: the open span starts from the item\'s latest arrival, not the stale first one', () => {
+    const run = archiveRun({
+      status: 'running',
+      queue: [
+        archiveItem({
+          id: 'item-f',
+          stage: 'reviewing',
+          stageAt: {
+            pending: at(0),
+            dispatched: at(10_000),
+            reviewing: at(20_000), // T1: stale — first arrival only, second visit unstamped
+            fixing: at(50_000) // T2: chronologically AFTER the stale reviewing stamp
+          }
+        })
+      ]
+    });
+
+    // now = T0 + 80_000, i.e. 30_000ms past T2.
+    //   closed spans:  dispatched 10_000 (dispatched->reviewing), reviewing 30_000 (reviewing->fixing, T2-T1)
+    //   correct open:  reviewing += now-T2  = 30_000  =>  reviewing total 60_000
+    //   buggy open:    reviewing += now-T1  = 60_000  =>  reviewing total 90_000 (T1->T2 double-counted)
+    expect(runStageTotals(run, T0 + 80_000)).toEqual({ dispatched: 10_000, reviewing: 60_000 });
+  });
+
+  // Fix round 2 (final-review wave, Important 1): a CRASHED run — `status`
+  // still `"running"` forever, because `orchestrate.mjs init` refuses to
+  // overwrite a run file already at that status, and recovery is only
+  // `--resume`/`--abort` (this repo's own "One run per project, checked
+  // twice" invariant) — whose last heartbeat (`updatedAt`) is long past
+  // `RUN_STALE_MS`. `status === 'running'` alone used to be enough to open a
+  // live span (case 9 above proves the run-level gate is needed AT ALL, and
+  // remains true — a fresh `running` run still ticks to `now` there); this
+  // case proves the gate ALSO needs `updatedAt`'s own freshness, the same
+  // fork `runElapsedMs` (run-time.ts) already makes for a shape with a real
+  // `fresh` flag of its own. The item's open span must freeze at
+  // `updatedAt`, never grow to `now` — otherwise the exact unbounded-span
+  // defect the status-only gate was built to prevent in fix round 1
+  // reappears through the one door that gate left open: a process nobody
+  // has heard from in hours still reporting `status: "running"` on disk.
+  it("freezes a crashed run's open span at its own last heartbeat, not now", () => {
+    const run = archiveRun({
+      status: 'running',
+      startedAt: at(0),
+      updatedAt: at(1_000_000), // last heartbeat, ~16.7 minutes after start
+      queue: [
+        archiveItem({
+          id: 'item-g',
+          stage: 'fixing',
+          stageAt: { pending: at(0), dispatched: at(10_000), fixing: at(30_000) }
+        })
+      ]
+    });
+
+    // now is a full day past the run's last heartbeat — an archive read long
+    // after a crash, not a slow poll tick that just missed one beat.
+    const now = T0 + 1_000_000 + 24 * 60 * 60 * 1000;
+
+    // dispatched->fixing (20_000, kept — unaffected by this fix) + fixing's
+    // open span FROZEN at updatedAt (1_000_000 - 30_000 = 970_000), never
+    // reaching the real `now` this test passes in.
+    expect(runStageTotals(run, now)).toEqual({ dispatched: 20_000, fixing: 970_000 });
+  });
+
+  // Companion to the case above: an `updatedAt` that will not parse reads as
+  // NOT fresh (an unparseable heartbeat is not evidence a process is still
+  // alive — it cannot earn the `now`-ticking branch) but also leaves no
+  // honest instant to freeze the open span AT, so the item's open span
+  // contributes nothing at all rather than fabricating one — only its
+  // closed spans stand. Pinned as its own case because "not fresh" and
+  // "frozen at updatedAt" are two different claims a single corrupt-heartbeat
+  // fixture tells apart: this run must fall into neither the fresh branch
+  // nor the frozen-number branch above.
+  it('adds no open span at all when the heartbeat itself will not parse', () => {
+    const run = archiveRun({
+      status: 'running',
+      startedAt: at(0),
+      updatedAt: 'garbage',
+      queue: [
+        archiveItem({
+          id: 'item-h',
+          stage: 'fixing',
+          stageAt: { pending: at(0), dispatched: at(10_000), fixing: at(30_000) }
+        })
+      ]
+    });
+
+    expect(runStageTotals(run, T0 + 90_000)).toEqual({ dispatched: 20_000 });
+  });
+
+  // Case 10: an item that left the pipeline through a non-merge exit
+  // (`parked`), in a running run. Its one completed span (pending->dispatched)
+  // is dropped for the pending reason as always, but — unlike case 9 — it
+  // gets NO open span for `parked`: `parked` is not in MACHINE_STAGES at all
+  // (it is an exit, not a place the orchestrator is working), and
+  // isTerminalStage would also refuse it a live span even if it were. Both
+  // guards land on the same fixture on purpose, so a future change that
+  // drops either one still fails this case. `status: 'running'` is set
+  // explicitly (rather than left at archiveRun's 'done' default) so this
+  // case keeps pinning the ITEM-terminality guard specifically, not the
+  // run-status guard fix round 1 added above — a 'done' run would exclude
+  // the open span for a completely different reason and this case would
+  // stop testing what its own name says it tests.
+  it('excludes a terminal-labelled span and adds no open span for a terminal item', () => {
+    const run = archiveRun({
+      status: 'running',
+      queue: [
+        archiveItem({
+          id: 'item-d',
+          stage: 'parked',
+          stageAt: { pending: at(0), dispatched: at(10_000), parked: at(30_000) }
+        })
+      ]
+    });
+    expect(runStageTotals(run, T0 + 999_000)).toEqual({ dispatched: 20_000 });
+  });
+
+  // Case 11: a live item whose CURRENT stage is `pending` itself — still
+  // queued, not yet dispatched at all, in a running run (see case 10's own
+  // comment for why `status: 'running'` is set explicitly here too). It has
+  // no completed spans (a single stamp cannot span anything) and earns no
+  // open span either, because `pending` fails the
+  // `MACHINE_STAGES.includes(item.stage)` half of the open-span guard even
+  // though it passes both `!isTerminalStage` and `status === 'running'`. The
+  // result is the empty record, not `{ pending: ... }` — the whole point of
+  // this module is that a queued item contributes nothing to "where did the
+  // orchestrator's time go" until it actually starts.
+  it('is empty for a live item still sitting in pending', () => {
+    const run = archiveRun({
+      status: 'running',
+      queue: [archiveItem({ id: 'item-e', stage: 'pending', stageAt: { pending: at(0) } })]
+    });
+    expect(runStageTotals(run, T0 + 999_000)).toEqual({});
+  });
+});
+
+describe('sumStageTotals', () => {
+  it('is the empty record for an empty list', () => {
+    expect(sumStageTotals([])).toEqual({});
+  });
+
+  // Field-wise sum: a stage present in only one operand (fixing) still
+  // shows up in the result, and a stage present in both (dispatched) adds
+  // rather than overwrites.
+  it('sums corresponding stages across a list of totals, keeping stages unique to one', () => {
+    expect(sumStageTotals([
+      { dispatched: 1_000, fixing: 500 },
+      { dispatched: 2_000 }
+    ])).toEqual({ dispatched: 3_000, fixing: 500 });
   });
 });
 
@@ -211,8 +415,18 @@ describe('aggregateRuns', () => {
   // finished run with two merges and a fix loop on each, one failed run that
   // merged only one of its two items, one still-running run that has merged
   // nothing yet. Every stamp below is a round number chosen so the average
-  // wall time comes out exact rather than needing toBeCloseTo.
-  it('aggregates counts, fix-loop cost, verification pass rate and average wall time across runs', () => {
+  // work time comes out exact rather than needing toBeCloseTo.
+  //
+  // Each merged item's `dispatched` stamp lands exactly 50s after its OWN
+  // `pending` — pinning the queue-wait exclusion this whole task exists for.
+  // Read against `itemDurationMs`, "50s after pending" makes each item's new
+  // work time exactly 50s shorter than the OLD first-to-last reading
+  // (itemWallMs, pending included) would have said — see the per-item
+  // comments below and the final assertion for the arithmetic. bug-2's
+  // `dispatched` is `at(250_000)`, not the `at(50_000)` bug-1/bug-3 use,
+  // because bug-2's own `pending` is not at T0 — "50s after pending" is the
+  // invariant every item shares, not a common absolute offset.
+  it('aggregates counts, fix-loop cost, verification pass rate and average work time across runs', () => {
     const doneRun = archiveRun({
       status: 'done',
       queue: [
@@ -224,8 +438,8 @@ describe('aggregateRuns', () => {
             { cmd: 'pnpm test', ok: true },
             { cmd: 'pnpm typecheck', ok: true }
           ],
-          // wall: 100_000
-          stageAt: { pending: at(0), dispatched: at(10_000), merged: at(100_000) }
+          // old wall (pending->merged) 100_000; new work (dispatched->merged) 50_000
+          stageAt: { pending: at(0), dispatched: at(50_000), merged: at(100_000) }
         }),
         archiveItem({
           id: 'bug-2',
@@ -235,8 +449,8 @@ describe('aggregateRuns', () => {
             { cmd: 'pnpm test', ok: true },
             { cmd: 'pnpm lint', ok: false }
           ],
-          // wall: 200_000
-          stageAt: { pending: at(200_000), dispatched: at(210_000), merged: at(400_000) }
+          // old wall 200_000; new work 150_000 (dispatched is pending + 50s)
+          stageAt: { pending: at(200_000), dispatched: at(250_000), merged: at(400_000) }
         })
       ]
     });
@@ -249,8 +463,8 @@ describe('aggregateRuns', () => {
           stage: 'merged',
           fixLoops: 0,
           verification: [],
-          // wall: 300_000
-          stageAt: { pending: at(0), dispatched: at(10_000), merged: at(300_000) }
+          // old wall 300_000; new work 250_000
+          stageAt: { pending: at(0), dispatched: at(50_000), merged: at(300_000) }
         }),
         archiveItem({
           id: 'bug-4',
@@ -285,8 +499,14 @@ describe('aggregateRuns', () => {
     expect(result.fixLoopsPerMerged).toBe(1);
     // 3 ok out of 4 total verification entries, all from doneRun
     expect(result.verifyPassRate).toBe(0.75);
-    // (100_000 + 200_000 + 300_000) / 3 merged items with a wall time
-    expect(result.avgItemWallMs).toBe(200_000);
+    // (50_000 + 150_000 + 250_000) / 3 merged items with a known work time.
+    // The OLD rule (itemWallMs, queue wait folded in) would read this exact
+    // fixture as (100_000 + 200_000 + 300_000) / 3 = 200_000 instead — the
+    // 50_000ms gap between the two numbers is exactly the 50s this fixture
+    // shaved off each of the three items' dispatched stamps, and is the one
+    // thing in this suite that would silently keep passing at the OLD
+    // number if the queue-wait exclusion this task adds were ever lost.
+    expect(result.avgItemWorkMs).toBe(150_000);
   });
 
   // Fix round 1: case 8 above cannot tell "sum fixLoops/verification over
@@ -350,6 +570,34 @@ describe('aggregateRuns', () => {
     expect(result.verifyPassRate).toBeCloseTo(2 / 3);
   });
 
+  // Case 14: the queue-wait exclusion at its starkest — a single merged item
+  // that waited a full hour in the queue (pending -> preflight) but only
+  // took a minute of actual work (preflight -> merged). The OLD rule
+  // (itemWallMs, pending included) would read this item's own wall time as
+  // 3_660_000ms (61 minutes) and report that as the average of one; the new
+  // rule reports 60_000ms (the one minute of real work), because
+  // itemDurationMs's whole reason for existing is dropping exactly the
+  // `pending` leg this fixture makes an hour long. This is the real-run
+  // failure mode named in run-stats.ts's own file header (bug-7 reading 161m
+  // in the pane vs 25m in the drawer) reproduced as a single deterministic
+  // case, not just an aggregate arithmetic coincidence like case 8 above.
+  it('avg item work excludes queue wait', () => {
+    const run = archiveRun({
+      status: 'done',
+      queue: [
+        archiveItem({
+          id: 'bug-slow-queue',
+          stage: 'merged',
+          stageAt: { pending: at(0), preflight: at(3_600_000), merged: at(3_660_000) }
+        })
+      ]
+    });
+
+    const result = aggregateRuns([run], T0);
+
+    expect(result.avgItemWorkMs).toBe(60_000);
+  });
+
   // Case 9: the empty-list floor. Every ratio is null (nothing to divide by)
   // rather than 0 or NaN — 0 would misreport "a 0% pass rate" for a run
   // history that simply does not exist yet.
@@ -360,7 +608,7 @@ describe('aggregateRuns', () => {
       byStatus: { done: 0, failed: 0, running: 0, aborted: 0 },
       itemsMerged: 0,
       itemsQueued: 0,
-      avgItemWallMs: null,
+      avgItemWorkMs: null,
       fixLoopsPerMerged: null,
       verifyPassRate: null
     });

@@ -3,11 +3,11 @@ import { useEffect } from 'react';
 import { projectLabel } from '../../lib/project-label';
 import { stageChipClass, stageGlyph } from '../../lib/run-stage';
 import {
-  formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
-  itemDoneClock, itemDurationMs, runElapsedMs, stepperDots
+  formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runElapsedMs, stepperDots
 } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
-import type { OrchestratorRun, RunQueueItem, RunStage, RunVerification } from '../../../../shared/types';
+import { RowTime } from './RunRowTime';
+import type { OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
 
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
@@ -92,55 +92,13 @@ function staleNote(run: RunPayload): string | null {
 }
 
 
-/**
- * The stages a row prints no time at all for.
- *
- * `ungroomed` and `skipped` are the two exits where no work happened: the gate
- * turned the item away, or the run never got to it. A duration measured across
- * either is a measurement of nothing — the seconds the orchestrator spent
- * reading a file and deciding not to queue it — and printing one would put a
- * number in the same column where its neighbours carry real work, inviting the
- * comparison. Blank is the honest reading; the row's chip already says why.
- */
-const TIMELESS_STAGES: readonly RunStage[] = ['ungroomed', 'skipped'];
-
-/**
- * The row's right-hand time reading: what a person scanning the queue wants
- * without opening anything — how long each item took, and when the finished
- * ones finished.
- *
- * Three shapes, because a queue row is in one of three situations and they
- * answer different questions. A finished row gets `<duration> · <HH:MM>`: both
- * halves matter and neither implies the other — the duration is the cost, the
- * clock time is what lets a person line the item up against something else
- * that happened this morning. An active row gets `<duration> elapsed`, with
- * the word carrying the tense the finished rows do not need. A `pending` row
- * gets an em dash: not "0s", which claims a measurement, but the typographic
- * mark for a field with nothing in it yet.
- *
- * A `null` duration degrades to whichever half survives rather than blanking
- * the row: a terminal row with a stamp for its exit but nothing before it can
- * still honestly say WHEN it ended even when it cannot say how long it took.
- */
-function RowTime({ item, now }: { item: RunQueueItem; now: number }): JSX.Element | null {
-  if (TIMELESS_STAGES.includes(item.stage)) return null;
-
-  if (item.stage === 'pending') {
-    return <span className="run-drawer-item-time" data-testid={`run-drawer-time-${item.id}`}>—</span>;
-  }
-
-  const duration = itemDurationMs(item, now);
-  const span = duration === null ? null : formatSpan(duration);
-  const terminal = isTerminalStage(item.stage);
-  const done = terminal ? itemDoneClock(item) : null;
-
-  const text = terminal
-    ? [span, done].filter((part) => part !== null).join(' · ')
-    : span === null ? '' : `${span} elapsed`;
-
-  if (text === '') return null;
-  return <span className="run-drawer-item-time" data-testid={`run-drawer-time-${item.id}`}>{text}</span>;
-}
+// `TIMELESS_STAGES` and `RowTime` — the row's right-hand time reading — moved
+// to `./RunRowTime` (Task 3). The detail pane had its own separate reading
+// that counted queue wait back in, which Task 2 measured as wrong; moving the
+// one correct implementation here is what lets the pane render it too instead
+// of maintaining a second version to keep in sync by hand. That file's header
+// comment carries the full reasoning, including why the shared version still
+// lives here in `board/` rather than in `runs/` beside its newer reader.
 
 /**
  * The seven-dot pipeline stepper under a queue row: where this item is, what
