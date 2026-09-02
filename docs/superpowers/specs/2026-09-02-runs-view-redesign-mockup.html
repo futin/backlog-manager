@@ -1,0 +1,333 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Runs Redesign</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600&family=IBM+Plex+Mono:wght@400;600;700&display=swap">
+<style>
+:root{
+  --board:#e8e3d7;--steel:#f2eee5;--strip:#fbf8f1;--strip-hi:#f2ecdd;
+  --hairline:#cdc4b1;--hairline2:#ab9f88;
+  --ink:#231f1a;--ink2:#5a5346;--ink3:#8a8172;
+  --green:#1f7a4d;--amber:#a86414;--mustard:#8a7415;--cyan:#136d78;--red:#a83420;
+  --good:var(--green);
+  --mono:'IBM Plex Mono','SF Mono','JetBrains Mono',monospace;
+  --font:'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --display:'Barlow Condensed','Barlow',sans-serif;
+  --gap:14px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --board:#0c1220;--steel:#131a2b;--strip:#182238;--strip-hi:#1e2a44;
+  --hairline:#2a3752;--hairline2:#354463;
+  --ink:#dde6f4;--ink2:#9fadc6;--ink3:#66738c;
+  --green:#46d48c;--amber:#ffb03a;--mustard:#d1ba52;--cyan:#55d0dd;--red:#e0533f;
+}}
+:root[data-theme="dark"]{
+  --board:#0c1220;--steel:#131a2b;--strip:#182238;--strip-hi:#1e2a44;
+  --hairline:#2a3752;--hairline2:#354463;
+  --ink:#dde6f4;--ink2:#9fadc6;--ink3:#66738c;
+  --green:#46d48c;--amber:#ffb03a;--mustard:#d1ba52;--cyan:#55d0dd;--red:#e0533f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--board);color:var(--ink2);font-family:var(--font);font-size:11.5px;line-height:1.4}
+button{font:inherit;color:inherit}
+button:focus-visible,select:focus-visible{outline:none;box-shadow:0 0 0 2px var(--cyan)}
+.page{max-width:1320px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:var(--gap)}
+.mock{font-family:var(--mono);font-size:9.5px;color:var(--ink3);letter-spacing:.03em}
+
+/* ---- header bar: title + range control + project select ---- */
+.bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;row-gap:8px}
+.title{font-family:var(--display);font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink)}
+.tools{margin-left:auto;display:flex;align-items:stretch;flex-wrap:wrap;gap:6px}
+.seg{display:inline-flex;background:var(--steel);border:1px solid var(--hairline);border-radius:2px;overflow:hidden}
+.seg button{border:0;background:transparent;font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink2);padding:4px 10px;cursor:pointer;transition:color .15s,background .15s}
+.seg button+button{border-left:1px solid var(--hairline)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{color:var(--ink);background:var(--strip-hi);box-shadow:inset 0 -2px 0 var(--cyan)}
+.sel{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink2);background:var(--steel);border:1px solid var(--hairline);border-radius:2px;padding:4px 8px;cursor:pointer;max-width:190px}
+
+/* ---- stat tiles + the wide "machine time by stage" tile ---- */
+.tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr)) minmax(300px,2.3fr);gap:8px}
+.tile{display:flex;flex-direction:column;gap:4px;min-width:0;background:var(--strip);border:1px solid var(--hairline);border-radius:2px;padding:10px 12px}
+.tv{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--ink)}
+.tl{font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3)}
+.tsub{display:flex;flex-wrap:wrap;gap:4px 8px;font-family:var(--mono);font-size:9.5px;color:var(--ink3)}
+.tsub span{white-space:nowrap}
+.tile.wide{gap:8px}
+.tile.wide .th{display:flex;align-items:baseline;gap:8px}
+.tile.wide .th .tsub{margin-left:auto}
+
+/* horizontal bar rows: one series, pipeline order, value at the tip */
+.bars{display:flex;flex-direction:column;gap:5px}
+.brow{display:grid;grid-template-columns:72px 1fr 54px;align-items:center;gap:8px}
+.blbl{font-family:var(--mono);font-size:10px;color:var(--ink2)}
+.btrack{position:relative;height:6px;border-left:1px solid var(--hairline2)}
+.barf{position:absolute;left:0;top:0;height:6px;background:var(--cyan);border-radius:0 3px 3px 0;min-width:2px}
+.bval{font-family:var(--mono);font-size:10.5px;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+.bval.none{color:var(--ink3)}
+
+/* ---- master/detail split ---- */
+.split{display:grid;grid-template-columns:200px 1fr;gap:var(--gap);align-items:start}
+.list{display:flex;flex-direction:column;gap:14px;min-width:0}
+.day{display:flex;flex-direction:column;gap:6px}
+.dh{font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3)}
+.rows{display:flex;flex-direction:column;gap:6px}
+.row{display:flex;flex-direction:column;gap:3px;width:100%;text-align:left;font-size:11px;color:var(--ink2);background:var(--strip);border:1px solid var(--hairline);border-radius:2px;padding:7px 10px;cursor:pointer;transition:border-color .15s}
+.row:hover{border-color:var(--hairline2)}
+.row[aria-current="true"]{border-color:var(--cyan)}
+.row.live{box-shadow:inset 2px 0 0 var(--cyan)}
+.rh{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.st{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;font-weight:600}
+.st-running{color:var(--cyan)}.st-done{color:var(--green)}.st-aborted{color:var(--amber)}.st-failed{color:var(--red)}
+.rp{font-family:var(--mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink)}
+.rc{margin-left:auto;font-family:var(--mono);font-size:10px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.rw{font-family:var(--mono);font-size:10px;color:var(--ink3);font-variant-numeric:tabular-nums}
+
+.detail{background:var(--strip);border:1px solid var(--hairline);border-radius:2px;padding:14px;min-height:160px;font-family:var(--mono);font-size:11px;color:var(--ink3);min-width:0}
+.dhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.rid{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink)}
+.dtime{font-family:var(--mono);font-size:10px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-family:var(--mono);font-size:10.5px;color:var(--ink2);background:var(--steel);border:1px solid var(--hairline);border-radius:2px;padding:4px 9px}
+.chip b{color:var(--ink);font-weight:600;margin-right:3px}
+.h{font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);margin:16px 0 8px;display:flex;align-items:baseline;gap:8px}
+.h .sub{font-family:var(--mono);text-transform:none;letter-spacing:.02em;font-weight:400;margin-left:auto}
+.rollup{background:var(--steel);border:1px solid var(--hairline);border-radius:2px;padding:10px 12px}
+.rollup .brow{grid-template-columns:80px 1fr 60px}
+
+/* ---- item rows ---- */
+.items{display:flex;flex-direction:column;gap:8px}
+.item{border:1px solid var(--hairline);border-radius:2px;background:var(--steel);padding:10px 12px 12px;display:flex;flex-direction:column;gap:4px}
+.ih{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.id{flex:none;font-family:var(--mono);font-size:10px;color:var(--ink3)}
+.ttl{flex:1;min-width:140px;font-size:12px;color:var(--ink)}
+.time{flex:none;margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lead{font-family:var(--mono);font-size:10px;color:var(--ink3)}
+.stage{flex:none;display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;color:var(--cyan);border:1px solid color-mix(in srgb,var(--cyan) 45%,transparent);border-radius:9px;padding:1px 7px 1px 5px}
+.stage .g{font-size:1.15em;line-height:1;animation:pulse 2s ease-in-out infinite}
+.stage.done{color:var(--green);border-color:color-mix(in srgb,var(--green) 45%,transparent)}
+.stage.done .g{animation:none}
+.stage.warn{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 45%,transparent)}
+.stage.idle{color:var(--ink3);border-color:var(--hairline2)}
+.stage.idle .g,.stage.warn .g{animation:none}
+@keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+
+/* ---- the pipeline track: 7 nodes, full width, name + time under each ---- */
+.track{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin-top:8px}
+.node{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding-top:2px;min-width:0}
+.node::before,.node::after{content:'';position:absolute;top:6px;height:2px;background:var(--hairline)}
+.node::before{left:0;right:calc(50% + 6px)}
+.node::after{left:calc(50% + 6px);right:0}
+.node[data-in="none"]::before,.node[data-out="none"]::after{display:none}
+.node[data-in="done"]::before,.node[data-out="done"]::after{background:var(--good)}
+.node[data-in="live"]::before{
+  background:linear-gradient(90deg,color-mix(in srgb,var(--cyan) 35%,transparent) 0%,var(--cyan) 50%,color-mix(in srgb,var(--cyan) 35%,transparent) 100%);
+  background-size:200% 100%;animation:sweep 1.6s linear infinite;
+}
+@keyframes sweep{from{background-position:100% 0}to{background-position:-100% 0}}
+.dot{width:10px;height:10px;border-radius:50%;border:2px solid var(--hairline2);background:var(--strip);z-index:1}
+.dot.done{background:var(--good);border-color:var(--good)}
+.dot.live{background:var(--cyan);border-color:var(--cyan);animation:ring 2s ease-in-out infinite}
+@keyframes ring{0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--cyan) 30%,transparent)}50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--cyan) 10%,transparent)}}
+.lbl{font-family:var(--mono);font-size:10px;color:var(--ink2);letter-spacing:.02em;margin-top:3px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.lbl.hollow{color:var(--ink3)}
+.lbl.live{color:var(--ink)}
+.val{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.val.none{color:var(--ink3);font-weight:400}
+.val.when{color:var(--ink2);font-weight:400}
+.loops{position:absolute;left:calc(50% + 9px);top:-3px;font-family:var(--mono);font-size:9px;font-weight:600;color:var(--ink);background:var(--strip-hi);border:1px solid var(--hairline2);border-radius:2px;padding:0 3px;line-height:14px;z-index:2}
+
+details.verify{font-family:var(--mono);font-size:10px;margin-top:6px}
+details.verify summary{cursor:pointer;display:flex;gap:6px;align-items:baseline;list-style:none}
+details.verify summary::-webkit-details-marker{display:none}
+details.verify summary::before{content:'▸';color:var(--ink3);font-size:9px}
+details[open].verify summary::before{content:'▾'}
+.vcmd{color:var(--ink2)}.vok{color:var(--green);font-weight:600}.vbad{color:var(--red);font-weight:600}
+.vtail{display:block;margin-top:4px;color:var(--ink3);white-space:pre-wrap}
+.empty{font-family:var(--mono);font-size:11px;color:var(--ink3);text-align:center;padding:16px 0}
+
+@media (max-width:900px){
+  .tiles{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tile.wide{grid-column:1/-1}
+}
+@media (max-width:700px){
+  .page{padding:14px}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split{grid-template-columns:1fr}
+  .lbl{font-size:8px}
+  .val{font-size:10.5px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+
+<div class="page">
+  <div class="mock">mockup · real run data from disk · range control and project filter scope everything · click the IXRAY live row or the backlog-manager 17:07 row to switch the detail pane</div>
+
+  <div class="bar">
+    <div class="title">Runs</div>
+    <div class="tools">
+      <div class="seg" role="group" aria-label="Range" id="seg">
+        <button data-range="today" aria-pressed="false">Today</button>
+        <button data-range="week" aria-pressed="false">This week</button>
+        <button data-range="month" aria-pressed="false">This month</button>
+        <button data-range="all" aria-pressed="true">All</button>
+      </div>
+      <select class="sel" aria-label="Project" id="proj">
+        <option value="all">All projects</option>
+        <option value="backlog-manager">backlog-manager</option>
+        <option value="claude-agents-dashboard">claude-agents-dashboard</option>
+        <option value="ixray">ixray</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="split">
+    <div class="list" id="list"></div>
+    <div class="detail" id="detail"></div>
+  </div>
+</div>
+
+<script>
+// ---------- baked data (from ~/.backlog-manager/orchestrator, 2026-09-02) ----------
+const ROWS=[{"proj":"claude-agents-dashboard","runId":"run-20260902-120403","status":"running","startedAt":"2026-09-02T12:04:03.971Z","merged":0,"total":1,"wallS":null,"ranges":["today","week","month","all"]},{"proj":"claude-agents-dashboard","runId":"run-20260902-103111","status":"done","startedAt":"2026-09-02T10:31:11.086Z","merged":1,"total":2,"wallS":5411,"ranges":["today","week","month","all"]},{"proj":"ixray","runId":"run-20260902-102746","status":"running","startedAt":"2026-09-02T10:27:46.885Z","merged":2,"total":3,"wallS":null,"ranges":["today","week","month","all"]},{"proj":"backlog-manager","runId":"run-20260902-081119","status":"done","startedAt":"2026-09-02T08:11:19.024Z","merged":2,"total":3,"wallS":4024,"ranges":["today","week","month","all"]},{"proj":"backlog-manager","runId":"run-20260901-203305","status":"done","startedAt":"2026-09-01T20:33:05.058Z","merged":0,"total":3,"wallS":77,"ranges":["week","month","all"]},{"proj":"claude-agents-dashboard","runId":"run-20260901-185757","status":"done","startedAt":"2026-09-01T18:57:57.567Z","merged":3,"total":5,"wallS":7052,"ranges":["week","month","all"]},{"proj":"claude-agents-dashboard","runId":"run-20260901-153529","status":"done","startedAt":"2026-09-01T15:35:29.814Z","merged":3,"total":3,"wallS":7496,"ranges":["week","month","all"]},{"proj":"backlog-manager","runId":"run-20260901-150701","status":"done","startedAt":"2026-09-01T15:07:01.181Z","merged":4,"total":4,"wallS":9927,"ranges":["week","month","all"]},{"proj":"backlog-manager","runId":"run-20260901-112815","status":"done","startedAt":"2026-09-01T11:28:15.919Z","merged":5,"total":5,"wallS":9680,"ranges":["week","month","all"]},{"proj":"backlog-manager","runId":"run-20260901-112035","status":"aborted","startedAt":"2026-09-01T11:20:35.499Z","merged":0,"total":5,"wallS":455,"ranges":["week","month","all"]},{"proj":"backlog-manager","runId":"run-20260901-111359","status":"failed","startedAt":"2026-09-01T11:13:59.861Z","merged":0,"total":5,"wallS":275,"ranges":["week","month","all"]},{"proj":"backlog-manager","runId":"run-20260901-073202","status":"done","startedAt":"2026-09-01T07:32:02.426Z","merged":2,"total":2,"wallS":2821,"ranges":["week","month","all"]},{"proj":"backlog-manager","runId":"run-20260831-211011","status":"done","startedAt":"2026-08-31T21:10:11.533Z","merged":1,"total":1,"wallS":1974,"ranges":["week","all"]}];
+
+const RUNS={
+"run-20260902-102746":{"runId":"run-20260902-102746","project":"ixray","status":"running","startedAt":"2026-09-02T10:27:46.885Z","updatedAt":"2026-09-02T12:04:35.633Z","attention":[],"queue":[{"id":"bug-7","title":"`extend`/`reorder` on a unique index silently widens the uniqueness constraint","stage":"merged","fixLoops":0,"stageAt":{"pending":"2026-09-02T10:27:46.885Z","preflight":"2026-09-02T10:28:02.156Z","dispatched":"2026-09-02T10:34:19.435Z","inspecting":"2026-09-02T10:55:52.676Z","reviewing":"2026-09-02T10:56:25.093Z","verifying":"2026-09-02T11:03:38.133Z","merging":"2026-09-02T11:04:33.801Z","merged":"2026-09-02T11:04:48.273Z"},"verification":[{"cmd":"pnpm run test","ok":true},{"cmd":"pnpm run build","ok":true}]},{"id":"bug-13","title":"Cluster delete orphans log_files on upgraded databases","stage":"merged","fixLoops":0,"stageAt":{"pending":"2026-09-02T10:27:46.885Z","preflight":"2026-09-02T11:05:02.405Z","dispatched":"2026-09-02T11:05:59.091Z","inspecting":"2026-09-02T11:19:22.344Z","reviewing":"2026-09-02T11:19:35.963Z","verifying":"2026-09-02T11:29:51.280Z","merging":"2026-09-02T11:30:37.766Z","merged":"2026-09-02T11:30:46.524Z"},"verification":[{"cmd":"pnpm run test","ok":true},{"cmd":"pnpm run build","ok":true}]},{"id":"bug-14","title":"Non-numeric cluster id reaches SQLite as NaN and 500s","stage":"fixing","fixLoops":1,"stageAt":{"pending":"2026-09-02T10:27:46.885Z","preflight":"2026-09-02T11:31:00.581Z","dispatched":"2026-09-02T11:32:01.413Z","inspecting":"2026-09-02T11:43:55.255Z","reviewing":"2026-09-02T11:44:10.396Z","fixing":"2026-09-02T11:54:08.515Z"},"verification":[]}]},
+"run-20260901-150701":{"runId":"run-20260901-150701","project":"backlog-manager","status":"done","startedAt":"2026-09-01T15:07:01.181Z","updatedAt":"2026-09-01T17:52:28.922Z","attention":[],"queue":[{"id":"task-4","title":"Board columns: reorder to Refactoring Ideas Bugs Tasks and evict out-of-scope","stage":"merged","fixLoops":1,"stageAt":{"pending":"2026-09-01T15:07:01.181Z","preflight":"2026-09-01T15:07:16.351Z","dispatched":"2026-09-01T15:07:40.498Z","inspecting":"2026-09-01T15:14:08.703Z","reviewing":"2026-09-01T15:14:29.370Z","fixing":"2026-09-01T15:21:56.600Z","verifying":"2026-09-01T15:27:39.136Z","merging":"2026-09-01T15:28:54.025Z","merged":"2026-09-01T15:29:05.716Z"},"verification":[{"cmd":"pnpm run test","ok":true},{"cmd":"pnpm run typecheck","ok":true},{"cmd":"pnpm run build","ok":true}]},{"id":"task-5","title":"Board/Archive split on staleness, with a stale marker on tasks","stage":"merged","fixLoops":0,"stageAt":{"pending":"2026-09-01T15:07:01.181Z","preflight":"2026-09-01T15:29:20.441Z","dispatched":"2026-09-01T15:29:34.091Z","inspecting":"2026-09-01T15:48:09.885Z","reviewing":"2026-09-01T15:48:18.830Z","verifying":"2026-09-01T15:53:51.760Z","merging":"2026-09-01T15:55:06.383Z","merged":"2026-09-01T15:55:12.724Z"},"verification":[{"cmd":"pnpm run test","ok":true},{"cmd":"pnpm run typecheck","ok":true},{"cmd":"pnpm run build","ok":true}]},{"id":"task-6","title":"Archive view: four columns, month groups, and the two promotion paths","stage":"merged","fixLoops":2,"stageAt":{"pending":"2026-09-01T15:07:01.181Z","preflight":"2026-09-01T15:55:29.501Z","dispatched":"2026-09-01T15:57:49.665Z","inspecting":"2026-09-01T16:19:45.331Z","reviewing":"2026-09-01T16:19:56.126Z","fixing":"2026-09-01T16:27:44.171Z","verifying":"2026-09-01T17:16:06.389Z","merging":"2026-09-01T17:17:23.232Z","merged":"2026-09-01T17:17:30.897Z"},"verification":[{"cmd":"pnpm run test","ok":true},{"cmd":"pnpm run typecheck","ok":true},{"cmd":"pnpm run build","ok":true}]},{"id":"task-9","title":"Pin orchestrator-active items to the top of their column with a run bar","stage":"merged","fixLoops":0,"stageAt":{"pending":"2026-09-01T15:07:01.181Z","preflight":"2026-09-01T17:17:48.284Z","dispatched":"2026-09-01T17:18:53.467Z","inspecting":"2026-09-01T17:40:54.285Z","reviewing":"2026-09-01T17:41:04.538Z","verifying":"2026-09-01T17:47:35.977Z","merging":"2026-09-01T17:52:07.676Z","merged":"2026-09-01T17:52:13.962Z"},"verification":[{"cmd":"pnpm run test","ok":false},{"cmd":"pnpm run typecheck","ok":true},{"cmd":"pnpm run build","ok":true},{"cmd":"pnpm run test","ok":true},{"cmd":"pnpm run typecheck","ok":true},{"cmd":"pnpm run build","ok":true}]}]}
+};
+
+// range aggregates computed over every run file on disk (seconds)
+const AGG={
+ today:{runs:4,by:{running:2,done:2,aborted:0,failed:0},merged:5,queued:9,avgWorkS:2538,rework:0.4,verify:1.0,
+        stage:{preflight:780,dispatched:8520,inspecting:180,reviewing:2760,fixing:1560,verifying:360,merging:30}},
+ week:{runs:13,by:{running:2,done:9,aborted:1,failed:1},merged:23,queued:42,avgWorkS:2148,rework:0.48,verify:84/88,
+        stage:{preflight:1680,dispatched:26760,inspecting:660,reviewing:9780,fixing:9420,verifying:1980,merging:240}},
+ month:{runs:12,by:{running:2,done:8,aborted:1,failed:1},merged:22,queued:41,avgWorkS:2160,rework:0.5,verify:81/85,
+        stage:{preflight:1620,dispatched:25320,inspecting:660,reviewing:9480,fixing:9420,verifying:1920,merging:240}},
+ all:{runs:13,by:{running:2,done:9,aborted:1,failed:1},merged:23,queued:42,avgWorkS:2148,rework:0.48,verify:84/88,
+        stage:{preflight:1680,dispatched:26760,inspecting:660,reviewing:9780,fixing:9420,verifying:1980,merging:240}}
+};
+const RANGE_LABEL={today:'today',week:'this week',month:'this month',all:'all runs'};
+
+// the clock is frozen at the moment the data was captured, then advanced by page-open time so live parts tick
+const FROZEN=Date.parse('2026-09-02T12:04:40Z'), LOAD=Date.now();
+const now=()=>FROZEN+(Date.now()-LOAD);
+
+const PIPE=['dispatched','inspecting','reviewing','fixing','verifying','merging','merged'];
+const ROLLUP=['preflight','dispatched','inspecting','reviewing','fixing','verifying','merging'];
+const TERMINAL=['merged','failed','skipped','needs-answers','ungroomed','parked'];
+const STATUS_GLYPH={running:'●',done:'✓',aborted:'⚠',failed:'✕'};
+const STAGE_TONE={dispatched:'',inspecting:'',reviewing:'',fixing:'',verifying:'',merging:'',merged:'done',failed:'bad','needs-answers':'warn',parked:'warn',pending:'idle',preflight:'idle',skipped:'idle',ungroomed:'idle'};
+const TONE_GLYPH={'':'●',done:'✓',bad:'✕',warn:'⚠',idle:'○'};
+const WD=['sun','mon','tue','wed','thu','fri','sat'], MO=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
+const pad2=n=>String(n).padStart(2,'0');
+function fmt(ms){ms=Math.max(0,Math.floor(ms));if(ms<6e4)return `${Math.floor(ms/1e3)}s`;if(ms<36e5){const m=Math.floor(ms/6e4),s=Math.floor(ms%6e4/1e3);return `${m}m ${pad2(s)}s`}const h=Math.floor(ms/36e5),m=Math.floor(ms%36e5/6e4);return `${h}h ${pad2(m)}m`}
+function fmtC(ms){ms=Math.max(0,Math.floor(ms));if(ms<6e4)return `${Math.floor(ms/1e3)}s`;if(ms<36e5)return `${Math.floor(ms/6e4)}m`;return fmt(ms)}
+function clock(iso){const d=new Date(iso);return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`}
+function dayLabel(iso){const d=new Date(iso);return `${WD[d.getDay()]} ${d.getDate()} ${MO[d.getMonth()]}`}
+function dayKey(iso){const d=new Date(iso);return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`}
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+function arrivals(item){return Object.entries(item.stageAt).map(([s,iso])=>({s,at:Date.parse(iso)})).filter(a=>!isNaN(a.at)).sort((a,b)=>a.at-b.at)}
+function spans(item){const a=arrivals(item),o={};for(let i=0;i<a.length-1;i++)o[a[i].s]=(o[a[i].s]||0)+(a[i+1].at-a[i].at);return o}
+function workStart(item){const a=arrivals(item).filter(x=>x.s!=='pending');return a.length?a[0].at:null}
+function workMs(item,t){const st=workStart(item);if(st===null)return null;if(!TERMINAL.includes(item.stage))return t-st;const a=arrivals(item);const end=Date.parse(item.stageAt[item.stage]||'');return (isNaN(end)?a[a.length-1].at:end)-st}
+function waitMs(item){const p=Date.parse(item.stageAt.pending||''),st=workStart(item);return (isNaN(p)||st===null)?null:st-p}
+// closed spans plus, for an item still moving, the open span from its current stage's arrival to now
+function runTotals(run){const t={},nowMs=now();for(const q of run.queue){for(const [s,ms] of Object.entries(spans(q)))if(ROLLUP.includes(s))t[s]=(t[s]||0)+ms;if(!TERMINAL.includes(q.stage)&&ROLLUP.includes(q.stage)){const at=Date.parse(q.stageAt[q.stage]||'');if(!isNaN(at))t[q.stage]=(t[q.stage]||0)+(nowMs-at)}}return t}
+
+function stageChip(stage){const tone=STAGE_TONE[stage]??'';return `<span class="stage ${tone}"><span class="g" aria-hidden="true">${TONE_GLYPH[tone]}</span>${stage}</span>`}
+
+function bars(totalsMs){
+  const max=Math.max(1,...ROLLUP.map(s=>totalsMs[s]||0));
+  return `<div class="bars">`+ROLLUP.map(s=>{const ms=totalsMs[s]||0;return `<div class="brow"><span class="blbl">${s}</span><span class="btrack">${ms>0?`<span class="barf" style="width:${(ms/max*100).toFixed(1)}%"></span>`:''}</span><span class="bval${ms>0?'':' none'}">${ms>0?fmtC(ms):'—'}</span></div>`}).join('')+`</div>`;
+}
+
+// ---------- tiles ----------
+function renderTiles(range){
+  const a=AGG[range];
+  const stageMs=Object.fromEntries(Object.entries(a.stage).map(([k,v])=>[k,v*1000]));
+  document.getElementById('tiles').innerHTML=`
+    <div class="tile"><div class="tv">${a.runs}</div><div class="tl">runs</div>
+      <div class="tsub">${['running','done','aborted','failed'].map(s=>`<span><span aria-hidden="true">${STATUS_GLYPH[s]}</span> ${a.by[s]} ${s}</span>`).join('')}</div></div>
+    <div class="tile"><div class="tv">${a.merged}/${a.queued}</div><div class="tl">merged / queued</div></div>
+    <div class="tile"><div class="tv">${fmtC(a.avgWorkS*1000)}</div><div class="tl">avg item work</div><div class="tsub"><span>queue wait excluded</span></div></div>
+    <div class="tile" title="Total fix loops across every queued item, divided by how many merged"><div class="tv">${a.rework.toFixed(1)}</div><div class="tl">rework / merge</div></div>
+    <div class="tile"><div class="tv">${Math.round(a.verify*100)}%</div><div class="tl">verify pass</div></div>
+    <div class="tile wide"><div class="th"><div class="tl">machine time by stage</div><div class="tsub"><span>${RANGE_LABEL[range]} · queue wait excluded</span></div></div>${bars(stageMs)}</div>`;
+}
+
+// ---------- list ----------
+let range='all', proj='all', selected='run-20260902-102746';
+function renderList(){
+  const rows=ROWS.filter(r=>r.ranges.includes(range)&&(proj==='all'||r.proj===proj));
+  const pinned=rows.filter(r=>r.status==='running'), hist=rows.filter(r=>r.status!=='running');
+  const groups=[];for(const r of hist){const k=dayKey(r.startedAt);const g=groups[groups.length-1];if(g&&g.k===k)g.rows.push(r);else groups.push({k,label:dayLabel(r.startedAt),rows:[r]})}
+  const row=r=>`<button class="row${r.status==='running'?' live':''}" data-run="${r.runId}" aria-current="${r.runId===selected?'true':'false'}" ${RUNS[r.runId]?'':'title="detail not baked into the mockup"'}>
+      <span class="rh"><span class="st st-${r.status}"><span aria-hidden="true">${STATUS_GLYPH[r.status]}</span>${r.status}</span><span class="rp">${r.proj}</span><span class="rc">${r.merged}/${r.total}</span></span>
+      <span class="rw">${r.wallS===null?`<span data-since="${r.startedAt}" data-fmt="c">${fmtC(now()-Date.parse(r.startedAt))}</span>`:fmtC(r.wallS*1000)}</span></button>`;
+  const el=document.getElementById('list');
+  if(rows.length===0){el.innerHTML='<div class="empty">no runs in this range</div>';return}
+  el.innerHTML=(pinned.length?`<div class="day"><div class="dh">live</div><div class="rows">${pinned.map(row).join('')}</div></div>`:'')
+    +groups.map(g=>`<div class="day"><div class="dh">${g.label}</div><div class="rows">${g.rows.map(row).join('')}</div></div>`).join('');
+  el.querySelectorAll('.row').forEach(b=>b.addEventListener('click',()=>{if(!RUNS[b.dataset.run])return;selected=b.dataset.run;renderList();renderDetail()}));
+}
+
+// ---------- detail ----------
+function track(item){
+  const t=now(), visited=new Set(Object.keys(item.stageAt)), sp=spans(item), terminal=TERMINAL.includes(item.stage);
+  let last=-1;PIPE.forEach((s,i)=>{if(visited.has(s))last=i});
+  return `<div class="track">`+PIPE.map((s,i)=>{
+    const cur=s===item.stage&&!terminal, v=visited.has(s), state=cur?'live':v?'done':'hollow';
+    const inS=i===0?'none':i<=last?(cur?'live':'done'):'idle';
+    const outS=i===PIPE.length-1?'none':i<last?'done':'idle';
+    let val;
+    if(cur) val=`<span class="val" data-since="${item.stageAt[s]}">${fmt(t-Date.parse(item.stageAt[s]))}</span>`;
+    else if(s==='merged'&&v) val=`<span class="val when">${clock(item.stageAt[s])}</span>`;
+    else if(v&&sp[s]!==undefined) val=`<span class="val">${fmt(sp[s])}</span>`;
+    else val=`<span class="val none">—</span>`;
+    const badge=s==='fixing'&&item.fixLoops>0?`<span class="loops" title="${item.fixLoops} fix loop${item.fixLoops===1?'':'s'}">×${item.fixLoops}</span>`:'';
+    return `<div class="node" data-in="${inS}" data-out="${outS}"><span class="dot ${state}"></span>${badge}<span class="lbl ${state}">${s}</span>${val}</div>`;
+  }).join('')+`</div>`;
+}
+
+function itemRow(item){
+  const t=now(), terminal=TERMINAL.includes(item.stage), work=workMs(item,t), wait=waitMs(item), sp=spans(item);
+  const time=work===null?'':terminal
+    ?`${fmt(work)}${item.stageAt[item.stage]?` · ${clock(item.stageAt[item.stage])}`:''}`
+    :`<span data-since="${new Date(workStart(item)).toISOString()}" data-suffix=" elapsed">${fmt(work)} elapsed</span>`;
+  const lead=[wait!==null?`queue ${fmtC(wait)}`:null, sp.preflight!==undefined?`preflight ${fmt(sp.preflight)}`:null].filter(Boolean).join(' · ');
+  const last=item.verification.length?item.verification[item.verification.length-1]:null;
+  return `<div class="item">
+    <div class="ih"><span class="id">${item.id}</span><span class="ttl">${esc(item.title)}</span>${stageChip(item.stage)}<span class="time">${time}</span></div>
+    ${lead?`<div class="lead">${lead}</div>`:''}
+    ${track(item)}
+    ${last?`<details class="verify"${last.ok?'':' open'}><summary><span class="vcmd">${last.cmd}</span><span class="${last.ok?'vok':'vbad'}">${last.ok?'ok':'failed'}</span></summary><span class="vtail">(verification output shows here on the real page)</span></details>`:''}
+  </div>`;
+}
+
+function renderDetail(){
+  const run=RUNS[selected], t=now(), live=run.status==='running';
+  const elapsed=live?t-Date.parse(run.startedAt):Date.parse(run.updatedAt)-Date.parse(run.startedAt);
+  const c=s=>run.queue.filter(q=>q.stage===s).length;
+  const active=run.queue.filter(q=>['dispatched','inspecting','reviewing','fixing','verifying','merging'].includes(q.stage)).length;
+  const fix=run.queue.reduce((n,q)=>n+q.fixLoops,0);
+  document.getElementById('detail').innerHTML=`
+    <div class="dhead"><span class="rid">${run.runId}</span><span class="st st-${run.status}"><span aria-hidden="true">${STATUS_GLYPH[run.status]}</span>${run.status}</span>
+      <span class="dtime">started ${clock(run.startedAt)} · ${live?`<span data-since="${run.startedAt}" data-fmt="c" data-suffix=" elapsed">${fmtC(elapsed)} elapsed</span>`:`${fmtC(elapsed)} elapsed`}</span></div>
+    <div class="chips"><span class="chip"><b>${c('merged')}</b>merged</span><span class="chip"><b>${c('skipped')}</b>skipped</span><span class="chip"><b>${run.attention.length}</b>attention</span><span class="chip"><b>${fix}</b>fix loops</span>${live?`<span class="chip"><b>${active}</b>active</span><span class="chip"><b>${c('pending')}</b>queued</span>`:''}</div>
+    <div class="h">machine time by stage<span class="sub">queue wait excluded</span></div>
+    <div class="rollup">${bars(runTotals(run))}</div>
+    <div class="h">items</div>
+    <div class="items">${run.queue.map(itemRow).join('')}</div>
+    <div class="h">attention</div>
+    ${run.attention.length?'':'<div class="empty">nothing needs a look</div>'}`;
+}
+
+// ---------- wiring ----------
+document.getElementById('seg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;range=b.dataset.range;document.querySelectorAll('#seg button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));renderTiles(range);renderList()});
+document.getElementById('proj').addEventListener('change',e=>{proj=e.target.value;renderList()});
+setInterval(()=>{const t=now();document.querySelectorAll('[data-since]').forEach(el=>{el.textContent=(el.dataset.fmt==='c'?fmtC:fmt)(t-Date.parse(el.dataset.since))+(el.dataset.suffix||'')})},1000);
+renderTiles(range);renderList();renderDetail();
+</script>
