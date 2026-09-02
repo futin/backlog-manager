@@ -32,15 +32,55 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * The last sentence of every prompt, whatever the action.
+ *
+ * Every action writes something — groom rewrites an item file, capture creates
+ * one, execute writes the fix itself — and before this line all of it was left
+ * loose in the working tree, so a dispatch's output existed only until someone
+ * noticed it. Asking for the commit is what makes a dispatched session's work
+ * survive on its own.
+ *
+ * The narrow staging IS the rule, not a nicety around it. Unlike
+ * `backlog-orchestrate`, which commits inside a per-item worktree built to hold
+ * exactly one item's diff, a dispatched session runs in the user's MAIN tree —
+ * which may hold whatever else they had in flight. `git add -A` there sweeps
+ * that up into a commit nobody asked for, and that exact risk is why
+ * `backlog-execute` banned committing outright in the first place. So the
+ * blanket ban becomes a scoped instruction, and the scope is the part that must
+ * not be trimmed. Pushing stays banned: nothing here is reviewed.
+ *
+ * Known seam, deliberately one-sided: `skills/backlog-execute/SKILL.md` still
+ * says "Never commits, never pushes", and CLAUDE.md's invariant still names
+ * `backlog-orchestrate` as the only skill that commits. Only this prompt
+ * changed — it is the most specific instruction the spawned session receives,
+ * and `skills/` is a publishing boundary (an install is a copy of the pushed
+ * HEAD, so a skill edit reaches nothing until `pnpm run plugin:sync`). If the
+ * two sides are ever reconciled, this sentence is where it starts.
+ */
+const COMMIT_RULE =
+  'When the job is done, commit the work: stage only the files this session ' +
+  'changed, never `git add -A` or `git add .` — the tree may hold unrelated ' +
+  'uncommitted work of the user\'s. Do not push.';
+
 export function composePrompt(item: BacklogItem, action: AgentAction): string {
   const head = `Use the ${SKILL[action]} skill on ${item.id} — "${oneLine(item.title)}" — in this repo's backlog.`;
 
+  return [head, instruction(item, action), COMMIT_RULE].join(' ');
+}
+
+/**
+ * The action- and section-specific middle of the prompt — everything between
+ * the "use this skill on this item" head and the commit rule every action
+ * shares. Split out so `COMMIT_RULE` is appended in exactly one place: when it
+ * lived at the end of each branch's own template, the next branch added was the
+ * one that forgot it.
+ */
+function instruction(item: BacklogItem, action: AgentAction): string {
   if (action === 'execute') {
     // "verify" and "archive" are the two halves backlog-execute refuses to
-    // separate, and the commit ban is belt-and-braces: the skill already says
-    // it never commits, but this session has no human at a terminal to stop it
-    // if it decides to be helpful.
-    return `${head} Work it through to verification, then archive the item. Report what you changed; do not commit or push.`;
+    // separate.
+    return 'Work it through to verification, then archive the item. Report what you changed.';
   }
   if (action === 'capture') {
     // Keyed on the ACTION, beside `execute` above, rather than on
@@ -73,7 +113,7 @@ export function composePrompt(item: BacklogItem, action: AgentAction): string {
     // frontmatter by hand and bans only `status:`. Do not "simplify" this to
     // one route on the grounds that the skill now allows the flag; the two
     // sides ship independently and this is the seam.
-    return `${head} It was ruled out of scope. File a NEW item that revives it, and give that new item a from: ${item.id} line in its frontmatter — either by passing --from ${item.id} to the backlog tool's new command, or by writing that line into the frontmatter by hand the way a tags: line is added. The citation is required: it is the revived item's only link back to the rejection. Leave ${item.id} itself exactly where it is — the rejection stays on the record.`;
+    return `It was ruled out of scope. File a NEW item that revives it, and give that new item a from: ${item.id} line in its frontmatter — either by passing --from ${item.id} to the backlog tool's new command, or by writing that line into the frontmatter by hand the way a tags: line is added. The citation is required: it is the revived item's only link back to the rejection. Leave ${item.id} itself exactly where it is — the rejection stays on the record.`;
   }
   // Refactors share this branch, not the fallback at the bottom: grooming one
   // promotes it into a task exactly as grooming an idea does, so the
@@ -81,16 +121,16 @@ export function composePrompt(item: BacklogItem, action: AgentAction): string {
   // task fallback ("give it a plan") — which reads as an instruction to edit
   // the refactor in place, the one thing a promote must not do.
   if (item.section === 'ideas' || item.section === 'refactors') {
-    return `${head} Promote it to a task with a real, executable plan.`;
+    return `Promote it to a task with a real, executable plan.`;
   }
   if (item.section === 'bugs') {
     // "Leave the item in bugs/open/" is the whole difference between grooming a
     // bug and executing it: groom fills the two headings and moves nothing.
-    return `${head} Investigate it and fill in ## Cause and ## Fix. Leave the item in bugs/open/.`;
+    return `Investigate it and fill in ## Cause and ## Fix. Leave the item in bugs/open/.`;
   }
   // A task with no Plan — only reachable from a hand-made file, since
   // backlog-capture refuses to create one without.
-  return `${head} Give it a plan concrete enough to execute.`;
+  return `Give it a plan concrete enough to execute.`;
 }
 
 /**

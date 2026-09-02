@@ -74,12 +74,35 @@ describe('composePrompt', () => {
     expect(p).toMatch(/plan/i);
   });
 
-  it('asks execute to verify and archive, and never to commit', () => {
+  it('asks execute to verify and archive, then commit', () => {
     const p = composePrompt(fakeItem({ id: 'task-12', title: 'Add CSP', section: 'tasks', groomed: true }), 'execute');
     expect(p).toContain('backlog-manager:backlog-execute');
     expect(p).toContain('task-12');
     expect(p).toMatch(/archive/i);
-    expect(p).toMatch(/do not commit or push/i);
+    expect(p).toMatch(/commit the work/i);
+  });
+
+  /*
+   * The commit rule rides on EVERY action, so it is asserted per action rather
+   * than once against `execute`. Each of these writes files — a groom rewrites
+   * an item, a promote creates a task, a capture creates a new item — and a
+   * dispatched session that leaves them loose in the working tree has produced
+   * nothing that survives on its own.
+   */
+  it.each(['groom', 'execute', 'capture'] as const)('asks %s to commit, narrowly, and never to push', action => {
+    const item = action === 'capture'
+      ? fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null })
+      : fakeItem();
+    const p = composePrompt(item, action);
+    expect(p).toMatch(/commit the work/i);
+    // The scope is the load-bearing half: a dispatched session runs in the
+    // user's main tree, not a per-item worktree, so a blanket `git add -A`
+    // would commit whatever else they had in flight. Naming both spellings of
+    // that command is what a session actually reads as a ban.
+    expect(p).toContain('git add -A');
+    expect(p).toContain('git add .');
+    expect(p).toMatch(/only the files this session changed/i);
+    expect(p).toMatch(/do not push/i);
   });
 
   it('asks capture for a NEW item citing the rejection, and to leave the original alone', () => {
