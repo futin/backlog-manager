@@ -3,6 +3,8 @@ id: bug-11
 title: A stale open bug an orchestrator is working still leaves the Board for Archive
 created: 2026-09-01
 tags: client, board, archive, orchestrator
+updated: 2026-09-02T07:35:12Z
+groom-elapsed: 306
 ---
 
 ## Symptom
@@ -70,42 +72,141 @@ hand-run item carrying `started:`.
 
 ## Cause
 
-unknown
+**Staleness is the reader at fault, not the orchestrator.** `isStale`
+(`client/src/lib/item-stale.ts`) answers "has nobody touched this" out of the
+item file alone — `updated ?? created`, plus the `isInProgress` exemption that
+reads `started:`. That was a complete account of live work until
+`backlog-orchestrate` existed. It no longer is: a run works each item inside
+its own worktree and stamps only that copy, so the main tree's copy — the one
+`/api/items` scans and both surfaces render — is silent for the whole run. The
+run payload is where the fact lives, and `runClaimBlock` (`shared/agent.ts`)
+already states the rule in its own doc comment: *"'this item is claimed by a
+run' therefore exists in exactly one place, the run payload, and every surface
+that needs it has to be handed it explicitly."* `isStale` is a surface that
+needs it and was never handed it. The exemption it does have is not wrong —
+it is one source short.
 
-The mechanism is understood and stated above — file-derived staleness cannot
-see a run that only ever stamps a worktree — but "cause" here is really a
-design question that grooming should settle rather than this capture:
-**which of the two readers is wrong.** Either staleness is incomplete because
-it consults only the file when a second live-work signal now exists, or the
-orchestrator is at fault for leaving the main tree's copy unstamped for the
-whole run, and every downstream reader inherits that blindness. task-9's own
-Goal section documents the unstamped main tree as confirmed behaviour, not an
-oversight, which is what makes this a real fork rather than an obvious repair.
+The fork this capture left open resolves against both of the other two
+candidates, on grounds stronger than cost:
+
+- **Against stamping the main tree.** It would put a writer on item files
+  during a run — against the single-writer invariant — and put it inside the
+  tree the worktree exists to keep untouched. That trades an isolation
+  boundary for a read gap, and the read gap has a reader-side fix.
+- **Against exempting at BoardView's filter.** `leavesBoard` is deliberately
+  the one implementation both surfaces read, so an item can never be in both
+  or in neither. A Board-only exemption leaves Archive's copy of the question
+  answering the old way, and the repair for that is to paste the same
+  exemption into Archive — two copies of the rule the module exists to
+  prevent.
+
+Two things the capture did not weigh, both of which fall out of the same
+cause:
+
+- **The attention stages are hit too, and worse.** `needs-answers` and
+  `parked` mean the run has stopped and is waiting for a person. `liveRank`
+  ranks exactly those 0 — the top of the column — while `leavesBoard`, blind
+  in the same way, sends them to Archive. An item asking for a human answer is
+  the last card that should leave the human's surface, so a fix scoped to
+  `dispatched..merging` only re-files this bug under a new number.
+- **The widening is nearly free at both call sites.** BoardView already holds
+  `runs` (`useOrchestratorRuns`, for the strip) and ArchiveView already holds
+  the same payload (for `runClaimBlock`, imported at `ArchiveView.tsx:13`).
+  Neither surface gains a fetch, a hook or a poll — only an argument.
 
 ## Fix
 
-unknown
+Widen the predicate and hand it the second source. Six edits, in dependency
+order.
 
-Three shapes, in rough order of blast radius. Worth noting that the first is
-the one task-9 explicitly declined, and its reason — a third reader on the
-stage lists, and a change to what Archive shows — is an argument about cost,
-not about correctness, so it should be re-weighed rather than treated as
-settled:
+1. **`shared/types.ts` — move `ATTENTION_RUN_STAGES` here** from
+   `client/src/components/board/ItemCard.tsx`, beside `RUN_CLAIMED_STAGES`,
+   whose doc comment already reasons about this partition ("a new stage added
+   to the union three lines up has to be classified in the same edit"). Two
+   importers today, `ItemCard` and `BoardView`; no test imports it, so the move
+   is mechanical. `ACTIVE_RUN_STAGES` stays on the card — it really is a
+   rendering fact (which cards wear a cyan stage badge) — but `ATTENTION` stops
+   being one the moment staleness reads it, and a `lib/` module importing a
+   React component to get it would invert the layering both surfaces depend on.
+2. **`shared/agent.ts` — add `runHoldsItem(item, runs): boolean`** next to
+   `runClaimBlock`, true when a **fresh** run in the item's project has the
+   item at a stage in `RUN_CLAIMED_STAGES` **or** `ATTENTION_RUN_STAGES` — that
+   is, at every stage but the four true exits (`merged`, `failed`, `skipped`,
+   `ungroomed`). Extract the fresh/project/id lookup the two now share into one
+   private helper rather than writing a second scan: `runClaimBlock`'s own
+   comment records that those three lines are exactly the part a second copy
+   gets subtly wrong. Keep `runClaimBlock`'s narrower `RUN_CLAIMED_STAGES` rule
+   as it is — the two questions genuinely differ, and the difference is the
+   point: a parked item may be dispatched by hand (that is what parking is
+   for), which requires it to still be on the Board to dispatch from.
+3. **`client/src/lib/item-stale.ts` — take `runs`.** `isStale(item,
+   windowDays, now, runs)` and `leavesBoard(item, windowDays, now, runs)`, with
+   `runs` **required and given no `[]` default**. A default is what makes this
+   bug recur silently for the next caller; the compiler asking is the whole
+   value of the change. Sequence the new half into rule 3, ahead of the
+   arithmetic exactly as the file already sequences the old one:
+   `if (isInProgress(item) || runHoldsItem(item, runs)) return false;`. Rewrite
+   rule 3's comment and the module header: the rule is now "the file says
+   someone is on it, or a fresh run does" — one predicate over two sources, and
+   the header's "pure function of the item file" framing is what the rewrite
+   has to retire.
+4. **`BoardView.tsx` — pass `runs` at both call sites** (`visible`, `staleFor`)
+   — the full `runs`, not `freshRuns`, since `runHoldsItem` filters on `fresh`
+   itself. Replace the comment at 344-350: its "they disagree harmlessly"
+   paragraph is this bug's own written record and becomes false. The
+   hook-ordering reason for computing `hasLive` on `matched` rather than
+   `visible` is unrelated and must survive the rewrite.
+5. **`ArchiveView.tsx` — pass `runs` to `leavesBoard`**, and rewrite the
+   `runBlockFor` comment. Its stated case (a stale item sitting `pending` in a
+   run's queue) can no longer reach this surface at all; what remains reachable
+   is an item rejected while a run held it, which enters Archive by section
+   rather than by staleness. The block stays — it is now the narrow case rather
+   than the common one, and deleting it would let a rejected-mid-run card
+   dispatch from Archive while the Board's equivalent is blocked.
+6. **`CLAUDE.md` — update the Board-versus-Archive invariant.** It currently
+   says the split is derived from `updated ?? created` and lists four rules the
+   predicate encodes; add the fifth, that a fresh run holding the item outranks
+   the arithmetic the same way `started` does, and that this is why the
+   predicate takes the run payload.
 
-- **Widen the staleness predicate to consult the run payload.** `isStale`
-  gains the run's view of live work beside the file's. Most direct, and it
-  keeps the Board/Archive split exactly complementary because both surfaces
-  read the one predicate. Cost is what task-9 named: a third reader on
-  `ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES`, and `item-stale.ts` stops being
-  a pure function of the item file.
-- **Exempt at the Board's filter rather than in the predicate.** `visible`
-  keeps any card whose `liveRank` is already `< 2` — a value task-9 computes
-  one line above for `hasLive`, so nothing new is derived. Smaller, but it
-  breaks the "Archive is the Board's exact complement" property both surfaces
-  currently rely on, and Archive would need the same exemption to avoid
-  showing the card twice.
-- **Have the orchestrator stamp the main tree's copy.** Closes the blind spot
-  at its source, for every present and future reader. Almost certainly the
-  wrong trade: it would put a writer on the main tree's item files during a
-  run, which is the thing the worktree isolation exists to prevent, and it
-  collides with the single-writer rule on item files.
+Two consequences to accept deliberately rather than discover:
+
+- **`pending`/`preflight` are included**, so starting a whole-queue run pulls
+  every stale queued bug back onto the Board at once — unpinned, since
+  `liveRank` still ranks them 2. That is the correct answer: the run will reach
+  them without anyone asking, so they are claimed work, not neglected work.
+  They return to Archive only if the run exits them at `failed`/`skipped`/
+  `ungroomed`; a merged one is in `done/` and stale to nobody.
+- **Archive shrinks while a run is live** and is the same set afterwards, which
+  is the self-clearing property the Symptom already notes, now on the correct
+  side.
+
+### Test cases
+
+- `test/agents-shared.test.ts` — `runHoldsItem` is `true` for every member of
+  `RUN_CLAIMED_STAGES` and both `ATTENTION_RUN_STAGES` members, and `false` for
+  `merged`, `failed`, `skipped`, `ungroomed`; `false` when the run is not
+  `fresh`; `false` when the run's `project` is another path or the id is not in
+  its queue; `false` for an empty `runs` list. Extend the existing
+  `Record<RunStage, true>` partition test so a new stage member must also be
+  classified live-or-exited, not just claimed-or-terminal.
+- `test/item-stale.test.ts` — an open bug stale by `updated` is **not** stale
+  when a fresh run has it at `dispatched`, at `pending`, at `parked` and at
+  `needs-answers`; **is** still stale at `merged`/`failed`/`skipped`/
+  `ungroomed`, when the run's `fresh` is `false`, and when the run belongs to
+  another project. Every existing case re-passes with `[]` for `runs`, and
+  `leavesBoard` mirrors the same set (a stale task is still kept and marked
+  regardless of any run).
+- `test/board.test.tsx` — a stale open bug plus a fresh run holding it at
+  `dispatched` renders in the Bugs column, first in it; the same bug with the
+  run at `fresh: false` is absent, as today.
+- `test/archive.test.tsx` — the existing stale-bug fixture with the runs stub
+  returning a fresh run that holds it disappears from Archive's Bugs column,
+  and reappears when that run is stale. This is the assertion that proves the
+  two surfaces stayed complementary.
+
+In the browser (playwright MCP tools): with a fresh orchestrator run holding a
+long-untouched open bug at `dispatched`, open the Board at
+`http://127.0.0.1:5177/` — the bug's card is in the Bugs column with its live
+run bar, and it is first in that column; then open Archive from the side rail
+and confirm the same card is absent from its Bugs column.
