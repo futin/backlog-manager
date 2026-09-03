@@ -1193,6 +1193,19 @@ body {
   color: var(--ink3); background: var(--steel); border-color: var(--hairline); cursor: default;
 }
 
+/* The one control state that is disabled and DOING something: the status
+   re-ask a click on a project-visibility block now provokes (bug-13,
+   DispatchButton.tsx). Declared after the two rules above deliberately —
+   equal specificity, both matching at once, so the later one wins and the
+   busy look is not swallowed by the disabled colour. Not a spinner: the
+   re-ask is one request long, and a control that grows moving parts for
+   200ms is worse than a cursor and a lighter label saying "asked". The
+   `default` cursor the disabled rules set is exactly the wrong signal here,
+   which is why cursor is restated rather than inherited. */
+.dispatch-tab[aria-busy='true'], .dispatch-chip[aria-busy='true'] {
+  color: var(--ink2); cursor: progress;
+}
+
 /* Reachable by a screen reader and by nothing else. The 1px-clip idiom rather
    than display:none or visibility:hidden, which both remove the node from the
    accessibility tree — the one thing this must not do, since its entire job is

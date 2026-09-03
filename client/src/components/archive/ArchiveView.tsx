@@ -84,7 +84,11 @@ export default function ArchiveView() {
      be: the two surfaces split on this number, so they must read it from the
      same place. */
   const { settings } = useSettings();
-  const { status: agents } = useAgents();
+  /* Threaded to both dispatch controls as `reverify`, exactly as BoardView
+     does it (bug-13): Archive's Out-of-scope column renders the capture
+     control, and it sits behind the same project-visibility gate — a stale
+     block is no more recoverable here than it was there. */
+  const { status: agents, reload: reverifyAgents } = useAgents();
   /* The run payload, read by two things here and still by no strip or drawer —
      a run is queue work and this surface is what is not queue work.
 
@@ -288,6 +292,7 @@ export default function ArchiveView() {
                              badging `groomed` on a task. The column heading
                              carries the fact instead. */
                           runBlock={runBlockFor(item)}
+                          reverify={reverifyAgents}
                         />
                       ))}
                     </div>
@@ -307,6 +312,7 @@ export default function ArchiveView() {
           agents={agents}
           onDispatch={() => setDispatching(open)}
           runBlock={runBlockFor(open)}
+          reverify={reverifyAgents}
         />
       )}
       {dispatching !== null && (

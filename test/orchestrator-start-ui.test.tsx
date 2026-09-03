@@ -504,13 +504,13 @@ describe('OrchestrateSheet', () => {
   it('leaves the sheet open and shows the server message for an uncoded 409 — a capability or visibility conflict, not the lock', async () => {
     stubOrchestrate({
       ok: false, status: 409,
-      body: { error: 'the dashboard cannot see /abs/alpha — no Claude session there inside its LOOKBACK_HOURS' }
+      body: { error: 'the dashboard does not list /abs/alpha — most likely no Claude session there inside its LOOKBACK_HOURS' }
     });
     const { onClose, refresh } = renderSheet();
 
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
-    expect(await screen.findByText(/cannot see \/abs\/alpha/)).toBeInTheDocument();
+    expect(await screen.findByText(/does not list \/abs\/alpha/)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();

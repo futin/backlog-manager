@@ -489,7 +489,14 @@ see the `dispatchGate` section below): the button's
 own `title` and its visually-hidden `aria-describedby` span carry the per-item
 reason (it names the path, and nothing else in the UI does), while Settings
 lists the host-level setup — including the two fixes for this one, a session in
-that repo or a higher `LOOKBACK_HOURS`. Environment-level blocks render no
+that repo or a higher `LOOKBACK_HOURS`. That reason states the missing path as
+fact and the lookback only as a likelihood ("the dashboard does not list X —
+most likely no Claude session there…"), because every reader of the string is
+one step removed from the dashboard's own answer: the server holds a project
+map for up to `PROJECT_TTL_MS`, and a browser tab holds a copy of that. It
+used to assert the lookback flatly, which is what made a stale block
+*confidently wrong* rather than merely late — it sent people to open a session
+in a repo that already had one (bug-13, below). Environment-level blocks render no
 button at all; see that same section below. Never derive a `dirName` from
 a path to route around this. The membership check behind it
 (`status.projectPaths.includes(item.projectPath)`, in `dispatchGate`,
@@ -591,6 +598,48 @@ The in-progress block was bug-12, the same shape one rung down and with the
 data in the opposite place: the card rendered its amber in-progress bar and an
 enabled dispatch button side by side, one telling the reader a session held
 this item and the other offering to start a second one against it.
+
+**One of the three lets the click through anyway, and only one: a
+project-visibility block re-asks the status instead of swallowing the click**
+(bug-13). `useAgents` refetches on mount and window focus alone, deliberately —
+what changes the answer happens outside the tab and you come back to the tab
+afterwards — and that reasoning simply has no purchase on a window that never
+loses focus (a board on a second monitor, or the only window in use). The
+staleness that follows was argued to be bounded: `PROJECT_TTL_MS`'s own comment
+said a minute of it "costs a disabled button that would have worked, which the
+sheet's own re-check then corrects". True in exactly one direction. A stale
+*enable* is corrected by the sheet, because clicking opens it and `plan()`
+re-derives the block server-side; a stale *disable* is not, because the sheet
+that would correct it is behind the control the stale answer just made inert.
+The self-correcting path was unreachable from the state that needed it, so the
+board sat on a confidently actionable message that was no longer true with
+nothing in the UI able to clear it.
+
+So the click asks. `DispatchButton` takes `reverify` — the board's own
+`useAgents().reload`, which now RESOLVES to the status it fetched rather than
+only setting state (the setState lands a render too late for the handler that
+provoked it) — calls it once, marks itself `aria-busy` while it waits, and
+opens the sheet only if `dispatchGate` reads `enabled` against the *fresh*
+answer. Worst case is one wasted request and a button that stays disabled,
+with the reader now able to see it was actually asked; the server is
+authoritative either way and `plan()` re-checks on open regardless. Note the
+one bound that remains: the refetch can still be answered from the server's own
+`PROJECT_TTL_MS` map, so a re-ask inside that minute can legitimately come back
+with the same list — the fix removes the *unrecoverable* state, not the cache.
+
+The scope of that exception is the fix, not a gap in it. The run claim keeps
+swallowing the click: `useOrchestratorRuns` polls every 5s while any run is
+fresh, so it is never stale in this way, and a claimed item genuinely must not
+be hand-dispatched. The in-progress stamp keeps swallowing it too: it is
+derived from the very item file the board is rendering, so no status refetch
+could move it. And a button blocked by project visibility *and* one of those
+two behaves as that block's case — clearing the visibility half would leave
+the click refused anyway, so there is nothing worth asking. Two alternatives
+were rejected on the way: a polling interval on `useAgents` asks the same
+question on a timer for every reader whether or not anyone is looking at a
+blocked button, which is what the mount+focus cadence was chosen over; and a
+`visibilitychange` listener narrows the window without closing it, since the
+failing case has the tab visible and the window focused the whole time.
 
 ## One run per project, checked twice
 

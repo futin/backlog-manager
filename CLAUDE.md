@@ -67,7 +67,9 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   persisted project filter, declared in `lib/view-keys.ts` rather than exported
   from either — they are separate lazy chunks, and an import between them would
   undo the split. Fed by `lib/agents.ts` (same-origin
-  fetches), `hooks/useAgents.ts` (status poll on mount and window focus),
+  fetches), `hooks/useAgents.ts` (status poll on mount and window focus, plus
+  the one re-ask a click against a project-visibility block provokes — see
+  Invariants),
   and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
   run is fresh).
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
@@ -348,6 +350,18 @@ happened.
   reason it shows names the thing to fix rather than a symptom of it — and the
   file-derived block outranks the run claim because the stamp is on the copy
   the board is rendering while the claim is a fact about another worktree.
+  **Exactly one of the three lets the click through: a project-visibility block
+  re-asks the status** (`reverify`, the board's own `useAgents().reload`, which
+  now resolves to the status it fetched) and opens the sheet if the fresh answer
+  reads `enabled` — it is the only block that can be silently stale, since
+  `useAgents` refetches on mount and window focus alone and a window that never
+  loses focus is never asked again, while the sheet whose `plan()` would correct
+  it sits behind the control the stale answer disabled (bug-13). The other two
+  keep swallowing the click, and so does a visibility block accompanied by
+  either — clearing one half of a doubly-blocked button changes nothing. The
+  reason string states the missing path as fact and the lookback only as a
+  likelihood for the same reason: no reader of it is closer to the dashboard
+  than a cached list.
   `progressBlock` lives beside `isInProgress`/`progressLabel` rather than with
   the other two in `shared/`: it is built from both of them, `shared/` must not
   import from `client/`, and the block is client-only — the server's dispatch

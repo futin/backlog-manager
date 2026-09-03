@@ -243,6 +243,19 @@ describe('dispatchBlock', () => {
     expect(blocked).toContain('/abs/alpha');
     expect(blocked).toMatch(/LOOKBACK_HOURS/);
   });
+
+  /* bug-13: the wording has to separate what the caller KNOWS from what it is
+     guessing. All any reader of this string actually has is a `projectPaths`
+     list that does not contain the path — the dashboard's lookback window is
+     only the usual explanation for that, and the case bug-13 was filed for is
+     precisely the other one (the list itself was out of date). The old wording
+     stated the cause flatly, which made a stale block confidently actionable:
+     it sent people to open a session in a repo that already had one. */
+  it('states the missing path as fact and the lookback as a likelihood', () => {
+    const blocked = dispatchBlock(fakeItem(), { ...OK, projectPaths: ['/abs/other'] });
+    expect(blocked).toContain('does not list /abs/alpha');
+    expect(blocked).toMatch(/most likely/);
+  });
 });
 
 describe('MODELS / EFFORTS', () => {
