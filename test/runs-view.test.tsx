@@ -544,6 +544,34 @@ describe('RunsView', () => {
     expect(reviewingValue).toBe('144h 00m');
   });
 
+  // bug-14. A crashed orchestrator leaves run.json at `status: "running"`
+  // forever and the archive serves it verbatim, with no live entry to back
+  // it (mergeRuns keeps a live entry only while its server-computed `fresh`
+  // flag holds), so `runWallMs` is the only place that can notice the
+  // process is dead. No unit test can prove the ROW stopped growing, which
+  // is what this case is for.
+  //
+  // No fake timers needed, and that is the point: the real `Date.now()`
+  // RunsView reads is months past this fixture's September 1st heartbeat,
+  // so the run is stale by construction on every day this suite ever runs.
+  // Pre-fix, the row prints the whole span since that date — a number that
+  // grows with the real calendar and could not be pinned to a fixed string
+  // at all; post-fix it freezes at `updatedAt - startedAt`, exactly 42m.
+  it('freezes a crashed archived run at its own last heartbeat rather than growing', async () => {
+    const crashed = run({
+      runId: 'run-20260901-090000',
+      project: '/repo/alpha',
+      status: 'running',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:42:00.000Z',
+      queue: [item('bug-1', 'fixing', { stageAt: { pending: '2026-09-01T09:00:00.000Z', fixing: '2026-09-01T09:10:00.000Z' } })]
+    });
+
+    await renderRunsView([crashed], []);
+
+    expect(screen.getByTestId(`runs-row-${crashed.runId}`).querySelector('.runs-row-wall')?.textContent).toBe('42m');
+  });
+
   it('renders the empty state and nothing else for empty payloads', async () => {
     await renderRunsView([], []);
     expect(screen.getByText('no runs yet')).toBeInTheDocument();

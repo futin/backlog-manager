@@ -2,6 +2,7 @@ import {
   itemStageSpans, runWallMs, runStageTotals, sumStageTotals, MACHINE_STAGES,
   aggregateRuns, dayKey, dayLabel
 } from '../client/src/lib/run-stats';
+import { RUN_STALE_MS } from '../shared/types';
 import type { ArchiveQueueItem, OrchestratorArchiveRun, RunQueueItem, RunStage } from '../shared/types';
 
 /**
@@ -142,6 +143,46 @@ describe('runWallMs', () => {
   it('is null when startedAt does not parse', () => {
     const run = archiveRun({ status: 'done', startedAt: 'garbage', updatedAt: at(90_000) });
     expect(runWallMs(run, T0)).toBeNull();
+  });
+
+  // bug-14. A CRASHED orchestrator leaves run.json at `status: "running"`
+  // forever (init refuses to overwrite one; recovery is --resume/--abort
+  // only), and the archive serves that frozen file verbatim — so `status`
+  // alone can never tell a live run from a dead one. Without the heartbeat
+  // gate this reads the whole day-plus span to `now` and keeps growing on
+  // every render. The direct analogue of runStageTotals' own "freezes a
+  // crashed run's open span at its own last heartbeat" case below.
+  it('freezes a crashed running run at its own last heartbeat', () => {
+    const run = archiveRun({ status: 'running', startedAt: at(0), updatedAt: at(1_000_000) });
+    expect(runWallMs(run, T0 + 1_000_000 + 24 * 60 * 60 * 1000)).toBe(1_000_000);
+  });
+
+  // The boundary reads STALE, matching the strict `<` the server itself
+  // performs to compute the live payload's own `fresh` flag
+  // (orchestrator.service.ts). Exactly RUN_STALE_MS since the heartbeat is
+  // not fresh, so this freezes rather than ticking.
+  it('treats a heartbeat exactly RUN_STALE_MS old as stale', () => {
+    const run = archiveRun({ status: 'running', startedAt: at(0), updatedAt: at(1_000) });
+    expect(runWallMs(run, T0 + 1_000 + RUN_STALE_MS)).toBe(1_000);
+  });
+
+  // An unparseable heartbeat is not evidence a process is alive, so it
+  // cannot earn the `now`-ticking branch — and it leaves no honest instant
+  // to freeze at either. `null`, the same "skip rather than fabricate" call
+  // this module makes for every other corrupt stamp. Both callers already
+  // degrade correctly on a null (RunRow renders no wall span; RunDetail
+  // prints `started HH:MM` alone).
+  it('is null for a running run whose updatedAt does not parse', () => {
+    const run = archiveRun({ status: 'running', startedAt: at(0), updatedAt: 'garbage' });
+    expect(runWallMs(run, T0 + 30_000)).toBeNull();
+  });
+
+  // The other half of the fork must survive the fix: a run whose heartbeat
+  // is genuinely recent still measures against `now`, or the board would
+  // freeze a live run at whatever its last write happened to be.
+  it('still ticks against now for a genuinely live run', () => {
+    const run = archiveRun({ status: 'running', startedAt: at(0), updatedAt: at(60_000) });
+    expect(runWallMs(run, T0 + 65_000)).toBe(65_000);
   });
 });
 
