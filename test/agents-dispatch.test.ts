@@ -387,7 +387,7 @@ describe('POST /api/agents/dispatch', () => {
     ) as jest.Mock;
     writeRun('reviewing');
     const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
-    expect(res.body.error).toContain('cannot see');
+    expect(res.body.error).toContain('does not list');
     expect(res.body.error).not.toContain('reviewing');
   });
 });

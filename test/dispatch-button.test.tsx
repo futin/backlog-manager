@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -311,6 +311,152 @@ describe('DispatchButton', () => {
     expect(onDispatch).not.toHaveBeenCalled();
   });
 
+  /*
+   * bug-13. The project-visibility block is the ONE of the three a click is
+   * allowed to clear, because it is the only one that can be silently stale.
+   * `useAgents` refetches on mount and window focus only (deliberately — see
+   * its own comment), so a board in a window that never loses focus keeps
+   * whatever `projectPaths` it last fetched; the launch sheet's own
+   * server-side re-derivation corrects a stale ENABLE, but it sits behind the
+   * control a stale DISABLE has just made inert, so the self-correcting path
+   * is unreachable from exactly the state that needs it. Asking again on the
+   * click is what closes that loop — and `reverify` returning the FRESH
+   * status, rather than only setting state upstream, is what lets this one
+   * click both re-render and decide.
+   */
+  it('re-asks the status when a project-visibility block is clicked, and dispatches once it clears', async () => {
+    const onDispatch = jest.fn();
+    const reverify = jest.fn(() => Promise.resolve(READY));
+    render(
+      <DispatchButton
+        item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }}
+        onDispatch={onDispatch} reverify={reverify}
+      />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'execute' }));
+
+    expect(reverify).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onDispatch).toHaveBeenCalledTimes(1));
+  });
+
+  // The other half of the same behaviour, and the reason it is safe: a
+  // re-check that agrees with what was already on screen changes nothing at
+  // all except that it was actually asked. No sheet, same reason, same
+  // disabled control — one wasted request is the whole downside.
+  it('opens nothing when the re-asked status still cannot see the project', async () => {
+    const stale: AgentsStatus = { ...READY, projectPaths: ['/abs/other'] };
+    const onDispatch = jest.fn();
+    const reverify = jest.fn(() => Promise.resolve(stale));
+    render(
+      <DispatchButton item={fakeItem()} status={stale} onDispatch={onDispatch} reverify={reverify} />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+
+    await userEvent.click(btn);
+
+    expect(reverify).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'false'));
+    expect(onDispatch).not.toHaveBeenCalled();
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('/abs/alpha'));
+  });
+
+  // aria-busy, not a spinner: the click has to be visibly answerable to the
+  // reader ("it was asked, and the answer was the same"), and the button's
+  // own accessible name is the action word — a two-state description folded
+  // into it would announce the whole sentence as the control's name.
+  it('marks itself busy while the re-ask is in flight', async () => {
+    let settle = (_s: AgentsStatus) => {};
+    const reverify = jest.fn(() => new Promise<AgentsStatus>((res) => { settle = res; }));
+    render(
+      <DispatchButton
+        item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }}
+        onDispatch={() => {}} reverify={reverify}
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+
+    await userEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => { settle(READY); });
+    expect(btn).toHaveAttribute('aria-busy', 'false');
+  });
+
+  // Not a loop of requests: an impatient reader clicking a control that looks
+  // like it did nothing must not queue one status fetch per click.
+  it('asks once while a re-ask is already in flight', async () => {
+    let settle = (_s: AgentsStatus) => {};
+    const reverify = jest.fn(() => new Promise<AgentsStatus>((res) => { settle = res; }));
+    render(
+      <DispatchButton
+        item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }}
+        onDispatch={() => {}} reverify={reverify}
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+
+    await userEvent.click(btn);
+    await userEvent.click(btn);
+    await userEvent.click(btn);
+
+    expect(reverify).toHaveBeenCalledTimes(1);
+    await act(async () => { settle(READY); });
+  });
+
+  /*
+   * The scope line of the fix, stated as three cases. The run claim keeps
+   * swallowing the click and asks nothing: it is fed by
+   * `useOrchestratorRuns`, which polls every 5s while any run is fresh, so it
+   * is fresh BY CONSTRUCTION and a claimed item genuinely must not be
+   * hand-dispatched. The in-progress block is derived from the very file the
+   * board is rendering, so a status refetch could not change it either. And
+   * when a project-visibility block is accompanied by one of those two,
+   * clearing the visibility half would still leave the click refused — so
+   * there is nothing to ask about.
+   */
+  it.each([
+    ['a run claim', { runBlock: 'task-1 is claimed by a run (implementing)' }],
+    ['an in-progress stamp', { item: fakeItem({ started: '2026-08-28T14:03:07Z' }) }],
+    ['a run claim over a project-visibility block', {
+      runBlock: 'task-1 is claimed by a run (implementing)',
+      status: { ...READY, projectPaths: ['/abs/other'] }
+    }],
+    ['an in-progress stamp over a project-visibility block', {
+      item: fakeItem({ started: '2026-08-28T14:03:07Z' }),
+      status: { ...READY, projectPaths: ['/abs/other'] }
+    }]
+  ])('asks nothing and opens nothing for %s', async (_why, over) => {
+    const onDispatch = jest.fn();
+    const reverify = jest.fn(() => Promise.resolve(READY));
+    render(
+      <DispatchButton
+        item={fakeItem()} status={READY} onDispatch={onDispatch} reverify={reverify} {...over}
+      />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /execute|groom/ }));
+
+    expect(reverify).not.toHaveBeenCalled();
+    expect(onDispatch).not.toHaveBeenCalled();
+  });
+
+  // And the unblocked path is untouched: it dispatches straight through
+  // without spending a status request on a question nothing is asking.
+  it('dispatches an unblocked item without re-asking the status', async () => {
+    const onDispatch = jest.fn();
+    const reverify = jest.fn(() => Promise.resolve(READY));
+    render(
+      <DispatchButton item={fakeItem()} status={READY} onDispatch={onDispatch} reverify={reverify} />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'execute' }));
+
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+    expect(reverify).not.toHaveBeenCalled();
+  });
+
   // Environment-level blocks render NOTHING, which is what makes ".env off ⇒
   // the board looks exactly as it did before this feature" true rather than
   // aspirational. All four are properties of the host, not of this card: they
@@ -405,10 +551,18 @@ describe('the board wiring', () => {
      orchestrator, so every pre-existing case in this describe keeps behaving
      exactly as it did before runs entered the picture. */
   let RUNS: RunPayload[] = [];
+  /* What the stub answers `/api/agents/status` with, per case — mutable for
+     the same reason `RUNS` above is, and for one case in particular: bug-13's
+     repro needs the ANSWER to change between the board's mount fetch and the
+     refetch a click provokes, with no window focus event in between. A
+     constant body cannot express "the world changed while the tab kept
+     focus", which is the entire failing condition. */
+  let AGENTS: AgentsStatus = READY;
 
   beforeEach(() => {
     localStorage.clear();
     RUNS = [];
+    AGENTS = READY;
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
       // `text`, not `json`, for this one route — ItemDrawer's effect calls
@@ -421,7 +575,7 @@ describe('the board wiring', () => {
       if (url.includes('/api/items/body')) {
         return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') } as Response);
       }
-      const payload = url.includes('/api/agents/status') ? READY
+      const payload = url.includes('/api/agents/status') ? AGENTS
         : url.includes('/api/orchestrator/runs') ? ({ runs: RUNS } satisfies OrchestratorRunsPayload)
         : url.includes('/api/agents/plan') ? {
           action: 'execute', prompt: 'do it', project: 'alpha',
@@ -439,6 +593,36 @@ describe('the board wiring', () => {
   // of failing loudly.
   afterEach(() => {
     global.fetch = realFetch;
+  });
+
+  /*
+   * bug-13's repro, end to end: a board that mounted while the dashboard
+   * could not see the project, in a window that never loses focus, so
+   * `useAgents` is never asked again by any of its own triggers. Before this
+   * fix the card's button sat disabled with a confidently actionable reason
+   * ("open a session there") that was simply no longer true, and nothing
+   * short of a reload or a blur/focus cycle could clear it.
+   *
+   * Rendered through BoardView rather than against DispatchButton alone
+   * because what it proves is the WIRING: `useAgents`' `reload` has existed
+   * since Task 5 and was returned to nobody, so a component-level test with
+   * a hand-written `reverify` would pass on a board that never threads one.
+   */
+  it('clears a stale project-visibility block on click, with the window never losing focus', async () => {
+    AGENTS = { ...READY, projectPaths: [] };
+    render(<BoardView />);
+    await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
+    const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
+    const btn = within(card).getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+
+    // The world changes. No focus event, no reload — only the click.
+    AGENTS = READY;
+    await userEvent.click(btn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument()
+    );
   });
 
   it('opens the sheet from a card without opening the item drawer', async () => {

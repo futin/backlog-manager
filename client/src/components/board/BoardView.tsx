@@ -167,7 +167,13 @@ export default function BoardView() {
      get the documented 30-day window rather than undefined. */
   const { settings } = useSettings();
   const [open, setOpen] = useState<BacklogItem | null>(null);
-  const { status: agents } = useAgents();
+  /* `reload` (bug-13) is threaded down to every dispatch control as
+     `reverify`: the hook's mount+focus cadence cannot recover a board whose
+     window never loses focus, and the one block that cadence can leave
+     falsely disabled is the one a click is now allowed to re-ask. Named for
+     what the button does with it rather than for the hook's own verb — the
+     board itself never calls it. */
+  const { status: agents, reload: reverifyAgents } = useAgents();
   // Task 11: the orchestrator's own view of any project's queue, polled live
   // while any run is fresh (useOrchestratorRuns.ts) and not at all otherwise.
   // `refresh` (Task 13): OrchestrateSheet's own Start button calls this
@@ -685,6 +691,7 @@ export default function BoardView() {
                          `runEntriesByProject` for why one prop and not two. */
                       run={runEntryFor(item)}
                       runBlock={runBlockFor(item)}
+                      reverify={reverifyAgents}
                     />
                   ))}
                 </div>
@@ -704,6 +711,7 @@ export default function BoardView() {
           // see that function's own comment for why.
           onDispatch={() => openLaunchSheet(open)}
           runBlock={runBlockFor(open)}
+          reverify={reverifyAgents}
         />
       )}
       {openRun !== null && (

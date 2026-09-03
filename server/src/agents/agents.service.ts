@@ -34,7 +34,19 @@ const MANAGEMENT_TIMEOUT_MS = 15_000;
  * How long a path→dirName map stays good. The list only changes when a Claude
  * session starts somewhere new, and the call behind it is the expensive one in
  * this feature — a minute of staleness costs a disabled button that would have
- * worked, which the sheet's own re-check then corrects.
+ * worked.
+ *
+ * That cost used to be argued away with "which the sheet's own re-check then
+ * corrects", and that held in one direction only: a stale ENABLE is corrected
+ * by the sheet (clicking opens it and `plan()` re-derives the block here),
+ * while a stale DISABLE never reached the sheet at all, because the control
+ * the stale answer disabled is what opens it. That was bug-13; the board now
+ * re-asks on a click against a project-visibility block (`DispatchButton`'s
+ * `reverify`) rather than swallowing it, which is what makes the staleness
+ * this constant permits recoverable in both directions. A re-ask inside the
+ * same minute can still be answered from this map — the bound is deliberate
+ * and unchanged, and one more click a moment later is the whole remaining
+ * cost.
  */
 const PROJECT_TTL_MS = 60_000;
 /** The spawn call forks a process on the other side; the health probe's 4s is

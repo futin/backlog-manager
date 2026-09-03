@@ -214,7 +214,7 @@ describe('POST /api/agents/orchestrate', () => {
 
     const res = await post({ project: projectPath }).expect(409);
     expect(res.body.error).toContain(projectPath);
-    expect(res.body.error).toMatch(/cannot see/);
+    expect(res.body.error).toMatch(/does not list/);
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
     // Fix round 2: this 409 must NOT carry the activeRun lock's `code` —
     // OrchestrateSheet's own fix-round-2 case for this exact scenario

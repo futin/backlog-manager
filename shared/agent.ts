@@ -202,11 +202,16 @@ export function clampMode(want: string, ceiling: PermissionMode | null): Permiss
  *    make — with `BM_AGENTS` off the board "renders exactly as it does today"
  *    and "shows no dispatch buttons" — literally true.
  *  - `disabled` — a PER-ITEM block: the dashboard cannot see this item's
- *    project. That one IS about this card, it is fixable (open a session
- *    there, or raise the dashboard's `LOOKBACK_HOURS`), and it names a path,
- *    so a control that states the reason is worth more than silence. It is
- *    precisely the behaviour chosen when the lookback limit was accepted
- *    rather than worked around.
+ *    project. That one IS about this card, it is usually fixable (open a
+ *    session there, or raise the dashboard's `LOOKBACK_HOURS`), and it names a
+ *    path, so a control that states the reason is worth more than silence. It
+ *    is precisely the behaviour chosen when the lookback limit was accepted
+ *    rather than worked around. "Usually", because a caller reading a status
+ *    it fetched some time ago cannot tell a project the dashboard genuinely
+ *    cannot see from one whose absence is only news to its own stale copy of
+ *    the list — which is why the wording below states the absence as fact and
+ *    the lookback as a likelihood, and why the board now re-asks on a click
+ *    instead of swallowing it (bug-13).
  *  - `enabled` — nothing is in the way.
  *
  * Ordered most-fundamental first so the reason names the thing to fix rather
@@ -287,7 +292,18 @@ export function projectDispatchGate(status: AgentsStatus, projectPath: string): 
   if (!status.projectPaths.includes(projectPath)) {
     return {
       control: 'disabled',
-      reason: `the dashboard cannot see ${projectPath} — no Claude session there inside its LOOKBACK_HOURS`
+      /*
+       * bug-13: the first clause is what the caller KNOWS — this path is not
+       * in the `projectPaths` list it is holding — and the second is only the
+       * usual explanation for that. The wording used to assert the lookback
+       * as fact, which turned a status a browser tab had held for a while
+       * into confidently wrong advice: it sent people to open a session in a
+       * repo that already had one, for a project the dashboard could see
+       * perfectly well. Every reader of this string is one step removed from
+       * the dashboard's own answer (a cached project map here, a tab's copy
+       * of it there), so none of them can promote the likelihood to a fact.
+       */
+      reason: `the dashboard does not list ${projectPath} — most likely no Claude session there inside its LOOKBACK_HOURS`
     };
   }
   return { control: 'enabled' };

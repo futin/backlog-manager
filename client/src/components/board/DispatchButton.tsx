@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 
 import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
@@ -28,6 +28,13 @@ import { progressBlock } from '../../lib/item-progress';
  * payload can know it). All three disable with their reason; see the `blocked`
  * line below for why they read in that order.
  *
+ * Exactly ONE of the three lets a click do something anyway, and that is
+ * bug-13: a project-visibility block is the only one that can be silently
+ * out of date, so clicking it RE-ASKS the status (`reverify`) and opens the
+ * sheet if the block has cleared. The other two are refused as before — see
+ * `reverify`'s own prop comment for why the asymmetry is the whole fix and
+ * not an inconsistency.
+ *
  * `status` is trusted here exactly as typed: making it honest at runtime is
  * `fetchAgentsStatus`'s job (`lib/agents.ts`), the one place a JSON body
  * actually becomes this type, not every leaf that consumes it — a guard here
@@ -45,7 +52,7 @@ import { progressBlock } from '../../lib/item-progress';
  * coloured by the same rules in styles.css.
  */
 export function DispatchButton(
-  { item, status, onDispatch, variant = 'chip', runBlock = null }: {
+  { item, status, onDispatch, variant = 'chip', runBlock = null, reverify }: {
     item: BacklogItem;
     status: AgentsStatus | null;
     onDispatch: () => void;
@@ -68,6 +75,31 @@ export function DispatchButton(
      * (the older tests, any future read-only view) behaves exactly as before.
      */
     runBlock?: string | null;
+    /**
+     * Re-ask the dashboard status and resolve to the fresh answer — the board's
+     * own `useAgents().reload`, threaded down.
+     *
+     * bug-13. `useAgents` refetches on mount and window focus only, and that
+     * cadence is deliberate (see its own comment). It is also, for one of the
+     * three per-item blocks, unrecoverable: a board whose window never loses
+     * focus keeps whatever `projectPaths` it last fetched, and while a stale
+     * *enable* self-corrects (the click opens the sheet, whose `plan()`
+     * re-derives the block server-side), a stale *disable* cannot — the sheet
+     * that would correct it sits behind the control the stale answer just
+     * made inert. So the click asks the question itself.
+     *
+     * Scoped to the project-visibility block alone, and the two exclusions are
+     * the reasons, not exceptions to them. `runBlock` is fed by
+     * `useOrchestratorRuns`, which polls every 5s for as long as any run is
+     * fresh, so it is never stale in this way — and a claimed item genuinely
+     * must not be hand-dispatched. `progressBlock` is derived from the very
+     * item file this board is rendering, so no status refetch could move it.
+     *
+     * Optional, like `runBlock`: a caller with no status to re-ask (the older
+     * tests, any future read-only view) leaves the click inert exactly as it
+     * was before this existed.
+     */
+    reverify?: () => Promise<AgentsStatus>;
   }
 ) {
   // Stable per mounted button, and unique across the forty of them a board can
@@ -75,6 +107,13 @@ export function DispatchButton(
   // drawer renders a second button for an item the card already rendered one
   // for. A duplicated id would point aria-describedby at the wrong card's span.
   const reasonId = useId();
+  /* Only ever true between a click on a project-visibility block and the
+     status answering it (bug-13). It exists for two reasons: `aria-busy`
+     below, so a click that looks like it did nothing is legible as "asked,
+     same answer"; and as the guard that keeps an impatient reader from
+     queueing one status fetch per click on a control that stays disabled
+     while the first is still in flight. */
+  const [verifying, setVerifying] = useState(false);
   const action = deriveAction(item);
   if (action === null || status === null) return null;
 
@@ -98,9 +137,34 @@ export function DispatchButton(
    * worktree's copy, so the registry's copy of a claimed item normally carries
    * no stamp at all — and when they do, the file wins.
    */
-  const blocked = (gate.control === 'disabled' ? gate.reason : null)
-    ?? progressBlock(item)
-    ?? runBlock;
+  const gateBlock = gate.control === 'disabled' ? gate.reason : null;
+  /* The two a click can never clear, in that same precedence — split out
+     from the gate's own block rather than folded into one string because
+     bug-13's re-ask has to know WHICH of the three is speaking. Kept as one
+     value because the answer it feeds is the same for both: refuse, ask
+     nothing. */
+  const itemBlock = progressBlock(item) ?? runBlock;
+  const blocked = gateBlock ?? itemBlock;
+
+  /*
+   * bug-13: whether a click on this (blocked) button may re-ask the status
+   * instead of being swallowed. All three conditions are load-bearing.
+   *
+   * `gateBlock !== null` — the project-visibility block is the one that can
+   * be stale, because it is derived from a payload this tab fetched at some
+   * earlier moment and has no trigger to re-fetch while the window keeps
+   * focus.
+   *
+   * `itemBlock === null` — and it must be the ONLY block. Clearing the
+   * visibility half of "invisible project AND claimed by a run" would still
+   * leave the click refused, so there is nothing worth asking; a
+   * simultaneously-blocked button therefore behaves exactly as the run-claim
+   * (or in-progress) case does, which is what it looks like to the reader
+   * anyway once the more fundamental reason is the one on screen.
+   *
+   * `reverify !== undefined` — a caller that handed us no way to ask.
+   */
+  const reverifiable = gateBlock !== null && itemBlock === null && reverify !== undefined;
 
   // The action IS the tone class: `groom` and `execute` are the two
   // AgentAction values, so the palette can never drift from the derivation.
@@ -108,8 +172,10 @@ export function DispatchButton(
     <>
       <button
         className={`dispatch-${variant} ${action}`}
-        // The reason, not a generic tooltip: "no Claude session in that repo
-        // inside LOOKBACK_HOURS" is a fixable thing, and nowhere else says it.
+        // The reason, not a generic tooltip: "the dashboard does not list
+        // <path>" is a fixable thing, and nowhere else says it. Deliberately
+        // NOT swapped out while `verifying` — the reason has to still be
+        // readable when the re-ask comes back with the same answer.
         title={blocked ?? `dispatch ${action} to a Claude session`}
         // aria-disabled, NOT the `disabled` attribute, and the guard in
         // onClick is what actually makes it inert. A `disabled` button is
@@ -123,13 +189,38 @@ export function DispatchButton(
         // and it is only readable if the control can be focused at all.
         aria-disabled={blocked !== null}
         aria-describedby={blocked === null ? undefined : reasonId}
+        // The one signal that a swallowed-looking click was actually answered
+        // (bug-13). An attribute rather than a spinner or a second label: the
+        // re-ask is one request long, and styles.css keys a `progress` cursor
+        // and a lighter label off this same attribute, so the feedback is not
+        // screen-reader-only either.
+        aria-busy={verifying}
         onClick={(e) => {
           // The whole card is a role="button" that opens the drawer. Without
           // this, one click opens both.
           e.stopPropagation();
           // The other half of aria-disabled: the browser will not stop a
-          // click on a control that is only *labelled* disabled, so this does.
-          if (blocked !== null) return;
+          // click on a control that is only *labelled* disabled, so this does
+          // — except for the one block a click is allowed to re-ask (bug-13;
+          // see `reverifiable` above for the three conditions).
+          if (blocked !== null) {
+            if (!reverifiable || verifying) return;
+            setVerifying(true);
+            // `reverify` never rejects (useAgents.ts explains why it resolves
+            // to a flatly-off status instead), so there is no failure branch
+            // here: an off status simply is not `enabled` and opens nothing.
+            void reverify().then((fresh) => {
+              setVerifying(false);
+              // Re-derived from the FRESH answer, not from the render this
+              // click came from — and through the same gate, so a status that
+              // came back with dispatch off or the dashboard gone opens
+              // nothing either. The two blocks `reverifiable` already ruled
+              // out cannot have changed in the meantime: one is on the item
+              // file this board is rendering, the other is a prop.
+              if (dispatchGate(item, fresh).control === 'enabled') onDispatch();
+            });
+            return;
+          }
           onDispatch();
         }}
         onKeyDown={(e) => {

@@ -181,7 +181,7 @@ marked.use({
  * make that refresh pay for content nobody is looking at.
  */
 export function ItemDrawer(
-  { item, hues, onClose, agents, onDispatch, runBlock }: {
+  { item, hues, onClose, agents, onDispatch, runBlock, reverify }: {
     item: BacklogItem;
     hues: ProjectHues;
     onClose: () => void;
@@ -198,6 +198,13 @@ export function ItemDrawer(
      * tab went dead is half of the bug this exists to fix.
      */
     runBlock?: string | null;
+    /** Re-ask the dashboard status, resolving to the fresh answer — passed
+     *  straight through to `DispatchButton` (bug-13). Both render sites need
+     *  it for the same reason they both need `runBlock`: the drawer chip and
+     *  the card tab are two independent buttons for one item, and a chip that
+     *  stayed unrecoverably disabled while the tab could clear itself would be
+     *  the same contradiction on two surfaces. */
+    reverify?: () => Promise<AgentsStatus>;
   }
 ) {
   const [body, setBody] = useState<string | null>(null);
@@ -266,6 +273,7 @@ export function ItemDrawer(
           {onDispatch && (
             <DispatchButton
               item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock}
+              reverify={reverify}
             />
           )}
           <button className="drawer-close" onClick={onClose}>close</button>

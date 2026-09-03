@@ -148,7 +148,7 @@ export const REFACTOR_KINDS: readonly string[] = ['chore', 'debt'];
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
 export function ItemCard(
-  { item, hues, onOpen, agents, onDispatch, now, stale, run, runBlock }: {
+  { item, hues, onOpen, agents, onDispatch, now, stale, run, runBlock, reverify }: {
     item: BacklogItem;
     hues: ProjectHues;
     onOpen: () => void;
@@ -214,6 +214,12 @@ export function ItemCard(
      * or the other. See `runClaimBlock` (shared/agent.ts) for who computes it.
      */
     runBlock?: string | null;
+    /** Re-ask the dashboard status, resolving to the fresh answer — passed
+     *  straight through to `DispatchButton`, which spends it on the one block
+     *  a click may clear (bug-13; its own prop comment carries the reasoning).
+     *  Threaded rather than derived for the same reason `agents` is: the
+     *  status belongs to one hook per view, not to forty cards. */
+    reverify?: () => Promise<AgentsStatus>;
   }
 ) {
   const at = now ?? Date.now();
@@ -385,7 +391,7 @@ export function ItemCard(
       {onDispatch && (
         <DispatchButton
           item={item} status={agents ?? null} onDispatch={onDispatch} variant="tab"
-          runBlock={runBlock}
+          runBlock={runBlock} reverify={reverify}
         />
       )}
     </div>
