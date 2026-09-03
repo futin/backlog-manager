@@ -2,8 +2,10 @@
 id: bug-14
 title: runWallMs reports a forever-growing wall time for a crashed run
 created: 2026-09-02
-updated: 2026-09-02T19:15:47Z
+updated: 2026-09-03T13:07:29Z
 groom-elapsed: 120
+started: 2026-09-03T12:55:05Z
+execute-elapsed: 744
 ---
 
 ## Symptom
@@ -188,3 +190,74 @@ time must read exactly `42m`, and clicking the row must put `42m elapsed` in
 the detail header. Reload the page and confirm both still read `42m` — the
 reload is the actual assertion, since the pre-fix reading is larger on every
 one. Remove `/tmp/bm-bug14-orch` when done.
+
+## Outcome
+
+2026-09-03 — fixed as planned. `runWallMs` now forks on `status === 'running'
+&& fresh`, with freshness derived by a new module-local `heartbeat` helper
+(`RUN_STALE_MS` measured against `updatedAt`, strictly `<`, matching
+`orchestrator.service.ts:209`); `runStageTotals` was pointed at that same
+helper in place of its inline derivation, so the file holds one implementation
+of the gate rather than two. The `KNOWN, DELIBERATE gap` paragraph in
+`runWallMs`' doc comment was replaced — it asserted the behaviour this fix
+removes. `aggregateRuns`' closing comment was left alone as the plan directed.
+Behaviour change beyond the crashed case, exactly as item 3 of the Fix
+specified: a `running` run whose `updatedAt` will not parse now answers `null`.
+
+Four unit cases were added to `test/run-stats.test.ts` and one component case
+to `test/runs-view.test.tsx`. Three of the four unit cases and the component
+case were watched failing before the fix (the fourth, "still ticks against now
+for a genuinely live run", is a regression guard on the branch that must not
+move):
+
+```
+  ● runWallMs › freezes a crashed running run at its own last heartbeat
+    Expected: 1000000
+    Received: 87400000
+  ● runWallMs › treats a heartbeat exactly RUN_STALE_MS old as stale
+    Expected: 1000
+    Received: 901000
+  ● runWallMs › is null for a running run whose updatedAt does not parse
+    Received: 30000
+Tests:       3 failed, 27 passed, 30 total
+
+  ✕ freezes a crashed archived run at its own last heartbeat rather than growing
+    Expected: "42m"
+    Received: "51h 57m"
+Tests:       1 failed, 20 passed, 21 total
+```
+
+`51h 57m` is itself the symptom: that fixture is dated 2026-09-01 and the
+number is measured against the real clock, so it is larger on every day the
+suite runs — nobody could have pinned the pre-fix formula to a fixed string.
+
+After the fix, the whole suite and the typechecker:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+TYPECHECK_EXIT=0
+
+$ pnpm test
+Test Suites: 55 passed, 55 total
+Tests:       850 passed, 850 total
+Snapshots:   0 total
+Time:        132.392 s
+```
+
+Confirmed in the browser as the Fix's own verification section describes, with
+a crashed run staged in a throwaway `BM_ORCH_HOME=/tmp/bm-bug14-orch` (the real
+`~/.backlog-manager/orchestrator/` was read for a template only, never written
+— a fabricated `status: "running"` file there would block every future run for
+that project). API on `PORT=4399`, Vite on `WEB_PORT=5199`, since the user's
+docker stack holds the default 4322. The Runs row read
+`running backlog-manager 0/1 42m` and the detail header
+`started 11:00 · 42m elapsed`; after a full page reload both still read `42m` —
+the reload being the actual assertion, since every pre-fix reading is larger
+than the last. The throwaway directory and both dev processes were removed
+afterwards.
+
+Observed but deliberately not touched: that same run's *item* row reads
+`63h 52m elapsed` for its stranded `fixing` item, which is the item-level
+version of this defect and belongs to bug-15's `itemDurationMs`/`stepperDots`
+scope, not this one.

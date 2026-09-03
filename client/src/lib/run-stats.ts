@@ -80,6 +80,39 @@ function parseStamp(iso: string | undefined): number | null {
 }
 
 /**
+ * A run's own heartbeat, parsed, together with whether it is still fresh:
+ * `RUN_STALE_MS` measured against `updatedAt`, the same comparison
+ * `orchestrator.service.ts` performs server-side to compute the LIVE
+ * payload's `fresh` flag — strictly `<`, so a heartbeat exactly
+ * `RUN_STALE_MS` old reads stale on both sides rather than fresh on one and
+ * stale on the other.
+ *
+ * Both readings in this file that fork on "is this run actually alive"
+ * (`runWallMs`, `runStageTotals`) call this rather than deriving it inline,
+ * so the file holds ONE implementation of the gate instead of two copies
+ * that could drift — the divergence bug-14 was: `runStageTotals` grew this
+ * check and `runWallMs` did not, and for months a crashed run's wall time
+ * ticked upward beside a stage rollup that had correctly frozen.
+ *
+ * It answers the parsed instant as well as the boolean because the two
+ * callers need different things from it: `runWallMs` measures its stale
+ * branch to `updated`, and `runStageTotals` freezes an open span there.
+ * `null` for a stamp that will not parse, and such a run is never fresh —
+ * an unparseable heartbeat is not evidence a process is alive.
+ *
+ * Deliberately NOT exported. `run-time.ts`'s `runElapsedMs` asks the same
+ * question of the LIVE payload, which carries the server's own `fresh`
+ * flag as a field, so it reads that flag instead of deriving anything —
+ * that shape difference is the whole reason these are separate functions,
+ * and exporting this would invite a caller to derive freshness for a
+ * payload that already states it.
+ */
+function heartbeat(updatedAt: string | undefined, now: number): { updated: number | null; fresh: boolean } {
+  const updated = parseStamp(updatedAt);
+  return { updated, fresh: updated !== null && now - updated < RUN_STALE_MS };
+}
+
+/**
  * Every `stageAt` entry that parses, as `{stage, at}` pairs sorted ascending
  * by the parsed instant — the one pass `itemStageSpans` builds its own
  * output on. Corrupt entries are dropped outright (not kept with a `null`
@@ -137,50 +170,59 @@ export function itemStageSpans(item: Pick<RunQueueItem, 'stageAt'>): StageSpan[]
 }
 
 /**
- * How long a whole run took (or has taken so far): `updatedAt − startedAt`
- * for a run that has already finished, `now − startedAt` for one still
- * `running`. The same fork `run-time.ts`'s `runElapsedMs` makes for the live
- * board, restated here rather than imported because that function's
- * signature is keyed on the LIVE payload's own `fresh` flag, which
- * `OrchestratorArchiveRun` carries no equivalent of at all (live or
- * archived, there is no `fresh` field on this shape — see `runStageTotals`
- * below for what a function that has to derive freshness for ITSELF from
- * `updatedAt` does instead) — a genuinely different question asked of a
- * genuinely different shape, not a primitive worth sharing.
+ * How long a whole run took (or has taken so far): `now − startedAt` for a
+ * run that is genuinely live, `updatedAt − startedAt` for every other run —
+ * finished, aborted, failed, and a `running` one whose heartbeat has gone
+ * stale alike.
  *
- * CORRECTED (final-review fix wave): this comment used to justify skipping a
- * freshness check by claiming an archived run "cannot go stale — it is
- * either still running right now or it is finished forever." That claim is
- * false, and it is exactly the false comfort that made `runStageTotals`'
- * OWN former `status === 'running'` gate look sufficient on its own below —
- * a CRASHED orchestrator leaves `run.json` at `status: "running"` forever
- * (`orchestrate.mjs init` refuses to overwrite one; recovery is
- * `--resume`/`--abort` only — this repo's own "One run per project, checked
- * twice" invariant), so a `running` archived run genuinely CAN be stale:
- * nobody has heard from that process in hours or days, and `status` alone
- * never says so.
+ * The fork is `status === 'running' && fresh`, the same pair `run-time.ts`'s
+ * `runElapsedMs` makes for the live board. It is restated here rather than
+ * imported because freshness has to be DERIVED at this call site, not read:
+ * `runElapsedMs`' signature is keyed on the LIVE payload's own `fresh`
+ * flag, and `OrchestratorArchiveRun` carries no equivalent of it at all
+ * (live-backed or archived, there is no `fresh` field on this shape). The
+ * derivation is `heartbeat` above — `RUN_STALE_MS` measured against
+ * `updatedAt` — shared with `runStageTotals` below, which forks on exactly
+ * the same question for its own open spans.
  *
- * `runStageTotals` below now checks `updatedAt`'s own freshness before
- * trusting a `running` status at all. This function still does NOT, and
- * that is a KNOWN, DELIBERATE gap this fix wave leaves alone rather than a
- * repeat of the same oversight: a crashed run's `runWallMs` reading (`now -
- * startedAt`, unconditionally, for any `status: 'running'` run) grows just
- * as unboundedly as `runStageTotals`' open span used to, and that behaviour
- * predates this branch entirely. It is safe to leave open here for a
- * different reason than "it cannot happen" — this is a single PER-RUN
- * reading, printed once beside that same run's own `running` status chip,
- * where a person looking at it can see the chip itself is what looks wrong;
- * it is never summed silently across a whole range the way `runStageTotals`'
- * open span is (via `sumStageTotals`), which is what made THAT number's
- * unbounded growth — one dead item quietly inflating a tile that looks like
- * a fixed total for the whole visible range — the more urgent defect to
- * close.
+ * Why a `running` run needs a freshness check at all, since `status` sounds
+ * like it already answers this: a CRASHED orchestrator leaves `run.json` at
+ * `status: "running"` FOREVER. `orchestrate.mjs init` refuses to overwrite
+ * one, fresh or stale — recovery is `--resume`/`--abort` only, this repo's
+ * own "One run per project, checked twice" invariant — and `GET
+ * /api/orchestrator/archive` serves that frozen file verbatim, while the
+ * live poll's merge drops it (a stale entry is never `fresh`, so
+ * `pickAuthority` never picks it as a live winner). So the archive path
+ * hands this function `running` runs of arbitrarily old heartbeat, and
+ * `status` alone never says which. Gating on `status` alone was bug-14:
+ * a crashed run's wall time grew by a second every second, indefinitely,
+ * printed as "how long this run has taken" — three days after the crash it
+ * read three days.
+ *
+ * A stale `running` run therefore freezes at its own last confirmed
+ * heartbeat, which is the reading `runElapsedMs`' own comment argues for:
+ * nobody knows whether that process is still working, so its last confirmed
+ * heartbeat is the only honest instant to report against — never whatever
+ * moment the archive happens to be read at.
  *
  * `null` when `startedAt` will not parse, for either branch: there is no
  * honest number to report without a start to measure from. A `running` run
  * with an unparseable `startedAt` cannot fall back to `updatedAt` either —
  * that would silently answer a different question ("how long since the last
  * heartbeat") under the same label.
+ *
+ * `null` also for a `running` run whose UPDATEDAT will not parse, which is
+ * the one behaviour bug-14's fix changes beyond the crashed case (it used
+ * to answer `now − startedAt`). An unparseable heartbeat is not evidence a
+ * process is alive, so it cannot earn the `now`-ticking branch, and it
+ * leaves no honest instant to freeze at either — the same "skip rather than
+ * fabricate" call `runStageTotals` already makes for its own open span.
+ * Both callers already degrade correctly on a `null` with no edit: `RunRow`
+ * renders the wall span only when it is non-null, and `RunDetail`'s header
+ * prints `started HH:MM` alone, precisely the case its own comment there
+ * describes (a run that can still say when it began with no honest wall
+ * time to report) — a comment that covered only finished runs and simply
+ * becomes true of `running` ones too.
  */
 export function runWallMs(
   run: Pick<OrchestratorArchiveRun, 'status' | 'startedAt' | 'updatedAt'>,
@@ -189,9 +231,9 @@ export function runWallMs(
   const started = parseStamp(run.startedAt);
   if (started === null) return null;
 
-  if (run.status === 'running') return Math.max(0, now - started);
+  const { updated, fresh } = heartbeat(run.updatedAt, now);
+  if (run.status === 'running' && fresh) return Math.max(0, now - started);
 
-  const updated = parseStamp(run.updatedAt);
   if (updated === null) return null;
   return Math.max(0, updated - started);
 }
@@ -370,8 +412,10 @@ export function runStageTotals(
   // than read off a `fresh` flag the way the live board's `runElapsedMs`
   // can. Computed once, outside the item loop, since it depends only on the
   // run itself, never on which item the loop happens to be measuring.
-  const updated = parseStamp(run.updatedAt);
-  const fresh = updated !== null && now - updated < RUN_STALE_MS;
+  // `heartbeat` is that derivation, shared with `runWallMs` above rather
+  // than written inline here as it once was: bug-14 was precisely the two
+  // going out of step.
+  const { updated, fresh } = heartbeat(run.updatedAt, now);
 
   for (const item of run.queue) {
     for (const span of itemStageSpans(item)) {
