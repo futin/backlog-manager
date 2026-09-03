@@ -1,4 +1,4 @@
-import { isInProgress, progressLabel } from '../client/src/lib/item-progress';
+import { isInProgress, progressBlock, progressLabel } from '../client/src/lib/item-progress';
 import type { BacklogItem } from '../shared/types';
 
 /**
@@ -83,5 +83,60 @@ describe('progressLabel', () => {
   it('reads "in progress" for a done item, even though it still carries phase: groom as history', () => {
     expect(progressLabel(fakeItem({ status: 'done', started: '2026-08-28T14:03:07Z', phase: 'groom' })))
       .toBe('in progress');
+  });
+});
+
+/**
+ * The dispatch block, bug-12: the board used to render the amber in-progress
+ * bar and an enabled dispatch button on the same card — one saying a session
+ * holds this item, the other offering to start a second one against it.
+ *
+ * It lives beside `isInProgress`/`progressLabel` rather than in
+ * `shared/agent.ts` beside `runClaimBlock`, which it otherwise mirrors: both
+ * of the predicates it is built from are here, `shared/` may not import from
+ * `client/`, and hoisting the pair into `shared/` would be a move made for a
+ * block the server has no use for — its dispatch route re-scans the item file
+ * itself and is unchanged by this.
+ *
+ * The parenthetical is what varies, exactly as `runClaimBlock` varies its
+ * stage: that keeps one sentence grammatical for all three `progressLabel`
+ * answers, the bare `in progress` fallback included. The stamp is printed
+ * verbatim rather than humanised because it is what is literally on disk —
+ * the string someone greps the item file for when they want to know whose
+ * marker this is.
+ *
+ * The done case is the same regression guard `isInProgress` carries: `move`
+ * never rewrites content, so an archived item keeps its `started` stamp as
+ * history, and blocking dispatch on a stamp that old would be blocking on a
+ * session that ended weeks ago. (Nothing renders a dispatch control for a
+ * done item anyway — `deriveAction` returns null first — but this function's
+ * own answer has to be the inert one regardless of who calls it.)
+ */
+describe('progressBlock', () => {
+  it('is null for an open item nobody has picked up', () => {
+    expect(progressBlock(fakeItem({ status: 'open', started: '' }))).toBeNull();
+  });
+
+  it('names the activity and the stamp for an item an execute session holds', () => {
+    const reason = progressBlock(
+      fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'execute' })
+    );
+    expect(reason).toContain('executing');
+    expect(reason).toContain('2026-08-28T14:03:07Z');
+  });
+
+  it('names grooming for an item a groom session holds', () => {
+    expect(progressBlock(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'groom' })))
+      .toContain('grooming');
+  });
+
+  it('stays grammatical with no phase recorded, falling back to the generic wording', () => {
+    expect(progressBlock(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: '' })))
+      .toContain('in progress');
+  });
+
+  it('is null for a done item, whose started stamp is history rather than a claim', () => {
+    expect(progressBlock(fakeItem({ status: 'done', started: '2026-08-28T14:03:07Z', phase: 'execute' })))
+      .toBeNull();
   });
 });

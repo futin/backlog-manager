@@ -483,8 +483,9 @@ Its `POST /api/spawn` takes a `dirName` resolved against projects active
 inside its `LOOKBACK_HOURS` (24 by default), so a quiet repo has no key to
 send. Accepted, not worked around: the alternative is teaching that app to
 take an absolute path, which widens the widest write surface it has. This is
-one of the two blocks that leave a control on screen (the other is a live
-orchestrator run's claim — see the `dispatchGate` section below): the button's
+one of the three blocks that leave a control on screen (the other two are a
+local skill session's `started:` stamp and a live orchestrator run's claim —
+see the `dispatchGate` section below): the button's
 own `title` and its visually-hidden `aria-describedby` span carry the per-item
 reason (it names the path, and nothing else in the UI does), while Settings
 lists the host-level setup — including the two fixes for this one, a session in
@@ -516,11 +517,37 @@ exactly as it does today" and "shows no dispatch buttons" — literally true;
 do not "improve" it into a disabled button on forty cards.
 
 The per-item blocks are the opposite case and keep their button. There are
-**two** of them, not one, and only the first is anything `dispatchGate` itself
-can answer:
+**three** of them, not one, and only the first is anything `dispatchGate`
+itself can answer:
 
 - **The dashboard cannot see this item's project** — `dispatchGate`'s own fifth
   line, the section above.
+- **A local skill session already holds this item** — `progressBlock`
+  (`client/src/lib/item-progress.ts`), and the only one of the three derived
+  from the item file itself. It is the exact mirror of the block below it:
+  `started:` has one writer (`backlog.mjs start`) and one clearer (`stop`), so
+  a session grooming or executing an item states that in the frontmatter the
+  board is already reading — `isInProgress` had been deriving it for the card's
+  amber bar since before dispatch existed, and nothing ever wired that
+  predicate into the dispatch path. It blocks on ANY stamp, fresh or stale,
+  matching `start`'s own rule that any stamp refuses: a stamp nobody is behind
+  is a lie the board must not paper over, and `stop` is the one-command fix for
+  it. What stops an ancient stamp from blocking forever is `isInProgress`'s
+  `status === 'open'` half — `move` never rewrites content, so an archived
+  item's stamp is history rather than a claim. It lives in `item-progress.ts`
+  and not in `shared/agent.ts` beside `runClaimBlock`, breaking that file's
+  otherwise complete ownership of the block vocabulary on purpose: it is built
+  from `isInProgress` and `progressLabel`, which are both already there,
+  `shared/` must not import from `client/`, and hoisting the pair over would be
+  a move made for a block the server has no use for. Client-only is the whole
+  decision, not an omission — the board is the only surface that can
+  double-dispatch, and the server's dispatch re-scan is unchanged. Unlike the
+  run claim there is nothing here for the server to catch late: the skills
+  already refuse (`start` will not stamp a file that carries a stamp), so what
+  a second spawn cost was never a corrupted file but a wasted session and a
+  refusal the user had to go and interpret — `backlog-groom` opening the whole
+  "whose marker is this" conversation about a marker its own board set ninety
+  seconds earlier.
 - **An orchestrator run has already claimed this item** — `runClaimBlock`
   (`shared/agent.ts`), which reads the run payload rather than the item. It has
   to: a run works each item inside its own git worktree and nothing reaches
@@ -543,14 +570,27 @@ can answer:
   mount, so a sheet left open while a run starts still shows an enabled launch
   button, and only the server sees the run as it is at click time.
 
-`DispatchButton` reads all three in one order — environment-hidden, then
-project visibility, then the run claim — most fundamental first, so the reason
-on screen names the thing to fix rather than a symptom of it. With dispatch off
-or the project invisible there is nothing worth saying about a run.
+`DispatchButton` reads all four in one order — environment-hidden, then
+project visibility, then the in-progress stamp, then the run claim — most
+fundamental first, so the reason on screen names the thing to fix rather than a
+symptom of it. With dispatch off or the project invisible there is nothing
+worth saying about either kind of session that might hold the item. The last
+two rungs are in that order for the same reason applied one level down: the
+`started:` stamp is on the very copy of the item this board is rendering, while
+a run claim is a fact about another worktree that the next poll can change, so
+the file wins. They coexist only pathologically — a run stamps `started:` on
+its own worktree's copy, which is exactly why `runClaimBlock` has to exist, so
+the registry's copy of a claimed item normally carries no stamp at all — but a
+reader who has both is better served by the one they can go and look at.
 
 This was bug-4: the run claim existed nowhere in the ladder, so a card an
 unattended run already owned kept a live dispatch tab, and clicking it spawned
 a second session against an item held in another worktree on `backlog/<id>`.
+
+The in-progress block was bug-12, the same shape one rung down and with the
+data in the opposite place: the card rendered its amber in-progress bar and an
+enabled dispatch button side by side, one telling the reader a session held
+this item and the other offering to start a second one against it.
 
 ## One run per project, checked twice
 

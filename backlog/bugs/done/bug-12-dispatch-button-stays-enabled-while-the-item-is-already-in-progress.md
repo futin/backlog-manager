@@ -3,8 +3,10 @@ id: bug-12
 title: Dispatch button stays enabled while the item is already in progress
 created: 2026-09-01
 tags: board, dispatch
-updated: 2026-09-01T18:57:50Z
+updated: 2026-09-03T11:44:21Z
 groom-elapsed: 41
+started: 2026-09-03T11:27:52Z
+execute-elapsed: 989
 ---
 
 ## Symptom
@@ -153,3 +155,71 @@ clicking it opens no launch sheet.
 
 `pnpm test` and `pnpm run typecheck` pass, and the board cannot offer a second
 dispatch for an item a session already holds.
+
+## Outcome
+
+2026-09-03 — Fixed as groomed, all five steps. `progressBlock(item)` is new in
+`client/src/lib/item-progress.ts`: null unless `isInProgress(item)`, otherwise
+`a session is already working this item (<progressLabel> since <started>)`, so
+one sentence stays grammatical across `grooming` / `executing` / the bare
+`in progress` fallback, and the stamp is printed verbatim because that is what
+is literally on disk. It blocks on any stamp, fresh or stale, matching
+`backlog.mjs start`'s own rule; `isInProgress`'s `status === 'open'` half is
+what stops an archived item's historical stamp from blocking forever.
+
+`DispatchButton` derives it rather than taking a prop — the fact is on the item
+the component already holds — so `ItemCard`, `ItemDrawer` and `ArchiveView` all
+get it with no signature change. Order is now environment → project visibility
+→ in progress → run claim: the file-derived block outranks the run claim
+because the stamp is on the copy this board is rendering while the claim is a
+volatile fact about another worktree. The component's file header, its
+`blocked` ordering comment, the `aria-disabled` comment and the `sr-only`
+comment all said "two blocks" and now say three, and the CLAUDE.md
+dispatch-block invariant was updated to match.
+
+Nine tests added, watched failing first. The five `progressBlock` unit cases
+failed on the missing export; three of the six component cases failed on the
+live behaviour (`aria-disabled` still `false`, `onDispatch` still called, the
+run reason winning over the session one). The other three component cases —
+project visibility still outranking the new block, the environment still
+hiding the control outright, and an unstarted item still dispatching normally
+— passed before the change as well as after, which is exactly their job as
+ordering guards.
+
+Verification, `pnpm run typecheck` then `pnpm test`:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+EXIT_TYPECHECK=0
+
+$ pnpm test
+Test Suites: 53 passed, 53 total
+Tests:       828 passed, 828 total
+Snapshots:   0 total
+Time:        39.7 s
+```
+
+Browser check, done against this worktree's own stack rather than the running
+docker one (which serves the main checkout, where this item carries no
+`started:` stamp at all): API on 4399 with `BM_REGISTRY_FILE` pointed at a
+temporary registry naming only this worktree, Vite on 5199. The real dashboard
+on 4321 reports `remoteAnswer:false, spawnAvailable:false, projectPaths:[]`,
+which is an ENVIRONMENT-level block that hides every dispatch button, so the
+upstream `/api/health` and `/api/management` were stubbed on 4390 to report a
+reachable dashboard that can see this worktree; the API and the client under
+test were the real ones. This item's own card — amber, reading `executing 11m`
+— rendered:
+
+```
+{ "label": "execute▸",
+  "ariaDisabled": "true",
+  "title": "a session is already working this item (executing since 2026-09-03T11:27:52Z)",
+  "card": "executing11mDispatch button stays enabled while the item is " }
+```
+
+and clicking it opened no launch sheet (`sheetOpen: false`). Every other card
+on the board was untouched: `aria-disabled: "false"`, title
+`dispatch <action> to a Claude session`. The temporary registry, the stub and
+both processes were removed afterwards; `git status` shows only the six
+intended files.

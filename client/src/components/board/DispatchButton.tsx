@@ -2,6 +2,7 @@ import { useId } from 'react';
 
 import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
+import { progressBlock } from '../../lib/item-progress';
 
 /**
  * DispatchButton — the click that hands this item to a Claude session.
@@ -18,11 +19,14 @@ import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
  *    disabled on every single card, for a reason that is not about any of
  *    them, is noise; "BM_AGENTS is off" belongs in Settings, which reports it.
  *
- * There are TWO per-item blocks, not one: the dashboard cannot see this item's
- * project (derived here, from `status`), and an orchestrator run has already
- * claimed this item (handed in as `runBlock`, because nothing in the item file
- * or the status payload can know it). Both disable with their reason; see the
- * `blocked` line below for why they read in that order.
+ * There are THREE per-item blocks, not one: the dashboard cannot see this
+ * item's project (derived here, from `status`), a local skill session already
+ * holds this item (derived here too, by `progressBlock` — the only one of the
+ * three the item file itself can answer, since `started:` is right there in
+ * its frontmatter), and an orchestrator run has already claimed this item
+ * (handed in as `runBlock`, because nothing in the item file or the status
+ * payload can know it). All three disable with their reason; see the `blocked`
+ * line below for why they read in that order.
  *
  * `status` is trusted here exactly as typed: making it honest at runtime is
  * `fetchAgentsStatus`'s job (`lib/agents.ts`), the one place a JSON body
@@ -79,15 +83,24 @@ export function DispatchButton(
 
   /*
    * Order is the invariant, not a preference: ENVIRONMENT-level → per-item
-   * project visibility → run claim. The first still returns `null` above (no
-   * control at all — see the file comment and `dispatchGate` for why), and the
-   * other two disable with a reason. The run claim reads LAST of the three
-   * because it is the most volatile and the least fundamental: with dispatch
-   * off or the project invisible there is nothing to say about a run, and a
-   * reason naming a stage would send the reader to watch a queue when what
-   * needs fixing is the dashboard.
+   * project visibility → in progress → run claim. The first still returns
+   * `null` above (no control at all — see the file comment and `dispatchGate`
+   * for why), and the other three disable with a reason. The run claim reads
+   * LAST of the four because it is the most volatile and the least
+   * fundamental: with dispatch off or the project invisible there is nothing
+   * to say about a run, and a reason naming a stage would send the reader to
+   * watch a queue when what needs fixing is the dashboard.
+   *
+   * The in-progress block slots in just ahead of it by that same logic: the
+   * `started:` stamp is on the file this very board is rendering, while a run
+   * claim is a fact about another worktree that the next poll can change. The
+   * two coexist only pathologically — a run stamps `started:` on its own
+   * worktree's copy, so the registry's copy of a claimed item normally carries
+   * no stamp at all — and when they do, the file wins.
    */
-  const blocked = (gate.control === 'disabled' ? gate.reason : null) ?? runBlock;
+  const blocked = (gate.control === 'disabled' ? gate.reason : null)
+    ?? progressBlock(item)
+    ?? runBlock;
 
   // The action IS the tone class: `groom` and `execute` are the two
   // AgentAction values, so the palette can never drift from the derivation.
@@ -101,10 +114,11 @@ export function DispatchButton(
         // aria-disabled, NOT the `disabled` attribute, and the guard in
         // onClick is what actually makes it inert. A `disabled` button is
         // removed from the tab order and from the accessibility tree's
-        // interactive surface, so a keyboard user cannot reach it — and both
-        // disabled states there are name something specific and actionable
-        // (which project the dashboard cannot see; which run stage owns this
-        // item). `title` on an unreachable element is announced unreliably at
+        // interactive surface, so a keyboard user cannot reach it — and all
+        // three disabled states there are name something specific and
+        // actionable (which project the dashboard cannot see; which session
+        // holds this item and since when; which run stage owns it). `title`
+        // on an unreachable element is announced unreliably at
         // best; the aria-describedby span below is what makes it dependable,
         // and it is only readable if the control can be focused at all.
         aria-disabled={blocked !== null}
@@ -161,9 +175,11 @@ export function DispatchButton(
           name. A description is the right slot for "why this cannot be used
           right now", and for the project-visibility reason it is the only
           place in the UI that states the condition at all — Settings reports
-          a project *count*, not which projects are missing. (The run-claim
-          reason has the run strip above the columns as a second telling, but
-          the strip names a queue, not this card.) Rendered as a sibling rather
+          a project *count*, not which projects are missing. (The other two each have
+          a second telling: the run strip above the columns for a run claim,
+          though the strip names a queue and not this card, and this card's own
+          amber bar for a session already holding the item, though the bar
+          prints an elapsed rather than a reason not to dispatch.) Rendered as a sibling rather
           than a child so its text stays out of the button's accessible
           name. */}
       {blocked !== null && <span id={reasonId} className="sr-only">{blocked}</span>}
