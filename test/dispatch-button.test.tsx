@@ -166,6 +166,105 @@ describe('DispatchButton', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  /*
+   * bug-12: the THIRD per-item block, and the only one derived from the item
+   * file itself. `started:` is written by `backlog.mjs start` and cleared by
+   * `stop`, so unlike the run claim it is right there on the item this leaf
+   * already holds — hence a derivation and not a prop, and hence no signature
+   * change at any of the three call sites.
+   *
+   * It disables rather than hides for the same reason the other two per-item
+   * blocks do: it is a fact about THIS card, and the reason names something
+   * the reader can act on (go find the session that holds it, or `stop` the
+   * marker if nobody does).
+   */
+  it("disables with the session's reason when a local session already holds the item", () => {
+    render(
+      <DispatchButton
+        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
+        status={READY} onDispatch={() => {}}
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('executing'));
+    const describedBy = btn.getAttribute('aria-describedby');
+    expect(document.getElementById(String(describedBy)))
+      .toHaveTextContent('2026-08-28T14:03:07Z');
+  });
+
+  it('dispatches nothing when an in-progress button is clicked', async () => {
+    const onDispatch = jest.fn();
+    render(
+      <DispatchButton
+        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
+        status={READY} onDispatch={onDispatch}
+      />
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'execute' }));
+    expect(onDispatch).not.toHaveBeenCalled();
+  });
+
+  /* Ordering, and the half of it this block introduces: the stamp is on the
+     file this board is rendering, the run claim is a volatile fact about
+     another worktree, so the file wins. The two coexist only pathologically —
+     a run works in its own worktree, so main's copy of a claimed item normally
+     carries no stamp at all — but when they do, the reason has to name the
+     thing the reader can actually go and look at on disk. */
+  it("prefers the session's reason over a run's when an item somehow carries both", () => {
+    render(
+      <DispatchButton
+        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
+        status={READY} onDispatch={() => {}}
+        runBlock="an orchestrator run is working this item (reviewing)"
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('title', expect.stringContaining('executing'));
+    expect(btn.getAttribute('title')).not.toContain('reviewing');
+  });
+
+  /* And the other half: project visibility still outranks it. A reason naming
+     a running session would send the reader to look for a session when what
+     actually needs fixing is which projects the dashboard can see. */
+  it('still names the dashboard, not the session, when the project is invisible too', () => {
+    render(
+      <DispatchButton
+        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
+        status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}}
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('title', expect.stringContaining('/abs/alpha'));
+    expect(btn.getAttribute('title')).not.toContain('executing');
+  });
+
+  /* The environment level is still above all three: ".env off ⇒ the board
+     looks exactly as it did before this feature" has to stay true of an
+     in-progress card as well, or the new block resurrects a control the
+     environment had hidden. */
+  it('still renders nothing when the environment hides the control, in progress or not', () => {
+    const { container } = render(
+      <DispatchButton
+        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
+        status={{ ...READY, enabled: false }} onDispatch={() => {}}
+      />
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // The other side of the block, and the one that proves it is not simply
+  // disabling everything: an item no session holds dispatches exactly as it
+  // always did.
+  it('dispatches normally for an open item no session holds', async () => {
+    const onDispatch = jest.fn();
+    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={onDispatch} />);
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'false');
+    await userEvent.click(btn);
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+  });
+
   it('disables with the reason when the dashboard cannot see the project', () => {
     render(
       <DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}} />

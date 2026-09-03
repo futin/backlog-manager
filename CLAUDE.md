@@ -335,13 +335,24 @@ happened.
   membership check is a raw string compare, deliberately not realpath.
 - **An environment-level block hides the dispatch control; the per-item ones
   disable it.** With `BM_AGENTS` off the board shows no dispatch buttons — do
-  not "improve" that into disabled buttons. There are two per-item blocks and
-  both keep their button: the dashboard cannot see this item's project
-  (`dispatchGate`, derived from `AgentsStatus`), and an orchestrator run has
-  already claimed this item (`runClaimBlock`, `shared/agent.ts` — read from the
-  run payload, since neither the item file nor the status payload can know it).
-  `DispatchButton` reads them in that order, environment first, so the reason
-  it shows names the thing to fix rather than a symptom of it.
+  not "improve" that into disabled buttons. There are three per-item blocks and
+  all three keep their button: the dashboard cannot see this item's project
+  (`dispatchGate`, derived from `AgentsStatus`); a local skill session already
+  holds this item (`progressBlock`, `client/src/lib/item-progress.ts` — the
+  only one of the three derived from the item file itself, since `started:` is
+  written by `backlog.mjs start` and cleared by `stop`, and it blocks on ANY
+  stamp, fresh or stale, matching `start`'s own rule); and an orchestrator run
+  has already claimed this item (`runClaimBlock`, `shared/agent.ts` — read from
+  the run payload, since neither the item file nor the status payload can know
+  it). `DispatchButton` reads them in that order, environment first, so the
+  reason it shows names the thing to fix rather than a symptom of it — and the
+  file-derived block outranks the run claim because the stamp is on the copy
+  the board is rendering while the claim is a fact about another worktree.
+  `progressBlock` lives beside `isInProgress`/`progressLabel` rather than with
+  the other two in `shared/`: it is built from both of them, `shared/` must not
+  import from `client/`, and the block is client-only — the server's dispatch
+  re-scan is unchanged, since the board is the only surface that can
+  double-dispatch (bug-12).
 - **One run per project, checked twice.** `orchestrate.mjs init` refuses
   outright on any `status: "running"` run file, fresh or stale — a stale one
   means a crashed run, recoverable only via `--resume`/`--abort`, never
