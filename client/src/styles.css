@@ -934,6 +934,16 @@ body {
    not a gap to paper over. Hollow, not absent: the reader still needs to
    know the stage exists to know it was not needed. */
 .run-stepper-dot-hollow { background: transparent; border: 1px solid var(--hairline2) }
+/* Here, but with nothing working on it any more: the run aborted, failed or
+   crashed while the item sat at this stage (bug-15). Amber, the tone
+   lib/run-stage.ts already gives `parked`/`needs-answers` — "stopped, and it
+   is waiting on a person" is the same register — and hollow-centred rather
+   than filled, so it differs from both its neighbours in two channels and not
+   just in colour: `filled` is a solid fill, `current` is a solid fill plus a
+   cyan halo, and this is a ring with a hole in it. */
+.run-stepper-dot-stalled {
+  background: transparent; border: 2px solid var(--amber);
+}
 .run-drawer-item-verify {
   display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
   font-family: var(--mono); font-size: 10px;
@@ -1688,6 +1698,17 @@ body {
   from { background-position: 100% 0 }
   to { background-position: -100% 0 }
 }
+/* The stopped line (bug-15): a flat amber lead-in where a live run would be
+   sweeping cyan. Static for EVERY reader, not just a reduced-motion one — the
+   motion is not decoration here, it is the assertion "something is happening
+   at the node this segment points at", and for an aborted or crashed run that
+   assertion is simply false. `animation: none` is declared rather than merely
+   omitted so the property is visible to a reader (and to
+   run-track-style.test.ts) as a decision, not an oversight. */
+.run-track-node[data-in="stalled"]::before {
+  background: color-mix(in srgb, var(--amber) 55%, transparent);
+  animation: none;
+}
 .run-track-dot {
   width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--hairline2);
   background: var(--strip); box-sizing: border-box; z-index: 1;
@@ -1706,6 +1727,25 @@ body {
   from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 30%, transparent) }
   to { box-shadow: 0 0 0 6px color-mix(in srgb, var(--cyan) 10%, transparent) }
 }
+/* Where a stopped run's item was left standing (bug-15). The deliberate
+   opposite of the dot above it in every channel that carries meaning: amber
+   instead of cyan, an unfilled centre instead of a solid one, and no
+   animation at all instead of a pulse. That is what keeps the two apart for a
+   colour-blind and a monochrome reader alike, which is the rule
+   run-stepper-style.test.ts states for the drawer's own dots and
+   run-track-style.test.ts now enforces for these.
+     Not `filled`: green-filled means "went through this stage cleanly", which
+   is the reading the whole hollow-between-filled design rests on (see
+   StageTrack.tsx). This item never left this stage. */
+.run-track-dot-stalled {
+  background: var(--strip); border-color: var(--amber);
+  animation: none;
+}
+/* The stage word under a stalled node stays at full `--ink`, like the current
+   one's: this is the node a person opening a stopped run is looking for, so
+   dimming it to `--ink2` would bury exactly the line that answers "where did
+   it die". */
+.run-track-name-stalled { color: var(--ink) }
 .run-track-name {
   font-family: var(--mono); font-size: 10px; color: var(--ink2); letter-spacing: .02em;
   margin-top: 3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

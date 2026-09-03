@@ -1,15 +1,19 @@
 import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
-  itemDoneClock, itemDurationMs, itemQueueWaitMs, runElapsedMs, stepperDots, STEPPER_STAGES
+  itemDoneClock, itemDurationMs, itemQueueWaitMs, runClockMs, runElapsedMs, runIsLive,
+  stepperDots, STEPPER_STAGES
 } from '../client/src/lib/run-time';
+import { runWallMs } from '../client/src/lib/run-stats';
+import { RUN_STALE_MS } from '../shared/types';
 import type { OrchestratorRun, RunQueueItem, RunStage } from '../shared/types';
 
 /**
  * The derivations behind the run strip's and run drawer's time readings. Every
  * case here pins behaviour against a fixed `now` passed in, never the real
- * clock: these functions all default to `Date.now()` for their callers'
- * convenience, and a suite that leaned on that default would be timing-flaky
- * for no gain.
+ * clock — and for `itemDurationMs`/`inStageMs` there is no longer any other
+ * option: bug-15 removed their `= Date.now()` defaults outright, because for
+ * a run that has stopped the wall clock is the one instant that is always
+ * wrong, and a default is what lets the next caller reach for it silently.
  */
 
 /** An arbitrary but fixed instant, and the base every relative stamp below is built from. */
@@ -135,6 +139,69 @@ describe('runElapsedMs', () => {
   });
 });
 
+/**
+ * bug-15's two new exports: the one question every item-level reading on a
+ * run detail surface has to ask before it measures anything against `now`.
+ *
+ * `runIsLive` is deliberately DERIVED from `status` + `updatedAt` rather than
+ * read off the live payload's own server-computed `fresh` flag (which is what
+ * `runElapsedMs` above does): the Runs pane's authority can be an
+ * `OrchestratorArchiveRun`, which carries no such field at all, and deriving
+ * is also what makes the crashed-`running` case — a dead orchestrator's run
+ * file frozen at `status: "running"` forever, this repo's "one run per
+ * project" invariant — fall out for free rather than needing a second rule.
+ */
+describe('runIsLive', () => {
+  // Strictly `<`, exactly like `orchestrate.mjs`'s own `isFresh` and the
+  // server's `fresh` computation: a heartbeat exactly RUN_STALE_MS old reads
+  // stale on every side rather than fresh on one and stale on another.
+  it('treats a running run as live until its heartbeat is exactly RUN_STALE_MS old', () => {
+    const running = { status: 'running' as const, updatedAt: at(0) };
+    expect(runIsLive(running, T0 + RUN_STALE_MS - 1)).toBe(true);
+    expect(runIsLive(running, T0 + RUN_STALE_MS)).toBe(false);
+  });
+
+  // The whole point of the fork: an exit status is not a heartbeat. A run
+  // that aborted seconds ago is not live — nothing is working on it, however
+  // recent its last write was.
+  it('is false for every non-running status, however fresh the heartbeat', () => {
+    for (const status of ['aborted', 'failed', 'done'] as const) {
+      expect(runIsLive({ status, updatedAt: at(0) }, T0 + 5_000)).toBe(false);
+    }
+  });
+
+  // An unparseable heartbeat is not evidence a process is alive — the same
+  // call `heartbeat` (run-stats.ts) already makes for `runWallMs`.
+  it('is false for a running run whose heartbeat will not parse', () => {
+    expect(runIsLive({ status: 'running', updatedAt: 'nope' }, T0)).toBe(false);
+  });
+});
+
+/**
+ * The last instant a run can actually prove — the clock every item-level
+ * reading on that run must be measured against instead of `now`.
+ */
+describe('runClockMs', () => {
+  it('hands back the exact now it was given for a live run', () => {
+    const now = T0 + 60_000;
+    expect(runClockMs({ status: 'running', updatedAt: at(0) }, now)).toBe(now);
+  });
+
+  // The bug-15 fork, on both of the two shapes that produce it: a run that
+  // exited, and a `running` run whose orchestrator is gone. Neither can
+  // prove anything past its own last write.
+  it('freezes a stopped run at its own last heartbeat, never at now', () => {
+    expect(runClockMs({ status: 'aborted', updatedAt: at(455_500) }, T0 + 86_400_000)).toBe(T0 + 455_500);
+    expect(runClockMs({ status: 'running', updatedAt: at(0) }, T0 + RUN_STALE_MS + 1)).toBe(T0);
+  });
+
+  // No honest instant at all: not live, and nothing parseable to freeze at.
+  // `null`, which every caller already renders as nothing.
+  it('is null for a stopped run whose heartbeat will not parse', () => {
+    expect(runClockMs({ status: 'aborted', updatedAt: 'nope' }, T0)).toBeNull();
+  });
+});
+
 describe('itemDurationMs', () => {
   it('measures a terminal item from its first real stage to its terminal stamp', () => {
     const item = queueItem('merged', { dispatched: at(0), merged: at(552_000) });
@@ -186,6 +253,70 @@ describe('itemDurationMs', () => {
   it('falls back to the last known arrival for a terminal stage that never stamped itself', () => {
     const item = queueItem('failed', { dispatched: at(0), inspecting: at(300_000) });
     expect(itemDurationMs(item, T0 + 99_000_000)).toBe(300_000);
+  });
+
+  /**
+   * bug-15: a null clock is what a caller passes when the run holding this
+   * item cannot prove any instant at all (`runClockMs` answered `null`).
+   * Blanking the reading is the only honest answer for a still-moving item —
+   * there is nothing to measure TO.
+   */
+  it('returns null for a non-terminal item measured against a null clock', () => {
+    const item = queueItem('dispatched', { pending: at(0), dispatched: at(10_000) });
+    expect(itemDurationMs(item, null)).toBeNull();
+  });
+
+  /**
+   * ...and the terminal branch must survive that same null, because it never
+   * reads the clock in the first place: the item's own two stamps prove this
+   * span outright, and blanking it would lose a number nobody had to guess.
+   */
+  it('still reports a terminal item span against a null clock, from its own stamps', () => {
+    const item = queueItem('merged', { dispatched: at(0), merged: at(552_000) });
+    expect(itemDurationMs(item, null)).toBe(552_000);
+  });
+});
+
+/**
+ * The cross-surface rule bug-15 exists to enforce, pinned on the real run it
+ * was filed from (`run-20260901-112035`, aborted, bug-2 frozen at
+ * `dispatched`): no item's reading can honestly exceed its own run's wall
+ * time. Before the fix this row read `now − preflight` — about 32 hours when
+ * the bug was groomed, growing on every render — beside a pane header
+ * correctly printing the run's own 7m 35s.
+ */
+describe('an aborted run\'s frozen item (bug-15 regression)', () => {
+  const abortedRun = {
+    status: 'aborted' as const,
+    startedAt: '2026-09-01T11:20:35.499Z',
+    updatedAt: '2026-09-01T11:28:10.999Z'
+  };
+  const frozenItem = queueItem('dispatched', {
+    pending: '2026-09-01T11:20:35.499Z',
+    preflight: '2026-09-01T11:20:46.414Z',
+    dispatched: '2026-09-01T11:21:05.935Z'
+  });
+
+  // 11:20:46.414 (preflight, the first non-pending arrival) → 11:28:10.999
+  // (the run's last heartbeat) = 444585ms, 7m 24s. The same number a day
+  // later and a week later, because neither reading touches `now` any more.
+  it('reads the same frozen span whenever the pane is opened', () => {
+    for (const now of [Date.parse('2026-09-02T11:28:10.999Z'), Date.parse('2026-09-08T11:28:10.999Z')]) {
+      expect(itemDurationMs(frozenItem, runClockMs(abortedRun, now))).toBe(444_585);
+    }
+  });
+
+  // The invariant, not just the value — and asserted against `runWallMs`
+  // itself (run-stats.ts, bug-14's function) rather than a hand-typed
+  // constant, since the claim is about the two surfaces agreeing, not about
+  // either number in isolation. Already correct for an `aborted` run today,
+  // so this needs nothing from bug-14.
+  it('never exceeds its own run wall time', () => {
+    const now = Date.parse('2026-09-02T11:28:10.999Z');
+    const item = itemDurationMs(frozenItem, runClockMs(abortedRun, now)) as number;
+    const wall = runWallMs(abortedRun, now) as number;
+    expect(wall).toBe(455_500);
+    expect(item).toBeLessThanOrEqual(wall);
   });
 });
 
@@ -253,6 +384,13 @@ describe('inStageMs', () => {
   it('returns null when the current stage has no stamp', () => {
     expect(inStageMs(queueItem('reviewing', { dispatched: at(0) }), T0 + 300_000)).toBeNull();
   });
+
+  // bug-15: unlike `itemDurationMs` there is no branch here that can survive
+  // a null clock — every reading this function makes is "until when", and a
+  // stopped run with no provable instant has no answer to that.
+  it('returns null outright for a null clock', () => {
+    expect(inStageMs(queueItem('reviewing', { dispatched: at(0), reviewing: at(120_000) }), null)).toBeNull();
+  });
 });
 
 describe('stepperDots', () => {
@@ -260,12 +398,12 @@ describe('stepperDots', () => {
     expect(STEPPER_STAGES).toEqual([
       'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'merged'
     ]);
-    expect(stepperDots(queueItem('pending', {})).map((d) => d.stage)).toEqual([...STEPPER_STAGES]);
+    expect(stepperDots(queueItem('pending', {}), true).map((d) => d.stage)).toEqual([...STEPPER_STAGES]);
   });
 
   it('rings the current stage of an active row, fills what it visited, leaves the rest hollow', () => {
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
-    const byStage = Object.fromEntries(stepperDots(item).map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, true).map((d) => [d.stage, d.state]));
     expect(byStage).toEqual({
       dispatched: 'filled', inspecting: 'filled', reviewing: 'current',
       fixing: 'hollow', verifying: 'hollow', merging: 'hollow', merged: 'hollow'
@@ -282,7 +420,7 @@ describe('stepperDots', () => {
       dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000),
       verifying: at(180_000), merging: at(240_000), merged: at(300_000)
     });
-    const byStage = Object.fromEntries(stepperDots(item).map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, true).map((d) => [d.stage, d.state]));
     expect(byStage.fixing).toBe('hollow');
     expect(byStage.verifying).toBe('filled');
     expect(byStage.merging).toBe('filled');
@@ -292,7 +430,7 @@ describe('stepperDots', () => {
 
   it('rings nothing for a row that left the pipeline early, showing only how far it got', () => {
     const item = queueItem('parked', { dispatched: at(0), inspecting: at(60_000), parked: at(120_000) });
-    const states = stepperDots(item).map((d) => d.state);
+    const states = stepperDots(item, true).map((d) => d.state);
     expect(states).not.toContain('current');
     expect(states.filter((s) => s === 'filled')).toHaveLength(2);
   });
@@ -300,8 +438,39 @@ describe('stepperDots', () => {
   it('labels a visited dot with its arrival time and a never-entered dot with the bare stage name', () => {
     const local = new Date(2026, 7, 31, 14, 31, 0);
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: local.toISOString(), reviewing: at(120_000) });
-    const dots = Object.fromEntries(stepperDots(item).map((d) => [d.stage, d.label]));
+    const dots = Object.fromEntries(stepperDots(item, true).map((d) => [d.stage, d.label]));
     expect(dots.inspecting).toBe('inspecting · 14:31');
     expect(dots.fixing).toBe('fixing');
+  });
+
+  /**
+   * bug-15's fourth state. A clock cannot fix this one — `current` is a
+   * boolean CLAIM ("this is happening right now"), not a measurement — so the
+   * caller has to say whether the run is live, and `live: false` demotes the
+   * ring to `stalled`.
+   *
+   * Not to `filled`: filled means "visited and left behind", and the whole
+   * hollow-between-filled design (see the case above) reads a filled node as
+   * "went through cleanly". This item never left this stage. Demoting to
+   * filled would swap one lie for a quieter one.
+   */
+  it('marks the stage a stopped run died on as stalled, leaving the rest of the row alone', () => {
+    const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
+    const byStage = Object.fromEntries(stepperDots(item, false).map((d) => [d.stage, d.state]));
+    expect(byStage).toEqual({
+      dispatched: 'filled', inspecting: 'filled', reviewing: 'stalled',
+      fixing: 'hollow', verifying: 'hollow', merging: 'hollow', merged: 'hollow'
+    });
+  });
+
+  // Nothing was `current` to demote: every stage of a merged row is either
+  // visited or never entered, so a stopped run's finished rows read exactly
+  // as they always have.
+  it('marks nothing stalled on a row that finished before the run stopped', () => {
+    const item = queueItem('merged', {
+      dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000),
+      verifying: at(180_000), merging: at(240_000), merged: at(300_000)
+    });
+    expect(stepperDots(item, false).map((d) => d.state)).not.toContain('stalled');
   });
 });

@@ -3,7 +3,8 @@ import { useEffect } from 'react';
 import { projectLabel } from '../../lib/project-label';
 import { stageChipClass, stageGlyph } from '../../lib/run-stage';
 import {
-  formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runElapsedMs, stepperDots
+  formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runClockMs, runElapsedMs,
+  runIsLive, stepperDots
 } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
 import { RowTime } from './RunRowTime';
@@ -111,6 +112,13 @@ function staleNote(run: RunPayload): string | null {
  * A `pending` row DOES get one, hollow throughout, because it is going to
  * enter — the empty track is the promise.
  *
+ * `live` is the run's own liveness (`runIsLive`, run-time.ts), threaded down
+ * because the item cannot answer it: with the run stopped, the dot the item
+ * is standing on renders `stalled` instead of `current` (bug-15). An aborted
+ * run's frozen item is still AT `reviewing`; the cyan ring's claim that
+ * something is happening there is the part that was false, and a dot is a
+ * claim, not a measurement — no clock could have fixed this one.
+ *
  * Each dot names its stage in a native `title` (hover) and the same text as an
  * `aria-label`, per the design: hover is mouse-only, and a dot that only a
  * mouse can identify is a dot half the readers cannot use. `role="img"` is
@@ -122,12 +130,12 @@ function staleNote(run: RunPayload): string | null {
  * still prints the current stage in words for everyone, so nobody has to walk
  * the dots to learn the one fact that matters most.
  */
-function RowStepper({ item }: { item: RunQueueItem }): JSX.Element | null {
+function RowStepper({ item, live }: { item: RunQueueItem; live: boolean }): JSX.Element | null {
   if (item.stage === 'ungroomed') return null;
 
   return (
     <div className="run-stepper" data-testid={`run-drawer-stepper-${item.id}`}>
-      {stepperDots(item).map((dot) => (
+      {stepperDots(item, live).map((dot) => (
         <span
           key={dot.stage}
           className={`run-stepper-dot run-stepper-dot-${dot.state}`}
@@ -154,8 +162,22 @@ function RowStepper({ item }: { item: RunQueueItem }): JSX.Element | null {
  * pass. The row's own `N fix loops` line, rendered a few lines below whenever
  * that has happened, is the visible tell that this number spans more than the
  * current attempt.
+ *
+ * Renders NOTHING for a run that has stopped (bug-15), which is the bluntest
+ * of the four surfaces that bug covered: this caption asserts in prose, in
+ * the literal word "now", that an item is being worked — and on an aborted
+ * run it printed `now dispatched · 32h 05m in stage` about an item nothing
+ * had touched since the day before. There is no honest rewording, because
+ * the whole sentence is about the present tense: the row's status chip and
+ * its stalled dot already say where the item stopped, so a third `null`
+ * return beside this function's two existing ones is the answer.
  */
-function RowStageCaption({ item, now }: { item: RunQueueItem; now: number }): JSX.Element | null {
+function RowStageCaption({ item, now, live }: {
+  item: RunQueueItem;
+  now: number;
+  live: boolean;
+}): JSX.Element | null {
+  if (!live) return null;
   if (isTerminalStage(item.stage) || item.stage === 'pending') return null;
   const ms = inStageMs(item, now);
   if (ms === null) return null;
@@ -216,6 +238,25 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
   // been going.
   const elapsed = runElapsedMs(run, now);
   const startedClock = formatClock(run.startedAt);
+
+  // Is this run actually alive, and what is the last instant it can PROVE?
+  // Every per-row reading below is measured against `clock`, never `now`
+  // directly — bug-15: `now` is honest only for a run that is still running,
+  // and this drawer opens onto stale and finished runs too (the strip renders
+  // them; a crashed one at `status: "running"` stays in the run file forever).
+  // A stopped run's rows freeze at its own last heartbeat, which is the same
+  // instant `runElapsedMs` above already freezes the drawer's own total at —
+  // that shared instant is what makes the meta line and the rows agree by
+  // construction instead of contradicting each other by a factor that grows
+  // without bound.
+  //
+  // Derived here rather than read off this payload's server-computed `fresh`
+  // flag (which `runElapsedMs` does read, since it takes it as a field): the
+  // two agree for any payload the server can actually emit, and deriving is
+  // what keeps ONE rule for this question across the drawer and the Runs
+  // pane, whose own authority can be an archive run with no such flag.
+  const live = runIsLive(run, now);
+  const clock = runClockMs(run, now);
 
   // Four counts, not a fifth "current item" pointer: the per-item rows below
   // already print every item's own stage, so a top-of-drawer pointer at
@@ -325,10 +366,10 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
                           reader's eye runs down when the question is "which
                           of these took the longest", which is exactly the
                           question a row-by-row reading answers worst. */}
-                      <RowTime item={q} now={now} />
+                      <RowTime item={q} now={clock} />
                     </div>
-                    <RowStepper item={q} />
-                    <RowStageCaption item={q} now={now} />
+                    <RowStepper item={q} live={live} />
+                    <RowStageCaption item={q} now={now} live={live} />
                     {q.fixLoops > 0 && (
                       <div className="run-drawer-item-fixloops">
                         {q.fixLoops} fix loop{q.fixLoops === 1 ? '' : 's'}

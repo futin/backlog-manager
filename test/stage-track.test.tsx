@@ -23,6 +23,13 @@ import type { RunQueueItem, RunStage } from '../shared/types';
  * from the real clock — case 9 below is the one that pins that directly,
  * by rerendering with an advanced `now` and checking the reading advances
  * by exactly that much.
+ *
+ * `live` is passed explicitly too, for the same reason it has no default in
+ * `stepperDots` (run-time.ts): whether the run holding this item is still
+ * alive is not something the item can answer, and bug-15 was exactly the
+ * caller never being asked. Every case below states `live={true}` — the
+ * pre-bug-15 behaviour, so those assertions are unchanged — except the two
+ * stalled cases at the end.
  */
 const T0 = Date.parse('2026-08-31T09:20:45Z');
 
@@ -55,7 +62,7 @@ function trackItem(
 describe('StageTrack', () => {
   it('renders seven nodes, one per STEPPER_STAGES entry, in pipeline order, each named for its own stage', () => {
     const { container } = render(
-      <StageTrack item={trackItem('bug-1', 'pending', { pending: at(0) })} now={T0} />
+      <StageTrack item={trackItem('bug-1', 'pending', { pending: at(0) })} now={T0} live={true} />
     );
 
     const nodes = Array.from(container.querySelectorAll('.run-track-node'));
@@ -76,7 +83,7 @@ describe('StageTrack', () => {
       pending: at(0), preflight: at(15_000), dispatched: at(60_000), inspecting: at(360_000),
       reviewing: at(380_000), verifying: at(700_000), merging: at(760_000), merged: at(772_000)
     };
-    render(<StageTrack item={trackItem('bug-2', 'merged', stageAt)} now={T0 + 1_000_000} />);
+    render(<StageTrack item={trackItem('bug-2', 'merged', stageAt)} now={T0 + 1_000_000} live={true} />);
 
     expect(screen.getByTestId('run-track-bug-2-dispatched-val')).toHaveTextContent('5m 00s');
     expect(screen.getByTestId('run-track-bug-2-inspecting-val')).toHaveTextContent('20s');
@@ -107,7 +114,7 @@ describe('StageTrack', () => {
       pending: at(0), dispatched: at(10_000), inspecting: at(20_000),
       reviewing: at(30_000), fixing: at(40_000)
     };
-    render(<StageTrack item={trackItem('bug-3', 'fixing', stageAt, 1)} now={T0 + 684_000} />);
+    render(<StageTrack item={trackItem('bug-3', 'fixing', stageAt, 1)} now={T0 + 684_000} live={true} />);
 
     const fixingNode = screen.getByTestId('run-track-bug-3-fixing');
     expect(fixingNode.querySelector('.run-track-dot')).toHaveClass('run-track-dot-current');
@@ -130,18 +137,18 @@ describe('StageTrack', () => {
   it('pluralises the fix-loop badge at 2 and renders no badge at all when fixLoops is 0', () => {
     const stageAt = { pending: at(0), dispatched: at(10_000), fixing: at(40_000) };
 
-    const { rerender } = render(<StageTrack item={trackItem('bug-4', 'fixing', stageAt, 2)} now={T0 + 100_000} />);
+    const { rerender } = render(<StageTrack item={trackItem('bug-4', 'fixing', stageAt, 2)} now={T0 + 100_000} live={true} />);
     const badge = screen.getByTestId('run-track-bug-4-loops');
     expect(badge).toHaveTextContent('×2');
     expect(badge).toHaveAttribute('aria-label', '2 fix loops');
 
-    rerender(<StageTrack item={trackItem('bug-4', 'fixing', stageAt, 0)} now={T0 + 100_000} />);
+    rerender(<StageTrack item={trackItem('bug-4', 'fixing', stageAt, 0)} now={T0 + 100_000} live={true} />);
     expect(screen.queryByTestId('run-track-bug-4-loops')).not.toBeInTheDocument();
   });
 
   it('renders a fully hollow track for a pending item, with no live segment anywhere', () => {
     const { container } = render(
-      <StageTrack item={trackItem('bug-5', 'pending', { pending: at(0) })} now={T0} />
+      <StageTrack item={trackItem('bug-5', 'pending', { pending: at(0) })} now={T0} live={true} />
     );
 
     expect(screen.getByTestId('run-track-bug-5')).toBeInTheDocument();
@@ -158,7 +165,7 @@ describe('StageTrack', () => {
   });
 
   it('renders nothing for an ungroomed item', () => {
-    const { container } = render(<StageTrack item={trackItem('bug-6', 'ungroomed', {})} now={T0} />);
+    const { container } = render(<StageTrack item={trackItem('bug-6', 'ungroomed', {})} now={T0} live={true} />);
 
     expect(container).toBeEmptyDOMElement();
     expect(screen.queryByTestId('run-track-bug-6')).not.toBeInTheDocument();
@@ -166,7 +173,7 @@ describe('StageTrack', () => {
 
   it('fills through the last-visited stage on a parked item, rings nothing, and reads the merged value as — rather than a clock', () => {
     const stageAt = { pending: at(0), dispatched: at(5_000), inspecting: at(10_000) };
-    const { container } = render(<StageTrack item={trackItem('bug-7', 'parked', stageAt)} now={T0 + 500_000} />);
+    const { container } = render(<StageTrack item={trackItem('bug-7', 'parked', stageAt)} now={T0 + 500_000} live={true} />);
 
     expect(screen.getByTestId('run-track-bug-7-dispatched').querySelector('.run-track-dot'))
       .toHaveClass('run-track-dot-filled');
@@ -188,21 +195,86 @@ describe('StageTrack', () => {
 
   it('reads a hollow — with -none when the current stage\'s own stamp will not parse', () => {
     const stageAt = { dispatched: at(0), inspecting: at(10_000), reviewing: at(20_000), fixing: 'garbage' };
-    render(<StageTrack item={trackItem('bug-8', 'fixing', stageAt)} now={T0 + 100_000} />);
+    render(<StageTrack item={trackItem('bug-8', 'fixing', stageAt)} now={T0 + 100_000} live={true} />);
 
     const fixingVal = screen.getByTestId('run-track-bug-8-fixing-val');
     expect(fixingVal).toHaveTextContent('—');
     expect(fixingVal).toHaveClass('run-track-val-none');
   });
 
+  /**
+   * bug-15, on the surface it was filed from. An aborted run's in-flight item
+   * is frozen at a non-terminal stage: the node it died on must read as
+   * STALLED — amber, static — and not as `run-track-dot-current`, the cyan
+   * pulsing dot that is this app's one "happening right now" signal. Its
+   * segment must not sweep either: `data-in="stalled"`, never `"live"`.
+   *
+   * The value under the node is still printed, and that is deliberate: with
+   * the clock clamped at the run's last heartbeat it is a bounded, honest
+   * reading — "it died 7m 24s into dispatch" — which is the single most
+   * useful thing the track can say about a run that stopped.
+   */
+  it('renders the stage a stopped run died on as a stalled node with a frozen reading', () => {
+    const stageAt = { pending: at(0), preflight: at(10_911), dispatched: at(30_436) };
+    // The clamped clock a stopped run hands down (`runClockMs`): its own last
+    // heartbeat, not `now` — here 7m 24s after the item reached `dispatched`.
+    const frozenClock = T0 + 30_436 + 444_000;
+    render(
+      <StageTrack item={trackItem('bug-2', 'dispatched', stageAt)} now={frozenClock} live={false} />
+    );
+
+    const node = screen.getByTestId('run-track-bug-2-dispatched');
+    expect(node.querySelector('.run-track-dot')).toHaveClass('run-track-dot-stalled');
+    expect(node.querySelector('.run-track-dot')).not.toHaveClass('run-track-dot-current');
+    // `dispatched` is the FIRST node, so it has no incoming segment at all
+    // (`data-in="none"`, the same as on a live run) — what matters here is
+    // that it is not the animated `"live"` lead-in. The mid-track case below
+    // is the one that pins the stalled segment itself.
+    expect(node.getAttribute('data-in')).toBe('none');
+    expect(screen.getByTestId('run-track-bug-2-dispatched-val')).toHaveTextContent('7m 24s');
+  });
+
+  // The stalled segment, on a node that actually has one: a static amber
+  // lead-in (`data-in="stalled"`), never the `run-track-sweep` gradient the
+  // `"live"` value animates — a sweep is a claim about right now.
+  it('leads into a stalled node with a static segment rather than the animated sweep', () => {
+    const stageAt = { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) };
+    const { container } = render(
+      <StageTrack item={trackItem('bug-4', 'reviewing', stageAt)} now={T0 + 180_000} live={false} />
+    );
+
+    expect(screen.getByTestId('run-track-bug-4-reviewing').getAttribute('data-in')).toBe('stalled');
+    expect(container.querySelectorAll('[data-in="live"]')).toHaveLength(0);
+    expect(container.querySelectorAll('.run-track-dot-current')).toHaveLength(0);
+    // The two nodes it passed through are still plain green: only the stage
+    // it died ON changes state, never its history.
+    expect(screen.getByTestId('run-track-bug-4-dispatched').querySelector('.run-track-dot'))
+      .toHaveClass('run-track-dot-filled');
+  });
+
+  // A null clock is what `runClockMs` answers for a stopped run whose own
+  // heartbeat will not parse: the node is still stalled (the item IS there),
+  // but there is no instant to measure the span against, so the value reads
+  // the honest dash rather than a number nobody can source.
+  it('reads a stalled node as — when the run can prove no instant at all', () => {
+    const stageAt = { pending: at(0), dispatched: at(30_000) };
+    render(<StageTrack item={trackItem('bug-3', 'dispatched', stageAt)} now={null} live={false} />);
+
+    expect(screen.getByTestId('run-track-bug-3-dispatched').querySelector('.run-track-dot'))
+      .toHaveClass('run-track-dot-stalled');
+    const val = screen.getByTestId('run-track-bug-3-dispatched-val');
+    expect(val).toHaveTextContent('—');
+    expect(val).toHaveClass('run-track-val-none');
+  });
+
   it('reads its current-stage value from the `now` prop, never the real clock', () => {
     const stageAt = { dispatched: at(0), inspecting: at(5_000), reviewing: at(10_000), fixing: at(15_000) };
     const item = trackItem('bug-9', 'fixing', stageAt);
 
-    const { rerender } = render(<StageTrack item={item} now={T0 + 135_000} />);
+    const { rerender } = render(<StageTrack item={item} now={T0 + 135_000} live={true} />);
     expect(screen.getByTestId('run-track-bug-9-fixing-val')).toHaveTextContent('2m 00s');
 
-    rerender(<StageTrack item={item} now={T0 + 195_000} />);
+    rerender(<StageTrack item={item} now={T0 + 195_000} live={true} />);
     expect(screen.getByTestId('run-track-bug-9-fixing-val')).toHaveTextContent('3m 00s');
   });
 });

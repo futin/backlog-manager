@@ -1,5 +1,4 @@
-import { isTerminalStage, itemDurationMs } from './run-time';
-import { RUN_STALE_MS } from '../../../shared/types';
+import { isTerminalStage, itemDurationMs, runIsLive } from './run-time';
 import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
 
 /**
@@ -80,36 +79,41 @@ function parseStamp(iso: string | undefined): number | null {
 }
 
 /**
- * A run's own heartbeat, parsed, together with whether it is still fresh:
- * `RUN_STALE_MS` measured against `updatedAt`, the same comparison
- * `orchestrator.service.ts` performs server-side to compute the LIVE
- * payload's `fresh` flag — strictly `<`, so a heartbeat exactly
- * `RUN_STALE_MS` old reads stale on both sides rather than fresh on one and
- * stale on the other.
+ * A run's own heartbeat, parsed, together with whether the run is still
+ * genuinely alive.
  *
- * Both readings in this file that fork on "is this run actually alive"
- * (`runWallMs`, `runStageTotals`) call this rather than deriving it inline,
- * so the file holds ONE implementation of the gate instead of two copies
- * that could drift — the divergence bug-14 was: `runStageTotals` grew this
- * check and `runWallMs` did not, and for months a crashed run's wall time
- * ticked upward beside a stage rollup that had correctly frozen.
+ * The boolean half is no longer derived here: it is `runIsLive`
+ * (`run-time.ts`), which asks exactly this question — `status: "running"`
+ * AND `RUN_STALE_MS` measured strictly against `updatedAt`, the same
+ * comparison `orchestrator.service.ts` performs server-side for the live
+ * payload's `fresh` flag. bug-15 exported it from that file for its own
+ * item-level clamp (`runClockMs`), which would have made this the FOURTH
+ * spelling of the same comparison in the repo and the SECOND on the client;
+ * delegating keeps it at one client-side implementation, which is the whole
+ * lesson bug-14 left behind (`runStageTotals` grew this check while
+ * `runWallMs` did not, and for months a crashed run's wall time ticked
+ * upward beside a stage rollup that had correctly frozen).
  *
- * It answers the parsed instant as well as the boolean because the two
- * callers need different things from it: `runWallMs` measures its stale
- * branch to `updated`, and `runStageTotals` freezes an open span there.
- * `null` for a stamp that will not parse, and such a run is never fresh —
- * an unparseable heartbeat is not evidence a process is alive.
+ * What this function still does that `runIsLive` cannot is answer the parsed
+ * INSTANT alongside the boolean, because the two callers need different
+ * things from it: `runWallMs` measures its stopped branch to `updated`, and
+ * `runStageTotals` freezes an open span there. `null` for a stamp that will
+ * not parse — and such a run is never live either, since an unparseable
+ * heartbeat is not evidence a process is alive.
  *
- * Deliberately NOT exported. `run-time.ts`'s `runElapsedMs` asks the same
- * question of the LIVE payload, which carries the server's own `fresh`
- * flag as a field, so it reads that flag instead of deriving anything —
- * that shape difference is the whole reason these are separate functions,
- * and exporting this would invite a caller to derive freshness for a
- * payload that already states it.
+ * Takes the run rather than the bare `updatedAt` string it used to, because
+ * `runIsLive` reads `status` too: liveness was always the conjunction of the
+ * two, this file just used to spell the `status` half at each call site.
+ *
+ * Still deliberately NOT exported. `run-time.ts`'s `runElapsedMs` asks the
+ * same question of the LIVE payload, which carries the server's own `fresh`
+ * flag as a field, so it reads that flag instead of deriving anything.
  */
-function heartbeat(updatedAt: string | undefined, now: number): { updated: number | null; fresh: boolean } {
-  const updated = parseStamp(updatedAt);
-  return { updated, fresh: updated !== null && now - updated < RUN_STALE_MS };
+function heartbeat(
+  run: Pick<OrchestratorArchiveRun, 'status' | 'updatedAt'>,
+  now: number
+): { updated: number | null; live: boolean } {
+  return { updated: parseStamp(run.updatedAt), live: runIsLive(run, now) };
 }
 
 /**
@@ -231,8 +235,11 @@ export function runWallMs(
   const started = parseStamp(run.startedAt);
   if (started === null) return null;
 
-  const { updated, fresh } = heartbeat(run.updatedAt, now);
-  if (run.status === 'running' && fresh) return Math.max(0, now - started);
+  // `heartbeat`'s boolean already carries the `status === 'running'` half of
+  // this fork (it delegates to `runIsLive`), so the branch reads as the one
+  // question it always was rather than restating half of it here.
+  const { updated, live } = heartbeat(run, now);
+  if (live) return Math.max(0, now - started);
 
   if (updated === null) return null;
   return Math.max(0, updated - started);
@@ -415,7 +422,7 @@ export function runStageTotals(
   // `heartbeat` is that derivation, shared with `runWallMs` above rather
   // than written inline here as it once was: bug-14 was precisely the two
   // going out of step.
-  const { updated, fresh } = heartbeat(run.updatedAt, now);
+  const { updated, live } = heartbeat(run, now);
 
   for (const item of run.queue) {
     for (const span of itemStageSpans(item)) {
@@ -436,7 +443,7 @@ export function runStageTotals(
         // true of it.
         const arrivals = parsedArrivals(item);
         const start = Math.max(arrivals[arrivals.length - 1].at, currentAt);
-        if (fresh) {
+        if (live) {
           totals[item.stage] = (totals[item.stage] ?? 0) + Math.max(0, now - start);
         } else if (updated !== null) {
           // Stale, but with an honest last-heartbeat instant to freeze the
@@ -445,8 +452,8 @@ export function runStageTotals(
           // not be credited with.
           totals[item.stage] = (totals[item.stage] ?? 0) + Math.max(0, updated - start);
         }
-        // else: `updatedAt` itself will not parse. Not fresh (per `fresh`'s
-        // own `updated !== null` half above) and with no honest instant to
+        // else: `updatedAt` itself will not parse. Never live (an
+        // unparseable heartbeat is no evidence of a process) and with no honest instant to
         // freeze at either, this item's open span adds nothing on top of
         // its closed spans (already summed above) for this render.
       }

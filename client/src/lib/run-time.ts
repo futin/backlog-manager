@@ -1,4 +1,4 @@
-import { RUN_CLAIMED_STAGES } from '../../../shared/types';
+import { RUN_CLAIMED_STAGES, RUN_STALE_MS } from '../../../shared/types';
 import type { OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
 
 /**
@@ -187,6 +187,68 @@ export function runElapsedMs(run: RunTiming, now: number = Date.now()): number |
 }
 
 /**
+ * Is this run genuinely alive right now — `status: "running"` AND a heartbeat
+ * we have heard within `RUN_STALE_MS`?
+ *
+ * The one question every ITEM-level reading below has to ask before it
+ * measures anything against `now`, and the whole of bug-15: `RunDetail` and
+ * `RunDrawer` each compute one `now` per render and used to hand that same
+ * instant to the run-level reading, which forks on liveness, AND to the
+ * item-level ones, which did not. So an aborted run's frozen item printed
+ * `now − preflight` — 32 hours and growing on the real run this was filed
+ * from — directly beneath a header correctly printing the run's own 7m 35s.
+ * The functions were never the defect; the argument was.
+ *
+ * DERIVED from `status` + `updatedAt` rather than read off a `fresh` flag,
+ * unlike `runElapsedMs` above, for two reasons that both point the same way:
+ * the Runs pane's authority can be an `OrchestratorArchiveRun`, which carries
+ * no such field at all (`runWallMs`, run-stats.ts, states this at length for
+ * its own identical fork), and deriving is what makes the CRASHED-`running`
+ * case fall out for free — a dead orchestrator leaves `run.json` at
+ * `status: "running"` forever ("one run per project, checked twice"), so
+ * `status` alone never says whether a process is still there.
+ *
+ * Strictly `<`, matching `orchestrate.mjs`'s own `isFresh` and the server's
+ * `fresh` computation (`orchestrator.service.ts`), so a heartbeat exactly
+ * `RUN_STALE_MS` old reads stale everywhere rather than fresh on one side and
+ * stale on another. An unparseable `updatedAt` is never live: a heartbeat
+ * nobody can read is not evidence a process is alive.
+ */
+export function runIsLive(
+  run: Pick<OrchestratorRun, 'status' | 'updatedAt'>,
+  now: number
+): boolean {
+  if (run.status !== 'running') return false;
+  const updated = parseStamp(run.updatedAt);
+  return updated !== null && now - updated < RUN_STALE_MS;
+}
+
+/**
+ * The last instant this run can actually PROVE — `now` while it is live, its
+ * own last heartbeat once it is not, and `null` when it has neither.
+ *
+ * This is the clock a caller hands to `itemDurationMs`/`inStageMs` instead of
+ * the wall clock. For a live run it is the wall clock, so nothing about a
+ * running board changes; for an aborted, failed or crashed one it freezes
+ * every item reading at the run's own last write, which is the same instant
+ * `runWallMs`/`runStageTotals` (run-stats.ts) already freeze the run-level
+ * numbers at. That shared instant is what makes the header and the rows
+ * beneath it agree by construction rather than by coincidence.
+ *
+ * `null` — rather than a silent fallback to `now` — when the run is not live
+ * and its heartbeat will not parse: there is no honest instant to report
+ * against, and `now` is the one value that is always wrong for a stopped run.
+ * Every reading that takes this clock already renders a `null` as nothing.
+ */
+export function runClockMs(
+  run: Pick<OrchestratorRun, 'status' | 'updatedAt'>,
+  now: number
+): number | null {
+  if (runIsLive(run, now)) return now;
+  return parseStamp(run.updatedAt);
+}
+
+/**
  * When work on this item actually started, as a parsed instant — the earliest
  * `stageAt` arrival that is NOT the `pending` stamp.
  *
@@ -243,15 +305,28 @@ function lastArrivalMs(item: Pick<RunQueueItem, 'stageAt'>): number | null {
  * reporting the span it can actually prove, rather than measuring a finished
  * item against a clock that keeps running and growing a number that is pure
  * fiction.
+ *
+ * `now` is the CLAMPED clock (`runClockMs` above), not the wall clock, and it
+ * carries no default any more: every caller already passed one explicitly,
+ * and the default it used to have was `Date.now()` — precisely the value that
+ * is always wrong for a run that has stopped. This is the `isStale`/`runs`
+ * lesson from this repo's own invariants applied to a clock: a default is
+ * what lets the next caller silently reintroduce the bug it was written to
+ * fix.
+ *
+ * A `null` clock blanks the NON-TERMINAL branch only. A still-moving item
+ * whose run can prove no instant at all has no honest span to report; a
+ * terminal one never reads the clock in the first place, so a null must not
+ * blank a span the item's own stamps already prove.
  */
 export function itemDurationMs(
   item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
-  now: number = Date.now()
+  now: number | null
 ): number | null {
   const started = startedAtMs(item);
   if (started === null) return null;
 
-  if (!isTerminalStage(item.stage)) return Math.max(0, now - started);
+  if (!isTerminalStage(item.stage)) return now === null ? null : Math.max(0, now - started);
 
   const end = parseStamp(item.stageAt[item.stage]) ?? lastArrivalMs(item);
   if (end === null) return null;
@@ -315,11 +390,17 @@ export function itemDoneClock(item: Pick<RunQueueItem, 'stage' | 'stageAt'>): st
  * for 14m" is the single most useful thing the drawer can say about a run
  * that looks wedged — but a caller printing it next to `fixLoops > 0` is
  * printing a number measured across the loops, not within the current one.
+ *
+ * Takes the same clamped clock `itemDurationMs` does, with the same default
+ * removed for the same reason — and unlike that function there is no branch
+ * here that can survive a `null` one: every reading this makes is "until
+ * when", and a stopped run with no provable instant has no answer to that.
  */
 export function inStageMs(
   item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
-  now: number = Date.now()
+  now: number | null
 ): number | null {
+  if (now === null) return null;
   const at = parseStamp(item.stageAt[item.stage]);
   if (at === null) return null;
   return Math.max(0, now - at);
@@ -331,10 +412,12 @@ export interface StepperDot {
   /** Local `HH:MM` of first arrival, or `null` for a stage never entered. */
   at: string | null;
   /**
-   * `current` — the row is sitting here now; `filled` — visited and left
+   * `current` — the row is sitting here now; `stalled` — the row is sitting
+   * here and nothing is working on it any more (the run aborted, failed, or
+   * crashed while the item was at this stage); `filled` — visited and left
    * behind; `hollow` — never entered.
    */
-  state: 'current' | 'filled' | 'hollow';
+  state: 'current' | 'stalled' | 'filled' | 'hollow';
   /** `dispatched · 09:20` for a visited stage, the bare stage name otherwise. */
   label: string;
 }
@@ -356,8 +439,26 @@ export interface StepperDot {
  * stages other than `merged` (`failed`, `parked`, ...) are not in the seven
  * at all, so such a row simply shows how far it got before leaving, with the
  * chip beside it naming the exit.
+ *
+ * `live` is REQUIRED, with no default, and it is the one thing about this row
+ * the item alone cannot answer (bug-15). `state: 'current'` is a boolean
+ * CLAIM — "this is happening right now, this instant", drawn as the cyan dot
+ * with the pulsing ring — not a measurement, so unlike every other reading in
+ * this module a clamped clock cannot fix it: an aborted run's frozen item is
+ * still AT `dispatched`, it is just that nothing is doing anything about it.
+ * The caller, which is the only place that holds the run, has to say. No
+ * default for the same reason `itemDurationMs` lost its own: whichever value
+ * were the default is the one a future caller would reintroduce this bug with.
+ *
+ * `stalled` rather than a demotion to `filled`, which would be the quieter
+ * lie: `filled` means "visited and left behind", and this file's own
+ * hollow-between-filled reading above depends on a filled node meaning the
+ * item went through that stage cleanly. It never left this one.
  */
-export function stepperDots(item: Pick<RunQueueItem, 'stage' | 'stageAt'>): StepperDot[] {
+export function stepperDots(
+  item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
+  live: boolean
+): StepperDot[] {
   return STEPPER_STAGES.map((stage) => {
     const at = formatClock(item.stageAt[stage]);
     const visited = stage in item.stageAt;
@@ -365,7 +466,7 @@ export function stepperDots(item: Pick<RunQueueItem, 'stage' | 'stageAt'>): Step
     return {
       stage,
       at,
-      state: isCurrent ? 'current' : visited ? 'filled' : 'hollow',
+      state: isCurrent ? (live ? 'current' : 'stalled') : visited ? 'filled' : 'hollow',
       // The time is appended only when it is actually known: a visited stage
       // whose stamp will not parse still names itself rather than reading
       // `inspecting · null`.
