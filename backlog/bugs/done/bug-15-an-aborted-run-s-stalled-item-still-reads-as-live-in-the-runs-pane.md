@@ -2,8 +2,10 @@
 id: bug-15
 title: An aborted run's stalled item still reads as live in the Runs pane
 created: 2026-09-02
-updated: 2026-09-02T19:17:46Z
+updated: 2026-09-03T13:49:00Z
 groom-elapsed: 423
+started: 2026-09-03T13:21:12Z
+execute-elapsed: 1668
 ---
 
 ## Symptom
@@ -332,3 +334,92 @@ value no larger than the `7m 35s` the pane header prints for the run itself, and
 identical on a page reload — and the `dispatched` node of its stage track must
 render the amber stalled dot with no pulsing ring, not the cyan
 `run-track-dot-current`.
+
+## Outcome
+
+2026-09-03 — Fixed as the `## Fix` above describes, at the four call sites plus
+the two new pure exports; no forked implementation and no run object pushed
+into a shared derivation's arithmetic.
+
+What landed:
+
+- `client/src/lib/run-time.ts` — `runIsLive` (status `running` AND `updatedAt`
+  within `RUN_STALE_MS`, strict `<`, unparseable ⇒ `false`) and `runClockMs`
+  (`now` when live, else the parsed `updatedAt`, else `null`).
+  `itemDurationMs`/`inStageMs` now take `now: number | null` with the
+  `= Date.now()` defaults REMOVED; `stepperDots` takes a required
+  `live: boolean` and returns a fourth state, `stalled`.
+- `client/src/lib/run-stats.ts` — `heartbeat` no longer derives the boolean
+  itself; it delegates to `runIsLive` and keeps only the job `run-time.ts`
+  cannot do (handing back the parsed freeze instant). That is step 5 of the
+  fix, taken on the "bug-14 landed first" branch: one client-side spelling of
+  the freshness comparison, not two. `runWallMs`' own branching is unchanged —
+  its `if` now reads the whole question instead of restating half of it.
+- `RunRowTime.tsx` / `StageTrack.tsx` / `RunDrawer.tsx` / `RunDetail.tsx` —
+  `RowTime now={clock}`, `StageTrack now={clock} live={live}`,
+  `RowStepper live={live}`, and `RowStageCaption` renders nothing when the run
+  is not live. `runStageTotals` still receives the real `now`, deliberately.
+- `styles.css` — `.run-track-dot-stalled`, `.run-stepper-dot-stalled`,
+  `.run-track-node[data-in="stalled"]::before`, `.run-track-name-stalled`:
+  amber, hollow-centred, `animation: none`. Three channels apart from
+  `filled`/`current`, not one.
+
+`itemDurationMs` was measured against the real filed run BEFORE the fix, as
+the red half of the cycle:
+
+```
+    Expected: <= 455500
+    Received:    86844585
+```
+
+86,844,585ms (24.1h, and growing) for bug-2 against its own run's 455,500ms
+(7m 35s) wall time. Both component suites were also re-run with the clamp
+reverted in place, to prove the new cases actually catch it rather than merely
+passing: `test/run-detail.test.tsx` 1 failed / 12 passed,
+`test/run-time-ui.test.tsx` 5 failed / 18 passed. Restored, both green.
+
+Verification — `pnpm run typecheck`, `pnpm test`, `pnpm run test:skills`:
+
+```
+$ tsc --noEmit
+TYPECHECK_EXIT=0
+
+Test Suites: 55 passed, 55 total
+Tests:       875 passed, 875 total
+Snapshots:   0 total
+Time:        56.369 s
+
+--- skills ---
+ℹ tests 277
+ℹ pass 277
+ℹ fail 0
+```
+
+`test/orchestrator-drawer.test.tsx` needed no edits after all — the churn the
+fix predicted at `:274`/`:302` never materialised, because those two cases
+assert only the heartbeat note. `test/run-time-ui.test.tsx`'s `runPayload`
+helper DID change: it now states `updatedAt: ago(0)` alongside `fresh: true`,
+because a payload claiming a fresh flag while carrying a weeks-old heartbeat
+is a run the drawer now (correctly) reads as crashed — and the server can
+never emit that combination, since it computes `fresh` from that very field.
+
+Confirmed in the browser as well, on the run this bug was filed from
+(`run-20260901-112035`, host dev servers on 4332/5187 so the running compose
+stack was left alone): the `bug-2` row reads `7m 24s elapsed` under a header
+reading `started 13:20 · 7m elapsed`, its `dispatched` node carries
+`run-track-dot-stalled` with computed `animation-name: none`, and the page
+holds zero `[data-in="live"]` segments and zero `.run-track-dot-current` dots.
+Identical after a full reload — `7m 24s`, still stalled — which is the part
+that could not be true before, since the number used to jump forward on every
+remount.
+
+One consequence worth stating, not a defect: a genuinely live run whose
+heartbeat gap exceeds `RUN_STALE_MS` now reads stalled on these four surfaces
+until its next stamp. That is the same threshold `RunStrip`, `runWallMs` and
+`runStageTotals` already act on, and `orchestrate.mjs watch` re-stamps every
+30s while a child session runs, so the case needs an actually quiet
+orchestrator to arise.
+
+`CLAUDE.md` was deliberately not touched, matching bug-14's own commit (same
+defect class, same files, no docs change) — the invariant this adds is worth
+recording, but recording it is a decision for the user, not this fix.

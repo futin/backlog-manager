@@ -529,6 +529,57 @@ describe('RunDetail', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
+  /**
+   * bug-15 on the Runs pane, against the shape of the real run it was filed
+   * from (`run-20260901-112035`: aborted, bug-2 frozen at `dispatched`, its
+   * `preflight` stamp 7m 24s before the run's last heartbeat).
+   *
+   * The pane is where the contradiction was loudest, because it prints both
+   * numbers on one screen: `runWallMs` in the header correctly reported the
+   * run's own 7m 35s while the row directly beneath it reported `now −
+   * preflight` — ~32 hours when this bug was groomed, and growing on every
+   * remount and focus refetch.
+   */
+  it('freezes an aborted run\'s in-flight row at the last heartbeat, no longer than the run itself', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const aborted: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      status: 'aborted',
+      startedAt: '2026-09-01T11:20:35.499Z',
+      updatedAt: '2026-09-01T11:28:10.999Z',
+      attention: [],
+      queue: [archiveItem('bug-2', 'dispatched', {
+        stageAt: {
+          pending: '2026-09-01T11:20:35.499Z',
+          preflight: '2026-09-01T11:20:46.414Z',
+          dispatched: '2026-09-01T11:21:05.935Z'
+        }
+      })]
+    };
+
+    render(<RunDetail summary={aborted} live={null} />);
+
+    // 444585ms — and it stays that number however long ago the run died,
+    // because nothing in the reading touches the wall clock any more. (The
+    // suite runs with a real clock here, days after those stamps; before the
+    // fix this assertion could not even have been written as a constant.)
+    expect(screen.getByTestId('run-detail-item-time-bug-2')).toHaveTextContent('7m 24s elapsed');
+
+    // The stage it died on wears the stalled dot, not the cyan pulsing
+    // `run-track-dot-current` — the app's one "happening right now" signal.
+    const node = screen.getByTestId('run-track-bug-2-dispatched');
+    expect(node.querySelector('.run-track-dot')).toHaveClass('run-track-dot-stalled');
+    expect(node.querySelector('.run-track-dot')).not.toHaveClass('run-track-dot-current');
+
+    // The cross-surface rule, asserted as a comparison rather than as two
+    // constants: no item's reading may exceed its own run's wall time. The
+    // header prints `formatSpanCompact` (7m), the row `formatSpan` (7m 24s),
+    // so this is pinned on the underlying numbers via their own libs in
+    // run-time.test.ts and stated here in the two strings a person reads.
+    expect(screen.getByTestId('run-detail-time')).toHaveTextContent('7m elapsed');
+  });
+
   it('fix loops show as a badge, not a line', () => {
     mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
 

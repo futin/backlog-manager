@@ -44,6 +44,17 @@ import type { RunQueueItem } from '../../../../shared/types';
  * through that stage without stopping — and breaking the line to mark the
  * gap would erase it.
  *
+ * A STOPPED RUN'S TRACK CARRIES NO CURRENT NODE AT ALL (bug-15). `live` says
+ * whether the run holding this item is still alive — derived by the caller
+ * from the run itself (`runIsLive`, run-time.ts), since neither this item nor
+ * this component can know — and with `live={false}` the node the item is
+ * sitting on renders `stalled` (amber, static) instead of `current` (cyan,
+ * pulsing). An aborted run's in-flight item is still AT `dispatched`; what is
+ * false is that anything is happening there, which is precisely the claim the
+ * pulsing ring makes. `now` is the caller's CLAMPED clock (`runClockMs`) for
+ * the same reason, and may be `null` for a run that can prove no instant at
+ * all — every value this component prints degrades to `—` on one.
+ *
  * THE SWEEP IS THE ONLY MOTION ON THE TRACK. Every dot, every segment,
  * every duration is a static read that only changes when the surrounding
  * poll re-renders the component with a new `now`. The single exception is
@@ -77,17 +88,24 @@ import type { RunQueueItem } from '../../../../shared/types';
  * of a visited run still sits on two `'done'` segments.
  *
  * `in` reaches `'live'` only for the segment entering the CURRENT node —
- * the one node `stepperDots` ever marks `state: 'current'` — and every
- * other combination bottoms out at `'done'` (behind or at `lastVisited`) or
- * `'idle'` (ahead of it), matching `.run-track-node[data-in=...]` /
- * `[data-out=...]` in styles.css exactly.
+ * the one node `stepperDots` ever marks `state: 'current'` — and
+ * `'stalled'` only for the one it marks `state: 'stalled'` (bug-15: the
+ * stage a stopped run died on, which gets a static amber lead-in rather than
+ * the animated `run-track-sweep` — the sweep is a claim about right now).
+ * Every other combination bottoms out at `'done'` (behind or at
+ * `lastVisited`) or `'idle'` (ahead of it), matching
+ * `.run-track-node[data-in=...]` / `[data-out=...]` in styles.css exactly.
  */
 function segmentState(
   i: number,
   lastVisited: number,
   state: StepperDot['state']
-): { in: 'none' | 'done' | 'live' | 'idle'; out: 'none' | 'done' | 'idle' } {
-  const into = i === 0 ? 'none' : i <= lastVisited ? (state === 'current' ? 'live' : 'done') : 'idle';
+): { in: 'none' | 'done' | 'live' | 'stalled' | 'idle'; out: 'none' | 'done' | 'idle' } {
+  const into = i === 0
+    ? 'none'
+    : i <= lastVisited
+      ? state === 'current' ? 'live' : state === 'stalled' ? 'stalled' : 'done'
+      : 'idle';
   const out = i === STEPPER_STAGES.length - 1 ? 'none' : i < lastVisited ? 'done' : 'idle';
   return { in: into, out };
 }
@@ -99,7 +117,11 @@ function segmentState(
  *    on the whole track that moves without a fresh `stageAt` entry, because
  *    it is measuring against `now`, not against a stamp. `—`/`-none` when
  *    the current stage's own stamp will not parse (case 8 in this file's
- *    test suite): a ticking reading needs a start point to tick FROM.
+ *    test suite): a ticking reading needs a start point to tick FROM. A
+ *    STALLED node takes this same branch (bug-15) and it is the one reading
+ *    on a stopped run's track worth having — "it died 7m 24s into dispatch",
+ *    bounded now that the clock is clamped at the run's last heartbeat
+ *    instead of ticking against the wall clock forever.
  * 2. `merged`, once visited, reads the finish CLOCK instead of a span —
  *    `-when`, a distinct register from `-none`: this is a known fact
  *    ("when it finished"), not an absent one, and the last arrival on any
@@ -117,10 +139,10 @@ function segmentState(
 function trackValue(
   dot: StepperDot,
   item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
-  now: number,
+  now: number | null,
   spans: readonly StageSpan[]
 ): { text: string; modifier: 'none' | 'when' | null } {
-  if (dot.state === 'current') {
+  if (dot.state === 'current' || dot.state === 'stalled') {
     const ms = inStageMs(item, now);
     return ms === null ? { text: '—', modifier: 'none' } : { text: formatSpan(ms), modifier: null };
   }
@@ -135,13 +157,14 @@ function trackValue(
   return { text: '—', modifier: 'none' };
 }
 
-export function StageTrack({ item, now }: {
+export function StageTrack({ item, now, live }: {
   item: Pick<RunQueueItem, 'id' | 'stage' | 'stageAt' | 'fixLoops'>;
-  now: number;
+  now: number | null;
+  live: boolean;
 }): JSX.Element | null {
   if (item.stage === 'ungroomed') return null;
 
-  const dots = stepperDots(item);
+  const dots = stepperDots(item, live);
   const spans = itemStageSpans(item);
   const lastVisited = dots.reduce((last, dot, i) => (dot.state !== 'hollow' ? i : last), -1);
 

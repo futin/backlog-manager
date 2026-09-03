@@ -73,10 +73,25 @@ export const TIMELESS_STAGES: readonly RunStage[] = ['ungroomed', 'skipped'];
  * A `null` duration degrades to whichever half survives rather than blanking
  * the row: a terminal row with a stamp for its exit but nothing before it can
  * still honestly say WHEN it ended even when it cannot say how long it took.
+ *
+ * `now` is the run's CLAMPED clock (`runClockMs`, lib/run-time.ts), not the
+ * wall clock, and it is `null` for a run that can prove no instant at all.
+ * Both callers hold the run and compute it once per render; this component
+ * deliberately takes no run of its own and keeps its wording at
+ * `<span> elapsed` regardless (bug-15). Once the number is bounded that word
+ * is honest — the span really did elapse — the status chip beside it names
+ * the exit, and the stalled dot below it carries the tense. Passing the run
+ * in just to swap one word would re-fork the very function this component
+ * exists to keep single across the drawer and the Runs pane.
+ *
+ * An active row with a `null` clock therefore renders nothing at all, via the
+ * `text === ''` branch that already existed for an unmeasurable span: there
+ * is no instant to measure the elapsed time TO, and a stopped run with an
+ * unreadable heartbeat is exactly that case.
  */
 export function RowTime({ item, now, testIdPrefix = 'run-drawer-time' }: {
   item: Pick<RunQueueItem, 'id' | 'stage' | 'stageAt'>;
-  now: number;
+  now: number | null;
   testIdPrefix?: string;
 }): JSX.Element | null {
   if (TIMELESS_STAGES.includes(item.stage)) return null;

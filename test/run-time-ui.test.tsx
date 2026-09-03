@@ -26,7 +26,16 @@ const fixture = rawFixture as OrchestratorRun;
 type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
 function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number }> = {}): Payload {
-  return { ...fixture, fresh: true, pastRuns: 0, ...over };
+  // `updatedAt: ago(0)` on top of the fixture's own frozen stamp, and it is
+  // load-bearing since bug-15: every ITEM-level reading in the drawer now
+  // derives liveness from `status` + `updatedAt` (`runIsLive`, run-time.ts)
+  // rather than trusting the payload's `fresh` flag, so a fixture claiming
+  // `fresh: true` while carrying a heartbeat weeks old is a run the drawer
+  // correctly reads as CRASHED — a state the server can never actually emit
+  // (it computes `fresh` from this very field, moments earlier). Stating a
+  // fresh heartbeat alongside the fresh flag is what keeps the live-path
+  // cases below exercising the live path.
+  return { ...fixture, fresh: true, updatedAt: ago(0), pastRuns: 0, ...over };
 }
 
 /**
@@ -59,7 +68,10 @@ function dotState(itemId: string, stage: RunStage): string {
     .getByTestId(`run-drawer-stepper-${itemId}`)
     .querySelector(`[data-stage="${stage}"]`) as HTMLElement | null;
   if (dot === null) throw new Error(`no ${stage} dot on row ${itemId}`);
-  const state = ['filled', 'current', 'hollow'].find((s) => dot.classList.contains(`run-stepper-dot-${s}`));
+  // `stalled` joined the three original states with bug-15 — the stage a
+  // stopped run died on, which is neither "here right now" nor "left behind".
+  const state = ['filled', 'current', 'stalled', 'hollow']
+    .find((s) => dot.classList.contains(`run-stepper-dot-${s}`));
   if (state === undefined) throw new Error(`${stage} dot on ${itemId} carries no state class`);
   return state;
 }
@@ -304,5 +316,97 @@ describe('RunDrawer stage stepper', () => {
     const row = screen.getByTestId('run-drawer-item-task-14');
     expect(within(row).getAllByRole('img')).toHaveLength(7);
     expect(row.querySelectorAll('.board-card-stage')).toHaveLength(1);
+  });
+});
+
+/**
+ * bug-15 on the drawer: an aborted (or failed, or crashed-`running`) run's
+ * in-flight item must stop presenting as work in progress. Three surfaces on
+ * one row, all keyed on the same missing fork, all asserted here — the row's
+ * time reading, the stepper dot, and the "now <stage>" caption.
+ *
+ * The fixture's task-14 is the in-flight row (`reviewing`); every stamp on it
+ * is built relative to `updatedAt` so the frozen readings are exact numbers
+ * rather than "whatever the wall clock said".
+ */
+describe('RunDrawer rows of a run that stopped', () => {
+  /** An aborted run whose task-14 reached `reviewing` 7m 24s before the run's last heartbeat. */
+  function abortedPayload(): Payload {
+    const stopped = ago(24 * 60 * 60 * 1000); // aborted a day ago
+    const stoppedAt = Date.parse(stopped);
+    const iso = (before: number): string => new Date(stoppedAt - before).toISOString();
+    return runPayload({
+      status: 'aborted',
+      fresh: false,
+      startedAt: iso(900_000),
+      updatedAt: stopped,
+      queue: [queueItem({
+        id: 'task-14',
+        stage: 'reviewing',
+        stageAt: { pending: iso(900_000), dispatched: iso(504_000), reviewing: iso(444_000) }
+      })]
+    });
+  }
+
+  // dispatched → the run's last heartbeat = 504_000ms, 8m 24s. Not the ~24h
+  // `now − dispatched` this row printed before the fix, and identical on
+  // every re-render since nothing in the reading touches the wall clock.
+  it('freezes an in-flight row at the run\'s last heartbeat instead of counting to now', () => {
+    render(<RunDrawer run={abortedPayload()} onClose={() => {}} />);
+    const time = screen.getByTestId('run-drawer-time-task-14');
+    expect(time).toHaveTextContent('8m 24s elapsed');
+    expect(time).not.toHaveTextContent('h ');
+  });
+
+  // The dot the item died on: amber and static, never the cyan pulsing ring
+  // that is this app's one "happening right now" signal.
+  it('marks the stage it died on stalled rather than current', () => {
+    render(<RunDrawer run={abortedPayload()} onClose={() => {}} />);
+    expect(dotState('task-14', 'reviewing')).toBe('stalled');
+    expect(dotState('task-14', 'dispatched')).toBe('filled');
+    expect(dotState('task-14', 'fixing')).toBe('hollow');
+  });
+
+  // The bluntest of the four surfaces: `now reviewing · 32h 05m in stage` is
+  // prose asserting, in the word "now", that something is happening to an
+  // item nothing is touching. There is no honest wording for a stopped run —
+  // the row's status chip and its stalled dot already say where it stopped —
+  // so the caption renders nothing at all.
+  it('drops the "now <stage>" caption entirely', () => {
+    render(<RunDrawer run={abortedPayload()} onClose={() => {}} />);
+    expect(screen.queryByTestId('run-drawer-stage-note-task-14')).not.toBeInTheDocument();
+  });
+
+  // Same three readings, same fix, for the case `status` alone cannot spot: a
+  // killed orchestrator leaves `run.json` at `status: "running"` forever
+  // ("one run per project, checked twice"), and `fresh` is the only thing
+  // that ever said otherwise. Deriving from `updatedAt` covers it without a
+  // second rule.
+  it('treats a crashed running run exactly as a stopped one', () => {
+    const crashed = { ...abortedPayload(), status: 'running' as const };
+    render(<RunDrawer run={crashed} onClose={() => {}} />);
+    expect(screen.getByTestId('run-drawer-time-task-14')).toHaveTextContent('8m 24s elapsed');
+    expect(dotState('task-14', 'reviewing')).toBe('stalled');
+    expect(screen.queryByTestId('run-drawer-stage-note-task-14')).not.toBeInTheDocument();
+  });
+
+  // A stopped run whose own heartbeat will not parse can prove no instant at
+  // all, so there is nothing to measure an in-flight row against: the reading
+  // goes away rather than falling back to the wall clock. The dot still
+  // stalls — the item IS at that stage, that much is not in doubt.
+  it('prints no time at all for an in-flight row when the run has no readable heartbeat', () => {
+    const unreadable = runPayload({
+      status: 'failed',
+      fresh: false,
+      updatedAt: 'nope',
+      queue: [queueItem({
+        id: 'task-14',
+        stage: 'reviewing',
+        stageAt: { pending: ago(900_000), dispatched: ago(504_000), reviewing: ago(444_000) }
+      })]
+    });
+    render(<RunDrawer run={unreadable} onClose={() => {}} />);
+    expect(screen.queryByTestId('run-drawer-time-task-14')).not.toBeInTheDocument();
+    expect(dotState('task-14', 'reviewing')).toBe('stalled');
   });
 });

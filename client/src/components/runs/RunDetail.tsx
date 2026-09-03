@@ -5,7 +5,9 @@ import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
 import { itemStageSpans, runStageTotals, runWallMs } from '../../lib/run-stats';
 import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, stageChipClass, stageGlyph } from '../../lib/run-stage';
-import { formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs } from '../../lib/run-time';
+import {
+  formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive
+} from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from '../board/ItemCard';
 import { RowTime } from '../board/RunRowTime';
 import { StageBars } from './StageBars';
@@ -220,6 +222,30 @@ export function RunDetail(
   const authority: RunFields = source;
   const attention = authority.attention;
 
+  // Is the run this pane is showing actually ALIVE, and what is the last
+  // instant it can PROVE? Every ITEM-level reading below is measured against
+  // `clock` rather than `now` — bug-15, which is the item-level half of the
+  // same defect bug-14 fixed for `runWallMs`: the pane computes one `now` per
+  // render and used to hand it both to the header (which forks on liveness)
+  // and to the rows (which did not), so an aborted run reported its own 7m
+  // 35s in the header above a row claiming 32 hours and climbing.
+  //
+  // Derived from `source` — the winning authority, the same object
+  // `runWallMs` and `runStageTotals` read — for the reason `runWallMs`'s own
+  // comment gives: that object can be an `OrchestratorArchiveRun`, which
+  // carries no `fresh` flag at all, and deriving is also what makes a CRASHED
+  // `running` run (a killed orchestrator's file, frozen at that status
+  // forever) fall out without a second rule.
+  //
+  // `runStageTotals` below deliberately keeps receiving the real `now`, NOT
+  // this clamped clock: it derives its own freshness internally, and handing
+  // it a pre-clamped instant would make that check trivially true — reaching
+  // the right number by accident rather than by rule. Same for `useNow`'s own
+  // `live !== null` gate above, which governs whether an interval exists at
+  // all, not what any reading measures against.
+  const runLive = runIsLive(source, now);
+  const clock = runClockMs(source, now);
+
   // Rows follow the SAME precedence as `source`/`authority` above, restated
   // here (rather than derived from either) only because a live/fetched
   // queue item and an archived one are different TypeScript shapes —
@@ -363,7 +389,7 @@ export function RunDetail(
                     second inline reading — see this file's own header for
                     why growing a second "how long" implementation here is
                     exactly the mistake this move exists to foreclose. */}
-                <RowTime item={row} now={now} testIdPrefix="run-detail-item-time" />
+                <RowTime item={row} now={clock} testIdPrefix="run-detail-item-time" />
               </div>
 
               {/* The queue-wait / preflight lead line (Task 6). Only
@@ -402,7 +428,7 @@ export function RunDetail(
                   "N fix loop(s)" line now rides as `StageTrack`'s own
                   badge on the `fixing` node instead — one reading of that
                   count, not two. */}
-              <StageTrack item={row} now={now} />
+              <StageTrack item={row} now={clock} live={runLive} />
 
               {row.verify !== null && (
                 // RunDrawer's own one-way-seed pattern, unchanged: React

@@ -95,3 +95,75 @@ describe('stage-track reduced-motion stylesheet rules', () => {
     expect(rule as string).toMatch(/(^|[\s;])animation\s*:\s*none\b/);
   });
 });
+
+/**
+ * bug-15's fourth dot state has to be told apart by SIGHT from the other
+ * three, and sight is exactly what jsdom cannot check — the same split
+ * run-stepper-style.test.ts states for the drawer's own three states:
+ * stage-track.test.tsx pins the state CLASSES, this pins that those classes
+ * actually paint something different, and neither half can stand in for the
+ * other.
+ *
+ * The claim being defended is the whole reason the state exists: a stalled
+ * node must not read as "this is happening right now". It is amber (the tone
+ * `run-stage.ts` already gives `parked`/`needs-answers` — a run that stopped
+ * needing a human is the same register) and it never animates.
+ */
+describe('stalled stage-track stylesheet rules (bug-15)', () => {
+  const css = readStyles();
+
+  it('has a rule for the stalled dot, its segment, and the drawer-sized dot', () => {
+    for (const selector of [
+      '.run-track-dot-stalled',
+      '.run-track-node[data-in="stalled"]::before',
+      '.run-stepper-dot-stalled'
+    ]) {
+      const block = ruleBlock(css, selector);
+      expect(block).not.toBeNull();
+      expect((block as string).trim()).not.toEqual('');
+    }
+  });
+
+  /**
+   * Nothing on a stalled node may move. The blanket reduced-motion reset
+   * cannot be leaned on here (it is media-gated, and never reaches a
+   * pseudo-element at all — see this file's own header): a stalled node is
+   * static for EVERY reader, because the motion would be asserting something
+   * false, not merely something distracting.
+   */
+  it('never animates the stalled dot or its segment', () => {
+    for (const selector of ['.run-track-dot-stalled', '.run-track-node[data-in="stalled"]::before']) {
+      const rule = ruleBlock(css, selector) as string;
+      const animation = /(^|[\s;])animation\s*:\s*([^;]+)/.exec(rule);
+      if (animation !== null) expect(animation[2].trim()).toBe('none');
+      expect(rule).not.toMatch(/run-track-ring|run-track-sweep/);
+    }
+  });
+
+  /**
+   * Two channels, not one — run-stepper-style.test.ts's own stated rule, for
+   * its own stated reason: colour alone fails a monochrome reader. Stalled is
+   * amber-ringed and static where `filled` is a solid green fill and
+   * `current` is a cyan fill that pulses, so it differs from each of them in
+   * both the declarations it makes and the ones it refuses to.
+   */
+  it('differs from the filled and current dots in more than colour', () => {
+    const stalled = ruleBlock(css, '.run-track-dot-stalled') as string;
+    const filled = ruleBlock(css, '.run-track-dot-filled') as string;
+    const current = ruleBlock(css, '.run-track-dot-current') as string;
+
+    const declarations = (rule: string): string[] =>
+      rule.split(';').map((d) => d.trim().replace(/\s+/g, ' ')).filter((d) => d !== '');
+
+    for (const other of [filled, current]) {
+      const differing = declarations(stalled).filter((d) => !declarations(other).includes(d));
+      expect(differing.length).toBeGreaterThanOrEqual(2);
+    }
+
+    // The channel that carries the meaning: `current` moves, `stalled` does
+    // not. Asserted on the pair rather than on `stalled` alone, so a future
+    // edit that stops the current dot pulsing has to come back through here.
+    expect(current).toMatch(/(^|[\s;])animation\s*:\s*run-track-ring\b/);
+    expect(stalled).not.toMatch(/run-track-ring/);
+  });
+});
