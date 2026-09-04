@@ -1,10 +1,10 @@
 import {
   AGENT_ACTIONS, EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction,
-  dispatchBlock, dispatchGate, isAgentAction, isItemId, modesUpTo, pickFrom, projectDispatchGate,
-  runClaimBlock, runHoldsItem
+  dispatchBlock, dispatchGate, isAgentAction, isItemId, isMergeMode, modesUpTo, pickFrom,
+  projectDispatchGate, runClaimBlock, runHoldsItem
 } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
-import { ATTENTION_RUN_STAGES, RUN_CLAIMED_STAGES } from '../shared/types';
+import { ATTENTION_RUN_STAGES, MERGE_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type {
   AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, RunQueueItem, RunStage
 } from '../shared/types';
@@ -82,6 +82,26 @@ describe('the action vocabulary', () => {
     expect(isAgentAction(undefined)).toBe(false);
     expect(isAgentAction(1)).toBe(false);
     expect(isAgentAction(['groom'])).toBe(false);
+  });
+});
+
+describe('the merge mode vocabulary', () => {
+  it('holds exactly the two modes', () => {
+    expect(MERGE_MODES).toEqual(['merge', 'branch']);
+  });
+
+  it('accepts each of them and nothing else', () => {
+    // `AgentsService.orchestrate`'s whole body check for a request's
+    // `mergeMode` — so a value that gets past this is a value the service
+    // trusts without re-deriving it, the same reasoning `isAgentAction`'s
+    // sibling test above pins for `action`.
+    for (const mode of MERGE_MODES) expect(isMergeMode(mode)).toBe(true);
+    expect(isMergeMode('rebase')).toBe(false);
+    expect(isMergeMode('')).toBe(false);
+    expect(isMergeMode(null)).toBe(false);
+    expect(isMergeMode(undefined)).toBe(false);
+    expect(isMergeMode(1)).toBe(false);
+    expect(isMergeMode(['merge'])).toBe(false);
   });
 });
 
