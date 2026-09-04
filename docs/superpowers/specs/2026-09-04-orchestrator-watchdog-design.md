@@ -78,7 +78,8 @@ knobs editable in Settings with server-enforced floors.
   scheduled because at least one run file says `running` (fresh or crashed —
   a crashed run is still `running`). *Idle*: no run file says `running`; no
   timer exists. *Off*: `BM_AGENTS` is off — nothing on this server can
-  spawn, so there is nothing to watch for, and no timer ever exists.
+  spawn, so there is nothing to watch for, and no timer ever exists — or
+  `BM_WATCHDOG=off` is set, the operator's kill switch (§5.1).
 - **Disabled** — the Settings toggle (§5) is off. Orthogonal to the phase:
   a disabled watchdog still arms, ticks and reports the crashed run it
   *would* have resumed; it only never spawns. Watching is cheap and is what
@@ -200,9 +201,10 @@ module cycle, no interceptor, no new polling endpoint for the strip.
 
 Holds:
 
-- `phase: 'off' | 'idle' | 'armed'` plus `reason` when off (only ever
-  `'BM_AGENTS off'` — the Settings toggle is reported through
-  `config.enabled`, not the phase), and `nextTickAt: string | null`.
+- `phase: 'off' | 'idle' | 'armed'` plus `reason` when off (`'BM_WATCHDOG
+  off'` or `'BM_AGENTS off'`, the env kill switch checked first — the
+  Settings toggle is reported through `config.enabled`, not the phase), and
+  `nextTickAt: string | null`.
 - `entries: Map<runId, { project, attempts, lastSpawnAt, lastSessionId, lastError, exhausted, recovered }>`.
 - `events`: a ring buffer of the last **50** `WatchdogEvent`s, newest first:
   `{ at, project, runId, kind, detail }` with
@@ -262,6 +264,17 @@ and restarting the API container, and the user asked for Settings. So:
 only writer, and it is the first file the server has ever written. Read
 fresh on every tick and every GET — the same no-cache posture as the
 registry. Written atomically (tmp + rename) on `POST`.
+
+One env var sits beside the file, and it is not a duplicate of the toggle:
+**`BM_WATCHDOG=off`** disables the watchdog entirely — phase `off`, no
+timer, no reads. The toggle is the *user's* switch and disables spawning
+while watching continues (§1); the env var is the *operator's* switch and
+stops the process doing anything at all. It exists for one concrete reason:
+the sweeper's bootstrap scan reads `orchHome()`, which in any jest suite
+that leaves `BM_ORCH_HOME` unset is the developer's real orchestrator
+directory, and a crashed run sitting there would make a stubbed `fetch` see
+a spawn nobody's assertions expect. The test setup sets it globally; the
+watchdog's own suites unset it after pointing `BM_ORCH_HOME` at a temp dir.
 
 `docker-compose.yml` mounts `${HOME}/.backlog-manager` read-only and must
 keep doing so; it gains one nested read-write mount,
@@ -377,9 +390,10 @@ and are shared by every device that opens this board.
 
 Rows:
 
-- **State** — `off — BM_AGENTS off` / `idle — no running run` / `armed —
-  watching run-…112622, next check in 42s`, with `· resume disabled` appended
-  to either of the last two while the toggle below is off.
+- **State** — `off — BM_AGENTS off` / `off — BM_WATCHDOG off` / `idle — no
+  running run` / `armed — watching run-…112622, next check in 42s`, with
+  `· resume disabled` appended to either of the last two while the toggle
+  below is off.
 - **Enabled** — a checkbox bound to `config.enabled`.
 - **Check every** / **Leave a resumed run alone for** / **Give up after** —
   `<select>`s over fixed ladders (`30s 1m 2m 5m 10m`; `5m 10m 20m 30m 60m`;
@@ -432,8 +446,9 @@ at a temp dir with hand-written `run.json`s):
 - spawn returns 429 → no attempt counted, `lastError` set, next tick inside
   grace does not retry, tick after grace does.
 - dashboard unreachable → same as above, `lastError` names the gate reason.
-- `BM_AGENTS` off → phase `off`, no timer scheduled, no POST, no health
-  probe made at all.
+- `BM_AGENTS` off → phase `off`, reason `BM_AGENTS off`, no timer scheduled,
+  no POST, no health probe made at all.
+- `BM_WATCHDOG=off` → phase `off`, reason `BM_WATCHDOG off`, `arm()` a no-op.
 - `enabled: false` in the file, crashed run → phase stays `armed`, no POST,
   no health probe, exactly one `disabled` event for that run across several
   ticks; `runs()` still annotates it with `enabled: false`.
@@ -511,6 +526,11 @@ its empty state.
 - **The terminal-start gap.** A run started outside the board with the board
   closed for its entire life is never watched. Accepted; the rule to start
   runs from the board predates this design.
+- **Two switches after all.** The file's `enabled` is the user's and
+  disables spawning; `BM_WATCHDOG=off` is the operator's and stops the
+  sweeper existing. Cost: one more env var to explain. Earned by the test
+  suite: without it every suite that builds `AppModule` would scan the
+  developer's real orchestrator directory at bootstrap.
 - **`RUN_IN_PROGRESS_CODE` reused** on `resume`'s fresh-run 409 rather than
   minting a second code. Both mean "a run is alive"; two codes for one fact
   is the drift the code exists to prevent.
