@@ -633,6 +633,72 @@ describe('watchdog sweeper', () => {
     expect(runsSpy).not.toHaveBeenCalled();
   });
 
+  // --- 20b: shutdown mid-await must not let the tick reschedule itself -----
+  //
+  // Case 20 only pins the EASY half of the shutdown race: a timer already
+  // pending, which disarm()'s own clearTimer() reaches directly. The HARD
+  // half — shutdown landing while a tick is mid-`await`, after sweep() has
+  // already cleared its OWN timer at the top but before it reaches the
+  // `setTimeout` at the bottom — is exactly what the `stopped` flag exists
+  // for (watchdog.service.ts:301). Case 20 never has a tick in flight when
+  // shutdown lands, so it cannot exercise that check: deleting
+  // `if (this.stopped) return;` leaves case 20 green. This case forces a
+  // tick to still be running by holding its spawn open with the suite's own
+  // `pendingSpawn` gate (the same mechanism case 19 uses to prove two ticks
+  // never overlap).
+  it('does not schedule a new tick when shutdown lands mid-await', async () => {
+    jest.useFakeTimers();
+    const dash = stubDashboard({ pendingSpawn: true });
+    await createApp();
+    // Written AFTER createApp(), so the bootstrap tick sees an empty
+    // directory and disarms immediately — matching case 19's structure, so
+    // every runs() read below is attributable to the tick() this case makes
+    // itself, not to bootstrap.
+    writeRun(crashedRun(projectPath));
+
+    // Installed after createApp() and after the run is written, so this spy
+    // counts only reads made by the tick() below — case 16's own technique
+    // for turning "no further tick ran" into a checkable count rather than
+    // an assertion of absence.
+    const runsSpy = jest.spyOn(OrchestratorService.prototype, 'runs');
+
+    const p = svc().tick();
+    // By the time tick() returns control here, sweep() has read runs() once
+    // (the count below is captured baseline, not asserted to be 1: a
+    // SUCCESSFUL spawn makes `agents.resume()` re-read `orchestrator.runs()`
+    // a second time on its own, as part of re-validating the run is still
+    // crashed immediately before it dispatches — see
+    // `agents.service.ts`'s `resume()`, the `this.orchestrator.runs().runs.find(...)`
+    // above its freshness check. That second read is unrelated to
+    // rescheduling and must not be mistaken for it, which is exactly why
+    // this case compares against a captured baseline instead of a literal
+    // count) and is now suspended inside spawn()'s
+    // `await this.agents.resume(...)` on the gated /api/spawn fetch —
+    // genuinely mid-await, not merely "about to await".
+    svc().onApplicationShutdown();
+    dash.release();
+    await p;
+
+    // Shutdown's own disarm() is what makes this false; the assertion that
+    // matters is the one below.
+    expect(svc().armed).toBe(false);
+
+    // Baseline AFTER the in-flight tick has fully settled (its own top-level
+    // read, plus resume()'s internal re-check, both done). Comparing against
+    // this rather than a literal number is what keeps the assertion honest:
+    // it is about whether a NEW tick ran, not about how many times a single
+    // tick happens to call runs() internally.
+    const callsOnceSettled = runsSpy.mock.calls.length;
+
+    // Advance well past the default 60s tickMs. If `stopped` were not
+    // checked at the bottom of sweep(), the tick that just finished
+    // resolving its spawn would have gone on to schedule a fresh
+    // setTimeout right before returning, and that timer would fire in this
+    // window and take at least one further runs() read.
+    await jest.advanceTimersByTimeAsync(120_000);
+    expect(runsSpy.mock.calls.length).toBe(callsOnceSettled);
+  });
+
   // --- 21: two projects, one crashed ----------------------------------------
 
   it('spawns only for the crashed project while watching both', async () => {
