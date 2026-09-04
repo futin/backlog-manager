@@ -3,6 +3,9 @@ id: idea-1
 title: Record tokens spent per item, per phase
 created: 2026-08-30
 tags: skills, stats
+updated: 2026-09-04T09:55:30Z
+promoted-to: task-11
+groom-elapsed: 220
 ---
 
 ## Problem
