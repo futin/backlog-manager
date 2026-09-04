@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpException, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, Post, Query, UseGuards } from '@nestjs/common';
 
 import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
+import type { MergeCheckResult } from './merge-check.util';
 import { SameOriginPostGuard } from './origin.guard';
 import { isAgentAction } from '../../../shared/agent';
 import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus } from '../../../shared/types';
@@ -134,5 +135,34 @@ export class AgentsController {
       // rebuild keeps.
       ids: body?.ids
     });
+  }
+
+  /**
+   * GET, not POST-with-a-path like `plan`'s `itemPath`. `plan`'s argument is
+   * an arbitrary absolute file path the client has no other reason to put
+   * anywhere visible, so POST keeps it out of access logs and browser
+   * history (see that handler's own comment). This one's `project` is
+   * always a path the client already pulled out of the registry via
+   * `/api/projects` to build the board in the first place — putting it in a
+   * query string discloses nothing an access log couldn't already read off
+   * that earlier response, the same reasoning
+   * `OrchestratorController.archivedRun`'s own `project` query param gives
+   * for itself. A GET is also the more honest verb for what this call
+   * actually is: read-only, side-effect-free, and safe to fire every time
+   * the sheet's merge-mode toggle is flipped, which is exactly the cadence
+   * Task 8's sheet needs it at.
+   *
+   * No guard, unlike `plan`/`dispatch`/`orchestrate`: `SameOriginPostGuard`
+   * answers "may this caller POST at all" for routes that start something
+   * or read an arbitrary file — this route does neither. It reads exactly
+   * one registered project's own settings and starts nothing, so there is
+   * nothing here for a cross-origin page to abuse beyond what `/api/projects`
+   * already discloses to any same-origin reader anyway.
+   */
+  @Get('merge-check')
+  mergeCheck(@Query('project') project: string | undefined): MergeCheckResult {
+    const trimmed = typeof project === 'string' ? project.trim() : '';
+    if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
+    return this.agents.mergeCheck(trimmed);
   }
 }

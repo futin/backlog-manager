@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { HttpException, Injectable } from '@nestjs/common';
 
@@ -7,6 +8,7 @@ import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
+import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
   clampMode, deriveAction, dispatchBlock, isItemId, isMergeMode, modesUpTo, pickFrom,
   projectDispatchGate, runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
@@ -771,6 +773,32 @@ export class AgentsService {
     // would not.
     const shown = JSON.stringify(typeof mergeMode === 'string' ? mergeMode.slice(0, 40) : mergeMode);
     throw new HttpException({ error: `mergeMode must be merge or branch — ${shown} is not one` }, 400);
+  }
+
+  /**
+   * GET /api/agents/merge-check's whole implementation. Registry-gated
+   * first, exactly like `resolveIds` above: a raw string compare against
+   * the registry's own `path` field, not `samePath`'s realpath compare —
+   * matching the "deliberately not realpath" rule CLAUDE.md pins on
+   * `dispatchGate`'s membership check. That choice is load-bearing here in
+   * a way it merely mirrors there: `realpathSync`-ing an unregistered path
+   * before comparing it would itself BE the filesystem touch
+   * test/merge-check.test.ts's unregistered-project case proves never
+   * happens — the gate has to stay a pure in-memory compare against a
+   * registry already loaded into this process, or the ordering the test
+   * checks collapses back into "eventually degrades to false", which is a
+   * weaker guarantee than "never asked at all".
+   *
+   * `homedir()` is read fresh on every call rather than once at
+   * construction, the same "read per call, never cache" posture
+   * `RegistryService.load()` and `orchHome()` both take: the developer's
+   * actual `~/.claude/settings.json` can change between two clicks of the
+   * same sheet, same as the registry file can.
+   */
+  mergeCheck(project: string): MergeCheckResult {
+    const entry = this.registry.load().projects.find((p) => p.path === project);
+    if (entry === undefined) throw new HttpException({ error: 'not found' }, 404);
+    return checkMergeCoverage(entry.path, homedir());
   }
 
   private findItem(requestPath: string): BacklogItem | null {
