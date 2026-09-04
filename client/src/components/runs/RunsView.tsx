@@ -697,12 +697,22 @@ export default function RunsView() {
                 whatever it did finish. The math never changed; only the
                 label was wrong, so a reader who checked the number against
                 the old caption could reasonably conclude a bug that was
-                never there. "rework / merge" plus the `title` below spells
-                out what a reader would otherwise only find in run-stats.ts —
-                and the `title` itself was corrected alongside the tile above
-                (finding 1): it used to say "how many did merge", which is
-                false for a branch-mode run's denominator (`itemsMerged`
-                counts `branched` too). */}
+                never there. The `title` below was corrected alongside the
+                tile above (finding 1): it used to say "how many did merge",
+                which is false for a branch-mode run's denominator
+                (`itemsMerged` counts `branched` too) — but that pass fixed
+                only the tooltip, leaving the VISIBLE label reading
+                "rework / merge", the identical mislabel one tile over: a
+                reader who never hovers still sees a claim that every
+                completion reached `main`. This is finding 1's other half.
+                "completed" is the word `itemsMerged`'s own doc comment uses
+                for the union of both success exits, the same word the tile
+                above already adopted, so this label now says what the
+                denominator means instead of naming only one of the two ways
+                to earn it. No arithmetic changed — see
+                `test/runs-view.test.tsx`'s branch-mode fixture, which now
+                pins this label (and its predecessor's) alongside the value
+                each already had pinned. */}
             <div
               className="runs-tile"
               data-testid="runs-tile-fixloops"
@@ -711,7 +721,7 @@ export default function RunsView() {
               <div className="runs-tile-value">
                 {aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}
               </div>
-              <div className="runs-tile-label">rework / merge</div>
+              <div className="runs-tile-label">rework / completed</div>
             </div>
             <div className="runs-tile" data-testid="runs-tile-verify">
               <div className="runs-tile-value">

@@ -744,9 +744,10 @@ body {
   text-transform: uppercase; letter-spacing: .06em; color: var(--ink);
 }
 /* Task 9's own badge for `lib/run-stage.ts`'s `mergeModeLabel` — shared
-   verbatim by RunStrip, RunsView's row and RunDetail's header rather than
-   three copies of the same small pill, the same reuse `.runs-status` already
-   gets across RunsView and RunDetail. Mustard, not the amber
+   verbatim by RunStrip, RunsView's row, RunDetail's header and (since the
+   final whole-branch review) RunDrawer's meta line, rather than four copies
+   of the same small pill, the same reuse `.runs-status` already gets across
+   RunsView and RunDetail. Mustard, not the amber
    `.board-card-stage-warn`/`.run-strip-attention` already use for "a human
    must act on this NOW": a branch-mode run is not an alert, it is a standing
    fact about how this run finishes work, which is the same "incomplete, not
@@ -850,6 +851,21 @@ body {
   display: flex; flex-direction: column; gap: 3px;
   padding: 10px 16px; border-bottom: 1px solid var(--hairline);
   font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  /* `align-items: flex-start`, not the `stretch` default a column flex
+     container would otherwise apply: every child here used to be plain
+     text (ItemDrawer's one meta span, RunDrawer's past-run/time spans),
+     which looks identical stretched or not because text has no visible
+     box to stretch. RunDrawer's mode badge (`.run-mode-badge` below) broke
+     that coincidence — it has a border, a pill radius and a background, so
+     `stretch` pulled it to the container's full width and rendered a
+     full-width mustard bar instead of a tag. Fixed on the container rather
+     than the badge itself, which is the one thing this rule must NOT do:
+     `.run-mode-badge` is shared verbatim with RunStrip, RunsView's row and
+     RunDetail's header, all row-flex parents relying on its default
+     vertical centering, and an `align-self` baked into the shared class
+     would retune their alignment too for a bug that is specific to this
+     one column-flex parent. */
+  align-items: flex-start;
 }
 .drawer-meta .drawer-path { color: var(--ink3); word-break: break-all }
 .drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px }

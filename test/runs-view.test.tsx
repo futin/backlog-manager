@@ -1000,6 +1000,22 @@ describe('RunsView', () => {
     // "done, not 0%" claim the row assertions above make, one surface over.
     expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('2/2');
     expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('0/2');
+
+    // Cleanup pass: the assertions above pin the tile's VALUE, which was
+    // already correct before finding 1 — the defect finding 1 fixed was the
+    // LABEL, one level up from the number, and a value-only assertion cannot
+    // catch a caption that lies about what the value means (it was pinning
+    // the wrong half of the same bug). Pin the label text itself now, for
+    // this tile and its sibling below: "completed / queued" here, and
+    // "rework / completed" on the fix-loops tile (RunsView's own comment
+    // above `runs-tile-fixloops` has that half's reasoning — it was fixed
+    // one wave after this one, the same mislabel one tile over). Neither
+    // says "merge" any more, because a branch-mode completion never reached
+    // one.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('completed / queued');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('merged / queued');
+    expect(screen.getByTestId('runs-tile-fixloops')).toHaveTextContent('rework / completed');
+    expect(screen.getByTestId('runs-tile-fixloops')).not.toHaveTextContent('rework / merge');
   });
 
   // Brief case 2: a run that ASKED for `merge` but is actually running

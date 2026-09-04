@@ -829,6 +829,60 @@ test('status names both counts for a run that downgraded mid-queue, not just the
   assert.match(out.stdout, /2 merged before the mode changed/)
 })
 
+// Cleanup pass, mirroring the degraded-run case above from the other side:
+// that test covers a run that STARTED merge and DEGRADED to branch mid-queue
+// (`mergeModeEffective` ends the run at `'branch'`). The arm this pins is the
+// one `queueSummaryLine` reaches when `mergeModeEffective` never moves at
+// all — a run that stays in `merge` for its entire life yet still stages an
+// item `branched`, which `cmdStage`'s own comment says is deliberately legal
+// ("`stage <id> branched` stays legal under `merge` mode too"): §3's
+// pre-flight recognises a branch already sitting on disk from an earlier,
+// interrupted run (branch present, worktree gone — see the "recognise a
+// carried-over branched item" doc fix this same review wave made) and stages
+// that item `branched` without ever calling `merge-mode branch`, because
+// nothing about THIS run decided to give up on merging; one specific item
+// just already finished the other way before this run picked the queue back
+// up. `queueSummaryLine`'s headline therefore stays `merged` (the run's own
+// mode never changed), with the carried-over item named in parentheses
+// instead — the mirror image of the degraded run's "N/M branched (K merged
+// before the mode changed)" wording, and previously the only one of the two
+// non-pure arms with no test at all.
+test('status names both counts for a run that stayed in merge mode but carried over a branched item', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-80', 'A')
+  seedReadyTask(project, 'task-81', 'B')
+  seedReadyTask(project, 'task-82', 'C')
+  seedReadyTask(project, 'task-83', 'D')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  // Two items merge, exactly as `merge` mode always allows...
+  assert.equal(run(project, home, 'stage', 'task-80', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-81', 'merged').status, 0)
+  // ...and a third is staged `branched` directly, with no `merge-mode`
+  // call anywhere in this test: this run's own mode never degrades, it
+  // simply carries an item that already finished on a branch before this
+  // run reached it.
+  assert.equal(run(project, home, 'stage', 'task-82', 'branched').status, 0)
+  // task-83 is left pending, so the total stays 4.
+
+  const out = run(project, home, 'status')
+
+  assert.equal(out.status, 0, out.stderr)
+  // The headline stays `merged` — unlike the degraded-run case, this run's
+  // `mergeModeEffective` never moved off `merge` — with the carried-over
+  // item named alongside it rather than silently dropped.
+  assert.match(out.stdout, /2\/4 merged/)
+  assert.match(out.stdout, /1 branched/)
+  assert.doesNotMatch(out.stdout, /2\/4 branched/)
+
+  const json = run(project, home, 'status', '--json')
+  assert.equal(json.status, 0, json.stderr)
+  // Confirms this really is the non-degraded arm, not a false positive that
+  // happens to print the same numbers: `mergeModeEffective` stayed `merge`
+  // for this run's entire life, which is the one fact `queueSummaryLine`
+  // branches on to pick this wording over the degraded run's.
+  assert.equal(JSON.parse(json.stdout).mergeModeEffective, 'merge')
+})
+
 // Case 11 — ATTENTION_KINDS gains no fourth member: a green branch is not a
 // thing a human needs to look at, so `branched` must stay an unknown kind
 // exactly like any other made-up string.

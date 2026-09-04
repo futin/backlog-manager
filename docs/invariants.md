@@ -129,6 +129,16 @@ per-call model classifier and its verdict on an identical command varies. The
 full table lives in the skill's own
 `skills/backlog-orchestrate/references/rationale.md`, §2.
 
+*(2026-09-04 note: the skill has since dropped the `-C "$PWD"` clause from
+both this command and the merge-mode probe (SKILL.md §2) — a no-op removed,
+since the session's cwd was already the project root at every call site.
+Claude Code's `permissions.allow` grammar matches an entry against the
+literal command line by prefix, so `Bash(git merge:*)` — the very rule the
+dashboard staged above — would not actually have matched the line quoted
+above; it starts `git -C`, not `git merge`. Dropping the clause is what
+makes that rule genuinely cover the command SKILL.md issues today. The
+quote itself is left exactly as these three runs issued it.)*
+
 Two consequences, and together they are the whole feature: merging is a
 *choice* (a run that stops at four reviewed branches is a successful run), and
 a run that wanted to merge and was refused *degrades to that outcome* rather
