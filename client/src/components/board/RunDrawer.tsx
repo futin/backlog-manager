@@ -8,7 +8,7 @@ import {
 } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
 import { RowTime } from './RunRowTime';
-import type { OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
+import type { MergeMode, OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
 
 type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 
@@ -119,6 +119,11 @@ function staleNote(run: RunPayload): string | null {
  * something is happening there is the part that was false, and a dot is a
  * claim, not a measurement — no clock could have fixed this one.
  *
+ * `mergeModeEffective` is threaded down for the same reason `live` is: which
+ * of the run's two success exits (`merged`, `branched`) the seventh dot
+ * should carry is a fact about the RUN, not the item, and `stepperDots`'s own
+ * `terminal` parameter has no default (run-time.ts) for exactly that reason.
+ *
  * Each dot names its stage in a native `title` (hover) and the same text as an
  * `aria-label`, per the design: hover is mouse-only, and a dot that only a
  * mouse can identify is a dot half the readers cannot use. `role="img"` is
@@ -130,12 +135,18 @@ function staleNote(run: RunPayload): string | null {
  * still prints the current stage in words for everyone, so nobody has to walk
  * the dots to learn the one fact that matters most.
  */
-function RowStepper({ item, live }: { item: RunQueueItem; live: boolean }): JSX.Element | null {
+function RowStepper({ item, live, mergeModeEffective }: {
+  item: RunQueueItem;
+  live: boolean;
+  mergeModeEffective: MergeMode;
+}): JSX.Element | null {
   if (item.stage === 'ungroomed') return null;
+
+  const terminal: 'merged' | 'branched' = mergeModeEffective === 'branch' ? 'branched' : 'merged';
 
   return (
     <div className="run-stepper" data-testid={`run-drawer-stepper-${item.id}`}>
-      {stepperDots(item, live).map((dot) => (
+      {stepperDots(item, live, terminal).map((dot) => (
         <span
           key={dot.stage}
           className={`run-stepper-dot run-stepper-dot-${dot.state}`}
@@ -368,7 +379,7 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
                           question a row-by-row reading answers worst. */}
                       <RowTime item={q} now={clock} />
                     </div>
-                    <RowStepper item={q} live={live} />
+                    <RowStepper item={q} live={live} mergeModeEffective={run.mergeModeEffective} />
                     <RowStageCaption item={q} now={now} live={live} />
                     {q.fixLoops > 0 && (
                       <div className="run-drawer-item-fixloops">

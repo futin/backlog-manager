@@ -30,33 +30,44 @@ const MS_PER_MINUTE = 60 * MS_PER_SECOND;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 
 /**
- * The seven dots of the row stepper, in pipeline order — the same order
+ * The row stepper's seven dots, in pipeline order — the same order
  * `RunStage`'s own union is written in, and for the reason that union's doc
  * comment gives ("Order here is the pipeline order, not alphabetical,
  * because ... the client render a 'how far along' indicator by finding a
  * stage's position in this list"). This is that client.
  *
- * Seven, not fourteen: `pending` and `preflight` are before the pipeline
- * proper (nothing about this item is happening yet), and the five non-merge
+ * Seven, not fifteen: `pending` and `preflight` are before the pipeline
+ * proper (nothing about this item is happening yet), and the five failure
  * exits (`failed`, `skipped`, `needs-answers`, `ungroomed`, `parked`) are not
  * positions ALONG it — they are ways of leaving it, which the row's own stage
  * chip already prints in words. Giving them dots would imply a sequence they
  * are not part of.
+ *
+ * The seventh dot is the one position that is not fixed: it is the run's
+ * SUCCESS exit, and which of `RunStage`'s two success members (`merged`,
+ * `branched`) that word actually is depends on the run's effective mode
+ * (`OrchestratorRun.mergeModeEffective`), never on the item. A merge-mode run
+ * and a branch-mode run walk a finished item through the identical six
+ * pipeline stages first — the two genuinely diverge only at the last step,
+ * whether the item lands in `main` or stays a reviewed branch — so the shape
+ * stays seven dots either way; only the word the last one carries changes.
+ * `terminal` is therefore a parameter here, not a second hard-coded array:
+ * see `stepperDots` below for why it is required, with no default.
  */
-export const STEPPER_STAGES: readonly RunStage[] = [
-  'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'merged'
-];
+export function stepperStages(terminal: 'merged' | 'branched'): readonly RunStage[] {
+  return ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', terminal];
+}
 
 /**
  * Has this item left the pipeline for good?
  *
  * Derived as the complement of `RUN_CLAIMED_STAGES` (shared/types.ts) rather
  * than written out as a third list of stage names. The two are already exact
- * complements — that constant's own doc comment enumerates the six it leaves
- * out as "the run's exits" — and a hand-copied list here would be a fourth
- * place a newly added `RunStage` member has to be remembered in. The compiler
- * cannot check a list of strings against a union it was copied from; it can
- * check this.
+ * complements — that constant's own doc comment enumerates the seven it
+ * leaves out as "the run's exits" — and a hand-copied list here would be a
+ * fourth place a newly added `RunStage` member has to be remembered in. The
+ * compiler cannot check a list of strings against a union it was copied
+ * from; it can check this.
  */
 export function isTerminalStage(stage: RunStage): boolean {
   return !RUN_CLAIMED_STAGES.includes(stage);
@@ -435,10 +446,13 @@ export interface StepperDot {
  *
  * The `current` ring is only ever placed on a NON-terminal stage. A merged
  * row is not "at" merged the way a reviewing row is at reviewing — it is
- * finished, and its last dot should read like the six before it. Terminal
- * stages other than `merged` (`failed`, `parked`, ...) are not in the seven
- * at all, so such a row simply shows how far it got before leaving, with the
- * chip beside it naming the exit.
+ * finished, and its last dot should read like the six before it. The same is
+ * true of a `branched` row: it is a true exit (`RUN_HELD_STAGES`,
+ * shared/agent.ts, leaves it out alongside `merged`), not a place the run is
+ * sitting, so the seventh dot never rings regardless of which word it
+ * carries. Terminal stages other than the run's own success exit (`failed`,
+ * `parked`, ...) are not in the seven at all, so such a row simply shows how
+ * far it got before leaving, with the chip beside it naming the exit.
  *
  * `live` is REQUIRED, with no default, and it is the one thing about this row
  * the item alone cannot answer (bug-15). `state: 'current'` is a boolean
@@ -450,6 +464,20 @@ export interface StepperDot {
  * default for the same reason `itemDurationMs` lost its own: whichever value
  * were the default is the one a future caller would reintroduce this bug with.
  *
+ * `terminal` is likewise REQUIRED, with no default, for the identical
+ * argument applied to a different fact: which of the run's two success exits
+ * (`merged`, `branched`) the seventh dot should carry is a fact about the
+ * RUN's effective mode (`OrchestratorRun.mergeModeEffective`), not about the
+ * item passed in here. An item still mid-pipeline has no stage of its own to
+ * read that word off at all, and even a FINISHED item's own `stage` only
+ * says which word it already reached — it cannot tell a still-moving row
+ * elsewhere in the same queue what its own seventh dot should say once it
+ * gets there. This is this repo's own `runHoldsItem` argument
+ * (`shared/agent.ts`'s required `runs` parameter) restated for a stage word
+ * instead of a boolean: a default would silently pick one mode for every
+ * caller that forgets to pass it, and whichever value were the default is
+ * the one a future caller would reintroduce the wrong terminal node with.
+ *
  * `stalled` rather than a demotion to `filled`, which would be the quieter
  * lie: `filled` means "visited and left behind", and this file's own
  * hollow-between-filled reading above depends on a filled node meaning the
@@ -457,9 +485,10 @@ export interface StepperDot {
  */
 export function stepperDots(
   item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
-  live: boolean
+  live: boolean,
+  terminal: 'merged' | 'branched'
 ): StepperDot[] {
-  return STEPPER_STAGES.map((stage) => {
+  return stepperStages(terminal).map((stage) => {
     const at = formatClock(item.stageAt[stage]);
     const visited = stage in item.stageAt;
     const isCurrent = stage === item.stage && !isTerminalStage(stage);

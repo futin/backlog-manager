@@ -427,8 +427,12 @@ export function RunDetail(
                   draw. The fix-loop count that used to print as its own
                   "N fix loop(s)" line now rides as `StageTrack`'s own
                   badge on the `fixing` node instead — one reading of that
-                  count, not two. */}
-              <StageTrack item={row} now={clock} live={runLive} />
+                  count, not two.
+                    `mergeModeEffective` comes from `source`, not `row`: it
+                  is a fact about the RUN this item is in, and `row` (a
+                  per-item `DetailRow`) carries no such field — an item
+                  cannot say which mode the run around it is running. */}
+              <StageTrack item={row} now={clock} live={runLive} mergeModeEffective={source.mergeModeEffective} />
 
               {row.verify !== null && (
                 // RunDrawer's own one-way-seed pattern, unchanged: React

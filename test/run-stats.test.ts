@@ -419,6 +419,30 @@ describe('runStageTotals', () => {
     expect(runStageTotals(run, T0 + 999_000)).toEqual({ dispatched: 20_000 });
   });
 
+  // `branched` is the OTHER terminal success exit (branch mode), and it must
+  // be excluded from every open-span guard exactly the way `merged` already
+  // is: it is not in MACHINE_STAGES, and isTerminalStage refuses it a live
+  // span even in a running run. This mirrors case 10's `parked` fixture
+  // above (both guards land on the same shape of fixture on purpose), but is
+  // pinned separately because `branched` is a SUCCESS exit — the design's
+  // whole reason to add a second terminal stage rather than reuse `merged` —
+  // and case 10 alone would leave that half of the partition unexercised.
+  it('adds no open span for an item that reached the branch-mode success exit', () => {
+    const run = archiveRun({
+      status: 'running',
+      queue: [
+        archiveItem({
+          id: 'item-branch',
+          stage: 'branched',
+          stageAt: { pending: at(0), dispatched: at(10_000), branched: at(30_000) }
+        })
+      ]
+    });
+    const result = runStageTotals(run, T0 + 999_000);
+    expect(result).not.toHaveProperty('branched');
+    expect(result).toEqual({ dispatched: 20_000 });
+  });
+
   // Case 11: a live item whose CURRENT stage is `pending` itself — still
   // queued, not yet dispatched at all, in a running run (see case 10's own
   // comment for why `status: 'running'` is set explicitly here too). It has
@@ -640,6 +664,43 @@ describe('aggregateRuns', () => {
     const result = aggregateRuns([run], T0);
 
     expect(result.avgItemWorkMs).toBe(60_000);
+  });
+
+  // Design spec §4's own classification table (docs/superpowers/specs/
+  // 2026-09-04-orchestrator-merge-mode-design.md): "aggregateRuns | counted
+  // as completed, alongside merged." A branch-mode run's item that reached a
+  // reviewed branch is exactly as finished as one that reached `main` — this
+  // pins that `itemsMerged` (the run-level "completed" count) treats the two
+  // success exits as interchangeable. Mixed with one genuine non-completion
+  // (`parked`) so the count cannot pass by coincidentally counting the whole
+  // queue.
+  it('counts branched items as completed, alongside a non-completed parked one', () => {
+    const run = archiveRun({
+      status: 'done',
+      queue: [
+        archiveItem({ id: 'b-1', stage: 'branched', stageAt: { pending: at(0), branched: at(10_000) } }),
+        archiveItem({ id: 'b-2', stage: 'branched', stageAt: { pending: at(0), branched: at(10_000) } }),
+        archiveItem({ id: 'b-3', stage: 'branched', stageAt: { pending: at(0), branched: at(10_000) } }),
+        archiveItem({ id: 'b-4', stage: 'parked', stageAt: { pending: at(0), parked: at(10_000) } })
+      ]
+    });
+    expect(aggregateRuns([run], T0).itemsMerged).toBe(3);
+  });
+
+  // The two success exits sum into the SAME count, not two separate ones —
+  // a run mixing merge-mode and branch-mode completions (e.g. one degraded
+  // mid-queue per the design's §5.2) must not undercount its own progress.
+  it('sums merged and branched items into one completed count', () => {
+    const run = archiveRun({
+      status: 'done',
+      queue: [
+        archiveItem({ id: 'm-1', stage: 'merged', stageAt: { pending: at(0), merged: at(10_000) } }),
+        archiveItem({ id: 'm-2', stage: 'merged', stageAt: { pending: at(0), merged: at(10_000) } }),
+        archiveItem({ id: 'b-1', stage: 'branched', stageAt: { pending: at(0), branched: at(10_000) } }),
+        archiveItem({ id: 'b-2', stage: 'branched', stageAt: { pending: at(0), branched: at(10_000) } })
+      ]
+    });
+    expect(aggregateRuns([run], T0).itemsMerged).toBe(4);
   });
 
   // Case 9: the empty-list floor. Every ratio is null (nothing to divide by)

@@ -255,11 +255,17 @@ export function runWallMs(
  * misreport a long queue as a long-running stage. This is the same
  * exclusion `itemQueueWaitMs` (run-time.ts) makes for a single item's own
  * reading, restated here as the list `runStageTotals` below filters against
- * for a whole run's rollup. The six terminal stages (`merged`, `failed`,
- * `skipped`, `needs-answers`, `ungroomed`, `parked`) are left out for the
- * more obvious reason that they are exits, not places work happens — an
- * item's OWN terminal stamp closes its last real span (see `itemStageSpans`)
- * rather than opening a new one of its own.
+ * for a whole run's rollup. The seven terminal stages (`merged`, `branched`,
+ * `failed`, `skipped`, `needs-answers`, `ungroomed`, `parked` — the run's two
+ * success exits, one per `MergeMode`, alongside its five failure ones; see
+ * `RunStage`'s own doc comment in shared/types.ts) are left out for the more
+ * obvious reason that they are exits, not places work happens — an item's
+ * OWN terminal stamp, whichever of the two success exits it lands on or one
+ * of the five failure ones, closes its last real span (see `itemStageSpans`)
+ * rather than opening a new one of its own. `branched` needed no separate
+ * carve-out when it was added: it is a terminal arrival exactly like
+ * `merged` already was, so the sentence that always excluded one success
+ * exit already covered both without changing a word of its reasoning.
  */
 export const MACHINE_STAGES: readonly RunStage[] = [
   'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
@@ -486,12 +492,25 @@ export function sumStageTotals(totals: readonly StageTotals[]): StageTotals {
 export interface RunAggregates {
   runs: number;
   byStatus: Record<OrchestratorArchiveRun['status'], number>;
+  /**
+   * Items that reached a SUCCESSFUL terminal stage — `merged` (merge mode)
+   * or `branched` (branch mode) alike, per the design's own classification
+   * (`docs/superpowers/specs/2026-09-04-orchestrator-merge-mode-design.md`
+   * §4: "aggregateRuns | counted as completed, alongside merged"). A
+   * branch-mode item that reached a reviewed branch is exactly as finished,
+   * and exactly as much real orchestrator work, as one that reached `main`.
+   * The field keeps its pre-existing name rather than becoming
+   * `itemsCompleted`: renaming a field every caller of this shape already
+   * reads is a decision for whichever later task actually surfaces
+   * `mergeMode` on this tile, not one buried in a stats module's own naming.
+   */
   itemsMerged: number;
   /** Total queue length across every run in scope — includes items that never merged. */
   itemsQueued: number;
   /**
-   * Mean `itemDurationMs` (run-time.ts) over merged items whose work time is
-   * known; `null` when none qualify. Named `...WorkMs`, not `...WallMs`, on
+   * Mean `itemDurationMs` (run-time.ts) over items that reached a successful
+   * terminal stage (`merged` or `branched`) whose work time is known; `null`
+   * when none qualify. Named `...WorkMs`, not `...WallMs`, on
    * purpose — this used to mean "first stamp to last stamp, `pending`
    * included" (the old `itemWallMs`, deleted along with the field this
    * replaces), and that number silently double-counted queue wait as if it
@@ -501,9 +520,9 @@ export interface RunAggregates {
    * actually take," not "how long, including everything else queued ahead
    * of it, did an item sit between its first and last stamp."
    *
-   * A GENUINE `0` from `itemDurationMs` — a merged item whose only recorded
-   * arrival is its own terminal stamp, so start and end read the identical
-   * instant — COUNTS toward this mean, deliberately, and this is a real
+   * A GENUINE `0` from `itemDurationMs` — a completed item whose only
+   * recorded arrival is its own terminal stamp, so start and end read the
+   * identical instant — COUNTS toward this mean, deliberately, and this is a real
    * behaviour change from the deleted rule: old `itemWallMs` returned `null`
    * (excluded outright) for any item with fewer than two recorded stamps,
    * where `itemDurationMs` finds one non-`pending` arrival to measure both
@@ -517,19 +536,20 @@ export interface RunAggregates {
   avgItemWorkMs: number | null;
   /**
    * Total `fixLoops` spent across EVERY queued item in scope — including
-   * ones that never merged — divided by how many DID merge. Deliberately
-   * NOT `sum(fixLoops of merged items only) / merged`: rework spent on an
-   * item that was ultimately parked or fix-exhausted is still cost this
-   * run paid on the way to whatever it did merge, and a caption reading
-   * "average fix loops per merge" would understate that cost if the
-   * numerator only counted the items that happened to succeed. Pinned
-   * against the "merged only" alternative by a dedicated fixture in
-   * `test/run-stats.test.ts` (`aggregateRuns` describe block) where a
-   * never-merged item carries fix loops of its own specifically so the two
-   * readings diverge — case 8, the main aggregate fixture, cannot tell them
-   * apart on its own, because every non-merged item there happens to carry
-   * zero. `null` when nothing merged (nothing to divide by, and the number
-   * would be either infinite or a lie).
+   * ones that never completed — divided by how many DID (merged or
+   * branched, `itemsMerged` above). Deliberately NOT `sum(fixLoops of
+   * completed items only) / completed`: rework spent on an item that was
+   * ultimately parked or fix-exhausted is still cost this run paid on the
+   * way to whatever it did finish, and a caption reading "average fix loops
+   * per merge" would understate that cost if the numerator only counted the
+   * items that happened to succeed. Pinned against the "merged only"
+   * alternative by a dedicated fixture in `test/run-stats.test.ts`
+   * (`aggregateRuns` describe block) where a never-merged item carries fix
+   * loops of its own specifically so the two readings diverge — case 8, the
+   * main aggregate fixture, cannot tell them apart on its own, because every
+   * non-merged item there happens to carry zero. `null` when nothing
+   * completed (nothing to divide by, and the number would be either
+   * infinite or a lie).
    */
   fixLoopsPerMerged: number | null;
   /**
@@ -551,11 +571,13 @@ export interface RunAggregates {
  * filtering) and folds it into the seven numbers the tile row prints.
  *
  * `fixLoopsPerMerged` sums `fixLoops` over EVERY queued item, not just the
- * merged ones, before dividing by the merged count: a fix loop spent on an
+ * completed ones, before dividing by `itemsMerged` — the completed count,
+ * `merged` and `branched` summed together (that field's own comment has the
+ * reasoning for why the two exits share one count): a fix loop spent on an
  * item that was ultimately abandoned (parked, or fix-exhausted into
  * `attention`) is still orchestrator effort that went into producing this
- * run's merges, and folding only the successful items' loops into the
- * numerator would understate what merging anything here actually cost.
+ * run's completions, and folding only the successful items' loops into the
+ * numerator would understate what finishing anything here actually cost.
  *
  * `verifyPassRate` counts every verification entry on every item, merged or
  * not, for the same reason a failing verify run is exactly the kind of
@@ -605,7 +627,7 @@ export function aggregateRuns(
     }[];
   }[],
   // Genuinely read below now (it did not used to be — see the comment ahead
-  // of the return statement): every merged item's `itemDurationMs(item,
+  // of the return statement): every completed item's `itemDurationMs(item,
   // now)` call needs it, the one clock reading this whole computation shares
   // for the same reason every other now-taking derivation in this codebase
   // does. "Average run wall time" is still deliberately not one of these
@@ -638,7 +660,14 @@ export function aggregateRuns(
         if (entry.ok) verifyOk += 1;
       }
 
-      if (item.stage === 'merged') {
+      // A run's SUCCESSFUL terminal stage is either `merged` or `branched`
+      // (`RunStage`'s own doc comment, shared/types.ts: "the two success
+      // exits ... a queue item reaches exactly one of them, never both").
+      // `itemsMerged` counts both, per the design's own classification
+      // ("counted as completed, alongside merged") — a branch-mode item that
+      // reached a reviewed branch is exactly as finished, and exactly as
+      // much real orchestrator work, as one that reached `main`.
+      if (item.stage === 'merged' || item.stage === 'branched') {
         itemsMerged += 1;
         const work = itemDurationMs(item, now);
         if (work !== null) mergedWorkTimes.push(work);
@@ -653,9 +682,9 @@ export function aggregateRuns(
   const fixLoopsPerMerged = itemsMerged === 0 ? null : totalFixLoops / itemsMerged;
   const verifyPassRate = verifyTotal === 0 ? null : verifyOk / verifyTotal;
 
-  // `now` IS genuinely read above now, via each merged item's
+  // `now` IS genuinely read above now, via each completed item's
   // `itemDurationMs(item, now)` call — though for every item that reaches
-  // this branch (`stage === 'merged'` is itself a terminal stage)
+  // this branch (`merged` and `branched` are both terminal stages)
   // `itemDurationMs` ignores the value it was handed and measures to the
   // item's own terminal stamp instead (see that function's own doc
   // comment), so `avgItemWorkMs` still cannot itself drift between two
