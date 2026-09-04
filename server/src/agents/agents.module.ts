@@ -26,16 +26,19 @@ import { OrchestratorModule } from '../orchestrator/orchestrator.module';
  * trusted to orchestrate.mjs alone. OrchestratorModule exports the service
  * for exactly this — a second consumer beyond its own controller.
  *
- * WatchdogService is listed as a provider and referenced by nothing else in
- * this module — no controller injects it, no other provider constructs it.
- * That is not an oversight: it is a provider purely so Nest INSTANTIATES it
- * and calls its `onApplicationBootstrap` hook, which is what arms the
- * sweeper. Everything after that is the sweeper's own `setTimeout` chain and
- * the armer callback it registers on WatchdogStateService (which lives in
- * OrchestratorModule, already imported above, and is where the runs payload
- * reads the sweeper's state back out). Deleting this line would not break a
- * single import — it would silently turn the watchdog off, which is the one
- * reason it is worth saying so here.
+ * WatchdogService is listed as a provider so Nest INSTANTIATES it and calls
+ * its `onApplicationBootstrap` hook, which is what arms the sweeper —
+ * deleting this line would not break a single import, it would silently
+ * turn the watchdog off, which is the one reason it is worth saying so here.
+ * That reason predates `AgentsController` injecting it too (Task 5's two
+ * routes, `GET /api/agents/watchdog` and `POST /api/agents/watchdog/config`,
+ * plus the `arm()` calls after a successful `orchestrate`/`resume` spawn):
+ * even a module with no controller depending on it at all would still need
+ * this line, because a provider nothing constructs is a provider Nest never
+ * builds. Everything past bootstrap is the sweeper's own `setTimeout` chain
+ * and the armer callback it registers on WatchdogStateService (which lives
+ * in OrchestratorModule, already imported above, and is where the runs
+ * payload reads the sweeper's state back out).
  */
 @Module({
   imports: [RegistryModule, OrchestratorModule],

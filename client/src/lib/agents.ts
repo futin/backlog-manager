@@ -1,7 +1,7 @@
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeMode,
   OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
-  PermissionMode
+  PermissionMode, WatchdogConfig, WatchdogStatus
 } from '../../../shared/types';
 
 /**
@@ -393,6 +393,75 @@ export async function fetchMergeCheck(project: string): Promise<MergeCheckResult
   // off it lies.
   if (!isMergeCheckResult(data)) {
     throw new Error('malformed /api/agents/merge-check response');
+  }
+  return data;
+}
+
+/**
+ * Same "lies quietly" reasoning as `isAgentsStatus`/`isOrchestratorRunsPayload`
+ * above, applied to `WatchdogStatus` (Task 5): it lands in `useWatchdog`'s
+ * own hook state, kept live across a mount, every window focus, and a poll
+ * while armed, and is read from there by the Settings group's State row,
+ * its four config controls, and its Activity feed — a wrong-shaped `phase`
+ * or `config` would not throw on its own, it would just render a nonsense
+ * state (an unrecognised phase string reads as neither off, idle, nor
+ * armed to anything downstream that switches on it) for as long as that
+ * hook state sticks around, exactly the profile `isOrchestratorRunsPayload`'s
+ * own comment describes for `fresh`. Checked at the field level `useWatchdog`
+ * and the Settings group actually dereference — `phase` against its closed
+ * three-value union, `config`'s four fields by type, `watching`/`events` as
+ * arrays — not a deep validation of every event's own shape, which no
+ * caller here branches on beyond "is this an array to map over".
+ */
+function isWatchdogStatus(data: unknown): data is WatchdogStatus {
+  if (typeof data !== 'object' || data === null) return false;
+  const s = data as WatchdogStatus;
+  return (
+    (s.phase === 'off' || s.phase === 'idle' || s.phase === 'armed') &&
+    Array.isArray(s.watching) &&
+    Array.isArray(s.events) &&
+    typeof s.config === 'object' && s.config !== null &&
+    typeof s.config.enabled === 'boolean' &&
+    typeof s.config.tickMs === 'number' &&
+    typeof s.config.graceMs === 'number' &&
+    typeof s.config.maxAttempts === 'number'
+  );
+}
+
+/** `GET /api/agents/watchdog` (Task 5) — the sweeper's whole state in one
+ *  call: phase/reason, `nextTickAt`, the effective (post-clamp) config,
+ *  which runIds it is watching, and its own event history. Read-only,
+ *  unguarded on the server side (like `fetchAgentsStatus`'s own route), so
+ *  this is a plain GET with no body to compose. */
+export async function fetchWatchdog(): Promise<WatchdogStatus> {
+  const data = await unwrap<WatchdogStatus>(await fetch('/api/agents/watchdog'));
+  // Thrown, not returned-anyway, mirroring every other shape-guarded fetch
+  // above: a caller gets a clean rejection rather than a payload that looks
+  // real until the Settings group's own render reads the wrong field off it.
+  if (!isWatchdogStatus(data)) {
+    throw new Error('malformed /api/agents/watchdog response');
+  }
+  return data;
+}
+
+/**
+ * `POST /api/agents/watchdog/config` (Task 5) — the Settings group's one
+ * write path. `patch` rides the body verbatim: the server is the one place
+ * that rebuilds it field by field and drops an unknown key (the same
+ * `model`/`effort` posture `dispatchAgent`'s own request already trusts the
+ * server to enforce rather than re-validating client-side), so there is
+ * nothing for this function to filter before sending — every caller here
+ * (`useWatchdog.save`) already composes `patch` from the Settings form's own
+ * typed controls, which cannot produce a field this type doesn't have.
+ */
+export async function updateWatchdogConfig(patch: Partial<WatchdogConfig>): Promise<WatchdogStatus> {
+  const data = await unwrap<WatchdogStatus>(await fetch('/api/agents/watchdog/config', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch)
+  }));
+  if (!isWatchdogStatus(data)) {
+    throw new Error('malformed /api/agents/watchdog/config response');
   }
   return data;
 }
