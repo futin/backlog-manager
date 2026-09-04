@@ -349,8 +349,11 @@ groom\` or \`--as execute\` also writes a \`phase:\` line alongside \`started:\`
 naming which of the two \`stop\` bills the elapsed time to. \`stop\` always
 clears \`started:\` and \`phase:\` together, and adds the seconds in between to
 \`groom-elapsed:\` or \`execute-elapsed:\` — one running total per phase, kept
-separate because grooming and executing are different work. Those two totals
-are never cleared, only added to, session after session.
+separate because grooming and executing are different work. It adds the tokens
+that session spent over the same interval to \`groom-tokens:\` or
+\`execute-tokens:\` alongside them: four totals, two per phase, saying how long
+the work took and roughly how much model work it took. All four are never
+cleared, only added to, session after session.
 `
 
 // Creates whatever is missing and returns only what it actually created, so
@@ -944,6 +947,274 @@ const FULL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/
 // itself in some earlier, valid run.
 const DIGITS_ONLY = /^\d+$/
 
+// --- session token accounting -----------------------------------------------
+// The token-shaped sibling of the elapsed buckets above: `stop` bills not only
+// the seconds a session spent on an item but roughly how much model work it
+// took, read out of the calling session's OWN transcript. Elapsed time and
+// tokens are two independent reads on the same interval — a session can idle
+// for an hour or burn a million tokens in ten minutes, and neither number
+// implies the other.
+//
+// There is deliberately NO hook and nothing new on the plugin's publish
+// surface. `CLAUDE_CODE_SESSION_ID` is present in the environment of every
+// Bash tool call and names the session's own transcript, and the transcript is
+// flushed mid-session rather than at exit — measured 317,222 bytes and 14
+// completed turns on disk while the session that wrote them was still running.
+// So a `stop` running INSIDE the session it is measuring can read that
+// session's own history, which is the whole premise. (`CLAUDE_CODE_HOST_
+// SESSION_ID` is a different variable and is the wrong one; do not reach for
+// it.)
+//
+// The caveat, stated on purpose because it decides who should trust the
+// number: this bills every token the session spent inside the window, not the
+// item alone. Under backlog-orchestrate it is very nearly exact — each item
+// gets its own headless backlog-execute session, so the window covers that
+// session and nothing else — and that is the consumer that matters, since it
+// is where the expensive items are. For hand grooming in a shared terminal it
+// is noisy by exactly as much as the unrelated work in the window. There is no
+// tighter mechanism available: nothing in a transcript marks a turn as being
+// about item X, so start/stop is already the finest bracket that exists. Do
+// not invent a heuristic to narrow it.
+
+// stop's second reading of PHASES, exactly parallel to ELAPSED_KEYS above and
+// for the identical reason: a lookup keyed by PHASES's own values, so a third
+// phase added without an entry here fails loudly instead of billing into
+// "undefined-tokens".
+const TOKEN_KEYS = { groom: 'groom-tokens', execute: 'execute-tokens' }
+
+// True only for a path that exists AND is a regular file. Both callers below
+// treat "it is there but is a directory" exactly as they treat "it is not
+// there" — a session id that names a directory is not a transcript, and the
+// alternative is an EISDIR thrown out of a `stop` that has nothing wrong with
+// it.
+function isFile(p) {
+  try {
+    return fs.statSync(p).isFile()
+  } catch {
+    return false
+  }
+}
+
+// Every transcript file belonging to one session: the main transcript first,
+// then its subagents in name order. Absolute paths.
+//
+// The main file is found by TESTING EACH PROJECT DIRECTORY for
+// `<sessionId>.jsonl`, never by deriving the directory name from cwd. The slug
+// rule (a cwd with its separators replaced) is undocumented and Claude Code
+// owns it, and — the part that actually bites — a backlog-execute session runs
+// with its cwd inside a per-item worktree, whose slug is not the main tree's.
+// A scan is slug-rule-free and costs one stat per project directory (measured
+// 77 of them on the machine this was written against) for a function that runs
+// once per `stop`.
+//
+// Subagent turns are NOT in the main transcript: they live in a sibling
+// `<sessionId>/subagents/agent-*.jsonl`. Measured, `isSidechain: true` appears
+// on zero records across all 703 transcripts in all 77 project directories
+// while a subagent file carried 20 of them — so filtering the main file finds
+// nothing and skipping these files loses every subagent's cost outright. This
+// repo's own history has a run that spent ~2M tokens on reviewer subagents; a
+// number that excluded them would be worse than no number. The same
+// `<sessionId>/` directory also holds `tool-results/`, which is not token
+// accounting and is ignored, as is anything in `subagents/` that is not
+// `.jsonl` (agent-*.meta.json sits right beside the transcripts).
+//
+// If the same `<sessionId>.jsonl` somehow appears under two project
+// directories, both are returned and the counting sums across them. A session
+// id is a uuid so this should not happen; summing is the answer that cannot
+// silently drop half the history if it does.
+//
+// A missing or unreadable root is `[]`, never a throw: this whole feature is
+// bookkeeping riding along on a `stop`, and no shape of a directory nobody
+// here owns may fail one.
+export function transcriptFiles(projectsRoot, sessionId) {
+  let entries
+  try {
+    entries = fs.readdirSync(projectsRoot, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const files = []
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (!entry.isDirectory()) continue
+    const main = path.join(projectsRoot, entry.name, `${sessionId}.jsonl`)
+    if (!isFile(main)) continue
+    files.push(main)
+
+    const subagents = path.join(projectsRoot, entry.name, sessionId, 'subagents')
+    let names = []
+    try {
+      names = fs.readdirSync(subagents).sort()
+    } catch {
+      names = []
+    }
+    for (const name of names) {
+      if (name.endsWith('.jsonl')) files.push(path.join(subagents, name))
+    }
+  }
+  return files
+}
+
+// One transcript file's records, or `null` if the file could not be read at
+// all. The null is load-bearing and different from `[]`: a file that exists but
+// cannot be read means the count would be an undercount, and an undercount
+// silently written to disk is worse than no number (see sessionTokensSince,
+// which turns it into a whole-resolution `null`).
+//
+// A line that is not valid JSON is skipped, not fatal. A transcript is a log
+// this tool does not own and does not version with; a half-flushed final line
+// is the ordinary case while the session writing it is still running, which is
+// exactly when this runs.
+function readRecords(file) {
+  let text
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+
+  const records = []
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    try {
+      records.push(JSON.parse(line))
+    } catch {
+      // Not a record. See above.
+    }
+  }
+  return records
+}
+
+// A usage field, coerced to a number that can be added: anything missing or
+// non-numeric contributes 0 rather than turning the whole total into NaN, and
+// a NaN would reach disk as the literal string "NaN" — a value DIGITS_ONLY
+// then refuses on every later stop, wedging the item shut exactly as the
+// elapsed arithmetic's own NaN guard describes.
+function usageNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+// The counting rule. Pure: no filesystem, no environment, already-parsed
+// records in, one number out — so every rule below is testable against literal
+// fixtures.
+//
+// DEDUPE ON requestId. This is the single most important rule here. One API
+// turn is written as one record PER CONTENT BLOCK — apiBlockIndex 0, 1, 2 for
+// thinking, text, tool_use — and each of those records repeats the same
+// `usage` object verbatim. Measured: 25 of 28 turns in one transcript were
+// split this way, all 25 groups carrying byte-identical usage, and 2,638 such
+// groups across 77 project directories. A naive per-record sum inflates a
+// typical turn 2-3x, and the wrong number still looks entirely plausible in
+// isolation, which is what makes this easy to get wrong and hard to notice.
+// `uuid` is the fallback key for a record with no requestId. One set spans
+// every file the caller concatenated, main and subagents alike — request ids
+// are unique per API call, so deduping globally is safe and is what makes the
+// main file's and a subagent's records comparable at all.
+//
+// THE NUMBER IS input + cache_creation + output. `cache_read_input_tokens` is
+// excluded, and the exclusion is the substance of the answer rather than an
+// oversight — do not quietly re-add it. Measured on one live session: 89,210
+// fresh against 804,246 cache_read, a 9:1 ratio. A raw total is ~90% re-read
+// context floor, which scales with turn count and prompt size and is close to
+// identical for a trivial item and a hard one; it would swamp the signal this
+// number exists to carry. Cache CREATION stays in — that is new material
+// genuinely pulled into context (files read, tool output) and does track how
+// much an item demanded. Output stays in as the model's own work. Output alone
+// was the other candidate and is rejected: it ignores the reading an item
+// required, which for a debugging item is most of the work.
+//
+// Deliberately NOT added: `output_tokens_details.thinking_tokens` (measured 281
+// inside an output_tokens of 370 — a subset, so adding it double-counts
+// thinking) and `usage.iterations[]` (measured as a per-iteration breakdown
+// whose single entry equalled the top-level fields, which are already the
+// aggregate).
+//
+// WINDOW: at or after `fromMs`, strictly before `toMs + 1000`. Both `started:`
+// and stop's `stamp` are truncated to the second while record timestamps carry
+// milliseconds, so the upper bound has to cover the whole second the stamp
+// names — otherwise the turn that issued the `stop` call itself, landing at
+// :50.900Z against a stamp of :50Z, falls outside its own window.
+//
+// Records of every other `type` (user, attachment, last-prompt, custom-title,
+// atis-latch, queue-operation — all observed), assistant records with no
+// usage, and records with no parseable timestamp are skipped without throwing.
+export function sumFreshTokens(records, fromMs, toMs) {
+  const upper = toMs + 1000
+  const seen = new Set()
+  let total = 0
+
+  for (const record of records) {
+    if (!record || record.type !== 'assistant') continue
+    const usage = record.message && record.message.usage
+    if (!usage || typeof usage !== 'object') continue
+
+    const at = Date.parse(record.timestamp)
+    if (!Number.isFinite(at) || at < fromMs || at >= upper) continue
+
+    const key = record.requestId ?? record.uuid
+    if (key !== undefined && key !== null) {
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
+
+    total += usageNumber(usage.input_tokens)
+      + usageNumber(usage.cache_creation_input_tokens)
+      + usageNumber(usage.output_tokens)
+  }
+  return total
+}
+
+// The default `warn` below: the non-fatal stderr note pattern this repo
+// already uses for a registration it could not make. Stdout is untouched —
+// `stop` prints the item path there and existing callers parse it.
+function warnToStderr(message) {
+  console.error(message)
+}
+
+// The glue: environment -> files -> records -> number. Returns `null`, never
+// throws and never partially succeeds, for every failure alike — no session
+// id, no matching transcript, a file that cannot be read. `null` means "cannot
+// attribute", which is a different fact from `0` ("attributed, and it was
+// tiny"), and stopItem writes no key at all for it.
+//
+// Every failure also emits one line through `warn`, because the alternative is
+// a feature that silently records nothing forever. Every measurement behind
+// this code came from a headless `sdk-cli` session; whether an INTERACTIVE
+// session exports CLAUDE_CODE_SESSION_ID was never observed, so the first
+// interactive `stop` after this ships either records a number or says out loud
+// why it could not. `warn` is a parameter so tests can collect those lines
+// instead of printing them; no real call site passes one.
+//
+// `env` is the whole source of truth, HOME included, rather than a mix of the
+// passed object and process-level state — that is what lets a test point the
+// fallback at a fixture instead of the developer's real ~/.claude.
+export function sessionTokensSince(startedISO, stampISO, env = process.env, warn = warnToStderr) {
+  const sessionId = env.CLAUDE_CODE_SESSION_ID
+  if (!sessionId) {
+    warn('backlog: CLAUDE_CODE_SESSION_ID is not set — recording no token count for this session')
+    return null
+  }
+
+  const configDir = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude')
+  const files = transcriptFiles(path.join(configDir, 'projects'), sessionId)
+  if (files.length === 0) {
+    warn(`backlog: no transcript found for session ${sessionId} — recording no token count`)
+    return null
+  }
+
+  const records = []
+  for (const file of files) {
+    const parsed = readRecords(file)
+    if (parsed === null) {
+      warn(`backlog: could not read transcript ${file} — recording no token count`)
+      return null
+    }
+    records.push(...parsed)
+  }
+
+  return sumFreshTokens(records, Date.parse(startedISO), Date.parse(stampISO))
+}
+
 // Deliberately permissive about WHERE the item is, unlike startItem: the one
 // thing stop is for is clearing a marker, and a stale `started` on an
 // archived item is precisely a marker worth being able to clear. Only
@@ -1011,6 +1282,13 @@ const DIGITS_ONLY = /^\d+$/
 // together is refused as a usage error at the CLI (see below) rather than
 // given a meaning here: abandonment already clears `started:` same as a
 // plain stop, so there would be nothing left for `keepStarted` to preserve.
+//
+// `opts.tokens` is a test seam and nothing else, mirroring exactly what
+// `stamp` already does for the clock: `undefined` means "resolve it yourself
+// from this session's transcript", and any other value — a number, or `null`
+// for "cannot attribute" — is taken as given. A real call site never supplies
+// it; it exists so the integration cases can assert exact literals without
+// building a transcript on disk for each one.
 export function stopItem(backlog, id, stamp = nowISO(), opts = {}) {
   const { abandon = false, keepStarted = false } = opts
   const item = locateItem(backlog, id)
@@ -1078,6 +1356,49 @@ export function stopItem(backlog, id, stamp = nowISO(), opts = {}) {
     // slightly behind start's.
     const seconds = Math.max(0, Math.floor((Date.parse(stamp) - Date.parse(started)) / 1000))
     next = { ...base, [key]: previous + seconds }
+
+    // Token billing rides this same gate rather than adding a second one, and
+    // that is the whole design: the token window IS the interval the seconds
+    // above are computed from, so if that interval is not billable then
+    // neither is the window over it. Every case the comments above already
+    // argue falls out for free — an --abandon bills no tokens (the interval
+    // was not work anyone did, so neither were the tokens in it), a plain
+    // `start` with no --as bills nothing (no phase to key either bucket off),
+    // a legacy bare-date `started:` bills nothing (UTC midnight is not when
+    // work began, so the window is fiction), and --keep-started bills tokens
+    // exactly as it bills seconds.
+    //
+    // Resolved lazily, here inside the branch, so a non-billable stop never
+    // goes looking through the transcript directory for a file it has no use
+    // for.
+    const tokens = opts.tokens === undefined ? sessionTokensSince(started, stamp) : opts.tokens
+
+    // A `null` count — the transcript could not be resolved, for any of the
+    // reasons sessionTokensSince names on stderr — writes no key at all and
+    // disturbs nothing beside it. An unattributable stop is still a
+    // successful stop, and the elapsed seconds it did bill are unaffected.
+    if (typeof tokens === 'number' && Number.isFinite(tokens)) {
+      const tokenKey = TOKEN_KEYS[phase]
+      const banked = rest[tokenKey]
+
+      // The DIGITS_ONLY refusal, reused verbatim and for reasoning that
+      // transfers without change: a bucket already holding something that is
+      // not a plain unsigned integer is refused rather than reset, because
+      // resetting would silently destroy a real recorded total and nothing
+      // about "this was hand-edited" should be allowed to erase it. The whole
+      // write is skipped — `started:` included — exactly as the elapsed
+      // refusal above already behaves.
+      if (banked !== undefined && !DIGITS_ONLY.test(banked)) {
+        throw new BacklogError(`${id}: ${tokenKey} is not a whole number: ${banked}`, 1)
+      }
+
+      // Floored to a non-negative integer for the same reason the seconds
+      // above are: renderFrontmatter stringifies whatever it is handed, and a
+      // fractional or negative value written here is one DIGITS_ONLY refuses
+      // on every later stop, wedging the item shut for good.
+      const previousTokens = banked === undefined ? 0 : Number(banked)
+      next = { ...next, [tokenKey]: previousTokens + Math.max(0, Math.floor(tokens)) }
+    }
   }
 
   writeItemFile(item.path, next, body, stamp)

@@ -64,7 +64,7 @@ const ARCHIVE_MARK = 'Out of scope';
  *  Archive puts in its columns (test/archive.test.tsx owns that). */
 const ARCHIVE_ITEM = {
   id: 'oos-1', title: 'declined thing', created: '2026-08-20', started: '', updated: '',
-  phase: '', groomElapsed: 0, executeElapsed: 0, kind: '', tags: [],
+  phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '', tags: [],
   section: 'out-of-scope', status: 'terminal', project: 'alpha', projectPath: '/abs/alpha',
   groomed: null, path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
 };

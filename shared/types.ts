@@ -127,6 +127,39 @@ export interface BacklogItem {
    *  under `backlog-execute` instead of `backlog-groom`. */
   executeElapsed: number;
   /**
+   * Tokens accumulated across every groom session on this item — the
+   * token-shaped sibling of `groomElapsed`, kept running by the same
+   * `start`/`stop` pair and clamped by the same reader (absent, negative,
+   * fractional and non-numeric all read as `0`). Elapsed time says how long an
+   * item took; this says roughly how much model work it took, and neither
+   * implies the other.
+   *
+   * Two things a reader of this type must not re-decide, because both are
+   * answers rather than oversights:
+   *
+   * 1. **Cache reads are excluded.** The number is
+   *    `input + cache_creation + output`, never `cache_read_input_tokens`.
+   *    Measured on one live session, fresh 89,210 against cache_read 804,246 —
+   *    a raw total is ~90% re-read context floor, which scales with turn count
+   *    and is nearly identical for a trivial item and a hard one. It would
+   *    swamp the signal this number exists to carry.
+   * 2. **Attribution is whole-session-within-the-window**, not per-item. The
+   *    CLI bills every token the calling session spent between `start` and
+   *    `stop`, so grooming an item and then chatting about something else in
+   *    the same session counts both. Under `backlog-orchestrate` — the
+   *    consumer that matters, and where the expensive items are — each item
+   *    gets its own headless session and the window covers nothing else, so it
+   *    is very nearly exact; for hand grooming in a shared terminal it is
+   *    noisy by exactly as much as the unrelated work in the window.
+   *
+   * Treat it as a rough complexity signal: right for "which items were
+   * expensive", wrong for anything claiming precision.
+   */
+  groomTokens: number;
+  /** Same accumulation, same clamping and the same two caveats as
+   *  `groomTokens`, for work done under `backlog-execute`. */
+  executeTokens: number;
+  /**
    * A refactor's flavour: `'chore'` (tidying that carries no risk anyone is
    * tracking) or `'debt'` (a shortcut taken deliberately, now due). `''` when
    * the key is absent, which is every non-refactor item and any refactor

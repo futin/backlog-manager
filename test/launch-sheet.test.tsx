@@ -11,7 +11,7 @@ import type { AgentPlan, BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
   id: 'task-12', title: 'Add CSP', created: '2026-08-20', started: '', tags: [],
-  updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
+  updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
   section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
   groomed: true, path: '/abs/alpha/backlog/tasks/open/task-12.md'
 };

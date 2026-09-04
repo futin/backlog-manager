@@ -3,6 +3,8 @@ id: task-11
 title: Record tokens spent per item, per phase, from the session transcript
 created: 2026-09-04
 from: idea-1
+updated: 2026-09-04T21:09:36Z
+execute-elapsed: 1105
 ---
 
 ## Goal
@@ -414,3 +416,115 @@ idea-3's, and its browser check belongs there.
 - The counters are documented in `CLAUDE.md`, `docs/invariants.md` and
   `shared/types.ts`, and no enumeration anywhere still claims there are two.
 - No `hooks/` directory, and `PUBLISHED_PATHS` unchanged.
+
+## Outcome
+
+2026-09-04 — Implemented as planned, with no hook and no change to the plugin's
+publish surface. `backlog.mjs` gained `transcriptFiles`, `sumFreshTokens` and
+`sessionTokensSince` (all exported for test) plus `TOKEN_KEYS`, and `stopItem`
+now bills `groom-tokens:`/`execute-tokens:` off the existing billable gate,
+lazily and with `opts.tokens` as the test seam. The server maps both keys
+through the existing `parseElapsed` into `BacklogItem.groomTokens` /
+`executeTokens`. Every `## Test cases` case is covered: 35 new skill tests
+(node's runner) and the server assertions folded into `test/items.test.ts`'s
+existing scan case rather than new fixture files, so the project open-counts
+assertion stayed true.
+
+**All three verification commands, run fresh at the end:**
+
+```
+=== pnpm run test:skills ===
+1..343
+# tests 343
+# pass 343
+# fail 0
+# duration_ms 52175.776625
+=== pnpm test ===
+Test Suites: 57 passed, 57 total
+Tests:       952 passed, 952 total
+Time:        46.97 s
+=== pnpm run typecheck ===
+$ tsc --noEmit
+typecheck exit: 0
+```
+
+`pnpm test` and `pnpm run test:skills` were both run from inside a Claude Code
+session with `CLAUDE_CODE_SESSION_ID` live in the environment — the one
+environment plan step 5's hazard appears in. Green with the neutralisation in
+place; no fixture item gained a token key.
+
+**The tests were mutation-checked**, because the implementation was written
+before them and a suite that has never been red proves nothing. Re-adding
+`cache_read_input_tokens` to the total: 12 failures. Removing the `requestId`
+dedupe: 6 failures. Restored: 197/197 (the skill file's own count at the time).
+
+**A real `start --as groom` / `stop` pair**, run against a scratch git repo with
+this session's actual environment and actual transcript, wrote:
+
+```
+started: 2026-09-04T21:06:04Z
+phase: groom
+---
+groom-elapsed: 8
+groom-tokens: 893
+```
+
+Cross-checked against the transcript by a separate ad-hoc counter over the same
+window: one API turn, split across two records (`apiBlockIndex` 0 and 1) with
+byte-identical usage. Deduped fresh total **893** — exactly what the CLI wrote —
+against a naive per-record sum of **1786**, and a `cache_read_input_tokens` of
+**150,223** on each record. So both of the rules the plan called load-bearing are
+demonstrably active on real data: the number is not the 2x a missed dedupe
+produces, and it is not the ~151k a raw total would have been for one turn.
+
+**Not settled, and deliberately left open: the interactive-session question.**
+This session's `CLAUDE_CODE_ENTRYPOINT` is `sdk-cli`, so every measurement above
+is still headless evidence, exactly as the plan's `## Done when` warned. What is
+now true is that a headless `stop` records a correct number, and that an
+environment without `CLAUDE_CODE_SESSION_ID` exits 0 and prints one stderr line
+saying so rather than failing silently — so whoever runs the first interactive
+`stop` will get an unambiguous answer either way. Per `## Done when`, this task
+should not be closed on headless evidence alone.
+
+**Docs.** The counter enumeration was updated in `CLAUDE.md` (four counters, two
+per activity, plus the two facts a later reader must not re-decide),
+`docs/invariants.md` (a new run of paragraphs covering the transcript
+resolution, the three counting rules with their measurements, the attribution
+caveat and the no-key-for-null rule), `shared/types.ts`, the README `init`
+writes, `skills/backlog-execute/SKILL.md`, `skills/backlog-groom/SKILL.md` and
+`skills/backlog-orchestrate/references/recovery.md` (the last two because their
+`--abandon` reasoning now covers tokens too). `skills/backlog/SKILL.md` turned
+out to enumerate nothing — it is the read-only board skill and never named the
+buckets. The dated plan and spec files under `docs/superpowers/` were left
+alone on purpose: they record what task-1 was asked to build in August, and
+editing them would falsify that record rather than fix drift.
+
+No `hooks/` directory exists and `PUBLISHED_PATHS` is unchanged
+(`['skills', '.claude-plugin', 'agents']`).
+
+**Why this item's own frontmatter has `execute-elapsed:` but no
+`execute-tokens:`.** The execute session's `start`/`stop` pair ran the
+INSTALLED plugin copy (`~/.claude/plugins/cache/.../0.1.1`), which predates this
+change — an install is a copy of the pushed HEAD, never the working tree, per
+the existing publish invariant. The absence is that invariant working, not a
+missed write. This item will gain a token count on the first `start`/`stop` pair
+run after this branch is merged, pushed and `pnpm run plugin:sync`ed.
+
+## What is left
+
+The implementation is finished and verified; this item stays open on purpose,
+waiting for exactly one thing — the interactive-session measurement `## Done
+when` requires. In order:
+
+1. Merge and push this branch, then `pnpm run plugin:sync`. Until that runs, the
+   installed CLI is the pre-change copy and no `stop` anywhere can write a token
+   key (see the publish-boundary note above).
+2. From an **ordinary interactive** Claude Code session (not `claude -p`, not a
+   board-spawned run — `CLAUDE_CODE_ENTRYPOINT` should not be `sdk-cli`), run a
+   `start --as groom` / `stop` pair on any open item and read the result:
+   - a `groom-tokens:` line appears → the variable is exported interactively
+     too. Record that here and `move task-11 done`.
+   - the stderr note `CLAUDE_CODE_SESSION_ID is not set` appears instead → file
+     a new bug citing this task. The feature still works headlessly, which is
+     where the expensive items are, but half its intended surface is unreachable
+     and that is a finding, not a failure of this work.

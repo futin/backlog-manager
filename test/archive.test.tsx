@@ -37,7 +37,7 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     id: 'bug-1', title: 'a bug', created: '2026-01-05', started: '', tags: [],
     // Stale by default — this is the Archive suite, so the interesting fixture
     // is the one that belongs here and the exceptions say so explicitly.
-    updated: STALE, lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
+    updated: STALE, lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
     section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md',
     ...over

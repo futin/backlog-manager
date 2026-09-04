@@ -31,9 +31,14 @@ describe('GET /api/items and /api/projects', () => {
     // Task 4 fixtures: every new key present at once — proves the scan still
     // parses, still derives section/status from the directory, and doesn't
     // add itself to errors[].
+    //
+    // Task 11 adds the two token buckets to the same fixture, for the same
+    // reason: they are a second pair of kebab keys that has to reach a second
+    // pair of camelCase fields, and nothing but a real file carrying them
+    // proves the mapping exists.
     { leaf: 'bugs/open', filename: 'bug-5-live-groom.md',
       content: item('bug-5', 'mid groom', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
-        'phase: groom\nupdated: 2026-08-30T12:00:00Z\ngroom-elapsed: 90\nexecute-elapsed: 7\n') },
+        'phase: groom\nupdated: 2026-08-30T12:00:00Z\ngroom-elapsed: 90\nexecute-elapsed: 7\ngroom-tokens: 4200\nexecute-tokens: 7\n') },
     // execute-elapsed present without groom-elapsed: the two buckets are
     // independent counters, not a shared one that both keys feed.
     { leaf: 'bugs/open', filename: 'bug-6-live-execute.md',
@@ -43,7 +48,7 @@ describe('GET /api/items and /api/projects', () => {
     // by hand-editing the file — the CLI never writes either.
     { leaf: 'bugs/open', filename: 'bug-7-bad-values.md',
       content: item('bug-7', 'hand-edited', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
-        'phase: wat\ngroom-elapsed: -5\n') },
+        'phase: wat\ngroom-elapsed: -5\ngroom-tokens: 4.2\nexecute-tokens: abc\n') },
     { leaf: 'tasks/done', filename: 'task-2-shipped.md',
       content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
     { leaf: 'out-of-scope', filename: 'oos-1-nope.md',
@@ -108,6 +113,9 @@ describe('GET /api/items and /api/projects', () => {
     expect(oos.status).toBe('terminal');
     expect(oos.groomed).toBeNull();
     expect((byId.get('beta/idea-1') as BacklogItem).projectPath).toBe(beta);
+    // Every item carries both token fields, present or absent on disk — a
+    // consumer never has to handle undefined for one and a number for another.
+    expect(index.items.every((i) => typeof i.groomTokens === 'number' && typeof i.executeTokens === 'number')).toBe(true);
   });
 
   it('reports the malformed file in errors[] and still returns the rest', async () => {
@@ -167,6 +175,8 @@ describe('GET /api/items and /api/projects', () => {
     expect(bug1.updated).toBe('');
     expect(bug1.groomElapsed).toBe(0);
     expect(bug1.executeElapsed).toBe(0);
+    expect(bug1.groomTokens).toBe(0);
+    expect(bug1.executeTokens).toBe(0);
     // A temp store is not a git repo, so the whole index exercises the degrade
     // path: no history to read, and the scan still answers rather than throwing.
     expect(index.items.every((i) => i.lastCommit === '')).toBe(true);
@@ -179,6 +189,8 @@ describe('GET /api/items and /api/projects', () => {
     expect(bug5.updated).toBe('2026-08-30T12:00:00Z');
     expect(bug5.groomElapsed).toBe(90);
     expect(bug5.executeElapsed).toBe(7);
+    expect(bug5.groomTokens).toBe(4200);
+    expect(bug5.executeTokens).toBe(7);
     expect(bug5.section).toBe('bugs');
     expect(bug5.status).toBe('open');
     expect(bug5.groomed).toBe(true);
@@ -195,6 +207,12 @@ describe('GET /api/items and /api/projects', () => {
     const bug7 = byId.get('alpha/bug-7') as BacklogItem;
     expect(bug7.phase).toBe('');
     expect(bug7.groomElapsed).toBe(0);
+    // The token buckets clamp through the very same parseElapsed: a fractional
+    // and a non-numeric value both read 0, and — the part that matters — the
+    // item is still in the index rather than dropped or in errors[].
+    expect(bug7.groomTokens).toBe(0);
+    expect(bug7.executeTokens).toBe(0);
+    expect(byId.has('alpha/bug-7')).toBe(true);
 
     // Still only the one pre-existing malformed file (idea-1-broken.md) —
     // none of the new fixtures above added themselves to errors[].
