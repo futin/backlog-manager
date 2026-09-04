@@ -431,7 +431,9 @@ body {
 .board-card-stage-idle .board-card-stage-glyph,
 .board-card-stage-muted .board-card-stage-glyph { animation: none }
 @keyframes stage-pulse { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
-/* merged: the run's one success exit. Green — the colour .board-card-groomed
+/* merged and branched: RunStage's two success exits, one per MergeMode (see
+   STAGE_TONE in run-stage.ts, which maps both to this tone — the outcome is
+   "done, cleanly" either way). Green — the colour .board-card-groomed
    and the verify-ok mark already use for "this passed" — because sharing the
    active cyan made a finished item and a running one the same colour in a
    list built to tell them apart. The doubled marker .board-card-stage's own

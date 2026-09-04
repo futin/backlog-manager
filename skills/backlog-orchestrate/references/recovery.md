@@ -10,7 +10,10 @@ dispatch line, "step 5" is Inspect, "step 6" is Commit.
 
 ### `--resume`
 
-Start from what is actually on disk, not from what the run file hoped:
+Read `mergeModeEffective` out of `status --json` first: a run downgraded to
+branch mode before the crash stays downgraded, and §9 then takes its branch
+path for every remaining item. Then start from what is actually on disk, not
+from what the run file hoped:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" reconcile
@@ -92,13 +95,22 @@ does this item's worktree copy still carry an in-progress `phase:` marker?
   worktree, `git branch -D` on the branch, best-effort (a worktree or branch
   git has never heard of just fails harmlessly — that is the state abort is
   trying to reach anyway).
+- **No marker, but the item finished `branched`** → the worktree still goes,
+  and the **branch is kept**. Under branch mode that branch was never merged
+  into anything, so it is the only copy of that item's work; `-D` would force
+  past git's "not fully merged" check and leave nothing to recover from. Abort
+  records the kept branch in `attention` — it needs no action, it is simply
+  waiting to be merged by hand. A `merged` item is the opposite case and keeps
+  today's behaviour: the run already deleted that branch at the merge, so the
+  `-D` is a harmless no-op.
 - **Marker present** → it leaves that item **completely alone**, worktree
   *and* branch, and pushes an `attention` entry naming the absolute worktree
   path, the exact `backlog.mjs stop <id>` to run, and the exact
   `worktree remove` / `branch -D` commands to finish with afterwards.
 
-Then it sets the run to `aborted` and prints a one-line summary of what it
-removed and what it left.
+Then it sets the run to `aborted` and prints a one-line summary of three
+counts: what it removed, how many branches it kept because their items were
+`branched`, and what it left in place with a marker.
 
 **That marker is the signal, and clearing markers *before* `abort` destroys
 it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
@@ -148,7 +160,9 @@ For each preserved item, in this order:
    file: a refusal means something is still uncommitted in there, and this is
    the one path where that is *likely* rather than surprising. `-D` on the
    branch, unlike the merge path's `-d`: an aborted branch was never merged
-   anywhere, so a safe delete would always refuse it.
+   anywhere, so a safe delete would always refuse it. These are the *preserved*
+   items only — never run `-D` on a branch abort reported as **kept**, which is
+   a finished `branched` item's whole deliverable.
 
 Everything the run had already merged before the abort stays merged — abort
 ends a run, it does not undo one.

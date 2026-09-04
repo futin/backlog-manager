@@ -34,10 +34,12 @@ worth having in mind before the first command runs:
   could have caught it.
 
 The trigger carries the whole invocation surface:
-`/backlog-orchestrate [ids…] [--max N] [--resume] [--abort]`. Ids and
-`--max` shape the queue (section 1); `--resume` takes over a run that was
-interrupted and `--abort` ends one (section 10). With none of them, the run
-is every ready item in the project's backlog, in the board's own order.
+`/backlog-orchestrate [ids…] [--max N] [--merge-mode branch] [--resume]
+[--abort]`. Ids and `--max` shape the queue (section 1); `--merge-mode`
+decides whether a verified item is merged to `main` or stops at its reviewed
+branch (section 2); `--resume` takes over a run that was interrupted and
+`--abort` ends one (section 10). With none of them, the run is every ready
+item in the project's backlog, in the board's own order, merged.
 
 The run's state lives in a machine-local run file, and
 `skills/backlog-orchestrate/tools/orchestrate.mjs` is its **only** writer —
@@ -218,6 +220,54 @@ Do not retry `init`, and **never delete the run file to get past this.** Run
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
 ```
+
+### Merge mode, and the probe before item 1
+
+When the trigger carries `--merge-mode branch`, add that flag to the `init`
+above and change nothing else. Absent, the run is `merge` mode —
+today's behaviour byte for byte. The mode is run-level — set at `init`, applied
+to the whole queue, and only ever moved one way afterwards (`merge` → `branch`,
+below). `status --json` carries it as `mergeModeEffective`, which is where a
+resumed session reads it.
+
+- **`merge`** — each verified item is merged to `main`, then its worktree and
+  branch are cleaned up (§9).
+- **`branch`** — each verified item stops at its reviewed `backlog/<id>`
+  branch and `main` is never written. Review and verification are unchanged:
+  the mode decides where a *successful* item stops, nothing else.
+
+**In `merge` mode only, probe once, here, before item 1:**
+
+```bash
+git -C "$PWD" merge --no-ff --no-edit HEAD
+```
+
+Merging `HEAD` into itself prints `Already up to date.`, exits `0` and writes
+nothing — no commit, no index change, no reflog entry, dirty tree or clean.
+The point is not the merge; it is that the command shape is byte-identical to
+§9's real one, so the permission classifier is asked now exactly what it will
+be asked at every merge later.
+
+- **Allowed** → carry on in merge mode.
+- **Denied** (`Permission for this action was denied by the Claude Code auto
+  mode classifier`) → record the downgrade and run the **whole queue** in
+  branch mode. The run does not stop and nothing is parked:
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "<the classifier's own message, verbatim>"
+  ```
+
+  `--note` is mandatory (omitting it exits `1`), and the command only ever
+  moves `merge` → `branch`, only once per run — a second call exits `1`
+  rather than overwriting the first note.
+
+**The probe is early warning, not a guarantee.** The verdict is per call, not
+per project: an identical merge command was allowed in one run and denied in
+the next, with no permission rule anywhere in either
+(`references/rationale.md`, §2 — merge mode). So a probe that passes can still
+be followed by a denied merge, which is precisely why §9 carries a degrade
+path of its own. Skip the probe in branch mode: there is no merge to ask
+about.
 
 Then work the queue **strictly one item at a time**, in the order `status
 --json` lists it. Sequential is not a performance compromise to be optimised
@@ -891,6 +941,36 @@ with that row quoted in the detail.
 
 ## 9. Merge — the only door to `main`
 
+**In `branch` mode this whole section collapses to two commands. Take them
+and skip the rest of it:**
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
+git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
+```
+
+No `stage <id> merging` — nothing is merging. No `symbolic-ref` precondition
+and no dirty-path probe: both exist to protect a write to the main tree, and
+there is no write. And **no `git branch -d`. The branch is the deliverable**,
+the only copy of this item's work anywhere. `remove` stays plain and never
+`--force`; if it refuses, the item stays `branched` and is never re-staged —
+record the leftover exactly as the merge path's own removal refusal does at
+the end of this section (`attention … --kind parked`, with `branched` in place
+of `merged` in the detail) and carry on.
+
+`branched` is a success exit in the same terminal position `merged` occupies:
+the item is finished and the run holds nothing. The pairing is enforced by
+the tool, not by this sentence — `stage <id> merged` under a branch-mode run
+exits `1` and writes nothing.
+
+The next item still branches from an **unchanged `main`**, so two items in
+this run that touch the same files produce two branches that will conflict
+with each other at hand-merge time. That is inherent to not merging; the run
+cannot fix it and must not pretend to. §10's summary names the merge order and
+flags the overlapping pairs, and that is the whole of what can be done here.
+
+**Everything below is the `merge` path.**
+
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merging
 git -C "$PWD" symbolic-ref HEAD
@@ -959,8 +1039,40 @@ git -C "$PWD" merge --no-ff --no-edit backlog/<id>
 even when it could have fast-forwarded; `--no-edit` so no editor opens in a
 session that has no terminal to open one in.
 
-**Two different failures, and they take different commands. Do not conflate
-them.**
+**Three different failures, and they take different commands. Do not conflate
+them: only the first one degrades the run, and the other two park the item
+exactly as they always have.**
+
+**A permission denial** — the command never reached git at all:
+
+```
+Permission for this action was denied by the Claude Code auto mode
+classifier. Reason: Blocked by classifier.
+```
+
+Nothing was attempted, `main` is untouched, and **the work is fine** — every
+step before this one was green and the last step of the pipeline was refused.
+That is not something a human must look at, so this item takes the *branch*
+outcome instead of a park, and the rest of the queue stops attempting a merge
+that has just been shown to fail:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "<the classifier's own message, verbatim>"
+git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
+```
+
+Then continue with the next item, which now takes the branch path at the top
+of this section. Keep the branch — no `branch -d`, for the reason that path
+gives. (If `merge-mode` exits `1` saying the run is already in branch mode,
+the state is already right: stage the item and carry on.)
+
+**No `attention` entry here.** The attention list means "a human must look at
+*this item*", and a green, reviewed branch does not qualify; `ATTENTION_KINDS`
+stays the three kinds it has always taken. One classifier verdict is one
+run-level fact and is recorded once, in `mergeModeNote` — N identical rows
+would be N copies of it. The actionable part, the merge command per branch in
+order, belongs in §10's summary.
 
 **A pre-merge refusal** — git declined before touching anything:
 
@@ -992,8 +1104,9 @@ the branch is the thing that makes that possible later.
 
 **When `main` moved under the run, resolving on the *branch* side is better
 than parking — and it is the only option that keeps the merge gate honest.**
-Both failures above have the same root cause: `main` is no longer the commit
-this item was verified against. Merging into it anyway would put content into
+Those two failures — the refusal and the conflict, not the denial above them —
+have the same root cause: `main` is no longer the commit this item was
+verified against. Merging into it anyway would put content into
 `main` that nothing green ever ran — every individual step was green, and the
 combination was never tested. That is a hole in the "never merges red" hard
 limit which is invisible precisely because nothing reports red.
@@ -1071,11 +1184,36 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" fini
 ```
 
 `--status` takes `done`, `aborted` or `failed`; anything else exits `1`. Then
-summarise for the user from `status --json`: what merged, what parked and why,
+summarise for the user from `status --json`: what merged or branched, what
+parked and why,
 what was skipped as `ungroomed` or `needs-answers` and therefore wants a
 groom pass before the next run. A clean item — no fix loops, no retries,
 green first try — should have produced no ping at all along the way; the
 summary is where it finally gets mentioned.
+
+**Any item that finished `branched` owes the user a merge list.** Name those
+branches in the order the run worked them — each was verified against the
+`main` its predecessor started from — with the literal command per branch:
+
+```bash
+git merge --no-ff backlog/<id>
+```
+
+Then flag the pairs that will fight. Every branch in the run started from the
+same unchanged `main`, so two that touch a common path mean a conflict for
+whichever is merged second. Write each branch's paths into the run's own
+`<dir>` and intersect them:
+
+```bash
+git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
+comm -12 "<dir>/verify/<a>.branch-paths" "<dir>/verify/<b>.branch-paths"
+```
+
+And when `mergeModeEffective` is `branch` while `mergeMode` is `merge`, say so
+**once**, run-level, quoting `mergeModeNote` verbatim: the run wanted to merge
+and was refused, the work is green, and those branches are what it produced
+instead. Not per item — one classifier verdict is one fact. A downgraded run
+still finishes `--status done`; nothing about it failed.
 
 Long steps in between deserve a heartbeat. `watch` stamps one every interval
 — through the dispatched session in step 4 and through the detached
@@ -1120,6 +1258,11 @@ merged.
   conflict does. Nothing green-lights a merge except the commands passing —
   not a clean review, not a confident `## Outcome`, not "the failure looks
   unrelated."
+- **Branch mode never writes `main`, and a denied merge never parks.** The
+  mode is fixed for the run at `init` and only ever moves `merge` → `branch`,
+  never back (§2, §9). `branched` is a success exit, not a failure — the tool
+  refuses `stage <id> merged` under branch mode so the run file cannot say
+  otherwise.
 - **Never force-pushes, never rewrites `main`'s history, never pushes at all.**
   Merge commits only; undoing one is `git revert -m 1`, never
   `git reset --hard` (step 9). Publishing anything is the user's call.
@@ -1141,7 +1284,9 @@ merged.
 
 ## Next
 
-`/backlog` shows the board with every merged item archived. Items left as
+`/backlog` shows the board with every merged item archived — but a `branched`
+item still reads as open there, because its archive move is committed on
+`backlog/<id>` and lands only when that branch is merged. Items left as
 `ungroomed` or `needs-answers` are a `/backlog-groom` pass away from being
 ready for the next run; parked items are a human decision, and their branches
 are still there. Anything the work surfaced along the way — a new bug, a

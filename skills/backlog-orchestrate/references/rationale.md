@@ -232,6 +232,61 @@ between the gate and the checkout, and any future drift between the ref
 
 ---
 
+## §2 — Merge mode, and why the probe cannot promise anything
+
+**The three runs.** On 2026-09-03 a `claude-agents-dashboard` run finished four
+items — reviewed, `test` + `typecheck` + `build` green on all four — and merged
+none of them. Every merge attempt came back:
+
+```
+Permission for this action was denied by the Claude Code auto mode
+classifier. Reason: Blocked by classifier.
+```
+
+| Run | Project | `permissions.allow` present | Merge |
+|---|---|---|---|
+| 2026-09-01 18:57 | claude-agents-dashboard | none | allowed ×3 |
+| 2026-09-03 11:26 | backlog-manager | none | allowed ×4 |
+| 2026-09-03 18:49 | claude-agents-dashboard | none | **denied ×4** |
+
+All three were board-spawned (`custom-title: "orchestrate <project>"`),
+headless, `claude -p --permission-mode auto`, issuing the identical
+`git -C "$PWD" merge --no-ff --no-edit backlog/<id>`. The dashboard's
+`.claude/settings.json` carrying `Bash(git merge:*)` is dated 2026-09-03
+22:34 — written *after* the failure, staged, never committed. **Nothing about
+permissions differed between the runs that merged and the run that did not.**
+
+The denied run's own notes diagnosed that missing `Bash(git merge:*)` rule.
+It is a valid *remedy* and a wrong *explanation*: an `allow` rule takes the
+classifier out of the path for matching commands, so it is worth having and
+worth telling the user about, but it is not what differed between these three
+runs. Auto mode is a per-call model classifier, and its verdict on an
+identical command varies between runs.
+
+Two things follow, and they are the whole of merge mode:
+
+1. Merging is a **choice**, not the only outcome. A run that stops at four
+   reviewed branches is a successful run.
+2. A run that *wanted* to merge and was refused **degrades to that outcome**
+   rather than parking work that is perfectly good.
+
+**What the probe buys, and what it does not.** It cannot promise the merge —
+the table above is the proof — so it is not a gate and a passing probe is not
+permission. It converts a denial discovered at item four's merge, after four
+hours of a run that merges nothing, into one discovered in ten seconds before
+item one. That is all of it, and it is enough on its own.
+
+**Why a denial is not a park, and not a fourth attention kind.**
+`ATTENTION_KINDS` stays the closed set of three (`needs-answers`, `parked`,
+`fix-exhausted`). The attention list means "a human must look at *this item*",
+and a green, reviewed branch does not qualify — four green branches reported
+as four parks is exactly what made 2026-09-03 read as a failed run. One
+classifier verdict is one run-level fact and is recorded once, in
+`mergeModeNote`; N per-item rows would be N copies of the same sentence in a
+list whose whole meaning is per item.
+
+---
+
 ## §2 — Why a stale `running` run refuses `init` exactly like a live one
 
 A stale `running` run is not an idle lock. It is the last surviving record of a
