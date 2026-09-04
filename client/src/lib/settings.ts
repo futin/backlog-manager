@@ -13,6 +13,7 @@
  */
 
 import { EFFORTS, MODELS } from '../../../shared/agent';
+import { MERGE_MODES, type MergeMode } from '../../../shared/types';
 import { SECTIONS, type Section } from '../components/SideRail';
 
 export const THEMES = [
@@ -75,6 +76,21 @@ export interface Settings {
   /** Same as `dispatchDefaultModel`, for the effort picker. */
   dispatchDefaultEffort: DispatchDefault;
   /**
+   * Preselected in the orchestrate sheet's merge-mode picker (Task 8);
+   * overridable for that one launch. Same reasoning as `dispatchDefaultModel`
+   * above, and the same rejection of the alternative: this is a default you
+   * set once in Settings and can see there, never the sheet remembering the
+   * last run's pick.
+   *
+   * `'merge'` is the default — it is what every existing run does — so a
+   * board that has never touched this setting keeps behaving exactly as it
+   * does today. Unlike `dispatchDefaultModel`/`dispatchDefaultEffort`, there
+   * is no `''`/"CLI default" third state: `MergeMode` is already a closed
+   * two-member enum with no absent-flag reading, so the picker always shows
+   * one of its two real members.
+   */
+  orchestrateDefaultMergeMode: MergeMode;
+  /**
    * Days. How long an open item may go untouched before it leaves the Board
    * for Archive (`client/src/lib/item-stale.ts`).
    *
@@ -97,6 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
   linkBase: 'http://127.0.0.1:5174',
   dispatchDefaultModel: '',
   dispatchDefaultEffort: '',
+  orchestrateDefaultMergeMode: 'merge',
   staleDays: 30
 };
 
@@ -237,6 +254,9 @@ export function clampSettings(raw: unknown): Settings {
     ),
     dispatchDefaultEffort: pickOne(
       s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort
+    ),
+    orchestrateDefaultMergeMode: pickOne(
+      s.orchestrateDefaultMergeMode, MERGE_MODES, DEFAULT_SETTINGS.orchestrateDefaultMergeMode
     ),
     staleDays: clampDays(
       s.staleDays, DEFAULT_SETTINGS.staleDays,

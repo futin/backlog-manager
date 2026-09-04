@@ -213,5 +213,23 @@ describe('SettingsView', () => {
       expect(stored.dispatchDefaultModel).toBe('haiku');
       expect(stored.dispatchDefaultEffort).toBe('low');
     });
+
+    // Task 7: the orchestrator's own default, seeding the sheet Task 8 adds —
+    // not the per-item launch sheet the two rows above feed. Asserted the
+    // same way as those: the row offers both real options (never a blank
+    // "CLI default" — absent means 'merge' server-side too, there is no third
+    // state to represent) and starts on 'merge', since that is the default
+    // this whole feature must not silently change for a board that has never
+    // touched the setting.
+    it('offers a default merge mode, starting on merge, and persists a pick', async () => {
+      renderView();
+      const select = await screen.findByLabelText('Default merge mode') as HTMLSelectElement;
+      expect(select.value).toBe('merge');
+      expect([...select.options].map((o) => o.value)).toEqual(['merge', 'branch']);
+
+      await userEvent.selectOptions(select, 'branch');
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
+      expect(stored.orchestrateDefaultMergeMode).toBe('branch');
+    });
   });
 });
