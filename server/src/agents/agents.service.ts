@@ -1011,15 +1011,29 @@ function orchestrateSessionName(projectPath: string): string {
  * takes an `origin` parameter in the first place — the dashboard's session
  * list is the one durable trail this feature leaves behind (this app writes
  * nothing to `run.json`; see the class doc comment on `resume()`), so a row
- * reading "watchdog resume · alpha" versus "resume · alpha" is the only
- * place a reader can later tell "the sweeper did this while nobody was
- * watching" apart from "I clicked the button" — see the design's own §3 for
- * why that distinction is worth a name change rather than a fifth field on
- * the run-payload's `RunWatchdog`.
+ * reading "watchdog resume alpha" versus "resume alpha" is the only place a
+ * reader can later tell "the sweeper did this while nobody was watching"
+ * apart from "I clicked the button" — see the design's own §3 for why that
+ * distinction is worth a name change rather than a fifth field on the
+ * run-payload's `RunWatchdog`.
+ *
+ * The prefix-to-basename separator is a plain space, not the middle dot
+ * (`·`, U+00B7) the design doc originally wrote it with. `orchestrateSessionName`
+ * above already tells this story once for `:` and `/`; it applies just as
+ * exactly to `·`, which is also outside `NAME_RE`'s
+ * `[A-Za-z0-9][A-Za-z0-9 ._-]*` character class. A name that fails that
+ * regex is not rejected — `parseSpawnRequest` on the dashboard side drops it
+ * to `undefined` and the row falls back to the bare project name, silently,
+ * with no failed request anywhere to notice. That is exactly the failure
+ * this field exists to prevent (see the comment above): a middle-dot name
+ * would make every resumed session's row indistinguishable from a
+ * hand-started one, defeating `origin`'s only purpose without ever
+ * producing an error. Do not "restore" the middle dot for readability — a
+ * space reads fine and, unlike `·`, the dashboard actually keeps it.
  */
-function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
+export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
   const prefix = origin === 'watchdog' ? 'watchdog resume' : 'resume';
-  return `${prefix} · ${basename(projectPath)}`.slice(0, 60);
+  return `${prefix} ${basename(projectPath)}`.slice(0, 60);
 }
 
 /** Never throws — used only to build messages and to compare paths. */

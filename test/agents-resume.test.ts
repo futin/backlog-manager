@@ -236,7 +236,7 @@ describe('POST /api/agents/resume', () => {
     expect(body).toEqual({
       project: '-abs-alpha',
       prompt: '/backlog-orchestrate --resume',
-      name: `resume · ${basename(projectPath)}`,
+      name: `resume ${basename(projectPath)}`,
       permissionMode: 'auto'
     });
   });
@@ -274,7 +274,7 @@ describe('POST /api/agents/resume', () => {
     expect(body).toEqual({
       project: '-abs-alpha',
       prompt: '/backlog-orchestrate --resume',
-      name: `resume · ${basename(projectPath)}`,
+      name: `resume ${basename(projectPath)}`,
       permissionMode: 'auto'
     });
   });
@@ -314,7 +314,7 @@ describe('POST /api/agents/resume', () => {
   // one case in this suite that talks to AgentsService directly rather than
   // through supertest.
 
-  it('names the session "watchdog resume · <basename>" when the service is called with origin "watchdog"', async () => {
+  it('names the session "watchdog resume <basename>" when the service is called with origin "watchdog"', async () => {
     const sent = stubDashboard({ ok: true }, 'auto');
     writeRun({
       ...fixture, project: projectPath, status: 'running',
@@ -327,6 +327,6 @@ describe('POST /api/agents/resume', () => {
 
     const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
     const body = JSON.parse(String(spawn?.init?.body));
-    expect(body.name).toBe(`watchdog resume · ${basename(projectPath)}`);
+    expect(body.name).toBe(`watchdog resume ${basename(projectPath)}`);
   });
 });
