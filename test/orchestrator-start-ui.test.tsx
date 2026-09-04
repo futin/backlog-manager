@@ -86,8 +86,27 @@ describe('toolbar Orchestrate button', () => {
       // -exclusion case below (it opens a real LaunchSheet), but stubbing
       // them unconditionally costs nothing for the other cases, which never
       // request either URL.
+      //
+      // Review fix round 1 (Important): `/api/agents/merge-check` used to
+      // have no branch here at all, so every one of this describe block's
+      // sheet-opening tests (the mutual-exclusion cases below) fell through
+      // to the `{ items, errors: [] }` catch-all — the WRONG shape for that
+      // endpoint, missing `covered` entirely — the instant OrchestrateSheet
+      // mounted with Settings' own default `mergeMode: 'merge'` and fired
+      // its merge-check effect. `fetchMergeCheck`'s shape guard now turns
+      // that malformed 200 into a thrown rejection the same way a network
+      // failure already was, so the practical difference from leaving this
+      // branch out is small (both render no hint), but the branch stays
+      // anyway: this stub exists to describe what each real endpoint
+      // answers, and a `/api/agents/merge-check` request silently landing
+      // on `/api/items`'s shape is exactly the kind of stub/reality drift a
+      // reviewer had to catch by hand once already. `covered: true` is
+      // Settings' own well-configured case — nothing here is testing the
+      // hint itself (that is `stubOrchestrate`'s job, below) — so no hint
+      // renders and no test in this block gets a surprise DOM node.
       const payload: unknown = url.includes('/api/agents/status') ? agents
         : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/agents/merge-check') ? { covered: true, source: null }
         : url.includes('/api/agents/plan') ? {
           action: 'execute', prompt: 'do it', project: 'alpha',
           allowedModes: ['plan', 'acceptEdits'], defaultMode: 'acceptEdits'
@@ -829,6 +848,48 @@ describe('OrchestrateSheet', () => {
     expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
     expect(screen.getByText('git merge')).toBeInTheDocument();
     expect(screen.getByText('Bash(git merge:*)', { exact: false })).toBeInTheDocument();
+  });
+
+  // --- Review fix round 1 (Important) -------------------------------------
+  // The reviewer's own reproduction, pinned directly: a 200 whose body is
+  // NOT `{ covered, source }` — the exact shape the pre-existing `stub()`
+  // helper in the "toolbar Orchestrate button" describe block above used to
+  // hand back for `/api/agents/merge-check` before that helper's own fix,
+  // since it fell through to the `{ items, errors: [] }` catch-all meant for
+  // `/api/items`. `fetchMergeCheck` (client/src/lib/agents.ts) now runs
+  // `isMergeCheckResult` over the parsed body and THROWS on a mismatch
+  // rather than returning it — the same treatment `fetchAgentsStatus` and
+  // `fetchOrchestratorRuns` already give their own payloads — so the
+  // effect's existing `.catch(() => setMergeCoverage(null))` (proven by
+  // case 7 below) is what actually keeps the hint from rendering here, not
+  // a second, separate code path.
+  //
+  // Same controlled-deferred + `act` technique as case 5 below, not
+  // `findBy`/`waitFor`: this is an absence claim, and a bare `waitFor`
+  // would pass at t=0, before the malformed response has even landed,
+  // proving nothing about whether the guard actually ran.
+  //
+  // Without `isMergeCheckResult`'s check, `mergeCoverage` would become this
+  // malformed object as-is, `mergeCoverage.covered` reads as `undefined`,
+  // and the hint's own guard is `!mergeCoverage.covered` — `!undefined` is
+  // `true`, so the hint would render from a response that never said
+  // anything about coverage at all. Deleting the `if (!isMergeCheckResult(data))`
+  // check in `fetchMergeCheck` is exactly what turns this test red: the
+  // `findByText`/`queryByText` assertion below would then find the hint's
+  // `<code>...settings.local.json</code>` node instead of its absence.
+  it('shows no hint when merge-check answers 200 with the wrong shape', async () => {
+    let settle: (value: Response) => void = () => {};
+    global.fetch = jest.fn(() => new Promise<Response>((resolve) => { settle = resolve; })) as jest.Mock;
+    renderSheet();
+
+    await act(async () => {
+      // Deliberately missing `covered` — the reviewer's own reproduction of
+      // what a stale/wrong stub (or a future server response shape change)
+      // hands back on an otherwise-successful request.
+      settle({ ok: true, status: 200, json: () => Promise.resolve({ items: [], errors: [] }) } as Response);
+    });
+
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
   });
 
   // --- Test case 5 -----------------------------------------------------

@@ -342,13 +342,41 @@ export interface MergeCheckResult {
  * deliberately swallows a thrown `ApiError` into "show no hint" rather than
  * anything that could block or blemish a launch that otherwise works fine.
  *
- * No shape guard, for the same reason `fetchArchivedRun` above carries
- * none: the response is read once and rendered once, by the same effect
- * that requested it — there is no long-lived hook state for a malformed
- * shape to lie quietly inside of.
+ * Shape-guarded (review fix round 1), reversing this function's original
+ * "read once, rendered once, nothing to lie inside of" reasoning — that
+ * reasoning is true of a CACHE but not of a RENDER, and this response feeds
+ * a render directly. `OrchestrateSheet`'s hint guard is
+ * `!mergeCoverage.covered`, and `!` on a missing field is not "no answer",
+ * it is `true`: any 200 whose body lacks `covered` — a wrong endpoint
+ * answering the URL pattern, a future server refactor that renames the
+ * field, or (as the reviewer reproduced) a test stub with a stale
+ * catch-all shape — renders the hint as a confident, false STATEMENT OF
+ * FACT that this project's settings lack a rule they may well have. That is
+ * a worse failure than the network error the `.catch` below already
+ * handles cleanly, not a better one, so it gets routed into the identical
+ * path: `isMergeCheckResult` throws, and the caller's existing
+ * `.catch(() => setMergeCoverage(null))` treats a malformed 200 exactly
+ * like a rejected request, which is the only value this hint is allowed to
+ * ever assert an absence from.
  */
+function isMergeCheckResult(data: unknown): data is MergeCheckResult {
+  return (
+    typeof data === 'object' && data !== null &&
+    typeof (data as MergeCheckResult).covered === 'boolean' &&
+    (typeof (data as MergeCheckResult).source === 'string' || (data as MergeCheckResult).source === null)
+  );
+}
+
 export async function fetchMergeCheck(project: string): Promise<MergeCheckResult> {
-  return unwrap<MergeCheckResult>(
+  const data = await unwrap<MergeCheckResult>(
     await fetch(`/api/agents/merge-check?project=${encodeURIComponent(project)}`)
   );
+  // Thrown, not returned-anyway, mirroring fetchAgentsStatus /
+  // fetchOrchestratorRuns above: a caller gets a clean rejection rather
+  // than a payload that looks real until the render that reads `.covered`
+  // off it lies.
+  if (!isMergeCheckResult(data)) {
+    throw new Error('malformed /api/agents/merge-check response');
+  }
+  return data;
 }
