@@ -201,6 +201,18 @@ two success exits answers with its **own** stage, and only an item still in
 flight falls back to the run's `mergeModeEffective`, because a run downgraded
 at item 3 must not redraw items 1 and 2 as having branched when they merged.
 
+Not every `branched` stamp was written by the run that did the work.
+`SKILL.md` §3's "Recognise a leftover branched item" step, run before
+pre-flight on every item, can find a branch a *previous* run finished and
+left waiting on a hand-merge, confirm it with an archive-move probe
+(`git diff --name-only main...backlog/<id> | grep -q "/done/<id>-"`), and
+stage it `branched` in the **current** run's own file without ever
+dispatching, reviewing or verifying it. This is deliberate — re-running that
+pipeline over already-green work would spend a whole item's budget re-proving
+what a prior run already proved — but it does mean a `branched` entry in a
+run's history is not proof that run executed the item, only that it correctly
+recognised the item was already done.
+
 ## A classifier denial degrades the run; every other merge failure parks
 
 The degrade is narrow on purpose. When the merge is refused by the classifier
@@ -233,10 +245,12 @@ human must decide" states and none of them is a permission problem.
 The preflight probe in `SKILL.md` §2 — `git -C "$PWD" merge --no-ff --no-edit
 HEAD`, once per run, merge mode only — is early warning for the same failure
 and never a guarantee. Merging `HEAD` into itself prints `Already up to date.`
-and writes nothing (no commit, no index change, no reflog entry, dirty tree or
-clean), and the command *shape* is byte-identical to the real merge so the
-classifier is shown what it will be shown later. It buys "find out in ten
-seconds instead of four hours" and nothing else: the verdict is per call, so a
+and changes nothing that matters (no commit, no index change, no reflog
+entry, dirty tree or clean — it does refresh `.git/ORIG_HEAD`, the same as
+any other `git merge`, harmlessly), and the command *shape* is byte-identical
+to the real merge so the classifier is shown what it will be shown later. It
+buys "find out in ten seconds instead of four hours" and nothing else: the
+verdict is per call, so a
 passing probe can still be followed by a denied merge, which is exactly why
 the degrade path exists as well as the probe.
 

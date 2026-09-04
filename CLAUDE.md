@@ -291,7 +291,11 @@ happened.
   that says an item merged when `main` never received it is worse than a
   mechanical sweep. `test/agents-shared.test.ts`'s `Record<RunStage, true>`
   literal is the mechanism that forces the classification rather than leaving
-  it a checklist someone forgets.
+  it a checklist someone forgets. **A `branched` stamp does not prove the run
+  that wrote it executed the item** — `SKILL.md` §3 recognises a branch a
+  *previous* run finished and left waiting on a hand-merge (an archive-move
+  probe) and stages it `branched` in the current run's own file before
+  pre-flight ever runs, without dispatching, reviewing or verifying it again.
 - **The tool refuses `stage <id> merged` under branch mode** — exit `1`,
   nothing written. `SKILL.md` is re-read on every one of a run's several
   hundred turns and prose drifts across them; a tool refusal does not, which
@@ -311,8 +315,9 @@ happened.
   decisions and still park, still keep the worktree, still say why. The
   narrowness is the rule: it triggers on the classifier denial and nothing
   else. `SKILL.md` §2's preflight probe (`git merge --no-ff --no-edit HEAD`,
-  which writes nothing) is early warning for the same failure, never a
-  guarantee — the verdict is per call.
+  which changes nothing that matters — no commit, no index change, no reflog
+  entry, though it does refresh `.git/ORIG_HEAD` harmlessly) is early warning
+  for the same failure, never a guarantee — the verdict is per call.
 - **Undoing an already-completed orchestrator merge is `git revert -m 1`,
   never `git reset --hard`.** Proved empirically, not just reasoned out:
   `reset --hard` silently destroyed an unrelated, uncommitted modification in

@@ -3,11 +3,13 @@ name: backlog-orchestrate
 description: >
   Drain a project's groomed backlog unattended: every ready bug and task, one at a time,
   each in its own git worktree and its own headless backlog-execute session, then
-  committed, reviewed, verified and merged to main before the next item starts. Use it to
-  drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate
-  tasks 3-7, or to --resume or --abort a run that was interrupted. It is the only skill
-  that commits or merges — execute still does the work, groom still writes the plans, and
-  neither of them ever touches git. Trigger: /backlog-orchestrate
+  committed, reviewed, verified and merged to main before the next item starts — or, told
+  to leave branches instead, stopped at a reviewed git branch per item with main never
+  touched. Use it to drain the backlog, work the whole queue, run the backlog while I'm
+  away, orchestrate tasks 3-7, drain the backlog but leave me branches to merge by hand, or
+  to --resume or --abort a run that was interrupted. It is the only skill that commits or
+  merges — execute still does the work, groom still writes the plans, and neither of them
+  ever touches git. Trigger: /backlog-orchestrate
 trigger: /backlog-orchestrate
 ---
 
@@ -244,9 +246,11 @@ resumed session reads it.
 git -C "$PWD" merge --no-ff --no-edit HEAD
 ```
 
-Merging `HEAD` into itself prints `Already up to date.`, exits `0` and writes
-nothing — no commit, no index change, no reflog entry, dirty tree or clean.
-The point is not the merge; it is that the command shape is byte-identical to
+Merging `HEAD` into itself prints `Already up to date.`, exits `0`, and
+changes nothing that matters — no commit, no index change, no reflog entry,
+dirty tree or clean (it does refresh `.git/ORIG_HEAD`, the same as any other
+`git merge` invocation, harmlessly). The point is not the merge; it is that
+the command shape is byte-identical to
 §9's real one, so the permission classifier is asked now exactly what it will
 be asked at every merge later.
 
@@ -280,6 +284,48 @@ item starts from the updated `main`. Branch mode gives up that half and only
 that half (§9); the rule itself is unconditional.
 
 ## 3. Pre-flight, per item
+
+### Recognise a leftover branched item, before anything else
+
+**Run this before the gate and before hunting for questions.** An item that
+already finished under branch mode in a *previous* run — worktree removed,
+branch kept, waiting on a hand-merge — cannot be told apart from one that
+still needs pre-flight by reading its file: any pre-flight answer a prior run
+wrote went **into that run's worktree** ("Writing an answer into the item",
+below), which rides the branch and is never merged back into the main-tree
+copy the hunt reads. Skip this check and the hunt finds the same unresolved
+`TBD` on every subsequent run, staging a green, reviewed, verified branch as
+`needs-answers` forever — the exact failure this mode exists to avoid, one
+layer up.
+
+```bash
+git -C "$PWD" show-ref --verify --quiet refs/heads/backlog/<id>; echo "branch=$?"
+git -C "$PWD" worktree list --porcelain | grep -qxF "worktree $PWD/.worktrees/<id>"; echo "worktree=$?"
+[ -e "$PWD/.worktrees/<id>" ]; echo "dir=$?"
+```
+
+(Swallowed exit status, and the directory checked apart from git's own
+worktree registration — the same probe §4's "Create the worktree" reuses
+below; its own comment there has the full reasoning for both.)
+
+- **`branch=0 worktree=1 dir=1`** (branch exists, worktree does not — what a
+  *finished* branch-mode item leaves behind) — confirm it actually finished:
+
+  ```bash
+  git -C "$PWD" diff --name-only main...backlog/<id> | grep -q "/done/<id>-"; echo "archived=$?"
+  ```
+
+  - **`archived=0`** — finished, waiting on a hand-merge. Stage it and move
+    straight to the **next** item; do not re-gate, hunt, dispatch, review or
+    verify it again — that would spend a whole item's budget re-proving what
+    is already green.
+
+    ```bash
+    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
+    ```
+  - **`archived=1`** — a real leftover, not a finished item (a crash before
+    this run re-checked the branch out). Continue below; §4 resumes it.
+- **Any other combination** — nothing to recognise yet. Continue below.
 
 ### Re-check the gate
 
@@ -436,33 +482,14 @@ just as hard as one it does know about. Then:
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "leftover worktree $PWD/.worktrees/<id> and branch backlog/<id> from an earlier run — resume or clear them by hand before the next run"
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
     ```
-- **`branch=0 worktree=1 dir=1`** — a branch with no worktree, and **usually
-  that is success, not a crash**: a `branched` item's worktree is removed and
-  its branch kept (§9), and the item stays open on `main` until someone merges
-  that branch, so it re-enters this queue on every run until they do — the
-  gate reads groomed-ness and never looks at branches. Every park path here
-  keeps its worktree, so a missing one is already the tell; confirm it with
-  the archive move the branch carries and `main` does not, in the same
-  swallow-the-status shape as the three probes above:
-
-  ```bash
-  git -C "$PWD" diff --name-only main...backlog/<id> | grep -q "/done/<id>-"; echo "archived=$?"
-  ```
-
-  **`archived=0` is finished work waiting on a hand-merge.** Do not dispatch,
-  review or verify it again — that spends a whole item's budget re-proving
-  what is already green. Record where it already is and move to the next item;
-  §10's merge list then names it alongside this run's own branches. Parking it
-  would report a green branch as a failure, which is the one thing branch mode
-  exists to stop.
-
-  ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
-  ```
-
-  **`archived=1`** and it is a real leftover — a run that stopped before
-  execute finished. Same two answers as the bullet above; to resume, check the
-  branch out into a fresh worktree *without* `-b`:
+- **`branch=0 worktree=1 dir=1`** — a branch with no worktree. **A real
+  leftover, not a finished item**: §3's own copy of this probe (top of that
+  section) already ran the archive-move check for this exact shape, and would
+  have staged the item `branched` and skipped straight to the next item had
+  it found one — an item cannot reach this point in this state any other way.
+  What's left is the other cause of a branch with no worktree: a run
+  committed the item's work and then crashed before re-checking the branch
+  out. Resume it: check the branch out into a fresh worktree *without* `-b`:
 
   ```bash
   git -C "$PWD" worktree add .worktrees/<id> backlog/<id>
@@ -1224,17 +1251,21 @@ summary is where it finally gets mentioned.
 
 **Any item that finished `branched` owes the user a merge list.** Name those
 branches in queue order — each was verified against the `main` its predecessor
-started from, and one carried over from an earlier run (§4) against that
-run's — with the literal command per branch:
+started from, and one carried over from an earlier run (§3's own recognition
+step) against that run's — with the literal command per branch:
 
 ```bash
 git merge --no-ff backlog/<id>
 ```
 
-Then flag the pairs that will fight. Every branch in the run started from the
-same unchanged `main`, so two that touch a common path mean a conflict for
-whichever is merged second. Write each branch's paths into the run's own
-`<dir>` and intersect them:
+Then flag the pairs that will fight: two branches that touch a common path
+mean a conflict for whichever is merged second, regardless of which `main`
+each one actually started from — a carried-over branch (§3) can predate this
+run by days, and a run that downgraded mid-queue means `main` itself moved
+(the items that merged before the denial) before it froze. Write each
+branch's paths into the run's own `<dir>` and intersect them — the three-dot
+diff each file is built from is merge-base relative, so it isolates each
+branch's own changes correctly regardless of any of that:
 
 ```bash
 git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
@@ -1321,7 +1352,7 @@ item still reads as open there, because its archive move is committed on
 `backlog/<id>` and lands only when that branch is merged. **Merge those
 branches before the next run**: until you do, those items stay open and the
 next run queues them again (it recognises the shape and passes them through
-untouched, §4 — but that is a re-report, not progress). Items left as
+untouched, §3 — but that is a re-report, not progress). Items left as
 `ungroomed` or `needs-answers` are a `/backlog-groom` pass away from being
 ready for the next run; parked items are a human decision, and their branches
 are still there. Anything the work surfaced along the way — a new bug, a
