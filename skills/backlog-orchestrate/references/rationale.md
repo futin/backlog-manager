@@ -256,6 +256,16 @@ headless, `claude -p --permission-mode auto`, issuing the identical
 22:34 — written *after* the failure, staged, never committed. **Nothing about
 permissions differed between the runs that merged and the run that did not.**
 
+*(2026-09-04 note: the skill has since dropped the `-C "$PWD"` clause from
+both this command and the merge-mode probe (SKILL.md §2) — a no-op removed,
+since the session's cwd was already the project root at every call site.
+Claude Code's `permissions.allow` grammar matches an entry against the
+literal command line by prefix, so `Bash(git merge:*)` — the very rule the
+dashboard staged above — would not actually have matched the line quoted
+above; it starts `git -C`, not `git merge`. Dropping the clause is what
+makes that rule genuinely cover the command SKILL.md issues today. The
+quote itself is left exactly as these three runs issued it.)*
+
 The denied run's own notes diagnosed that missing `Bash(git merge:*)` rule.
 It is a valid *remedy* and a wrong *explanation*: an `allow` rule takes the
 classifier out of the path for matching commands, so it is worth having and

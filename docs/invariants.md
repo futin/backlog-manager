@@ -242,8 +242,8 @@ pre-merge refusal over overlapping dirty paths, a main tree not on `main` —
 all still park, still keep the worktree, still say why. Those are genuine "a
 human must decide" states and none of them is a permission problem.
 
-The preflight probe in `SKILL.md` §2 — `git -C "$PWD" merge --no-ff --no-edit
-HEAD`, once per run, merge mode only — is early warning for the same failure
+The preflight probe in `SKILL.md` §2 — `git merge --no-ff --no-edit HEAD`,
+once per run, merge mode only — is early warning for the same failure
 and never a guarantee. Merging `HEAD` into itself prints `Already up to date.`
 and changes nothing that matters (no commit, no index change, no reflog
 entry, dirty tree or clean — it does refresh `.git/ORIG_HEAD`, the same as

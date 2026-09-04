@@ -243,7 +243,7 @@ resumed session reads it.
 **In `merge` mode only, probe once, here, before item 1:**
 
 ```bash
-git -C "$PWD" merge --no-ff --no-edit HEAD
+git merge --no-ff --no-edit HEAD
 ```
 
 Merging `HEAD` into itself prints `Already up to date.`, exits `0`, and
@@ -1087,7 +1087,7 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 Otherwise merge:
 
 ```bash
-git -C "$PWD" merge --no-ff --no-edit backlog/<id>
+git merge --no-ff --no-edit backlog/<id>
 ```
 
 `--no-ff` so every item is one identifiable merge commit in `main`'s history

@@ -19,33 +19,17 @@ import { join } from 'node:path';
  * of the literal command line. The command backlog-orchestrate actually
  * issues (skills/backlog-orchestrate/SKILL.md) is:
  *
- *   git -C "$PWD" merge --no-ff --no-edit backlog/<id>
+ *   git merge --no-ff --no-edit backlog/<id>
  *
- * A literal prefix compare of THAT string against a rule like
- * `Bash(git merge:*)` — the rule a person would actually write, because
- * nobody hand-writes a rule around a `-C` flag naming a directory that
- * changes on every run — would answer "not covered" for a project that is,
- * in every sense a reader cares about, already set up correctly. That false
- * negative is the wrong failure to optimize against here: this endpoint's
- * only job is a setup hint, and a hint that calls a correct setup broken
- * sends the reader hunting for a problem that does not exist. So the
- * comparison target below is not the raw argv — it is that argv with the
- * `-C "$PWD"` clause and the per-item branch name removed, because `-C`
- * changes WHERE git runs, never WHAT capability is being granted, and
- * nothing about the permission surface depends on which branch is named.
- * What remains, `MERGE_COMMAND_WORDS` below, is the fixed, meaningful part
- * of the command this endpoint checks coverage against.
- *
- * That asymmetry has a cost the rest of this comment doesn't otherwise
- * mention: an allow entry that spells the `-C "$PWD"` clause out literally —
- * `Bash(git -C "$PWD" merge:*)`, which mirrors SKILL.md's own invocation
- * almost verbatim and is exactly what a careful user might copy straight out
- * of it — does NOT match `MERGE_COMMAND_WORDS` (its second word is `-C`, not
- * `merge`) and so reports `covered: false`, even though that command would
- * genuinely cover the real invocation under the literal-prefix grammar. That
- * is a false negative, which is the safe direction this whole file already
- * argues for, so it is left as-is rather than "fixed" — recorded here only
- * so a future reader doesn't mistake it for an oversight.
+ * `<id>` is the one part of that line that varies run to run and item to
+ * item, so a literal prefix compare of the WHOLE string would only ever
+ * credit an allow entry that happened to spell out one specific branch
+ * name — useless for a setup hint whose job is "will this cover every item
+ * this run merges", not "did it cover the last one". The comparison target
+ * below, `MERGE_COMMAND_WORDS`, is therefore the fixed part of the command
+ * with the per-item branch name removed: the part that is identical on
+ * every merge this skill will ever issue, and the only part a person would
+ * ever write an allow rule around in the first place.
  *
  * A candidate entry then "covers" that target when its own prefix, split on
  * whitespace, is a WHOLE-WORD prefix of `MERGE_COMMAND_WORDS` — matched word
@@ -81,10 +65,10 @@ export interface MergeCheckResult {
 }
 
 /**
- * The fixed part of `git -C "$PWD" merge --no-ff --no-edit backlog/<id>`
- * (SKILL.md) once the location flag (`-C "$PWD"`) and the per-item branch
- * name are removed — see the file header for why both are dropped from the
- * comparison target rather than from the rule text a user would write.
+ * The fixed part of `git merge --no-ff --no-edit backlog/<id>` (SKILL.md)
+ * once the per-item branch name is removed — see the file header for why
+ * that name is dropped from the comparison target rather than from the rule
+ * text a user would write.
  */
 const MERGE_COMMAND_WORDS = ['git', 'merge', '--no-ff', '--no-edit'];
 
