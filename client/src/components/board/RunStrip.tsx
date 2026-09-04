@@ -1,23 +1,34 @@
 import { POLL_MS } from '../../hooks/useOrchestratorRuns';
 import { elapsedSince } from '../../lib/item-age';
 import { projectLabel } from '../../lib/project-label';
-import { stageChipClass, stageGlyph } from '../../lib/run-stage';
-import { formatSpanCompact, runElapsedMs } from '../../lib/run-time';
-import type { OrchestratorRun, RunStage } from '../../../../shared/types';
+import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { formatSpanCompact, isTerminalStage, runElapsedMs } from '../../lib/run-time';
+import type { OrchestratorRun } from '../../../../shared/types';
 
 /**
- * Mirrors RunStage's own doc comment in shared/types.ts almost verbatim:
- * "`merged` is the only success exit; `failed`, `skipped`, `needs-answers`,
- * `ungroomed`, and `parked` are the five ways an item leaves the pipeline
- * without merging." That set — the six rest states a queue item never moves
- * on from — is exactly what "current" below is defined against: the first
- * item NOT at one of these six is either genuinely mid-pipeline right now,
- * or (if the run has not dispatched anything yet) the next one due to be,
+ * `RunStage`'s own doc comment (shared/types.ts) states the shape "current"
+ * below is defined against: `merged` and `branched` are the pipeline's two
+ * success exits — one per `MergeMode`, sharing the same terminal position —
+ * and `failed`, `skipped`, `needs-answers`, `ungroomed`, and `parked` are the
+ * five ways an item leaves it without merging. Together those seven are
+ * every stage a run has let go of; `isTerminalStage` (lib/run-time.ts) is
+ * that set, derived as the complement of `RUN_CLAIMED_STAGES`
+ * (shared/types.ts) rather than restated here as a bare array of strings —
+ * which is what this file used to do, and which is exactly how it went
+ * seven-of-seven instead of the whole set: a hand-written `RunStage[]`
+ * compiles whether or not it lists every member, so the omission of
+ * `branched` (added by this same feature) went unnoticed until a
+ * branch-mode run's own FINISHED item kept reading as "current" — this
+ * strip's own progress claim calling a done run's last item still in
+ * flight. `isTerminalStage` is backed by a `Record<RunStage, true>` pin
+ * (`test/agents-shared.test.ts`) that forces a compiler error the day a
+ * future `RunStage` member goes unclassified, which a plain array never
+ * could.
+ *
+ * The first item NOT terminal is either genuinely mid-pipeline right now, or
+ * (if the run has not dispatched anything yet) the next one due to be,
  * either of which is an honest answer to "what is this run doing".
  */
-const TERMINAL_STAGES: readonly RunStage[] = [
-  'merged', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
-];
 
 /**
  * How young a run's heartbeat (`updatedAt`) has to be to read as the word
@@ -79,9 +90,28 @@ export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPa
   // it against the denominator would make a run that skipped it on sight
   // read as permanently short of "done".
   const total = run.queue.filter((q) => q.stage !== 'ungroomed').length;
-  const merged = run.queue.filter((q) => q.stage === 'merged').length;
-  const current = run.queue.find((q) => !TERMINAL_STAGES.includes(q.stage));
-  const pct = total === 0 ? 0 : Math.round((merged / total) * 100);
+  // Both of `RunStage`'s success exits count toward "done" here — `merged`
+  // when the run kept its default mode, `branched` when it stopped at a
+  // reviewed branch instead (`MergeMode`, shared/types.ts). Counting `merged`
+  // alone was a controller-verified defect: a branch-mode run's own §9 never
+  // reaches `merged` at all (design §5.3), so a run that finished every item
+  // cleanly — the real overnight run this whole feature traces back to,
+  // four green branches — read as 0% complete, which is exactly the
+  // "a successful run must not look like a failure" bug the feature exists
+  // to fix. `isTerminalStage` and this arithmetic are two different
+  // questions asked of the same pair of stages (which stages are DONE, vs.
+  // which one is the run's success exit) and cannot share one constant —
+  // see this file's own comment above `isTerminalStage`'s import for why
+  // the first question already has its own single home.
+  const completed = run.queue.filter((q) => q.stage === 'merged' || q.stage === 'branched').length;
+  const current = run.queue.find((q) => !isTerminalStage(q.stage));
+  const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+  // `null` for a plain merge-mode run — see `mergeModeLabel`'s own doc
+  // comment (lib/run-stage.ts) for why that is the one fact that keeps a
+  // merge-mode run's strip byte-identical to what it rendered before this
+  // feature existed, rather than a conditional restated at this call site.
+  const modeLabel = mergeModeLabel(run.mergeMode, run.mergeModeEffective);
 
   const heartbeatMs = Date.now() - Date.parse(run.updatedAt);
   const live = Number.isFinite(heartbeatMs) && heartbeatMs < LIVE_THRESHOLD_MS;
@@ -130,13 +160,20 @@ export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPa
           beside it always are. */}
       <span className={live ? 'run-strip-dot run-strip-dot-live' : 'run-strip-dot'} aria-hidden="true" />
       <span className="run-strip-project">{label}</span>
+      {/* Design §7: "a branch-mode run says so." Absent entirely for a
+          plain merge-mode run (`modeLabel` is `null` — see its own
+          derivation above), which is what keeps that shape of run rendering
+          byte-identically to before this feature existed. */}
+      {modeLabel !== null && (
+        <span className="run-mode-badge" data-testid="run-strip-mode">{modeLabel}</span>
+      )}
       <span className="run-strip-heartbeat">{live ? 'live' : age ?? '—'}</span>
       {elapsed !== null && (
         <span className="run-strip-elapsed" data-testid="run-strip-elapsed">
           {formatSpanCompact(elapsed)}
         </span>
       )}
-      <span className="run-strip-count">{merged}/{total}</span>
+      <span className="run-strip-count">{completed}/{total}</span>
       {/* Purely a graphical restatement of the count just printed — hidden
           from the accessibility tree so a screen reader is not made to sit
           through the same fact twice in two forms. */}

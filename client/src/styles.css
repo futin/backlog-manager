@@ -741,6 +741,26 @@ body {
   flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .06em; color: var(--ink);
 }
+/* Task 9's own badge for `lib/run-stage.ts`'s `mergeModeLabel` — shared
+   verbatim by RunStrip, RunsView's row and RunDetail's header rather than
+   three copies of the same small pill, the same reuse `.runs-status` already
+   gets across RunsView and RunDetail. Mustard, not the amber
+   `.board-card-stage-warn`/`.run-strip-attention` already use for "a human
+   must act on this NOW": a branch-mode run is not an alert, it is a standing
+   fact about how this run finishes work, which is the same "incomplete, not
+   a problem" register mustard already carries for a pending stage chip. It
+   cannot reuse `stageChipClass` itself — that function's own Record is keyed
+   on `RunStage`, and `MergeMode` is a different, two-member union entirely
+   (`lib/run-stage.ts`'s own file header has the fuller argument for why the
+   two vocabularies must not share one map). */
+.run-mode-badge {
+  flex: none; display: inline-flex; align-items: center;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+  padding: 1.5px 7px; border: 1px solid; border-radius: 999px;
+  color: var(--mustard); border-color: color-mix(in srgb, var(--mustard) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--mustard) 10%, var(--strip));
+}
 .run-strip-heartbeat { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
 /* The run's own total, sitting immediately after the heartbeat because the
    two are read as a pair — "still being heard from" then "for how long" —
@@ -756,12 +776,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .run-strip-count { flex: none; font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink) }
-/* The bar restates merged/total graphically (aria-hidden in the markup, for
-   that exact reason) — it does NOT track a separate "processed" fraction
-   that could disagree with the count printed beside it, on purpose: the
-   brief pins one ratio (merged/total), and a second, undefined one would be
-   one more thing to keep in step by hand. --good is --green's own "success"
-   alias (shared/theme.css) — merged is the pipeline's one success exit. */
+/* The bar restates the count beside it graphically (aria-hidden in the
+   markup, for that exact reason) — it does NOT track a separate "processed"
+   fraction that could disagree with the count printed beside it, on purpose:
+   the brief pins one ratio (RunStrip.tsx's own `completed`/`total`), and a
+   second, undefined one would be one more thing to keep in step by hand.
+   --good is --green's own "success" alias (shared/theme.css) — `merged` and
+   `branched` are the pipeline's two success exits (one per `MergeMode`,
+   RunStrip.tsx's own comment on `completed` has the full reasoning), and
+   both fill this bar the same green: the colour is about the outcome, not
+   which mode produced it. */
 .run-strip-bar {
   flex: 1 1 80px; min-width: 40px; height: 4px; border-radius: 2px;
   background: var(--steel); overflow: hidden;
@@ -1437,8 +1461,10 @@ body {
 }
 /* Pushed to the row's right margin, matching .run-drawer-item-time's own
    `margin-left: auto` reasoning: a reader scanning the list top to bottom
-   for "which of these merged the most" wants that number in a stable column,
-   not wherever the status word and project label happened to leave room. */
+   for "which of these got the most done" wants that number in a stable
+   column, not wherever the status word and project label happened to leave
+   room. "Done" here is `RunsView.tsx`'s own `completed` — merged or
+   branched alike, RunStage's two success exits — not `merged` alone. */
 .runs-row-count { margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
 .runs-row-wall { font-family: var(--mono); font-size: 10px; color: var(--ink3); font-variant-numeric: tabular-nums }
 
@@ -1473,6 +1499,36 @@ body {
 .run-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px }
 .run-detail-id { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink) }
 .run-detail-time { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+
+/* Task 9's own downgrade explanation (`mergeModeNote`, shown only when it
+   differs from the run's own asked-for `mergeMode`) — mustard, matching
+   `.run-mode-badge` right above it in the head: this is prose about the
+   SAME fact that badge names in one word, not a second, unrelated alert
+   needing its own colour. Boxed like `.run-detail-error` right below (same
+   "the first thing a reader should see" placement, see RunDetail.tsx's own
+   comment on why), but never red — a downgrade is exactly the run
+   succeeding at what this whole feature exists to make possible, not a
+   fault. */
+.run-detail-mode-note {
+  font-family: var(--mono); font-size: 11px; color: var(--ink);
+  background: color-mix(in srgb, var(--mustard) 10%, var(--strip));
+  border: 1px solid color-mix(in srgb, var(--mustard) 40%, var(--hairline));
+  border-radius: 2px; padding: 8px 10px; margin-bottom: 10px;
+}
+
+/* The literal `git merge --no-ff backlog/<id>` a person copies out of the
+   "Branches to merge" section (Task 9, design §7) — a code line, not prose,
+   so it wears the same mono/steel/bordered treatment
+   `.run-drawer-item-verify-cmd` gives an inline command rather than reusing
+   that class outright (that one sits inline in a <summary> row; this one is
+   its own block, meant to be selected and copied whole). `overflow-x: auto`
+   rather than wrapping: a git ref can be long enough to wrap mid-token, and
+   a command that wraps is a command a person can copy wrong. */
+.run-detail-branch-cmd {
+  display: block; font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 5px 8px; margin-top: 4px; white-space: nowrap; overflow-x: auto;
+}
 
 /* Matches .runs-day-heading's own small-caps treatment exactly (this pane
    sits right beside that list, and the two section labels — "live"/a day,

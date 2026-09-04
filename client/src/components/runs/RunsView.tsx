@@ -5,7 +5,7 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
-import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH } from '../../lib/run-stage';
+import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, mergeModeLabel } from '../../lib/run-stage';
 import { aggregateRuns, dayKey, dayLabel, runStageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
@@ -285,7 +285,7 @@ function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
 const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed'];
 
 /**
- * Merged-stage items over a run's whole queue — the same ratio the tiles
+ * Completed items over a run's whole queue — the same ratio the tiles
  * above compute across every run in scope (`aggregateRuns`' own
  * `itemsQueued`/`itemsMerged`, Task 3), read here for one run at a time.
  * Takes any object with a `.queue` of stage-bearing items rather than
@@ -293,6 +293,17 @@ const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', '
  * `RunRow` can call this on WHICHEVER object `pickAuthority` names as the
  * authority (the archive record, or a fresh `LiveRun`), not only the
  * archive one.
+ *
+ * `completed` counts BOTH of `RunStage`'s success exits, `merged` and
+ * `branched` — one per `MergeMode` — for the identical reason
+ * `RunStrip.tsx`'s own `completed` does (that file's own comment has the
+ * full account): a run holding items in both stages, the shape a merge
+ * denied partway through the queue actually leaves behind (design §5.2),
+ * must count both rather than silently dropping whichever one this
+ * function's numerator did not name. `aggregateRuns` already made this
+ * same call for the tiles above ("counted as completed, alongside merged",
+ * design §4) — this is that same rule applied to one run instead of every
+ * run in scope, not a second, independently-arrived-at decision.
  *
  * `total` is deliberately the RAW `queue.length` — fix round 1's own
  * flagged-but-ruled-on discrepancy: `RunStrip.tsx`'s live strip computes its
@@ -324,8 +335,11 @@ const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', '
  * for a "skipped" count to explain the mismatch would not find one, because
  * that is not where this stage surfaces.
  */
-function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { merged: number; total: number } {
-  return { merged: run.queue.filter((q) => q.stage === 'merged').length, total: run.queue.length };
+function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { completed: number; total: number } {
+  return {
+    completed: run.queue.filter((q) => q.stage === 'merged' || q.stage === 'branched').length,
+    total: run.queue.length
+  };
 }
 
 /**
@@ -350,6 +364,18 @@ function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { merged: 
  * `run.project`/`run.runId` are read straight off `run` regardless — those
  * are identity fields that cannot change between the two sources for what
  * is, by construction, the same run file.
+ *
+ * Task 9 adds the mode badge (`mergeModeLabel`, lib/run-stage.ts), read off
+ * the SAME `authority` object every other reading on this row already uses
+ * — `mergeMode`/`mergeModeEffective` live on both `OrchestratorRun` and
+ * `OrchestratorArchiveRun`, so no third field has to be threaded through
+ * `pickAuthority` for it. Design §7 asks for this at the LIST level, not
+ * just the detail pane behind it, specifically so a downgraded run is
+ * "legible at a glance in history" — a person scanning a day's worth of
+ * rows should not have to open every one just to learn which runs left
+ * branches behind. `mergeModeLabel` returns `null` for a plain merge-mode
+ * run, so this adds nothing to the row for the shape of run that made up
+ * every row in this list before this feature existed.
  */
 function RunRow({
   row, now, isSelected, onSelect
@@ -361,8 +387,9 @@ function RunRow({
 }): JSX.Element {
   const { run } = row;
   const authority = pickAuthority([row.live], run);
-  const { merged, total } = queueCounts(authority);
+  const { completed, total } = queueCounts(authority);
   const wall = runWallMs(authority, now);
+  const modeLabel = mergeModeLabel(authority.mergeMode, authority.mergeModeEffective);
 
   return (
     <button
@@ -382,7 +409,10 @@ function RunRow({
           {authority.status}
         </span>
         <span className="runs-row-project">{projectLabel(run.project)}</span>
-        <span className="runs-row-count">{merged}/{total}</span>
+        {modeLabel !== null && (
+          <span className="run-mode-badge" data-testid={`runs-row-mode-${run.runId}`}>{modeLabel}</span>
+        )}
+        <span className="runs-row-count">{completed}/{total}</span>
       </span>
       {wall !== null && <span className="runs-row-wall">{formatSpanCompact(wall)}</span>}
     </button>

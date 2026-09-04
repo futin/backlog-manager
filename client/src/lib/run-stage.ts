@@ -1,4 +1,4 @@
-import type { OrchestratorRun, RunStage } from '../../../shared/types';
+import type { MergeMode, OrchestratorRun, RunStage } from '../../../shared/types';
 
 /**
  * The visual register a run stage is read in. Six tones, not fourteen: a
@@ -142,3 +142,39 @@ export const RUN_STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
   aborted: 'runs-status-warn',
   failed: 'runs-status-bad'
 };
+
+/**
+ * The one label RunStrip, RunsView's row and RunDetail's header all print
+ * for a run's `MergeMode` (Task 9, "surface a run's merge mode and any
+ * downgrade") — `null` for a plain `merge`-mode run, so every one of those
+ * three call sites renders NOTHING extra for the run shape that made up the
+ * whole app before this feature existed. That `null` is what makes "a
+ * merge-mode run renders byte-identically to today" true by construction
+ * rather than by three separately-remembered conditionals: a stray `&&`
+ * inverted at one call site would be caught by that surface's own
+ * regression test, but a stray extra STRING (an empty badge, a bare "merge
+ * mode" nobody asked to see) would not be, since `toBeEmptyDOMElement`-style
+ * assertions only catch a NODE existing, not a word that was always going to
+ * render anyway.
+ *
+ * One string, not two separate facts handed to each caller, because a
+ * caller rendering "branch mode" and "(downgraded)" as two independently
+ * placed pieces is exactly the kind of duplicate-decision this file's own
+ * header warns about for `STAGE_TONE` vs `RUN_STATUS_GLYPH` — the same
+ * caller-visible word has to come from the same place for a run whose mode
+ * is read from three different components.
+ *
+ * The one asymmetry worth stating: this label answers "does this run's
+ * OUTCOME need a person to finish it, and did that surprise the run itself"
+ * — it does NOT carry `mergeModeNote`'s own prose (why the classifier
+ * refused). Design §7 asks for both the mode and, where they differ, "the
+ * note", but the note is free text meant to be read as its own sentence,
+ * not folded into a badge a screen reader would run together with whatever
+ * sits next to it. RunDetail (the one surface with room for prose) reads
+ * `mergeModeNote` directly for that half; this function is only ever the
+ * short badge word.
+ */
+export function mergeModeLabel(mergeMode: MergeMode, mergeModeEffective: MergeMode): string | null {
+  if (mergeModeEffective !== 'branch') return null;
+  return mergeMode === mergeModeEffective ? 'branch mode' : 'branch mode (downgraded)';
+}

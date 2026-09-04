@@ -33,6 +33,24 @@ function runPayload(over: Partial<OrchestratorRun & { fresh: boolean }> = {}): P
   return { ...fixture, fresh: true, pastRuns: 0, ...over };
 }
 
+/**
+ * A minimal `RunQueueItem`, for the merge-mode cases below only — the
+ * fixture this file otherwise reuses throughout predates the `branched`
+ * stage entirely (it was recorded before this feature existed), so a case
+ * that needs one builds its own small queue from scratch rather than
+ * patching a `branched` entry into a fixture that never had one. Narrow
+ * defaults (no session, no verification, empty `stageAt`) match this
+ * repo's usual "state only what this case cares about" fixture shape
+ * (`test/runs-view.test.tsx`'s own `item()`/`liveQueueItem()`).
+ */
+function queueItem(id: string, stage: RunStage, over: Partial<RunQueueItem> = {}): RunQueueItem {
+  return {
+    id, title: `${id} title`, stage, sessionId: null, worktree: null, branch: null,
+    permissionMode: null, fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null,
+    ...over
+  };
+}
+
 describe('RunStrip', () => {
   // The fixture's own queue, in order: bug-14 merged, task-21 needs-answers,
   // bug-22 ungroomed, task-16 merged, task-9 merged, task-14 reviewing,
@@ -119,6 +137,96 @@ describe('RunStrip', () => {
     const strip = screen.getByTestId('run-strip');
     expect(strip).toHaveTextContent('3m');
     expect(strip).not.toHaveTextContent('live');
+  });
+
+  // Task 9's own case (brief case a): the real overnight run this whole
+  // feature traces back to finished four items — all reviewed, all green —
+  // and merged none, because the classifier refused every merge. Reported
+  // as four parks, that read as a failed run. Under branch mode the same
+  // four items all reach `branched`, and this pins that a run shaped
+  // exactly like that one now reads as fully done, not as a failure or a
+  // park: 4/4, a full bar, no "current" item pointing at already-finished
+  // work, and neither of the words a genuine failure state would use.
+  it('renders a fully successful branch-mode run as done, not as a park or a failure', () => {
+    const queue = [
+      queueItem('bug-1', 'branched'),
+      queueItem('bug-2', 'branched'),
+      queueItem('bug-3', 'branched'),
+      queueItem('bug-4', 'branched')
+    ];
+    const run = runPayload({
+      queue, attention: [], mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null
+    });
+    render(<RunStrip run={run} onOpen={() => {}} />);
+    const strip = screen.getByTestId('run-strip');
+
+    expect(strip).toHaveTextContent('4/4');
+    expect(strip.querySelector('.run-strip-bar-fill')).toHaveStyle({ width: '100%' });
+    // Every entry already exited the pipeline, so nothing is "still
+    // working" — the ruling defect this fixture also exercises (below) is
+    // exactly a run like this one misreading its own last exited item as
+    // current.
+    expect(strip.querySelector('.run-strip-current')).toBeNull();
+    expect(strip).not.toHaveTextContent('parked');
+    expect(strip).not.toHaveTextContent('failed');
+    expect(screen.getByTestId('run-strip-mode')).toHaveTextContent('branch mode');
+  });
+
+  // Controller ruling defect #1: `TERMINAL_STAGES` used to omit `branched`
+  // entirely, so `run.queue.find((q) => !TERMINAL_STAGES.includes(q.stage))`
+  // treated an already-finished branched item as the one non-terminal —
+  // "current" — entry the moment it was the first one in queue order,
+  // regardless of whether real work was still ahead of it. Pinned with a
+  // branched item FOLLOWED BY a genuinely pending one: before the fix this
+  // read `bug-1` (done) as current; after it, `bug-2` (the true next item).
+  it("does not read an already-exited branched item as the run's current work", () => {
+    const queue = [queueItem('bug-1', 'branched'), queueItem('bug-2', 'pending')];
+    const run = runPayload({
+      queue, attention: [], mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null
+    });
+    render(<RunStrip run={run} onOpen={() => {}} />);
+    const current = screen.getByTestId('run-strip').querySelector('.run-strip-current');
+    expect(current).not.toBeNull();
+    expect(current).toHaveTextContent('bug-2');
+    expect(current).not.toHaveTextContent('bug-1');
+  });
+
+  // Brief case 5: a run whose merge was denied partway through (design
+  // §5.2) holds items in BOTH success exits at once — the two merged
+  // before the denial, the two branched after it. Controller ruling defect
+  // #2 was counting `merged` alone, which for a run shaped like this one
+  // undercounts real completion by half; this pins that both exits now
+  // count toward the same "done" total, hiding neither.
+  it('counts merged and branched items together for a run that downgraded mid-queue', () => {
+    const queue = [
+      queueItem('bug-1', 'merged'),
+      queueItem('bug-2', 'merged'),
+      queueItem('bug-3', 'branched'),
+      queueItem('bug-4', 'branched')
+    ];
+    const run = runPayload({
+      queue, attention: [], mergeMode: 'merge', mergeModeEffective: 'branch',
+      mergeModeNote: 'classifier denied the merge on bug-3'
+    });
+    render(<RunStrip run={run} onOpen={() => {}} />);
+    const strip = screen.getByTestId('run-strip');
+    expect(strip).toHaveTextContent('4/4');
+    expect(strip.querySelector('.run-strip-bar-fill')).toHaveStyle({ width: '100%' });
+  });
+
+  // Brief case 3, the regression guard: a plain merge-mode run — the shape
+  // of every run ever archived before this feature existed — must render
+  // byte-identically to today. The fixture's own `mergeMode`/
+  // `mergeModeEffective` are both `'merge'` (asserted here, not assumed),
+  // so `mergeModeLabel` (lib/run-stage.ts) must return `null` and the badge
+  // this feature adds must be entirely absent, on top of the exact
+  // merged/total ratio the very first test in this file already pins.
+  it('renders a merge-mode run byte-identically to before this feature: no mode badge', () => {
+    expect(fixture.mergeMode).toBe('merge');
+    expect(fixture.mergeModeEffective).toBe('merge');
+    render(<RunStrip run={runPayload()} onOpen={() => {}} />);
+    expect(screen.queryByTestId('run-strip-mode')).not.toBeInTheDocument();
+    expect(screen.getByTestId('run-strip')).toHaveTextContent('3/6');
   });
 });
 

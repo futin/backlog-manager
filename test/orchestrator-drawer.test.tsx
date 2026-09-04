@@ -9,7 +9,8 @@ import BoardView from '../client/src/components/board/BoardView';
 import { RunDrawer } from '../client/src/components/board/RunDrawer';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type {
-  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary
+  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
+  RunQueueItem, RunStage
 } from '../shared/types';
 
 // Same translation orchestrator-strip.test.tsx (Task 11) already uses: the
@@ -26,6 +27,22 @@ type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number };
  *  GET /api/orchestrator/runs contract. */
 function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number }> = {}): Payload {
   return { ...fixture, fresh: true, pastRuns: 0, ...over };
+}
+
+/**
+ * A minimal `RunQueueItem`, for the merge-mode cases below only — the
+ * fixture this file otherwise reuses throughout predates the `branched`
+ * stage entirely, so a case that needs one builds its own small queue from
+ * scratch rather than patching a `branched` entry into a fixture that never
+ * had one (the identical reasoning orchestrator-strip.test.tsx's own
+ * `queueItem` gives).
+ */
+function queueItem(id: string, stage: RunStage, over: Partial<RunQueueItem> = {}): RunQueueItem {
+  return {
+    id, title: `${id} title`, stage, sessionId: null, worktree: null, branch: null,
+    permissionMode: null, fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null,
+    ...over
+  };
 }
 
 describe('RunDrawer', () => {
@@ -324,6 +341,69 @@ describe('RunDrawer', () => {
     // fixture.project is "/Users/dev/code/example-app" — the readable tail,
     // same reading RunStrip.tsx prints on its own strip.
     expect(screen.getByRole('dialog', { name: 'example-app run' })).toBeInTheDocument();
+  });
+
+  // Task 9's own coverage gap, not a Task 9 source change: `RowStepper`
+  // already threads `mergeModeEffective` through to `stepperTerminal`
+  // (wired in an earlier task, RunDrawer.tsx's own file header), but no
+  // suite had ever exercised a `branched` row through it — this fixture
+  // predates the stage entirely. Brief case 5's shape (design §5.2: some
+  // items merged before a mid-queue denial, the rest branched after)
+  // applied to the live drawer: BOTH exits must render correctly side by
+  // side, hiding neither behind the other's own tone or terminal word.
+  it("renders a branched row's own stage chip and terminal stepper dot correctly, beside a merged row in the same run", () => {
+    const queue = [
+      queueItem('m-1', 'merged', { stageAt: { dispatched: '2026-09-01T09:00:00Z', merged: '2026-09-01T09:10:00Z' } }),
+      queueItem('b-1', 'branched', { stageAt: { dispatched: '2026-09-01T09:20:00Z', branched: '2026-09-01T09:30:00Z' } })
+    ];
+    render(
+      <RunDrawer
+        run={runPayload({ queue, mergeMode: 'merge', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge on b-1' })}
+        onClose={() => {}}
+      />
+    );
+
+    // Stage chips: the same tone (`board-card-stage-done`, "this item is
+    // done, cleanly" — lib/run-stage.ts's own comment on why the two exits
+    // share a colour) but the different WORD each item actually earned.
+    const mergedChip = screen.getByTestId('run-drawer-item-m-1').querySelector('.board-card-stage');
+    const branchedChip = screen.getByTestId('run-drawer-item-b-1').querySelector('.board-card-stage');
+    expect(mergedChip).toHaveClass('board-card-stage-done');
+    expect(mergedChip).toHaveTextContent('merged');
+    expect(branchedChip).toHaveClass('board-card-stage-done');
+    expect(branchedChip).toHaveTextContent('branched');
+
+    // The stepper's own seventh (terminal) dot: filled — `stageAt` carries
+    // an arrival for it on both rows — and carrying the item's OWN exit
+    // word, not the run's shared `mergeModeEffective` blindly applied to
+    // both (`stepperTerminal`'s own rule: an item that already reached
+    // `merged` or `branched` answers with its own stage). `m-1` finished
+    // BEFORE the run's mode moved to `branch`, so a stepper that read the
+    // run's field instead of the item's own history would wrongly draw a
+    // hollow `branched` dot under a chip still reading `merged`.
+    const mergedDot = screen.getByTestId('run-drawer-stepper-m-1').querySelector('[data-stage="merged"]');
+    const branchedDot = screen.getByTestId('run-drawer-stepper-b-1').querySelector('[data-stage="branched"]');
+    expect(mergedDot).toHaveClass('run-stepper-dot-filled');
+    expect(branchedDot).toHaveClass('run-stepper-dot-filled');
+    // Neither row's stepper has the OTHER exit's dot at all — the seven
+    // dots are fixed positions ending in ONE resolved terminal word apiece.
+    expect(screen.getByTestId('run-drawer-stepper-m-1').querySelector('[data-stage="branched"]')).toBeNull();
+    expect(screen.getByTestId('run-drawer-stepper-b-1').querySelector('[data-stage="merged"]')).toBeNull();
+  });
+
+  // Brief case 3, the regression guard, applied to the drawer: the
+  // fixture's own queue (every finished item at `merged`, `mergeMode` and
+  // `mergeModeEffective` both `'merge'`) must keep resolving every stepper's
+  // terminal dot to `merged` — proof that the coverage gap the test above
+  // closes was a gap in TESTING, not a change in RunDrawer.tsx's own
+  // (untouched by this task) behaviour.
+  it('keeps resolving every stepper to a merged terminal dot for a plain merge-mode run', () => {
+    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    for (const q of fixture.queue) {
+      if (q.stage === 'ungroomed') continue; // no stepper at all for this one
+      const stepper = screen.getByTestId(`run-drawer-stepper-${q.id}`);
+      expect(stepper.querySelector('[data-stage="branched"]')).toBeNull();
+    }
   });
 });
 
