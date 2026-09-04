@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 import { projectLabel } from '../../lib/project-label';
-import { stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runClockMs, runElapsedMs,
   runIsLive, stepperDots, stepperTerminal
@@ -276,12 +276,29 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
   const live = runIsLive(run, now);
   const clock = runClockMs(run, now);
 
-  // Four counts, not a fifth "current item" pointer: the per-item rows below
-  // already print every item's own stage, so a top-of-drawer pointer at
-  // "the" current one would only restate a row a few lines down. These four
-  // are the one thing no single row can say on its own — how the WHOLE
-  // queue is distributed right now.
+  // Four counts (five, with `branched` below), not a "current item" pointer:
+  // the per-item rows further down already print every item's own stage, so
+  // a top-of-drawer pointer at "the" current one would only restate a row a
+  // few lines down. These are the one thing no single row can say on its
+  // own — how the WHOLE queue is distributed right now.
   const merged = run.queue.filter((q) => q.stage === 'merged').length;
+  // Final whole-branch review, finding 2: RunDetail.tsx already computes this
+  // exact count (its own `branched` const, with the full reasoning for why a
+  // MergeMode's second success exit needs its own chip rather than folding
+  // into `merged` above — a downgraded run, design §5.2, holds items in BOTH
+  // exits at once, and a chip row that only printed `merged` silently dropped
+  // however many finished the other way). Mirrored here rather than shared
+  // through a helper because it is a one-line `.filter().length`, the same
+  // shape `merged`, `active` and `queued` already are on their own lines —
+  // extracting a function for one filter predicate would be a second
+  // indirection to read past for no fewer lines at the call site.
+  //
+  // Before this fix, this drawer was the one design §7 surface that showed
+  // NEITHER the mode NOR this count: a run that finished 4/4 items in branch
+  // mode opened onto a drawer reading "0 merged" with no `branched` chip and
+  // no mode badge anywhere in `.drawer-meta` below — a milder version of the
+  // exact 0%-progress defect already fixed on RunStrip.tsx.
+  const branched = run.queue.filter((q) => q.stage === 'branched').length;
   // ACTIVE_RUN_STAGES is ItemCard's own list (dispatched..merging) — "the
   // orchestrator running WITHOUT a human", per its own comment — imported
   // rather than re-typed a second time, the same reuse POLL_MS already gets
@@ -289,6 +306,16 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
   const active = run.queue.filter((q) => ACTIVE_RUN_STAGES.includes(q.stage)).length;
   const queued = run.queue.filter((q) => q.stage === 'pending').length;
   const attentionCount = run.attention.length;
+
+  // The same short badge word RunStrip's live tile and RunDetail's header
+  // already print for a run's `MergeMode` (`mergeModeLabel`, lib/run-stage.ts)
+  // — `null` for a plain merge-mode run, which is what keeps a merge-mode
+  // drawer rendering byte-identically to every drawer opened before this
+  // feature existed. Not a new helper: `mergeModeLabel` is the one
+  // implementation, read by all three surfaces design §7 names, so a stray
+  // fourth copy here is exactly the drift this file's own header comment
+  // (and run-stage.ts's) warns against for `STAGE_TONE` vs `RUN_STATUS_GLYPH`.
+  const modeLabel = mergeModeLabel(run.mergeMode, run.mergeModeEffective);
 
   return (
     <>
@@ -302,6 +329,15 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
           <span data-testid="run-drawer-past">
             {run.status} · {run.pastRuns} past run{run.pastRuns === 1 ? '' : 's'}
           </span>
+          {/* Design §7's first bullet, second half: "a branch-mode run says
+              so" — the drawer's own copy of the badge RunStrip (the button
+              that opens it) and RunDetail already print. Absent entirely for
+              a plain merge-mode run (`modeLabel` is `null`), the same
+              construction that keeps every OTHER `mergeModeLabel` call site
+              byte-identical for a run this feature predates. */}
+          {modeLabel !== null && (
+            <span className="run-mode-badge" data-testid="run-drawer-mode">{modeLabel}</span>
+          )}
           {/* Each half appears only if its own stamp parsed: a run file with a
               readable `startedAt` and a corrupt `updatedAt` can still say when
               it began, and one with neither renders no node at all rather than
@@ -327,6 +363,17 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
             <span className="run-drawer-chip" data-testid="run-drawer-chip-merged">
               <span className="run-drawer-chip-num">{merged}</span> merged
             </span>
+            {/* Rendered only once this run actually has a branched item to
+                report — mirrors RunDetail.tsx's identical `branched.length > 0`
+                gate, and for the identical reason: a plain merge-mode run's
+                chip row has to stay the exact four chips it printed before
+                this feature existed, not four chips plus a permanent "0
+                branched" that never once applies to it. */}
+            {branched > 0 && (
+              <span className="run-drawer-chip" data-testid="run-drawer-chip-branched">
+                <span className="run-drawer-chip-num">{branched}</span> branched
+              </span>
+            )}
             <span className="run-drawer-chip" data-testid="run-drawer-chip-active">
               <span className="run-drawer-chip-num">{active}</span> active
             </span>
@@ -359,12 +406,12 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
                       <span className="run-drawer-item-title">{q.title}</span>
                       {/* Tone and glyph from lib/run-stage.ts, shared with
                           the card and the strip — six tones over RunStage's
-                          fourteen members, with the stage word itself always
+                          fifteen members, with the stage word itself always
                           printed beside them for the finer detail. Unlike the
                           card, EVERY stage gets a chip here (the card only
-                          chips seven of the fourteen — its six
+                          chips seven of the fifteen — its six
                           ACTIVE_RUN_STAGES plus needs-answers — and renders
-                          nothing for the other seven); the drawer's job is
+                          nothing for the other eight); the drawer's job is
                           the full picture, which is exactly why the tone map
                           had to become total: this is the one surface where
                           `merged`, `skipped` and `pending` are all on screen

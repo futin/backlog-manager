@@ -405,6 +405,64 @@ describe('RunDrawer', () => {
       expect(stepper.querySelector('[data-stage="branched"]')).toBeNull();
     }
   });
+
+  // Final whole-branch review, finding 2: before this fix, RunDrawer was the
+  // one design §7 surface ("RunStrip / RunDrawer — a branch-mode run says so")
+  // that showed NEITHER half of that claim. A run that finished 4/4 items in
+  // branch mode opened a strip reading "4/4, branch mode" onto a drawer
+  // reading "0 merged" with no branched chip anywhere — two surfaces, one
+  // run, contradictory summaries. `mergeModeLabel` and the `branched > 0`
+  // chip gate mirror RunDetail.tsx's own, already-covered implementation
+  // exactly (same helper, same construction), so this is the drawer's first
+  // direct coverage of either.
+  it('shows the mode badge and a branched chip for a branch-mode run, without losing the merged count', () => {
+    const queue = [
+      queueItem('m-1', 'merged'),
+      queueItem('b-1', 'branched'),
+      queueItem('b-2', 'branched')
+    ];
+    render(
+      <RunDrawer
+        run={runPayload({ queue, mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null })}
+        onClose={() => {}}
+      />
+    );
+
+    expect(screen.getByTestId('run-drawer-mode')).toHaveTextContent('branch mode');
+    expect(screen.getByTestId('run-drawer-mode')).not.toHaveTextContent('downgraded');
+    expect(screen.getByTestId('run-drawer-chip-merged')).toHaveTextContent('1');
+    expect(screen.getByTestId('run-drawer-chip-branched')).toHaveTextContent('2');
+  });
+
+  // `mergeModeLabel`'s other branch: a run that ASKED for `merge` but
+  // downgraded mid-queue (design §5.2) has to read distinctly from a run that
+  // chose branch mode up front — the same distinction RunsView's row and
+  // RunDetail's header already pin, now pinned on the drawer too.
+  it('labels a mid-queue-denied run\'s badge "(downgraded)", distinct from a deliberately-chosen branch-mode run', () => {
+    const queue = [
+      queueItem('m-1', 'merged'),
+      queueItem('b-1', 'branched')
+    ];
+    render(
+      <RunDrawer
+        run={runPayload({ queue, mergeMode: 'merge', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge on b-1' })}
+        onClose={() => {}}
+      />
+    );
+    expect(screen.getByTestId('run-drawer-mode')).toHaveTextContent('branch mode (downgraded)');
+  });
+
+  // Brief case 3, the regression guard, applied to the two nodes this finding
+  // actually added: the fixture is every drawer this app rendered before this
+  // feature existed (`mergeMode`/`mergeModeEffective` both `'merge'`, every
+  // finished item at `merged`), so neither the mode badge nor a branched chip
+  // may appear for it at all — the "byte-identical for a plain merge-mode
+  // run" claim, this time for the surface finding 2 fixed.
+  it('renders no mode badge and no branched chip for a plain merge-mode run', () => {
+    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    expect(screen.queryByTestId('run-drawer-mode')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-drawer-chip-branched')).not.toBeInTheDocument();
+  });
 });
 
 describe('BoardView: run drawer wiring', () => {

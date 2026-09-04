@@ -990,6 +990,16 @@ describe('RunsView', () => {
     expect(row).not.toHaveTextContent('0/2');
     expect(screen.getByTestId(`runs-row-mode-${branchRun.runId}`)).toHaveTextContent('branch mode');
     expect(screen.getByTestId(`runs-row-mode-${branchRun.runId}`)).not.toHaveTextContent('downgraded');
+
+    // Final whole-branch review, finding 1: the aggregate tile beside the
+    // list counts `branched` into `itemsMerged` exactly as the row does
+    // (`aggregateRuns`'s own doc comment), but until this fix its LABEL still
+    // read "merged / queued" — so this same fully-successful branch-mode run
+    // rendered "2/2 merged" over a queue that reached `main` zero times. No
+    // test asserted the tile at all before this one; it now pins the same
+    // "done, not 0%" claim the row assertions above make, one surface over.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('2/2');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('0/2');
   });
 
   // Brief case 2: a run that ASKED for `merge` but is actually running
