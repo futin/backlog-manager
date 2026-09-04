@@ -23,7 +23,7 @@ type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'task-1', title: 'a task', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, kind: '',
+    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
     section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
     groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md'
   };

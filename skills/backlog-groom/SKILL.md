@@ -163,8 +163,9 @@ Then, by their answer:
   `--abandon` on that first line, not a plain `stop`: the interval between whenever that
   stale stamp was set and right now is not work anyone did — nobody was grooming this
   item while it sat there over a crash, a `/clear`, or a weekend — and a plain `stop`
-  would bill that whole dead stretch into `groom-elapsed:` as if it had been real
-  grooming, permanently, since that total is never reset. `--abandon` clears `started:`
+  would bill that whole dead stretch into `groom-elapsed:` — and every token this
+  session spent in it into `groom-tokens:` — as if it had been real grooming,
+  permanently, since neither total is ever reset. `--abandon` clears `started:`
   and `phase:` and stamps `updated:` exactly as a plain `stop` does; it just skips the
   billing that would otherwise turn a stale marker into fabricated history.
 - **They know a session is live and want to proceed anyway.** Their call, and the only

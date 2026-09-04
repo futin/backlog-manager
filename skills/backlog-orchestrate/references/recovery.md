@@ -55,8 +55,8 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   it was a real execute session doing real work, and the elapsed interval is
   the only record of it — so the time is billed, and `--abandon` is not used.
   The cost is real and worth knowing: a crash noticed hours later bills those
-  idle hours into `execute-elapsed:` too, permanently, since the counter never
-  resets. `start` refuses to stamp a file that already carries a marker, so
+  idle hours into `execute-elapsed:` too — and whatever tokens fell inside that
+  window into `execute-tokens:` — permanently, since neither counter resets. `start` refuses to stamp a file that already carries a marker, so
   the clear has to come before the fresh dispatch. Then dispatch again on the
   same worktree and branch, from the project root — **step 4's dispatch line
   unchanged**, `--verbose` included, for the reason `resume-session` above
