@@ -138,6 +138,36 @@ export class AgentsController {
   }
 
   /**
+   * The strip's manual "Resume" button, and the sweeper's own recovery call
+   * (a later task) once it exists — both funnel through
+   * `AgentsService.resume()`, which is where the two are actually told
+   * apart (`origin: 'board'` here, `origin: 'watchdog'` there; see that
+   * method's own doc comment). This route only ever sends `'board'`: it is
+   * reached by a click, and there is no way for an HTTP caller to claim to
+   * be the sweeper instead.
+   *
+   * One field, rebuilt like every other route here: `project` is trimmed
+   * and required, and nothing else in the body is ever read — the same
+   * posture `orchestrate` takes toward a caller-supplied `prompt` (there,
+   * a field exists and is dropped by never being read; here, there is no
+   * field for a caller-supplied prompt to occupy in the first place, since
+   * `AgentsService.RESUME_PROMPT` is a compile-time constant). See that
+   * constant's own comment for why this is a narrower surface than
+   * `orchestrate`'s, not merely an equally-guarded one.
+   *
+   * Guarded for the same reason `dispatch`/`orchestrate` are: this starts a
+   * headless session, so a cross-origin page must not be able to drive it
+   * either. See `origin.guard.ts`.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('resume')
+  resume(@Body() body: { project?: unknown } | undefined): Promise<AgentDispatchResult> {
+    const project = typeof body?.project === 'string' ? body.project.trim() : '';
+    if (project === '') throw new HttpException({ error: 'project is required' }, 400);
+    return this.agents.resume(project, 'board');
+  }
+
+  /**
    * GET, not POST-with-a-path like `plan`'s `itemPath`. `plan`'s argument is
    * an arbitrary absolute file path the client has no other reason to put
    * anywhere visible, so POST keeps it out of access logs and browser

@@ -296,6 +296,22 @@ export async function startOrchestrate(req: StartOrchestrateRequest): Promise<Ag
 }
 
 /**
+ * The strip's manual "Resume" button — `POST /api/agents/resume`, `origin:
+ * 'board'` server-side (`AgentsService.resume()`). One field, matching the
+ * request itself: there is no `prompt`/`ids`/`model` for a caller to send,
+ * because `resume()` builds the whole spawn from a compile-time constant —
+ * see `AgentsService.RESUME_PROMPT`'s own comment for why this request has
+ * nothing to widen the way `StartOrchestrateRequest` above does.
+ */
+export async function resumeOrchestrate(project: string): Promise<AgentDispatchResult> {
+  return unwrap<AgentDispatchResult>(await fetch('/api/agents/resume', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ project })
+  }));
+}
+
+/**
  * The dashboard's own deep link (`?session=<id>`, read by its
  * client/src/lib/deepLink.ts). Built here rather than server-side because the
  * base is per-device: the laptop reaches the dashboard on loopback, the phone
