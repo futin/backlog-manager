@@ -145,15 +145,40 @@ export function clampWatchdogConfig(raw: unknown): WatchdogConfig {
  * Read `file` (default: `watchdogFile()`) and clamp its contents, degrading
  * to `DEFAULT_WATCHDOG_CONFIG` on every kind of failure but never throwing —
  * the same posture `RegistryService.load()` and `readRun` both already take
- * on their own files. The two failure kinds are deliberately NOT reported
- * the same way. A missing file is the ordinary first-run case: nothing has
- * ever been written, and `DEFAULT_WATCHDOG_CONFIG` existing at all is
- * exactly what lets a fresh install need no file — so it degrades silently.
- * A file that IS there and does not parse means something wrote garbage to
- * it (a truncated disk write, a hand-edit gone wrong), which is worth one
- * line on stderr naming the path: whoever finds all-default settings where
- * they expected their own now has somewhere to start looking, the same
- * value `readRun`'s own parse-failure message provides for `run.json`.
+ * on their own files. Spec §5.2 groups "missing, unreadable or non-object
+ * file" together for the DEGRADE (all three land on `DEFAULT_WATCHDOG_CONFIG`,
+ * never a 500) but that is a statement about the return value, not about
+ * whether an operator gets told — and two of the three DO get told, each
+ * with exactly one `console.warn` naming `file`:
+ *
+ * - Missing entirely: the ordinary first-run case. `DEFAULT_WATCHDOG_CONFIG`
+ *   existing at all is exactly what lets a fresh install need no file on
+ *   disk, so there is nothing here worth a warning — an operator who has
+ *   never touched this file does not need to be told it doesn't exist.
+ * - Exists but fails `JSON.parse`: something wrote garbage to it (a
+ *   truncated disk write, a hand-edit gone wrong), which is worth one line
+ *   on stderr naming the path — the same value `readRun`'s own
+ *   parse-failure message provides for `run.json`, and the value
+ *   `orchestrator.service.ts`'s `readOneRun` provides with its own
+ *   "unreadable or not valid JSON, skipping" line.
+ * - Exists, parses, but the top-level value is not a plain object — a bare
+ *   number, string, `null`, or an array (whatever `JSON.parse` can produce
+ *   that isn't `{...}`). This is NOT the same shape as a partial object
+ *   missing some keys, which degrades silently through
+ *   `clampWatchdogConfig`'s own per-field logic below and is treated as an
+ *   ordinary (if outdated) config. A bare `42` or `[]` at the top level is
+ *   not a config under any schema past or future — it means the file was
+ *   overwritten by something else, or truncated to a single JSON token —
+ *   so it warns for the identical reason an unparseable file does: an
+ *   operator staring at all-default settings needs to know this file is
+ *   where the mismatch is, not chase it through the rest of the process.
+ *   `orchestrator.service.ts`'s `readOneRun` draws the same line for
+ *   `run.json` (`isPlausibleRun` fails → "parsed but is not a run,
+ *   skipping") — this mirrors that precedent rather than diverging from
+ *   it. `null` counts as non-object here even though `typeof null ===
+ *   'object'` in JS, and an array counts too even though `Array.isArray`
+ *   is not `typeof`'s business — neither is a config, whatever the
+ *   language quirks say about their `typeof`.
  */
 export function readWatchdogConfig(file: string = watchdogFile()): WatchdogConfig {
   let text: string;
@@ -167,6 +192,10 @@ export function readWatchdogConfig(file: string = watchdogFile()): WatchdogConfi
     raw = JSON.parse(text);
   } catch {
     console.warn(`${file}: exists but does not parse as JSON — using defaults`);
+    return DEFAULT_WATCHDOG_CONFIG;
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    console.warn(`${file}: parsed but is not a config object — using defaults`);
     return DEFAULT_WATCHDOG_CONFIG;
   }
   return clampWatchdogConfig(raw);

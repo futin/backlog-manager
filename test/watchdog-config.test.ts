@@ -119,6 +119,24 @@ describe('readWatchdogConfig / writeWatchdogConfig', () => {
     expect(String(warn.mock.calls[0][0])).toContain(file);
   });
 
+  it.each([
+    ['a bare number', '42'],
+    ['an empty array', '[]'],
+    ['the JSON literal null', 'null']
+  ])('defaults and warns exactly once, naming the path, when the file holds valid JSON that is not a config object (%s)', (_label, json) => {
+    // Valid-but-non-object JSON is a distinct failure shape from "not JSON
+    // at all" (the case above) and from "a partial object" (the case
+    // below, which is silent) — the fix for the reviewer's Important
+    // finding: 42, [], and null must each warn, exactly as an unparseable
+    // file does, because none of the three is a config under any schema.
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, json);
+
+    expect(readWatchdogConfig()).toEqual(DEFAULT_WATCHDOG_CONFIG);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain(file);
+  });
+
   it('clamps a partial file, defaulting the rest and dropping unknown keys', () => {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify({ graceMs: 900_000, junk: 1 }));
