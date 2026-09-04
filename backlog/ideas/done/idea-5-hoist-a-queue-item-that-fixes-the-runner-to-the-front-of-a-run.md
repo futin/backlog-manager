@@ -3,6 +3,9 @@ id: idea-5
 title: Hoist a queue item that fixes the runner to the front of a run
 created: 2026-09-01
 tags: orchestrate, skill
+updated: 2026-09-04T21:03:15Z
+promoted-to: task-13
+groom-elapsed: 358
 ---
 
 ## Idea
