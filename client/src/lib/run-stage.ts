@@ -1,7 +1,7 @@
 import type { MergeMode, OrchestratorRun, RunStage } from '../../../shared/types';
 
 /**
- * The visual register a run stage is read in. Six tones, not fourteen: a
+ * The visual register a run stage is read in. Six tones, not fifteen: a
  * reader scanning a queue wants "is this done / working / waiting / blocked /
  * broken / never-ran", and the stage word itself — which is always printed
  * beside the tone, never replaced by it — carries the finer detail.
@@ -90,7 +90,7 @@ export function stageChipClass(stage: RunStage): string {
  * `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` below look like they could just be
  * `stageGlyph`/`stageChipClass` again, and that similarity is exactly the
  * trap: they answer a different question about a different value. Every
- * export above this comment keys on `RunStage` — the fourteen-member,
+ * export above this comment keys on `RunStage` — the fifteen-member,
  * per-ITEM pipeline union (`pending`, `reviewing`, `merged`, ...). These two
  * key on `OrchestratorRun['status']` — the whole RUN's own four-member
  * lifecycle (`running | done | aborted | failed`), which shares only one

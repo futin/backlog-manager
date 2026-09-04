@@ -517,7 +517,7 @@ describe('runClaimBlock', () => {
     expect(RUN_CLAIMED_STAGES.includes('branched')).toBe(false);
     expect(ATTENTION_RUN_STAGES.includes('branched')).toBe(false);
 
-    /* The SECOND partition of the same fourteen members, the one bug-11
+    /* The SECOND partition of the same fifteen members, the one bug-11
        added: live (a run still holds the item, whether working it or blocked
        on a person) versus exited. It shares the `Record<RunStage, true>`
        literal above deliberately — one object the compiler forces a new

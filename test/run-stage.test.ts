@@ -77,7 +77,7 @@ describe('run stage tones', () => {
  * file, beside `STAGE_TONE`, precisely because the two answer a different
  * question about a different value: a whole RUN's own `status`
  * (`OrchestratorRun['status']`, four members), never one item's `RunStage`
- * (fourteen members). Before the hoist these two maps were only ever
+ * (fifteen members). Before the hoist these two maps were only ever
  * exercised TRANSITIVELY, through whichever component rendered a status
  * chip — this suite is what now pins them directly, the same way the
  * `STAGE_TONE`/`stageGlyph`/`stageChipClass` cases above already pin the

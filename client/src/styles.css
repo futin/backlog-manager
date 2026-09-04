@@ -384,7 +384,7 @@ body {
      Task 9 left every one of these rules untouched and took away one of their
    two callers: ItemCard's own footer chip is gone, because all seven stages it
    chipped now render as the card's own live bar instead (the run-tone modifier
-   at the end of this section). RunDrawer chips all fourteen stages and is the
+   at the end of this section). RunDrawer chips all fifteen stages and is the
    only caller left, which is why these names still read as the board's own —
    they are still the board's legend, just no longer painted on a card. The
    stale marker above is unrelated and still a card's.
@@ -420,7 +420,7 @@ body {
    differently from the rest. */
 .board-card-stage-glyph { font-size: 1.15em; line-height: 1; opacity: .9 }
 /* Only the active tone pulses, and only this glyph does — not the whole chip:
-   a pulsing border on six of fourteen stages would make a busy queue strobe.
+   a pulsing border on six of fifteen stages would make a busy queue strobe.
    Two seconds, and a floor of .45 rather than 0, so it reads as a heartbeat
    rather than a blink. Honoured for everyone who has not asked otherwise;
    the reduced-motion block at the end of this file turns it off. */
@@ -1448,7 +1448,7 @@ body {
 /* The run-level status chip. Its own small class rather than a reuse of
    .board-card-stage: see RunsView.tsx's own comment on RUN_STATUS_GLYPH for
    why a RUN's status (running/done/aborted/failed) and an ITEM's stage
-   (RunStage's fourteen members) are different vocabularies that only
+   (RunStage's fifteen members) are different vocabularies that only
    happen to share one spelling. The colour tokens are the same four
    run-stage.ts already uses for its own tones, though — cyan/green/amber/red
    mean the same thing everywhere in this app. */
