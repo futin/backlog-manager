@@ -526,17 +526,33 @@ export function OrchestrateSheet(
               classifier than a settings file is, so it can say what is
               missing but never promise what adding it will do. It never
               offers to write the file — text and JSON to paste by hand,
-              nothing clickable — an explicit non-goal of the design. */}
+              nothing clickable — an explicit non-goal of the design.
+
+              Review fix round 1 (Minor): the choice of
+              `settings.local.json` over the shared `settings.json` used to
+              live only in this file's own top-of-file comment and
+              `MERGE_ALLOW_SNIPPET`'s — a reader of the rendered hint had no
+              way to learn the alternative existed at all. One sentence below
+              makes that tradeoff legible without touching either the FACT
+              or the LIKELIHOOD sentence on either side of it: per-user takes
+              effect immediately and never risks landing a permission grant
+              in a file the whole team commits, and `settings.json` is named
+              as the deliberate opposite choice for a reader who wants that
+              instead. */}
           {mergeMode === 'merge' && mergeCoverage !== null && !mergeCoverage.covered && (
             <div className="sheet-note orchestrate-merge-hint">
               <p>
                 <code>{project}/.claude/settings.local.json</code> has no{' '}
-                <code>git merge</code> allow rule. The run may still merge
-                without one, but not reliably — the auto-mode classifier's
-                verdict on that exact command varies between runs. Add this
-                to the file, creating it if it does not exist yet (or merge
-                the one entry into an existing <code>permissions.allow</code>{' '}
-                list rather than replacing it):
+                <code>git merge</code> allow rule. This is the per-user file,
+                so the rule stays out of the shared{' '}
+                <code>settings.json</code> your team commits — put it there
+                instead if you want everyone to inherit it. The run may still
+                merge without one, but not reliably — the auto-mode
+                classifier's verdict on that exact command varies between
+                runs. Add this to the file, creating it if it does not exist
+                yet (or merge the one entry into an existing{' '}
+                <code>permissions.allow</code> list rather than replacing
+                it):
               </p>
               <pre className="orchestrate-merge-hint-json">{MERGE_ALLOW_SNIPPET}</pre>
             </div>
