@@ -1,12 +1,40 @@
 import { useEffect, useState } from 'react';
 
-import { ApiError, startOrchestrate } from '../../lib/agents';
+import { ApiError, fetchMergeCheck, startOrchestrate, type MergeCheckResult } from '../../lib/agents';
 import {
   EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction
 } from '../../../../shared/agent';
 import { useSettings } from '../../hooks/useSettings';
-import { RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
-import type { BacklogItem, PermissionMode } from '../../../../shared/types';
+import { MERGE_MODES, RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
+import type { BacklogItem, MergeMode, PermissionMode } from '../../../../shared/types';
+
+/**
+ * The merge-mode picker's own words (design §2.2): each names the OUTCOME a
+ * successful run ends in, never the flag a caller would type — "why would I
+ * pick 'branch'" is a worse question for this control to answer than "why
+ * would I pick 'leave branches for me'". A `Record<MergeMode, string>`
+ * rather than an ordered pair of literal strings, for the same reason
+ * `isMergeMode` is a guard rather than an inline comparison chain
+ * (shared/agent.ts): the compiler refuses to build this file the day
+ * `MergeMode` gains a third member and nobody has decided what this control
+ * calls it.
+ */
+const MERGE_MODE_LABELS: Record<MergeMode, string> = {
+  merge: 'Merge to main',
+  branch: 'Leave branches for me'
+};
+
+/**
+ * The exact JSON the setup hint (§6) tells a reader to paste. One `allow`
+ * entry — `Bash(git merge:*)`, the family-level rule `merge-check.util.ts`'s
+ * own comment names as the plainest of the three shapes it accepts — never
+ * the broader `Bash(git:*)` (grants every git subcommand, not just the one
+ * this run needs) or the narrower `--no-ff` variant (buys nothing extra: the
+ * family rule already covers the literal invocation SKILL.md issues).
+ * `JSON.stringify(..., null, 2)` rather than a hand-typed multi-line
+ * template so this can never drift from actually-valid JSON.
+ */
+const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git merge:*)'] } }, null, 2);
 
 /**
  * OrchestrateSheet — the toolbar's "drain this project's whole groomed
@@ -21,9 +49,13 @@ import type { BacklogItem, PermissionMode } from '../../../../shared/types';
  *     blocked / ready). There is no such endpoint for a whole project, and
  *     brief context point 6 is explicit that there must not be one — the
  *     orchestrator tool's own gate (orchestrate.mjs) is the only truth, and
- *     the run re-gates itself when it starts. So this component has no
- *     fetch effect at all; its "preview" is a pure derivation over props
- *     BoardView already had in hand (see `queue` below).
+ *     the run re-gates itself when it starts. So this component's "preview"
+ *     is a pure derivation over props BoardView already had in hand (see
+ *     `queue` below), never a fetch. Task 8 later added the one genuine
+ *     exception — a `GET /api/agents/merge-check` effect behind the
+ *     merge-mode picker — and it is deliberately built so a failure can
+ *     never gate anything: unlike a blocked LaunchSheet, this sheet stays
+ *     fully usable whether or not that request ever comes back.
  *   - LaunchSheet's whole body is built around one editable `prompt`
  *     textarea for one item. Orchestrate has no prompt field, full stop —
  *     the server owns a constant one (`ORCHESTRATE_PROMPT`,
@@ -100,6 +132,27 @@ export function OrchestrateSheet(
   // included.
   const [model, setModel] = useState(settings.dispatchDefaultModel);
   const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
+  /**
+   * The merge-mode picker (Task 8; design §2.2) — seeded from Settings and
+   * overridable for this launch only, the identical rule `model`/`effort`
+   * above already follow. `'merge'` runs exactly as every launch before this
+   * feature existed; `'branch'` tells the run to stop at a reviewed
+   * `backlog/<id>` branch instead of merging it into `main` (`MergeMode`'s
+   * own doc comment, shared/types.ts, has the full behavioural difference).
+   * See `start` below for why the request always carries this value, even
+   * when it is the untouched default.
+   */
+  const [mergeMode, setMergeMode] = useState<MergeMode>(settings.orchestrateDefaultMergeMode);
+  /**
+   * The setup hint's own data (§6) — whether this project's Claude Code
+   * settings already grant `git merge`. `null` covers three different
+   * states at once: not asked yet, still in flight, and "the request failed
+   * outright" — all three render no hint at all (brief case 7), because a
+   * hint is not worth a loading spinner or an error banner bolted onto a
+   * control that launches a run just fine without it. See the effect below
+   * for exactly when this is fetched.
+   */
+  const [mergeCoverage, setMergeCoverage] = useState<MergeCheckResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -137,6 +190,49 @@ export function OrchestrateSheet(
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  /**
+   * The setup hint's data source (§6) — fetched only while `mergeMode` is
+   * actually `'merge'` (brief case 6: branch mode fetches nothing at all).
+   * Branch mode never touches `main`, so this project's `git merge`
+   * coverage is none of its business — asking anyway would spend a request
+   * nobody reads the answer to, and risk a hint flashing into view for the
+   * one instant between picking 'merge' and picking 'branch' right back.
+   *
+   * `alive` is `LaunchSheet`'s own `fetchAgentPlan` effect's guard (see that
+   * file), restated here rather than shared — this file's own header
+   * comment already explains why a sibling component repeats small idioms
+   * like this instead of factoring them out. It matters for two reasons at
+   * once: a slow response landing after the mode has flipped back to
+   * `branch`, or after this sheet has closed, must not call
+   * `setMergeCoverage` on a render that no longer wants the answer — which
+   * would otherwise be either a stale hint or React's own "cannot update
+   * state on an unmounted component" warning.
+   *
+   * The `.catch` is deliberately silent (brief case 7): this hint exists to
+   * make a merge more likely to succeed, not to gate one, and a network
+   * hiccup here must cost the user nothing more than a hint that never shows
+   * up. `error`/`busy` stay `start`'s own state below, untouched either way
+   * — a failed merge-check must never block or blemish a launch that
+   * otherwise works.
+   */
+  useEffect(() => {
+    if (mergeMode !== 'merge') {
+      setMergeCoverage(null);
+      return;
+    }
+    let alive = true;
+    fetchMergeCheck(project)
+      .then((result) => {
+        if (alive) setMergeCoverage(result);
+      })
+      .catch(() => {
+        if (alive) setMergeCoverage(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mergeMode, project]);
 
   /**
    * The queue preview — deliberately client-side and deliberately only an
@@ -228,6 +324,13 @@ export function OrchestrateSheet(
       // "no flag" from a genuinely missing key rather than an empty string.
       ...(model === '' ? {} : { model }),
       ...(effort === '' ? {} : { effort }),
+      // Unlike model/effort above and ids below, this is NEVER wrapped in a
+      // conditional spread — see `mergeMode`'s own state comment. It is the
+      // sheet's explicit answer to "what should this run do", sent even
+      // when it equals the untouched Settings default, because inferring it
+      // server-side from an absent field would put that one decision in two
+      // places (design §2.2).
+      mergeMode,
       // The same absent-not-empty convention, for the field it matters most
       // on: `ids` rides along ONLY for a strict subset. A full list would be
       // a different instruction from no list at all (see `selected` and
@@ -399,7 +502,45 @@ export function OrchestrateSheet(
                 ))}
               </select>
             </label>
+
+            <label className="sheet-field">
+              <span className="set-name">Merge mode</span>
+              <select
+                aria-label="Merge mode"
+                value={mergeMode}
+                onChange={(e) => setMergeMode(e.target.value as MergeMode)}
+              >
+                {MERGE_MODES.map((m) => (
+                  <option key={m} value={m}>{MERGE_MODE_LABELS[m]}</option>
+                ))}
+              </select>
+            </label>
           </div>
+
+          {/* The setup hint (§6) — shown only under `merge` mode, and only
+              once the check has actually come back uncovered (brief cases
+              4/5/6/7 above). States the missing path as FACT and the effect
+              as a LIKELIHOOD, the same two-part shape `dispatchGate`'s own
+              reason string uses (shared/agent.ts) and for the same reason:
+              no reader of this sentence is closer to the auto-mode
+              classifier than a settings file is, so it can say what is
+              missing but never promise what adding it will do. It never
+              offers to write the file — text and JSON to paste by hand,
+              nothing clickable — an explicit non-goal of the design. */}
+          {mergeMode === 'merge' && mergeCoverage !== null && !mergeCoverage.covered && (
+            <div className="sheet-note orchestrate-merge-hint">
+              <p>
+                <code>{project}/.claude/settings.local.json</code> has no{' '}
+                <code>git merge</code> allow rule. The run may still merge
+                without one, but not reliably — the auto-mode classifier's
+                verdict on that exact command varies between runs. Add this
+                to the file, creating it if it does not exist yet (or merge
+                the one entry into an existing <code>permissions.allow</code>{' '}
+                list rather than replacing it):
+              </p>
+              <pre className="orchestrate-merge-hint-json">{MERGE_ALLOW_SNIPPET}</pre>
+            </div>
+          )}
 
           {error !== null && <div className="sheet-error">{error}</div>}
 

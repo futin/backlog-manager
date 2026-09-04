@@ -1028,6 +1028,19 @@ body {
 .orchestrate-preview-action.groom { color: var(--mustard) }
 .orchestrate-preview-action.execute { color: var(--cyan) }
 
+/* The merge-mode setup hint (Task 8; design §6). Plain `.sheet-note` tone,
+   not `.sheet-error`'s amber: the sheet still launches a perfectly good run
+   without this file, so the copy is a fact plus a likelihood, never an
+   alarm. The JSON block reuses `.sheet-prompt`'s own monospace/steel
+   treatment rather than inventing a second "block of code" look this app
+   does not have anywhere else. */
+.orchestrate-merge-hint p { margin: 0 0 6px }
+.orchestrate-merge-hint-json {
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.5; color: var(--ink);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
+  padding: 8px; margin: 0; overflow-x: auto; white-space: pre;
+}
+
 /* Attention entries share one amber tint regardless of kind (needs-answers /
    parked / fix-exhausted): RunAttention's own doc comment calls all three
    "things a human should look at", and splitting that into three sub-tones

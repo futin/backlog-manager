@@ -304,3 +304,51 @@ export async function startOrchestrate(req: StartOrchestrateRequest): Promise<Ag
 export function sessionUrl(linkBase: string, sessionId: string): string {
   return `${linkBase.replace(/\/+$/, '')}/?session=${encodeURIComponent(sessionId)}`;
 }
+
+/**
+ * Body of `GET /api/agents/merge-check` (Task 6). Mirrors the server's own
+ * `MergeCheckResult` (server/src/agents/merge-check.util.ts) field for
+ * field, but is declared here rather than promoted into shared/types.ts —
+ * the same call `StartOrchestrateRequest` above already makes, for the same
+ * reason: promotion waits for a second consumer to need it, and this
+ * client-only declaration is exactly that second consumer without touching
+ * the server side, which this task was never asked to do.
+ */
+export interface MergeCheckResult {
+  covered: boolean;
+  /** Absolute path of the settings file whose `permissions.allow` entry
+   *  covers `git merge`, or `null` when nothing does. Read-only, display-only
+   *  data for the orchestrate sheet's setup hint — this client only ever
+   *  reads it, never writes it (the design's own non-goal: the sheet must
+   *  never offer to write the file for the user). */
+  source: string | null;
+}
+
+/**
+ * `GET /api/agents/merge-check` (Task 6) — a read-only guess at whether this
+ * project's Claude Code settings already grant `git merge`, so the
+ * orchestrate sheet can hint at the one-time setup that makes a `merge`-mode
+ * run's last step reliable instead of a coin flip against the auto-mode
+ * classifier (see the design doc's "Why this exists"). `project` rides in
+ * the query string, not a POST body, mirroring the server's own transport
+ * choice (`AgentsController.mergeCheck`'s own comment): unlike
+ * `fetchAgentPlan`'s `itemPath`, this `project` is a path the client already
+ * pulled out of `/api/projects` to build the board, so a query string
+ * discloses nothing an access log couldn't already read off that response.
+ *
+ * Unlike every neighbour above, a rejection here is not this caller's
+ * problem to turn into a rendered error — it is a missing HINT, not a
+ * missing capability, and the one caller (OrchestrateSheet's own effect)
+ * deliberately swallows a thrown `ApiError` into "show no hint" rather than
+ * anything that could block or blemish a launch that otherwise works fine.
+ *
+ * No shape guard, for the same reason `fetchArchivedRun` above carries
+ * none: the response is read once and rendered once, by the same effect
+ * that requested it — there is no long-lived hook state for a malformed
+ * shape to lie quietly inside of.
+ */
+export async function fetchMergeCheck(project: string): Promise<MergeCheckResult> {
+  return unwrap<MergeCheckResult>(
+    await fetch(`/api/agents/merge-check?project=${encodeURIComponent(project)}`)
+  );
+}

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -319,10 +319,41 @@ describe('OrchestrateSheet', () => {
     return { onClose, refresh };
   }
 
-  function stubOrchestrate(res: { ok: boolean; status: number; body: unknown }): { url: string; body: unknown }[] {
+  /**
+   * @param res The `/api/agents/orchestrate` response this test cares about
+   *   — unchanged from before Task 8.
+   * @param mergeCheck What `/api/agents/merge-check` answers. Defaults to
+   *   "covered", which is what keeps Task 8's merge-mode picker from ever
+   *   fetching that endpoint. Task 8's merge-mode picker seeds `mergeMode`
+   *   from Settings, whose own default is `'merge'` — so every sheet in this
+   *   describe block now fires a `/api/agents/merge-check` request the
+   *   instant it mounts, whether or not the test below has anything to do
+   *   with merge mode at all. Answered here, and kept OUT of `calls`, for
+   *   the same reason `stub()`'s `/api/agents/plan`/`dispatch` branches
+   *   above answer requests the mutual-exclusion cases never asked about:
+   *   `calls` exists to record the one request most of these tests actually
+   *   care about (the launch itself), and a merge-check row appearing in it
+   *   would fail `toHaveLength(1)`/`toEqual` assertions that predate this
+   *   feature and have nothing to do with it. The default's `covered: true`
+   *   also keeps the setup hint (see the "merge-mode picker" section below)
+   *   from rendering and leaking into an unrelated test's text assertions.
+   *   A caller that DOES care passes a literal `{ covered, source }` to
+   *   choose the hint's own answer, or the string `'fail'` to make the
+   *   request reject outright (brief case 7).
+   */
+  function stubOrchestrate(
+    res: { ok: boolean; status: number; body: unknown },
+    mergeCheck: { covered: boolean; source: string | null } | 'fail' = { covered: true, source: null }
+  ): { url: string; body: unknown }[] {
     const calls: { url: string; body: unknown }[] = [];
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      calls.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const url = String(input);
+      if (url.includes('/api/agents/merge-check')) {
+        return mergeCheck === 'fail'
+          ? Promise.reject(new Error('network down'))
+          : Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mergeCheck) } as Response);
+      }
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       return Promise.resolve({ ok: res.ok, status: res.status, json: () => Promise.resolve(res.body) } as Response);
     }) as jest.Mock;
     return calls;
@@ -432,8 +463,12 @@ describe('OrchestrateSheet', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(calls).toHaveLength(1);
     expect(calls[0].url.endsWith('/api/agents/orchestrate')).toBe(true);
+    // `mergeMode: 'merge'` here is Task 8's own addition (Settings' default,
+    // untouched by this test) — see that feature's own describe block below
+    // for the cases that pin ITS behaviour; this assertion only has to keep
+    // proving it rides along unconditionally, same as every other body here.
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', model: 'opus', effort: 'high', permissionMode: 'plan'
+      project: '/abs/alpha', model: 'opus', effort: 'high', permissionMode: 'plan', mergeMode: 'merge'
     });
     expect(onClose).toHaveBeenCalled();
   });
@@ -443,7 +478,7 @@ describe('OrchestrateSheet', () => {
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
   });
 
   // --- Test case 7 ---------------------------------------------------
@@ -569,20 +604,25 @@ describe('OrchestrateSheet', () => {
     expect(boxes.every((b) => (b as HTMLInputElement).checked)).toBe(true);
   });
 
-  /* The regression the whole "strict subset" rule exists for. An untouched
-     sheet must send the request it sent before this feature existed — no
-     `ids` key at all — because a full list is not the same instruction: it
-     freezes the run to a snapshot of the queue taken when the sheet opened,
-     and an item groomed and committed in the meantime would be silently
-     dropped from a run the user believes is draining everything. */
-  it('sends no ids at all when nothing was unchecked', async () => {
+  /* The regression the whole "strict subset" rule exists for — and, since
+     Task 8, the task brief's own case 8: `mergeMode` and `ids` have
+     deliberately opposite absent-value semantics (the former is always
+     sent, the latter only for a strict subset) and share this one request
+     body, which is exactly where that distinction would get confused. An
+     untouched sheet must send the request it sent before this feature
+     existed, `mergeMode` aside — no `ids` key at all — because a full list
+     is not the same instruction: it freezes the run to a snapshot of the
+     queue taken when the sheet opened, and an item groomed and committed in
+     the meantime would be silently dropped from a run the user believes is
+     draining everything. */
+  it('sends no ids at all when nothing was unchecked (brief case 8)', async () => {
     const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     renderSheet({ items: THREE });
 
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
   });
 
   it('sends exactly the still-checked ids, in board order, once one is unchecked', async () => {
@@ -594,7 +634,7 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', ids: ['bug-1', 'task-2']
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', ids: ['bug-1', 'task-2']
     });
   });
 
@@ -628,7 +668,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', ids: ['task-2']
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', ids: ['task-2']
     });
   });
 
@@ -648,7 +688,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
   });
 
   /* An ungroomed item is a legal pick. The run really will queue it, gate
@@ -675,7 +715,7 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', ids: ['bug-2']
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', ids: ['bug-2']
     });
   });
 
@@ -720,7 +760,166 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+  });
+
+  // =====================================================================
+  // The merge-mode picker and its setup hint (Task 8; design §2.2/§6). The
+  // eight cases below are numbered to match the task brief's own table
+  // exactly — case 8 is the regression guard fixed into the ids tests
+  // above, not a new test here, since it pins the SHARED request body those
+  // tests already cover rather than anything specific to this picker.
+  // =====================================================================
+
+  // --- Test case 1 -----------------------------------------------------
+  it('seeds the merge-mode picker from the Settings default "branch"', () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    renderSheet();
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect(picker.value).toBe('branch');
+    // The design's own binding wording (§2.2): each option names the
+    // OUTCOME, never the flag — pinned here so a future edit that quietly
+    // reverts to 'merge'/'branch' as the visible label fails a test instead
+    // of only a design-doc diff.
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me']);
+  });
+
+  // --- Test case 2 -----------------------------------------------------
+  // Seeded on 'branch' specifically (not the Settings default of 'merge')
+  // so a passing assertion can only mean the OVERRIDE was sent, never a
+  // default that happened to already read 'merge'.
+  it('sends the picked mergeMode once the user switches away from the seeded default', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+
+    await userEvent.selectOptions(screen.getByLabelText('Merge mode'), 'merge');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+  });
+
+  // --- Test case 3 -----------------------------------------------------
+  // The brief's own wording: sent on EVERY launch, never omitted — even
+  // an untouched sheet, sitting on exactly the Settings default nobody
+  // picked, must still say so explicitly. (`stubOrchestrate`'s default
+  // merge-check answer is 'covered', so this is not also exercising the
+  // hint — that is cases 4/5/6/7's job below.)
+  it('sends the Settings default mergeMode on an untouched launch, never omitted', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+  });
+
+  // --- Test case 4 -----------------------------------------------------
+  it('shows the setup hint, naming the file and the JSON to paste, when merge-check reports no coverage', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: false, source: null });
+    renderSheet();
+
+    // `findBy`, not a synchronous `getBy`: the hint depends on the
+    // merge-check response actually landing, and this is the one case in
+    // this section where waiting for something to APPEAR is the right tool
+    // — case 5 below is the mirror case (waiting for something to stay
+    // ABSENT), which `findBy` cannot prove and is handled differently.
+    expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
+    expect(screen.getByText('git merge')).toBeInTheDocument();
+    expect(screen.getByText('Bash(git merge:*)', { exact: false })).toBeInTheDocument();
+  });
+
+  // --- Test case 5 -----------------------------------------------------
+  // A controlled deferred + `act`, not `findBy`/`waitFor`, because the
+  // claim here is an ABSENCE. `findByText` retries until something APPEARS
+  // and would simply time out trying to prove a negative, and a bare
+  // `waitFor(() => expect(...).not.toBeInTheDocument())` would pass at
+  // t=0 — before the merge-check round trip (and the `mergeCoverage`
+  // update it drives) has happened at all — which would let a real
+  // inversion of the hint's own `!mergeCoverage.covered` guard slip
+  // straight through this test undetected. Awaiting the SPECIFIC promise
+  // this mock handed out, inside `act`, is what makes "settled, and still
+  // nothing rendered" an actual claim about mounted state rather than
+  // about the instant of render, before `mergeCoverage` has even left
+  // `null`. Same technique dispatch-button.test.tsx's own
+  // "marks itself busy while the re-ask is in flight" case already uses.
+  it('shows no hint once merge-check reports coverage', async () => {
+    let settle: (value: Response) => void = () => {};
+    global.fetch = jest.fn(() => new Promise<Response>((resolve) => { settle = resolve; })) as jest.Mock;
+    renderSheet();
+
+    await act(async () => {
+      settle({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ covered: true, source: '/abs/alpha/.claude/settings.json' })
+      } as Response);
+    });
+
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+  });
+
+  // --- Test case 6 -----------------------------------------------------
+  // No `act`/`waitFor` needed here at all: the decision not to fetch is
+  // made SYNCHRONOUSLY, in the effect's own `mergeMode !== 'merge'` branch
+  // (OrchestrateSheet.tsx), which RTL's `render` already flushes before
+  // returning — there is no async step for this assertion to race against.
+  it('never fetches merge-check at all when branch mode is selected', () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    const fetchSpy = jest.fn();
+    global.fetch = fetchSpy as unknown as jest.Mock;
+    renderSheet();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+  });
+
+  // --- Test case 7 -----------------------------------------------------
+  // A controlled deferred REJECTION + `act`, deliberately awaited BEFORE
+  // clicking start — not after, and not interleaved via plain `waitFor`.
+  // `start` (OrchestrateSheet.tsx) calls `setError(null)` as its own very
+  // first line, unconditionally, the instant it is pressed: a version of
+  // this test that clicked start first and only checked for "no error" at
+  // the end would have that click silently erase the exact evidence a
+  // merge-check leak would leave behind, passing whether or not the leak
+  // happened. Splitting it into "let the failed request settle and prove
+  // nothing rendered from it" first, THEN "start still launches", is what
+  // makes each half a claim about its own step rather than one step's
+  // side effect quietly covering for the other's bug.
+  it('shows no hint and surfaces no error once merge-check fails, then still launches on start', async () => {
+    let reject: (err: Error) => void = () => {};
+    const calls: { url: string; body: unknown }[] = [];
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/agents/merge-check')) {
+        return new Promise<Response>((_resolve, rej) => { reject = rej; });
+      }
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      return Promise.resolve({
+        ok: true, status: 201, json: () => Promise.resolve({ sessionId: 'sess-9' })
+      } as Response);
+    }) as jest.Mock;
+    const { onClose, refresh } = renderSheet();
+
+    await act(async () => {
+      reject(new Error('network down'));
+    });
+
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+    // A substring match, not an exact one: a leak would render whatever
+    // `error` holds VERBATIM (no fixed prefix), so it could arrive wrapped
+    // (`Error: network down`, `String(e)`, ...) rather than as the bare
+    // message this mock rejects with — an exact-match query would miss it.
+    expect(screen.queryByText(/network down/)).not.toBeInTheDocument();
+
+    // The hint failing to show up must not have cost the launch anything —
+    // a hint is not worth blocking a run over, and this is the step that
+    // proves it literally does not.
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('closes on Escape', async () => {
