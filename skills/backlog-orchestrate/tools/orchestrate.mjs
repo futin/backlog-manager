@@ -1378,8 +1378,6 @@ function cmdStage(argv) {
   return 0
 }
 
-const MERGE_MODE_USAGE = 'usage: orchestrate.mjs merge-mode <merge|branch> --note <text>'
-
 // Records the one degrade design §5.2 allows: a run that started (or was
 // previously left) in `merge` mode gives up on merging for the REST of the
 // queue, because the evidence this whole feature is built on (§ "Why this
@@ -1414,9 +1412,20 @@ function cmdMergeMode(argv) {
   // Validated before the run is even read, same "a problem with THIS call"
   // reasoning `stage`'s own unknown-stage check uses: a target outside
   // MERGE_MODES, or a missing --note, is wrong regardless of what run
-  // exists.
-  if (!MERGE_MODES.includes(target) || note === undefined) {
-    throw new OrchestrateError(MERGE_MODE_USAGE, 1)
+  // exists. Split into two throws, each naming the half that failed and
+  // echoing the value actually received, in the same register cmdInit's own
+  // --merge-mode check uses just above (`` `--merge-mode must be one of ...
+  // (got ...)` ``) — a single bare usage string here told the reader THAT
+  // the call was wrong but not WHICH of the two required pieces of argv was
+  // the problem, unlike every other validation failure in this file.
+  if (!MERGE_MODES.includes(target)) {
+    throw new OrchestrateError(
+      `merge-mode target must be one of ${MERGE_MODES.join(', ')} (got ${target === undefined ? 'no value' : target})`,
+      1,
+    )
+  }
+  if (note === undefined) {
+    throw new OrchestrateError('merge-mode requires --note <text> (got no value)', 1)
   }
 
   const dir = projectDir(orchHome(), resolveProjectRoot())

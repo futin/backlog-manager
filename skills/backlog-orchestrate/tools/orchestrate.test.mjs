@@ -750,6 +750,26 @@ test('merge-mode merge on a run already effective-branch is refused, changing no
   assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
 })
 
+// Task-3 review fix round (Minor) — the one-way-transition logic is covered
+// above only for a run that REACHED branch mode via a downgrade (`init`
+// plain, then `merge-mode branch`). That covers the guard by construction
+// (it only ever checks `mergeModeEffective`, not how the run got there), but
+// the path where a run started in branch mode from `init --merge-mode
+// branch` directly was never exercised by any test — this pins it: a
+// `merge-mode branch --note x` call against a run that was ALREADY
+// effective-branch from its very first write must be refused exactly like
+// case 9's downgrade-then-re-record scenario, changing nothing.
+test('merge-mode branch on a run that started in branch mode via init is refused, changing nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'merge-mode', 'branch', '--note', 'x')
+
+  assert.notEqual(out.status, 0)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
 // Case 10 — the status summary must not report a branch-mode run's
 // progress as "N/M merged": that wording is only true under merge mode.
 test('status reads in branch-mode wording for a branch-mode run, not "N/M merged"', (t) => {
