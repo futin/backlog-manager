@@ -71,8 +71,18 @@ services:
       - backlog-manager-node-modules:/app/node_modules
       # The registry names projects by absolute host path, so those paths
       # have to mean the same thing inside the container. Read-only
-      # throughout: the server never writes; backlog.mjs does, on the host.
+      # throughout EXCEPT settings/ below: the server never writes anything
+      # else here — backlog.mjs and orchestrate.mjs do, on the host.
       - ${HOME}/.backlog-manager:${HOME}/.backlog-manager:ro
+      # The one directory the server itself writes to — watchdog.json alone
+      # (watchdog-config.util.ts). A nested mount of a whole directory,
+      # deliberately not of the file: a bind mount of a path that does not
+      # exist yet on the host is created as a directory, never as a file, so
+      # mounting the file itself would either fail on a fresh machine or
+      # silently create a directory where a file was expected either way.
+      # Read-write is scoped to exactly this subtree; everything else under
+      # ~/.backlog-manager stays covered by the :ro mount above.
+      - ${HOME}/.backlog-manager/settings:${HOME}/.backlog-manager/settings
       - ${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:ro
 
   client:

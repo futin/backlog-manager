@@ -86,6 +86,8 @@ Everything lives in `.env`; `.env.example` documents each key.
 | `BM_AGENTS` | off | Turns on dispatching backlog items to `../claude-agents-dashboard` |
 | `BM_AGENTS_URL` | `http://127.0.0.1:4173` | The dashboard's API origin — its `PORT`, not its Vite port |
 | `BM_AGENTS_TOKEN` | empty | Sent as `Authorization: Bearer …` when the dashboard sets `ANSWER_TOKEN` |
+| `BM_WATCHDOG_FILE` | `~/.backlog-manager/settings/watchdog.json` | Where the server itself writes the run watchdog's own settings |
+| `BM_WATCHDOG` | on | `off` disables the run watchdog entirely — the operator's kill switch, separate from its Settings toggle |
 
 A project outside `BM_PROJECT_ROOT` is invisible to the container and is
 reported as missing on `/api/projects` rather than silently dropped from the
