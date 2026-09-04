@@ -64,12 +64,183 @@ export function registerProject(root, file = registryFile()) {
   fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
 }
 
+// The registry's only removal path, and the exact counterpart to
+// registerProject's upsert: same file, same single writer, same raw
+// absolute-path key. Returns true when an entry was removed, false when the
+// path was not registered at all.
+//
+// Removal exists because the upsert has no undo and this tool is the registry's
+// ONLY writer (CLAUDE.md's hard invariant), so the repair for an entry that
+// should never have been written has to live here too — not in the server,
+// which is read-only over this file by the same invariant, and not in a text
+// editor, which is not a path anything can test. bug-17 is what made that
+// concrete: a per-item worktree registered as a phantom project, still on the
+// board after the directory it named was gone.
+//
+// Keyed on an exact string compare against `path`, deliberately not a realpath
+// and not a basename match: that is precisely how registerProject keys its
+// upsert, and a removal that resolved paths differently from the insert could
+// delete an entry the caller never named. It also means an entry pointing at a
+// directory that no longer exists — the common case, since a worktree is
+// deleted the moment its item merges — is still removable.
+//
+// An unreadable or corrupt registry is `false`, not a throw: there is nothing
+// to remove from a file that holds no entries this function can see, and the
+// caller's "not registered" message says exactly that.
+export function unregisterProject(root, file = registryFile()) {
+  let registry
+  try {
+    registry = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch {
+    return false
+  }
+  if (!Array.isArray(registry.projects)) return false
+
+  const remaining = registry.projects.filter((p) => p.path !== root)
+  if (remaining.length === registry.projects.length) return false
+
+  // Assigning back into the parsed object rather than writing a fresh
+  // `{ projects }` keeps any other top-level key a future version of the file
+  // might carry, exactly as registerProject's own read-modify-write does.
+  registry.projects = remaining
+  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
+  return true
+}
+
+// Is `dir` the top of a LINKED GIT WORKTREE? Returns a
+// `{ worktree, gitdir, projectRoot }` description if so, or null for anything
+// else — an ordinary clone, a main working tree, a submodule working tree, or a
+// directory with no `.git` at all.
+//
+// This is the SECOND copy of this function in the plugin; the first is
+// `linkedWorktreeInfo` in skills/backlog-orchestrate/tools/orchestrate.mjs,
+// where it backs that tool's refusal to run from inside a worktree at all.
+// Duplicated rather than imported for the reason that file's header states:
+// plugin skill directories are installed as independent copies of whatever
+// shipped at sync time, and a later prune of one skill's tools/ must never
+// break another's — so one skill's tool may never import another's. The two
+// copies must stay behaviourally identical; a change to git's own layout
+// invalidates both at once, and both suites build a real submodule so it fails
+// loudly in both places rather than quietly in one.
+//
+// The whole discriminator is what `<dir>/.git` IS, and it takes two small reads
+// rather than a `git rev-parse` subprocess:
+//
+//   - a DIRECTORY — ordinary clone or main tree. Not a worktree.
+//   - a FILE whose `gitdir:` target contains a `commondir` entry — a linked
+//     worktree. This is the case the registry must never key on.
+//   - a FILE whose target has NO `commondir` — a submodule working tree. Not a
+//     worktree, and registering it under its own path is the correct answer.
+//
+// That last case is why "`.git` is a file" is not on its own a sufficient test,
+// and it is the reason this discriminator exists here at all rather than a
+// cheap statSync in registryRoot below: resolveRoot's own comment says its
+// existsSync covers "a directory for a normal clone, a file for a worktree or
+// submodule", which is exactly right for finding a backlog/ store and exactly
+// wrong for deciding what to write into the registry. The distinction was
+// verified against real git plumbing rather than assumed: a worktree gitdir
+// (`<main>/.git/worktrees/<name>`) carries `HEAD commondir gitdir index logs
+// refs`, a submodule gitdir (`<super>/.git/modules/<name>`) carries `HEAD
+// config description hooks index info logs objects packed-refs refs`.
+// `commondir` is present in exactly one of them.
+//
+// Both pointers can be relative, and both are resolved against the right base:
+// the `.git` file's `gitdir:` against the directory holding that file (a
+// submodule's is written relative, and git can be configured to write relative
+// worktree pointers too), and `commondir` against the gitdir itself (`../..` in
+// practice). `projectRoot` — the main working tree, i.e. the common git dir's
+// parent — is best-effort and may come back null: a bare main repo has no
+// working tree to name.
+export function linkedWorktreeInfo(dir) {
+  const gitEntry = path.join(dir, '.git')
+  let stat
+  try {
+    stat = fs.statSync(gitEntry)
+  } catch {
+    return null
+  }
+  if (!stat.isFile()) return null
+
+  let pointer
+  try {
+    pointer = fs.readFileSync(gitEntry, 'utf8')
+  } catch {
+    return null
+  }
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(pointer)
+  if (!match) return null
+  const gitdir = path.resolve(dir, match[1])
+
+  let commonRaw
+  try {
+    commonRaw = fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim()
+  } catch {
+    // No commondir — a submodule (or a gitdir this process cannot read, in
+    // which case rewriting the registry on a guess would be worse than the
+    // status quo).
+    return null
+  }
+  const commonDir = path.resolve(gitdir, commonRaw)
+
+  // The main tree is the common git dir's parent, but only when that common dir
+  // actually IS a `.git` directory inside a working tree. A bare main repo's
+  // common dir is the repository itself (`/srv/foo.git`), whose parent is not a
+  // checkout of anything.
+  let projectRoot = null
+  if (path.basename(commonDir) === '.git') {
+    try {
+      if (fs.statSync(commonDir).isDirectory()) projectRoot = path.dirname(commonDir)
+    } catch {
+      projectRoot = null
+    }
+  }
+
+  return { worktree: dir, gitdir, projectRoot }
+}
+
+// Maps a root resolved by `resolveRoot` onto the path that belongs in the
+// registry, or null for "register nothing".
+//
+// These are the same path in every ordinary case and differ in exactly one,
+// which is bug-17: a per-item orchestrator worktree got registered as a
+// standalone project — `.worktrees/bug-13`, name "bug-13" — a phantom sixth
+// project on the board that outlived the worktree itself, since a worktree is
+// deleted the moment its item merges.
+//
+// resolveRoot is not at fault and is deliberately unchanged: an execute session
+// running inside a worktree MUST resolve backlog/ to that worktree's own copy,
+// which is the whole reason its walk accepts a `.git` file. The registry is the
+// one consumer of that root for which the worktree is the wrong answer — it
+// stores absolute host paths that the board, the item-body allowlist and the
+// orchestrator all key on — so the mapping lives at this seam alone rather than
+// in the walk every other command shares.
+//
+// The main tree is the answer rather than a flat refusal because the worktree's
+// items merge back into it: the main tree IS the project this capture belongs
+// to, and it is almost always already registered, so the upsert degrades to a
+// harmless name refresh. Null is reserved for the one case where no main-tree
+// path can be named at all (a bare main repo), where refusing to write beats
+// inventing a path nothing else will ever read.
+export function registryRoot(root) {
+  const worktree = linkedWorktreeInfo(root)
+  if (!worktree) return root
+  return worktree.projectRoot
+}
+
 // Registration must never fail the command that triggered it: a capture that
 // exits non-zero because a dashboard's bookkeeping file was unwritable would
-// teach people not to capture. stderr and move on.
+// teach people not to capture. stderr and move on. The one refusal registryRoot
+// can hand back gets the same treatment for the same reason — a linked worktree
+// off a bare main repo is a real place to work, just not a place whose path
+// belongs in the registry, and the capture itself is still perfectly valid.
 function registerBestEffort(root) {
+  const target = registryRoot(root)
+  if (target === null) {
+    console.error(`registry update skipped (board will not list this project): ${root} is a linked git worktree whose main working tree could not be determined`)
+    return
+  }
   try {
-    registerProject(root)
+    registerProject(target)
   } catch (e) {
     console.error(`registry update failed (board will not list this project): ${e.message}`)
   }
@@ -979,14 +1150,15 @@ function frontmatterBlock(rawText) {
 const USAGE = `usage: backlog.mjs <command>
 
 commands:
-  init   create the backlog/ store in the current repo
-  root   print the resolved backlog/ directory
-  new    print a new item's path and frontmatter (writes nothing)
-  board  print the board of open items (bugs, ideas, tasks, refactors)
-  show   print an item's absolute path and frontmatter
-  move   move an item into done or out-of-scope
-  start  mark an open bug or task as in progress
-  stop   clear the in-progress marker`
+  init        create the backlog/ store in the current repo
+  root        print the resolved backlog/ directory
+  new         print a new item's path and frontmatter (writes nothing)
+  board       print the board of open items (bugs, ideas, tasks, refactors)
+  show        print an item's absolute path and frontmatter
+  move        move an item into done or out-of-scope
+  start       mark an open bug or task as in progress
+  stop        clear the in-progress marker
+  unregister  drop a project from the board registry by path`
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
 
@@ -997,6 +1169,11 @@ const BOARD_USAGE = `usage: backlog.mjs board [--section <bugs|ideas|tasks|refac
 const SHOW_USAGE = `usage: backlog.mjs show <id>`
 
 const MOVE_USAGE = `usage: backlog.mjs move <id> done|out-of-scope`
+
+// The path is spelled out in the usage line because it is mandatory: see the
+// CLI block below for why this verb has no cwd default when every other one
+// resolves its target from where it stands.
+const UNREGISTER_USAGE = `usage: backlog.mjs unregister <project path>`
 
 // One constant for both verbs: they are a pair, and someone who mistyped one
 // of them is the person most likely to want the other named right there.
@@ -1306,6 +1483,43 @@ export function main(argv) {
     }
 
     console.log(itemPath)
+    return 0
+  }
+
+  // The registry's one removal path, and the only command in this file that
+  // takes a project path instead of deriving one. That is deliberate: every
+  // other verb here acts on the repo you are standing in, but a bare
+  // `unregister` that silently dropped whatever project that happened to be is
+  // an accident the registry has no undo for — and the entry most likely to
+  // need removing names a directory you cannot stand in, because it no longer
+  // exists. Resolved against cwd so a relative argument works, which leaves an
+  // absolute one byte-identical apart from normalisation; the compare against
+  // the stored path is exact either way, matching the upsert's own key.
+  //
+  // A path that is not registered is exit 1, never a silent success: the
+  // overwhelmingly likely cause is a typo, and reporting "unregistered" for a
+  // no-op would hide it behind the very reassurance the caller was looking for.
+  if (cmd === 'unregister') {
+    const target = argv[1]
+    if (!target) {
+      console.error(UNREGISTER_USAGE)
+      return 1
+    }
+
+    const resolved = path.resolve(target)
+    let removed
+    try {
+      removed = unregisterProject(resolved)
+    } catch (e) {
+      console.error(`registry update failed: ${e.message}`)
+      return 1
+    }
+
+    if (!removed) {
+      console.error(`not registered: ${resolved}`)
+      return 1
+    }
+    console.log(`unregistered ${resolved}`)
     return 0
   }
 

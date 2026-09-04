@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, registryFile, startItem, stopItem } from './backlog.mjs'
+import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem } from './backlog.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
@@ -1891,6 +1891,220 @@ test('registerProject starts fresh over a corrupt registry rather than failing',
   registerProject('/abs/one', file)
   const written = JSON.parse(fs.readFileSync(file, 'utf8'))
   assert.equal(written.projects.length, 1)
+})
+
+// --- bug-17: a linked worktree must never be registered as its own project ---
+// The registry stores absolute host paths and every consumer keys on them: the
+// board lists them, the item-body allowlist is built from them, the orchestrator
+// keys a run under one. A per-item orchestrator worktree is none of those things
+// — it is deleted the moment its item merges — yet one was registered as a
+// standalone project named "bug-13" and outlived the directory it pointed at.
+//
+// resolveRoot is NOT the bug and is deliberately not changed: an execute session
+// running inside a worktree MUST resolve backlog/ to that worktree's own copy,
+// which is exactly why its walk accepts a `.git` file. The registry is the one
+// consumer of that root for which the worktree is the wrong answer, so the
+// mapping lives at that seam alone.
+//
+// Every fixture below drives real git plumbing rather than hand-rolling a `.git`
+// file, because the entire claim under test is what git itself writes: a linked
+// worktree's gitdir carries a `commondir` entry and a submodule's does not. A
+// future git that changes that layout must fail here loudly instead of silently
+// rewriting every submodule's registry entry.
+
+const GIT_IDENT = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test']
+
+function seedCommit(repo) {
+  fs.writeFileSync(path.join(repo, 'seed.txt'), 'seed\n')
+  assert.equal(spawnSync('git', ['-C', repo, 'add', '-A'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', repo, ...GIT_IDENT, 'commit', '-qm', 'seed'], { encoding: 'utf8' }).status, 0)
+}
+
+// A real repo plus a real linked worktree under it, the same shape
+// backlog-orchestrate builds per item. `git worktree add` needs HEAD to
+// resolve, hence the seed commit.
+function worktreeFixture(name = 'bug-13') {
+  const { dir } = backlogFixture()
+  seedCommit(dir)
+  const worktree = path.join(dir, '.worktrees', name)
+  const added = spawnSync('git', ['-C', dir, 'worktree', 'add', worktree, '-b', `backlog/${name}`, 'HEAD'], { encoding: 'utf8' })
+  assert.equal(added.status, 0, added.stderr)
+  return { project: dir, worktree }
+}
+
+// A real submodule working tree. `protocol.file.allow=always` is required for a
+// local-path submodule on git >= 2.38.
+function submoduleFixture() {
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-submodule-')))
+  const inner = path.join(scratch, 'inner')
+  const superRepo = path.join(scratch, 'super')
+  for (const repo of [inner, superRepo]) {
+    fs.mkdirSync(repo)
+    assert.equal(spawnSync('git', ['-C', repo, 'init', '-q'], { encoding: 'utf8' }).status, 0)
+    seedCommit(repo)
+  }
+  const added = spawnSync(
+    'git',
+    ['-C', superRepo, '-c', 'protocol.file.allow=always', ...GIT_IDENT, 'submodule', 'add', '-q', inner, 'sub'],
+    { encoding: 'utf8' },
+  )
+  assert.equal(added.status, 0, added.stderr)
+  const submodule = path.join(superRepo, 'sub')
+  assert.equal(fs.statSync(path.join(submodule, '.git')).isFile(), true, 'fixture sanity: a submodule .git is a file')
+  return { superRepo, submodule }
+}
+
+// Spawns the real CLI with its registry pointed at one throwaway file. The
+// module-level BM_REGISTRY_FILE at the top of this suite already keeps every
+// spawn off the developer's real registry; this narrows it to one file per test
+// so the assertions below can read the WHOLE file rather than search it.
+function runWithRegistry(cwd, file, ...args) {
+  return spawnSync('node', [SCRIPT, ...args], {
+    encoding: 'utf8',
+    cwd,
+    env: { ...process.env, BM_REGISTRY_FILE: file },
+  })
+}
+
+test('linkedWorktreeInfo returns null for an ordinary clone, where .git is a directory', () => {
+  const { dir } = backlogFixture()
+
+  assert.equal(fs.statSync(path.join(dir, '.git')).isDirectory(), true, 'fixture sanity')
+  assert.equal(linkedWorktreeInfo(dir), null)
+})
+
+test('linkedWorktreeInfo identifies a real linked worktree and names its main working tree', () => {
+  const { project, worktree } = worktreeFixture()
+
+  const info = linkedWorktreeInfo(worktree)
+
+  assert.ok(info, 'a linked worktree must be recognised')
+  assert.equal(info.worktree, worktree)
+  assert.equal(info.projectRoot, project)
+})
+
+test('linkedWorktreeInfo returns null for a real submodule working tree — commondir, not ".git is a file", is the discriminator', () => {
+  const { submodule } = submoduleFixture()
+
+  assert.equal(linkedWorktreeInfo(submodule), null)
+})
+
+test('registryRoot passes an ordinary repo root through unchanged', () => {
+  const { dir } = backlogFixture()
+
+  assert.equal(registryRoot(dir), dir)
+})
+
+test('registryRoot maps a linked worktree onto the main tree, never the worktree', () => {
+  const { project, worktree } = worktreeFixture()
+
+  assert.equal(registryRoot(worktree), project)
+})
+
+test('registryRoot returns a submodule working tree as itself', () => {
+  const { submodule } = submoduleFixture()
+
+  assert.equal(registryRoot(submodule), submodule)
+})
+
+test('CLI init run from inside a linked worktree registers the main tree, not the worktree', () => {
+  const { project, worktree } = worktreeFixture()
+  const file = tmpRegistry()
+
+  const out = runWithRegistry(worktree, file, 'init')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.deepEqual(written.projects.map((p) => p.path), [project], 'the worktree path must never reach the registry')
+  assert.equal(written.projects[0].name, path.basename(project), 'the name follows the main tree, not the item branch')
+})
+
+test('CLI new run from inside a linked worktree registers the main tree too — the other upsert call site', () => {
+  const { project, worktree } = worktreeFixture('bug-14')
+  const file = tmpRegistry()
+
+  const out = runWithRegistry(worktree, file, 'new', 'bugs', 'Something broke')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.deepEqual(written.projects.map((p) => p.path), [project])
+})
+
+test('CLI init run inside a real submodule registers the submodule itself', () => {
+  const { submodule } = submoduleFixture()
+  const file = tmpRegistry()
+
+  const out = runWithRegistry(submodule, file, 'init')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.deepEqual(written.projects.map((p) => p.path), [submodule])
+})
+
+// --- unregister: the registry's only removal path ---------------------------
+// The upsert has no undo and this tool is the registry's only writer, so the
+// repair for an entry that should never have been written has to live here too
+// — not in the server, which is read-only by invariant, and not in a text
+// editor. Every case below runs from a cwd that is NOT a git repo on purpose:
+// unregister names its target explicitly and must never consult one.
+
+test('unregisterProject removes exactly the named entry and leaves the others byte-identical', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/one', file)
+  registerProject('/abs/two', file)
+  registerProject('/abs/three', file)
+  const before = JSON.parse(fs.readFileSync(file, 'utf8')).projects
+
+  assert.equal(unregisterProject('/abs/two', file), true)
+
+  const after = JSON.parse(fs.readFileSync(file, 'utf8')).projects
+  assert.deepEqual(after.map((p) => p.path), ['/abs/one', '/abs/three'])
+  assert.deepEqual(after, before.filter((p) => p.path !== '/abs/two'), 'createdAt and name must survive untouched')
+})
+
+test('unregisterProject reports false and rewrites nothing for a path that is not registered', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/one', file)
+  const before = fs.readFileSync(file)
+
+  assert.equal(unregisterProject('/abs/nope', file), false)
+
+  assert.ok(before.equals(fs.readFileSync(file)))
+})
+
+test('CLI unregister removes the entry and exits 0', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/one', file)
+  registerProject('/abs/two', file)
+
+  const out = runWithRegistry(path.dirname(file), file, 'unregister', '/abs/one')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).projects.map((p) => p.path), ['/abs/two'])
+})
+
+test('CLI unregister exits 1 on a path that is not registered and rewrites nothing', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/one', file)
+  const before = fs.readFileSync(file)
+
+  const out = runWithRegistry(path.dirname(file), file, 'unregister', '/abs/nope')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /not registered/)
+  assert.ok(before.equals(fs.readFileSync(file)), 'a miss must never rewrite the file')
+})
+
+test('CLI unregister with no path prints usage and exits 1 — there is deliberately no cwd default', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/one', file)
+  const before = fs.readFileSync(file)
+
+  const out = runWithRegistry(path.dirname(file), file, 'unregister')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs unregister/)
+  assert.ok(before.equals(fs.readFileSync(file)))
 })
 
 // --- refactors section ----------------------------------------------------

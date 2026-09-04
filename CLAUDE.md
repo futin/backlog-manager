@@ -108,8 +108,32 @@ happened.
 - **`skills/` is the plugin skill root**; never duplicate it under
   `.claude/skills/` — that loads the same skills twice and drifts.
 - **`~/.backlog-manager/registry.json` has exactly one writer**:
-  `skills/backlog/tools/backlog.mjs` (`init`/`new` upsert). The server
-  re-reads it per request, never writes, never caches.
+  `skills/backlog/tools/backlog.mjs` (`init`/`new` upsert, plus `unregister`,
+  the one removal path — the upsert has no undo, and the repair for an entry
+  that should never have been written has to live behind the same single
+  writer, not in the server and not in a text editor). The server re-reads it
+  per request, never writes, never caches. **What gets written is
+  `registryRoot(root)`, not the root `resolveRoot` returned**: those are the
+  same path in every case but one, and that one is bug-17 — a per-item
+  orchestrator worktree registered as a standalone project (`.worktrees/bug-13`,
+  name "bug-13"), a phantom entry that outlived the directory it named, since
+  a worktree is deleted the moment its item merges. `resolveRoot` is not at
+  fault and is deliberately unchanged: an execute session inside a worktree
+  MUST resolve `backlog/` to that worktree's own copy, which is why its walk
+  accepts a `.git` file at all. The registry is the one consumer of that root
+  for which a worktree is the wrong answer — it stores absolute host paths the
+  board, the item-body allowlist and the orchestrator all key on — so the
+  mapping sits at that seam alone. A linked worktree registers its **main
+  tree** rather than being refused, because the worktree's items merge back
+  into it and it is almost always already registered, making the upsert a
+  harmless name refresh; `null` (register nothing, non-fatal stderr note) is
+  reserved for a bare main repo, where no main-tree path can be named. The
+  discriminator is `linkedWorktreeInfo`, a **second copy** of
+  `orchestrate.mjs`'s function — duplicated because one skill's `tools/` may
+  never import another's, and keyed on a `commondir` entry in the `gitdir:`
+  target, never "`.git` is a file": a submodule working tree is a file too and
+  must keep registering as itself. Both suites build a real submodule so a
+  future git that changes that layout fails loudly in both places.
 - **The orchestrator's run file has exactly one writer, one reader — the
   same relationship the registry has.**
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is the writer,
