@@ -51,6 +51,14 @@ describe('GET /api/orchestrator/runs', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'bm-orch-'));
     orchHome = join(tmpRoot, 'orchestrator');
     process.env.BM_ORCH_HOME = orchHome;
+    // A crashed run's payload entry now reads readWatchdogConfig() (via
+    // WatchdogStateService.annotate()) to fill in maxAttempts/enabled — this
+    // override keeps that read pointed at a file under tmpRoot rather than
+    // the developer's real ~/.backlog-manager/settings/watchdog.json, the
+    // same isolation BM_ORCH_HOME above already gives run.json itself. Left
+    // pointing at a path that never gets written in this suite, so every
+    // case here reads DEFAULT_WATCHDOG_CONFIG.
+    process.env.BM_WATCHDOG_FILE = join(tmpRoot, 'settings', 'watchdog.json');
 
     // REGISTRY_FILE is overridden the same way app.test.ts and
     // agents-status.test.ts do it: AppModule also wires up ItemsModule and
@@ -222,5 +230,44 @@ describe('GET /api/orchestrator/runs', () => {
 
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect(res.body.runs[0].pastRuns).toBe(2);
+  });
+
+  it('attaches a zeroed watchdog record to a crashed running run', async () => {
+    // The fixture as-is: its own updatedAt (2026-08-31) is already well past
+    // RUN_STALE_MS relative to "now", and its own status is already
+    // 'running' — this is deliberately the one case in this file that does
+    // NOT override updatedAt to `new Date().toISOString()`, because the
+    // crashed shape (status === 'running' && !fresh) is exactly what every
+    // other case here mutates AWAY from.
+    writeRun(fixture);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].fresh).toBe(false);
+    expect(res.body.runs[0].watchdog).toMatchObject({ attempts: 0, exhausted: false });
+  });
+
+  it('carries no watchdog key at all on a fresh running run', async () => {
+    const run: OrchestratorRun = { ...fixture, updatedAt: new Date().toISOString() };
+    writeRun(run);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    // Key ABSENCE, not merely an undefined value: a payload entry built as
+    // `{ ...run, fresh, pastRuns, watchdog: undefined }` would satisfy
+    // `toBeUndefined()` just as well, but only checking for the key itself
+    // proves the conditional spread actually ran rather than always adding
+    // the field.
+    expect('watchdog' in res.body.runs[0]).toBe(false);
+  });
+
+  it('carries no watchdog key on a done run, even with a stale updatedAt', async () => {
+    // fixture's own stale updatedAt, left untouched — only status changes,
+    // to prove the gate is `status === 'running' && !fresh`, not `!fresh`
+    // alone (a done run is just as un-fresh as a crashed one, by the exact
+    // same arithmetic, and must still get no watchdog key).
+    const run: OrchestratorRun = { ...fixture, status: 'done' };
+    writeRun(run);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect('watchdog' in res.body.runs[0]).toBe(false);
   });
 });

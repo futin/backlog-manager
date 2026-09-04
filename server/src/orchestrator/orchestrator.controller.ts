@@ -1,6 +1,7 @@
 import { Controller, Get, HttpException, Query } from '@nestjs/common';
 
 import { OrchestratorService } from './orchestrator.service';
+import { WatchdogStateService } from './watchdog-state.service';
 import type { OrchestratorArchivePayload, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
 
 /**
@@ -11,11 +12,30 @@ import type { OrchestratorArchivePayload, OrchestratorRun, OrchestratorRunsPaylo
  */
 @Controller('api/orchestrator')
 export class OrchestratorController {
-  constructor(private readonly orchestrator: OrchestratorService) {}
+  constructor(
+    private readonly orchestrator: OrchestratorService,
+    private readonly watchdogState: WatchdogStateService
+  ) {}
 
   @Get('runs')
   runs(): OrchestratorRunsPayload {
-    return this.orchestrator.runs();
+    const payload = this.orchestrator.runs();
+    // The one side effect on this otherwise read-only route —
+    // OrchestratorService.runs() itself stays pure (see its own comment) —
+    // deliberately placed here, AFTER the payload is fully built, rather
+    // than inside the service method that builds it. This is how a board
+    // that has simply had this endpoint open and polling the whole time
+    // (mount, focus, its 5s live-run poll) can arm a sweeper that
+    // bootstraps AFTER a run already started: without this call, the
+    // sweeper would only ever learn a run exists from its own bootstrap
+    // scan or from a spawn it made itself, never from one a terminal
+    // session started while nobody's board had asked yet. In-memory only
+    // (WatchdogStateService holds nothing on disk), and a safe no-op until
+    // Task 3's sweeper ever calls setArmer() — this task ships with no
+    // sweeper, so every call this endpoint makes today takes that no-op
+    // path.
+    this.watchdogState.observe(payload);
+    return payload;
   }
 
   @Get('archive')

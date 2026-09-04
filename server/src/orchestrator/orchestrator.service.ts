@@ -11,6 +11,7 @@ import type {
   OrchestratorRun,
   OrchestratorRunsPayload
 } from '../../../shared/types';
+import { WatchdogStateService } from './watchdog-state.service';
 
 /**
  * `$BM_ORCH_HOME` when set, else `~/.backlog-manager/orchestrator/` — must
@@ -221,9 +222,25 @@ function toArchiveEntry(run: OrchestratorRun, current: boolean): OrchestratorArc
  * the same absolute path RegistryProject.path would carry), so there is
  * nothing to cross-reference — this service only ever walks orchHome()'s
  * own subdirectories, one per project that has ever had a run.
+ *
+ * `WatchdogStateService` is injected for exactly one read, inside `runs()`
+ * below: `annotate()`, called once per run this loop already parsed, to
+ * decide whether that run's payload entry gains a `watchdog` field at all.
+ * That read is the only thing `WatchdogStateService` does here — `runs()`
+ * stays otherwise unchanged, and in particular stays a PURE read with no
+ * side effects of its own. The one side effect this feature adds —
+ * `WatchdogStateService.observe()`, which can arm the sweeper — is
+ * deliberately NOT called from here; it happens in
+ * `OrchestratorController.runs()`, after this method has already returned
+ * a finished payload, because a payload builder that also decides who else
+ * gets notified stops being a function you can reason about as "just
+ * builds the response" — see that method's own comment for the rest of the
+ * reasoning.
  */
 @Injectable()
 export class OrchestratorService {
+  constructor(private readonly watchdogState: WatchdogStateService) {}
+
   runs(): OrchestratorRunsPayload {
     const root = orchHome();
     let entries: string[];
@@ -261,7 +278,19 @@ export class OrchestratorService {
       const run = sanitizeMergeFields(parsed);
       const fresh = run.status === 'running' && Date.now() - Date.parse(run.updatedAt) < RUN_STALE_MS;
       const pastRuns = countPastRuns(join(dir, 'runs'));
-      runs.push({ ...run, fresh, pastRuns });
+      // `annotate()` returns undefined for every run but the crashed one
+      // (status === 'running' && !fresh) — spread it in conditionally so a
+      // fresh or finished run's payload entry carries no `watchdog` key at
+      // all, rather than a `watchdog: undefined` a naive `{ ...run, fresh,
+      // pastRuns, watchdog }` would produce. Key ABSENCE is the contract
+      // OrchestratorRunsPayload's own doc comment describes ("this run has
+      // never crashed"), and JSON.stringify would in fact drop an
+      // undefined-valued key too — but this repo's own tests assert on `in`/
+      // `toHaveProperty`, which a value-only distinction can't satisfy
+      // before serialisation, and correctness here shouldn't depend on this
+      // object happening to cross a JSON boundary before anyone inspects it.
+      const watchdog = this.watchdogState.annotate({ ...run, fresh });
+      runs.push({ ...run, fresh, pastRuns, ...(watchdog ? { watchdog } : {}) });
     }
 
     return { runs };
