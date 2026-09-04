@@ -112,6 +112,18 @@ export class AgentsController {
       // becomes the ladder's floor, applied server-side once the ceiling is
       // known.
       permissionMode: body?.permissionMode,
+      // Unvalidated here too, for the same reason as every field above:
+      // `resolveMergeMode` (in the service) is the one place a value is
+      // judged, and a shape check in this controller would be a second,
+      // weaker copy of it — the service alone can tell "absent" (defaults
+      // to 'merge') apart from "present and wrong" (a 400), which is the
+      // one distinction that makes this field's validation differ from
+      // every neighbour's drop-on-unknown rule. See that method's own
+      // comment for why the distinction matters here specifically: merging
+      // to `main` is the irreversible direction, so a caller bug must not
+      // be able to select it by having an unrecognised value silently
+      // resolve to the default.
+      mergeMode: body?.mergeMode,
       // Also unvalidated here, and the most important one to leave alone:
       // `resolveIds` (in the service) is the single place this becomes a
       // list of strings, because it is the only place that can also check

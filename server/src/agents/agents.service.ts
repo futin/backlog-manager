@@ -8,13 +8,14 @@ import { buildAllowlist, resolveAllowed } from '../items/allow.util';
 import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import {
-  clampMode, deriveAction, dispatchBlock, isItemId, modesUpTo, pickFrom, projectDispatchGate,
-  runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
+  clampMode, deriveAction, dispatchBlock, isItemId, isMergeMode, modesUpTo, pickFrom,
+  projectDispatchGate, runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
 import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, PermissionMode
+  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, MergeMode,
+  PermissionMode
 } from '../../../shared/types';
 
 /**
@@ -74,26 +75,38 @@ const PROMPT_MAX = 8_000;
  * from the request body, and never anything but this literal plus, at most,
  * a list of ids that `resolveIds` has already proved name open bugs or tasks
  * in the project being orchestrated (see that method for both checks and for
- * why shape alone would not be enough). `--ids` is a flag `orchestrate.mjs`
- * has always taken and SKILL.md has always documented on the trigger
+ * why shape alone would not be enough), and a trailing ` --merge-mode
+ * branch` when `resolveMergeMode` (Task 4) has resolved the request's
+ * `mergeMode` to `'branch'`. `--ids` is a flag `orchestrate.mjs` has always
+ * taken and SKILL.md has always documented on the trigger
  * (`/backlog-orchestrate [ids…] [--max N]`), so composing them on here is
- * speaking the skill's own invocation surface, not inventing a channel. `dispatch`'s prompt varies by design: the action the item
+ * speaking the skill's own invocation surface, not inventing a channel — and
+ * the same is true of `--merge-mode`, which `orchestrate.mjs init` has taken
+ * since Task 3. `dispatch`'s prompt varies by design: the action the item
  * needs (groom vs. execute) is derived from the item file, but WHAT to say
  * about it is a client-editable default the launch sheet composes
  * (composePrompt, prompt.util.ts) and the reader may reword before sending.
- * Orchestrate has no per-request decision to make room for: it always means
+ * Orchestrate has no per-request PROSE to make room for: it always means
  * "hand this project's whole groomed queue to the backlog-orchestrate skill
- * and let orchestrate.mjs run it", so there is nothing legitimate for a
- * caller to vary — and a `prompt` field, were it honoured, would be the one
- * way an attacker-controlled request could make an unattended, headless
+ * and let orchestrate.mjs run it" — but what a caller can influence has
+ * grown from a validated id list alone to a validated id list plus a
+ * two-valued enum. A `prompt` field, were it honoured, would still be the
+ * one way an attacker-controlled request could make an unattended, headless
  * session do anything at all (see origin.guard.ts's own reasoning for why
  * that is exactly the threat these POST routes exist to prevent). A `prompt`
  * in the body is therefore dropped the same way dispatch drops any field
  * outside AgentDispatchRequest: by never being read. Note the asymmetry that
- * makes `ids` acceptable where a `prompt` would not be: a prompt is free
- * text and there is no check that could make it safe, while an id is a
- * closed vocabulary — this project's own open items — that the server can
- * enumerate for itself and compare against.
+ * makes `ids` and `mergeMode` acceptable where a `prompt` would not be: a
+ * prompt is free text and there is no check that could make it safe, while
+ * an id is a closed vocabulary — this project's own open items — and a
+ * merge mode is an even smaller closed vocabulary (`MERGE_MODES`, exactly
+ * two members) that the server can enumerate or check membership against
+ * for itself. `mergeMode` is in fact a TIGHTER injection surface than `ids`:
+ * the text it can append is one of exactly two compile-time constants
+ * selected by a guard (`resolveMergeMode`) — this literal alone, or this
+ * literal plus the fixed ` --merge-mode branch` suffix — with no
+ * caller-supplied character reaching the prompt through that channel at
+ * all, unlike an id, which is caller text that merely passed a shape check.
  *
  * The leading slash is deliberate and differs from prompt.util.ts's own
  * choice for groom/execute (natural language, not a slash command — see that
@@ -122,6 +135,18 @@ export interface AgentOrchestrateRequest {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  /**
+   * `string | undefined`, not `MergeMode | undefined`: this arrives straight
+   * off a request body this service cannot trust, the same reason `ids`
+   * below is `unknown` rather than `string[]` — the client's own
+   * `StartOrchestrateRequest` (client/src/lib/agents.ts) is the one that
+   * gets to type this narrower, because a caller composing that request
+   * already has the real `MergeMode` union in scope. `resolveMergeMode` is
+   * the only place this field is read and the only place it is allowed to
+   * become a `MergeMode` — see that method for the validation rule, which
+   * deliberately differs from every neighbouring field.
+   */
+  mergeMode?: string;
   /** The board's item selection, or absent for "the whole queue".
    *
    *  `unknown` rather than `string[]`: this arrives straight off a request
@@ -447,18 +472,35 @@ export class AgentsService {
     // screen to the run strip. A stale board tab whose selection has since
     // been archived must still be told "a run is already in progress", not
     // "task-3 is not open"; validating ids first would answer the second and
-    // leave the sheet sitting on a project that is already mid-run.
+    // leave the sheet sitting on a project that is already mid-run. The same
+    // reasoning is why `resolveMergeMode` is called here too, after the
+    // lock, rather than up with the other gates — a malformed `mergeMode`
+    // is a problem with what the run should contain, not whether it may
+    // start at all, and case 8 of the design's server-validation table
+    // (task-4-brief.md) pins the lock winning over it, same as it wins over
+    // an ids problem.
     const ids = this.resolveIds(req.project, req.ids);
+    const mergeMode = this.resolveMergeMode(req.mergeMode);
 
     return this.spawn(cfg, {
       project: dirName,
-      // The composition, and the whole of what `ids` can influence: a bare
-      // constant for a full-queue run, or that same constant followed by ids
-      // that have each been proved to name an open bug or task in THIS
-      // project. Nothing a caller sends is ever concatenated in unchecked —
-      // see resolveIds, and ORCHESTRATE_PROMPT's own comment for why a
-      // `prompt` field remains unreadable rather than merely validated.
-      prompt: ids === undefined ? ORCHESTRATE_PROMPT : `${ORCHESTRATE_PROMPT} ${ids.join(' ')}`,
+      // The composition, and the whole of what `ids` and `mergeMode` can
+      // influence: a bare constant for a full-queue, merge-mode run, that
+      // same constant followed by ids that have each been proved to name an
+      // open bug or task in THIS project, and/or a trailing ` --merge-mode
+      // branch` when the request asked for branch mode. Nothing a caller
+      // sends is ever concatenated in unchecked — see resolveIds,
+      // resolveMergeMode, and ORCHESTRATE_PROMPT's own comment for why a
+      // `prompt` field remains unreadable rather than merely validated. Ids
+      // first, the merge-mode flag last: `orchestrate.mjs`'s own argv
+      // parsing reads bare tokens as ids and `--merge-mode` as a flag with
+      // an argument, so a flag ahead of the ids would swallow the first id
+      // as `--merge-mode`'s value instead.
+      prompt: [
+        ORCHESTRATE_PROMPT,
+        ...(ids === undefined ? [] : ids),
+        ...(mergeMode === 'branch' ? ['--merge-mode', 'branch'] : [])
+      ].join(' '),
       // Unlike dispatch, which names a session after the one item it is
       // working (sessionName, prompt.util.ts), there is no item here to
       // build that name from — orchestrateSessionName below is that
@@ -677,6 +719,58 @@ export class AgentsService {
       if (!seen.includes(id)) seen.push(id);
     }
     return seen;
+  }
+
+  /**
+   * `req.mergeMode`, turned into a `MergeMode` `orchestrate.mjs init` can be
+   * told to run with, or a 400 if it cannot be. Design §2.3
+   * (2026-09-04-orchestrator-merge-mode-design.md):
+   *
+   * - absent (`undefined` or `''`) → `'merge'` — today's behaviour, for
+   *   every caller written before this field existed.
+   * - a member of `MERGE_MODES` → that value.
+   * - anything else → reject.
+   *
+   * This is deliberately NOT `pickFrom`'s drop-on-unknown rule, even though
+   * `model` and `effort` — resolved via `pickFrom` in `orchestrate()`'s own
+   * spawn call — use exactly that rule for what looks like the identical
+   * shape of problem. The difference is what
+   * dropping resolves TO: an unrecognised model or effort falls through to
+   * "the CLI's own default", a harmless no-op. An unrecognised `mergeMode`
+   * would fall through to the absent branch above and resolve to `'merge'`
+   * — and `merge` is the irreversible direction: it commits this run's
+   * verified items into `main`, undoable afterwards only by `git revert -m
+   * 1`, never `git reset --hard` (see CLAUDE.md's invariant on undoing a
+   * completed orchestrator merge, and the data loss that rule exists to
+   * prevent). A caller bug — a stale enum on an old board tab, a typo, a
+   * future client sending a mode this build has never heard of — must not
+   * be able to select that outcome silently. Absent is different from
+   * unrecognised and gets the opposite answer for the same reason
+   * `permissionMode`'s default-before-clamp treats them oppositely just
+   * above in `orchestrate()`: absent is not a bug, it is every request ever
+   * written before `mergeMode` existed, so it defaults rather than rejects.
+   * Only `undefined` and `''` count as absent, matching `pickFrom`'s own
+   * "no pick submits the empty string" convention (see that function) —
+   * anything else, including the non-string a `Partial`-typed body cannot
+   * rule out, is a real value that simply is not one of `MERGE_MODES`, so
+   * it is rejected outright rather than defaulted or floored.
+   *
+   * Uncoded, like every 400 and most 409s this endpoint throws:
+   * `RUN_IN_PROGRESS_CODE` stays the one and only machine-readable answer
+   * this route gives (see the activeRun throw above, in `orchestrate()`) —
+   * nothing about a malformed enum needs telling apart from any other 4xx.
+   */
+  private resolveMergeMode(mergeMode: string | undefined): MergeMode {
+    if (mergeMode === undefined || mergeMode === '') return 'merge';
+    if (isMergeMode(mergeMode)) return mergeMode;
+    // Echoed back truncated and JSON-quoted, matching resolveIds's own
+    // convention just above: a client bug is far easier to find when the
+    // error names the value that broke, and this body goes back to the
+    // same caller that sent it. `JSON.stringify` also renders a non-string
+    // value (case 7's `42`) sensibly, which a template-literal interpolation
+    // would not.
+    const shown = JSON.stringify(typeof mergeMode === 'string' ? mergeMode.slice(0, 40) : mergeMode);
+    throw new HttpException({ error: `mergeMode must be merge or branch — ${shown} is not one` }, 400);
   }
 
   private findItem(requestPath: string): BacklogItem | null {

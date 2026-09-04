@@ -1,6 +1,7 @@
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, OrchestratorArchivePayload,
-  OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, PermissionMode
+  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeMode,
+  OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
+  PermissionMode
 } from '../../../shared/types';
 
 /**
@@ -256,6 +257,19 @@ export interface StartOrchestrateRequest {
   model?: string;
   effort?: string;
   permissionMode?: PermissionMode;
+  /**
+   * Narrower than the server's plain `string` for the same reason
+   * `permissionMode` above is: the server is validating a body it cannot
+   * trust, but a caller composing this request on the client already has
+   * the real `MergeMode` union in scope (see `shared/types.ts`), so there
+   * is no reason to widen it back to `string` just to send it over the
+   * wire. Sent on every launch, including when it equals the default
+   * (`'merge'`) — an absent field would mean the same thing today, but the
+   * request is the sheet's explicit answer to "what should this run do",
+   * and inferring it server-side from an absent field would put that one
+   * decision in two places.
+   */
+  mergeMode?: MergeMode;
   /** The board's item selection, sent ONLY when it is a strict subset of the
    *  project's queue — an absent `ids` means "drain everything", and the two
    *  are genuinely different instructions rather than two spellings of one
