@@ -117,10 +117,16 @@ describe('GET /api/agents/merge-check', () => {
   let app: INestApplication;
   let projectPath: string;
   let homePath: string;
+  // A second registered project, unused by cases 11-13 (they only ever name
+  // `projectPath`) and present purely so cases 14-15 below have a WRONG
+  // project to prove `AgentsService.mergeCheck` didn't pick — see those
+  // cases' own comments for why a single registered project can't do that.
+  let otherPath: string;
   const env = { ...process.env };
 
   beforeEach(async () => {
     projectPath = mkdtempSync(join(tmpdir(), 'bm-merge-check-http-project-'));
+    otherPath = mkdtempSync(join(tmpdir(), 'bm-merge-check-http-other-'));
     // Overrides os.homedir() (it reads $HOME on POSIX, checked fresh on every
     // call, never cached) so this suite's answer never depends on whatever
     // the developer running it actually has in their own
@@ -130,7 +136,7 @@ describe('GET /api/agents/merge-check', () => {
     process.env.HOME = homePath;
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
-      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }]))
+      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }, { name: 'beta', path: otherPath }]))
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -140,6 +146,7 @@ describe('GET /api/agents/merge-check', () => {
     await app.close();
     process.env = { ...env };
     rmSync(projectPath, { recursive: true, force: true });
+    rmSync(otherPath, { recursive: true, force: true });
     rmSync(homePath, { recursive: true, force: true });
     jest.restoreAllMocks();
   });
@@ -173,5 +180,70 @@ describe('GET /api/agents/merge-check', () => {
     await request(app.getHttpServer())
       .get('/api/agents/merge-check')
       .expect(400, { error: 'project is required' });
+  });
+
+  // --- Cases 14-15: prove the ROUTE wires the util correctly, not just that
+  // the util itself is correct in isolation --------------------------------
+  //
+  // Cases 1-10 exercise `mergeCheck()` directly and cases 11-13 only ever
+  // leave both `.claude` trees empty, so every one of the thirteen brief
+  // cases returns (or must return) `{ covered: false, source: null }` at the
+  // HTTP layer — none of them can tell a correct
+  // `checkMergeCoverage(entry.path, homedir())` call apart from a broken one
+  // that, say, swapped its two arguments or resolved the wrong registry
+  // entry, because both mistakes still degrade to "nothing found" against an
+  // all-empty fixture. These two cases each write a REAL covering entry into
+  // a REAL settings file and assert the 200 body reports `covered: true`
+  // with the matching `source`, which only happens if the service handed the
+  // util the right project path in the right argument slot.
+
+  it('case 14: threads the registered project\'s own path into the util as the PROJECT argument, not the home one', async () => {
+    // Written to settings.local.json specifically, not settings.json: that
+    // file is the util's project-side tier ONLY — it is never consulted as
+    // the home-side candidate under any argument order — so if
+    // AgentsService.mergeCheck ever called
+    // `checkMergeCoverage(homedir(), entry.path)` (project and home swapped)
+    // instead of the intended `checkMergeCoverage(entry.path, homedir())`,
+    // the util would look for this project's covering entry under
+    // `<projectPath>/.claude/settings.json` (the swapped call's third
+    // candidate) — a file this test never writes — and report
+    // `covered: false`, failing the assertion below instead of coincidentally
+    // still passing it. A fixture using settings.json instead would not
+    // catch that swap, because settings.json IS one of the swapped call's
+    // real candidates.
+    const file = writeAllow(projectPath, 'settings.local.json', ['Bash(git merge:*)']);
+    const res = await request(app.getHttpServer())
+      .get('/api/agents/merge-check')
+      .query({ project: projectPath })
+      .expect(200);
+    expect(res.body).toEqual({ covered: true, source: file });
+  });
+
+  it('case 15: selects the registry entry matching the requested project, not some other registered project', async () => {
+    // `beta` (otherPath) is the one with a covering entry; `alpha`
+    // (projectPath) has none. A service that resolved the wrong registry
+    // entry for a given `project` query — e.g. always taking
+    // `registry.projects[0]` regardless of which path was asked for, or
+    // matching on `name` instead of `path` — would answer this request with
+    // alpha's (uncovered) result instead of beta's (covered) one, and this
+    // assertion would catch that: it would see `covered: false` where
+    // `covered: true` is expected.
+    const file = writeAllow(otherPath, 'settings.local.json', ['Bash(git merge:*)']);
+    const res = await request(app.getHttpServer())
+      .get('/api/agents/merge-check')
+      .query({ project: otherPath })
+      .expect(200);
+    expect(res.body).toEqual({ covered: true, source: file });
+
+    // The other half of the same proof, run against the same fixture: asking
+    // about alpha (which has no covering entry of its own) must NOT come
+    // back contaminated with beta's coverage — the failure mode a
+    // registry-wide "does ANY project cover this" bug would produce instead
+    // of "does THIS project cover this".
+    const alphaRes = await request(app.getHttpServer())
+      .get('/api/agents/merge-check')
+      .query({ project: projectPath })
+      .expect(200);
+    expect(alphaRes.body).toEqual({ covered: false, source: null });
   });
 });

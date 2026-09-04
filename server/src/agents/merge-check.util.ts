@@ -36,6 +36,17 @@ import { join } from 'node:path';
  * What remains, `MERGE_COMMAND_WORDS` below, is the fixed, meaningful part
  * of the command this endpoint checks coverage against.
  *
+ * That asymmetry has a cost the rest of this comment doesn't otherwise
+ * mention: an allow entry that spells the `-C "$PWD"` clause out literally —
+ * `Bash(git -C "$PWD" merge:*)`, which mirrors SKILL.md's own invocation
+ * almost verbatim and is exactly what a careful user might copy straight out
+ * of it — does NOT match `MERGE_COMMAND_WORDS` (its second word is `-C`, not
+ * `merge`) and so reports `covered: false`, even though that command would
+ * genuinely cover the real invocation under the literal-prefix grammar. That
+ * is a false negative, which is the safe direction this whole file already
+ * argues for, so it is left as-is rather than "fixed" — recorded here only
+ * so a future reader doesn't mistake it for an oversight.
+ *
  * A candidate entry then "covers" that target when its own prefix, split on
  * whitespace, is a WHOLE-WORD prefix of `MERGE_COMMAND_WORDS` — matched word
  * by word, never as a raw substring, so a coincidental textual prefix (say,
