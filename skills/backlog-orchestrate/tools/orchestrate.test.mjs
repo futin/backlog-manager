@@ -2047,6 +2047,96 @@ test('abort on a run with a never-dispatched pending item does nothing destructi
   assert.deepEqual(after.attention, [])
 })
 
+// Task-3 review fix round (Important) — the data-destroying defect: before
+// this fix, abort's teardown loop decided "preserve vs. remove" purely from
+// the phase:-marker check above, so a `branched` item (branch mode's own
+// terminal stage — design §5.3, "no `git branch -d`. The branch is the
+// deliverable.") had its branch force-deleted (`branch -D`, which bypasses
+// git's own not-fully-merged safety check) exactly like any other finished
+// item, with `main` never having touched its commits at all. This test pins
+// the fix: a `branched` item's worktree is still removed (§5.3 already has
+// the run do that at the moment the item is staged; leaving the call
+// ungated also still clears a stale worktree admin entry, same as before
+// this fix), but its branch survives, and the survival is recorded in
+// `attention` — not just this command's own stdout — so an operator who
+// aborts the rest of a queue after several items have already completed as
+// `branched` can find every kept branch from the run file alone.
+test("abort removes a branched item's worktree but keeps its branch, recording the kept branch in attention", (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-60', 'A branch-mode task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+
+  const worktreePath = path.join(project, '.worktrees', 'task-60')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-60', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-60', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-60').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-60', 'branched').status, 0)
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+  // Worktree gone...
+  assert.equal(fs.existsSync(worktreePath), false)
+  // ...but the branch itself is the surviving deliverable.
+  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-60'], { encoding: 'utf8' })
+  assert.match(branchList.stdout, /backlog\/task-60/)
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'aborted')
+  assert.equal(after.attention.length, 1)
+  assert.equal(after.attention[0].id, 'task-60')
+  assert.equal(after.attention[0].kind, 'parked')
+  assert.match(after.attention[0].detail, /backlog\/task-60/, 'attention must name the kept branch')
+  assert.match(after.attention[0].detail, /branched/, 'attention must say why the branch was kept')
+
+  assert.match(out.stdout, /kept 1 branch\(es\).*\(task-60/)
+})
+
+// Task-3 review fix round (Important) — the converse pin the finding calls
+// for: the fix above must not be over-broad. A `merged` item's branch was
+// already deleted by the run itself at merge time (§9) — abort attempting
+// `branch -D` on it again is a pre-existing, harmless no-op, and this test
+// proves the new `stage === 'branched'` gate did not accidentally widen to
+// catch `merged` (or any other stage) too. One run, two items: a `merged`
+// item torn down exactly as before this fix, and a `branched` item whose
+// branch survives — so the same abort call demonstrates both halves at
+// once, the same "mixed run" shape the marker tests above already use.
+test("abort still deletes a merged item's branch normally — only a branched item's branch is exempt", (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-61', 'A merged task')
+  seedReadyTask(project, 'task-62', 'A branched task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const mergedWorktree = path.join(project, '.worktrees', 'task-61')
+  const branchedWorktree = path.join(project, '.worktrees', 'task-62')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', mergedWorktree, '-b', 'backlog/task-61', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', branchedWorktree, '-b', 'backlog/task-62', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-61', 'dispatched', '--worktree', mergedWorktree, '--branch', 'backlog/task-61').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-62', 'dispatched', '--worktree', branchedWorktree, '--branch', 'backlog/task-62').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-61', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-62', 'branched').status, 0)
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+
+  // The merged item: torn down exactly as before this fix — worktree AND
+  // branch both gone.
+  assert.equal(fs.existsSync(mergedWorktree), false)
+  const mergedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-61'], { encoding: 'utf8' })
+  assert.equal(mergedBranch.stdout.trim(), '')
+
+  // The branched item: worktree gone, branch kept.
+  assert.equal(fs.existsSync(branchedWorktree), false)
+  const branchedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-62'], { encoding: 'utf8' })
+  assert.match(branchedBranch.stdout, /backlog\/task-62/)
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.attention.length, 1, 'only the branched item gets an attention entry, not the merged one')
+  assert.equal(after.attention[0].id, 'task-62')
+})
+
 test('abort with no run exits 3', (t) => {
   const { home, project } = orchFixture(t)
 

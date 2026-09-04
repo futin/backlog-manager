@@ -2234,6 +2234,34 @@ function cmdReconcile(argv) {
 //      behind: a leftover worktree is an annoyance a human can clean up by
 //      hand; destroyed uncommitted work has no recovery path at all.
 //
+// A SECOND, narrower exemption, added once branch mode made the existing
+// unconditional `git branch -D` destructive in a way it never was before:
+// an item that has already reached the `branched` terminal stage (design
+// §5.3) keeps its branch. Before branch mode existed, deleting a completed
+// item's branch here was always safe — a `merged` item's commits already
+// live on `main`, so the branch is redundant by the time abort runs, and
+// deleting it destroys nothing. Branch mode broke that assumption: a
+// `branched` item's branch is never folded into anything, `main` is never
+// touched (§5.3, "no `git branch -d`. The branch is the deliverable."), so
+// this file's own single unconditional `branch -D` call would, for a
+// `branched` item, be the ONLY copy of that item's work anywhere — force-
+// deleted with `-D`, which bypasses git's "not fully merged" safety check
+// with no reflog-reachable backup, exactly the class of loss CLAUDE.md's
+// own `git revert -m 1` (never `reset --hard`) invariant exists to head
+// off for the merge side of this same file. Unlike the phase:-marker
+// exemption above, the worktree teardown itself is NOT skipped here — the
+// directory serves no further purpose once the branch exists as a ref, and
+// leaving `git worktree remove` ungated also still clears a stale
+// `.git/worktrees/` admin entry for a `branched` item exactly as it does
+// for every other stage. Only the `branch -D` call is gated, and the kept
+// branch gets its own `attention` entry (same reasoning as the marker
+// case: a human may never see this process's own stdout, so the run file
+// is the only durable record that this branch still exists and where).
+// Every OTHER terminal stage keeps today's behaviour exactly — most
+// notably `merged`, whose branch was already deleted by the run itself at
+// merge time (§9), so attempting `branch -D` again here is a harmless
+// no-op, not a second case needing a guard.
+//
 // This does NOT stop abort from finishing overall: every OTHER item's
 // worktree and branch still get torn down, `run.status` still becomes
 // `aborted`, and the run still ends — only the marked item's own git
@@ -2247,6 +2275,7 @@ function cmdAbort() {
 
   const removedIds = []
   const preservedIds = []
+  const keptBranchIds = []
 
   for (const item of run.queue) {
     let marker = false
@@ -2289,9 +2318,37 @@ function cmdAbort() {
       spawnSync('git', ['-C', projectRoot, 'worktree', 'remove', '--force', item.worktree])
     }
     if (item.branch) {
-      spawnSync('git', ['-C', projectRoot, 'branch', '-D', item.branch])
+      if (item.stage === 'branched') {
+        // See this function's own header comment (the SECOND exemption)
+        // for why this branch — and only this branch — survives abort's
+        // otherwise-unconditional `branch -D`: it is the item's whole
+        // deliverable under branch mode (design §5.3), never merged into
+        // `main`, so deleting it here would be the one and only copy of
+        // that item's work gone for good. Recorded in `attention`, not
+        // just this function's own console summary below, for the same
+        // "a human may never see this process's own stdout" reason the
+        // marker exemption above already gives.
+        run.attention.push({
+          id: item.id,
+          kind: 'parked',
+          detail:
+            `branch ${item.branch} was KEPT by abort (not deleted) — this item finished as 'branched', ` +
+            `branch mode's own terminal stage (design §5.3), so its branch is the deliverable and was never ` +
+            `merged into main. The worktree at ${item.worktree ?? '(none recorded)'} was still removed since it ` +
+            `serves no further purpose once the branch exists as a ref; the branch itself needs no action — it ` +
+            `is simply waiting to be reviewed or merged by hand.`,
+        })
+        keptBranchIds.push(item.id)
+      } else {
+        // Every other terminal (or non-terminal) stage's branch is
+        // genuinely disposable here — most notably `merged`, whose branch
+        // was already deleted by the run itself at merge time (§9), which
+        // makes this call a harmless no-op for that stage rather than a
+        // second case needing its own guard.
+        spawnSync('git', ['-C', projectRoot, 'branch', '-D', item.branch])
+      }
     }
-    if (item.worktree || item.branch) removedIds.push(item.id)
+    if (item.worktree || (item.branch && item.stage !== 'branched')) removedIds.push(item.id)
   }
 
   run.updatedAt = nowISO()
@@ -2300,9 +2357,16 @@ function cmdAbort() {
   // A one-line human-readable summary, printed BEFORE cmdFinish's own
   // `{"status":"aborted"}` JSON line, so a human watching this run does not
   // have to separately run `status --json` and cross-reference `attention`
-  // by hand just to learn what abort actually did.
+  // by hand just to learn what abort actually did. A THIRD clause joined
+  // the original two once branch mode gave abort something else worth
+  // calling out on its own: a `branched` item's kept branch is neither a
+  // full "removed" (its worktree went, its branch didn't) nor the marker
+  // case's "left completely alone" (its worktree DID go) — silently
+  // folding it into either existing count would misreport what abort
+  // actually did to it.
   console.log(
     `abort: removed ${removedIds.length} item(s)${removedIds.length ? ` (${removedIds.join(', ')})` : ''}; ` +
+      `kept ${keptBranchIds.length} branch(es) already staged 'branched'${keptBranchIds.length ? ` (${keptBranchIds.join(', ')} — see attention)` : ''}; ` +
       `left ${preservedIds.length} in place with an in-progress marker${preservedIds.length ? ` (${preservedIds.join(', ')} — see attention)` : ''}`,
   )
 
