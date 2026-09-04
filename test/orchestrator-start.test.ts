@@ -330,9 +330,20 @@ describe('POST /api/agents/orchestrate', () => {
      own `prompt`) and that `name` is exactly what orchestrateSessionName
      produces, not merely present; a wider, narrower, or differently-valued
      object than expected fails this either way. */
+  // Extended (Task 4, brief case 9) to also carry `mergeMode: 'branch'`: the
+  // field-by-field controller rebuild this test has always pinned (via
+  // `toEqual` against the FULL spawn body, not a handful of field checks)
+  // now has a fifth field to prove reaches the service — and reaches it
+  // alongside, not instead of, the two fields already proven dropped here
+  // (the request's own `prompt`, the unrecognised `model`). `mergeMode`
+  // itself never rides along as a body key of its own on the dashboard
+  // side — only as the composed prompt's trailing flag — which `toEqual`
+  // against the exact four keys below still catches if that ever changes.
   it('spawns with the constant prompt and drops the client-supplied prompt and unknown model', async () => {
     const sent = stubDashboard();
-    const res = await post({ project: projectPath, prompt: 'rm -rf', model: 'claude-x' }).expect(201);
+    const res = await post({
+      project: projectPath, prompt: 'rm -rf', model: 'claude-x', mergeMode: 'branch'
+    }).expect(201);
     expect(res.body).toEqual({ sessionId: 'sess-1' });
 
     const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
@@ -342,7 +353,10 @@ describe('POST /api/agents/orchestrate', () => {
       // The dashboard's own dirName, never the absolute path — see
       // dispatch's identical assertion in agents-dispatch.test.ts for why.
       project: '-abs-alpha',
-      prompt: '/backlog-orchestrate',
+      // The composed prompt: `mergeMode: 'branch'` reached the service and
+      // was appended after the constant, proving this field survives the
+      // controller's field-by-field rebuild (Task 4's case 9).
+      prompt: '/backlog-orchestrate --merge-mode branch',
       // orchestrateSessionName's own output: 'orchestrate ' plus the
       // project path's basename (makeProject's tmp dir, not a clean
       // registry display name — this is why the expectation is computed

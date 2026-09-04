@@ -5,7 +5,7 @@ import {
   FONT_SCALES, STALE_WINDOWS, THEMES, type Landing, type ThemeId
 } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
-import type { AgentsStatus } from '../../../../shared/types';
+import type { AgentsStatus, MergeMode } from '../../../../shared/types';
 
 /**
  * Preview colors per theme — board / strip / accent, in that order. A mirror of
@@ -247,6 +247,20 @@ function AgentsGroup() {
         >
           <option value="">CLI default</option>
           {EFFORTS.map((f) => <option key={f} value={f}>{f}</option>)}
+        </select>
+      </SettingsRow>
+
+      <SettingsRow
+        name="Default merge mode"
+        hint="Preselected in the Orchestrate sheet. “Merge to main” is what every run does today; “Leave branches for me” stops at a reviewed git branch per item instead. Overridable per launch."
+      >
+        <select
+          aria-label="Default merge mode"
+          value={settings.orchestrateDefaultMergeMode}
+          onChange={(e) => update({ orchestrateDefaultMergeMode: e.target.value as MergeMode })}
+        >
+          <option value="merge">Merge to main</option>
+          <option value="branch">Leave branches for me</option>
         </select>
       </SettingsRow>
 

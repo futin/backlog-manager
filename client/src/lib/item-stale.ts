@@ -93,7 +93,7 @@ function ageInDays(stamp: string, now: number): number | null {
  *    false whatever the stamp says. Sequenced BEFORE the parse rather than
  *    folded in afterwards so no arithmetic can override either half.
  *
- *    A run holds the item at every stage but its four true exits — including
+ *    A run holds the item at every stage but its five true exits — including
  *    `pending`, so starting a whole-queue run pulls every stale queued item
  *    back onto the Board at once, and including `parked`/`needs-answers`,
  *    where the run has stopped and is waiting for a person. Both are the

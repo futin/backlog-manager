@@ -8,19 +8,22 @@ describe('clampSettings', () => {
   it('passes a valid object through', () => {
     const s = clampSettings({
       theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14
+      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14,
+      orchestrateDefaultMergeMode: 'branch'
     });
     expect(s).toEqual({
       theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
       linkBase: 'http://127.0.0.1:5174',
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14
+      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14,
+      orchestrateDefaultMergeMode: 'branch'
     });
   });
 
   it('falls back per field, independently', () => {
     const s = clampSettings({
       theme: 'neon', density: 7, fontScale: 'big', landing: 'guides',
-      dispatchDefaultModel: 'gpt', dispatchDefaultEffort: 7, staleDays: 'soon'
+      dispatchDefaultModel: 'gpt', dispatchDefaultEffort: 7, staleDays: 'soon',
+      orchestrateDefaultMergeMode: 'rebase'
     });
     expect(s).toEqual(DEFAULT_SETTINGS);
   });
@@ -118,5 +121,42 @@ describe('dispatch defaults', () => {
   it('offers exactly the lists the launch sheet pickers are built from', () => {
     expect(MODELS).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
     expect(EFFORTS).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+});
+
+/**
+ * `orchestrateDefaultMergeMode` seeds the orchestrate sheet's merge-mode
+ * picker (Task 8) the same way `dispatchDefaultModel`/`dispatchDefaultEffort`
+ * seed the launch sheet's — a default you set once in Settings, not the sheet
+ * remembering the last launch.
+ *
+ * The clamp-to-default here is the deliberate mirror image of Task 4's server
+ * rule: a malformed `mergeMode` on an orchestrate request body is an HTTP 400,
+ * never a clamp, because that value is an *instruction* acted on unattended —
+ * silently resolving a caller's bug to `'merge'` would let it pick the
+ * irreversible direction by accident. This value is a *preference* instead:
+ * its worst case is the sheet opening pre-selected on the wrong option, which
+ * the user sees on screen and can change before launching anything, so
+ * clamping a hand-edited localStorage value back to the safe default is the
+ * right failure mode rather than an error nobody watching a board would see.
+ */
+describe('orchestrateDefaultMergeMode', () => {
+  it('defaults to merge — today\'s behaviour for a board that has never touched this setting', () => {
+    expect(clampSettings({}).orchestrateDefaultMergeMode).toBe('merge');
+  });
+
+  it('keeps a real merge mode', () => {
+    expect(clampSettings({ orchestrateDefaultMergeMode: 'branch' }).orchestrateDefaultMergeMode)
+      .toBe('branch');
+  });
+
+  it('clamps an unrecognised string to the default, rather than passing it on', () => {
+    expect(clampSettings({ orchestrateDefaultMergeMode: 'nonsense' }).orchestrateDefaultMergeMode)
+      .toBe('merge');
+  });
+
+  it('clamps a non-string to the default', () => {
+    expect(clampSettings({ orchestrateDefaultMergeMode: 7 }).orchestrateDefaultMergeMode)
+      .toBe('merge');
   });
 });

@@ -1,8 +1,8 @@
 import { itemStageSpans } from '../../lib/run-stats';
-import { formatClock, formatSpan, inStageMs, STEPPER_STAGES, stepperDots } from '../../lib/run-time';
+import { formatClock, formatSpan, inStageMs, stepperDots, stepperTerminal } from '../../lib/run-time';
 import type { StageSpan } from '../../lib/run-stats';
 import type { StepperDot } from '../../lib/run-time';
-import type { RunQueueItem } from '../../../../shared/types';
+import type { MergeMode, RunQueueItem } from '../../../../shared/types';
 
 /**
  * `StageTrack`: the seven-node, full-width stage stepper for ONE run queue
@@ -15,13 +15,27 @@ import type { RunQueueItem } from '../../../../shared/types';
  * caption holding the per-stage durations — "the most useful thing the pane
  * knows" — was, in the user's own words, "not visible at all" underneath it.
  *
- * SEVEN NODES, NOT EIGHT. Built directly off `stepperDots(item)`, which
- * itself walks `STEPPER_STAGES` (run-time.ts) — `dispatched` through
- * `merged`, never `pending`/`preflight`. That constant's own comment gives
- * the reason: nothing about the item is happening yet at either of those
- * two, so a dot for them would draw a position on a track the item has not
- * actually started, and `RunDetail`'s lead line already prints both
- * durations in words beside this track.
+ * SEVEN NODES, NOT EIGHT. Built directly off `stepperDots(item, live,
+ * terminal)`, which itself walks `stepperStages(terminal)` (run-time.ts) —
+ * `dispatched` through the run's own success exit, never `pending`/
+ * `preflight`. That function's own comment gives the reason: nothing about
+ * the item is happening yet at either of those two, so a dot for them would
+ * draw a position on a track the item has not actually started, and
+ * `RunDetail`'s lead line already prints both durations in words beside this
+ * track.
+ *
+ * `terminal` — 'merged' or 'branched' — is resolved from the required
+ * `mergeModeEffective` prop via `stepperTerminal` (run-time.ts), not read off
+ * `mergeModeEffective` directly: a still-mid-pipeline item has no
+ * `merged`/`branched` stage of its own yet, so the run's mode is its only
+ * available answer, but an item that has ALREADY reached one of the two
+ * success exits answers with its own `stage` instead — see
+ * `stepperTerminal`'s own doc comment for why that item-first rule exists (a
+ * run's mode can move on to `'branch'` after this item already merged under
+ * the old one, mid-queue, and the item's own finished stage must not be
+ * relabelled after the fact). See `stepperDots`'s own doc comment
+ * (run-time.ts) for why `stepperDots` itself still takes the resolved word
+ * as a required parameter with no default.
  *
  * EQUAL COLUMNS, NOT TIME-PROPORTIONAL. The grid (styles.css) gives
  * `merging` (seconds) and `inspecting` (minutes) the exact same seventh of
@@ -95,18 +109,26 @@ import type { RunQueueItem } from '../../../../shared/types';
  * Every other combination bottoms out at `'done'` (behind or at
  * `lastVisited`) or `'idle'` (ahead of it), matching
  * `.run-track-node[data-in=...]` / `[data-out=...]` in styles.css exactly.
+ *
+ * `total` is the caller's own `dots.length` — always 7, whichever terminal
+ * word the run's last dot carries — rather than a re-import of
+ * `stepperStages(terminal).length`: the caller already has the array this
+ * index space is drawn from in scope (it is iterating it), so asking it to
+ * pass the one number it needs costs less than a second call to recompute
+ * an array this function would then throw away.
  */
 function segmentState(
   i: number,
   lastVisited: number,
-  state: StepperDot['state']
+  state: StepperDot['state'],
+  total: number
 ): { in: 'none' | 'done' | 'live' | 'stalled' | 'idle'; out: 'none' | 'done' | 'idle' } {
   const into = i === 0
     ? 'none'
     : i <= lastVisited
       ? state === 'current' ? 'live' : state === 'stalled' ? 'stalled' : 'done'
       : 'idle';
-  const out = i === STEPPER_STAGES.length - 1 ? 'none' : i < lastVisited ? 'done' : 'idle';
+  const out = i === total - 1 ? 'none' : i < lastVisited ? 'done' : 'idle';
   return { in: into, out };
 }
 
@@ -122,11 +144,13 @@ function segmentState(
  *    on a stopped run's track worth having — "it died 7m 24s into dispatch",
  *    bounded now that the clock is clamped at the run's last heartbeat
  *    instead of ticking against the wall clock forever.
- * 2. `merged`, once visited, reads the finish CLOCK instead of a span —
- *    `-when`, a distinct register from `-none`: this is a known fact
- *    ("when it finished"), not an absent one, and the last arrival on any
- *    item has no "next stamp" for a span to measure it against in the
- *    first place.
+ * 2. The run's own success exit (`terminal` — 'merged' or 'branched'), once
+ *    visited, reads the finish CLOCK instead of a span — `-when`, a distinct
+ *    register from `-none`: this is a known fact ("when it finished"), not
+ *    an absent one, and the last arrival on any item has no "next stamp" for
+ *    a span to measure it against in the first place. Both success exits
+ *    take this branch identically — a branch-mode item finished exactly as
+ *    much as a merge-mode one did, just at a different destination.
  * 3. Any other visited node reads its own span from `itemStageSpans` —
  *    but only when one actually exists FOR that stage. A node can be
  *    visited (filled) and still have no span: the item's own chronologically
@@ -140,15 +164,16 @@ function trackValue(
   dot: StepperDot,
   item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
   now: number | null,
-  spans: readonly StageSpan[]
+  spans: readonly StageSpan[],
+  terminal: 'merged' | 'branched'
 ): { text: string; modifier: 'none' | 'when' | null } {
   if (dot.state === 'current' || dot.state === 'stalled') {
     const ms = inStageMs(item, now);
     return ms === null ? { text: '—', modifier: 'none' } : { text: formatSpan(ms), modifier: null };
   }
 
-  if (dot.stage === 'merged' && dot.state !== 'hollow') {
-    return { text: formatClock(item.stageAt.merged) ?? '—', modifier: 'when' };
+  if (dot.stage === terminal && dot.state !== 'hollow') {
+    return { text: formatClock(item.stageAt[terminal]) ?? '—', modifier: 'when' };
   }
 
   const span = spans.find((s) => s.stage === dot.stage);
@@ -157,22 +182,30 @@ function trackValue(
   return { text: '—', modifier: 'none' };
 }
 
-export function StageTrack({ item, now, live }: {
+export function StageTrack({ item, now, live, mergeModeEffective }: {
   item: Pick<RunQueueItem, 'id' | 'stage' | 'stageAt' | 'fixLoops'>;
   now: number | null;
   live: boolean;
+  mergeModeEffective: MergeMode;
 }): JSX.Element | null {
   if (item.stage === 'ungroomed') return null;
 
-  const dots = stepperDots(item, live);
+  // The run's own success exit — usually, but this item's OWN exit when it
+  // has already reached one. See this file's header comment and
+  // `stepperTerminal`'s own doc comment (run-time.ts) for the full rule and
+  // why an already-finished item must not be relabelled by a run that later
+  // moved on to the other mode.
+  const terminal = stepperTerminal(item, mergeModeEffective);
+
+  const dots = stepperDots(item, live, terminal);
   const spans = itemStageSpans(item);
   const lastVisited = dots.reduce((last, dot, i) => (dot.state !== 'hollow' ? i : last), -1);
 
   return (
     <div className="run-track" data-testid={`run-track-${item.id}`}>
       {dots.map((dot, i) => {
-        const { in: dataIn, out: dataOut } = segmentState(i, lastVisited, dot.state);
-        const value = trackValue(dot, item, now, spans);
+        const { in: dataIn, out: dataOut } = segmentState(i, lastVisited, dot.state, dots.length);
+        const value = trackValue(dot, item, now, spans, terminal);
         const valueClass = ['run-track-val', value.modifier !== null && `run-track-val-${value.modifier}`]
           .filter(Boolean)
           .join(' ');

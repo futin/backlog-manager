@@ -380,7 +380,7 @@ export function ItemCard(
                 across the card's whole width instead of 9.5px of its foot.
                 `stageChipClass`/`stageGlyph` (lib/run-stage.ts) and every
                 `.board-card-stage*` rule in styles.css stay exactly as they
-                are — RunDrawer chips all fourteen stages and is now their only
+                are — RunDrawer chips all fifteen stages and is now their only
                 caller, which is why those names still read as the board's own
                 and did not move with the chip. */}
           </div>

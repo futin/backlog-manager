@@ -1,6 +1,7 @@
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, OrchestratorArchivePayload,
-  OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, PermissionMode
+  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeMode,
+  OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
+  PermissionMode
 } from '../../../shared/types';
 
 /**
@@ -256,6 +257,19 @@ export interface StartOrchestrateRequest {
   model?: string;
   effort?: string;
   permissionMode?: PermissionMode;
+  /**
+   * Narrower than the server's plain `string` for the same reason
+   * `permissionMode` above is: the server is validating a body it cannot
+   * trust, but a caller composing this request on the client already has
+   * the real `MergeMode` union in scope (see `shared/types.ts`), so there
+   * is no reason to widen it back to `string` just to send it over the
+   * wire. Sent on every launch, including when it equals the default
+   * (`'merge'`) — an absent field would mean the same thing today, but the
+   * request is the sheet's explicit answer to "what should this run do",
+   * and inferring it server-side from an absent field would put that one
+   * decision in two places.
+   */
+  mergeMode?: MergeMode;
   /** The board's item selection, sent ONLY when it is a strict subset of the
    *  project's queue — an absent `ids` means "drain everything", and the two
    *  are genuinely different instructions rather than two spellings of one
@@ -289,4 +303,80 @@ export async function startOrchestrate(req: StartOrchestrateRequest): Promise<Ag
  */
 export function sessionUrl(linkBase: string, sessionId: string): string {
   return `${linkBase.replace(/\/+$/, '')}/?session=${encodeURIComponent(sessionId)}`;
+}
+
+/**
+ * Body of `GET /api/agents/merge-check` (Task 6). Mirrors the server's own
+ * `MergeCheckResult` (server/src/agents/merge-check.util.ts) field for
+ * field, but is declared here rather than promoted into shared/types.ts —
+ * the same call `StartOrchestrateRequest` above already makes, for the same
+ * reason: promotion waits for a second consumer to need it, and this
+ * client-only declaration is exactly that second consumer without touching
+ * the server side, which this task was never asked to do.
+ */
+export interface MergeCheckResult {
+  covered: boolean;
+  /** Absolute path of the settings file whose `permissions.allow` entry
+   *  covers `git merge`, or `null` when nothing does. Read-only, display-only
+   *  data for the orchestrate sheet's setup hint — this client only ever
+   *  reads it, never writes it (the design's own non-goal: the sheet must
+   *  never offer to write the file for the user). */
+  source: string | null;
+}
+
+/**
+ * `GET /api/agents/merge-check` (Task 6) — a read-only guess at whether this
+ * project's Claude Code settings already grant `git merge`, so the
+ * orchestrate sheet can hint at the one-time setup that makes a `merge`-mode
+ * run's last step reliable instead of a coin flip against the auto-mode
+ * classifier (see the design doc's "Why this exists"). `project` rides in
+ * the query string, not a POST body, mirroring the server's own transport
+ * choice (`AgentsController.mergeCheck`'s own comment): unlike
+ * `fetchAgentPlan`'s `itemPath`, this `project` is a path the client already
+ * pulled out of `/api/projects` to build the board, so a query string
+ * discloses nothing an access log couldn't already read off that response.
+ *
+ * Unlike every neighbour above, a rejection here is not this caller's
+ * problem to turn into a rendered error — it is a missing HINT, not a
+ * missing capability, and the one caller (OrchestrateSheet's own effect)
+ * deliberately swallows a thrown `ApiError` into "show no hint" rather than
+ * anything that could block or blemish a launch that otherwise works fine.
+ *
+ * Shape-guarded (review fix round 1), reversing this function's original
+ * "read once, rendered once, nothing to lie inside of" reasoning — that
+ * reasoning is true of a CACHE but not of a RENDER, and this response feeds
+ * a render directly. `OrchestrateSheet`'s hint guard is
+ * `!mergeCoverage.covered`, and `!` on a missing field is not "no answer",
+ * it is `true`: any 200 whose body lacks `covered` — a wrong endpoint
+ * answering the URL pattern, a future server refactor that renames the
+ * field, or (as the reviewer reproduced) a test stub with a stale
+ * catch-all shape — renders the hint as a confident, false STATEMENT OF
+ * FACT that this project's settings lack a rule they may well have. That is
+ * a worse failure than the network error the `.catch` below already
+ * handles cleanly, not a better one, so it gets routed into the identical
+ * path: `isMergeCheckResult` throws, and the caller's existing
+ * `.catch(() => setMergeCoverage(null))` treats a malformed 200 exactly
+ * like a rejected request, which is the only value this hint is allowed to
+ * ever assert an absence from.
+ */
+function isMergeCheckResult(data: unknown): data is MergeCheckResult {
+  return (
+    typeof data === 'object' && data !== null &&
+    typeof (data as MergeCheckResult).covered === 'boolean' &&
+    (typeof (data as MergeCheckResult).source === 'string' || (data as MergeCheckResult).source === null)
+  );
+}
+
+export async function fetchMergeCheck(project: string): Promise<MergeCheckResult> {
+  const data = await unwrap<MergeCheckResult>(
+    await fetch(`/api/agents/merge-check?project=${encodeURIComponent(project)}`)
+  );
+  // Thrown, not returned-anyway, mirroring fetchAgentsStatus /
+  // fetchOrchestratorRuns above: a caller gets a clean rejection rather
+  // than a payload that looks real until the render that reads `.covered`
+  // off it lies.
+  if (!isMergeCheckResult(data)) {
+    throw new Error('malformed /api/agents/merge-check response');
+  }
+  return data;
 }

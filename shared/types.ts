@@ -296,6 +296,29 @@ export interface AgentDispatchResult {
 export const RUN_IN_PROGRESS_CODE = 'run-in-progress';
 
 /**
+ * What a successful run does with a verified item's branch: merge it into
+ * `main` and clean up, or leave it for a person to merge by hand. Declared
+ * beside `RunStage` because the two are the same feature — `branch` mode
+ * exists to make `RunStage` need a second success exit (`branched`, below).
+ *
+ * - `merge` — today's behaviour, byte for byte. The run merges each verified
+ *   item into `main` (`git merge --no-ff`) and deletes its worktree and
+ *   branch.
+ * - `branch` — the run commits, reviews and verifies exactly as `merge`
+ *   mode does, then removes the worktree and **keeps the branch**. `main` is
+ *   never touched. The branch is the deliverable a person merges by hand.
+ */
+export type MergeMode = 'merge' | 'branch';
+
+/**
+ * Every member of `MergeMode`, as a value — what a request body's
+ * `mergeMode` and the CLI's `--merge-mode` flag are both checked against.
+ * Exported so neither caller has to restate the union by hand, the same
+ * reason `AGENT_ACTIONS` exists in `shared/agent.ts` beside `isAgentAction`.
+ */
+export const MERGE_MODES: readonly MergeMode[] = ['merge', 'branch'];
+
+/**
  * The orchestrator's one-way pipeline for a single queue item, pending
  * through merged, plus the terminal exits that leave the pipeline early.
  * Written out as a flat union rather than modelled as "pipeline stage" +
@@ -308,17 +331,27 @@ export const RUN_IN_PROGRESS_CODE = 'run-in-progress';
  * loop and Task 6's client render a "how far along" indicator by finding a
  * stage's position in this list — the members exist as much for a reader
  * scanning the sequence as for the string values themselves. `pending` is
- * the only stage every item starts in; `merged` is the only success exit;
+ * the only stage every item starts in; `merged` and `branched` are the two
+ * success exits — same terminal position in the pipeline, one per
+ * `MergeMode`, and a queue item reaches exactly one of them, never both;
  * `failed`, `skipped`, `needs-answers`, `ungroomed`, and `parked` are the
  * five ways an item leaves the pipeline without merging. `needs-answers` and
  * `ungroomed` are reachable straight from `pending` (a preflight question
  * with no answer, or an item the gate never queues past parse) without ever
  * touching `preflight` — the type does not encode reachability, only the
  * vocabulary; `orchestrate.mjs` (Task 3) owns which transitions are legal.
+ *
+ * `branched` is the `branch`-mode success exit, positioned beside `merged`
+ * rather than off with the failure exits: it is what a *successful* item
+ * reaches when the run was told to stop at a reviewed branch instead of
+ * merging it, and it is a true exit like `merged` — the run holds nothing
+ * once an item is there. See `MergeMode` above for what the two modes do
+ * differently, and `RUN_HELD_STAGES` (shared/agent.ts) for why `branched`
+ * counts as one of the exits and not one of the claims.
  */
 export type RunStage =
   | 'pending' | 'preflight' | 'dispatched' | 'inspecting' | 'reviewing'
-  | 'fixing' | 'verifying' | 'merging' | 'merged'
+  | 'fixing' | 'verifying' | 'merging' | 'merged' | 'branched'
   | 'failed' | 'skipped' | 'needs-answers' | 'ungroomed' | 'parked';
 
 /**
@@ -338,12 +371,15 @@ export type RunStage =
  * `pending` and `preflight` are IN this list deliberately, which is the one
  * judgement call here. A pending item is already claimed — the run will reach
  * it without asking anyone — so a manual session that grooms or archives it
- * first leaves the run dispatching into an item that moved under it. The six
- * members left out (`merged`, `failed`, `skipped`, `needs-answers`,
- * `ungroomed`, `parked`) are the run's exits: it is finished with that item
- * and a human picking it up by hand is the intended next move. `parked` most
- * of all — a park exists precisely to hand the item back to a person, so
- * blocking it would break the one recovery path it was built for.
+ * first leaves the run dispatching into an item that moved under it. The
+ * seven members left out (`merged`, `branched`, `failed`, `skipped`,
+ * `needs-answers`, `ungroomed`, `parked`) are the run's exits: it is finished
+ * with that item and a human picking it up by hand is the intended next
+ * move. `parked` most of all — a park exists precisely to hand the item back
+ * to a person, so blocking it would break the one recovery path it was built
+ * for. `branched` joins the exits for the same reason `merged` is one: a
+ * branch-mode run that finished the item successfully has let go of it just
+ * as completely as a merge-mode run has.
  *
  * NOT the same list as `ACTIVE_RUN_STAGES` (client ItemCard.tsx), and the two
  * must not be unified: that one answers "does this card show a live stage
@@ -360,8 +396,9 @@ export const RUN_CLAIMED_STAGES: readonly RunStage[] = [
  * The two `RunStage` values that mean the run has STOPPED and will not restart
  * until a person does something. Together with `RUN_CLAIMED_STAGES` above they
  * are every stage a run still HOLDS the item at — `runHoldsItem`
- * (shared/agent.ts) is that union, and `merged`/`failed`/`skipped`/`ungroomed`
- * are the four true exits it leaves out.
+ * (shared/agent.ts) is that union, and
+ * `merged`/`branched`/`failed`/`skipped`/`ungroomed` are the five true exits
+ * it leaves out.
  *
  * Moved here from `client/src/components/board/ItemCard.tsx` by bug-11, and
  * the move is the interesting part. On the card these two were a rendering
@@ -530,6 +567,35 @@ export interface OrchestratorRun {
   updatedAt: string;
   /** The `--max` the run was started with, or `null` for "work the whole gated queue". */
   maxItems: number | null;
+  /**
+   * What this run was ASKED to do — `init --merge-mode`'s value, or
+   * `'merge'` when the flag was omitted. Never rewritten after `init`: it is
+   * the answer to "what did the user request", and `mergeModeEffective`
+   * below is the separate answer to "what is the run actually doing". The
+   * two are split into two fields rather than one because an archive that
+   * only kept the final effective mode could no longer tell a run that
+   * *chose* branch mode up front apart from a run that started in merge
+   * mode and was degraded into branch mode by a denied merge — exactly the
+   * distinction a post-mortem on a run like that needs.
+   */
+  mergeMode: MergeMode;
+  /**
+   * What this run is actually doing right now. Starts equal to `mergeMode`
+   * and only ever moves `merge` → `branch`, never back — a run can be
+   * denied a merge mid-queue (§5.2 of the design) and fall back to leaving
+   * branches for the rest of the queue, but nothing pushes it the other way:
+   * once a run has proven the classifier will refuse it, retrying merge mode
+   * on a later item would just repeat the four-hour failure this field
+   * exists to prevent.
+   */
+  mergeModeEffective: MergeMode;
+  /**
+   * Why `mergeModeEffective` differs from `mergeMode`, or `null` when they
+   * still agree. Set once, at the moment a merge is denied — see
+   * `mergeModeEffective`'s own comment for why that move is one-directional
+   * and this note is never cleared back to `null` afterwards.
+   */
+  mergeModeNote: string | null;
   queue: RunQueueItem[];
   attention: RunAttention[];
 }

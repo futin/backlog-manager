@@ -1,6 +1,7 @@
-import { ATTENTION_RUN_STAGES, RUN_CLAIMED_STAGES } from './types';
+import { ATTENTION_RUN_STAGES, MERGE_MODES, RUN_CLAIMED_STAGES } from './types';
 import type {
-  AgentsStatus, BacklogItem, OrchestratorRunsPayload, PermissionMode, RunQueueItem, RunStage
+  AgentsStatus, BacklogItem, MergeMode, OrchestratorRunsPayload, PermissionMode, RunQueueItem,
+  RunStage
 } from './types';
 
 /**
@@ -33,6 +34,21 @@ export const AGENT_ACTIONS: readonly AgentAction[] = ['groom', 'execute', 'captu
  *  controller narrows a request body's `action` with. */
 export function isAgentAction(value: unknown): value is AgentAction {
   return typeof value === 'string' && (AGENT_ACTIONS as readonly string[]).includes(value);
+}
+
+/**
+ * Is this unvalidated value one of the two `MergeMode`s? Lives beside
+ * `isAgentAction` for the identical reason: `AgentsService.orchestrate`
+ * (§2.3 of the design) has to answer "absent → 'merge', valid → itself,
+ * anything else → reject", and a hand-written `!== 'merge' && !== 'branch'`
+ * chain is a second copy of `MERGE_MODES` — the copy that goes stale the day
+ * a third mode is ever added. Deliberately not exported from `shared/types.ts`
+ * alongside `MergeMode`/`MERGE_MODES` themselves: this file is where every
+ * other request-body guard already lives, and a reader checking a body field
+ * against its vocabulary should have exactly one module to look in.
+ */
+export function isMergeMode(value: unknown): value is MergeMode {
+  return typeof value === 'string' && (MERGE_MODES as readonly string[]).includes(value);
 }
 
 /**
@@ -415,8 +431,11 @@ function runEntryAt(
 /**
  * Every stage a run still HOLDS the item at: the eight it is actively working
  * it through, plus the two it has stopped at waiting for a person. The
- * complement is the four true exits — `merged`, `failed`, `skipped`,
- * `ungroomed` — after which nobody is on the item at all.
+ * complement is the five true exits — `merged`, `branched`, `failed`,
+ * `skipped`, `ungroomed` — after which nobody is on the item at all.
+ * `branched` sits with `merged` rather than off on its own: it is the other
+ * success exit `MergeMode` adds (shared/types.ts), and a branch-mode run has
+ * let go of the item exactly as completely as a merge-mode run has.
  *
  * Composed from the two exported partitions rather than written out, which is
  * the one place in this pair of lists that composing is right: both halves are

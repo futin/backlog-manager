@@ -1,7 +1,7 @@
 import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
   itemDoneClock, itemDurationMs, itemQueueWaitMs, runClockMs, runElapsedMs, runIsLive,
-  stepperDots, STEPPER_STAGES
+  stepperDots, stepperStages, stepperTerminal
 } from '../client/src/lib/run-time';
 import { runWallMs } from '../client/src/lib/run-stats';
 import { RUN_STALE_MS } from '../shared/types';
@@ -393,17 +393,34 @@ describe('inStageMs', () => {
   });
 });
 
-describe('stepperDots', () => {
-  it('covers the seven pipeline stages in order, and nothing else', () => {
-    expect(STEPPER_STAGES).toEqual([
+describe('stepperStages', () => {
+  // Regression guard: byte-identical to the old STEPPER_STAGES constant.
+  // Merge mode must render exactly as it does today — this is one of the
+  // two cases this task pins specifically to prove that.
+  it('is the seven pipeline stages ending `merged` for merge mode, unchanged from before this task', () => {
+    expect(stepperStages('merged')).toEqual([
       'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'merged'
     ]);
-    expect(stepperDots(queueItem('pending', {}), true).map((d) => d.stage)).toEqual([...STEPPER_STAGES]);
+  });
+
+  // The same six pipeline stages, but the seventh — the run's own success
+  // exit — carries branch mode's word instead.
+  it('is the same seven stages, ending `branched`, for branch mode', () => {
+    expect(stepperStages('branched')).toEqual([
+      'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'branched'
+    ]);
+  });
+});
+
+describe('stepperDots', () => {
+  it('covers the seven pipeline stages in order, and nothing else', () => {
+    expect(stepperDots(queueItem('pending', {}), true, 'merged').map((d) => d.stage))
+      .toEqual([...stepperStages('merged')]);
   });
 
   it('rings the current stage of an active row, fills what it visited, leaves the rest hollow', () => {
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
-    const byStage = Object.fromEntries(stepperDots(item, true).map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.state]));
     expect(byStage).toEqual({
       dispatched: 'filled', inspecting: 'filled', reviewing: 'current',
       fixing: 'hollow', verifying: 'hollow', merging: 'hollow', merged: 'hollow'
@@ -420,7 +437,7 @@ describe('stepperDots', () => {
       dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000),
       verifying: at(180_000), merging: at(240_000), merged: at(300_000)
     });
-    const byStage = Object.fromEntries(stepperDots(item, true).map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.state]));
     expect(byStage.fixing).toBe('hollow');
     expect(byStage.verifying).toBe('filled');
     expect(byStage.merging).toBe('filled');
@@ -430,7 +447,7 @@ describe('stepperDots', () => {
 
   it('rings nothing for a row that left the pipeline early, showing only how far it got', () => {
     const item = queueItem('parked', { dispatched: at(0), inspecting: at(60_000), parked: at(120_000) });
-    const states = stepperDots(item, true).map((d) => d.state);
+    const states = stepperDots(item, true, 'merged').map((d) => d.state);
     expect(states).not.toContain('current');
     expect(states.filter((s) => s === 'filled')).toHaveLength(2);
   });
@@ -438,7 +455,7 @@ describe('stepperDots', () => {
   it('labels a visited dot with its arrival time and a never-entered dot with the bare stage name', () => {
     const local = new Date(2026, 7, 31, 14, 31, 0);
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: local.toISOString(), reviewing: at(120_000) });
-    const dots = Object.fromEntries(stepperDots(item, true).map((d) => [d.stage, d.label]));
+    const dots = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.label]));
     expect(dots.inspecting).toBe('inspecting · 14:31');
     expect(dots.fixing).toBe('fixing');
   });
@@ -456,7 +473,7 @@ describe('stepperDots', () => {
    */
   it('marks the stage a stopped run died on as stalled, leaving the rest of the row alone', () => {
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
-    const byStage = Object.fromEntries(stepperDots(item, false).map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, false, 'merged').map((d) => [d.stage, d.state]));
     expect(byStage).toEqual({
       dispatched: 'filled', inspecting: 'filled', reviewing: 'stalled',
       fixing: 'hollow', verifying: 'hollow', merging: 'hollow', merged: 'hollow'
@@ -471,6 +488,80 @@ describe('stepperDots', () => {
       dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000),
       verifying: at(180_000), merging: at(240_000), merged: at(300_000)
     });
-    expect(stepperDots(item, false).map((d) => d.state)).not.toContain('stalled');
+    expect(stepperDots(item, false, 'merged').map((d) => d.state)).not.toContain('stalled');
+  });
+
+  // Branch mode's own success exit. Same six pipeline stages the item
+  // actually walked through, but the terminal argument is now 'branched' —
+  // the seventh dot has to carry that word rather than 'merged', and the
+  // dots array still has to be seven long, not eight: `branched` REPLACES
+  // the seventh position, it does not add an eighth one (RunStage's own doc
+  // comment: the two success exits occupy "the same terminal position", one
+  // per MergeMode, never both on the same item).
+  it('produces seven dots for an item at the branch-mode success exit, the last one named branched', () => {
+    const item = queueItem('branched', {
+      pending: at(0), dispatched: at(10_000), inspecting: at(60_000), reviewing: at(120_000),
+      verifying: at(180_000), merging: at(240_000), branched: at(300_000)
+    });
+    const dots = stepperDots(item, true, 'branched');
+    expect(dots).toHaveLength(7);
+    expect(dots[6].stage).toBe('branched');
+  });
+
+  // A terminal stage is never the current node — the same rule `merged`
+  // already follows (see the "rings nothing" case above) — and `branched`
+  // must follow it too: the item is finished, not "at" branched the way a
+  // reviewing row is at reviewing. `filled`, not `current` and not `hollow`,
+  // is simultaneously "visited" and "not current" in one assertion, the same
+  // way the `merged` case above pins it.
+  it('marks a branched item\'s last dot visited but never current', () => {
+    const item = queueItem('branched', {
+      pending: at(0), dispatched: at(10_000), inspecting: at(60_000), reviewing: at(120_000),
+      verifying: at(180_000), merging: at(240_000), branched: at(300_000)
+    });
+    const dots = stepperDots(item, true, 'branched');
+    expect(dots[6].state).toBe('filled');
+  });
+});
+
+describe('stepperTerminal', () => {
+  // The disagreement case the fix exists for: a run's `mergeModeEffective`
+  // can move on to `'branch'` mid-queue (§5.2 of the design — a merge denied
+  // partway through the queue) while an earlier item already finished with
+  // `stage: 'merged'` under the old mode. That item's own exit must win, not
+  // the run's current field, or its seventh dot would read `branched` — a
+  // key `stageAt` never got — and lose its finish time to a false hollow.
+  it('reads a merged item\'s own stage, not the run\'s branch-mode field, once it has already exited', () => {
+    expect(stepperTerminal(queueItem('merged', { merged: at(0) }), 'branch')).toBe('merged');
+  });
+
+  // The identical rule stated the other direction: a branched item's own
+  // exit wins over a run whose field still reads `'merge'`. Not a run shape
+  // `mergeModeEffective` can actually reach today (it only ever moves
+  // `merge` → `branch`, never back — `OrchestratorRun.mergeModeEffective`'s
+  // own doc comment, shared/types.ts) but the function's rule is symmetric,
+  // and pinning both directions is what proves it is actually symmetric
+  // rather than merge-mode being special-cased.
+  it('reads a branched item\'s own stage, not the run\'s merge-mode field, once it has already exited', () => {
+    expect(stepperTerminal(queueItem('branched', { branched: at(0) }), 'merge')).toBe('branched');
+  });
+
+  // The fallback branch: an item still mid-pipeline has no `merged`/
+  // `branched` stage of its own to read at all, so the run's own effective
+  // mode is the only available answer — the pre-fix behaviour, preserved for
+  // the one case it was always correct for.
+  it('falls back to the run\'s effective mode for an item that has not exited yet', () => {
+    expect(stepperTerminal(queueItem('reviewing', { reviewing: at(0) }), 'branch')).toBe('branched');
+    expect(stepperTerminal(queueItem('reviewing', { reviewing: at(0) }), 'merge')).toBe('merged');
+  });
+
+  // A failure exit (never a success exit either way) also has no stage of
+  // its own for this function to prefer, so it takes the same fallback path
+  // as a still-moving item — the returned word is irrelevant to a parked
+  // row's own rendering (neither `merged` nor `branched` will be in its
+  // `stageAt`), but the function must not throw or misread `parked` as one
+  // of the two success stages it is choosing between.
+  it('falls back to the run\'s effective mode for a failure exit too', () => {
+    expect(stepperTerminal(queueItem('parked', { parked: at(0) }), 'branch')).toBe('branched');
   });
 });

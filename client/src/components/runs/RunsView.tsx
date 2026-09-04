@@ -5,7 +5,7 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
-import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH } from '../../lib/run-stage';
+import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, mergeModeLabel } from '../../lib/run-stage';
 import { aggregateRuns, dayKey, dayLabel, runStageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
@@ -63,12 +63,13 @@ import type { OrchestratorArchiveRun, OrchestratorRun, RunStage } from '../../..
  * Fix round 3: round 2 fixed the ROW but left the aggregate stat tiles
  * behind — a follow-up re-review found `aggregateRuns` still fed the raw
  * archive record for every run, live-backed included, so a run's row could
- * tick `1/6 -> 2/6` on the live poll while the "merged / queued" tile beside
- * it stayed frozen on the stale archive count for the run's entire
- * duration. Same cause as round 2 (a call site reading `m.run` instead of
- * asking `pickAuthority` who the current authority is), just a second call
- * site that had not been touched yet. See the comment immediately above
- * `aggregateRuns`'s own call below for the specifics.
+ * tick `1/6 -> 2/6` on the live poll while the "completed / queued" tile
+ * beside it (labelled "merged / queued" at the time; relabelled by the final
+ * whole-branch review's finding 1) stayed frozen on the stale archive count
+ * for the run's entire duration. Same cause as round 2 (a call site reading
+ * `m.run` instead of asking `pickAuthority` who the current authority is),
+ * just a second call site that had not been touched yet. See the comment
+ * immediately above `aggregateRuns`'s own call below for the specifics.
  *
  * Task 7 adds the range control (design doc: "Range") — a segmented Today /
  * This week / This month / All group in the toolbar (`RUN_RANGES`-driven,
@@ -285,7 +286,7 @@ function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
 const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed'];
 
 /**
- * Merged-stage items over a run's whole queue — the same ratio the tiles
+ * Completed items over a run's whole queue — the same ratio the tiles
  * above compute across every run in scope (`aggregateRuns`' own
  * `itemsQueued`/`itemsMerged`, Task 3), read here for one run at a time.
  * Takes any object with a `.queue` of stage-bearing items rather than
@@ -293,6 +294,17 @@ const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', '
  * `RunRow` can call this on WHICHEVER object `pickAuthority` names as the
  * authority (the archive record, or a fresh `LiveRun`), not only the
  * archive one.
+ *
+ * `completed` counts BOTH of `RunStage`'s success exits, `merged` and
+ * `branched` — one per `MergeMode` — for the identical reason
+ * `RunStrip.tsx`'s own `completed` does (that file's own comment has the
+ * full account): a run holding items in both stages, the shape a merge
+ * denied partway through the queue actually leaves behind (design §5.2),
+ * must count both rather than silently dropping whichever one this
+ * function's numerator did not name. `aggregateRuns` already made this
+ * same call for the tiles above ("counted as completed, alongside merged",
+ * design §4) — this is that same rule applied to one run instead of every
+ * run in scope, not a second, independently-arrived-at decision.
  *
  * `total` is deliberately the RAW `queue.length` — fix round 1's own
  * flagged-but-ruled-on discrepancy: `RunStrip.tsx`'s live strip computes its
@@ -324,8 +336,11 @@ const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', '
  * for a "skipped" count to explain the mismatch would not find one, because
  * that is not where this stage surfaces.
  */
-function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { merged: number; total: number } {
-  return { merged: run.queue.filter((q) => q.stage === 'merged').length, total: run.queue.length };
+function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { completed: number; total: number } {
+  return {
+    completed: run.queue.filter((q) => q.stage === 'merged' || q.stage === 'branched').length,
+    total: run.queue.length
+  };
 }
 
 /**
@@ -350,6 +365,18 @@ function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { merged: 
  * `run.project`/`run.runId` are read straight off `run` regardless — those
  * are identity fields that cannot change between the two sources for what
  * is, by construction, the same run file.
+ *
+ * Task 9 adds the mode badge (`mergeModeLabel`, lib/run-stage.ts), read off
+ * the SAME `authority` object every other reading on this row already uses
+ * — `mergeMode`/`mergeModeEffective` live on both `OrchestratorRun` and
+ * `OrchestratorArchiveRun`, so no third field has to be threaded through
+ * `pickAuthority` for it. Design §7 asks for this at the LIST level, not
+ * just the detail pane behind it, specifically so a downgraded run is
+ * "legible at a glance in history" — a person scanning a day's worth of
+ * rows should not have to open every one just to learn which runs left
+ * branches behind. `mergeModeLabel` returns `null` for a plain merge-mode
+ * run, so this adds nothing to the row for the shape of run that made up
+ * every row in this list before this feature existed.
  */
 function RunRow({
   row, now, isSelected, onSelect
@@ -361,8 +388,9 @@ function RunRow({
 }): JSX.Element {
   const { run } = row;
   const authority = pickAuthority([row.live], run);
-  const { merged, total } = queueCounts(authority);
+  const { completed, total } = queueCounts(authority);
   const wall = runWallMs(authority, now);
+  const modeLabel = mergeModeLabel(authority.mergeMode, authority.mergeModeEffective);
 
   return (
     <button
@@ -382,7 +410,10 @@ function RunRow({
           {authority.status}
         </span>
         <span className="runs-row-project">{projectLabel(run.project)}</span>
-        <span className="runs-row-count">{merged}/{total}</span>
+        {modeLabel !== null && (
+          <span className="run-mode-badge" data-testid={`runs-row-mode-${run.runId}`}>{modeLabel}</span>
+        )}
+        <span className="runs-row-count">{completed}/{total}</span>
       </span>
       {wall !== null && <span className="runs-row-wall">{formatSpanCompact(wall)}</span>}
     </button>
@@ -513,10 +544,10 @@ export default function RunsView() {
   // merged/total and status off `pickAuthority([row.live], row.run)`, but
   // the tiles below still summed the raw archive snapshot, so an item
   // merging mid-run ticked the pinned row's own count up (1/6 -> 2/6) while
-  // this "merged / queued" tile a few tiles away stayed frozen at whatever
-  // the last archive fetch saw — the exact I2 defect class (row and tile
-  // disagreeing about one run's numbers), relocated from the detail pane to
-  // the aggregate tiles rather than fixed everywhere at once. Mapping
+  // this "completed / queued" tile a few tiles away stayed frozen at
+  // whatever the last archive fetch saw — the exact I2 defect class (row and
+  // tile disagreeing about one run's numbers), relocated from the detail
+  // pane to the aggregate tiles rather than fixed everywhere at once. Mapping
   // through the same `pickAuthority` call `RunRow` already uses closes it
   // the same way: every run in scope contributes its freshest known queue,
   // not whichever snapshot happened to be sitting in the archive payload.
@@ -621,19 +652,35 @@ export default function RunsView() {
                 ))}
               </div>
             </div>
+            {/* Final whole-branch review, finding 1: this tile's VALUE
+                (`itemsMerged`) already counted `branched` alongside `merged`
+                per spec §4 — `aggregateRuns`'s own doc comment has always
+                said so — but the LABEL still read "merged / queued", so a
+                fully successful branch-mode run (nothing reached `main`)
+                rendered "4/4 merged" over a queue that merged nothing at
+                all. That is the exact failure spec §4 invented `branched` to
+                stop, reappearing one level up in the tile's wording instead
+                of its stored state. "completed" is the word `itemsMerged`'s
+                own doc comment already uses to describe the union of both
+                success exits, so the label now says what the number means
+                instead of naming only one of the two ways to earn it. No
+                arithmetic changed — see `test/runs-view.test.tsx`'s
+                branch-mode fixture, which pins this tile at `2/2` for a run
+                that merged zero of two items. */}
             <div className="runs-tile" data-testid="runs-tile-merged">
               <div className="runs-tile-value">{aggregates.itemsMerged}/{aggregates.itemsQueued}</div>
-              <div className="runs-tile-label">merged / queued</div>
+              <div className="runs-tile-label">completed / queued</div>
             </div>
             {/* "avg item work" (Task 7), not "avg item": `avgItemWorkMs`
                 (RunAggregates' own doc comment has the full reasoning) is
-                `itemDurationMs` averaged over merged items — first
-                non-pending arrival to the terminal stamp — which deliberately
-                EXCLUDES the queue-wait interval a bare "avg item" reading
-                would leave a person assuming is included. The substat states
-                the exclusion outright, matching how the wide tile below (and
-                RunDetail's own rollup) already caveat the identical number
-                rather than leaving it implicit. */}
+                `itemDurationMs` averaged over completed items — merged or
+                branched alike, per the same finding-1 correction as the tile
+                above — first non-pending arrival to the terminal stamp —
+                which deliberately EXCLUDES the queue-wait interval a bare
+                "avg item" reading would leave a person assuming is included.
+                The substat states the exclusion outright, matching how the
+                wide tile below (and RunDetail's own rollup) already caveat
+                the identical number rather than leaving it implicit. */}
             <div className="runs-tile" data-testid="runs-tile-avg-item">
               <div className="runs-tile-value">
                 {aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}
@@ -644,23 +691,37 @@ export default function RunsView() {
             {/* "fix loops / merged" read as the MERGED-ONLY reading R1
                 deliberately rejected (`RunAggregates.fixLoopsPerMerged`'s own
                 doc comment): the numerator sums fix loops across every
-                QUEUED item, including ones that never merged, because rework
-                spent on an item that was ultimately parked or fix-exhausted
-                is still cost this run paid on the way to whatever it did
-                merge. The math never changed; only the label was wrong, so a
-                reader who checked the number against the old caption could
-                reasonably conclude a bug that was never there. "rework /
-                merge" plus the `title` below spells out what a reader would
-                otherwise only find in run-stats.ts. */}
+                QUEUED item, including ones that never completed, because
+                rework spent on an item that was ultimately parked or
+                fix-exhausted is still cost this run paid on the way to
+                whatever it did finish. The math never changed; only the
+                label was wrong, so a reader who checked the number against
+                the old caption could reasonably conclude a bug that was
+                never there. The `title` below was corrected alongside the
+                tile above (finding 1): it used to say "how many did merge",
+                which is false for a branch-mode run's denominator
+                (`itemsMerged` counts `branched` too) — but that pass fixed
+                only the tooltip, leaving the VISIBLE label reading
+                "rework / merge", the identical mislabel one tile over: a
+                reader who never hovers still sees a claim that every
+                completion reached `main`. This is finding 1's other half.
+                "completed" is the word `itemsMerged`'s own doc comment uses
+                for the union of both success exits, the same word the tile
+                above already adopted, so this label now says what the
+                denominator means instead of naming only one of the two ways
+                to earn it. No arithmetic changed — see
+                `test/runs-view.test.tsx`'s branch-mode fixture, which now
+                pins this label (and its predecessor's) alongside the value
+                each already had pinned. */}
             <div
               className="runs-tile"
               data-testid="runs-tile-fixloops"
-              title="Total fix loops across every queued item, including ones that never merged, divided by how many did merge — what each merge cost in rework."
+              title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."
             >
               <div className="runs-tile-value">
                 {aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}
               </div>
-              <div className="runs-tile-label">rework / merge</div>
+              <div className="runs-tile-label">rework / completed</div>
             </div>
             <div className="runs-tile" data-testid="runs-tile-verify">
               <div className="runs-tile-value">

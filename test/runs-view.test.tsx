@@ -99,7 +99,10 @@ function liveQueueItem(
 }
 
 function run(over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun, 'runId' | 'project' | 'status' | 'startedAt' | 'updatedAt' | 'queue'>): OrchestratorArchiveRun {
-  return { maxItems: null, attention: [], current: false, ...over };
+  return {
+    maxItems: null, mergeMode: 'merge', mergeModeEffective: 'merge', mergeModeNote: null,
+    attention: [], current: false, ...over
+  };
 }
 
 /**
@@ -244,6 +247,9 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
     startedAt: RUN_LIVE.startedAt,
     updatedAt: RUN_LIVE.updatedAt,
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     queue: [
       liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
       // live-ahead-of-archive: the archive's own a-2 is still "reviewing".
@@ -662,6 +668,9 @@ describe('RunsView', () => {
       startedAt: archiveEntry.startedAt,
       updatedAt: '2026-09-01T09:10:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveQueueItem('g-1', 'merged'),
@@ -715,6 +724,9 @@ describe('RunsView', () => {
       startedAt: archiveEntry.startedAt,
       updatedAt: '2026-09-01T09:10:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveQueueItem('g-1', 'merged'),
@@ -797,6 +809,9 @@ describe('RunsView', () => {
         startedAt: archiveAlpha.startedAt,
         updatedAt: archiveAlpha.updatedAt,
         maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        mergeModeNote: null,
         queue: [],
         attention: [],
         fresh: true,
@@ -825,6 +840,9 @@ describe('RunsView', () => {
         startedAt: '2026-09-01T09:30:00.000Z',
         updatedAt: '2026-09-01T09:30:00.000Z',
         maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        mergeModeNote: null,
         queue: [],
         attention: [],
         fresh: true,
@@ -939,5 +957,126 @@ describe('RunsView', () => {
     // 5-minute span remains.
     expect(dispatchedValue()).toBe('5m');
     expect(screen.getByTestId('runs-tile-machine')).toHaveTextContent('today · queue wait excluded');
+  });
+
+  // Task 9, brief case a applied to the list row: the real overnight run
+  // this feature traces back to finished four items — all reviewed, all
+  // green — and merged none, because the classifier refused every merge.
+  // A row reading `0/2` for a fully successful branch-mode run would be the
+  // identical "looks like a failure" bug RunStrip's own case pins, on the
+  // history surface instead of the live one. `queueCounts`' own `completed`
+  // counts both success exits, so this run's row must read `2/2`, and the
+  // mode badge (design §7: "a branch-mode run says so", extended to the
+  // list per that section's own "RunsView list ... same") must be visible
+  // without opening the detail pane.
+  it("reads a fully successful branch-mode run's row as done, with a branch-mode badge", async () => {
+    const branchRun = run({
+      runId: 'run-20260901-133000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-09-01T13:30:00.000Z',
+      updatedAt: '2026-09-01T13:45:00.000Z',
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null,
+      current: false,
+      queue: [item('c-1', 'branched'), item('c-2', 'branched')]
+    });
+
+    await renderRunsView([branchRun]);
+
+    const row = screen.getByTestId(`runs-row-${branchRun.runId}`);
+    expect(row).toHaveTextContent('2/2');
+    expect(row).not.toHaveTextContent('0/2');
+    expect(screen.getByTestId(`runs-row-mode-${branchRun.runId}`)).toHaveTextContent('branch mode');
+    expect(screen.getByTestId(`runs-row-mode-${branchRun.runId}`)).not.toHaveTextContent('downgraded');
+
+    // Final whole-branch review, finding 1: the aggregate tile beside the
+    // list counts `branched` into `itemsMerged` exactly as the row does
+    // (`aggregateRuns`'s own doc comment), but until this fix its LABEL still
+    // read "merged / queued" — so this same fully-successful branch-mode run
+    // rendered "2/2 merged" over a queue that reached `main` zero times. No
+    // test asserted the tile at all before this one; it now pins the same
+    // "done, not 0%" claim the row assertions above make, one surface over.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('2/2');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('0/2');
+
+    // Cleanup pass: the assertions above pin the tile's VALUE, which was
+    // already correct before finding 1 — the defect finding 1 fixed was the
+    // LABEL, one level up from the number, and a value-only assertion cannot
+    // catch a caption that lies about what the value means (it was pinning
+    // the wrong half of the same bug). Pin the label text itself now, for
+    // this tile and its sibling below: "completed / queued" here, and
+    // "rework / completed" on the fix-loops tile (RunsView's own comment
+    // above `runs-tile-fixloops` has that half's reasoning — it was fixed
+    // one wave after this one, the same mislabel one tile over). Neither
+    // says "merge" any more, because a branch-mode completion never reached
+    // one.
+    expect(screen.getByTestId('runs-tile-merged')).toHaveTextContent('completed / queued');
+    expect(screen.getByTestId('runs-tile-merged')).not.toHaveTextContent('merged / queued');
+    expect(screen.getByTestId('runs-tile-fixloops')).toHaveTextContent('rework / completed');
+    expect(screen.getByTestId('runs-tile-fixloops')).not.toHaveTextContent('rework / merge');
+  });
+
+  // Brief case 2: a run that ASKED for `merge` but is actually running
+  // `branch` (design §5.2's mid-queue denial) must show the two-field
+  // distinction rather than collapse it into the same badge a deliberately-
+  // chosen branch-mode run wears — `mergeModeLabel` (lib/run-stage.ts)
+  // appends "(downgraded)" for exactly this shape. The row's badge is the
+  // "legible at a glance in history" half of design §7; the full
+  // `mergeModeNote` prose is the detail pane's job, pinned separately in
+  // run-detail.test.tsx.
+  it('marks a downgraded run\'s row distinctly from a deliberately-chosen branch-mode one', async () => {
+    const downgraded = run({
+      runId: 'run-20260901-100000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-09-01T10:00:00.000Z',
+      updatedAt: '2026-09-01T10:20:00.000Z',
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'classifier denied the merge on d-2',
+      current: false,
+      queue: [item('d-1', 'merged'), item('d-2', 'branched')]
+    });
+
+    await renderRunsView([downgraded]);
+
+    expect(screen.getByTestId(`runs-row-mode-${downgraded.runId}`)).toHaveTextContent('branch mode (downgraded)');
+  });
+
+  // Brief case 5, at the row level: a run holding items in BOTH success
+  // exits at once (the shape design §5.2 actually leaves behind) must count
+  // both toward the row's own ratio, hiding neither — the identical rule
+  // RunStrip.tsx's ruling defect #2 fixes for the live strip, pinned here
+  // for `queueCounts`' own `completed` instead.
+  it('counts merged and branched items together in a mixed row, hiding neither', async () => {
+    const mixed = run({
+      runId: 'run-20260901-110000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-09-01T11:00:00.000Z',
+      updatedAt: '2026-09-01T11:30:00.000Z',
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'classifier denied the merge on e-3',
+      current: false,
+      queue: [item('e-1', 'merged'), item('e-2', 'merged'), item('e-3', 'branched'), item('e-4', 'branched')]
+    });
+
+    await renderRunsView([mixed]);
+
+    expect(screen.getByTestId(`runs-row-${mixed.runId}`)).toHaveTextContent('4/4');
+  });
+
+  // Brief case 3, the regression guard: a plain merge-mode row — every row
+  // in `ARCHIVE_RUNS` and every row this whole file rendered before this
+  // task — must render byte-identically to today, which for the row means
+  // no mode badge node at all, not merely an empty one.
+  it('renders a merge-mode row byte-identically to before this feature: no mode badge', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    for (const entry of ARCHIVE_RUNS) {
+      expect(screen.queryByTestId(`runs-row-mode-${entry.runId}`)).not.toBeInTheDocument();
+    }
   });
 });

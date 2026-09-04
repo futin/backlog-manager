@@ -613,6 +613,292 @@ test('status --json prints the run file verbatim as parseable JSON', (t) => {
   assert.deepEqual(printed, onDisk)
 })
 
+// --- Task 3: merge mode in the run file ---------------------------------
+// Numbered per the task-3 brief's own table (task-3-brief.md, Step 1) so a
+// failing case here maps straight back to the row that specifies it.
+
+// Case 1.
+test('init --merge-mode branch writes mergeMode/mergeModeEffective "branch" and a null note', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'branch')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(written.mergeMode, 'branch')
+  assert.equal(written.mergeModeEffective, 'branch')
+  assert.equal(written.mergeModeNote, null)
+})
+
+// Case 2 — the regression guard: a run started with no --merge-mode flag
+// must behave exactly as it does at HEAD, key set included.
+test('init with no --merge-mode flag writes "merge" for both fields and a null note, key set unchanged from the contract fixture', (t) => {
+  const { home, project } = orchFixture(t)
+  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
+
+  const out = run(project, home, 'init', '--project', project)
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(written.mergeMode, 'merge')
+  assert.equal(written.mergeModeEffective, 'merge')
+  assert.equal(written.mergeModeNote, null)
+  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)))
+})
+
+// Case 3 — "validate first, mutate last": an invalid --merge-mode must
+// write nothing at all, not merely exit nonzero, so this asserts the whole
+// BM_ORCH_HOME directory tree stays empty rather than just checking the
+// exit code.
+test('init --merge-mode nonsense exits 1, names the two valid values, and writes nothing at all', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'nonsense')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /merge/)
+  assert.match(out.stderr, /branch/)
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --merge-mode is invalid')
+})
+
+// Case 4 — the same guarantee for a --merge-mode flag with no value at all
+// (the flag consumes the next argv slot; here there isn't one).
+test('init --merge-mode with no value exits 1 and writes nothing', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--merge-mode')
+
+  assert.equal(out.status, 1)
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --merge-mode has no value')
+})
+
+// Case 5 — the enforcement point design §3 calls for: a tool refusal, not a
+// SKILL.md reminder, because the reminder has to survive several hundred
+// turns of a headless session re-reading its own body and the refusal
+// doesn't need to. Checked against the WHOLE file, not just the item's
+// stage, since the refusal fires before any write at all.
+test("stage <id> merged is refused under a branch-mode run, naming the mode and the stage to use, and leaves run.json byte-unchanged", (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-40', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'stage', 'task-40', 'merged')
+
+  assert.notEqual(out.status, 0)
+  assert.match(out.stderr, /branch/)
+  assert.match(out.stderr, /branched/)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
+// Case 6.
+test('stage <id> branched under branch mode succeeds and stamps stageAt.branched', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-41', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+
+  const out = run(project, home, 'stage', 'task-41', 'branched')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const item = after.queue.find((q) => q.id === 'task-41')
+  assert.equal(item.stage, 'branched')
+  assert.ok(Number.isFinite(Date.parse(item.stageAt.branched)), `stageAt.branched did not parse: ${item.stageAt.branched}`)
+})
+
+// Case 7 — the converse of case 5 is deliberately NOT enforced: staging an
+// item 'branched' under plain merge mode is exactly what a merge denied
+// mid-queue degrades an item to (design §5.2), so it must stay legal here
+// even before any `merge-mode` call has moved the run's own effective mode.
+test('stage <id> branched under merge mode is legal too — the degrade path', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-42', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const out = run(project, home, 'stage', 'task-42', 'branched')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.queue.find((q) => q.id === 'task-42').stage, 'branched')
+})
+
+// Case 8.
+test('merge-mode branch --note records a downgrade: mergeMode stays merge, mergeModeEffective becomes branch, note stored verbatim', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const out = run(project, home, 'merge-mode', 'branch', '--note', 'classifier denied the merge on bug-14')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.mergeMode, 'merge')
+  assert.equal(after.mergeModeEffective, 'branch')
+  assert.equal(after.mergeModeNote, 'classifier denied the merge on bug-14')
+})
+
+// Case 9 — the downgrade is one-way: a run already effective-branch must
+// refuse a call trying to move it back to merge, changing nothing.
+test('merge-mode merge on a run already effective-branch is refused, changing nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'merge-mode', 'branch', '--note', 'denied once already').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'merge-mode', 'merge', '--note', 'x')
+
+  assert.notEqual(out.status, 0)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
+// Task-3 review fix round (Minor) — the one-way-transition logic is covered
+// above only for a run that REACHED branch mode via a downgrade (`init`
+// plain, then `merge-mode branch`). That covers the guard by construction
+// (it only ever checks `mergeModeEffective`, not how the run got there), but
+// the path where a run started in branch mode from `init --merge-mode
+// branch` directly was never exercised by any test — this pins it: a
+// `merge-mode branch --note x` call against a run that was ALREADY
+// effective-branch from its very first write must be refused exactly like
+// case 9's downgrade-then-re-record scenario, changing nothing.
+test('merge-mode branch on a run that started in branch mode via init is refused, changing nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'merge-mode', 'branch', '--note', 'x')
+
+  assert.notEqual(out.status, 0)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
+// Case 10 — the status summary must not report a branch-mode run's
+// progress as "N/M merged": that wording is only true under merge mode.
+test('status reads in branch-mode wording for a branch-mode run, not "N/M merged"', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-50', 'A')
+  seedReadyTask(project, 'task-51', 'B')
+  seedReadyTask(project, 'task-52', 'C')
+  seedReadyTask(project, 'task-53', 'D')
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-50', 'branched').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-51', 'branched').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-52', 'branched').status, 0)
+  // task-53 is left pending, so the total stays 4.
+
+  const out = run(project, home, 'status')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /3\/4 branched/)
+  assert.doesNotMatch(out.stdout, /3\/4 merged/)
+})
+
+// Final whole-branch review, finding 9: case 10 above pins `queueSummaryLine`'s
+// PURE branch-mode wording (a run that started `--merge-mode branch` and never
+// merged anything) — but its OTHER arm, a run that started in `merge` mode and
+// downgraded mid-queue (design §5.2, the real 2026-09-03 shape this whole
+// feature traces back to), had no coverage at all. That degraded-run string is
+// the one line a post-mortem actually reads, and `queueSummaryLine`'s own doc
+// comment is explicit that the secondary count is "never folded away, in
+// either direction" — so this pins both numbers appearing together, not just
+// the headline `branched` count that case 10 already covers.
+test('status names both counts for a run that downgraded mid-queue, not just the branched headline', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-70', 'A')
+  seedReadyTask(project, 'task-71', 'B')
+  seedReadyTask(project, 'task-72', 'C')
+  seedReadyTask(project, 'task-73', 'D')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  // Two items merge while the run is still in `merge` mode...
+  assert.equal(run(project, home, 'stage', 'task-70', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-71', 'merged').status, 0)
+  // ...then the classifier denies a merge, degrading the rest of the queue.
+  assert.equal(
+    run(project, home, 'merge-mode', 'branch', '--note', 'classifier denied the merge on task-72').status,
+    0
+  )
+  assert.equal(run(project, home, 'stage', 'task-72', 'branched').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-73', 'branched').status, 0)
+
+  const out = run(project, home, 'status')
+
+  assert.equal(out.status, 0, out.stderr)
+  // The headline flips to `branched` (this run's own definition of
+  // "finished successfully" once mergeModeEffective moved), and the two
+  // items that reached `main` before the denial are still named, not
+  // silently dropped from the summary a post-mortem reads.
+  assert.match(out.stdout, /2\/4 branched/)
+  assert.match(out.stdout, /2 merged before the mode changed/)
+})
+
+// Cleanup pass, mirroring the degraded-run case above from the other side:
+// that test covers a run that STARTED merge and DEGRADED to branch mid-queue
+// (`mergeModeEffective` ends the run at `'branch'`). The arm this pins is the
+// one `queueSummaryLine` reaches when `mergeModeEffective` never moves at
+// all — a run that stays in `merge` for its entire life yet still stages an
+// item `branched`, which `cmdStage`'s own comment says is deliberately legal
+// ("`stage <id> branched` stays legal under `merge` mode too"): §3's
+// pre-flight recognises a branch already sitting on disk from an earlier,
+// interrupted run (branch present, worktree gone — see the "recognise a
+// carried-over branched item" doc fix this same review wave made) and stages
+// that item `branched` without ever calling `merge-mode branch`, because
+// nothing about THIS run decided to give up on merging; one specific item
+// just already finished the other way before this run picked the queue back
+// up. `queueSummaryLine`'s headline therefore stays `merged` (the run's own
+// mode never changed), with the carried-over item named in parentheses
+// instead — the mirror image of the degraded run's "N/M branched (K merged
+// before the mode changed)" wording, and previously the only one of the two
+// non-pure arms with no test at all.
+test('status names both counts for a run that stayed in merge mode but carried over a branched item', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-80', 'A')
+  seedReadyTask(project, 'task-81', 'B')
+  seedReadyTask(project, 'task-82', 'C')
+  seedReadyTask(project, 'task-83', 'D')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  // Two items merge, exactly as `merge` mode always allows...
+  assert.equal(run(project, home, 'stage', 'task-80', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-81', 'merged').status, 0)
+  // ...and a third is staged `branched` directly, with no `merge-mode`
+  // call anywhere in this test: this run's own mode never degrades, it
+  // simply carries an item that already finished on a branch before this
+  // run reached it.
+  assert.equal(run(project, home, 'stage', 'task-82', 'branched').status, 0)
+  // task-83 is left pending, so the total stays 4.
+
+  const out = run(project, home, 'status')
+
+  assert.equal(out.status, 0, out.stderr)
+  // The headline stays `merged` — unlike the degraded-run case, this run's
+  // `mergeModeEffective` never moved off `merge` — with the carried-over
+  // item named alongside it rather than silently dropped.
+  assert.match(out.stdout, /2\/4 merged/)
+  assert.match(out.stdout, /1 branched/)
+  assert.doesNotMatch(out.stdout, /2\/4 branched/)
+
+  const json = run(project, home, 'status', '--json')
+  assert.equal(json.status, 0, json.stderr)
+  // Confirms this really is the non-degraded arm, not a false positive that
+  // happens to print the same numbers: `mergeModeEffective` stayed `merge`
+  // for this run's entire life, which is the one fact `queueSummaryLine`
+  // branches on to pick this wording over the degraded run's.
+  assert.equal(JSON.parse(json.stdout).mergeModeEffective, 'merge')
+})
+
+// Case 11 — ATTENTION_KINDS gains no fourth member: a green branch is not a
+// thing a human needs to look at, so `branched` must stay an unknown kind
+// exactly like any other made-up string.
+test('attention --kind branched is refused as an unknown kind — ATTENTION_KINDS gains no fourth member', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-60', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'attention', 'task-60', '--kind', 'branched', '--detail', 'x')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /unknown kind/)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
 // --- finish ------------------------------------------------------------
 
 test('finish --status done sets run status and re-stamps updatedAt', (t) => {
@@ -1694,6 +1980,23 @@ test('reconcile only reports non-terminal queue items, skipping merged/etc', (t)
   assert.deepEqual(JSON.parse(out.stdout), [])
 })
 
+// Controller ruling on top of the task-3 brief (spec §4's classification
+// table lists `branched` in RECONCILE_TERMINAL_STAGES explicitly): an item
+// already at this exit has left the pipeline exactly as completely as a
+// `merged` one has, so --resume's own reconcile pass must not treat an
+// already-delivered branch as unfinished work to redispatch into.
+test('reconcile also skips a branched item — branched is a true exit like merged', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-25', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-25', 'branched').status, 0)
+
+  const out = run(project, home, 'reconcile', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout), [])
+})
+
 test('reconcile with no run exits 3', (t) => {
   const { home, project } = orchFixture(t)
 
@@ -1834,6 +2137,96 @@ test('abort on a run with a never-dispatched pending item does nothing destructi
   const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
   assert.equal(after.status, 'aborted')
   assert.deepEqual(after.attention, [])
+})
+
+// Task-3 review fix round (Important) — the data-destroying defect: before
+// this fix, abort's teardown loop decided "preserve vs. remove" purely from
+// the phase:-marker check above, so a `branched` item (branch mode's own
+// terminal stage — design §5.3, "no `git branch -d`. The branch is the
+// deliverable.") had its branch force-deleted (`branch -D`, which bypasses
+// git's own not-fully-merged safety check) exactly like any other finished
+// item, with `main` never having touched its commits at all. This test pins
+// the fix: a `branched` item's worktree is still removed (§5.3 already has
+// the run do that at the moment the item is staged; leaving the call
+// ungated also still clears a stale worktree admin entry, same as before
+// this fix), but its branch survives, and the survival is recorded in
+// `attention` — not just this command's own stdout — so an operator who
+// aborts the rest of a queue after several items have already completed as
+// `branched` can find every kept branch from the run file alone.
+test("abort removes a branched item's worktree but keeps its branch, recording the kept branch in attention", (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-60', 'A branch-mode task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+
+  const worktreePath = path.join(project, '.worktrees', 'task-60')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-60', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-60', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-60').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-60', 'branched').status, 0)
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+  // Worktree gone...
+  assert.equal(fs.existsSync(worktreePath), false)
+  // ...but the branch itself is the surviving deliverable.
+  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-60'], { encoding: 'utf8' })
+  assert.match(branchList.stdout, /backlog\/task-60/)
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'aborted')
+  assert.equal(after.attention.length, 1)
+  assert.equal(after.attention[0].id, 'task-60')
+  assert.equal(after.attention[0].kind, 'parked')
+  assert.match(after.attention[0].detail, /backlog\/task-60/, 'attention must name the kept branch')
+  assert.match(after.attention[0].detail, /branched/, 'attention must say why the branch was kept')
+
+  assert.match(out.stdout, /kept 1 branch\(es\).*\(task-60/)
+})
+
+// Task-3 review fix round (Important) — the converse pin the finding calls
+// for: the fix above must not be over-broad. A `merged` item's branch was
+// already deleted by the run itself at merge time (§9) — abort attempting
+// `branch -D` on it again is a pre-existing, harmless no-op, and this test
+// proves the new `stage === 'branched'` gate did not accidentally widen to
+// catch `merged` (or any other stage) too. One run, two items: a `merged`
+// item torn down exactly as before this fix, and a `branched` item whose
+// branch survives — so the same abort call demonstrates both halves at
+// once, the same "mixed run" shape the marker tests above already use.
+test("abort still deletes a merged item's branch normally — only a branched item's branch is exempt", (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-61', 'A merged task')
+  seedReadyTask(project, 'task-62', 'A branched task')
+  commitEverything(project, 'seed')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const mergedWorktree = path.join(project, '.worktrees', 'task-61')
+  const branchedWorktree = path.join(project, '.worktrees', 'task-62')
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', mergedWorktree, '-b', 'backlog/task-61', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', branchedWorktree, '-b', 'backlog/task-62', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-61', 'dispatched', '--worktree', mergedWorktree, '--branch', 'backlog/task-61').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-62', 'dispatched', '--worktree', branchedWorktree, '--branch', 'backlog/task-62').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-61', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-62', 'branched').status, 0)
+
+  const out = run(project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+
+  // The merged item: torn down exactly as before this fix — worktree AND
+  // branch both gone.
+  assert.equal(fs.existsSync(mergedWorktree), false)
+  const mergedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-61'], { encoding: 'utf8' })
+  assert.equal(mergedBranch.stdout.trim(), '')
+
+  // The branched item: worktree gone, branch kept.
+  assert.equal(fs.existsSync(branchedWorktree), false)
+  const branchedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-62'], { encoding: 'utf8' })
+  assert.match(branchedBranch.stdout, /backlog\/task-62/)
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.attention.length, 1, 'only the branched item gets an attention entry, not the merged one')
+  assert.equal(after.attention[0].id, 'task-62')
 })
 
 test('abort with no run exits 3', (t) => {

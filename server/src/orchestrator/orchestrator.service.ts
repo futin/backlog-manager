@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 
+import { isMergeMode } from '../../../shared/agent';
 import { RUN_STALE_MS } from '../../../shared/types';
 import type {
   OrchestratorArchivePayload,
@@ -45,6 +46,57 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
     typeof r.updatedAt === 'string' &&
     Array.isArray(r.queue)
   );
+}
+
+/**
+ * Defaults the three merge-mode fields (`OrchestratorRun.mergeMode` /
+ * `mergeModeEffective` / `mergeModeNote`, shared/types.ts §2.5 of the design)
+ * to the pre-feature behaviour — a plain merge to `main`, no note — whenever
+ * the run file doesn't hold a value this reader recognises. Two distinct
+ * inputs collapse to that same default, deliberately not distinguished any
+ * further:
+ *
+ *   1. The keys are simply absent. Every run.json on every machine predates
+ *      this feature (it shipped after `orchestrate.mjs` had already been
+ *      writing run files for a while), so this is not an edge case, it is
+ *      the common case — every archived run this reader will ever see until
+ *      the fleet ages out. `JSON.parse` hands back `undefined` for a key
+ *      that was never written, and `isMergeMode`/`typeof … === 'string'`
+ *      both correctly say no to `undefined`.
+ *   2. The keys are present but hold something `isMergeMode` (shared/agent.ts)
+ *      doesn't recognise, or `mergeModeNote` holds something other than a
+ *      string — a hand-edited file, a future build's mode this server has
+ *      never heard of, or plain corruption.
+ *
+ * This is the deliberate asymmetry with `POST /api/agents/orchestrate`'s
+ * `resolveMergeMode` (agents.service.ts), which 400s on the identical bad
+ * string instead of defaulting it. There, the value is a caller's
+ * *instruction* about to be acted on, and merging to `main` is the
+ * irreversible direction (undoable afterwards only via `git revert -m 1`,
+ * never `git reset --hard` — see CLAUDE.md's invariant on that), so a bad
+ * value must be refused before it can select that outcome. Here, the value
+ * is a *reading* of a file `orchestrate.mjs` already wrote describing a run
+ * that has already happened; this service's whole contract (see the class
+ * doc comment below, and `isPlausibleRun`/`readOneRun` above) is to degrade
+ * a file it doesn't fully trust rather than throw, because refusing to
+ * render history helps nobody and a single bad byte on disk must not 500 an
+ * entire project's run list.
+ *
+ * Applied at every site that hands a parsed run file back to a caller —
+ * `runs()`'s own inline loop, and `readOneRun()` further down in this file
+ * (shared by `archive()` and `archivedRun()`) — rather than folded
+ * into `isPlausibleRun` itself: that guard's job is "safe enough to read the
+ * handful of fields this service touches directly," not "every field is
+ * valid," and conflating the two would make a merge-mode typo reject an
+ * otherwise-perfectly-good run the same way a missing `runId` does.
+ */
+function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
+  return {
+    ...run,
+    mergeMode: isMergeMode(run.mergeMode) ? run.mergeMode : 'merge',
+    mergeModeEffective: isMergeMode(run.mergeModeEffective) ? run.mergeModeEffective : 'merge',
+    mergeModeNote: typeof run.mergeModeNote === 'string' ? run.mergeModeNote : null
+  };
 }
 
 /**
@@ -127,7 +179,7 @@ function readOneRun(path: string, label: string, expectMiss = false): Orchestrat
     console.warn(`orchestrator: ${label} parsed but is not a run, skipping`);
     return null;
   }
-  return parsed;
+  return sanitizeMergeFields(parsed);
 }
 
 /**
@@ -206,9 +258,10 @@ export class OrchestratorService {
         continue;
       }
 
-      const fresh = parsed.status === 'running' && Date.now() - Date.parse(parsed.updatedAt) < RUN_STALE_MS;
+      const run = sanitizeMergeFields(parsed);
+      const fresh = run.status === 'running' && Date.now() - Date.parse(run.updatedAt) < RUN_STALE_MS;
       const pastRuns = countPastRuns(join(dir, 'runs'));
-      runs.push({ ...parsed, fresh, pastRuns });
+      runs.push({ ...run, fresh, pastRuns });
     }
 
     return { runs };

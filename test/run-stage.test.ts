@@ -14,7 +14,7 @@ import type { OrchestratorRun, RunStage } from '../shared/types';
  */
 const ALL_STAGES: RunStage[] = [
   'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing',
-  'fixing', 'verifying', 'merging', 'merged',
+  'fixing', 'verifying', 'merging', 'merged', 'branched',
   'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
 ];
 
@@ -33,6 +33,10 @@ describe('run stage tones', () => {
 
   it('separates success, failure, waiting and blocked', () => {
     expect(STAGE_TONE.merged).toBe('done');
+    // The branch-mode success exit reads as the same 'done' green as
+    // `merged` — both are the run finishing an item cleanly, and the tone
+    // is about how the outcome should be read, not which mode produced it.
+    expect(STAGE_TONE.branched).toBe('done');
     expect(STAGE_TONE.failed).toBe('bad');
     expect(STAGE_TONE.pending).toBe('idle');
     expect(STAGE_TONE.preflight).toBe('idle');
@@ -73,7 +77,7 @@ describe('run stage tones', () => {
  * file, beside `STAGE_TONE`, precisely because the two answer a different
  * question about a different value: a whole RUN's own `status`
  * (`OrchestratorRun['status']`, four members), never one item's `RunStage`
- * (fourteen members). Before the hoist these two maps were only ever
+ * (fifteen members). Before the hoist these two maps were only ever
  * exercised TRANSITIVELY, through whichever component rendered a status
  * chip — this suite is what now pins them directly, the same way the
  * `STAGE_TONE`/`stageGlyph`/`stageChipClass` cases above already pin the

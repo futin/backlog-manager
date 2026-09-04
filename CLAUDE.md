@@ -30,7 +30,8 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 
 - `server/src/` — Nest: `health/`, `items/` (`/api/items`, `/api/projects`,
   `/api/items/body`), `agents/` (the one outbound-calling module — status,
-  plan, dispatch, orchestrate), `orchestrator/` (`GET /api/orchestrator/runs`
+  plan, dispatch, orchestrate, plus the local read-only `merge-check`),
+  `orchestrator/` (`GET /api/orchestrator/runs`
   for the live board strip, plus `GET /api/orchestrator/archive` and
   `GET /api/orchestrator/archive/run` for run history — all three a
   read-only view of the run-state directory, current run and archived
@@ -46,7 +47,9 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
   a toolbar Orchestrate control opening `OrchestrateSheet` (previews the
   queue and selects a subset of it — `ids` rides along only for a strict
-  subset, so an untouched sheet still starts a whole-queue run), and a run strip
+  subset, so an untouched sheet still starts a whole-queue run — plus a merge
+  mode picker seeded from Settings and, in merge mode, a setup hint fed by
+  `GET /api/agents/merge-check`), and a run strip
   above the columns — `RunStrip`/`RunDrawer` — showing every project's
   orchestrator runs), Runs (`RunsView` — aggregate stat tiles including a
   wide "machine time by stage" tile, a Today / This week / This month / All
@@ -178,7 +181,7 @@ happened.
   item a **fresh orchestrator run holds** is never stale either, which is why
   both functions take `runs` — required, no `[]` default, because a default
   is what lets the next caller reintroduce bug-11 silently (`runHoldsItem`,
-  `shared/agent.ts`, is every stage but the four true exits, so `pending` and
+  `shared/agent.ts`, is every stage but the five true exits, so `pending` and
   `parked` both count, and it is a separate function from `runClaimBlock`
   because a parked item must stay on the Board *and* stay hand-dispatchable);
   a **done or rejected** item is never
@@ -259,6 +262,62 @@ happened.
   pushes" limit is unchanged — the reasoning behind it (staging inside a tree
   it doesn't own could sweep up unrelated work) never applied to a worktree
   built to hold nothing but this one item's diff.
+- **Merge mode is run-scoped: chosen per launch, defaulted from Settings, and
+  carried spawn → prompt → `init` → run file.** `MergeMode`
+  (`shared/types.ts`) is `merge | branch`, with `isMergeMode` as its one guard
+  for the reason `isAgentAction` has one. It rides the spawn prompt because
+  `localStorage` cannot reach a headless process and the run file has a single
+  writer: `orchestrateDefaultMergeMode` seeds `OrchestrateSheet`, the sheet
+  sends `mergeMode` on **every** launch (inferring it server-side from an
+  absent field would put one decision in two places), and `init` writes three
+  fields only `orchestrate.mjs` ever touches — `mergeMode` (what was asked,
+  never rewritten), `mergeModeEffective` (what the run is doing, moving
+  `merge` → `branch` once and never back), `mergeModeNote` (why they differ).
+  Two fields rather than one because the archive has to answer "did this run
+  merge, and was that the plan?" months later. **Absent means `merge`;
+  present-but-invalid is a 400, never a clamp** — deliberately unlike
+  `model`/`effort`, which drop an unknown value: dropping this one resolves to
+  `merge`, and merging to `main` is the irreversible direction, so a caller
+  bug must not be able to select it. Absent is not a bug, it is every request
+  written before the field existed.
+- **`merged` is no longer the only success exit.** `branched` is its
+  branch-mode sibling in the same terminal position — `StageTrack` stays seven
+  nodes and the seventh just carries a different word — and the two are true
+  exits alike: out of `RUN_CLAIMED_STAGES` and `ATTENTION_RUN_STAGES` (the run
+  has let go, and a clean branch needs nobody), out of `MACHINE_STAGES` (a
+  terminal arrival opens no span), counted as completed by `aggregateRuns`, in
+  `RECONCILE_TERMINAL_STAGES`. A new stage rather than `merged` relabelled in
+  the UI, for the reason `itemDurationMs` and `lastTouched` exist: an archive
+  that says an item merged when `main` never received it is worse than a
+  mechanical sweep. `test/agents-shared.test.ts`'s `Record<RunStage, true>`
+  literal is the mechanism that forces the classification rather than leaving
+  it a checklist someone forgets. **A `branched` stamp does not prove the run
+  that wrote it executed the item** — `SKILL.md` §3 recognises a branch a
+  *previous* run finished and left waiting on a hand-merge (an archive-move
+  probe) and stages it `branched` in the current run's own file before
+  pre-flight ever runs, without dispatching, reviewing or verifying it again.
+- **The tool refuses `stage <id> merged` under branch mode** — exit `1`,
+  nothing written. `SKILL.md` is re-read on every one of a run's several
+  hundred turns and prose drifts across them; a tool refusal does not, which
+  is the same division of labour `buildGatedQueue` and its rationale already
+  keep. The converse is deliberately *not* enforced: `stage <id> branched` is
+  legal under `merge` mode too, because that is exactly what a denied merge
+  degrades an item to.
+- **A classifier denial degrades a run to branch mode; every other merge
+  failure still parks.** Denied means the work is green and only the last step
+  of the pipeline was refused, so the item is staged `branched`, the run
+  records the downgrade once (`merge-mode branch --note`), and the queue
+  continues — with **no attention entry**, because `ATTENTION_KINDS` stays the
+  closed set of three and that list means "a human must look at this item",
+  which a reviewed branch does not warrant. One classifier verdict is one
+  run-level fact, not N item-level ones. A conflict, a pre-merge refusal over
+  overlapping dirty paths, and a main tree not on `main` are genuine human
+  decisions and still park, still keep the worktree, still say why. The
+  narrowness is the rule: it triggers on the classifier denial and nothing
+  else. `SKILL.md` §2's preflight probe (`git merge --no-ff --no-edit HEAD`,
+  which changes nothing that matters — no commit, no index change, no reflog
+  entry, though it does refresh `.git/ORIG_HEAD` harmlessly) is early warning
+  for the same failure, never a guarantee — the verdict is per call.
 - **Undoing an already-completed orchestrator merge is `git revert -m 1`,
   never `git reset --hard`.** Proved empirically, not just reasoned out:
   `reset --hard` silently destroyed an unrelated, uncommitted modification in
@@ -341,8 +400,9 @@ happened.
   `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal
   `/backlog-orchestrate` — `backlog-orchestrate`'s own `trigger:` — and
   `POST /api/agents/orchestrate`'s body has no `prompt` field to begin with,
-  so a caller-supplied one is not rejected, it is simply never read. The one
-  thing a caller can put into that string is `ids`, the board's item
+  so a caller-supplied one is not rejected, it is simply never read. A caller
+  can influence exactly two things in that string. The first is `ids`, the
+  board's item
   selection, and only after `resolveIds` proves every entry both *is* an id
   (`isItemId`, `shared/agent.ts` — the same `^[a-z]+-\d+$` `backlog.mjs`
   enforces, so no whitespace, path separator, shell metacharacter or newline
@@ -351,8 +411,12 @@ happened.
   walk). 400 for a malformed list, 409 for one the files disagree with, both
   uncoded. An absent `ids` means the whole queue; an explicitly empty one is
   a 400, never "everything" — `parseIdsArg`'s own distinction in
-  `orchestrate.mjs`, enforced at the only layer a browser reaches. The
-  "derive, never accept" rule dispatch already follows, applied to a route
+  `orchestrate.mjs`, enforced at the only layer a browser reaches. The second
+  is `mergeMode`, a tighter surface still: the appended text is the
+  compile-time literal ` --merge-mode branch` selected by `isMergeMode`, with
+  no caller string in it at all, and `merge` appends nothing so a default
+  run's prompt stays byte-identical to what shipped before the field existed.
+  The "derive, never accept" rule dispatch already follows, applied to a route
   with no item file to derive anything from at all.
 - **The browser never talks to the dashboard.** Every call goes board → this
   API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off.

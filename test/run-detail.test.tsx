@@ -38,6 +38,7 @@ function archiveItem(
     stageAt?: Partial<Record<RunStage, string>>;
     verification?: VerificationSummary[];
     questions?: string[];
+    branch?: string | null;
   } = {}
 ): ArchiveQueueItem {
   return {
@@ -46,7 +47,7 @@ function archiveItem(
     stage,
     sessionId: null,
     worktree: null,
-    branch: null,
+    branch: over.branch ?? null,
     permissionMode: null,
     fixLoops: over.fixLoops ?? 0,
     stageAt: over.stageAt ?? {},
@@ -107,6 +108,9 @@ function primarySummary(): OrchestratorArchiveRun {
     startedAt: '2026-09-01T09:00:00.000Z',
     updatedAt: '2026-09-01T09:30:00.000Z',
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     current: false,
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
     queue: [
@@ -138,6 +142,9 @@ function primaryFull(overTails: { a1?: string; a2?: string } = {}): Orchestrator
     startedAt: '2026-09-01T09:00:00.000Z',
     updatedAt: '2026-09-01T09:30:00.000Z',
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
     queue: [
       liveItem('a-1', 'merged', {
@@ -245,6 +252,9 @@ describe('RunDetail', () => {
       startedAt: '2026-09-01T09:00:00.000Z',
       updatedAt: '2026-09-01T09:15:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       current: true,
       attention: [],
       queue: [
@@ -261,6 +271,9 @@ describe('RunDetail', () => {
       startedAt: '2026-09-01T09:00:00.000Z',
       updatedAt: '2026-09-01T09:12:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveItem('a-1', 'merged', {
@@ -279,6 +292,9 @@ describe('RunDetail', () => {
       startedAt: '2026-09-01T09:00:00.000Z',
       updatedAt: '2026-09-01T09:20:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveItem('a-1', 'merged', {
@@ -493,6 +509,9 @@ describe('RunDetail', () => {
       startedAt: fixingAt,
       updatedAt: fixingAt,
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [liveItem('f-1', 'fixing', { stageAt: { fixing: fixingAt } })]
     };
@@ -592,5 +611,156 @@ describe('RunDetail', () => {
 
     expect(screen.queryByTestId('run-detail-stagebar-a-1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-detail-caption-a-1')).not.toBeInTheDocument();
+  });
+
+  // Task 9 ("surface a run's merge mode and any downgrade"), brief case 2:
+  // a run that ASKED for `merge` but is actually running `branch` (design
+  // §5.2's mid-queue denial) must show the two-field distinction rather
+  // than collapse it into one value — the badge names WHAT is happening
+  // now, `mergeModeNote` names WHY it differs from what was asked for, and
+  // both have to be visible as their own, separately findable pieces of
+  // text for a reader to tell "chose branch mode" apart from "was denied a
+  // merge and fell back to it".
+  it("shows a downgraded run's mode badge and its note as two distinct, visible facts", () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'classifier denied the merge on g-1',
+      queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
+    };
+
+    render(<RunDetail summary={summary} live={null} />);
+
+    expect(screen.getByTestId('run-detail-mode')).toHaveTextContent('branch mode (downgraded)');
+    // The note is the free-text reason, verbatim — not folded into the
+    // badge's own short word, and not paraphrased.
+    expect(screen.getByTestId('run-detail-mode-note')).toHaveTextContent('classifier denied the merge on g-1');
+  });
+
+  // The other half of "not collapsed": a run that was TOLD to run in
+  // branch mode from the start (`mergeMode` and `mergeModeEffective`
+  // already agree) shows the same badge with no "(downgraded)" suffix, and
+  // — because there is nothing to explain — no note banner at all.
+  // Asserted on the SAME summary shape as the test above but for the
+  // deliberate-choice case, so a future change that always renders the note
+  // whenever `mergeModeEffective === 'branch'` (rather than only when it
+  // DIFFERS from `mergeMode`) fails exactly here.
+  it('shows a deliberately-chosen branch-mode run\'s badge with no downgrade note', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null,
+      queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
+    };
+
+    render(<RunDetail summary={summary} live={null} />);
+
+    const badge = screen.getByTestId('run-detail-mode');
+    expect(badge).toHaveTextContent('branch mode');
+    expect(badge).not.toHaveTextContent('downgraded');
+    expect(screen.queryByTestId('run-detail-mode-note')).not.toBeInTheDocument();
+  });
+
+  // Brief case 4: the detail pane for a branch-mode run lists the branches
+  // still waiting to be merged by hand, each with the literal command a
+  // person runs to do it — the one thing a stage chip cannot say on its
+  // own. Two branched items, in queue order, so this also pins that the
+  // list is not silently limited to one entry.
+  it('lists every branched item with its literal git merge --no-ff command', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null,
+      queue: [
+        archiveItem('h-1', 'branched', { branch: 'backlog/h-1' }),
+        archiveItem('h-2', 'branched', { branch: 'backlog/h-2' })
+      ]
+    };
+
+    render(<RunDetail summary={summary} live={null} />);
+
+    expect(screen.getByTestId('run-detail-branches')).toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-branch-h-1')).toHaveTextContent('git merge --no-ff backlog/h-1');
+    expect(screen.getByTestId('run-detail-branch-h-2')).toHaveTextContent('git merge --no-ff backlog/h-2');
+  });
+
+  // The fallback half of that same feature: a hand-edited or corrupted run
+  // file can leave `branch` null on an item that nonetheless reached
+  // `branched` (CLAUDE.md's own invariant says this cannot happen from a
+  // real orchestrator run, but this pane still has to degrade gracefully
+  // rather than print "git merge --no-ff null"). `DetailRow.branch`'s own
+  // doc comment names `backlog/<id>` as the rebuilt fallback.
+  it('rebuilds the branch name from the id when a branched item carries no branch field', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null,
+      queue: [archiveItem('h-3', 'branched', { branch: null })]
+    };
+
+    render(<RunDetail summary={summary} live={null} />);
+
+    expect(screen.getByTestId('run-detail-branch-h-3')).toHaveTextContent('git merge --no-ff backlog/h-3');
+  });
+
+  // Brief case 5: a run holding items in BOTH success exits at once (design
+  // §5.2's mid-queue denial — some items merged before it, the rest
+  // branched after) must count both, hiding neither. The pre-existing
+  // `merged` chip only ever counted `stage === 'merged'`; this pins the new
+  // `branched` chip beside it so a reader sees both numbers rather than
+  // just the merged half.
+  it('shows a merged chip and a branched chip together for a run holding both exits, hiding neither', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'classifier denied the merge on k-3',
+      attention: [],
+      queue: [
+        archiveItem('k-1', 'merged'),
+        archiveItem('k-2', 'merged'),
+        archiveItem('k-3', 'branched', { branch: 'backlog/k-3' }),
+        archiveItem('k-4', 'branched', { branch: 'backlog/k-4' })
+      ]
+    };
+
+    render(<RunDetail summary={summary} live={null} />);
+
+    expect(screen.getByTestId('run-detail-chip-merged')).toHaveTextContent('2');
+    expect(screen.getByTestId('run-detail-chip-branched')).toHaveTextContent('2');
+  });
+
+  // Brief case 3, the regression guard: a plain merge-mode run — the shape
+  // `primarySummary()` already builds, and every run ever archived before
+  // this feature existed — must render byte-identically to today. None of
+  // Task 9's four additions (the mode badge, the downgrade note, the
+  // branched chip, the "Branches to merge" list) may appear at all for it.
+  it('renders a merge-mode run byte-identically to before this feature: none of the four new elements appear', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary = primarySummary();
+    expect(summary.mergeMode).toBe('merge');
+    expect(summary.mergeModeEffective).toBe('merge');
+
+    render(<RunDetail summary={summary} live={null} />);
+
+    expect(screen.queryByTestId('run-detail-mode')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-mode-note')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-chip-branched')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-branches')).not.toBeInTheDocument();
   });
 });

@@ -113,6 +113,157 @@ rule is only about a merge that already landed; a conflict discovered
 `git merge --abort`, which leaves nothing to revert because nothing ever
 committed.
 
+## Merge mode is run-scoped, and a malformed one is a 400
+
+On 2026-09-03 a board-spawned `claude-agents-dashboard` run finished four
+items — reviewed, `test` + `typecheck` + `build` green on all four — and
+merged none of them. Every merge attempt answered *"Permission for this action
+was denied by the Claude Code auto mode classifier."* Two earlier runs, one on
+the same project and one on this one, had issued the identical
+`git -C "$PWD" merge --no-ff --no-edit backlog/<id>` and merged seven items
+between them. Neither project had a `permissions.allow` entry at the time; the
+dashboard's `.claude/settings.json` carrying `Bash(git merge:*)` is dated after
+the failure, staged and never committed. **Nothing about permissions differed
+between the runs that merged and the run that did not** — auto mode is a
+per-call model classifier and its verdict on an identical command varies. The
+full table lives in the skill's own
+`skills/backlog-orchestrate/references/rationale.md`, §2.
+
+*(2026-09-04 note: the skill has since dropped the `-C "$PWD"` clause from
+both this command and the merge-mode probe (SKILL.md §2) — a no-op removed,
+since the session's cwd was already the project root at every call site.
+Claude Code's `permissions.allow` grammar matches an entry against the
+literal command line by prefix, so `Bash(git merge:*)` — the very rule the
+dashboard staged above — would not actually have matched the line quoted
+above; it starts `git -C`, not `git merge`. Dropping the clause is what
+makes that rule genuinely cover the command SKILL.md issues today. The
+quote itself is left exactly as these three runs issued it.)*
+
+Two consequences, and together they are the whole feature: merging is a
+*choice* (a run that stops at four reviewed branches is a successful run), and
+a run that wanted to merge and was refused *degrades to that outcome* rather
+than parking work that is perfectly good.
+
+The setting is chosen in a browser and consumed by a headless process on the
+machine, so it cannot travel by `localStorage`, and the run file already has
+exactly one writer. It rides the one channel that exists — the spawn prompt —
+and lands in the run file, where every other fact about a run lives:
+`orchestrateDefaultMergeMode` (client Settings, per-device, default `'merge'`,
+clamped by the same `pickOne` as `dispatchDefaultModel`) seeds the
+`OrchestrateSheet` picker; the sheet sends `mergeMode` on **every** launch,
+including when it equals the default, because the field is the sheet's answer
+to "what should this run do" and inferring it server-side from an absent field
+would put one decision in two places; `AgentsService` validates it and appends
+the compile-time literal ` --merge-mode branch`; `orchestrate.mjs init` writes
+`mergeMode`, `mergeModeEffective` and `mergeModeNote`.
+
+The service's rule differs deliberately from every neighbouring field. Absent
+(`undefined` or `''`) resolves to `'merge'`; a member of `MERGE_MODES` passes
+through; **anything else is a 400, uncoded — not clamped, not dropped.**
+`model` and `effort` drop an unknown value because dropping one costs a
+default model. Dropping an unrecognised `mergeMode` would resolve to `'merge'`,
+and *merging to `main` is the irreversible direction*: a caller bug must not
+be able to pick it. Absent still means `'merge'` because absent is not a bug —
+it is every request written before this field existed. Uncoded because
+`RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this endpoint
+gives, and nothing about a malformed enum needs telling apart from another 4xx.
+
+Two run fields rather than one, because the archive has to answer "did this
+run merge, and was that the plan?" months later. `mergeMode` is what was
+asked for and is never rewritten; `mergeModeEffective` is what the run is
+actually doing and only ever moves `merge` → `branch`, never back;
+`mergeModeNote` says why they differ. Collapsing them loses the distinction
+between a run that chose branches and a run that was denied them — exactly the
+distinction the post-mortem above needed.
+
+Enforcement of the mode lives in the tool, not in prose. `stage <id> merged`
+exits `1` and writes nothing when `mergeModeEffective` is `'branch'`, naming
+the stage it should have used. `SKILL.md` has to survive several hundred turns
+of one session re-reading its own body; a tool refusal does not drift. The
+converse is deliberately not enforced — `stage <id> branched` stays legal
+under `merge` mode, because that is precisely what a denied merge degrades an
+item to.
+
+## `merged` is not the only success exit — `branched` is its branch-mode sibling
+
+`branched` occupies the same terminal position `merged` does: `StageTrack`
+stays seven nodes and the seventh carries whichever word this item actually
+reached. It is a true exit — the run is finished with the item and holds
+nothing — so it is out of `RUN_CLAIMED_STAGES` and out of
+`ATTENTION_RUN_STAGES` (a clean branch needs nobody), out of `MACHINE_STAGES`
+(a terminal arrival opens no span, the same rule "queue wait is not work"
+already applies to `pending`), in `RECONCILE_TERMINAL_STAGES`, and counted as
+completed by `aggregateRuns` alongside `merged`.
+
+The cheaper option was to reuse `merged` and relabel it in the UI from the
+run's mode — roughly half the work, and a stored history that states an item
+merged when `main` never received it. This repo has repeatedly paid for
+honesty in derived state over cheapness (`itemDurationMs`, `lastTouched`,
+`isStale`), and a run archive that lies about what reached `main` is worse
+than a mechanical sweep across the classification sites.
+
+What keeps that sweep from being a checklist someone forgets is
+`test/agents-shared.test.ts`'s `Record<RunStage, true>` literal: the compiler
+demands an entry for every union member, and the test then forces each member
+into one side of both partitions. The one place the mode alone is not enough
+is `stepperDots`' terminal word — an item that has already reached one of the
+two success exits answers with its **own** stage, and only an item still in
+flight falls back to the run's `mergeModeEffective`, because a run downgraded
+at item 3 must not redraw items 1 and 2 as having branched when they merged.
+
+Not every `branched` stamp was written by the run that did the work.
+`SKILL.md` §3's "Recognise a leftover branched item" step, run before
+pre-flight on every item, can find a branch a *previous* run finished and
+left waiting on a hand-merge, confirm it with an archive-move probe
+(`git diff --name-only main...backlog/<id> | grep -q "/done/<id>-"`), and
+stage it `branched` in the **current** run's own file without ever
+dispatching, reviewing or verifying it. This is deliberate — re-running that
+pipeline over already-green work would spend a whole item's budget re-proving
+what a prior run already proved — but it does mean a `branched` entry in a
+run's history is not proof that run executed the item, only that it correctly
+recognised the item was already done.
+
+## A classifier denial degrades the run; every other merge failure parks
+
+The degrade is narrow on purpose. When the merge is refused by the classifier
+the item is staged `branched` (not `parked`), the run records the downgrade
+once with `merge-mode branch --note "<the classifier's message>"` so the rest
+of the queue skips a merge just shown to fail, and the run continues to the
+next item.
+
+`parked` is wrong here, and correcting it is what this whole feature exists
+for. Parked means a human must look at the work. Nothing is wrong with the
+work — every step before the last was green, and the last step of the pipeline
+was refused. Four green branches reported as four parks is what made the
+2026-09-03 run read as a failure.
+
+**No attention entry, and no fourth attention kind.** `ATTENTION_KINDS` stays
+the closed set of three (`needs-answers`, `parked`, `fix-exhausted`): the
+attention list means "a human must look at *this item*", and a verified branch
+does not qualify. The cause is one run-level fact recorded once in
+`mergeModeNote`; N items denied by one classifier verdict would write N
+identical rows. The actionable part — the literal `git merge --no-ff
+backlog/<id>` per branch, in merge order, with overlapping pairs flagged —
+belongs in the run's finish summary, where it is one list rather than N copies
+of one sentence.
+
+**Every other §9 failure keeps its behaviour exactly.** A conflict, a
+pre-merge refusal over overlapping dirty paths, a main tree not on `main` —
+all still park, still keep the worktree, still say why. Those are genuine "a
+human must decide" states and none of them is a permission problem.
+
+The preflight probe in `SKILL.md` §2 — `git merge --no-ff --no-edit HEAD`,
+once per run, merge mode only — is early warning for the same failure
+and never a guarantee. Merging `HEAD` into itself prints `Already up to date.`
+and changes nothing that matters (no commit, no index change, no reflog
+entry, dirty tree or clean — it does refresh `.git/ORIG_HEAD`, the same as
+any other `git merge`, harmlessly), and the command *shape* is byte-identical
+to the real merge so the classifier is shown what it will be shown later. It
+buys "find out in ten seconds instead of four hours" and nothing else: the
+verdict is per call, so a
+passing probe can still be followed by a denied merge, which is exactly why
+the degrade path exists as well as the probe.
+
 ## `orchestrate.mjs` is always invoked from the project root, never from inside a per-item worktree
 
 `resolveProjectRoot()` walks up from `process.cwd()` looking for a `.git`
@@ -565,8 +716,9 @@ itself can answer:
   `RUN_CLAIMED_STAGES` (`shared/types.ts`) on a run that is *fresh*: the eight
   non-terminal stages, `pending` and `preflight` included, because a pending
   item is already the run's and a manual session that grooms or archives it
-  first leaves the run dispatching into an item that moved under it. The six
-  exits (`merged`, `failed`, `skipped`, `needs-answers`, `ungroomed`, `parked`)
+  first leaves the run dispatching into an item that moved under it. The seven
+  exits (`merged`, `branched`, `failed`, `skipped`, `needs-answers`,
+  `ungroomed`, `parked`)
   are out — the run is finished with the item, and a human picking it up by
   hand is the intended next move, `parked` most of all. That list is
   deliberately NOT `ACTIVE_RUN_STAGES` (client `ItemCard.tsx`), which answers

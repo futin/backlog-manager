@@ -63,6 +63,9 @@ function makeRun(overrides: Partial<OrchestratorRun> = {}): OrchestratorRun {
     startedAt: '2026-08-31T08:40:03Z',
     updatedAt: '2026-08-31T09:36:40Z',
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     queue: [queueItem()],
     attention: [],
     ...overrides
@@ -353,5 +356,43 @@ describe('OrchestratorController.archivedRun', () => {
     writeCurrent(orchHome, makeRun({ project, runId: 'run-20260901-150701' }));
 
     expectNotFound(() => controller.archivedRun(project, 'run-20260831-000000'));
+  });
+
+  // Task 5: the same merge-mode sanitising runs() applies (see
+  // orchestrator-runs.test.ts) has to hold here too — archivedRun() reaches
+  // the file through readOneRun(), a different call site from runs()'s own
+  // inline loop, so passing there proves nothing about this endpoint.
+  it("carries a run's merge-mode fields through untouched when they already hold real values", () => {
+    const project = '/abs/project-i';
+    const run = makeRun({
+      project,
+      runId: 'run-20260901-150701',
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'merge classifier denied the merge; falling back to branch'
+    });
+    writeCurrent(orchHome, run);
+
+    const result = controller.archivedRun(project, 'run-20260901-150701');
+    expect(result?.mergeMode).toBe('merge');
+    expect(result?.mergeModeEffective).toBe('branch');
+    expect(result?.mergeModeNote).toBe('merge classifier denied the merge; falling back to branch');
+  });
+
+  it('defaults the merge fields to merge/merge/null for a run file written before this feature existed', () => {
+    // Same single-most-important case as orchestrator-runs.test.ts's
+    // identical scenario, exercised here because this endpoint reads through
+    // a different function (readOneRun, not runs()'s inline loop) — every
+    // archived run.json on every machine predates this feature and has none
+    // of these three keys at all.
+    const project = '/abs/project-j';
+    const full = makeRun({ project, runId: 'run-20260901-150701' });
+    const { mergeMode: _mergeMode, mergeModeEffective: _mergeModeEffective, mergeModeNote: _mergeModeNote, ...legacyRun } = full;
+    writeCurrent(orchHome, legacyRun as OrchestratorRun);
+
+    const result = controller.archivedRun(project, 'run-20260901-150701');
+    expect(result?.mergeMode).toBe('merge');
+    expect(result?.mergeModeEffective).toBe('merge');
+    expect(result?.mergeModeNote).toBeNull();
   });
 });

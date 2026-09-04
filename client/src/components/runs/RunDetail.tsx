@@ -4,7 +4,7 @@ import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
 import { itemStageSpans, runStageTotals, runWallMs } from '../../lib/run-stats';
-import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import {
   formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive
 } from '../../lib/run-time';
@@ -93,7 +93,18 @@ type RunFields = Pick<OrchestratorRun, 'status' | 'startedAt' | 'updatedAt' | 'a
  *  own `lastVerification` — only the LAST verification entry is shown, the
  *  same "skim the build log's last relevant line" reasoning that function's
  *  doc comment gives; `tail` inside it is `null` until a fuller run object
- *  (live, or a landed fetch) supplies it. */
+ *  (live, or a landed fetch) supplies it.
+ *
+ *  `branch` (Task 9) is threaded through for the "branches to merge" list
+ *  below: `RunQueueItem.branch`'s own contract (shared/types.ts) is `null`
+ *  only for an item skipped before dispatch, and CLAUDE.md's own invariant
+ *  on `backlog-orchestrate` being the one skill that ever writes it says the
+ *  branch is always exactly `backlog/<id>` — so a `branched` row (which, by
+ *  construction, was committed, reviewed and verified) always carries a
+ *  real value here in practice; the section below still falls back to
+ *  rebuilding that name from `id` rather than trusting the field blindly,
+ *  the same defensiveness this file already applies to every other stamp
+ *  a hand-edited run file could leave blank. */
 interface DetailRow {
   id: string;
   title: string;
@@ -102,6 +113,7 @@ interface DetailRow {
   fixLoops: number;
   questions: string[];
   verify: { cmd: string; ok: boolean; tail: string | null } | null;
+  branch: string | null;
 }
 
 function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[] {
@@ -109,7 +121,7 @@ function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[] {
     const last = q.verification.length === 0 ? null : q.verification[q.verification.length - 1];
     return {
       id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
-      fixLoops: q.fixLoops, questions: q.questions,
+      fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: null }
     };
   });
@@ -120,7 +132,7 @@ function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
     const last = q.verification.length === 0 ? null : q.verification[q.verification.length - 1];
     return {
       id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
-      fixLoops: q.fixLoops, questions: q.questions,
+      fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: last.tail }
     };
   });
@@ -269,6 +281,31 @@ export function RunDetail(
       : rowsFromArchive(summary.queue);
 
   const merged = rows.filter((r) => r.stage === 'merged').length;
+  // Which rows reached RunStage's OTHER success exit (one per MergeMode),
+  // and in queue order — this is also the "what do I do next" list design
+  // §7 asks for ("lists the branches ... with their git merge --no-ff
+  // backlog/<id> commands"), so it is kept as the row array rather than a
+  // bare count: `branched.length` below feeds the chip, `branched` itself
+  // feeds the list a few lines down, and computing it once means the two
+  // can never quietly disagree about which rows qualify. Listed in QUEUE
+  // order, not MERGE order: design §5.3's overlap-flagging is the
+  // ORCHESTRATOR's own finish-summary job (skills/backlog-orchestrate,
+  // which can re-run git against the actual worktrees), not this pane's,
+  // which can only re-list history it already has on hand.
+  //
+  // Before Task 9 a downgraded run (design §5.2: some items merged before
+  // the classifier was denied, the rest branched afterwards) had NO chip
+  // for this half of its queue at all — the chips below printed only
+  // `merged`, silently dropping however many items finished the other way.
+  // Its own chip, not folded into `merged`'s count, for the same reason
+  // `mergeMode`/`mergeModeEffective` stay two fields rather than one (this
+  // file's own mode-note comment below): collapsing them would erase
+  // exactly the distinction a reader needs — which exit each item actually
+  // took — that a bare "N completed" total cannot answer on its own. Empty
+  // for every run this feature predates, which is what keeps a plain
+  // merge-mode run's chip row (and this list) rendering exactly as they
+  // always have.
+  const branched = rows.filter((r) => r.stage === 'branched');
   const skipped = rows.filter((r) => r.stage === 'skipped').length;
   const fixLoopsTotal = rows.reduce((sum, r) => sum + r.fixLoops, 0);
   // `ACTIVE_RUN_STAGES` (ItemCard.tsx) rather than RunDrawer's own
@@ -281,6 +318,34 @@ export function RunDetail(
   const startedClock = formatClock(authority.startedAt);
   const wall = runWallMs(authority, now);
 
+  // `mergeMode`/`mergeModeEffective`/`mergeModeNote` are read off `source`
+  // (the full winning object), not the narrower `authority` — the same
+  // choice `mergeModeEffective`'s own existing use a few lines below
+  // (`StageTrack`'s prop) already makes and documents in this file's own
+  // header, for the identical reason: `RunFields` is a `Pick` that never
+  // claimed these three fields, and widening it just to read them here
+  // would be a second projection of `source` to keep in sync with the
+  // first.
+  //
+  // `modeLabel` is `null` for a plain merge-mode run (`mergeModeLabel`'s own
+  // contract, lib/run-stage.ts) — the fact that keeps this pane rendering
+  // byte-identically to before this feature existed for every run that
+  // shape describes, which is every run ever archived before Task 9 landed.
+  const modeLabel = mergeModeLabel(source.mergeMode, source.mergeModeEffective);
+  // The two-field distinction design §7 asks for ("plus ... the note, when
+  // it differs") is deliberately NOT collapsed into `modeLabel` above: a
+  // reader needs to tell "this run was TOLD to leave branches" apart from
+  // "this run tried to merge and was turned down partway through" (design
+  // §5.2 — the classifier's own verdict is a per-call coin flip, and the
+  // whole post-mortem value of `mergeModeNote` is naming WHICH call got
+  // denied), and folding the note's prose into the same short badge every
+  // surface prints would either truncate it illegibly or blow the badge's
+  // one-line shape out on every OTHER run. `mergeModeNote` is `null`
+  // whenever the two fields agree (its own contract, shared/types.ts), so
+  // this renders nothing extra for a deliberately-chosen branch-mode run
+  // either — only a genuinely downgraded one earns the second line.
+  const modeNote = source.mergeMode === source.mergeModeEffective ? null : source.mergeModeNote;
+
   return (
     <>
       <div className="run-detail-head">
@@ -289,6 +354,9 @@ export function RunDetail(
           <span aria-hidden="true">{RUN_STATUS_GLYPH[authority.status]}</span>
           {authority.status}
         </span>
+        {modeLabel !== null && (
+          <span className="run-mode-badge" data-testid="run-detail-mode">{modeLabel}</span>
+        )}
         {/* Each half renders only if its own stamp parsed — RunDrawer's own
             null-tolerant join, restated here rather than re-derived: a run
             with a readable `startedAt` and a corrupt `updatedAt` can still
@@ -303,10 +371,33 @@ export function RunDetail(
         )}
       </div>
 
+      {modeNote !== null && (
+        // Verbatim, not paraphrased — matching RunDrawer.tsx's own rule for
+        // `RunAttention`'s `detail` prose: the exact reason a person carries
+        // forward is more useful than this pane's own summary of it. Placed
+        // right after the head, ahead of the chips, for the same "this has
+        // to be the first thing a reader sees" reasoning RunDrawer.tsx's
+        // `staleNote` gives for its own first-in-body placement — a
+        // downgraded run's whole point (design §7: "legible at a glance in
+        // history") is lost if the explanation sits below four count chips
+        // a skimming reader may never reach.
+        <div className="run-detail-mode-note" data-testid="run-detail-mode-note">{modeNote}</div>
+      )}
+
       <div className="run-drawer-chips" data-testid="run-detail-chips">
         <span className="run-drawer-chip" data-testid="run-detail-chip-merged">
           <span className="run-drawer-chip-num">{merged}</span> merged
         </span>
+        {/* Rendered only once this run has an actual branched item to
+            report — see `branched`'s own comment above for why zero of them
+            means this chip must not appear at all: a plain merge-mode run's
+            chip row is exactly the three-then-fourth set it printed before
+            this feature existed, unchanged. */}
+        {branched.length > 0 && (
+          <span className="run-drawer-chip" data-testid="run-detail-chip-branched">
+            <span className="run-drawer-chip-num">{branched.length}</span> branched
+          </span>
+        )}
         <span className="run-drawer-chip" data-testid="run-detail-chip-skipped">
           <span className="run-drawer-chip-num">{skipped}</span> skipped
         </span>
@@ -359,6 +450,44 @@ export function RunDetail(
       <div className="run-detail-rollup">
         <StageBars totals={runStageTotals(source, now)} testId="run-detail-machine" />
       </div>
+
+      {/* Branch mode's own "what do I do next" list (design §7 and §5.2's
+          own "the actionable part ... belongs in the finish summary, where
+          it is one list rather than N copies of one sentence" — the finish
+          summary is the ORCHESTRATOR's own console output at the moment the
+          run ends; this is that same list's home once the run has scrolled
+          off a terminal and only this pane still has it). Rendered only
+          when at least one row actually reached `branched` — the same
+          "nothing extra for a run this feature predates" rule every other
+          addition on this pane follows, and it is what keeps a plain
+          merge-mode run's history rendering byte-identically to before this
+          feature existed.
+            Queue order, not merge order: see `branched`'s own comment above
+          for why the overlap-flagging design §5.3 asks for stays the
+          orchestrator's job, not this pane's. */}
+      {branched.length > 0 && (
+        <>
+          <div className="run-detail-heading">Branches to merge</div>
+          <div className="run-drawer-queue" data-testid="run-detail-branches">
+            {branched.map((row) => (
+              <div key={row.id} className="run-drawer-item" data-testid={`run-detail-branch-${row.id}`}>
+                <div className="run-drawer-item-head">
+                  <span className="run-drawer-item-id">{row.id}</span>
+                  <span className="run-drawer-item-title">{row.title}</span>
+                </div>
+                {/* `row.branch ?? backlog/<id>` — see `DetailRow.branch`'s
+                    own doc comment for why the fallback exists at all (a
+                    hand-edited or corrupted run file, never a real
+                    orchestrator-produced one) rather than trusting the
+                    field outright the way every other reader of it could. */}
+                <code className="run-detail-branch-cmd">
+                  git merge --no-ff {row.branch ?? `backlog/${row.id}`}
+                </code>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="run-detail-heading">Items</div>
       <div className="run-drawer-queue" data-testid="run-detail-items">
@@ -427,8 +556,12 @@ export function RunDetail(
                   draw. The fix-loop count that used to print as its own
                   "N fix loop(s)" line now rides as `StageTrack`'s own
                   badge on the `fixing` node instead — one reading of that
-                  count, not two. */}
-              <StageTrack item={row} now={clock} live={runLive} />
+                  count, not two.
+                    `mergeModeEffective` comes from `source`, not `row`: it
+                  is a fact about the RUN this item is in, and `row` (a
+                  per-item `DetailRow`) carries no such field — an item
+                  cannot say which mode the run around it is running. */}
+              <StageTrack item={row} now={clock} live={runLive} mergeModeEffective={source.mergeModeEffective} />
 
               {row.verify !== null && (
                 // RunDrawer's own one-way-seed pattern, unchanged: React

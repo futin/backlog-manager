@@ -109,6 +109,71 @@ describe('GET /api/orchestrator/runs', () => {
     expect(res.body.runs).toEqual([{ ...run, fresh: true, pastRuns: 0 }]);
   });
 
+  it("carries a run's merge-mode fields through untouched when they already disagree", async () => {
+    // Deliberately NOT the fixture's own 'merge'/'merge'/null — those three
+    // values are also this reader's default, so a sanitiser that silently
+    // defaulted instead of reading the file would pass a test built on them
+    // without anyone noticing. mergeMode !== mergeModeEffective, plus a real
+    // note, is the actual shape a mid-run merge denial produces (design
+    // §2.5) and the only shape that proves "read from disk" apart from
+    // "defaulted" — if the reader defaulted here, mergeModeEffective would
+    // come back 'merge', not 'branch', and mergeModeNote would come back
+    // null, not this string.
+    const run: OrchestratorRun = {
+      ...fixture,
+      updatedAt: new Date().toISOString(),
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
+      mergeModeNote: 'merge classifier denied the merge for bug-14; falling back to branch for the rest of the queue'
+    };
+    writeRun(run);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].mergeMode).toBe('merge');
+    expect(res.body.runs[0].mergeModeEffective).toBe('branch');
+    expect(res.body.runs[0].mergeModeNote).toBe(
+      'merge classifier denied the merge for bug-14; falling back to branch for the rest of the queue'
+    );
+  });
+
+  it('defaults mergeMode/mergeModeEffective to merge and mergeModeNote to null for a run file written before this feature existed', async () => {
+    // Every archived run on every machine today predates this feature, so a
+    // pre-feature run.json has none of these three keys at all — not `null`,
+    // simply absent, the shape JSON.parse hands back for a key nobody ever
+    // wrote. This is the single most important case in this task: an old run
+    // must keep rendering as a plain, uneventful merge run, not as one with
+    // `undefined` fields the board has never been told how to draw.
+    const { mergeMode: _mergeMode, mergeModeEffective: _mergeModeEffective, mergeModeNote: _mergeModeNote, ...legacyRun } = fixture;
+    const dir = projectDir(fixture.project);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...legacyRun, updatedAt: new Date().toISOString() }, null, 2));
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].mergeMode).toBe('merge');
+    expect(res.body.runs[0].mergeModeEffective).toBe('merge');
+    expect(res.body.runs[0].mergeModeNote).toBeNull();
+  });
+
+  it('falls back to merge for a nonsense mergeMode on disk rather than throwing', async () => {
+    // This reader sanitises a file another process wrote; it does not trust
+    // it. A hand-edited file, a future build's mode this server has never
+    // heard of, or plain disk corruption must degrade exactly like the
+    // absent-fields case above rather than 500 the whole payload — the
+    // deliberate asymmetry with POST /api/agents/orchestrate's 400 for the
+    // identical string (agents.service.ts's resolveMergeMode): there the
+    // value is a caller's instruction about to be acted on and merging to
+    // main is irreversible, so a bad value must be refused; here the value
+    // is a reading of a run that already happened, and refusing to render
+    // history helps nobody.
+    const run = { ...fixture, updatedAt: new Date().toISOString(), mergeMode: 'nonsense' };
+    const dir = projectDir(fixture.project);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].mergeMode).toBe('merge');
+  });
+
   it('marks a run whose heartbeat is 16 minutes old as not fresh', async () => {
     const run: OrchestratorRun = {
       ...fixture,
