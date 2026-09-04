@@ -791,6 +791,44 @@ test('status reads in branch-mode wording for a branch-mode run, not "N/M merged
   assert.doesNotMatch(out.stdout, /3\/4 merged/)
 })
 
+// Final whole-branch review, finding 9: case 10 above pins `queueSummaryLine`'s
+// PURE branch-mode wording (a run that started `--merge-mode branch` and never
+// merged anything) — but its OTHER arm, a run that started in `merge` mode and
+// downgraded mid-queue (design §5.2, the real 2026-09-03 shape this whole
+// feature traces back to), had no coverage at all. That degraded-run string is
+// the one line a post-mortem actually reads, and `queueSummaryLine`'s own doc
+// comment is explicit that the secondary count is "never folded away, in
+// either direction" — so this pins both numbers appearing together, not just
+// the headline `branched` count that case 10 already covers.
+test('status names both counts for a run that downgraded mid-queue, not just the branched headline', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-70', 'A')
+  seedReadyTask(project, 'task-71', 'B')
+  seedReadyTask(project, 'task-72', 'C')
+  seedReadyTask(project, 'task-73', 'D')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  // Two items merge while the run is still in `merge` mode...
+  assert.equal(run(project, home, 'stage', 'task-70', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-71', 'merged').status, 0)
+  // ...then the classifier denies a merge, degrading the rest of the queue.
+  assert.equal(
+    run(project, home, 'merge-mode', 'branch', '--note', 'classifier denied the merge on task-72').status,
+    0
+  )
+  assert.equal(run(project, home, 'stage', 'task-72', 'branched').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-73', 'branched').status, 0)
+
+  const out = run(project, home, 'status')
+
+  assert.equal(out.status, 0, out.stderr)
+  // The headline flips to `branched` (this run's own definition of
+  // "finished successfully" once mergeModeEffective moved), and the two
+  // items that reached `main` before the denial are still named, not
+  // silently dropped from the summary a post-mortem reads.
+  assert.match(out.stdout, /2\/4 branched/)
+  assert.match(out.stdout, /2 merged before the mode changed/)
+})
+
 // Case 11 — ATTENTION_KINDS gains no fourth member: a green branch is not a
 // thing a human needs to look at, so `branched` must stay an unknown kind
 // exactly like any other made-up string.
