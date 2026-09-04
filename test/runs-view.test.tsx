@@ -99,7 +99,10 @@ function liveQueueItem(
 }
 
 function run(over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun, 'runId' | 'project' | 'status' | 'startedAt' | 'updatedAt' | 'queue'>): OrchestratorArchiveRun {
-  return { maxItems: null, attention: [], current: false, ...over };
+  return {
+    maxItems: null, mergeMode: 'merge', mergeModeEffective: 'merge', mergeModeNote: null,
+    attention: [], current: false, ...over
+  };
 }
 
 /**
@@ -244,6 +247,9 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
     startedAt: RUN_LIVE.startedAt,
     updatedAt: RUN_LIVE.updatedAt,
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     queue: [
       liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
       // live-ahead-of-archive: the archive's own a-2 is still "reviewing".
@@ -662,6 +668,9 @@ describe('RunsView', () => {
       startedAt: archiveEntry.startedAt,
       updatedAt: '2026-09-01T09:10:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveQueueItem('g-1', 'merged'),
@@ -715,6 +724,9 @@ describe('RunsView', () => {
       startedAt: archiveEntry.startedAt,
       updatedAt: '2026-09-01T09:10:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveQueueItem('g-1', 'merged'),
@@ -797,6 +809,9 @@ describe('RunsView', () => {
         startedAt: archiveAlpha.startedAt,
         updatedAt: archiveAlpha.updatedAt,
         maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        mergeModeNote: null,
         queue: [],
         attention: [],
         fresh: true,
@@ -825,6 +840,9 @@ describe('RunsView', () => {
         startedAt: '2026-09-01T09:30:00.000Z',
         updatedAt: '2026-09-01T09:30:00.000Z',
         maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        mergeModeNote: null,
         queue: [],
         attention: [],
         fresh: true,

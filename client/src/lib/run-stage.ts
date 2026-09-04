@@ -27,10 +27,15 @@ export const STAGE_TONE: Record<RunStage, StageTone> = {
   fixing: 'active',
   verifying: 'active',
   merging: 'active',
-  // The one success exit, per RunStage's own doc comment. Green: it used to
-  // share the active tone, which made "finished" and "still running" the same
-  // colour in a list whose whole job is telling those two apart.
+  // The two success exits, one per MergeMode, per RunStage's own doc comment
+  // — `merged` when the run merged to main, `branched` when it was told to
+  // stop at a reviewed branch instead. Both green: it used to be a single
+  // stage sharing the active tone, which made "finished" and "still running"
+  // the same colour in a list whose whole job is telling those two apart,
+  // and the two exits read identically here on purpose — the tone is about
+  // the outcome (this item is done, cleanly), not which mode produced it.
   merged: 'done',
+  branched: 'done',
   failed: 'bad',
   // Blocked on a person. `parked` joins `needs-answers` because both mean the
   // pipeline has stopped and will not restart on its own.

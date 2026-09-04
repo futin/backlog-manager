@@ -397,31 +397,37 @@ function runWith(stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
 }
 
 /*
- * The six stages a run has FINISHED with an item at. Written out here rather
- * than derived as "everything RUN_CLAIMED_STAGES omits", because deriving it
- * from the thing under test is how a partition test proves nothing: if
- * RUN_CLAIMED_STAGES lost a member, a derived complement would gain it and
- * both halves would still agree.
+ * The seven stages a run has FINISHED with an item at. Written out here
+ * rather than derived as "everything RUN_CLAIMED_STAGES omits", because
+ * deriving it from the thing under test is how a partition test proves
+ * nothing: if RUN_CLAIMED_STAGES lost a member, a derived complement would
+ * gain it and both halves would still agree. `branched` joins this list for
+ * the same reason `merged` is in it: both are outcomes a run has finished
+ * the item at, and a human dispatching it by hand is the intended next move
+ * for either.
  */
 const TERMINAL_STAGES: readonly RunStage[] = [
-  'merged', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
+  'merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
 ];
 
 /*
- * The four stages a run has truly EXITED an item at — the complement of
+ * The five stages a run has truly EXITED an item at — the complement of
  * `runHoldsItem`'s answer rather than of `runClaimBlock`'s, and the reason
  * the two lists above and below this comment both have to exist. A parked or
  * needs-answers item is terminal to DISPATCH (nobody is going to move it but
  * a human, which is what parking is for) and not terminal to the ITEM: the
  * run still holds the worktree and is waiting, so bug-11's question — "is
  * this item live work" — answers yes where `runClaimBlock`'s answers no.
+ * `branched` is a true exit like `merged`: the run mode decided where a
+ * successful item stops, but either way the run is done with it and holds
+ * nothing.
  *
  * Written out by hand for the reason TERMINAL_STAGES above is: derived from
  * the constants under test, a partition test proves nothing, because a
  * constant that loses a member hands it straight to the derived complement
  * and both halves still agree.
  */
-const EXITED_STAGES: readonly RunStage[] = ['merged', 'failed', 'skipped', 'ungroomed'];
+const EXITED_STAGES: readonly RunStage[] = ['merged', 'branched', 'failed', 'skipped', 'ungroomed'];
 
 describe('runClaimBlock', () => {
   it('names the stage for every stage a run still owns the item at', () => {
@@ -477,13 +483,19 @@ describe('runClaimBlock', () => {
   it('partitions every RunStage member into exactly one of claimed or terminal', () => {
     const everyStage: Record<RunStage, true> = {
       pending: true, preflight: true, dispatched: true, inspecting: true, reviewing: true,
-      fixing: true, verifying: true, merging: true, merged: true, failed: true,
+      fixing: true, verifying: true, merging: true, merged: true, branched: true, failed: true,
       skipped: true, 'needs-answers': true, ungroomed: true, parked: true
     };
     const all = Object.keys(everyStage) as RunStage[];
 
     expect([...RUN_CLAIMED_STAGES, ...TERMINAL_STAGES].sort()).toEqual([...all].sort());
     expect(RUN_CLAIMED_STAGES.filter((s) => TERMINAL_STAGES.includes(s))).toEqual([]);
+
+    // `branched` is the branch-mode success exit: the run has let go of the
+    // item exactly as it does at `merged`, so it must sit outside both the
+    // claimed and the attention partitions.
+    expect(RUN_CLAIMED_STAGES.includes('branched')).toBe(false);
+    expect(ATTENTION_RUN_STAGES.includes('branched')).toBe(false);
 
     /* The SECOND partition of the same fourteen members, the one bug-11
        added: live (a run still holds the item, whether working it or blocked
@@ -523,10 +535,19 @@ describe('runHoldsItem', () => {
     }
   });
 
-  it('releases the item at the four stages a run has exited it at', () => {
+  it('releases the item at the five stages a run has exited it at', () => {
     for (const stage of EXITED_STAGES) {
       expect(runHoldsItem(fakeItem(), [runWith(stage)])).toBe(false);
     }
+  });
+
+  // The table case from the design's classification list, spelled out on its
+  // own rather than left to the loop above: `branched` is the mode this
+  // repo did not have when EXITED_STAGES was first written, and the loop
+  // alone would not tell a reader that this specific stage was the reason
+  // the list grew.
+  it('releases the item at the branch-mode success exit', () => {
+    expect(runHoldsItem(fakeItem(), [runWith('branched')])).toBe(false);
   });
 
   /* The three lines the two functions share, asserted here as well as on

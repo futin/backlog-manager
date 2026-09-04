@@ -107,6 +107,9 @@ function primarySummary(): OrchestratorArchiveRun {
     startedAt: '2026-09-01T09:00:00.000Z',
     updatedAt: '2026-09-01T09:30:00.000Z',
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     current: false,
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
     queue: [
@@ -138,6 +141,9 @@ function primaryFull(overTails: { a1?: string; a2?: string } = {}): Orchestrator
     startedAt: '2026-09-01T09:00:00.000Z',
     updatedAt: '2026-09-01T09:30:00.000Z',
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
     queue: [
       liveItem('a-1', 'merged', {
@@ -245,6 +251,9 @@ describe('RunDetail', () => {
       startedAt: '2026-09-01T09:00:00.000Z',
       updatedAt: '2026-09-01T09:15:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       current: true,
       attention: [],
       queue: [
@@ -261,6 +270,9 @@ describe('RunDetail', () => {
       startedAt: '2026-09-01T09:00:00.000Z',
       updatedAt: '2026-09-01T09:12:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveItem('a-1', 'merged', {
@@ -279,6 +291,9 @@ describe('RunDetail', () => {
       startedAt: '2026-09-01T09:00:00.000Z',
       updatedAt: '2026-09-01T09:20:00.000Z',
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [
         liveItem('a-1', 'merged', {
@@ -493,6 +508,9 @@ describe('RunDetail', () => {
       startedAt: fixingAt,
       updatedAt: fixingAt,
       maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
       attention: [],
       queue: [liveItem('f-1', 'fixing', { stageAt: { fixing: fixingAt } })]
     };

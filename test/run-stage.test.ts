@@ -14,7 +14,7 @@ import type { OrchestratorRun, RunStage } from '../shared/types';
  */
 const ALL_STAGES: RunStage[] = [
   'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing',
-  'fixing', 'verifying', 'merging', 'merged',
+  'fixing', 'verifying', 'merging', 'merged', 'branched',
   'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
 ];
 
@@ -33,6 +33,10 @@ describe('run stage tones', () => {
 
   it('separates success, failure, waiting and blocked', () => {
     expect(STAGE_TONE.merged).toBe('done');
+    // The branch-mode success exit reads as the same 'done' green as
+    // `merged` — both are the run finishing an item cleanly, and the tone
+    // is about how the outcome should be read, not which mode produced it.
+    expect(STAGE_TONE.branched).toBe('done');
     expect(STAGE_TONE.failed).toBe('bad');
     expect(STAGE_TONE.pending).toBe('idle');
     expect(STAGE_TONE.preflight).toBe('idle');

@@ -63,6 +63,9 @@ function makeRun(overrides: Partial<OrchestratorRun> = {}): OrchestratorRun {
     startedAt: '2026-08-31T08:40:03Z',
     updatedAt: '2026-08-31T09:36:40Z',
     maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
     queue: [queueItem()],
     attention: [],
     ...overrides
