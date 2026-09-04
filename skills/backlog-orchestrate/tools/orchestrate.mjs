@@ -381,12 +381,30 @@ function writeRunAtomic(dir, run) {
 // RunStage union — duplicated for the same standalone reason as
 // RUN_STALE_MS above (see that constant's comment). `stage` validates
 // against this list; an unrecognized string is a code-1 usage error, never
-// silently accepted.
+// silently accepted. `branched` sits right after `merged` — same terminal
+// position in the pipeline as the union itself documents: one success exit
+// per MergeMode, and a queue item reaches exactly one of the two, never
+// both.
 const RUN_STAGES = [
   'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing',
-  'fixing', 'verifying', 'merging', 'merged',
+  'fixing', 'verifying', 'merging', 'merged', 'branched',
   'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked',
 ]
+
+// The MergeMode vocabulary, verbatim from shared/types.ts's own MergeMode
+// union and its MERGE_MODES const — duplicated for the exact same
+// standalone reason RUN_STAGES just above already is (this file may not
+// import from shared/, even though the two lists are one feature: `branch`
+// mode is the entire reason RUN_STAGES needed a second success exit).
+// `merge` is today's behaviour, byte for byte — merge each verified item
+// into main and clean up its worktree and branch. `branch` commits, reviews
+// and verifies exactly the same way, then removes the worktree and KEEPS
+// the branch; main is never touched. `init --merge-mode` and the
+// `merge-mode` command below both validate against this exact list, rather
+// than a hand-written `=== 'merge' || === 'branch'` chain, for the same
+// "one copy of the vocabulary" reason RUN_STAGES is a list and not a
+// scattered set of string literals.
+const MERGE_MODES = ['merge', 'branch']
 
 // Builds one full RunQueueItem from just an id and a title, with every
 // other field at the shape's own documented default: `pending` is the
@@ -996,7 +1014,7 @@ function branchExists(projectRoot, branch) {
 // command style, so the contract for "what does `stage` do" lives entirely
 // inside cmdStage and not spread across a bigger switch.
 
-const INIT_USAGE = 'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>]'
+const INIT_USAGE = 'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch>]'
 
 function cmdInit(argv) {
   let project
@@ -1006,11 +1024,20 @@ function cmdInit(argv) {
   // fill in, so that `--base ''` is a base ref of '' (which resolves to
   // nothing and takes the fallback) rather than silently meaning `main`.
   let base = BASE_REF_DEFAULT
+  // Same reasoning as `base` above: defaulted right here so an absent flag
+  // reads as the literal value 'merge' everywhere below rather than as
+  // undefined needing its own fallback later — and so this run's very
+  // first `mergeMode`/`mergeModeEffective` pair is byte-identical to a run
+  // started before this flag existed at all (design §2.5: "a new key must
+  // not silently change the behaviour of a board that has been working for
+  // a fortnight").
+  let mergeMode = 'merge'
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project') project = argv[++i]
     else if (argv[i] === '--ids') idsArg = argv[++i]
     else if (argv[i] === '--max') maxArg = argv[++i]
     else if (argv[i] === '--base') base = argv[++i]
+    else if (argv[i] === '--merge-mode') mergeMode = argv[++i]
   }
 
   // Validated before anything else touches disk: an unusable --project is a
@@ -1035,6 +1062,26 @@ function cmdInit(argv) {
   // even parsed, so the "nothing written when init refuses" guarantee holds.
   const projectWorktree = linkedWorktreeInfo(project)
   if (projectWorktree) refuseLinkedWorktree(projectWorktree)
+
+  // Validated in this SAME block, immediately after the two checks above —
+  // the task-3 brief pins this exact ordering, and the reason is the same
+  // "validate first, mutate last" guarantee those two already give: a
+  // caller cannot tell from the outside whether --merge-mode was checked
+  // before or after --project, but a bug that checked it AFTER
+  // buildGatedQueue (which does real filesystem/git work) could leave a
+  // half-built queue's side effects behind an eventual throw. An
+  // unrecognized --merge-mode is a shape problem with the call itself,
+  // exactly like a non-absolute --project or a linked-worktree --project,
+  // so it is refused the same way: exit 1, nothing written. Checked
+  // against MERGE_MODES rather than `mergeMode !== 'merge' && mergeMode
+  // !== 'branch'` for the "one copy of the vocabulary" reason that
+  // constant's own comment gives.
+  if (!MERGE_MODES.includes(mergeMode)) {
+    throw new OrchestrateError(
+      `--merge-mode must be one of ${MERGE_MODES.join(', ')} (got ${mergeMode === undefined ? 'no value' : mergeMode})`,
+      1,
+    )
+  }
 
   let maxItems = null
   if (maxArg !== undefined) {
@@ -1173,6 +1220,19 @@ function cmdInit(argv) {
     startedAt: stamp,
     updatedAt: stamp,
     maxItems,
+    // What this run was ASKED to do (never rewritten after this line — see
+    // the `merge-mode` command below, which only ever moves the EFFECTIVE
+    // field) and what it is actually doing right now. The two start equal,
+    // by construction, at every init: a run that opens in 'branch' mode
+    // chose that from the start, no different from one that will only
+    // reach 'branch' later via a denied merge — the note is what tells
+    // those two apart in the archive, and it starts null because nothing
+    // has diverged yet. See shared/types.ts's OrchestratorRun fields of the
+    // same names for the fuller rationale this file may not import but
+    // still has to uphold byte for byte.
+    mergeMode,
+    mergeModeEffective: mergeMode,
+    mergeModeNote: null,
     queue,
     attention: [],
   }
@@ -1279,6 +1339,30 @@ function cmdStage(argv) {
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
 
+  // Design §3: enforcement lives in the TOOL, not in SKILL.md's prose — a
+  // prose reminder has to survive several hundred turns of a headless
+  // session re-reading its own body across a whole run, and a tool refusal
+  // does not drift the way prose can. A branch-mode run has already
+  // decided `main` is never touched this run (see `mergeModeEffective`'s
+  // own comment on the run skeleton above), so `stage <id> merged` — the
+  // literal shape of "an item just landed on main" — cannot be allowed to
+  // write that lie into the run file, no matter what called it or why.
+  // Checked here: after the stage name itself is validated (a bad stage
+  // string is a problem with THIS call regardless of run state, see the
+  // comment above) but before the queue item is touched at all, so a
+  // refusal leaves run.json byte-identical, exactly like every other exit-1
+  // path in this function. The converse is deliberately NOT enforced:
+  // `stage <id> branched` stays legal under `merge` mode too, because that
+  // is precisely what a merge denied mid-queue degrades an item to (design
+  // §5.2) — see the `merge-mode` command below for the run-level half of
+  // that same degrade.
+  if (stage === 'merged' && run.mergeModeEffective === 'branch') {
+    throw new OrchestrateError(
+      `this run's merge mode is 'branch' — an item cannot be staged 'merged' under branch mode. Use \`stage ${itemId} branched\` instead.`,
+      1,
+    )
+  }
+
   const item = findQueueItem(run, itemId)
   applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop })
 
@@ -1291,6 +1375,65 @@ function cmdStage(argv) {
   // a `--resume` would reset). Every other stage call keeps the exact
   // two-key line it has always printed.
   console.log(JSON.stringify(fixLoop ? { id: itemId, stage, fixLoops: item.fixLoops } : { id: itemId, stage }))
+  return 0
+}
+
+const MERGE_MODE_USAGE = 'usage: orchestrate.mjs merge-mode <merge|branch> --note <text>'
+
+// Records the one degrade design §5.2 allows: a run that started (or was
+// previously left) in `merge` mode gives up on merging for the REST of the
+// queue, because the evidence this whole feature is built on (§ "Why this
+// exists" at the top of the design doc) is that the classifier's verdict on
+// an identical merge command is a per-call coin flip — once one merge has
+// been denied, retrying merge mode on a later item just repeats the same
+// four-hour failure this command exists to head off. `mergeMode` itself
+// (what was asked for at `init`) is never touched here; only
+// `mergeModeEffective` (what the run is actually doing) and the note move,
+// and they always move together — a note with no mode change, or a mode
+// change with no note, would both leave the archive unable to answer "why
+// did this run stop merging" months later.
+//
+// The one-way rule (`merge` -> `branch`, never back) is enforced by
+// CONSTRUCTION here, not by trusting the caller to only ever ask for the
+// right thing: the sole transition this function will ever perform is
+// exactly `mergeModeEffective === 'merge'` and `target === 'branch'`.
+// Everything else is refused untouched — including trying to move back to
+// `merge` (case 9 of the task-3 brief: the downgrade is one-way) AND
+// re-recording a downgrade that has already happened. That second refusal
+// is deliberate too: `mergeModeNote`'s own contract (shared/types.ts) is
+// "set once, at the moment a merge is denied, and never cleared back to
+// null afterwards" — letting a second call silently overwrite an existing
+// note would erase the very post-mortem detail this field exists to keep.
+function cmdMergeMode(argv) {
+  const target = argv[0]
+  let note
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--note') note = argv[++i]
+  }
+
+  // Validated before the run is even read, same "a problem with THIS call"
+  // reasoning `stage`'s own unknown-stage check uses: a target outside
+  // MERGE_MODES, or a missing --note, is wrong regardless of what run
+  // exists.
+  if (!MERGE_MODES.includes(target) || note === undefined) {
+    throw new OrchestrateError(MERGE_MODE_USAGE, 1)
+  }
+
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const run = readRun(dir)
+
+  if (!(run.mergeModeEffective === 'merge' && target === 'branch')) {
+    throw new OrchestrateError(
+      `merge mode cannot move from '${run.mergeModeEffective}' to '${target}' — the only move this command ever allows is merge -> branch, and only once per run`,
+      1,
+    )
+  }
+
+  run.mergeModeEffective = target
+  run.mergeModeNote = note
+  run.updatedAt = nowISO()
+  writeRunAtomic(dir, run)
+  console.log(JSON.stringify({ mergeModeEffective: run.mergeModeEffective, mergeModeNote: run.mergeModeNote }))
   return 0
 }
 
@@ -1385,6 +1528,35 @@ function cmdFinish(argv) {
   return 0
 }
 
+// The human-readable "queue: N/M merged" line's mode-aware replacement.
+// Under `merge` mode the headline count is still `merged`, byte-identical
+// to what this line has always printed when nothing has branched — that is
+// the task-3 brief's case-2 regression guard. Under `branch` mode the
+// headline flips to `branched`, because that is THIS run's own definition
+// of "finished successfully" (design §4's `branched` is the branch-mode
+// success exit, same terminal position `merged` occupies).
+//
+// The secondary count is never folded away, in either direction: a run
+// that degraded mid-queue via `merge-mode` (see that command's own
+// comment) carries items that reached `merged` before the degrade AND
+// items that reached `branched` after it, and hiding either number would
+// make a partially-degraded run's history unreadable — exactly the kind of
+// silent loss the design doc's own post-mortem (§ "Why this exists")
+// complains about. So whichever count is not the mode's own headline is
+// still named, in parentheses, whenever it is nonzero.
+function queueSummaryLine(run) {
+  const total = run.queue.length
+  const merged = run.queue.filter((q) => q.stage === 'merged').length
+  const branched = run.queue.filter((q) => q.stage === 'branched').length
+
+  if (run.mergeModeEffective === 'branch') {
+    const mergedBefore = merged > 0 ? ` (${merged} merged before the mode changed)` : ''
+    return `${branched}/${total} branched${mergedBefore}`
+  }
+  const branchedSince = branched > 0 ? ` (${branched} branched)` : ''
+  return `${merged}/${total} merged${branchedSince}`
+}
+
 function cmdStatus(argv) {
   const json = argv.includes('--json')
 
@@ -1394,10 +1566,9 @@ function cmdStatus(argv) {
   if (json) {
     console.log(JSON.stringify(run))
   } else {
-    const merged = run.queue.filter((q) => q.stage === 'merged').length
     console.log(`${run.runId}  ${run.project}  ${run.status}`)
     console.log(`updated: ${run.updatedAt}`)
-    console.log(`queue: ${merged}/${run.queue.length} merged`)
+    console.log(`queue: ${queueSummaryLine(run)}`)
     console.log(`attention: ${run.attention.length}`)
   }
   return 0
@@ -1922,13 +2093,26 @@ function cmdVerify(argv) {
 // decides what to actually DO with each suggestion; this command's only job
 // is to tell them accurately what it found.
 
-// RunStage's own doc comment: "`merged` is the only success exit; `failed`,
-// `skipped`, `needs-answers`, `ungroomed`, and `parked` are the five ways
-// an item leaves the pipeline without merging." An item already in one of
-// these six has already left the pipeline by definition — reconciling it
-// against a possibly-gone worktree would tell a human nothing they don't
-// already know from its stage alone.
-const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'])
+// RunStage's own doc comment (shared/types.ts — restated here since this
+// file cannot import it): "`merged` and `branched` are the two success
+// exits — one per MergeMode, and a queue item reaches exactly one of them,
+// never both — and `failed`, `skipped`, `needs-answers`, `ungroomed`, and
+// `parked` are the five ways an item leaves the pipeline without merging."
+// An item already in one of these seven has already left the pipeline by
+// definition — reconciling it against a possibly-gone worktree would tell
+// a human nothing they don't already know from its stage alone.
+//
+// `branched` belongs here for the exact reason `merged` always has: a
+// branch-mode run that finished the item successfully has let go of it
+// just as completely as a merge-mode run that reached `main` has (the same
+// argument shared/types.ts's `RUN_HELD_STAGES`/`runHoldsItem` make on the
+// server/client side of this same feature). Leaving it out would be a real
+// bug, not a cosmetic one: `--resume`'s whole job is telling a crashed run
+// apart from one that finished cleanly, and without `branched` here it
+// would read an already-delivered branch as unfinished work and dispatch
+// straight back into it — redoing an item whose result is already sitting
+// on disk as the deliverable.
+const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'])
 
 // The fixed suggestion vocabulary the brief names, in priority order:
 //   1. Neither the worktree directory nor the branch survive at all —
@@ -2119,18 +2303,19 @@ function cmdAbort() {
 const USAGE = `usage: orchestrate.mjs <command>
 
 commands:
-  init       create and lock a new run for a project
-  plan       preview the gated queue init would build, without writing
-  stage      move a queue item to a new stage
-  heartbeat  re-stamp the run's updatedAt
-  attention  record something a human should look at
-  finish     set the run's final status
-  status     print the current run
-  watch      survive a long headless child across the loop's own Bash cap
-  denials    list the permission denials a session's transcript recorded
-  verify     run the project's proof commands and record them
-  reconcile  read-only crash-recovery report
-  abort      tear down worktrees/branches and end the run`
+  init         create and lock a new run for a project
+  plan         preview the gated queue init would build, without writing
+  stage        move a queue item to a new stage
+  merge-mode   record a merge mode downgrade (merge -> branch only)
+  heartbeat    re-stamp the run's updatedAt
+  attention    record something a human should look at
+  finish       set the run's final status
+  status       print the current run
+  watch        survive a long headless child across the loop's own Bash cap
+  denials      list the permission denials a session's transcript recorded
+  verify       run the project's proof commands and record them
+  reconcile    read-only crash-recovery report
+  abort        tear down worktrees/branches and end the run`
 
 // --- CLI dispatch --------------------------------------------------------
 // Thin by design (see the "commands" section comment above): main only maps
@@ -2147,7 +2332,15 @@ commands:
 //   0  success.
 //   1  bad args, an unknown item id, an unknown stage/kind string, or
 //      missing required input — a problem with THIS call, independent of
-//      run state. Nothing is ever written when a command exits 1.
+//      run state. Nothing is ever written when a command exits 1. One exit
+//      1 is the deliberate exception to "independent of run state": `stage
+//      <id> merged` under a branch-mode run (see cmdStage's own comment)
+//      and `merge-mode` refusing anything but a merge -> branch move (see
+//      cmdMergeMode's own comment) both depend on the run file's own
+//      mergeModeEffective, not on the call's args alone — listed here so
+//      this contract doc doesn't quietly go stale on the one case where it
+//      isn't quite true. The "nothing written" half of the guarantee still
+//      holds for both.
 //   3  no run exists for this project (readRun's own refusal) — EXCEPT for
 //      `watch`, which also exits 3 when its own `--budget-ms` elapses with
 //      the child still alive. That second meaning is a deliberate reuse of
@@ -2165,6 +2358,7 @@ export function main(argv) {
     if (cmd === 'init') return cmdInit(rest)
     if (cmd === 'plan') return cmdPlan(rest)
     if (cmd === 'stage') return cmdStage(rest)
+    if (cmd === 'merge-mode') return cmdMergeMode(rest)
     if (cmd === 'heartbeat') return cmdHeartbeat(rest)
     if (cmd === 'attention') return cmdAttention(rest)
     if (cmd === 'finish') return cmdFinish(rest)
