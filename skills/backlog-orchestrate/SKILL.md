@@ -11,14 +11,16 @@ description: >
 trigger: /backlog-orchestrate
 ---
 
-# /backlog-orchestrate — drain the queue, one merged item at a time
+# /backlog-orchestrate — drain the queue, one verified item at a time
 
 Orchestrate is the loop around `backlog-execute`, and only the loop. For every
 groomed bug and task in a project's backlog it creates a worktree, runs one
 fresh headless `backlog-execute` session inside it, commits what that session
 produced, has it reviewed, proves it with real commands, and merges it to
-`main` — then starts the next item from the updated `main`. Execute keeps
-doing the work, groom keeps writing the plans, capture keeps filing new items.
+`main` — then starts the next item from the updated `main`. Under
+`--merge-mode branch` a verified item stops at its reviewed branch instead and
+`main` is never written (section 2). Execute keeps doing the work, groom keeps
+writing the plans, capture keeps filing new items.
 
 Two things make this skill different from its three siblings, and both are
 worth having in mind before the first command runs:
@@ -271,9 +273,11 @@ about.
 
 Then work the queue **strictly one item at a time**, in the order `status
 --json` lists it. Sequential is not a performance compromise to be optimised
-away later: merging to `main` between items is what keeps each item's
-worktree isolated and each session's context clean, and two items in flight
-forfeit both.
+away later: one worktree and one session in flight is what keeps each item's
+diff attributable and each session's context clean, and two items forfeit
+both. In `merge` mode the merge between items adds a second reason — each
+item starts from the updated `main`. Branch mode gives up that half and only
+that half (§9); the rule itself is unconditional.
 
 ## 3. Pre-flight, per item
 
@@ -432,9 +436,33 @@ just as hard as one it does know about. Then:
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "leftover worktree $PWD/.worktrees/<id> and branch backlog/<id> from an earlier run — resume or clear them by hand before the next run"
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
     ```
-- **`branch=0 worktree=1 dir=1`** — the branch outlived its directory. Same
-  two answers as above; to resume, check the branch out into a fresh worktree
-  *without* `-b`:
+- **`branch=0 worktree=1 dir=1`** — a branch with no worktree, and **usually
+  that is success, not a crash**: a `branched` item's worktree is removed and
+  its branch kept (§9), and the item stays open on `main` until someone merges
+  that branch, so it re-enters this queue on every run until they do — the
+  gate reads groomed-ness and never looks at branches. Every park path here
+  keeps its worktree, so a missing one is already the tell; confirm it with
+  the archive move the branch carries and `main` does not, in the same
+  swallow-the-status shape as the three probes above:
+
+  ```bash
+  git -C "$PWD" diff --name-only main...backlog/<id> | grep -q "/done/<id>-"; echo "archived=$?"
+  ```
+
+  **`archived=0` is finished work waiting on a hand-merge.** Do not dispatch,
+  review or verify it again — that spends a whole item's budget re-proving
+  what is already green. Record where it already is and move to the next item;
+  §10's merge list then names it alongside this run's own branches. Parking it
+  would report a green branch as a failure, which is the one thing branch mode
+  exists to stop.
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
+  ```
+
+  **`archived=1`** and it is a real leftover — a run that stopped before
+  execute finished. Same two answers as the bullet above; to resume, check the
+  branch out into a fresh worktree *without* `-b`:
 
   ```bash
   git -C "$PWD" worktree add .worktrees/<id> backlog/<id>
@@ -1064,8 +1092,11 @@ git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
 
 Then continue with the next item, which now takes the branch path at the top
 of this section. Keep the branch — no `branch -d`, for the reason that path
-gives. (If `merge-mode` exits `1` saying the run is already in branch mode,
-the state is already right: stage the item and carry on.)
+gives — and if `worktree remove` refuses, handle it exactly as that path says:
+the item stays `branched` and the leftover directory is recorded with
+`attention … --kind parked`. (A `merge-mode` exit `1` saying the run is
+already in branch mode is the right state, not a failure — a resumed,
+already-degraded run hits it, and the stage above has already landed.)
 
 **No `attention` entry here.** The attention list means "a human must look at
 *this item*", and a green, reviewed branch does not qualify; `ATTENTION_KINDS`
@@ -1192,8 +1223,9 @@ green first try — should have produced no ping at all along the way; the
 summary is where it finally gets mentioned.
 
 **Any item that finished `branched` owes the user a merge list.** Name those
-branches in the order the run worked them — each was verified against the
-`main` its predecessor started from — with the literal command per branch:
+branches in queue order — each was verified against the `main` its predecessor
+started from, and one carried over from an earlier run (§4) against that
+run's — with the literal command per branch:
 
 ```bash
 git merge --no-ff backlog/<id>
@@ -1251,18 +1283,18 @@ merged.
 
 ## Hard limits
 
-- **Sequential, always.** One item in flight, start to merge, before the next
-  begins. No flag enables parallel items; merging between items is the
-  isolation, and parallelism forfeits it.
+- **Sequential, always.** One item in flight, start to finish, before the next
+  begins. No flag enables parallel items; one worktree and one session at a
+  time is the isolation, and parallelism forfeits it (§2).
 - **Never merges red.** Verification failure parks the item exactly like a
   conflict does. Nothing green-lights a merge except the commands passing —
   not a clean review, not a confident `## Outcome`, not "the failure looks
   unrelated."
 - **Branch mode never writes `main`, and a denied merge never parks.** The
-  mode is fixed for the run at `init` and only ever moves `merge` → `branch`,
-  never back (§2, §9). `branched` is a success exit, not a failure — the tool
-  refuses `stage <id> merged` under branch mode so the run file cannot say
-  otherwise.
+  mode is set at `init`, applies to the whole queue, and only ever moves one
+  way afterwards (`merge` → `branch`, never back — §2, §9). `branched` is a
+  success exit, not a failure — the tool refuses `stage <id> merged` under
+  branch mode so the run file cannot say otherwise.
 - **Never force-pushes, never rewrites `main`'s history, never pushes at all.**
   Merge commits only; undoing one is `git revert -m 1`, never
   `git reset --hard` (step 9). Publishing anything is the user's call.
@@ -1286,7 +1318,10 @@ merged.
 
 `/backlog` shows the board with every merged item archived — but a `branched`
 item still reads as open there, because its archive move is committed on
-`backlog/<id>` and lands only when that branch is merged. Items left as
+`backlog/<id>` and lands only when that branch is merged. **Merge those
+branches before the next run**: until you do, those items stay open and the
+next run queues them again (it recognises the shape and passes them through
+untouched, §4 — but that is a re-report, not progress). Items left as
 `ungroomed` or `needs-answers` are a `/backlog-groom` pass away from being
 ready for the next run; parked items are a human decision, and their branches
 are still there. Anything the work surfaced along the way — a new bug, a
