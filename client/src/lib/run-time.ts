@@ -1,5 +1,5 @@
 import { RUN_CLAIMED_STAGES, RUN_STALE_MS } from '../../../shared/types';
-import type { OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
+import type { MergeMode, OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
 
 /**
  * Everything the run strip and the run drawer need to answer "how long" and
@@ -45,14 +45,17 @@ const MS_PER_HOUR = 60 * MS_PER_MINUTE;
  *
  * The seventh dot is the one position that is not fixed: it is the run's
  * SUCCESS exit, and which of `RunStage`'s two success members (`merged`,
- * `branched`) that word actually is depends on the run's effective mode
- * (`OrchestratorRun.mergeModeEffective`), never on the item. A merge-mode run
- * and a branch-mode run walk a finished item through the identical six
- * pipeline stages first — the two genuinely diverge only at the last step,
- * whether the item lands in `main` or stays a reviewed branch — so the shape
- * stays seven dots either way; only the word the last one carries changes.
- * `terminal` is therefore a parameter here, not a second hard-coded array:
- * see `stepperDots` below for why it is required, with no default.
+ * `branched`) that word actually names is resolved by the caller before
+ * this function ever sees it — usually from the run's effective mode
+ * (`OrchestratorRun.mergeModeEffective`), but from the item's OWN already-
+ * reached exit when it has one (see `stepperTerminal` below for why that
+ * case has to win). A merge-mode run and a branch-mode run walk a finished
+ * item through the identical six pipeline stages first — the two genuinely
+ * diverge only at the last step, whether the item lands in `main` or stays a
+ * reviewed branch — so the shape stays seven dots either way; only the word
+ * the last one carries changes. `terminal` is therefore a parameter here,
+ * not a second hard-coded array: see `stepperDots` below for why it is
+ * required, with no default.
  */
 export function stepperStages(terminal: 'merged' | 'branched'): readonly RunStage[] {
   return ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', terminal];
@@ -434,6 +437,46 @@ export interface StepperDot {
 }
 
 /**
+ * Which of the run's two success exits (`merged`, `branched`) THIS item's
+ * seventh dot should carry — `stepperDots`'s and `stepperStages`'s own
+ * `terminal` argument, resolved once here rather than inline at each caller.
+ *
+ * The rule is NOT simply "read the run's `mergeModeEffective`", even though
+ * that field's own doc comment (shared/types.ts) calls it "what this run is
+ * actually doing right now": `mergeModeEffective` describes the run as a
+ * WHOLE, and a run's mode can change mid-queue while items already finished
+ * under the old mode keep their own finished stage forever. §5.2 of the
+ * design spec is the concrete case — a merge-mode run denied a merge at item
+ * 3 stages that item `branched` and flips `mergeModeEffective` to `'branch'`
+ * for the rest of the run (one-directional, per that field's own comment:
+ * "only ever moves `merge` → `branch`, never back"), while items 1 and 2
+ * already completed with `stage: 'merged'` and `stageAt.merged` set. Reading
+ * the run's field alone for item 1's row would derive `terminal: 'branched'`,
+ * so `stepperDots` would look for `'branched' in item.stageAt` — absent —
+ * and draw a hollow seventh dot with no finish time on a row that in fact
+ * finished cleanly, while its own stage chip prints `merged` beside it.
+ *
+ * So an item that has ALREADY reached one of the two success exits answers
+ * with its own `stage`, full stop — an item's own recorded history is a fact
+ * about that item and cannot be overridden by what the run went on to do
+ * afterwards. Only an item that has not exited yet falls back to the run's
+ * `mergeModeEffective`, because that item's OWN eventual exit is genuinely
+ * unknown: it has no `merged`/`branched` stage of its own for this function
+ * to read, and the run's current mode is the best (only) available guess at
+ * where it is headed. This is the same asymmetry the design's own §4
+ * classification table states for `aggregateRuns` — "must not claim an item
+ * merged when it did not" — read in the other direction: a run must not
+ * claim an item did NOT merge when it did, either.
+ */
+export function stepperTerminal(
+  item: Pick<RunQueueItem, 'stage'>,
+  mergeModeEffective: MergeMode
+): 'merged' | 'branched' {
+  if (item.stage === 'merged' || item.stage === 'branched') return item.stage;
+  return mergeModeEffective === 'branch' ? 'branched' : 'merged';
+}
+
+/**
  * The row's seven dots, resolved against what it has actually visited.
  *
  * `filled` is keyed on the presence of a `stageAt` entry rather than on
@@ -466,17 +509,20 @@ export interface StepperDot {
  *
  * `terminal` is likewise REQUIRED, with no default, for the identical
  * argument applied to a different fact: which of the run's two success exits
- * (`merged`, `branched`) the seventh dot should carry is a fact about the
- * RUN's effective mode (`OrchestratorRun.mergeModeEffective`), not about the
- * item passed in here. An item still mid-pipeline has no stage of its own to
- * read that word off at all, and even a FINISHED item's own `stage` only
- * says which word it already reached — it cannot tell a still-moving row
- * elsewhere in the same queue what its own seventh dot should say once it
- * gets there. This is this repo's own `runHoldsItem` argument
- * (`shared/agent.ts`'s required `runs` parameter) restated for a stage word
- * instead of a boolean: a default would silently pick one mode for every
- * caller that forgets to pass it, and whichever value were the default is
- * the one a future caller would reintroduce the wrong terminal node with.
+ * (`merged`, `branched`) the seventh dot should carry. This function itself
+ * takes the word already resolved — it does not consult `mergeModeEffective`
+ * at all — because the resolution is not this function's own job: see
+ * `stepperTerminal` above, which callers use to compute it, and whose own
+ * doc comment explains why a FINISHED item's own `stage` must win over the
+ * run's current mode (a run's mode can move on after this item already
+ * exited under the old one), while a still-moving item — which has no
+ * `merged`/`branched` stage of its own yet either way — has no answer of its
+ * own to give and takes the run's mode as its only available guess. This is
+ * this repo's own `runHoldsItem` argument (`shared/agent.ts`'s required
+ * `runs` parameter) restated for a stage word instead of a boolean: a
+ * default would silently pick one mode for every caller that forgets to pass
+ * it, and whichever value were the default is the one a future caller would
+ * reintroduce the wrong terminal node with.
  *
  * `stalled` rather than a demotion to `filled`, which would be the quieter
  * lie: `filled` means "visited and left behind", and this file's own

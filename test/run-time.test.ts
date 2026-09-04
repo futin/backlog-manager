@@ -1,7 +1,7 @@
 import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
   itemDoneClock, itemDurationMs, itemQueueWaitMs, runClockMs, runElapsedMs, runIsLive,
-  stepperDots, stepperStages
+  stepperDots, stepperStages, stepperTerminal
 } from '../client/src/lib/run-time';
 import { runWallMs } from '../client/src/lib/run-stats';
 import { RUN_STALE_MS } from '../shared/types';
@@ -521,5 +521,47 @@ describe('stepperDots', () => {
     });
     const dots = stepperDots(item, true, 'branched');
     expect(dots[6].state).toBe('filled');
+  });
+});
+
+describe('stepperTerminal', () => {
+  // The disagreement case the fix exists for: a run's `mergeModeEffective`
+  // can move on to `'branch'` mid-queue (§5.2 of the design — a merge denied
+  // partway through the queue) while an earlier item already finished with
+  // `stage: 'merged'` under the old mode. That item's own exit must win, not
+  // the run's current field, or its seventh dot would read `branched` — a
+  // key `stageAt` never got — and lose its finish time to a false hollow.
+  it('reads a merged item\'s own stage, not the run\'s branch-mode field, once it has already exited', () => {
+    expect(stepperTerminal(queueItem('merged', { merged: at(0) }), 'branch')).toBe('merged');
+  });
+
+  // The identical rule stated the other direction: a branched item's own
+  // exit wins over a run whose field still reads `'merge'`. Not a run shape
+  // `mergeModeEffective` can actually reach today (it only ever moves
+  // `merge` → `branch`, never back — `OrchestratorRun.mergeModeEffective`'s
+  // own doc comment, shared/types.ts) but the function's rule is symmetric,
+  // and pinning both directions is what proves it is actually symmetric
+  // rather than merge-mode being special-cased.
+  it('reads a branched item\'s own stage, not the run\'s merge-mode field, once it has already exited', () => {
+    expect(stepperTerminal(queueItem('branched', { branched: at(0) }), 'merge')).toBe('branched');
+  });
+
+  // The fallback branch: an item still mid-pipeline has no `merged`/
+  // `branched` stage of its own to read at all, so the run's own effective
+  // mode is the only available answer — the pre-fix behaviour, preserved for
+  // the one case it was always correct for.
+  it('falls back to the run\'s effective mode for an item that has not exited yet', () => {
+    expect(stepperTerminal(queueItem('reviewing', { reviewing: at(0) }), 'branch')).toBe('branched');
+    expect(stepperTerminal(queueItem('reviewing', { reviewing: at(0) }), 'merge')).toBe('merged');
+  });
+
+  // A failure exit (never a success exit either way) also has no stage of
+  // its own for this function to prefer, so it takes the same fallback path
+  // as a still-moving item — the returned word is irrelevant to a parked
+  // row's own rendering (neither `merged` nor `branched` will be in its
+  // `stageAt`), but the function must not throw or misread `parked` as one
+  // of the two success stages it is choosing between.
+  it('falls back to the run\'s effective mode for a failure exit too', () => {
+    expect(stepperTerminal(queueItem('parked', { parked: at(0) }), 'branch')).toBe('branched');
   });
 });

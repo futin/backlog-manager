@@ -127,6 +127,41 @@ describe('StageTrack', () => {
       .toHaveTextContent('branched');
   });
 
+  // The mixed-run disagreement a run-time review found (design §5.2): a
+  // merge-mode run denied a merge partway through the queue flips
+  // `mergeModeEffective` to `'branch'` for the REST of the run, but an
+  // earlier item that already reached `merged` before the denial keeps its
+  // own finished stage forever — the run's field moves on, this item does
+  // not. Rendering that earlier item's row with the run's now-`'branch'`
+  // field taken at face value would derive `terminal: 'branched'`, so the
+  // seventh dot would look for a `branched` key this item's `stageAt` never
+  // got: hollow, with its genuine finish time gone, directly beneath a stage
+  // chip elsewhere on the row still printing `merged`. This item's own
+  // `stage` must win instead — filled, not hollow, and still showing when it
+  // finished.
+  it('renders a merged item\'s seventh node as merged, filled with its finish time, even when the run has since moved to branch mode', () => {
+    const stageAt = {
+      pending: at(0), dispatched: at(10_000), inspecting: at(20_000), reviewing: at(30_000),
+      verifying: at(40_000), merging: at(50_000), merged: at(60_000)
+    };
+    render(
+      <StageTrack item={trackItem('bug-12', 'merged', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="branch" />
+    );
+
+    const node = screen.getByTestId('run-track-bug-12-merged');
+    expect(node.querySelector('.run-track-name')).toHaveTextContent('merged');
+    expect(node.querySelector('.run-track-dot')).toHaveClass('run-track-dot-filled');
+
+    const val = screen.getByTestId('run-track-bug-12-merged-val');
+    expect(val).toHaveClass('run-track-val-when');
+    expect(val).toHaveTextContent(clockOf(at(60_000)));
+
+    // No stray eighth `branched` node was invented for this render, and no
+    // dangling hollow `merged` slot sits unrendered either — the track is
+    // still exactly seven nodes, `merged` occupying the one terminal slot.
+    expect(screen.queryByTestId('run-track-bug-12-branched')).not.toBeInTheDocument();
+  });
+
   it('prints each visited node\'s own stage span, the finish clock on merged, and leaves a cleanly-skipped stage hollow on a green line', () => {
     const stageAt = {
       pending: at(0), preflight: at(15_000), dispatched: at(60_000), inspecting: at(360_000),

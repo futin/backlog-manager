@@ -522,16 +522,16 @@ export interface RunAggregates {
    *
    * A GENUINE `0` from `itemDurationMs` — a completed item whose only
    * recorded arrival is its own terminal stamp, so start and end read the
-   * identical instant — COUNTS toward this mean, deliberately, and this is a real
-   * behaviour change from the deleted rule: old `itemWallMs` returned `null`
-   * (excluded outright) for any item with fewer than two recorded stamps,
-   * where `itemDurationMs` finds one non-`pending` arrival to measure both
-   * ends from and reports the honest `0` instead. Keeping it is the same
-   * principle the rest of this task applies everywhere else — an item that
-   * genuinely took under a second of measured work is a real data point, and
-   * silently dropping it would be exactly the kind of quiet exclusion this
-   * whole rewrite exists to remove, just aimed at a `0` instead of a
-   * `pending` leg this time.
+   * identical instant — COUNTS toward this mean, deliberately, and this is
+   * a real behaviour change from the deleted rule: old `itemWallMs`
+   * returned `null` (excluded outright) for any item with fewer than two
+   * recorded stamps, where `itemDurationMs` finds one non-`pending`
+   * arrival to measure both ends from and reports the honest `0` instead.
+   * Keeping it is the same principle the rest of this task applies
+   * everywhere else — an item that genuinely took under a second of
+   * measured work is a real data point, and silently dropping it would be
+   * exactly the kind of quiet exclusion this whole rewrite exists to
+   * remove, just aimed at a `0` instead of a `pending` leg this time.
    */
   avgItemWorkMs: number | null;
   /**

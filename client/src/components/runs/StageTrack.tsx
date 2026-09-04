@@ -1,5 +1,5 @@
 import { itemStageSpans } from '../../lib/run-stats';
-import { formatClock, formatSpan, inStageMs, stepperDots } from '../../lib/run-time';
+import { formatClock, formatSpan, inStageMs, stepperDots, stepperTerminal } from '../../lib/run-time';
 import type { StageSpan } from '../../lib/run-stats';
 import type { StepperDot } from '../../lib/run-time';
 import type { MergeMode, RunQueueItem } from '../../../../shared/types';
@@ -24,12 +24,18 @@ import type { MergeMode, RunQueueItem } from '../../../../shared/types';
  * `RunDetail`'s lead line already prints both durations in words beside this
  * track.
  *
- * `terminal` — 'merged' or 'branched' — is this component's own required
- * prop derived from `mergeModeEffective`, the run's field, not the item's:
- * an item cannot say which mode the run around it is running in, and a
- * still-mid-pipeline item has no `merged`/`branched` stage of its own yet
- * either way for this component to read it off. See `stepperDots`'s own doc
- * comment (run-time.ts) for why no default is offered for it.
+ * `terminal` — 'merged' or 'branched' — is resolved from the required
+ * `mergeModeEffective` prop via `stepperTerminal` (run-time.ts), not read off
+ * `mergeModeEffective` directly: a still-mid-pipeline item has no
+ * `merged`/`branched` stage of its own yet, so the run's mode is its only
+ * available answer, but an item that has ALREADY reached one of the two
+ * success exits answers with its own `stage` instead — see
+ * `stepperTerminal`'s own doc comment for why that item-first rule exists (a
+ * run's mode can move on to `'branch'` after this item already merged under
+ * the old one, mid-queue, and the item's own finished stage must not be
+ * relabelled after the fact). See `stepperDots`'s own doc comment
+ * (run-time.ts) for why `stepperDots` itself still takes the resolved word
+ * as a required parameter with no default.
  *
  * EQUAL COLUMNS, NOT TIME-PROPORTIONAL. The grid (styles.css) gives
  * `merging` (seconds) and `inspecting` (minutes) the exact same seventh of
@@ -184,11 +190,12 @@ export function StageTrack({ item, now, live, mergeModeEffective }: {
 }): JSX.Element | null {
   if (item.stage === 'ungroomed') return null;
 
-  // The run's own success exit, not the item's — see this file's header
-  // comment and `stepperDots`'s own doc comment (run-time.ts) for why this
-  // is derived from a required prop rather than defaulted or read off the
-  // item.
-  const terminal: 'merged' | 'branched' = mergeModeEffective === 'branch' ? 'branched' : 'merged';
+  // The run's own success exit — usually, but this item's OWN exit when it
+  // has already reached one. See this file's header comment and
+  // `stepperTerminal`'s own doc comment (run-time.ts) for the full rule and
+  // why an already-finished item must not be relabelled by a run that later
+  // moved on to the other mode.
+  const terminal = stepperTerminal(item, mergeModeEffective);
 
   const dots = stepperDots(item, live, terminal);
   const spans = itemStageSpans(item);

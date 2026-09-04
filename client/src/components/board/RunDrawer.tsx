@@ -4,7 +4,7 @@ import { projectLabel } from '../../lib/project-label';
 import { stageChipClass, stageGlyph } from '../../lib/run-stage';
 import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runClockMs, runElapsedMs,
-  runIsLive, stepperDots
+  runIsLive, stepperDots, stepperTerminal
 } from '../../lib/run-time';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
 import { RowTime } from './RunRowTime';
@@ -121,8 +121,15 @@ function staleNote(run: RunPayload): string | null {
  *
  * `mergeModeEffective` is threaded down for the same reason `live` is: which
  * of the run's two success exits (`merged`, `branched`) the seventh dot
- * should carry is a fact about the RUN, not the item, and `stepperDots`'s own
- * `terminal` parameter has no default (run-time.ts) for exactly that reason.
+ * should carry USUALLY is a fact about the RUN, not the item — but not
+ * always, so this passes it to `stepperTerminal` (run-time.ts) rather than
+ * reading it off directly. That function's own doc comment has the full
+ * rule: an item that already reached `merged` or `branched` answers with its
+ * own stage, since a run's mode can move on to `'branch'` mid-queue after
+ * this item already finished under the old one, and only a still-moving item
+ * — which has no exit of its own yet — falls back to the run's field. Either
+ * way `stepperDots`'s own `terminal` parameter has no default (run-time.ts),
+ * for the reason its doc comment gives.
  *
  * Each dot names its stage in a native `title` (hover) and the same text as an
  * `aria-label`, per the design: hover is mouse-only, and a dot that only a
@@ -142,7 +149,7 @@ function RowStepper({ item, live, mergeModeEffective }: {
 }): JSX.Element | null {
   if (item.stage === 'ungroomed') return null;
 
-  const terminal: 'merged' | 'branched' = mergeModeEffective === 'branch' ? 'branched' : 'merged';
+  const terminal = stepperTerminal(item, mergeModeEffective);
 
   return (
     <div className="run-stepper" data-testid={`run-drawer-stepper-${item.id}`}>
