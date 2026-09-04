@@ -72,6 +72,15 @@ export function scanProject(project: RegistryProject): { items: BacklogItem[]; e
           phase: clampPhase(fm.fields.phase),
           groomElapsed: parseElapsed(fm.fields['groom-elapsed']),
           executeElapsed: parseElapsed(fm.fields['execute-elapsed']),
+          // The token buckets go through the SAME parseElapsed, deliberately
+          // rather than a second parser of their own: the shape on disk is
+          // identical (a plain unsigned integer the CLI accumulates and
+          // refuses to corrupt) and so is the right degrade — a hand-edited
+          // value must read as 0, never 500 a board. See BacklogItem.groomTokens
+          // in shared/types.ts for what the number counts and, more
+          // importantly, what it deliberately does not.
+          groomTokens: parseElapsed(fm.fields['groom-tokens']),
+          executeTokens: parseElapsed(fm.fields['execute-tokens']),
           // Passed through verbatim, not clamped against 'chore'|'debt' — see
           // BacklogItem.kind in shared/types.ts for why this one differs from
           // `phase` above: the client's badge simply doesn't render for a value

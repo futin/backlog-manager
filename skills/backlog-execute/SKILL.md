@@ -111,9 +111,10 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as exec
 
 That writes a `started: <UTC timestamp>` line and a `phase: execute` line into the
 item's frontmatter, and nothing else — the body is untouched. `phase: execute` is what
-lets `stop` (see below) know to bill the time this session runs into `execute-elapsed:`
-rather than `groom-elapsed:` — leave off `--as` and there's nothing for `stop` to bill
-against. The board app renders the marker as an amber bar across the top of the card,
+lets `stop` (see below) know to bill this session into `execute-elapsed:` and
+`execute-tokens:` rather than their `groom-` counterparts — the seconds it ran and the
+tokens it spent over that same interval, read out of this session's own transcript.
+Leave off `--as` and there's nothing for `stop` to bill either of them against. The board app renders the marker as an amber bar across the top of the card,
 reading how long the work has been going, so anyone looking at the board can see what's
 being worked without asking. It is not a status: the item is still open, still in
 `<section>/open/`.

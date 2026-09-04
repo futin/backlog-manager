@@ -3,6 +3,9 @@ id: ref-2
 title: Sweep the residual minor findings from the runs-view redesign reviews
 created: 2026-09-02
 kind: chore
+updated: 2026-09-04T21:09:19Z
+promoted-to: task-15
+groom-elapsed: 193
 ---
 
 ## What exists today

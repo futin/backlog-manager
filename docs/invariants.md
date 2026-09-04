@@ -464,6 +464,75 @@ makes `stop` refuse outright rather than reset it to zero: resetting would
 silently destroy whatever real total was recorded there, and a refusal at
 least leaves the bad value in the file for a human to recover by hand.
 
+`groom-tokens:` and `execute-tokens:` are the token-shaped siblings of those
+two, and everything in the paragraph above applies to them unchanged: same
+accumulation, same permanence, same DIGITS_ONLY refusal on a corrupt bucket.
+There are four counters now, two per activity — elapsed time says how long an
+item took, tokens say roughly how much model work it took, and neither implies
+the other: a session can idle for an hour or burn a million tokens in ten
+minutes. Deliberately ONE gate covers both, not two: the token window *is* the
+interval the seconds are computed from, so if that interval is not billable
+then neither is the window over it, and `--abandon`, a phase-less `start` and a
+legacy bare date each fall out billing nothing without a second rule being
+written for them.
+
+The count comes from the calling session's own transcript, which it names
+itself: `CLAUDE_CODE_SESSION_ID` is present in the environment of every Bash
+tool call and the transcript is flushed mid-session rather than at exit
+(measured, on a live session: 317,222 bytes and 14 completed turns on disk
+while it was still running), so a `stop` running inside the session it is
+measuring can read that session's own history. There is therefore **no hook**
+and nothing added to `PUBLISHED_PATHS`. The main transcript is found by
+scanning project directories for `<sessionId>.jsonl`, never by deriving the
+directory from cwd — the slug rule is undocumented, and a `backlog-execute`
+session's cwd is inside a per-item worktree whose slug is not the main tree's
+anyway. Subagent turns are NOT in that file: they live in a sibling
+`<sessionId>/subagents/agent-*.jsonl` and are summed too, because a run of this
+repo's own history spent ~2M tokens on reviewer subagents and a number
+excluding them would be worse than no number.
+
+Three rules inside the count, each an answer rather than an omission. **Dedupe
+on `requestId`** (falling back to `uuid`): one API turn is written as one record
+per content block — thinking, text, tool_use — each repeating the same `usage`
+object verbatim, so a naive per-record sum inflates a typical turn 2-3x, and the
+inflated number still looks entirely plausible in isolation. Measured, 25 of 28
+turns in one transcript were split this way. **Cache reads are excluded** — the
+number is `input + cache_creation + output`. Measured on one live session, fresh
+89,210 against cache_read 804,246: a raw total is ~90% re-read context floor,
+which scales with turn count and prompt size and is close to identical for a
+trivial item and a hard one, so it would swamp the signal the number exists to
+carry. Cache *creation* stays in as material genuinely pulled into context;
+output stays in as the model's own work. (`output_tokens_details.thinking_tokens`
+is a subset of `output_tokens` and `usage.iterations[]` is a breakdown of the
+top-level fields — adding either double-counts.) **The window's upper bound
+covers the whole second the stamp names**, because both stamps truncate to the
+second while records carry milliseconds — otherwise the turn that issued the
+`stop` call itself, landing at `:50.900Z` against a stamp of `:50Z`, would fall
+outside its own window.
+
+Attribution is whole-session-within-the-window, not per-item, and that is
+stated rather than fixed because there is no tighter mechanism available:
+nothing in a transcript marks a turn as being about item X, so `start`/`stop`
+is already the finest bracket that exists. Under `backlog-orchestrate` it is
+very nearly exact — each item gets its own headless `backlog-execute` session,
+so the window covers that session and nothing else, and that is the consumer
+that matters since it is where the expensive items are. For hand grooming in a
+shared terminal it is noisy by exactly as much as the unrelated work in the
+window. Treat it as a rough complexity signal: right for "which items were
+expensive", wrong for anything claiming precision. Do not invent a heuristic to
+narrow it.
+
+A count that cannot be attributed at all — no session id in the environment, no
+transcript matching it, a file that cannot be read — writes **no key**, not
+`0`: `0` claims the work was tiny, which is a different fact. It is never fatal
+(the stop still exits 0, and the seconds it did bill are unaffected) but it is
+never silent either — one stderr line names what was missing, the same non-fatal
+note pattern `registryRoot` uses for a registration it could not make. That note
+exists for a specific reason: every measurement behind this feature came from a
+headless `sdk-cli` session, and whether an interactive session exports
+`CLAUDE_CODE_SESSION_ID` has not been observed, so the first interactive `stop`
+either records a number or says out loud why it could not.
+
 The `started:` value is a second-precision UTC timestamp
 (`2026-08-28T14:03:07Z`), not a date, because the useful resolution for "is
 anyone on this right now" is minutes and hours: a bare date rounded

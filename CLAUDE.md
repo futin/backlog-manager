@@ -236,8 +236,24 @@ happened.
   `start <id> [--as groom|execute]` writes `started:` (a second-precision UTC
   timestamp, `2026-08-28T14:03:07Z`) alone, or with a `phase: groom` /
   `phase: execute` line alongside it when `--as` is given; `stop <id>` reads
-  `phase:` back to pick `groom-elapsed:` or `execute-elapsed:` — two
-  permanent, accumulating integer-seconds counters, one per activity — bills
+  `phase:` back to pick `groom-elapsed:` or `execute-elapsed:` and
+  `groom-tokens:` or `execute-tokens:` — **four permanent, accumulating
+  integer counters, two per activity**: whole seconds since `started:`, and
+  the tokens the calling session spent over that same window, read out of its
+  own transcript (`CLAUDE_CODE_SESSION_ID` names it; there is no hook and
+  nothing new on the publish surface). Both buckets ride **one** billable
+  gate, never two — the token window *is* the interval the seconds are
+  computed from, so `--abandon`, a phase-less `start` and a legacy bare date
+  each bill neither. Two things about the token number a later reader must
+  not re-decide: **cache reads are excluded** (`input + cache_creation +
+  output` only — a raw total measured 9:1 cache_read to fresh, i.e. ~90%
+  re-read context floor that is near-identical for a trivial item and a hard
+  one), and **attribution is whole-session-within-the-window**, not per-item
+  (near-exact under `backlog-orchestrate`, where each item gets its own
+  headless session; noisy for hand grooming in a shared terminal, by exactly
+  as much as the unrelated work in the window). A count that cannot be
+  attributed at all writes no key and says why on stderr — `0` would claim
+  the work was tiny. `stop` bills
   the whole seconds since `started:` into it, then removes `phase:` and,
   unless the caller passes `--keep-started`, `started:` too. `--keep-started`
   is what `backlog-execute`'s successful archive uses: it bills the session

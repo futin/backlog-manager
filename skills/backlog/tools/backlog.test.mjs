@@ -5,10 +5,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem } from './backlog.mjs'
+import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince } from './backlog.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
+// The same spawn with the child's environment named outright, for the two
+// Task 11 cases that are ABOUT the environment (a session id and a config dir
+// pointing at a fixture transcript). A sibling rather than an extra parameter
+// on `run` so that every existing `run(dir, ...)` call site stays byte-
+// identical — those tests care about the tool, not about what it inherits.
+const runWithEnv = (cwd, env, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd, env })
 
 // `run` spawns the real CLI as a child process, which inherits this process's
 // env by default. Task 4 wires registerBestEffort into `init` and `new`, so
@@ -20,6 +26,21 @@ const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: '
 // registryFile test below still exercises BM_REGISTRY_FILE handling correctly
 // on top of this default, since it saves and restores whatever value it finds.
 process.env.BM_REGISTRY_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-registry-test-')), 'registry.json')
+
+// The same hazard again, for Task 11's token counting, and it only appears in
+// one environment: run this suite from inside a Claude Code session and every
+// fixture `stop --as groom` below would resolve the DEVELOPER'S LIVE
+// TRANSCRIPT — `run` spawns the real CLI as a child that inherits this
+// process's env, CLAUDE_CODE_SESSION_ID included — and bill real tokens into
+// throwaway items, turning several round-trip assertions red for reasons that
+// have nothing to do with the change. Deleting the session id is what makes
+// the ambient case deterministic; pointing CLAUDE_CONFIG_DIR at an empty
+// throwaway directory covers the same hazard from the other side, so even a
+// child that somehow acquires a session id has no transcript to find. The two
+// tests that WANT a transcript opt in explicitly by passing an env to
+// `runWithEnv` above.
+delete process.env.CLAUDE_CODE_SESSION_ID
+process.env.CLAUDE_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-config-test-'))
 
 // Every later task (ids, board+show, move) reuses this: a fresh tmpdir that
 // is already a git repo, plus the backlog/ path resolveRoot would compute
@@ -2311,4 +2332,451 @@ test('the README init writes documents the refactors row and the two kinds', () 
   assert.match(readme, /^\| refactors\s+\| ref\s+\| open -> done\s+\|$/m)
   assert.match(readme, /kind: chore/)
   assert.match(readme, /kind: debt/)
+})
+
+// --- token accounting (Task 11) ---------------------------------------------
+// The measured usage shape of one real API turn, reused by every case below so
+// each states only what it varies. The fresh total is deliberately NOT the sum
+// of all four fields: cache_read_input_tokens is excluded, so
+// 2 + 38041 + 370 = 38413.
+const BASE_USAGE = {
+  input_tokens: 2,
+  cache_creation_input_tokens: 38041,
+  cache_read_input_tokens: 37538,
+  output_tokens: 370,
+}
+const FRESH = 38413
+
+// The window every sumFreshTokens case below counts against. `TOKEN_TO` is
+// second-truncated exactly as a real `started:`/`stamp` pair is, which is what
+// the sub-second upper-bound case turns on.
+const TOKEN_FROM = Date.parse('2026-08-30T09:00:00Z')
+const TOKEN_TO = Date.parse('2026-08-30T09:51:50Z')
+
+// One assistant record as the transcript actually writes them. `usage` is
+// spread fresh per call so a case that mutates its own copy cannot leak into
+// the next.
+function assistantRecord(fields = {}) {
+  const { usage = {}, ...rest } = fields
+  return {
+    type: 'assistant',
+    requestId: 'req_1',
+    uuid: 'uuid-1',
+    timestamp: '2026-08-30T09:30:00.000Z',
+    message: { usage: { ...BASE_USAGE, ...usage } },
+    ...rest,
+  }
+}
+
+// The three records one API turn is actually split into: same requestId, same
+// usage byte-for-byte, one content block each. Summing them per-record gives
+// 115239 — three times the right answer — which is why every case that uses
+// this asserts the exact deduped value rather than "greater than zero".
+function splitTurn(overrides = {}) {
+  return ['thinking', 'text', 'tool_use'].map((_, i) =>
+    assistantRecord({ apiBlockIndex: i, uuid: `uuid-${i}`, ...overrides }),
+  )
+}
+
+test('sumFreshTokens counts one API turn once, however many content blocks it was split across', () => {
+  assert.equal(sumFreshTokens(splitTurn(), TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+test('sumFreshTokens excludes cache_read_input_tokens entirely', () => {
+  const records = splitTurn({ usage: { cache_read_input_tokens: 999999 } })
+
+  assert.equal(sumFreshTokens(records, TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+test('sumFreshTokens does not add thinking_tokens, which are a subset of output_tokens', () => {
+  const record = assistantRecord({ usage: { output_tokens_details: { thinking_tokens: 281 } } })
+
+  assert.equal(sumFreshTokens([record], TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+test('sumFreshTokens does not add usage.iterations, which is a breakdown of the top-level fields', () => {
+  const record = assistantRecord({ usage: { iterations: [{ ...BASE_USAGE }] } })
+
+  assert.equal(sumFreshTokens([record], TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+test('sumFreshTokens ignores a record timestamped before the window opened', () => {
+  const records = [
+    assistantRecord({ requestId: 'req_before', timestamp: '2026-08-30T08:59:00.000Z' }),
+    assistantRecord({ requestId: 'req_inside' }),
+  ]
+
+  assert.equal(sumFreshTokens(records, TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+// The turn that issued the `stop` call itself lands inside the second the
+// stamp names but after its .000 — without the upper bound covering the whole
+// second, a stop would never count its own final turn.
+test('sumFreshTokens counts a record in the same second as the upper bound, milliseconds and all', () => {
+  const record = assistantRecord({ timestamp: '2026-08-30T09:51:50.900Z' })
+
+  assert.equal(sumFreshTokens([record], TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+test('sumFreshTokens counts a record landing exactly on the lower bound', () => {
+  const record = assistantRecord({ timestamp: '2026-08-30T09:00:00.000Z' })
+
+  assert.equal(sumFreshTokens([record], TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+test('sumFreshTokens skips every non-assistant record type and an assistant record with no usage', () => {
+  const records = [
+    { type: 'user', timestamp: '2026-08-30T09:30:00.000Z', message: { usage: { ...BASE_USAGE } } },
+    { type: 'attachment', timestamp: '2026-08-30T09:30:00.000Z' },
+    { type: 'last-prompt', timestamp: '2026-08-30T09:30:00.000Z' },
+    { type: 'assistant', requestId: 'req_x', timestamp: '2026-08-30T09:30:00.000Z', message: {} },
+  ]
+
+  assert.equal(sumFreshTokens(records, TOKEN_FROM, TOKEN_TO), 0)
+})
+
+test('sumFreshTokens dedupes on uuid when a record carries no requestId', () => {
+  const { requestId, ...noRequestId } = assistantRecord()
+
+  assert.equal(sumFreshTokens([noRequestId, { ...noRequestId }], TOKEN_FROM, TOKEN_TO), FRESH)
+})
+
+test('sumFreshTokens returns 0 for no records at all', () => {
+  assert.equal(sumFreshTokens([], TOKEN_FROM, TOKEN_TO), 0)
+})
+
+// A throwaway CLAUDE_CONFIG_DIR-shaped tree: <root>/projects/<dir>/... Returns
+// the projects root, which is what transcriptFiles takes.
+function transcriptFixture() {
+  const config = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-transcripts-')))
+  const projects = path.join(config, 'projects')
+  fs.mkdirSync(projects, { recursive: true })
+  return { config, projects }
+}
+
+function writeTranscript(projects, dirName, name, records) {
+  const dir = path.join(projects, dirName)
+  fs.mkdirSync(dir, { recursive: true })
+  const file = path.join(dir, name)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n')
+  return file
+}
+
+const SID = '61710af2-900c-4026-b79d-c819f3e5c919'
+
+test('transcriptFiles finds the session transcript by scanning project directories, not by slug', () => {
+  const { projects } = transcriptFixture()
+  for (const other of ['proj-b', 'proj-c', 'proj-d']) {
+    writeTranscript(projects, other, 'someone-elses-session.jsonl', [])
+  }
+  const main = writeTranscript(projects, 'proj-a', `${SID}.jsonl`, [])
+
+  assert.deepEqual(transcriptFiles(projects, SID), [main])
+})
+
+test('transcriptFiles returns the subagent transcripts too, main file first', () => {
+  const { projects } = transcriptFixture()
+  const main = writeTranscript(projects, 'proj-a', `${SID}.jsonl`, [])
+  const x = writeTranscript(projects, 'proj-a', path.join(SID, 'subagents', 'agent-x.jsonl'), [])
+  const y = writeTranscript(projects, 'proj-a', path.join(SID, 'subagents', 'agent-y.jsonl'), [])
+
+  assert.deepEqual(transcriptFiles(projects, SID), [main, x, y])
+})
+
+test('transcriptFiles ignores tool-results/ and non-jsonl files sitting beside the subagent transcripts', () => {
+  const { projects } = transcriptFixture()
+  const main = writeTranscript(projects, 'proj-a', `${SID}.jsonl`, [])
+  const x = writeTranscript(projects, 'proj-a', path.join(SID, 'subagents', 'agent-x.jsonl'), [])
+  writeTranscript(projects, 'proj-a', path.join(SID, 'subagents', 'agent-x.meta.json'), [])
+  writeTranscript(projects, 'proj-a', path.join(SID, 'tool-results', 'foo.txt'), [])
+
+  assert.deepEqual(transcriptFiles(projects, SID), [main, x])
+})
+
+test('transcriptFiles returns every copy when one session id appears under two project directories', () => {
+  const { projects } = transcriptFixture()
+  const a = writeTranscript(projects, 'proj-a', `${SID}.jsonl`, [])
+  const b = writeTranscript(projects, 'proj-b', `${SID}.jsonl`, [])
+
+  assert.deepEqual(transcriptFiles(projects, SID), [a, b])
+})
+
+test('transcriptFiles returns [] when no project directory holds that session', () => {
+  const { projects } = transcriptFixture()
+  writeTranscript(projects, 'proj-a', 'another-session.jsonl', [])
+
+  assert.deepEqual(transcriptFiles(projects, SID), [])
+})
+
+test('transcriptFiles returns [] for a projects root that does not exist, rather than throwing', () => {
+  assert.deepEqual(transcriptFiles(path.join(os.tmpdir(), 'bm-no-such-root-12345', 'projects'), SID), [])
+})
+
+// Collects the stderr notes instead of printing them, so a unit test asserting
+// a `null` can also assert that the reason was stated.
+function collector() {
+  const lines = []
+  return { lines, warn: (m) => lines.push(m) }
+}
+
+const STARTED_ISO = '2026-08-30T09:00:00Z'
+const STOPPED_ISO = '2026-08-30T09:51:50Z'
+
+test('sessionTokensSince returns null and says so when CLAUDE_CODE_SESSION_ID is unset', () => {
+  const { lines, warn } = collector()
+
+  assert.equal(sessionTokensSince(STARTED_ISO, STOPPED_ISO, {}, warn), null)
+  assert.equal(lines.length, 1)
+  assert.match(lines[0], /CLAUDE_CODE_SESSION_ID/)
+})
+
+test('sessionTokensSince returns null and names the session when no transcript matches it', () => {
+  const { config } = transcriptFixture()
+  const { lines, warn } = collector()
+
+  const env = { CLAUDE_CODE_SESSION_ID: SID, CLAUDE_CONFIG_DIR: config }
+
+  assert.equal(sessionTokensSince(STARTED_ISO, STOPPED_ISO, env, warn), null)
+  assert.equal(lines.length, 1)
+  assert.match(lines[0], new RegExp(SID))
+})
+
+test('sessionTokensSince reads the transcript CLAUDE_CONFIG_DIR names and sums the window', () => {
+  const { config, projects } = transcriptFixture()
+  writeTranscript(projects, 'proj-a', `${SID}.jsonl`, splitTurn())
+  const { lines, warn } = collector()
+
+  const env = { CLAUDE_CODE_SESSION_ID: SID, CLAUDE_CONFIG_DIR: config }
+
+  assert.equal(sessionTokensSince(STARTED_ISO, STOPPED_ISO, env, warn), FRESH)
+  assert.deepEqual(lines, [])
+})
+
+// Proves CLAUDE_CONFIG_DIR is actually consulted rather than ignored in favour
+// of a hard-coded ~/.claude: the same transcript is on disk, and pointing the
+// fallback somewhere empty is enough to make the answer null.
+test('sessionTokensSince falls back to HOME/.claude, and finds nothing there', () => {
+  const { projects } = transcriptFixture()
+  writeTranscript(projects, 'proj-a', `${SID}.jsonl`, splitTurn())
+  const emptyHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-empty-home-')))
+  const { warn } = collector()
+
+  const env = { CLAUDE_CODE_SESSION_ID: SID, HOME: emptyHome }
+
+  assert.equal(sessionTokensSince(STARTED_ISO, STOPPED_ISO, env, warn), null)
+})
+
+test('sessionTokensSince returns null when the transcript path is a directory rather than a file', () => {
+  const { config, projects } = transcriptFixture()
+  fs.mkdirSync(path.join(projects, 'proj-a', `${SID}.jsonl`), { recursive: true })
+  const { warn } = collector()
+
+  const env = { CLAUDE_CODE_SESSION_ID: SID, CLAUDE_CONFIG_DIR: config }
+
+  assert.equal(sessionTokensSince(STARTED_ISO, STOPPED_ISO, env, warn), null)
+})
+
+// A transcript being written by a session that is still running routinely ends
+// mid-line, and a log this tool does not own may hold shapes it has never
+// seen. Neither may fail a stop, and neither may cost the records around it.
+test('sessionTokensSince skips a line that is not valid JSON and still counts the records around it', () => {
+  const { config, projects } = transcriptFixture()
+  const dir = path.join(projects, 'proj-a')
+  fs.mkdirSync(dir, { recursive: true })
+  const first = assistantRecord({ requestId: 'req_a', uuid: 'uuid-a' })
+  const second = assistantRecord({ requestId: 'req_b', uuid: 'uuid-b' })
+  fs.writeFileSync(
+    path.join(dir, `${SID}.jsonl`),
+    `${JSON.stringify(first)}\n{"type":"assistant","mess\n${JSON.stringify(second)}\n`,
+  )
+  const { warn } = collector()
+
+  const env = { CLAUDE_CODE_SESSION_ID: SID, CLAUDE_CONFIG_DIR: config }
+
+  assert.equal(sessionTokensSince(STARTED_ISO, STOPPED_ISO, env, warn), FRESH * 2)
+})
+
+test('sessionTokensSince sums a subagent transcript alongside the main one, deduping across both', () => {
+  const { config, projects } = transcriptFixture()
+  writeTranscript(projects, 'proj-a', `${SID}.jsonl`, splitTurn())
+  writeTranscript(projects, 'proj-a', path.join(SID, 'subagents', 'agent-x.jsonl'), [
+    ...splitTurn(),
+    assistantRecord({ requestId: 'req_sub', uuid: 'uuid-sub' }),
+  ])
+  const { warn } = collector()
+
+  const env = { CLAUDE_CODE_SESSION_ID: SID, CLAUDE_CONFIG_DIR: config }
+
+  assert.equal(sessionTokensSince(STARTED_ISO, STOPPED_ISO, env, warn), FRESH * 2)
+})
+
+test('stopItem writes a first groom session token count into groom-tokens', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', STAMP, { tokens: 1234 })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-tokens'], '1234')
+})
+
+test('stopItem accumulates onto an existing groom-tokens rather than overwriting it', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom', 'groom-tokens': 1000 })
+
+  stopItem(backlog, 'bug-7', STAMP, { tokens: 234 })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-tokens'], '1234')
+})
+
+test('stopItem bills execute tokens into their own bucket, leaving groom-tokens untouched', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'execute', 'groom-tokens': 1000 })
+
+  stopItem(backlog, 'bug-7', STAMP, { tokens: 500 })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['execute-tokens'], '500')
+  assert.equal(data['groom-tokens'], '1000')
+})
+
+// The token count rides the elapsed gate rather than carrying a second one of
+// its own, so every case that bills no seconds bills no tokens either — the
+// three below are that gate's three arms.
+test('stopItem with no phase: key writes no token key, exactly as it bills no seconds', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0 })
+
+  stopItem(backlog, 'bug-7', STAMP, { tokens: 999 })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-tokens' in data, false)
+  assert.equal('execute-tokens' in data, false)
+  assert.equal('groom-elapsed' in data, false)
+})
+
+test('stopItem writes no token key for a legacy bare-date started:, though it still clears it', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: '2026-08-30', phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', STAMP, { tokens: 999 })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-tokens' in data, false)
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal('started' in data, false)
+})
+
+test('stopItem --abandon bills no tokens either, but still clears the marker and stamps updated', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', STAMP, { abandon: true, tokens: 999 })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-tokens' in data, false)
+  assert.equal('groom-elapsed' in data, false)
+  assert.equal('started' in data, false)
+  assert.equal(data.updated, STAMP)
+})
+
+test('stopItem --keep-started bills tokens exactly as it bills seconds', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', STAMP, { keepStarted: true, tokens: 777 })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal(data['groom-tokens'], '777')
+  assert.equal(data.started, T0)
+  assert.equal('phase' in data, false)
+})
+
+// "Cannot attribute" is a different fact from "attributed, and it was tiny",
+// and only the second one is a number worth writing down.
+test('stopItem writes no token key for a null count, and bills the seconds as normal', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom' })
+
+  stopItem(backlog, 'bug-7', '2026-08-30T10:01:30Z', { tokens: null })
+
+  const { data } = parseFrontmatter(fs.readFileSync(openBugPath, 'utf8'))
+  assert.equal('groom-tokens' in data, false)
+  assert.equal(data['groom-elapsed'], '90')
+})
+
+test('stopItem refuses a non-numeric groom-tokens, naming the key and the bad value, and writes nothing', () => {
+  const { backlog, openBugPath } = boardFixture()
+  withFrontmatter(openBugPath, { started: T0, phase: 'groom', 'groom-tokens': '12x' })
+  const before = fs.readFileSync(openBugPath, 'utf8')
+
+  assert.throws(
+    () => stopItem(backlog, 'bug-7', STAMP, { tokens: 5 }),
+    (e) => e instanceof BacklogError && e.code === 1 && /groom-tokens/.test(e.message) && /12x/.test(e.message),
+  )
+  assert.equal(fs.readFileSync(openBugPath, 'utf8'), before)
+})
+
+test('stopItem writing a token key still round-trips an unknown key and the body byte-for-byte', () => {
+  const { backlog } = boardFixture()
+  const body = '\n## Plan\n\n---\n\nA literal fence in the body.\n'
+  const itemPath = writeItemWithBody(backlog, 'tasks/open', 'task-4', 'Ship it', body)
+  withFrontmatter(itemPath, { started: T0, phase: 'groom', from: 'idea-2' })
+
+  stopItem(backlog, 'task-4', STAMP, { tokens: 4200 })
+
+  const { data, body: afterBody } = parseFrontmatter(fs.readFileSync(itemPath, 'utf8'))
+  assert.equal(afterBody, body)
+  assert.equal(data.from, 'idea-2')
+  assert.equal(data['groom-tokens'], '4200')
+})
+
+// The one case that proves the whole chain the seam above skips: a real child
+// process, a real environment, a real transcript file, a real frontmatter
+// write. The records are stamped between the two spawns so they land inside
+// whatever window the tool's own clock produces, rather than at a fixed date
+// that would age out of it.
+test('CLI stop reads the session transcript named by the environment and writes groom-tokens', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const itemPath = writeItem(backlog, 'bugs/open', 'bug-7', 'Board drops an item')
+  const { config, projects } = transcriptFixture()
+
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_SESSION_ID: SID }
+
+  const started = runWithEnv(dir, env, 'start', 'bug-7', '--as', 'groom')
+  assert.equal(started.status, 0, started.stderr)
+
+  const now = new Date().toISOString()
+  writeTranscript(projects, 'proj-a', `${SID}.jsonl`, splitTurn({ timestamp: now }))
+
+  const stopped = runWithEnv(dir, env, 'stop', 'bug-7')
+  assert.equal(stopped.status, 0, stopped.stderr)
+  assert.equal(stopped.stdout, itemPath + '\n')
+
+  const { data } = parseFrontmatter(fs.readFileSync(itemPath, 'utf8'))
+  assert.equal(data['groom-tokens'], String(FRESH))
+})
+
+test('CLI stop with no CLAUDE_CODE_SESSION_ID still exits 0, writes no token key, and says why on stderr', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const itemPath = writeItem(backlog, 'bugs/open', 'bug-7', 'Board drops an item')
+
+  const started = run(dir, 'start', 'bug-7', '--as', 'groom')
+  assert.equal(started.status, 0, started.stderr)
+
+  const stopped = run(dir, 'stop', 'bug-7')
+
+  assert.equal(stopped.status, 0)
+  assert.equal(stopped.stdout, itemPath + '\n')
+  assert.deepEqual(stopped.stderr.trim().split('\n'), [
+    'backlog: CLAUDE_CODE_SESSION_ID is not set — recording no token count for this session',
+  ])
+
+  const { data } = parseFrontmatter(fs.readFileSync(itemPath, 'utf8'))
+  assert.equal('groom-tokens' in data, false)
+  assert.match(data['groom-elapsed'], /^\d+$/)
 })
