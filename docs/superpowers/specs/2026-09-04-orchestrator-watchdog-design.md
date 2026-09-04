@@ -180,9 +180,15 @@ copying it (the `environmentBlock` incident in that file is the reason):
    a constant composed server-side. The request body of the route below has
    no field that reaches this string. `permissionMode` is `'auto'` clamped
    to `spawnMaxPermission`; no `model`/`effort`; `remoteControl` omitted.
-   Session name: `watchdog resume · <project>` for `origin: 'watchdog'`,
-   `resume · <project>` for `'board'` — the dashboard's session list is the
+   Session name: `watchdog resume <project>` for `origin: 'watchdog'`,
+   `resume <project>` for `'board'` — the dashboard's session list is the
    one durable trail this design leaves, so the name carries who asked.
+   The separator is a plain space, not `·` (U+00B7): the dashboard's own
+   `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` does not admit that
+   character, and a name that fails it is not rejected but silently
+   dropped to `undefined` — the exact failure mode `orchestrateSessionName`
+   was already rewritten once to fix, for `:` and `/`, so this design does
+   not reintroduce the same silent drop under a different character.
 
 Callers: the sweeper (§2.2 step 5) and **`POST /api/agents/resume`**, body
 `{ project }` only, `project` trimmed and required (400 when empty), guarded
@@ -466,8 +472,8 @@ at a temp dir with hand-written `run.json`s):
 - empty `project` → 400. `BM_AGENTS` off → 404. no run / run `done` → 409
   without `code`. run fresh → 409 with `RUN_IN_PROGRESS_CODE`. project not
   in `projectPaths` → 409. crashed run → 200 `{ sessionId }`, one POST with
-  the exact prompt and a `name` starting `resume ·`. Cross-origin POST → the
-  guard's rejection.
+  the exact prompt and a `name` starting `resume ` (plain space — see §3).
+  Cross-origin POST → the guard's rejection.
 
 **Config** (`test/watchdog-config.test.ts`):
 
