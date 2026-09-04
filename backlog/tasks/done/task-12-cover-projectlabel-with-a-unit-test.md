@@ -2,6 +2,9 @@
 id: task-12
 title: Cover projectLabel with a unit test
 created: 2026-09-04
+updated: 2026-09-04T20:16:19Z
+started: 2026-09-04T20:13:05Z
+execute-elapsed: 194
 ---
 
 ## Goal
@@ -101,3 +104,67 @@ input would need a cast that documents nothing.
 - `pnpm run typecheck` is green.
 - `client/src/lib/project-label.ts` is byte-for-byte unchanged, and the branch
   diff touches exactly one file.
+
+## Outcome
+
+2026-09-04 — Added `test/project-label.test.ts`, flat in `test/` with no jsdom
+docblock, covering all eight cases from `## Test cases`: the six table-shaped
+ones under one `it.each` and the two `?? path` fallbacks (`''` and `'/'`) as
+plain `it`s, each carrying the reason a table row would have hidden. The file
+header states on purpose why no Windows-separator or relative-path case
+exists. `client/src/lib/project-label.ts` is byte-for-byte unchanged; the
+branch diff is that one new file plus this item's own frontmatter markers.
+
+One thing worth recording for the orchestrator smoke test this item doubles
+as: the worktree had no `node_modules`, so the first `pnpm test` failed with
+`sh: jest: command not found`. `pnpm install --frozen-lockfile` fixed it — a
+fresh per-item worktree needs an install before any verification command will
+run.
+
+New file, all eight cases:
+
+```
+$ pnpm test -- test/project-label.test.ts
+ PASS  test/project-label.test.ts (5.29 s)
+  projectLabel
+    ✓ reads /Users/dev/code/example-app as example-app (1 ms)
+    ✓ reads /Users/dev/code/example-app/ as example-app
+    ✓ reads /Users/dev/code/example-app// as example-app
+    ✓ reads example-app as example-app
+    ✓ reads /single as single (1 ms)
+    ✓ reads /Users/dev/code/my app (2) as my app (2)
+    ✓ returns the empty string for an empty path, via the ?? fallback
+    ✓ returns the path unchanged for a bare separator (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       8 passed, 8 total
+```
+
+Full suite, per `## Done when`:
+
+```
+$ pnpm test
+ PASS  test/project-label.test.ts
+
+Test Suites: 58 passed, 58 total
+Tests:       960 passed, 960 total
+Snapshots:   0 total
+Time:        80.053 s
+Ran all test suites.
+```
+
+Types:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+(no output)
+```
+
+Diff scope:
+
+```
+$ git status --short
+ M backlog/tasks/open/task-12-cover-projectlabel-with-a-unit-test.md
+?? test/project-label.test.ts
+```
