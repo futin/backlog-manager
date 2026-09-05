@@ -550,7 +550,47 @@ happened.
   crashed run's whole cap without a single resume ever having actually
   started. `exhausted` is decided before grace, not after, so a run on its
   last attempt reads exhausted on the very next tick rather than making a
-  person wait out a grace window to be told nobody is coming.
+  person wait out a grace window to be told nobody is coming. **A resume a
+  person starts from the board is a spawn attempt too**
+  (`WatchdogService.noteBoardResume`, called from the controller beside
+  `arm()` and BEFORE it, since `arm()`'s tick reads the stamp
+  synchronously): it stamps the grace clock and leaves a `spawned` line in
+  Activity, and it deliberately does NOT count against the cap. Grace asks
+  "is a resume session already on its way into this run", which a board
+  resume is; the cap asks "how many times has the watchdog tried on its own
+  before asking a human", to which a board resume is the answer rather than
+  an instance — and since the Resume control renders precisely when the
+  watchdog has stood down, counting hand resumes would let a person retire
+  the automation using the only control the board offers them.
+- **The board offers a hand resume exactly when the watchdog will not spawn
+  one, and that is one function, not two agreeing expressions.**
+  `watchdogStoodDown` (`shared/agent.ts`) is the single implementation:
+  `RunStrip` renders its Resume control on it, and `watchdog.service.ts`'s
+  `visit()` returns without spawning on it. Nothing else prevents a click and
+  a tick from both driving `--resume` into one `run.json` — `resume()`
+  refuses a *fresh* run, not a second resume of a crashed one, and grace is a
+  backoff, not a lock; two `--resume` sessions reconcile, stage-write and
+  merge against a file whose single-writer guarantee assumes one process, and
+  both end in a merge to `main`. Its two inputs are single implementations
+  too, for the same reason: `spawningEnabled()` (`WatchdogStateService`,
+  which the sweeper calls rather than re-testing `config.enabled` itself)
+  fills the wire's `enabled`, and **`exhausted` is DERIVED**
+  (`watchdogExhausted`, `attempts >= maxAttempts`), never stored — it was a
+  flag written once and never cleared while the sweeper re-read the config
+  every tick, so raising "Give up after" in Settings, the exact action the
+  strip's own "exhausted after N — resume by hand" invites, restarted the
+  sweeper while the board kept the button. A stored flag whose input is
+  re-read every tick is the bug class, not just that bug; this is the same
+  posture as "Groomed is derived" and "Board-versus-Archive is derived".
+  `WatchdogEntry.exhaustedLogged` is what remains: a once-per-condition log
+  guard, cleared again the tick the derivation reads false, never a verdict.
+  The rule survived a whole branch as two hand-written expressions and two
+  prose sentences that merely agreed — widening the strip's half to
+  `canResume === true` left all 1102 tests green — so it is now pinned by
+  `test/watchdog-coupling.test.tsx` (board) and `test/watchdog-sweep.test.ts`
+  (sweeper) driving both sides from one table, `test/helpers/watchdog-coupling.ts`,
+  whose rows carry a hand-checked verdict so the predicate itself cannot be
+  broken into a constant both halves would then agree with.
 - **Every agents POST is guarded by content-type and origin**
   (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the
   access control (`plan`, `dispatch`, `orchestrate`, `resume` and

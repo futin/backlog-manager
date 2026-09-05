@@ -1092,6 +1092,128 @@ a good day (`run-20260903-112622`'s own resume — spawned 18:57:44, heartbeat
 event, so a resume spawned into the same overload can take several minutes
 just to run its first command.
 
+### The Resume coupling: the board offers a hand resume exactly when the sweeper will not
+
+This is the load-bearing rule of the whole feature, and for the length of one
+branch it was enforced by nothing but two comments.
+
+Two spawns of `/backlog-orchestrate --resume` into one run is the failure it
+prevents. Nothing else prevents it. `AgentsService.resume()` refuses a
+*fresh* run — a run that is heartbeating — but says nothing about a second
+resume of a crashed one, which is the whole state this feature operates in;
+grace is a backoff measured from the last spawn, not a lock, and it only
+exists inside the sweeper's own bookkeeping. Two concurrent `--resume`
+sessions each run `reconcile`, each stage-write, and each merge, against one
+`run.json` whose single-writer guarantee (the first invariant in this file)
+assumes one process — and both end by merging to `main`.
+
+What keeps them apart is a coincidence of two rules stated in two places:
+design §6.1 says the board's crashed strip renders its Resume control only on
+`watchdog.exhausted || !watchdog.enabled`, and design §2.2 says the sweeper's
+per-run pass returns without spawning on exactly those two conditions (steps
+2 and 3). As shipped, those were two hand-written expressions in two files
+reviewed as two different tasks, plus prose. The whole-branch review measured
+what that was worth: widening the strip's half to `canResume === true` left
+all 1102 tests green.
+
+So the rule is now one function, `watchdogStoodDown` (`shared/agent.ts`),
+called by `RunStrip.tsx` to decide whether to render the control and by
+`watchdog.service.ts`'s `visit()` to decide whether to return without
+spawning. Its two inputs are single implementations for the same reason.
+`WatchdogStateService.spawningEnabled(config)` is the one answer to "may the
+watchdog spawn" — it fills the wire's `RunWatchdog.enabled` AND is what the
+sweeper's own gate calls, rather than the sweeper re-testing `config.enabled`
+under an env check made separately in `sweep()`; that was the second copy of
+a vocabulary, and CLAUDE.md's `isAgentAction` invariant already says which
+copy goes stale. And `exhausted` is **derived**, never stored — see below.
+
+Pinned by two suites and one table, because no single `it` can hold both
+halves (one needs jsdom and a React tree, the other a real Nest app):
+`test/watchdog-coupling.test.tsx` renders the strip for every row of
+`test/helpers/watchdog-coupling.ts`, and `test/watchdog-sweep.test.ts`'s own
+table case arranges the sweeper for the same rows and asserts it spawns iff
+the row does not stand down. Each row carries a hand-checked `standsDown`
+literal rather than a derived one: without it, both halves would assert only
+that they agree with `watchdogStoodDown`, which a `watchdogStoodDown` broken
+into a constant would also satisfy — the two sides would move together and
+stay "coupled" while saying something false. Sharing a fixture across suites
+is against this repo's usual convention, and is the point here: two copies of
+the table would be two copies of the rule.
+
+### `exhausted` is derived from `attempts` and `maxAttempts`, never stored
+
+`entry.exhausted` used to be a boolean the sweeper set `true` once and never
+cleared, which `annotate()` then published verbatim onto every crashed run's
+payload. The condition it stood for — `attempts >= maxAttempts` — was
+meanwhile re-derived by the sweeper from a config file it reads FRESH on
+every tick. Those two disagree the moment `maxAttempts` moves, and moving it
+is not an exotic act: the strip prints "watchdog: exhausted after 1 — resume
+by hand", and Settings has a control called "Give up after" three rows below
+the Activity list. Raise it, and from the next tick the sweeper falls through
+its stand-down and — once grace from its own `lastSpawnAt` elapses — spawns
+again, while the payload still reports `exhausted: true` and the board
+therefore still renders the Resume control and still prints "exhausted after
+1". One click there is the second resume.
+
+`watchdogExhausted(attempts, maxAttempts)` (`shared/agent.ts`) is now the one
+derivation, read by the sweeper's stand-down and by `annotate()`, which takes
+a single `readWatchdogConfig()` read and fills `attempts`, `maxAttempts` and
+`exhausted` from it — so the boolean and the two numbers printed beside it
+can never describe different moments. The generalisation is the part worth
+keeping: **a stored flag whose inputs are re-read on every tick is a second
+copy of the answer, and it is the copy that goes stale.** This repo already
+answers that shape with derivation wherever it matters — "Groomed is derived
+… never stored", "Board-versus-Archive is derived … never stored" — and this
+is the same rule, found the hard way inside a branch where no single task
+owned both sides of it.
+
+What survives on the entry is `exhaustedLogged`, and it is strictly smaller
+than what it replaces: a guard for the once-per-condition `exhausted` event,
+which only a per-entry flag can provide because the event log is a ring
+buffer that cannot answer "did I already say this" once fifty other lines
+have pushed it out. The sweeper clears it again the tick the derivation reads
+false, so a run whose cap was raised and then spent again says so a second
+time rather than exhausting in silence. It is a record of what was logged,
+never of what is true.
+
+### A board resume is a spawn attempt: grace yes, cap no
+
+`POST /api/agents/resume` with `origin: 'board'` spawns the same session
+through the same method as the sweeper's own resume, and used to leave no
+trace in `WatchdogStateService` at all. The immediate consequence was
+reachable in one click: `AgentsController.resume` calls `arm()` right after a
+successful spawn, `arm()` can drive a tick synchronously as far as its own
+grace check, and that tick found the same still-crashed run (a resumed
+session takes ~90 seconds to reach its first `heartbeat`) with no entry,
+`lastSpawnAt === null`, and so spawned a second `--resume` of its own. The
+quieter consequence was that Settings' Activity list — the answer to "where
+do I see that it ran" — silently omitted every resume a person started.
+
+`WatchdogService.noteBoardResume(project, sessionId)` closes both. It is
+called from the controller, beside the `arm()` it must precede, and at
+controller level for the same reason `arm()` is (RULING R3): `WatchdogService`
+injects `AgentsService`, so the reverse edge would be a cycle Nest cannot
+construct.
+
+It stamps `lastSpawnAt` and pushes a `spawned` event; it deliberately does
+**not** increment `attempts`. Design §1 defines grace as "the interval after
+any spawn attempt or failure during which the run is left alone", and a board
+resume is a spawn attempt by that definition — the same definition under
+which a *refused* watchdog spawn already stamps the clock. The cap is a
+different question with a different answer. §1's "Attempt — a resume spawn
+that returned a session id" is written inside §2.2's per-tick loop, about the
+sweeper's own spawns, and reading it to include this one costs two things it
+never meant to spend: `attempts` feeds the strip's "attempt 1/2" and
+"exhausted after N" sentences, which would then count spawns the watchdog
+never made; and — the real damage — the Resume control renders precisely when
+the watchdog has stood down, so counting hand resumes would let a person walk
+a run's cap to `maxAttempts` using the only control the board offers them,
+permanently retiring the automation on a run it may never have tried at all.
+Grace asks "is a resume session already on its way into this run", which a
+board resume is; the cap asks "how many times has the watchdog tried on its
+own before asking a human", to which a board resume is the answer, not an
+instance.
+
 ### In-memory state, and what a restart costs
 
 Attempts, phase and the event log live only in `WatchdogStateService`'s
