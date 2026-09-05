@@ -3,6 +3,9 @@ id: task-13
 title: Hoist a runner-fix item to the front of an orchestrator run
 created: 2026-09-04
 from: idea-5
+updated: 2026-09-05T11:09:39Z
+groom-elapsed: 75
+groom-tokens: 12757
 ---
 
 ## Goal
@@ -116,11 +119,13 @@ runs from. It also makes the client change unnecessary (step 6).
 - `plan`'s "writes nothing at all" guarantee is unchanged: no new git call, no new file
   read beyond the frontmatter already being parsed.
 
-### 5. SKILL.md — `skills/backlog-orchestrate/SKILL.md`
+### 5. SKILL.md — `skills/backlog-orchestrate/SKILL.md`, plus the resume reference
 
-Two edits, both small, both in sections that already exist. Keep the file's habit of
-explaining *why* inline; a run re-reads this body on every one of its several hundred
-turns, so add prose, not a new reference file.
+Two edits to SKILL.md and one to `references/recovery.md`, all small, all in sections that
+already exist. Keep both files' habit of explaining *why* inline; a run re-reads SKILL.md's
+body on every one of its several hundred turns, so what goes there is prose in the sections
+already listed — and nothing here creates a new reference file, it adds a step to the one
+`--resume` already reads.
 
 - **§1 (Preview the queue).** Document the key, that presence hoists and only `false` opts
   out, that the marker is read at `<base>` like the gate, and amend the `--ids` bullet to
@@ -149,10 +154,31 @@ turns, so add prose, not a new reference file.
   `ATTENTION_KINDS` stays the closed set of three, and a run that successfully picked up
   its own fix needs nobody to look at anything.
 
+  **A resumed session does not inherit the switch, and has to re-derive it.** The switch
+  is session state; nothing on disk carries it. A run that crashes after picking up its
+  own fix is continued by a *fresh* headless session — started by the board's Resume
+  control, or by the server's watchdog, which resumes a crashed run unattended — and that
+  session is handed the **installed** SKILL.md again, exactly as the first one was. Both
+  halves revert together, so nothing becomes inconsistent; what lapses, silently, is the
+  whole point of this item, at the one moment a broken runner makes a crash most likely.
+  So say here that the switch is re-derivable, and from what: the note written just above
+  is the durable record. A resumed session that finds any queue item staged `merged` (or
+  `branched`) carrying that note takes the switch again before it works the rest of the
+  queue. No new field and no second writer — the note is a string in one
+  `orchestrate.mjs` already writes.
+
   Say plainly in this subsection that a merged runner fix is **inert for the next run
   either way** until the repo's HEAD is pushed and `pnpm run plugin:sync` has run: git is
   the publishing boundary, and this subsection is a within-run workaround for one run, not
   a substitute for the sync.
+
+- **`references/recovery.md`, the `--resume` procedure.** One step, sitting with the other
+  run-file reads that resume already makes and *before* the first item is taken over:
+  re-derive the switch from the queue's notes exactly as §9 describes. It goes here rather
+  than inline in SKILL.md because recovery.md is read in full before every `--resume` and
+  by nothing else — precisely this step's audience — and because SKILL.md's own body is
+  re-read on every one of a run's several hundred turns, which is the cost this file's
+  two reference files exist to avoid paying for text only a resume needs.
 
 ### 6. What deliberately does not change
 
@@ -249,10 +275,17 @@ No jest-side cases: nothing in `shared/`, `server/` or `client/` changes, and
 `test/agents-shared.test.ts`'s `Record<RunStage, true>` literal is untouched because no
 stage is added. `pnpm test` staying green is itself the assertion that nothing drifted.
 
+No case covers §5's `--resume` re-derivation either, and that is a gap this plan states
+rather than hides: it is prose in two skill bodies over a note string the tool already
+writes, so there is no CLI behaviour to assert on. `## Done when` 4 and 5 are its only
+check, and the failure mode if the prose is wrong is a resumed run quietly using the
+installed copy — the state that exists today.
+
 **No browser check.** The `In the browser (playwright MCP tools):` prefix is deliberately
-absent from this task: nothing rendered changes. The whole diff is one CLI, two SKILL.md
-bodies and the invariants docs, and every observable consequence is a CLI stdout or a
-`run.json` the node suite reads directly.
+absent from this task: nothing rendered changes. The whole diff is one CLI, three skill
+bodies (`backlog-orchestrate`'s SKILL.md and its `references/recovery.md`,
+`backlog-groom`'s SKILL.md) and the invariants docs, and every observable consequence is a
+CLI stdout or a `run.json` the node suite reads directly.
 
 ## Done when
 
@@ -266,10 +299,14 @@ bodies and the invariants docs, and every observable consequence is a CLI stdout
    temporary stamp is reverted before the item is archived.)
 4. `skills/backlog-orchestrate/SKILL.md` §1 documents the key and the amended `--ids`
    sentence, and §9 carries the "After a runner-fix item lands" subsection including the
-   prose-and-tool-move-together rule and the `plugin:sync` caveat.
-5. `skills/backlog-groom/SKILL.md` names the exact key in both the Promote and the
+   prose-and-tool-move-together rule, the re-derive-on-resume rule and the `plugin:sync`
+   caveat.
+5. `skills/backlog-orchestrate/references/recovery.md`'s `--resume` procedure carries the
+   step that re-derives the switch from the queue's notes, before the first item is taken
+   over.
+6. `skills/backlog-groom/SKILL.md` names the exact key in both the Promote and the
    Plan-the-fix verdicts.
-6. `CLAUDE.md` and `docs/invariants.md` carry the new invariant.
-7. Noted, not run: none of the skill edits change any real run until this repo's HEAD is
+7. `CLAUDE.md` and `docs/invariants.md` carry the new invariant.
+8. Noted, not run: none of the skill edits change any real run until this repo's HEAD is
    pushed and `pnpm run plugin:sync` succeeds — `plugin:sync` refuses a dirty or unpushed
    tree, so it cannot be part of an orchestrated run's own verification.
