@@ -427,8 +427,11 @@ the human-versus-watchdog double-resume window from ~90s to a few seconds.
 
 `SKILL.md` §10 gains one sentence: the board may spawn `--resume` on its
 own for a run whose heartbeat has gone stale, so this path is entered
-unattended and must stay safe to enter that way — which it is, everything
-before `reconcile`'s verdicts being read-only.
+unattended and must stay safe to enter that way — which it is, the only
+write before `reconcile`'s verdicts being `heartbeat` re-stamping
+`updatedAt` on a run `status` has just confirmed is `running`, the
+identical stamp the run's own loop writes on every turn, gated by `status`
+alone so a finished run is never re-stamped.
 
 Both are `skills/` edits: they change nothing until committed, pushed and
 `pnpm run plugin:sync` has run. No `.mjs` changes, so the skill test suite
