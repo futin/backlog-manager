@@ -797,10 +797,19 @@ export const WATCHDOG_EVENT_CAP = 50;
  * per-run record of "auto-resumed"). `lastSessionId` is the id a resume
  * spawn returned, the same role `RunQueueItem.sessionId` plays for the
  * original dispatch, so the strip and drawer can link to whichever session
- * is (or was) actually doing the recovery work. `exhausted` duplicates
- * `attempts >= maxAttempts` on purpose: a boolean the strip and the
- * Settings row can render directly, rather than every reader re-deriving
- * the same comparison from two other fields.
+ * is (or was) actually doing the recovery work.
+ *
+ * `exhausted` rides alongside `attempts` and `maxAttempts` so the strip and
+ * the Settings row can render a boolean directly instead of every reader
+ * re-deriving the same comparison — but it is DERIVED from those same two
+ * numbers at the one place this record is built
+ * (`WatchdogStateService.annotate()`, through `watchdogExhausted` in
+ * shared/agent.ts), never stored anywhere and never carried forward from an
+ * earlier read. It used to be a flag the sweeper set once and never cleared,
+ * which is how raising "Give up after" in Settings could restart the sweeper
+ * while this field still said it had given up — see `watchdogExhausted`'s own
+ * comment for the failure that produced, and `watchdogStoodDown` for why the
+ * board and the sweeper must agree about this field to the letter.
  */
 export interface RunWatchdog {
   enabled: boolean;

@@ -201,6 +201,18 @@ export class AgentsController {
     const project = typeof body?.project === 'string' ? body.project.trim() : '';
     if (project === '') throw new HttpException({ error: 'project is required' }, 400);
     const result = await this.agents.resume(project, 'board');
+    // Recorded BEFORE `arm()`, and that order is load-bearing rather than
+    // tidy: `arm()` can start a chain whose first tick runs synchronously as
+    // far as its own grace check, so a stamp written after it would be
+    // written after the very tick it exists to hold off. A board resume is a
+    // spawn attempt under design §1's own definition of grace ("the interval
+    // after ANY spawn attempt or failure"), and until this call existed the
+    // tick `arm()` kicked found the same still-crashed run with no entry at
+    // all and spawned a second `--resume` into it. It stamps the clock and
+    // leaves an Activity line; it deliberately does not count against the
+    // cap — see `noteBoardResume`'s own comment for why those are different
+    // questions.
+    this.watchdog.noteBoardResume(project, result.sessionId);
     this.watchdog.arm();
     return result;
   }

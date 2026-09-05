@@ -7,6 +7,7 @@ import { projectLabel } from '../../lib/project-label';
 import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { formatSpanCompact, isTerminalStage, runElapsedMs } from '../../lib/run-time';
 import { isCrashed, watchdogClause } from '../../lib/run-watchdog';
+import { watchdogStoodDown } from '../../../../shared/agent';
 import { RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
 import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../../shared/types';
 
@@ -155,12 +156,19 @@ function renderCrashedStrip({
   // tick will NOT spawn a resume on its own, which is the only thing
   // preventing a board click and a sweep from both spawning `--resume` into
   // the same run at the same moment. Widening this to "whenever the board
-  // allows it" would reintroduce that double-spawn race. `canResume` is the
-  // SEPARATE, board-side half of the same gate (CLAUDE.md's "an
-  // environment-level block hides the dispatch control; the per-item ones
+  // allows it" would reintroduce that double-spawn race — and, until the
+  // whole-branch review, that widening left every one of 1102 tests green,
+  // because the rule lived in two hand-written expressions in two files and
+  // in prose. It is now `watchdogStoodDown` (shared/agent.ts), the SAME
+  // function `watchdog.service.ts`'s `visit()` returns on without spawning,
+  // pinned from one table of states by `test/watchdog-coupling.test.tsx`.
+  // Do not inline it back into an `||` here, however obvious it looks.
+  //
+  // `canResume` is the SEPARATE, board-side half of the same gate (CLAUDE.md's
+  // "an environment-level block hides the dispatch control; the per-item ones
   // disable it" — applied here to a project-level control) — both halves
   // must agree before any control renders at all.
-  const watchdogAllowsResume = run.watchdog !== undefined && (run.watchdog.exhausted || !run.watchdog.enabled);
+  const watchdogAllowsResume = run.watchdog !== undefined && watchdogStoodDown(run.watchdog);
   const showResume = canResume === true && watchdogAllowsResume;
   const blocked = resumeBlockedReason;
 

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { readAgentsConfig } from '../agents/config.util';
 import { readWatchdogConfig, watchdogEnvOff } from './watchdog-config.util';
+import { watchdogExhausted } from '../../../shared/agent';
 import { WATCHDOG_EVENT_CAP } from '../../../shared/types';
 import type {
   OrchestratorRun,
@@ -53,12 +54,25 @@ import type {
  * One crashed run's watchdog bookkeeping — everything the sweeper needs to
  * remember between ticks that the run file itself neither has nor should
  * have (design's own non-goal: no durable "auto-resumed" trail on the run).
- * `recovered` and `disabledLogged` are per-entry flags rather than the
- * sweeper re-deriving "have I already said this" from the event log on
+ * `recovered`, `exhaustedLogged` and `disabledLogged` are per-entry flags
+ * rather than the sweeper re-deriving "have I already said this" from the
+ * event log on
  * every tick: the log is a ring buffer that drops its oldest entries
  * (`WATCHDOG_EVENT_CAP`), so it cannot answer "did I already log this" once
  * enough OTHER events have pushed the relevant line out — only a flag that
- * lives as long as the entry itself can answer that reliably. Exported so
+ * lives as long as the entry itself can answer that reliably.
+ *
+ * **There is deliberately no `exhausted` field here, and `exhaustedLogged`
+ * is not a rename of one — it is a strictly smaller thing.** "Is this run
+ * exhausted" is `watchdogExhausted(attempts, maxAttempts)` (shared/agent.ts),
+ * derived at every read from a config the sweeper re-reads on every tick;
+ * "have I already logged that it is" is this flag, which only a per-entry
+ * boolean can answer. Storing the verdict itself is what let a raised
+ * `maxAttempts` restart the sweeper while the payload still reported
+ * `exhausted: true` — the Critical this fix wave closes. The flag is cleared
+ * again by the sweeper the moment the derivation reads false (a raised cap),
+ * so it stays a once-per-CONDITION guard rather than a once-per-run one that
+ * would silence the second, genuinely new exhaustion. Exported so
  * the sweeper (`agents/watchdog.service.ts`, Task 3) can name this shape
  * when it reads back what `entry()`/`upsert()` hand it, without this file
  * needing to round-trip through `shared/types.ts` for something no client
@@ -72,8 +86,8 @@ export interface WatchdogEntry {
   lastSpawnAt: string | null;
   lastSessionId: string | null;
   lastError: string | null;
-  exhausted: boolean;
   recovered: boolean;
+  exhaustedLogged: boolean;
   disabledLogged: boolean;
 }
 
@@ -141,8 +155,8 @@ export class WatchdogStateService {
         lastSpawnAt: null,
         lastSessionId: null,
         lastError: null,
-        exhausted: false,
         recovered: false,
+        exhaustedLogged: false,
         disabledLogged: false
       };
       this.entries.set(runId, entry);
@@ -193,9 +207,31 @@ export class WatchdogStateService {
    * one caller that needs to explain WHY (the Settings row, `status()`'s
    * `WatchdogStatus.reason`) reports the sweeper's own phase separately, not
    * this boolean broken down field by field.
+   *
+   * **This is the ONE implementation of "may the watchdog spawn", and the
+   * sweeper's own per-run gate calls it rather than re-deciding the third
+   * term for itself.** It used to answer only for the wire
+   * (`RunWatchdog.enabled`), while `visit()` step 2 tested `config.enabled`
+   * directly under an env check `sweep()` had made separately — two
+   * expressions, in two files reviewed as two different tasks, that merely
+   * happened to agree. `RunWatchdog.enabled` is half of `watchdogStoodDown`
+   * (shared/agent.ts), the predicate the board renders its Resume control on,
+   * so the day those two drifted the board would offer a hand resume against
+   * a sweeper that was still spawning — exactly the hazard the derived
+   * `exhausted` closes on the other half. This is `isAgentAction`'s argument
+   * (CLAUDE.md) applied to a second vocabulary: a hand-written copy of a
+   * decision is the copy that goes stale.
+   *
+   * `config` is a parameter with a default rather than always a fresh read so
+   * a caller that has ALREADY read the file passes what it read. The sweeper
+   * reads the config once per tick and hands the same object to every run it
+   * visits; `annotate()` reads it once per crashed run and derives
+   * `maxAttempts`, `exhausted` and this flag from that one read. Neither can
+   * report two halves of one answer from two different reads of a file the
+   * Settings route can rewrite between them.
    */
-  spawningEnabled(): boolean {
-    return !watchdogEnvOff() && readAgentsConfig().enabled && readWatchdogConfig().enabled;
+  spawningEnabled(config: WatchdogConfig = readWatchdogConfig()): boolean {
+    return !watchdogEnvOff() && readAgentsConfig().enabled && config.enabled;
   }
 
   /**
@@ -234,14 +270,24 @@ export class WatchdogStateService {
   annotate(run: OrchestratorRun & { fresh: boolean }): RunWatchdog | undefined {
     if (!(run.status === 'running' && !run.fresh)) return undefined;
     const entry = this.entry(run.runId);
+    // ONE read of the config, and ONE reading of `attempts`, for all three
+    // fields derived from them. `exhausted` is computed here rather than read
+    // off the entry — the entry has no such field, on purpose (see
+    // `WatchdogEntry`'s own comment) — so the boolean this record carries and
+    // the two numbers beside it can never describe different moments: a
+    // `POST /api/agents/watchdog/config` landing between two reads used to be
+    // enough to publish `exhausted: true` next to `attempts: 1, maxAttempts:
+    // 3`, a sentence the board renders verbatim and a person then acts on.
+    const config = readWatchdogConfig();
+    const attempts = entry?.attempts ?? 0;
     return {
-      enabled: this.spawningEnabled(),
-      attempts: entry?.attempts ?? 0,
-      maxAttempts: readWatchdogConfig().maxAttempts,
+      enabled: this.spawningEnabled(config),
+      attempts,
+      maxAttempts: config.maxAttempts,
       lastSpawnAt: entry?.lastSpawnAt ?? null,
       lastSessionId: entry?.lastSessionId ?? null,
       lastError: entry?.lastError ?? null,
-      exhausted: entry?.exhausted ?? false
+      exhausted: watchdogExhausted(attempts, config.maxAttempts)
     };
   }
 

@@ -9,6 +9,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { AgentsController } from '../server/src/agents/agents.controller';
 import { WatchdogService } from '../server/src/agents/watchdog.service';
+import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
@@ -85,6 +86,9 @@ describe('the two watchdog routes', () => {
   }
 
   const svc = (): WatchdogService => app!.get(WatchdogService);
+  /** The sweeper's own bookkeeping, for the one case that asserts what a
+   *  BOARD resume records in it. */
+  const state = (): WatchdogStateService => app!.get(WatchdogStateService);
 
   /** `<BM_ORCH_HOME>/<encodeURIComponent(project)>/run.json` — the exact
    *  layout orchestrate.mjs's own projectDir()/runFilePath() write, same
@@ -400,7 +404,7 @@ describe('the two watchdog routes', () => {
   // resume()), so the reverse edge would be a dependency cycle Nest cannot
   // construct.
 
-  it('leaves the watchdog armed after a successful POST /api/agents/resume', async () => {
+  it('records a board resume against the run, so the arm()-kicked tick does not spawn a second one', async () => {
     const dash = stubDashboard();
     await createApp();
     writeRun(crashedRun(projectPath));
@@ -416,27 +420,53 @@ describe('the two watchdog routes', () => {
       .expect(201);
 
     // RULING R3: the controller calls `arm()` right after the successful
-    // spawn above. Because the run file on disk in this test is never
-    // actually heartbeated (there is no real `--resume` session behind this
-    // stub — only `/api/spawn` is answered), the tick `arm()` itself kicks
-    // off finds the SAME run still reading crashed and, finding no watchdog
-    // state entry yet (a board-triggered resume never touches
-    // WatchdogStateService), spawns a SECOND resume of its own. This is not
-    // a bug this task introduces: it is the identical "human-versus-
-    // watchdog double-resume window" design §7 already names and already
-    // accepts, shrunk to "a few seconds" there by an early `heartbeat` on
-    // the skill side rather than eliminated here — and design §2.1
-    // describes this exact call as "belt-and-braces over the observe()
-    // trigger the board's own runs poll already provides," which carries
-    // the identical race today via `refreshRuns()`'s own
-    // `GET /api/orchestrator/runs` call after every manual Resume click.
-    // So this case asserts what Task 5 actually owns — `arm()` ran — and
-    // settles the tick it triggered (`svc().tick()` returns the SAME
-    // in-flight promise) rather than leaving it dangling past this test's
-    // own `afterEach`.
+    // spawn above, and `arm()` drives a tick synchronously as far as its own
+    // grace check. The run file on disk here is never actually heartbeated
+    // (there is no real `--resume` session behind this stub — only
+    // `/api/spawn` is answered), so that tick finds the SAME run still
+    // reading crashed.
+    //
+    // This case used to document a SECOND `--resume` spawning at exactly this
+    // point, and to argue it away as the human-versus-watchdog window design
+    // §7 already accepts. The whole-branch review rejected that reading, and
+    // it was right to: design §1 defines grace as "the interval after ANY
+    // spawn attempt or failure during which the run is left alone", and a
+    // board resume is a spawn attempt by that definition — the same
+    // definition under which a REFUSED watchdog spawn already stamps the
+    // clock. `AgentsController.resume` now records it
+    // (`WatchdogService.noteBoardResume`) BEFORE `arm()`, precisely because
+    // that tick reads the stamp synchronously.
     await svc().tick();
 
-    expect(dash.spawns().length).toBeGreaterThanOrEqual(1);
+    expect(dash.spawns()).toHaveLength(1);
     expect(svc().armed).toBe(true);
+
+    const entry = state().entry(fixture.runId);
+    // Grace: stamped, so the sweeper backs off exactly as it would from one
+    // of its own attempts.
+    expect(entry?.lastSpawnAt).not.toBeNull();
+    expect(entry?.lastSessionId).toBe('sess-1');
+    // The cap: deliberately untouched. `attempts` counts what the WATCHDOG
+    // started, which is what the strip's "attempt 1/2" and "exhausted after
+    // N" sentences claim — and, more sharply, the Resume control renders
+    // precisely when the watchdog has stood down, so counting hand resumes
+    // would let a person retire the automation with the only control the
+    // board offers them. See `noteBoardResume`'s own comment.
+    expect(entry?.attempts).toBe(0);
+
+    // And the Activity feed stops lying by omission: a resume a person
+    // started is a resume, and "where do I see that it ran" is the whole
+    // reason that list exists.
+    //
+    // Looked up by kind rather than read at index 0: `arm()` runs after this
+    // record and pushes its own `armed` line, which is newest and correctly
+    // sits on top. The assertion is that the resume is IN the feed, not where
+    // it sits in it.
+    const res = await request(app!.getHttpServer()).get('/api/agents/watchdog').expect(200);
+    const spawned = res.body.events.filter((e: { kind: string }) => e.kind === 'spawned');
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].detail).toContain('by hand');
+    expect(spawned[0].detail).toContain('sess-1');
+    expect(spawned[0].runId).toBe(fixture.runId);
   });
 });

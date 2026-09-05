@@ -99,8 +99,8 @@ describe('WatchdogStateService', () => {
       lastSpawnAt: null,
       lastSessionId: null,
       lastError: null,
-      exhausted: false,
       recovered: false,
+      exhaustedLogged: false,
       disabledLogged: false
     });
   });
@@ -177,19 +177,45 @@ describe('WatchdogStateService', () => {
     expect(result?.maxAttempts).toBe(4);
   });
 
-  it("annotate reflects an existing entry's attempts, lastSessionId and exhausted flag", () => {
+  it("annotate reflects an existing entry's attempts and lastSessionId, and derives exhausted from them", () => {
     process.env.BM_AGENTS = 'on';
     const service = new WatchdogStateService();
     const entry = service.upsert('run-1', '/p');
-    entry.attempts = 1;
+    // Two attempts against the default cap of 2. Nothing sets `exhausted`
+    // here because no such field exists to set: the entry records what
+    // happened (`attempts`), and the verdict is derived from it against
+    // whatever the config says at the moment of the read.
+    entry.attempts = 2;
     entry.lastSessionId = 'sess-1';
-    entry.exhausted = true;
 
     const result = service.annotate(fakeRun({ runId: 'run-1', status: 'running', fresh: false }));
 
-    expect(result?.attempts).toBe(1);
+    expect(result?.attempts).toBe(2);
     expect(result?.lastSessionId).toBe('sess-1');
     expect(result?.exhausted).toBe(true);
+  });
+
+  // The Critical, at the layer that publishes the field: the SAME entry, the
+  // same two attempts, read against a cap a person has since raised. A stored
+  // flag would still read `true` here — and the board renders its Resume
+  // control on this exact boolean, while the sweeper is off spawning again
+  // because it re-derives the same comparison every tick.
+  it('annotate reports exhausted: false once maxAttempts is raised past the attempts spent', () => {
+    process.env.BM_AGENTS = 'on';
+    const file = process.env.BM_WATCHDOG_FILE as string;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ maxAttempts: 3 }));
+
+    const service = new WatchdogStateService();
+    service.upsert('run-1', '/p').attempts = 2;
+
+    const result = service.annotate(fakeRun({ runId: 'run-1', status: 'running', fresh: false }));
+
+    expect(result?.exhausted).toBe(false);
+    // The two numbers the sentence is built from ride the same record, out of
+    // the same single config read, so a reader can always check it.
+    expect(result?.attempts).toBe(2);
+    expect(result?.maxAttempts).toBe(3);
   });
 
   it('observe does not throw when no armer has been registered', () => {

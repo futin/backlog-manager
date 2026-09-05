@@ -7,6 +7,7 @@ import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { readWatchdogConfig, watchdogEnvOff } from '../orchestrator/watchdog-config.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import type { WatchdogEntry } from '../orchestrator/watchdog-state.service';
+import { watchdogExhausted, watchdogStoodDown } from '../../../shared/agent';
 import type { OrchestratorRunsPayload, WatchdogStatus } from '../../../shared/types';
 
 /**
@@ -308,8 +309,10 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
   }
 
   /**
-   * Design §2.2's five steps for one `running` run, in order. The ordering
-   * is load-bearing and is the spec's, not a convenience: `exhausted` is
+   * Design §2.2's five steps for one `running` run, in order — steps 2 and 3
+   * written as the single `watchdogStoodDown` branch they always described
+   * (see it there), the rest one step each. The ordering is load-bearing and
+   * is the spec's, not a convenience: `exhausted` is
    * decided BEFORE grace, so a run that has used its last attempt reads
    * `exhausted` on the very next tick rather than waiting out a grace window
    * first — the strip's Resume button renders on `exhausted`, and making a
@@ -340,30 +343,67 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     // dead (CLAUDE.md's "one freshness number").
     const entry = this.state.upsert(run.runId, run.project);
 
-    // 2. The user's toggle is off. Watching continues and the crashed run is
-    //    reported; only the spawn is withheld. Logged once per run — the
-    //    flag lives on the entry rather than being re-derived from the event
-    //    log, which is a ring buffer and cannot answer "did I already say
-    //    this" once fifty other events have pushed the line out.
-    if (!config.enabled) {
-      if (!entry.disabledLogged) {
-        entry.disabledLogged = true;
-        this.push(run, 'disabled', 'watchdog off — resume by hand');
-      }
-      return;
-    }
-
-    // 3. The cap. `exhausted` doubles as the once-only guard for its own
-    //    event, which is what makes "one line however many ticks follow"
-    //    true by construction rather than by a second flag that could
-    //    disagree with it.
-    if (entry.attempts >= config.maxAttempts) {
-      if (!entry.exhausted) {
-        entry.exhausted = true;
+    // 2 & 3. The two stand-down states: the watchdog is off (the user's
+    //    Settings toggle, or either env switch), or the cap is spent.
+    //    Watching continues in both and the crashed run is still reported;
+    //    only the spawn is withheld.
+    //
+    //    Both values come from ONE implementation each, shared with the
+    //    board rather than restated here. `spawningEnabled(config)`
+    //    (WatchdogStateService) is the same call that fills the wire's
+    //    `RunWatchdog.enabled`; `watchdogExhausted` (shared/agent.ts) is the
+    //    same derivation `annotate()` fills `RunWatchdog.exhausted` with,
+    //    from the config THIS tick read — the flag it replaces was written
+    //    once and never cleared, so raising `maxAttempts` in Settings
+    //    restarted this sweeper while the board went on rendering its Resume
+    //    control, and a click plus this tick could then both spawn
+    //    `--resume` into one `run.json`.
+    //
+    //    And the branch itself is `watchdogStoodDown`, the predicate
+    //    `RunStrip` renders that control on. Written this way — one call,
+    //    not two `if`s that happen to cover the same pair — because "the
+    //    board offers a hand resume exactly when this sweeper will not spawn
+    //    one" is the whole safety argument, and it survives only as long as
+    //    both sides read the same sentence. `test/watchdog-coupling.test.tsx`
+    //    and this suite's own table case drive the two halves from one table
+    //    of states so a change to either goes red.
+    const enabled = this.state.spawningEnabled(config);
+    const exhausted = watchdogExhausted(entry.attempts, config.maxAttempts);
+    if (watchdogStoodDown({ enabled, exhausted })) {
+      // WHICH of the two it is decides only which line gets logged, never
+      // whether this returns. `off` is reported ahead of `exhausted` when
+      // both hold, preserving the order the two separate steps had: an
+      // operator who has just switched the sweeper off is owed the fact they
+      // can act on. (`watchdogClause` ranks them the other way round for the
+      // strip's one-line SUMMARY, which is a different question — what is
+      // the most permanent fact about this run — and both orderings are
+      // deliberate.)
+      //
+      // Each line is logged once per CONDITION, not once per tick: the log
+      // is a ring buffer, so it cannot answer "did I already say this" once
+      // fifty other events have pushed the line out, and only a flag living
+      // as long as the entry can.
+      if (!enabled) {
+        if (!entry.disabledLogged) {
+          entry.disabledLogged = true;
+          this.push(run, 'disabled', 'watchdog off — resume by hand');
+        }
+      } else if (!entry.exhaustedLogged) {
+        entry.exhaustedLogged = true;
         this.push(run, 'exhausted', `exhausted after ${entry.attempts} attempts — resume by hand`);
       }
       return;
     }
+
+    // Past both, so this run is NOT exhausted as of this tick's config read —
+    // which a run that was exhausted a minute ago can now be, and only by one
+    // route: a person raised "Give up after" in Settings, the very action the
+    // strip's "exhausted after N — resume by hand" sentence invites. The
+    // once-only guard is cleared to match, so that if this run goes on to
+    // spend the larger cap too, it says so again instead of exhausting in
+    // silence. The guard tracks the condition; it is not a record that the
+    // run was ever exhausted at all.
+    entry.exhaustedLogged = false;
 
     // 4. Grace. Measured from the last spawn ATTEMPT, success or failure
     //    alike — see the class comment for why the two share one clock.
@@ -377,6 +417,91 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     //    dashboard only as the session's NAME, so the session list can say
     //    who asked.
     await this.spawn(run, entry, config.maxAttempts);
+  }
+
+  /**
+   * Record a resume a PERSON started from the board (`POST /api/agents/resume`,
+   * `origin: 'board'`), so this sweeper's own accounting knows it happened.
+   *
+   * ## Why this exists at all
+   *
+   * A board resume and a watchdog resume spawn the same session through the
+   * same method; the only thing that used to tell them apart afterwards was
+   * that one of them left no trace here. That had two consequences, and the
+   * first was reachable in one click: `AgentsController.resume` calls `arm()`
+   * straight after a successful spawn, and `arm()` can drive a tick
+   * SYNCHRONOUSLY — which found the same still-crashed run (a resumed session
+   * takes ~90s to reach its first `heartbeat`), no entry, `lastSpawnAt ===
+   * null`, and so fell through grace and spawned a SECOND `--resume` against
+   * it. `test/watchdog-routes.test.ts` documented that second spawn in its
+   * own comment as an accepted human-versus-watchdog window. It is not
+   * accepted any more: design §1 defines grace as "the interval after ANY
+   * spawn attempt or failure during which the run is left alone", and a board
+   * resume is a spawn attempt by that definition — the same definition under
+   * which a REFUSED watchdog spawn already stamps the clock. The second
+   * consequence was quieter: the Settings Activity list is the answer to
+   * "where do I see that it ran", and it silently omitted every resume a
+   * person started.
+   *
+   * ## Grace yes, cap no
+   *
+   * `lastSpawnAt` is stamped; `attempts` is deliberately NOT incremented, and
+   * the event says so in as many words. The two answer different questions.
+   * Grace asks "is a resume session probably already on its way into this
+   * run" — a board resume unambiguously is one, which is the whole reason
+   * this method exists. The cap asks "how many times has the WATCHDOG tried
+   * on its own before giving up and asking a human", and a human resume is
+   * the ANSWER to that question rather than an instance of it. Design §1's
+   * "Attempt — a resume spawn that returned a session id" is written inside
+   * §2.2's per-tick loop, about the sweeper's own spawns; reading it to
+   * include this one costs two things it never meant to spend. `attempts`
+   * feeds the strip's own "attempt 1/2" and "exhausted after N" sentences,
+   * which would then count spawns the watchdog never made; and — the real
+   * damage — the Resume control renders precisely when the watchdog has stood
+   * down (`watchdogStoodDown`), so counting hand resumes lets a person, by
+   * using the only control the board offers them, walk a run's cap up to
+   * `maxAttempts` and permanently retire the automation on a run it may never
+   * have tried at all.
+   *
+   * `lastError` is cleared for the same reason a successful watchdog spawn
+   * clears it: it records the last spawn's outcome, and the last spawn
+   * succeeded. That cannot change the strip's clause in any state this is
+   * reachable from — both `exhausted` and `!enabled`, the two states the
+   * Resume control renders in, already outrank `lastError` in
+   * `watchdogClause`.
+   *
+   * ## Where it is called from, and why not from `AgentsService`
+   *
+   * `AgentsController.resume`, immediately after the spawn returns and
+   * BEFORE its `arm()` — that order is required, not stylistic, since
+   * `arm()`'s tick reads the grace stamp synchronously. Controller-level for
+   * the identical reason `arm()` itself is (RULING R3, CLAUDE.md): this
+   * service injects `AgentsService`, so `AgentsService` cannot inject this
+   * one back without a cycle Nest cannot construct.
+   *
+   * Finding the run costs one fresh `runs()` read rather than a runId
+   * threaded through `resume()`'s return type: `AgentDispatchResult` is the
+   * shape `dispatch`/`orchestrate` share, and widening it for one caller's
+   * bookkeeping would put watchdog concerns in a type three routes answer
+   * with. A run that has vanished between the spawn and this call (finished,
+   * archived, aborted) records nothing and says nothing — there is then no
+   * entry any tick could act on, so there is nothing for grace to protect.
+   */
+  noteBoardResume(project: string, sessionId: string): void {
+    const run = this.orchestrator.runs().runs.find(
+      (r) => r.project === project && r.status === 'running'
+    );
+    if (run === undefined) return;
+
+    const entry = this.state.upsert(run.runId, run.project);
+    entry.lastSpawnAt = new Date().toISOString();
+    entry.lastSessionId = sessionId;
+    entry.lastError = null;
+    this.push(
+      run,
+      'spawned',
+      `resumed by hand from the board → session ${sessionId} (not counted against the cap)`
+    );
   }
 
   private async spawn(

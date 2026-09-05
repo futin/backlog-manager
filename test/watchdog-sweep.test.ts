@@ -11,8 +11,10 @@ import { OrchestratorService } from '../server/src/orchestrator/orchestrator.ser
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { makeProject, makeRegistry } from './helpers/store';
+import { COUPLING_ROWS, rowWatchdog } from './helpers/watchdog-coupling';
+import { watchdogStoodDown } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { OrchestratorRun, WatchdogEventKind } from '../shared/types';
+import type { OrchestratorRun, RunWatchdog, WatchdogEventKind } from '../shared/types';
 
 /**
  * The sweeper, end to end through a real `AppModule` — the one suite in this
@@ -201,6 +203,16 @@ describe('watchdog sweeper', () => {
     };
   }
 
+  /** This suite's own run out of a runs payload — a `GET /api/orchestrator/runs`
+   *  body, or the `OrchestratorService.runs()` object the endpoint serializes.
+   *  Typed loosely because supertest hands back `any`; the assertions are what
+   *  narrow it. */
+  function runEntry(payload: { runs: Array<{ runId: string; watchdog?: RunWatchdog }> }) {
+    const run = payload.runs.find((r) => r.runId === fixture.runId);
+    if (run === undefined) throw new Error('the fixture run is missing from the payload');
+    return run;
+  }
+
   function spawnBody(sent: Sent): Record<string, unknown> {
     return JSON.parse(String(sent.init?.body)) as Record<string, unknown>;
   }
@@ -361,7 +373,7 @@ describe('watchdog sweeper', () => {
     await svc().tick();
 
     expect(dash.spawns()).toHaveLength(2);
-    expect(state().entry(fixture.runId)?.exhausted).toBe(true);
+    expect(state().entry(fixture.runId)?.exhaustedLogged).toBe(true);
     expect(kinds('exhausted')).toHaveLength(1);
 
     await svc().tick();
@@ -391,8 +403,103 @@ describe('watchdog sweeper', () => {
     await svc().tick();
 
     expect(dash.spawns()).toHaveLength(1);
-    expect(state().entry(fixture.runId)?.exhausted).toBe(true);
+    expect(state().entry(fixture.runId)?.exhaustedLogged).toBe(true);
     expect(kinds('exhausted')).toHaveLength(1);
+  });
+
+  // --- 7c: the cap is DERIVED, so raising it un-exhausts the run ------------
+  //
+  // The whole-branch review's Critical, end to end through the two surfaces a
+  // person actually uses. `exhausted` used to be a flag written `true` once
+  // and never cleared, while the sweeper's own stand-down re-derived
+  // `attempts >= maxAttempts` from a config it reads fresh every tick. So the
+  // operator who read "exhausted after 1 — resume by hand" on the strip and
+  // did the obvious thing that sentence invites — raised "Give up after" in
+  // Settings — restarted the sweeper while the payload went on reporting
+  // `exhausted: true`, which is what keeps the strip's Resume control
+  // rendered. A click there and the sweeper's next spawn are then both live
+  // `--resume` sessions against one `run.json`.
+  //
+  // Both halves are asserted, because either alone would let the defect back:
+  // the second spawn proves the sweeper moved, and the payload's own
+  // `exhausted: false` proves the board moved with it.
+
+  it('resumes again, and reports exhausted: false, once maxAttempts is raised past the attempts spent', async () => {
+    const dash = stubDashboard();
+    writeConfig({ maxAttempts: 1 });
+    await createApp();
+    writeRun(crashedRun(projectPath));
+
+    await svc().tick();
+    await svc().tick();
+    expect(dash.spawns()).toHaveLength(1);
+    expect(kinds('exhausted')).toHaveLength(1);
+
+    const before = await request(app!.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(runEntry(before.body).watchdog).toMatchObject({ attempts: 1, maxAttempts: 1, exhausted: true });
+
+    // The Settings save. Written straight to the file rather than through
+    // `POST /api/agents/watchdog/config` on purpose: that route also kicks a
+    // tick of its own, and this case is about what the NEXT tick derives, not
+    // about the route's arming behaviour (which has its own case in
+    // test/watchdog-routes.test.ts).
+    writeConfig({ maxAttempts: 3 });
+    // Past grace — otherwise step 4 would hold the spawn back for a reason
+    // that has nothing to do with the cap, and this case would pass while
+    // proving nothing.
+    state().entry(fixture.runId)!.lastSpawnAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(2);
+    const after = await request(app!.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(runEntry(after.body).watchdog).toMatchObject({ attempts: 2, maxAttempts: 3, exhausted: false });
+  });
+
+  // --- 7d: the sweeper half of the Resume coupling --------------------------
+  //
+  // Driven from `COUPLING_ROWS` (test/helpers/watchdog-coupling.ts), the same
+  // table `test/watchdog-coupling.test.tsx` renders the board's crashed strip
+  // from. Together the two suites assert the one rule that keeps a board click
+  // and a sweep from both spawning `--resume` into one run: **the board offers
+  // a hand resume exactly when this sweeper declines to spawn one.** Neither
+  // suite can hold both halves — one needs jsdom, this one needs a real Nest
+  // app — so the table is what joins them, and the row's own `standsDown`
+  // literal is what keeps `watchdogStoodDown` from being broken into a
+  // constant that both halves would then agree with.
+  //
+  // Each row asserts the wire record FIRST (what the board would be handed at
+  // that moment) and only then ticks, so the spawn count is compared against
+  // the same state the board was reading rather than the state the tick left
+  // behind.
+
+  it.each(COUPLING_ROWS)('$name: the sweeper stands down iff the strip offers Resume', async (row) => {
+    const dash = stubDashboard();
+    writeConfig({ enabled: row.configEnabled, maxAttempts: row.maxAttempts });
+    await createApp();
+    writeRun(crashedRun(projectPath));
+    // Attempts are set directly rather than spent through real spawns: the
+    // row is a STATE, and driving it through N ticks would also drag grace,
+    // event counts and the dashboard stub's own call log into a case that is
+    // about one comparison. `lastSpawnAt` stays null, so grace never fires
+    // and the only thing that can withhold a spawn here is the rule under
+    // test.
+    if (row.attempts > 0) state().upsert(fixture.runId, projectPath).attempts = row.attempts;
+
+    // Read straight off `OrchestratorService.runs()` — the object the
+    // endpoint serializes — rather than over HTTP, deliberately: the
+    // controller's own `observe()` would arm the sweeper and kick an
+    // UNAWAITED tick, putting a second, racing sweep inside a case whose
+    // whole subject is what one tick does. The endpoint's serialization of
+    // this same annotation is covered end to end by case 7c and by
+    // test/orchestrator-runs.test.ts.
+    const watchdog = runEntry(app!.get(OrchestratorService).runs()).watchdog;
+    expect(watchdog).toEqual(rowWatchdog(row));
+    expect(watchdogStoodDown(watchdog!)).toBe(row.standsDown);
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(row.standsDown ? 0 : 1);
   });
 
   // --- 8: a rejected spawn starts grace but burns no attempt ----------------
