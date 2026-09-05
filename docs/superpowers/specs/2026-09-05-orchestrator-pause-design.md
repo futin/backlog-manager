@@ -573,8 +573,9 @@ under node's runner, against a temp `BM_ORCH_HOME` and a temp
   with Resume when the gate is open, the reason otherwise; `done` still
   renders nothing.
 - `RunsView`: a fresh row with `pauseRequested` carries the `pausing`
-  badge; a paused run sorts after running ones and before done ones within
-  its day, and is not pinned.
+  badge; a paused run's row is not pinned and keeps its place in the
+  day's `startedAt` order (rows never sort by status); the tiles' by-status
+  breakdown lists `paused` between `running` and `done`.
 - `noteResume`: after the mark, the interval runs with nothing fresh or
   running; it stops when the run reads `running` (the ordinary rule takes
   over) and stops on its own at `RESUME_POLL_GRACE_MS` when nothing
