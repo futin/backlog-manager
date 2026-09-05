@@ -241,17 +241,57 @@ describe('WatchdogGroup', () => {
   });
 
   // --- 6: an off-ladder value still renders as its own selected option ------
+  //
+  // Table-driven across all three fields `ladderWithSelected` is applied to
+  // (`WatchdogGroup.tsx:227, 242, 257`), not only `tickMs` — the brief's own
+  // case 6 fixture names `tickMs` alone, but `ladderWithSelected` itself has
+  // no field-specific branch in it, so a regression scoped to only the
+  // `graceMs` or `maxAttempts` call site (someone "simplifies" one `.map()`
+  // into a bare `LADDER.map(...)` and drops the splice) would pass a suite
+  // that only ever exercised `tickMs`, while silently breaking exactly the
+  // guarantee this row exists to prove. One parameterised case beats three
+  // near-identical copies for the same reason `agents-shared.test.ts`'s own
+  // `it.each` tables do it: the assertion shape below is identical across
+  // rows, only the fixture differs.
+  //
+  // Every fixture value is chosen to sit INSIDE `WATCHDOG_LIMITS` for its
+  // own field, not merely off its own ladder — so this exercises the
+  // select's splice-and-sort path alone, never the server's separate clamp
+  // (`watchdog-config.util.ts`, which this client-only component never
+  // calls):
+  //   - `tickMs` 45_000 — between the 30s/1m rungs, inside [30_000, 600_000]
+  //     (unchanged from the original, single-field case 6).
+  //   - `graceMs` 900_000 (15m) — between the 10m/20m rungs, inside
+  //     [300_000, 3_600_000].
+  //   - `maxAttempts` 2.5 — `ATTEMPT_LADDER` is `[1, 2, 3, 4, 5]`, i.e.
+  //     literally every integer in `WATCHDOG_LIMITS.maxAttempts`'s own
+  //     [1, 5] range, so no INTEGER value can be both off-ladder and inside
+  //     that range at once. A fractional value is the only fixture that is
+  //     off-ladder while still landing strictly inside [1, 5] — the server's
+  //     own `clampAttempts` would default a fractional value outright rather
+  //     than clamp it (a fractional attempt count is not a smaller or larger
+  //     count, it is not representable at all), but that clamp lives on the
+  //     server and is never reached from this component; here it is simply a
+  //     `WatchdogStatus.config.maxAttempts` this test hands to `WatchdogGroup`
+  //     directly, exactly like every other case in this file stubs the GET
+  //     response rather than running it through the real API.
+  it.each([
+    ['Check every', 'tickMs', 45_000, '45s', '45000'],
+    ['Leave a resumed run alone for', 'graceMs', 900_000, '15m', '900000'],
+    ['Give up after', 'maxAttempts', 2.5, '2.5', '2.5']
+  ] as [string, 'tickMs' | 'graceMs' | 'maxAttempts', number, string, string][])(
+    'shows an off-ladder %s value as an extra selected option, never snapped to a neighbour',
+    async (label, field, value, expectedText, expectedValue) => {
+      stubFetch({
+        watchdog: watchdogStatus({ config: { ...DEFAULT_WATCHDOG_CONFIG, [field]: value } })
+      });
+      renderView();
 
-  it('shows an off-ladder tickMs as an extra selected option, never snapped to a neighbour', async () => {
-    stubFetch({
-      watchdog: watchdogStatus({ config: { ...DEFAULT_WATCHDOG_CONFIG, tickMs: 45_000 } })
-    });
-    renderView();
-
-    const tick = await screen.findByLabelText('Check every') as HTMLSelectElement;
-    expect(tick.options[tick.selectedIndex].textContent).toBe('45s');
-    expect(tick.value).toBe('45000');
-  });
+      const select = await screen.findByLabelText(label) as HTMLSelectElement;
+      expect(select.options[select.selectedIndex].textContent).toBe(expectedText);
+      expect(select.value).toBe(expectedValue);
+    }
+  );
 
   // --- 7: Give up after -> exactly one POST, redraw from the response ------
 
@@ -266,6 +306,16 @@ describe('WatchdogGroup', () => {
     renderView();
 
     const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+
+    // The "before" half of the Minor finding's call-count assertion: taken
+    // only once `findByLabelText` above has resolved, i.e. only once the
+    // MOUNT fetch's own promise has already settled — otherwise that GET
+    // itself could be miscounted as one the save below triggers.
+    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(
+      ([u]) => String(u).endsWith('/api/agents/watchdog')
+    ).length;
+    const getsBeforeSave = getsToWatchdog();
+
     await userEvent.selectOptions(attempts, '3');
 
     await waitFor(() => {
@@ -280,6 +330,16 @@ describe('WatchdogGroup', () => {
     await waitFor(() => {
       expect((screen.getByLabelText('Give up after') as HTMLSelectElement).value).toBe('3');
     });
+
+    // The behaviour itself: `useWatchdog.save` (`useWatchdog.ts:88-97`)
+    // redraws `status` straight from the POST's own response and never
+    // calls `reload()` afterwards, so a save must add ZERO new GETs to
+    // `/api/agents/watchdog` — proven here directly by a call-count
+    // assertion, rather than only inferred (as the two `waitFor`s above
+    // already do) from the select's final value having come from a POST
+    // response that differs from both the GET default and the ladder
+    // default.
+    expect(getsToWatchdog()).toBe(getsBeforeSave);
   });
 
   // --- 8: Enabled checkbox -> exactly one POST {enabled:false} --------------
@@ -296,6 +356,14 @@ describe('WatchdogGroup', () => {
 
     const checkbox = await screen.findByLabelText('Enabled') as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
+
+    // Same "before" snapshot as case 7's — see that case's comment for why
+    // it is taken only after the mount fetch has already settled.
+    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(
+      ([u]) => String(u).endsWith('/api/agents/watchdog')
+    ).length;
+    const getsBeforeSave = getsToWatchdog();
+
     await userEvent.click(checkbox);
 
     await waitFor(() => {
@@ -306,6 +374,9 @@ describe('WatchdogGroup', () => {
       ([u]) => String(u).endsWith('/api/agents/watchdog/config')
     ) as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ enabled: false });
+
+    // Same call-count proof as case 7's, for the checkbox's own save path.
+    expect(getsToWatchdog()).toBe(getsBeforeSave);
   });
 
   // --- 9: Activity — three rows, newest-first order preserved --------------
