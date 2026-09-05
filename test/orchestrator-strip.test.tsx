@@ -11,7 +11,7 @@ import { RunStrip } from '../client/src/components/board/RunStrip';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type {
   AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunQueueItem, RunStage
+  RunQueueItem, RunStage, RunWatchdog
 } from '../shared/types';
 
 // Same translation orchestrator-hook.test.tsx (Task 10) already uses: the
@@ -20,7 +20,11 @@ import type {
 // RunStrip and BoardView actually key their behaviour on.
 const fixture = rawFixture as OrchestratorRun;
 
-type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number };
+// `watchdog?` joins the wrapper shape here (orchestrator-watchdog design
+// §4.1's own addition to `OrchestratorRunsPayload`'s run entries) — every
+// case in this file that builds a crashed run needs it, and `Payload` is
+// the one place both `RunStrip` and `BoardView`'s cases share.
+type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
 
 /**
  * The endpoint's exact wrapper shape (Task 8) around one project's run.
@@ -29,8 +33,41 @@ type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number };
  * nobody would vary — the same simplification orchestrator-hook.test.tsx
  * makes for the same reason.
  */
-function runPayload(over: Partial<OrchestratorRun & { fresh: boolean }> = {}): Payload {
+function runPayload(over: Partial<Payload> = {}): Payload {
   return { ...fixture, fresh: true, pastRuns: 0, ...over };
+}
+
+/**
+ * A full `RunWatchdog`, overridden per case — the same "state only what this
+ * case cares about, default the rest" shape `queueItem` below already uses.
+ * Duplicated from run-watchdog.test.ts's own identical helper rather than
+ * imported: that file is a different suite, and this repo's fixture
+ * convention (see `queueItem`'s own comment) is every suite owning its
+ * fixtures rather than importing another test file's. The baseline reads
+ * as "just started watching, nothing has happened yet": enabled, no
+ * attempts, no error, not exhausted.
+ */
+function watchdog(over: Partial<RunWatchdog> = {}): RunWatchdog {
+  return {
+    enabled: true, attempts: 0, maxAttempts: 2, lastSpawnAt: null,
+    lastSessionId: null, lastError: null, exhausted: false,
+    ...over
+  };
+}
+
+/**
+ * A crashed run: `fresh: false` over the fixture's own `status: 'running'`
+ * (left unchanged — that pair IS `isCrashed`'s own definition,
+ * lib/run-watchdog.ts) with a `watchdog` record attached by default. Every
+ * crashed-strip case below builds from this rather than `runPayload({ fresh:
+ * false })` directly, so a case that does not care about the watchdog clause
+ * still gets one — an `undefined` watchdog is its own distinct case (row 8/9
+ * below need no watchdog at all, since they are not `status: 'running'`, but
+ * every OTHER crashed case in this suite is exercising the clause, not its
+ * absence).
+ */
+function crashedRun(over: Partial<Payload> & { watchdog?: RunWatchdog } = {}): Payload {
+  return { ...fixture, fresh: false, pastRuns: 0, watchdog: watchdog(), ...over };
 }
 
 /**
@@ -83,9 +120,214 @@ describe('RunStrip', () => {
     expect(screen.getByTestId('run-strip')).toHaveTextContent('0/0');
   });
 
-  it('renders no strip for a stale run', () => {
-    const { container } = render(<RunStrip run={runPayload({ fresh: false })} onOpen={() => {}} />);
-    expect(container).toBeEmptyDOMElement();
+  // --- orchestrator-watchdog (Task 6): a crashed run renders AS crashed ---
+  //
+  // Replaces the old "renders no strip for a stale run" case: `!fresh` alone
+  // no longer means "render nothing" (that reading is what let
+  // `run-20260903-112622` disappear from the board for four hours — see
+  // RunStrip.tsx's own file-level comment for the incident). The split now
+  // is `isCrashed` (lib/run-watchdog.ts): `!fresh && status !== 'running'`
+  // (rows 8/9 below) still renders nothing, because a finished run going
+  // stale is not a fault; `!fresh && status === 'running'` (every other row
+  // here) renders a crashed strip instead.
+  describe('a crashed run', () => {
+    const realFetch = global.fetch;
+    afterEach(() => {
+      global.fetch = realFetch;
+    });
+
+    /** Stubs `fetch` to answer every call (the Resume click's one POST) with
+     *  one fixed response — matching test/agents-client.test.ts's own
+     *  `stub` shape for a single-call case. */
+    function stubResume(status: number, body: unknown): jest.Mock {
+      const fn = jest.fn(() => Promise.resolve({
+        ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body)
+      } as Response));
+      global.fetch = fn as unknown as typeof fetch;
+      return fn;
+    }
+
+    // Row 1. The fixture's own queue order (see the comment on the "3/6"
+    // case above): the last entry that is neither terminal nor `pending` —
+    // the controller ruling this task exists to honour — is task-14 at
+    // `reviewing`, NOT the naive "first non-terminal item" (that would be
+    // task-21 at `needs-answers`, which this fixture's queue order puts
+    // second). Every substring below is asserted against the fixture as it
+    // actually reads, not against illustrative prose.
+    it('renders a crashed strip: project, "crashed", no-heartbeat, last-reported stage, waiting clause, no Resume', () => {
+      render(<RunStrip run={crashedRun()} onOpen={() => {}} />);
+      const strip = screen.getByTestId('run-strip');
+      expect(strip).toHaveClass('run-strip-crashed');
+      expect(strip).toHaveTextContent('crashed');
+      expect(strip).toHaveTextContent('no heartbeat for');
+      expect(strip).toHaveTextContent('last reported task-14 at reviewing');
+      expect(strip).toHaveTextContent('watchdog: waiting for next check');
+      expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
+    });
+
+    // Row 2.
+    it('reads the watchdog\'s "attempt N/M spawned" clause, still with no Resume control', () => {
+      const lastSpawnAt = new Date().toISOString();
+      render(<RunStrip
+        run={crashedRun({ watchdog: watchdog({ attempts: 1, lastSpawnAt }) })}
+        onOpen={() => {}}
+      />);
+      expect(screen.getByTestId('run-strip')).toHaveTextContent('attempt 1/2 spawned');
+      expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
+    });
+
+    // Row 3.
+    it('reads the watchdog\'s "resume failed" clause', () => {
+      render(<RunStrip
+        run={crashedRun({ watchdog: watchdog({ lastError: 'busy' }) })}
+        onOpen={() => {}}
+      />);
+      expect(screen.getByTestId('run-strip')).toHaveTextContent('resume failed: busy');
+    });
+
+    // Row 4. `canResume` present and true: the watchdog is exhausted, so
+    // the Resume control renders, enabled — the one hard constraint this
+    // task must not relax (widening it reintroduces a double-spawn race
+    // with the watchdog's own next tick, see RunStrip.tsx's own comment).
+    it('shows an enabled Resume control once the watchdog is exhausted and the board allows it', () => {
+      render(<RunStrip
+        run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })}
+        onOpen={() => {}}
+        canResume
+      />);
+      const strip = screen.getByTestId('run-strip');
+      expect(strip).toHaveTextContent('exhausted after 2 — resume by hand');
+      const button = screen.getByRole('button', { name: 'Resume run' });
+      expect(button).toBeInTheDocument();
+      expect(button.getAttribute('aria-disabled')).not.toBe('true');
+    });
+
+    // Row 5. `!watchdog.enabled` is the OTHER state the hard constraint
+    // allows Resume for.
+    it('shows a Resume control when the watchdog itself is off', () => {
+      render(<RunStrip
+        run={crashedRun({ watchdog: watchdog({ enabled: false }) })}
+        onOpen={() => {}}
+        canResume
+      />);
+      const strip = screen.getByTestId('run-strip');
+      expect(strip).toHaveTextContent('off — resume by hand');
+      expect(screen.getByRole('button', { name: 'Resume run' })).toBeInTheDocument();
+    });
+
+    // Row 6: same watchdog state as row 4 (exhausted), but the BOARD side of
+    // the gate says no — no control at all, matching CLAUDE.md's rule that
+    // an environment-level/project-visibility block hides rather than merely
+    // disables (BoardView passes `canResume` for exactly this reason).
+    it('renders no Resume control when the board withholds it, even once exhausted', () => {
+      render(<RunStrip
+        run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })}
+        onOpen={() => {}}
+        canResume={false}
+      />);
+      expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
+    });
+
+    // Row 7: `canResume` true but a per-project reason blocks it — present,
+    // aria-disabled, titled with the reason, matching DispatchButton's own
+    // aria-disabled + title idiom (CLAUDE.md) rather than a native
+    // `disabled` attribute, which a keyboard user cannot even focus.
+    it('renders a disabled, titled Resume control when the board names a blocking reason', () => {
+      render(<RunStrip
+        run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })}
+        onOpen={() => {}}
+        canResume
+        resumeBlockedReason="the dashboard cannot see this project"
+      />);
+      const button = screen.getByRole('button', { name: 'Resume run' });
+      expect(button).toBeInTheDocument();
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+      expect(button).toHaveAttribute('title', 'the dashboard cannot see this project');
+    });
+
+    // Rows 8/9: a run whose heartbeat is stale but whose `status` is not
+    // `'running'` is not crashed at all — it is the ordinary end of every
+    // run that ever finished, and renders nothing, exactly as a stale run
+    // always has.
+    it.each(['done', 'aborted', 'failed'] as const)(
+      'renders nothing for a stale run whose status is %s (not crashed)',
+      (status) => {
+        const { container } = render(
+          <RunStrip run={runPayload({ fresh: false, status })} onOpen={() => {}} />
+        );
+        expect(container).toBeEmptyDOMElement();
+      }
+    );
+
+    // Row 10: the regression guard — a fresh run must render byte-identically
+    // to before this feature, carrying neither the crashed class nor any of
+    // its wording. The existing "3/6" case elsewhere in this file already
+    // covers the rest of a fresh strip's own content.
+    it('does not read as crashed while the run is still fresh', () => {
+      render(<RunStrip run={runPayload()} onOpen={() => {}} />);
+      const strip = screen.getByTestId('run-strip');
+      expect(strip).not.toHaveClass('run-strip-crashed');
+      expect(strip).not.toHaveTextContent('crashed');
+    });
+
+    // Row 11: a successful resume posts to the right endpoint with the right
+    // body, calls `onResumed`, and does NOT also open the drawer — the two
+    // are different outcomes of two different controls sharing one strip.
+    it('posts to /api/agents/resume and calls onResumed on a successful click, without opening the drawer', async () => {
+      const fetchMock = stubResume(200, { sessionId: 's' });
+      const onOpen = jest.fn();
+      const onResumed = jest.fn();
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={onOpen} canResume onResumed={onResumed} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Resume run' }));
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(String(url)).toBe('/api/agents/resume');
+      expect(JSON.parse((init as RequestInit).body as string)).toEqual({ project: fixture.project });
+      await waitFor(() => expect(onResumed).toHaveBeenCalledTimes(1));
+      expect(onOpen).not.toHaveBeenCalled();
+    });
+
+    // Row 12: a 409 "already running" answer means the run recovered under
+    // the click (design §6.1) — treated as success, not an error.
+    it('treats a 409 run-in-progress answer as success, not an error', async () => {
+      stubResume(409, { error: 'alive', code: 'run-in-progress' });
+      const onResumed = jest.fn();
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={() => {}} canResume onResumed={onResumed} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Resume run' }));
+
+      await waitFor(() => expect(onResumed).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText('alive')).not.toBeInTheDocument();
+    });
+
+    // Row 13: any other error renders inline on the strip instead.
+    it('renders any other resume failure inline on the strip, without calling onResumed', async () => {
+      stubResume(502, { error: 'dashboard down' });
+      const onResumed = jest.fn();
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={() => {}} canResume onResumed={onResumed} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Resume run' }));
+
+      await waitFor(() => expect(screen.getByTestId('run-strip')).toHaveTextContent('dashboard down'));
+      expect(onResumed).not.toHaveBeenCalled();
+    });
+
+    // Row 14: clicking anywhere else on a crashed strip still opens the
+    // drawer, exactly as a fresh strip's click always has.
+    it('calls onOpen when a crashed strip is clicked anywhere but the Resume control', async () => {
+      const onOpen = jest.fn();
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={onOpen} canResume />);
+
+      await userEvent.click(screen.getByText('crashed'));
+
+      expect(onOpen).toHaveBeenCalledWith(run);
+    });
   });
 
   it('calls onOpen with the run when clicked', async () => {
@@ -340,10 +582,103 @@ describe('BoardView: run strips and card live bars', () => {
     await waitFor(() => expect(screen.getAllByTestId('run-strip')).toHaveLength(2));
   });
 
-  it('does not render a strip for a project whose run has gone stale', async () => {
-    stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0 }], [fakeItem({})]);
+  // `status: 'done'` here, not the fixture's own default `'running'` — a
+  // stale run whose status is still `'running'` is a CRASHED run
+  // post-watchdog (`isCrashed`, lib/run-watchdog.ts) and now renders a
+  // strip on purpose (the cases just below this one); this case is testing
+  // the other half, a run that genuinely finished going stale, which still
+  // renders nothing at all.
+  it('does not render a strip for a project whose run has genuinely finished and gone stale', async () => {
+    stub([{ ...fixture, project: '/abs/alpha', fresh: false, status: 'done', pastRuns: 0 }], [fakeItem({})]);
     await renderBoard();
     expect(screen.queryByTestId('run-strip')).not.toBeInTheDocument();
+  });
+
+  // --- orchestrator-watchdog (Task 6), BoardView cases 15-18 --------------
+
+  /** Same shape as the top-level `crashedRun` builder, scoped to alpha. */
+  function alphaCrashedRun(over: Partial<Payload> = {}): Payload {
+    return crashedRun({ project: '/abs/alpha', ...over });
+  }
+
+  // Row 15: a crashed strip renders on the board, and the existing
+  // stale-run card assertions (this file's own "pins nothing at all once
+  // the run is stale" and "keeps a stale run readable in the drawer while
+  // its cards go unmarked" cases, both built on `fresh: false` over this
+  // same fixture) are untouched by this — `freshRuns` (badges/claims) stays
+  // exactly as freshness-based as it always was; only the STRIP gained a
+  // second, wider list to render from.
+  it('renders a crashed strip on the board for a project with a stale-but-running run', async () => {
+    stub([alphaCrashedRun()], [fakeItem({})]);
+    await renderBoard();
+    const strip = await screen.findByTestId('run-strip');
+    expect(strip).toHaveClass('run-strip-crashed');
+  });
+
+  // Row 16: the dashboard cannot see this project — `projectDispatchGate`
+  // disables rather than hides (the project is invisible, not the whole
+  // environment), so the Resume control renders present but blocked.
+  /** Same URL-branching shape `stub` above uses, with the agents-status
+   *  body overridable per case — the two gate cases below (16/17) each need
+   *  a DIFFERENT status shape than `AGENTS_STATUS`'s own default, which
+   *  `stub`'s own signature has no parameter for. */
+  function stubWithStatus(agentsStatus: AgentsStatus, runs: Payload[], items: BacklogItem[]): jest.Mock {
+    const fn = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload: unknown = url.includes('/api/agents/status') ? agentsStatus
+        : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/projects') ? PROJECTS
+        : { items, errors: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+    global.fetch = fn as unknown as typeof fetch;
+    return fn;
+  }
+
+  it('disables the crashed strip\'s Resume control when the dashboard cannot see the project', async () => {
+    stubWithStatus(
+      { ...AGENTS_STATUS, projectPaths: [] },
+      [alphaCrashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })],
+      [fakeItem({})]
+    );
+    await renderBoard();
+    const button = await screen.findByRole('button', { name: 'Resume run' });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button.getAttribute('title')).toMatch(/does not list/);
+  });
+
+  // Row 17: `BM_AGENTS` off (the environment-level block) hides the control
+  // outright — CLAUDE.md's own rule, applied to Resume the same way it
+  // already applies to DispatchButton and the Orchestrate toolbar button.
+  it('renders no Resume control on the crashed strip when agent dispatch is disabled entirely', async () => {
+    stubWithStatus(
+      { ...AGENTS_STATUS, enabled: false },
+      [alphaCrashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })],
+      [fakeItem({})]
+    );
+    await renderBoard();
+    await screen.findByTestId('run-strip');
+    expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
+  });
+
+  // Row 18: a crashed run and a fresh run, different projects — both strips
+  // render, one crashed and one not.
+  it('renders one crashed strip and one fresh strip for two different projects', async () => {
+    stub(
+      [
+        alphaCrashedRun(),
+        { ...fixture, runId: 'run-2', project: '/abs/beta', fresh: true, pastRuns: 0 }
+      ],
+      [fakeItem({})]
+    );
+    await renderBoard();
+    const strips = await waitFor(() => {
+      const found = screen.getAllByTestId('run-strip');
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(strips.filter((s) => s.classList.contains('run-strip-crashed'))).toHaveLength(1);
+    expect(strips.filter((s) => !s.classList.contains('run-strip-crashed'))).toHaveLength(1);
   });
 
   // The card half of this task: task-14 (this suite's own fixture item) sits at

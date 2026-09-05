@@ -100,7 +100,20 @@ export function useOrchestratorRuns(): { runs: OrchestratorRunsPayload['runs']; 
   // Server-computed per run (`fresh` = status running AND heartbeated within
   // RUN_STALE_MS, shared/types.ts) — true exactly when at least one
   // registered project has a run actually worth watching live right now.
-  const anyFresh = runs.some((run) => run.fresh);
+  //
+  // Renamed from `anyFresh` (orchestrator-watchdog design §6.3) to
+  // `anyLive`, and widened from `runs.some((run) => run.fresh)` to also
+  // count a run that is `status === 'running'` but no longer `fresh` — a
+  // CRASHED run, in `RunStrip.tsx`'s own vocabulary (`isCrashed`,
+  // lib/run-watchdog.ts). A crashed strip rendered once and then left to
+  // sit is a screenshot, not a live view: the attempt counter, the error
+  // text, and the moment the watchdog's own spawn brings the run back to
+  // life would all otherwise wait for a window-focus event that might not
+  // come for hours — the exact shape of the four-hour gap
+  // `run-20260903-112622` left the FIRST time (see run-watchdog.ts's own
+  // header for the incident this whole feature traces back to), just moved
+  // from "the strip is blank" to "the strip is stale and doesn't say so".
+  const anyLive = runs.some((run) => run.fresh || run.status === 'running');
 
   /**
    * The point of this hook: an interval that exists only while it has
@@ -111,27 +124,28 @@ export function useOrchestratorRuns(): { runs: OrchestratorRunsPayload['runs']; 
    * whose props have not changed; this one fires a real network request
    * every tick. A board left open and unattended for hours — a spare
    * monitor, a forgotten tab — must not spend that whole stretch polling an
-   * API for a run that finished (or never started) long ago: with no run
-   * fresh, `anyFresh` is false, this effect's guard clause returns before
+   * API for a run that finished (or never started) long ago: with nothing
+   * live, `anyLive` is false, this effect's guard clause returns before
    * ever calling `setInterval`, and the cleanup from the last time it WAS
    * true (if ever) has already cleared that interval on the render where
-   * `anyFresh` flipped. A quiet board therefore costs exactly the two
+   * `anyLive` flipped. A quiet board therefore costs exactly the two
    * requests mount and focus already cost it, forever, and not one more.
-   * The moment a run goes fresh — the next mount, focus, or a launch
-   * elsewhere in the app that this same focus effect will pick up — this
-   * effect reruns, installs the interval, and polling resumes; the moment
-   * the last fresh run finishes or goes stale, this effect reruns again and
-   * tears the interval back down on that very render. Mount and window
-   * focus (both effects above) are untouched by any of this and keep
-   * refreshing in both worlds — which is what lets a quiet board still
+   * The moment a run goes live — fresh, or newly crashed — the next mount,
+   * focus, or a launch elsewhere in the app that this same focus effect
+   * will pick up — this effect reruns, installs the interval, and polling
+   * resumes; the moment the last live run finishes (truly `done`,
+   * `aborted`, or `failed` — not merely gone stale) this effect reruns
+   * again and tears the interval back down on that very render. Mount and
+   * window focus (both effects above) are untouched by any of this and
+   * keep refreshing in both worlds — which is what lets a quiet board still
    * notice a brand new run the instant you switch back to the tab, instead
    * of waiting up to 5s for a poll that, by definition, was not running yet.
    */
   useEffect(() => {
-    if (!anyFresh) return;
+    if (!anyLive) return;
     const id = setInterval(refresh, POLL_MS);
     return () => clearInterval(id);
-  }, [anyFresh, refresh]);
+  }, [anyLive, refresh]);
 
   return { runs, refresh };
 }

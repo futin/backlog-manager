@@ -539,7 +539,7 @@ describe('BoardView: run drawer wiring', () => {
     await renderBoard();
     await userEvent.click(await screen.findByTestId('run-strip'));
     await screen.findByTestId('run-drawer-item-bug-27');
-    expect(screen.queryByText(/no heartbeat/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-drawer-note')).not.toBeInTheDocument();
 
     // Swap the stub to answer a stale reading for the SAME run and drive the
     // hook's own window-focus refetch path (useOrchestratorRuns.ts fires
@@ -547,7 +547,15 @@ describe('BoardView: run drawer wiring', () => {
     stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0 }], [fakeItem({})]);
     window.dispatchEvent(new Event('focus'));
 
-    await waitFor(() => expect(screen.getByText(/no heartbeat/)).toBeInTheDocument());
+    // Scoped to the drawer's own note, not a bare `getByText(/no heartbeat/)`
+    // — orchestrator-watchdog (Task 6) means this same stale-but-`running`
+    // run now ALSO renders a crashed `RunStrip` behind this open drawer,
+    // carrying its own "no heartbeat for …" text, so an unscoped query would
+    // find two matches instead of disambiguating which surface this case is
+    // actually about (the drawer's own fault report, `run-drawer-note`).
+    await waitFor(() => {
+      expect(screen.getByTestId('run-drawer-note')).toHaveTextContent(/no heartbeat/);
+    });
   });
 
   // Fix round 1 — reviewer-reproduced: with no exclusion between `open` and
