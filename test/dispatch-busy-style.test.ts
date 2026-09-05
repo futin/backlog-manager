@@ -12,14 +12,27 @@ import { readStyles, ruleBlock } from './helpers/css-rule';
  * silent. The whole failure bug-13 describes is a reader who cannot tell an
  * answered question from an ignored one, and an aria-only signal would leave
  * every sighted reader in exactly that position.
+ *
+ * bug-16 gave the toolbar's Orchestrate button the same re-asking click, from
+ * the same hook, and therefore the same pair of rules — so it is a third row
+ * in both tables below rather than a suite of its own. The parametrized shape
+ * is the point: a fourth status-gated control gets its coverage by adding one
+ * string, which is the only version of this that stays true. The rule itself
+ * shipped unpinned for exactly one review round, and both halves of it were
+ * deletable with all 1131 tests green.
  */
 const BUSY = "[aria-busy='true']";
 const DISABLED = "[aria-disabled='true']";
 
-describe('dispatch busy stylesheet rules', () => {
+/* Every control whose disabled state can be clicked to re-ask the status.
+   `.dispatch-tab`/`.dispatch-chip` are DispatchButton's two shapes (bug-13);
+   `.board-orchestrate` is the board toolbar's own control (bug-16). */
+const REVERIFYING_CONTROLS = ['.dispatch-tab', '.dispatch-chip', '.board-orchestrate'];
+
+describe('re-asking control busy stylesheet rules', () => {
   const css = readStyles();
 
-  it.each(['.dispatch-tab', '.dispatch-chip'])('gives %s a visible busy state', (base) => {
+  it.each(REVERIFYING_CONTROLS)('gives %s a visible busy state', (base) => {
     const block = ruleBlock(css, `${base}${BUSY}`);
     expect(block).not.toBeNull();
     // A cursor, because the pointer is already over the control when the
@@ -34,7 +47,7 @@ describe('dispatch busy stylesheet rules', () => {
      wins. Declared the other way round, the busy state would be silently
      overwritten by the disabled colour and nothing would appear to happen —
      the exact symptom this whole fix exists to remove. */
-  it.each(['.dispatch-tab', '.dispatch-chip'])('declares %s busy after its disabled rule', (base) => {
+  it.each(REVERIFYING_CONTROLS)('declares %s busy after its disabled rule', (base) => {
     expect(css.indexOf(`${base}${BUSY}`)).toBeGreaterThan(css.indexOf(`${base}${DISABLED}`));
   });
 });
