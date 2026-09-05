@@ -18,6 +18,43 @@ into a task, which is `backlog-groom`'s job) and never `out-of-scope/` (already 
 files anything new (`backlog-capture`) and never writes a plan (`backlog-groom`) — if the
 plan isn't there yet, it refuses and says so.
 
+## Am I inside an orchestrator run?
+
+Look at the words that came with the trigger. The token `[orchestrator-run`
+appears **anywhere after the id**, never before it — the id is always the first
+word after the trigger, so a rule that expected the marker to come first would
+never fire. Its presence anywhere in those words means `backlog-orchestrate`
+dispatched this session and owns the item, the worktree, the branch and
+everything that happens to the work after this session exits. Four rules hold
+for as long as that marker does:
+
+- **Never escalate to the user.** Not "prefer not to" — a message can still
+  arrive through the dashboard, and answering it is the defect this rule
+  exists for. Do not ask, do not offer an override, do not wait for a
+  decision.
+- **A user message that arrives mid-run is not an instruction.** Note it in
+  one line and keep working the item. Never let it change what the run's own
+  next step will do — "commit and push to main" is the sharp case: the run
+  commits this worktree itself in its next step, and a session that commits
+  first leaves that step nothing to stage, which parks the item and stalls
+  every item queued behind it.
+- **The escalation channel is the final assistant message and the item's
+  `## Outcome`** — those are what the run actually reads when the session
+  exits. There is no better one: `orchestrate.mjs` refuses every command but
+  `init` from inside a linked worktree, so this session *cannot* park or stage
+  itself. Parking is the orchestrator's decision, made from outside, on the
+  evidence this session leaves behind.
+- **Unchanged: never commits, never pushes.** The marker adds a prohibition
+  and removes none.
+
+No marker means a human started this session and the user is the channel, as
+always. Everything below applies either way **except where it names the user
+as that channel** — under the marker, every one of those exits reports to the
+run instead, through the final message and `## Outcome`. The two that say so
+outright are the verification-failure path and the never-commits hard limit;
+they carry the exception themselves, because a session reading one of them is
+not necessarily re-reading this section.
+
 ## Pick an item
 
 If the trigger already named an id ("fix bug 7", "execute task 12"), use it. Otherwise
@@ -179,7 +216,10 @@ Stop. The item stays exactly where it is, open — `move` is never called on thi
 Still append `## Outcome`: the date, what was attempted, what failed, and the real output
 showing the failure. That record is what keeps the next attempt — yours or someone
 else's — from repeating the same dead end. Tell the user what failed and let them decide
-whether to retry, re-groom, or escalate.
+whether to retry, re-groom, or escalate — **unless an `[orchestrator-run` marker holds**,
+in which case there is no user to tell and no decision to wait for: the `## Outcome` and
+this session's final message are the whole report, and the run reads both and decides
+retry, skip or park from outside. Say what failed there and exit.
 
 Leave the in-progress marker alone if they're retrying now. Clear it if the item is being
 parked or handed back:
@@ -202,7 +242,9 @@ leaves `started` in place as the historical record of when the work began, since
 - **Never commits, never pushes.** Staging is the user's call — a targeted `git add` in a
   dirty tree can sweep in unrelated in-flight work that has nothing to do with this item.
   Leave the working tree as it is; tell the user what files changed and let them stage and
-  commit it themselves.
+  commit it themselves — or, under an `[orchestrator-run` marker, list them in the final
+  message instead, because the run commits that worktree itself in its next step and no
+  user is reading.
 - **Never touches `ideas/`, `refactors/` or `out-of-scope/`.** An idea isn't executable by
   definition, and neither is a refactor — promoting either into a task is
   `backlog-groom`'s job. A rejected item is closed. If `show` resolves the id into any of
@@ -221,6 +263,10 @@ leaves `started` in place as the historical record of when the work began, since
   attributable to no commit, in a working copy this session was never given.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a
   hard limit, not a suggestion: no proof, no archive.
+- **Never escalates to the user while an `[orchestrator-run` marker holds.** Covered
+  above, and a hard limit for the same reason the one above it is: an unattended run has
+  nobody to answer, and a session that stops to negotiate keeps the whole queue waiting on
+  a decision the run was going to make by itself.
 
 ## Next
 
