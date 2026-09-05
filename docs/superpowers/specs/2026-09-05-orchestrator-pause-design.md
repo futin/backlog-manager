@@ -43,8 +43,9 @@ writing that same file.
 Decisions taken with the user before this document (see §8 for the costs):
 **soft pause only** — the in-flight item drains through merge, the next one
 never starts; **manual resume from the board** — no auto-resume at a reset
-time; the **Pause control lives in the run drawer**, not on the strip; the
-usage check and its threshold are **out of this round entirely**.
+time; the **controls live in the Board's run drawer and in the Runs view's
+detail pane**, not on the strip or the list rows; the usage check and its
+threshold are **out of this round entirely**.
 
 ## Non-goals
 
@@ -333,43 +334,126 @@ and `test/run-stage.test.ts`'s `ALL_STATUSES` grows so the compiler, not a
 checklist, finds every site. `paused` sorts directly after `running` in
 `STATUS_ORDER`: it is the one non-running status that still has a future.
 
-### 5.2 RunDrawer — Pause / Cancel pause
+### 5.2 Where each state is visible
 
-The drawer header, for a run that is `running` and `fresh`:
+Both states are derived, and both are shown wherever the run is shown. The
+answer to "do I see it pausing, then paused":
 
-- no effective request → a **Pause** control: "pause after the current
-  item". Click → `POST /api/agents/pause` → reload runs.
-- effective request → the same slot reads **"Pausing after `<current
-  item>`"** with a **Cancel** control beside it. Click → `cancel: true` →
-  reload.
+| surface | pausing (`running`, fresh, effective request) | `paused` |
+|---|---|---|
+| Board · strip | chip: "pausing · finishes `<item>`" | paused strip: "paused · N of M done", **Resume** |
+| Board · run drawer | "Pausing after `<item>`" + **Cancel** | meta line reads `paused`, **Resume** (the strip's is the no-click copy) |
+| Runs · list row | `pausing` badge beside the `running` status chip | status chip reads `paused`; the row leaves the pinned region |
+| Runs · detail pane | "Pausing after `<item>`" + **Cancel** | status chip `paused`, **Resume** |
+| Runs · tiles | unchanged | counted as neither completed nor failed |
 
-Nothing for a crashed, `paused` or finished run — the crashed drawer is the
-fault report, and Resume lives on the strip. Errors render inline in the
-header, the way the crashed strip renders a resume error.
+`<item>` is the in-flight queue entry — the one whose stage is neither
+`pending` nor terminal; there is at most one, by the loop's own "one
+worktree and one session in flight" rule.
 
-The drawer rather than the strip because the fresh strip's root is one
-`<button>` that opens the drawer, and adding a sibling control means the
-same root restructuring the crashed strip needed; one extra click is the
-price of leaving the most-rendered component in the board untouched.
+### 5.3 One control set, two surfaces
 
-### 5.3 The strip — pausing, paused
+`Pause`, `Cancel pause` and `Resume run` are one component, rendered by
+`RunDrawer` (Board) and `RunDetail` (Runs). It takes the run's payload
+entry, the resume gate, and an `onChanged` callback, and decides from the
+entry alone which control to show:
+
+- `running` and `fresh`, no effective request → **Pause**, "pause after the
+  current item". Click → `POST /api/agents/pause` → `onChanged`.
+- `running` and `fresh`, effective request → **"Pausing after `<item>`"**
+  with **Cancel** beside it. Click → `cancel: true` → `onChanged`.
+- `paused` → **Resume run**. Click → `POST /api/agents/resume` (the same
+  call the crashed strip makes) → `onChanged`. Rendered only when the
+  resume gate allows; otherwise the gate's reason, as the crashed strip
+  does. Once clicked, and for as long as §5.6's mark is live for this
+  project, the slot reads **"Resuming…"** with no button — on this
+  component and on the paused strip alike — so a second click has nothing
+  to land on while the first session is still on its way to `unpause`.
+- crashed (`running`, not fresh), `done`, `aborted`, `failed` → nothing.
+  A crashed run's resume stays where it is, on the strip, behind
+  `watchdogStoodDown` and the coupling test that pins it; this component
+  does not take that decision on.
+
+Errors render inline beside the control, the way the crashed strip renders
+a resume error. A component shared by two lazily-loaded views lives with
+the other cross-view modules (`lib/view-keys.ts` is the precedent), never
+inside either view's directory — an import between the views would undo the
+chunk split.
+
+The **resume gate** is one function too. `BoardView` today derives
+`canResume` and `resumeBlockedReason` from `projectDispatchGate` in three
+inline lines beside the strip; those lines move into a named function
+beside `projectDispatchGate` in `shared/agent.ts`, and both views call it.
+It is the environment half of the gate only — is the dashboard reachable,
+can it see this project — and it says nothing about the watchdog, which is
+the crashed strip's own concern.
+
+Both views host the component rather than only the drawer because a person
+watching a run watches it in the Runs view, where the per-item stage track
+and the durations are; sending them back to the Board to pause it would be
+the one-click cost paid twice.
+
+### 5.4 The strip — pausing, paused
 
 - **pausing** — a fresh strip with an effective request gains a chip:
-  "pausing · finishes `<current item>`". Everything else about the fresh
-  strip is unchanged, including the polling that keeps it live.
+  "pausing · finishes `<item>`". Everything else about the fresh strip is
+  unchanged, including the polling that keeps it live. The strip itself
+  carries no Pause control: its root is one `<button>` that opens the
+  drawer, and the drawer is where the control is.
 - **paused** — today `!fresh && status !== 'running'` renders nothing; a
   `paused` run now renders a **paused strip** instead: "paused · N of M
   done" with the same body-button-plus-sibling-button layout the crashed
   strip uses, the sibling being **Resume run**. No watchdog clause — the
-  watchdog was never involved. `canResume`, the board-side environment
-  gate, still applies: with agents off the paused strip renders without
-  the button and says why, exactly as the crashed strip does.
+  watchdog was never involved. The resume gate applies: with agents off
+  the paused strip renders without the button and says why, exactly as
+  the crashed strip does.
 
 A paused strip leaves when the run is resumed (status `running` again) or
 superseded (a new run's `init` archives it, and the payload carries the new
 run). It does not age out; a paused run is waiting for a person.
 
-### 5.4 Runs view, Archive, everything else
+### 5.5 The Runs view
+
+- **Rows.** `RunRow` reads `row.live` — the fresh live entry, present only
+  while the run is fresh — and shows a `pausing` badge beside the status
+  chip when that entry's `pauseRequested` is true. Rows are `<button>`s
+  that select a run; they carry no controls, for the same nested-button
+  reason the strip carries none.
+- **`paused` reaches the list on its own.** `RunsView` already re-fetches
+  the archive listing the moment the set of fresh runs changes; a run
+  pausing leaves that set, so the refresh that already covers "a run
+  finished" covers "a run paused" too, and the row's status chip reads
+  `paused` off the refreshed listing. Nothing new is polled.
+- **The pane.** `RunDetail` already re-fetches the run file when its `live`
+  prop goes `null` with the same run still selected — the transition a
+  pause makes — so the pane's status chip reads `paused` from the freshest
+  possible source. `RunDetail` hosts the shared control set in its head,
+  beside the status chip. `RunsView` gains `useAgents()` for the resume
+  gate, the same hook `BoardView` already holds; only one of the two views
+  is mounted at a time, so this is not a second poll.
+- `pickAuthority` and its three tiers are untouched.
+
+### 5.6 Polling after a resume
+
+A crashed run is `running`, so `useOrchestratorRuns` is already polling
+when its Resume is clicked and simply keeps going. A `paused` run is
+neither fresh nor `running`, so nothing polls it — and the resumed session
+needs anywhere from a few seconds to about ninety (the measured time to a
+first heartbeat) before `unpause` flips the file to `running`. Without
+help, a Resume click would leave both surfaces reading `paused` until a
+window focus.
+
+`useOrchestratorRuns` therefore gains `noteResume(project)`: a transient,
+in-memory mark that keeps the interval alive for that project for up to
+`RESUME_POLL_GRACE_MS` (three minutes — the watchdog's own worst-case
+first-heartbeat reasoning, rounded) or until the run reads `running`,
+whichever is first. Both surfaces call it from the Resume click, through
+`onChanged`, and both read it back to show "Resuming…" in place of the
+button (§5.3). It is the one new client rule; it is derived from a click
+and a clock, never stored, and it expires on its own so a resume that never
+starts cannot leave a tab polling forever — or a button hidden forever.
+
+### 5.7 Everything else
 
 - `RunsView`/`RunDetail` print `paused` through the status chip like any
   status; `aggregateRuns` counts it as neither completed nor failed.
@@ -380,11 +464,12 @@ run). It does not age out; a paused run is waiting for a person.
   claim-blocked — they can be hand-dispatched or groomed meanwhile, and a
   later resume's `plan --ids` re-gate skips one that moved ("unknown item
   id" → `skipped`), which `SKILL.md` §3 already prescribes.
-- `useOrchestratorRuns` is untouched: `anyLive` already covers pausing (the
-  run is fresh), and a paused run needs no poll — the only thing that
-  changes it is a click this board makes, which reloads.
+- `useOrchestratorRuns`' `anyLive` rule is untouched: `anyLive` already
+  covers pausing (the run is fresh), and a paused run needs no poll until a
+  resume is clicked (§5.6).
 - `lib/agents.ts` gains `pauseOrchestrate(project)` and
-  `cancelPauseOrchestrate(project)`, both over the one route.
+  `cancelPauseOrchestrate(project)`, both over the one route;
+  `resumeOrchestrate` is reused as is.
 
 ## 6. The skill side — publish required
 
@@ -472,15 +557,29 @@ under node's runner, against a temp `BM_ORCH_HOME` and a temp
 
 - `ALL_STATUSES` includes `paused`; each status record compiles and renders
   a chip.
-- drawer: fresh run, no request → Pause; click posts `{ project }` and
-  reloads. Fresh run with request → "Pausing after `<item>`" + Cancel;
-  click posts `{ project, cancel: true }`. Crashed, paused and finished
-  runs → no control.
+- the shared control set, driven by one table of payload entries: fresh
+  `running` without request → Pause, click posts `{ project }` and calls
+  `onChanged`; fresh `running` with request → "Pausing after `<item>`" +
+  Cancel, click posts `{ project, cancel: true }`; `paused` with the gate
+  open → Resume, click posts to `/api/agents/resume`; `paused` with the
+  gate closed → the reason, no button; crashed, `done`, `aborted`, `failed`
+  → renders nothing.
+- the resume gate: one function; `BoardView` and `RunsView` both read it;
+  hidden / disabled / enabled map to the same three answers
+  `projectDispatchGate` gives.
+- drawer and pane each render the control set for the selected run and
+  reload after `onChanged`.
 - strip: fresh + `pauseRequested` → pausing chip; `paused` → paused strip
-  with Resume when `canResume`, blocked reason otherwise; `done` still
+  with Resume when the gate is open, the reason otherwise; `done` still
   renders nothing.
-- `RunsView`: a paused run sorts after running ones and before done ones
-  within its day.
+- `RunsView`: a fresh row with `pauseRequested` carries the `pausing`
+  badge; a paused run sorts after running ones and before done ones within
+  its day, and is not pinned.
+- `noteResume`: after the mark, the interval runs with nothing fresh or
+  running; it stops when the run reads `running` (the ordinary rule takes
+  over) and stops on its own at `RESUME_POLL_GRACE_MS` when nothing
+  changes; a second mark restarts the clock; an unmarked idle board still
+  installs no interval.
 
 ## 8. Decisions taken, and what they cost
 
@@ -504,9 +603,34 @@ under node's runner, against a temp `BM_ORCH_HOME` and a temp
   the one refusal it must act on differently.
 - **`unpause` is its own command.** One more verb to document; in exchange
   `heartbeat` stays a pure stamp that can never change a status.
-- **Pause in the drawer.** One click further than the strip. The fresh
-  strip stays a single button; the paused strip reuses the crashed strip's
-  two-button layout rather than a third one.
+- **Controls in the drawer and the pane, not on the strip or the rows.**
+  One click further than a strip button on the Board; nothing further in
+  the Runs view, where the pane is already open. The fresh strip stays a
+  single button; the paused strip reuses the crashed strip's two-button
+  layout rather than a third one. Cost: a shared component two lazy chunks
+  import, and a resume gate hoisted out of `BoardView` into `shared/agent.ts`
+  — one more function to keep single.
+- **The crashed run's Resume stays on the strip alone.** The pane could
+  offer it behind the same `watchdogStoodDown` function, and the coupling
+  table would then drive three surfaces instead of two. Declined for this
+  round: it is not part of pausing, and widening the coupling test is its
+  own change.
+- **Three minutes of polling after a Resume click.** A resume that never
+  starts (the dashboard took the spawn and the session died before its
+  first command) costs a tab up to 36 requests it would not otherwise
+  make. Accepted: the alternative is a paused strip that stays paused
+  after a successful resume until someone refocuses the window, which
+  reads as the click having done nothing.
+- **Double-resume is guarded in the client, not the server.** `resume()`
+  refuses a *fresh* run, and a resumed run is not fresh until its session
+  stamps the file — up to ninety seconds in which a second Resume from
+  another tab would spawn a second `--resume` into the same `run.json`.
+  The "Resuming…" state closes the one-tab case; the two-tab case is the
+  same exposure the crashed strip already has today, and a server-side
+  lock would mean the server remembering something about a run between
+  requests, which the watchdog's in-memory grace already is for crashed
+  runs and would have to grow to cover paused ones. Left as is, named
+  here so the growth is a decision when it comes and not a surprise.
 - **Pause is independent of `BM_AGENTS`.** A control visible while dispatch
   controls are hidden — an asymmetry to explain once. Earned by the case it
   covers: a terminal-started run can be paused from a board whose agents
