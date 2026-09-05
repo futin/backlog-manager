@@ -1,4 +1,5 @@
 import { Segmented, SettingsGroup, SettingsRow } from './SettingsRow';
+import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
 import {
@@ -189,6 +190,8 @@ export default function SettingsView() {
       </SettingsGroup>
 
       <AgentsGroup />
+
+      <WatchdogGroup />
     </div>
   );
 }

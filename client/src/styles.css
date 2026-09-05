@@ -574,6 +574,24 @@ body {
 .set-control input[type=number] { width: 84px; font-variant-numeric: tabular-nums }
 .set-unit { font-size: 10px; color: var(--ink3); font-family: var(--mono) }
 
+/* The watchdog Settings group's Activity feed (WatchdogGroup.tsx) — up to
+   WATCHDOG_EVENT_CAP (50) newest-first lines of what the sweeper itself did.
+   `flex: 1 1 100%` forces it onto its own line below the row's name/hint
+   label rather than sharing the `.set-row` flex line with it (that row has
+   no fixed-width control the way every select/checkbox row above it does,
+   so without an explicit full-width basis a short label could leave enough
+   room for both to sit side by side, which reads wrong for a list this
+   dense). Deliberately plain — a mono timestamp, the project's basename,
+   then the sentence, one per line, no card chrome: this is a log, not a
+   stack of cards, and a busy afternoon should read like one. */
+.watchdog-events { flex: 1 1 100%; list-style: none; margin: 0; padding: 0 }
+.watchdog-events-empty { flex: 1 1 100% }
+.watchdog-events, .watchdog-events-empty { font-size: 10.5px; color: var(--ink3) }
+.watchdog-events { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto }
+.watchdog-events li { display: flex; gap: 8px; align-items: baseline; color: var(--ink2) }
+.watchdog-events time { font-family: var(--mono); color: var(--ink3); flex-shrink: 0 }
+.watchdog-event-project { font-weight: 600; color: var(--ink); flex-shrink: 0 }
+
 .set-seg { display: flex; gap: 4px }
 .set-seg button {
   font-family: var(--display); font-size: 10.5px; font-weight: 600;
