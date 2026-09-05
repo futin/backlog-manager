@@ -80,7 +80,7 @@ function stubItems(items: BacklogItem[], errors: string[] = [], runs: RunPayload
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
+      : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects') ? PROJECTS : index;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;

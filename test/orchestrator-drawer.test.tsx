@@ -497,7 +497,7 @@ describe('BoardView: run drawer wiring', () => {
     const fn = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
       const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects') ? PROJECTS
         : { items, errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);

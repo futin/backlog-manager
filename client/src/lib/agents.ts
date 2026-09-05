@@ -1,7 +1,7 @@
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeMode,
   OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
-  PermissionMode, WatchdogConfig, WatchdogStatus
+  PermissionMode, StartingRun, WatchdogConfig, WatchdogStatus
 } from '../../../shared/types';
 
 /**
@@ -140,14 +140,39 @@ export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDis
  * `projectPaths` (an unguarded `.some`/`.every` on a non-array throws before
  * any of this even matters), and every run's `fresh` is checked because that
  * is the one field this payload's first consumer actually branches on.
+ *
+ * `starting` (task-14) is checked on exactly the same terms, with one
+ * deliberate difference: ABSENT is accepted, present-but-wrong is not. Absent
+ * is what an older server answers — one built before this field existed,
+ * which a dev box can genuinely be serving while a newer client bundle is
+ * open — and refusing that whole payload would blank the run strip over a
+ * field that only ever ADDS a card; `useOrchestratorRuns` defaults it to `[]`
+ * for precisely that case. Present-but-wrong is the "lies quietly" shape this
+ * guard exists for: `BoardView` calls `.filter` on this array during render
+ * and `StartingStrip` reads `project`/`requestedAt` straight out of each
+ * entry, and an unguarded throw during render unmounts the whole tree to a
+ * blank page (BoardView.tsx's own comment on that).
  */
+function isStartingRuns(value: unknown): boolean {
+  if (value === undefined) return true;
+  return (
+    Array.isArray(value) &&
+    value.every((s) => (
+      typeof s === 'object' && s !== null &&
+      typeof (s as StartingRun).project === 'string' &&
+      typeof (s as StartingRun).requestedAt === 'string'
+    ))
+  );
+}
+
 function isOrchestratorRunsPayload(data: unknown): data is OrchestratorRunsPayload {
   return (
     typeof data === 'object' && data !== null &&
     Array.isArray((data as OrchestratorRunsPayload).runs) &&
     (data as OrchestratorRunsPayload).runs.every(
       (run) => typeof run === 'object' && run !== null && typeof (run as { fresh?: unknown }).fresh === 'boolean'
-    )
+    ) &&
+    isStartingRuns((data as Partial<OrchestratorRunsPayload>).starting)
   );
 }
 

@@ -5,6 +5,7 @@ import { HttpException } from '@nestjs/common';
 
 import { OrchestratorController } from '../server/src/orchestrator/orchestrator.controller';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
+import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import type { OrchestratorRun, RunQueueItem, RunVerification } from '../shared/types';
 
@@ -130,11 +131,11 @@ describe('OrchestratorService.archive', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'bm-orch-archive-'));
     orchHome = join(tmpRoot, 'orchestrator');
     process.env.BM_ORCH_HOME = orchHome;
-    // archive() never touches WatchdogStateService (only runs() does) — a
-    // bare, unwired instance is enough to satisfy the constructor here, the
-    // same "construct directly, no Nest DI needed" style this suite already
-    // uses for OrchestratorService itself.
-    service = new OrchestratorService(new WatchdogStateService());
+    // archive() never touches WatchdogStateService or StartingRunsService
+    // (only runs() does) — bare, unwired instances are enough to satisfy the
+    // constructor here, the same "construct directly, no Nest DI needed"
+    // style this suite already uses for OrchestratorService itself.
+    service = new OrchestratorService(new WatchdogStateService(), new StartingRunsService());
   });
 
   afterEach(() => {
@@ -243,7 +244,11 @@ describe('OrchestratorController.archivedRun', () => {
     // archivedRun() calls straight through to OrchestratorService.archivedRun()
     // and never reads watchdogState — a bare unwired instance is enough here
     // too, for the same reason as OrchestratorService's own construction above.
-    controller = new OrchestratorController(new OrchestratorService(new WatchdogStateService()), new WatchdogStateService());
+    controller = new OrchestratorController(
+      new OrchestratorService(new WatchdogStateService(), new StartingRunsService()),
+      new WatchdogStateService(),
+      new StartingRunsService()
+    );
   });
 
   afterEach(() => {

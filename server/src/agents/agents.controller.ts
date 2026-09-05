@@ -4,6 +4,7 @@ import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
 import type { MergeCheckResult } from './merge-check.util';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
+import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { isAgentAction } from '../../../shared/agent';
 import type {
@@ -17,7 +18,11 @@ import type {
  */
 @Controller('api/agents')
 export class AgentsController {
-  constructor(private readonly agents: AgentsService, private readonly watchdog: WatchdogService) {}
+  constructor(
+    private readonly agents: AgentsService,
+    private readonly watchdog: WatchdogService,
+    private readonly starting: StartingRunsService
+  ) {}
 
   /**
    * Read-only and always 200, even when the dashboard is down: "is this wired
@@ -117,6 +122,15 @@ export class AgentsController {
    * unlike RULING R2's case, where the run is ALREADY crashed and every
    * tick that passes without acting on it is a tick a person is left
    * waiting.
+   *
+   * task-14 adds a THIRD spawn-success side effect here, `mark(project)`,
+   * for the same layering reason RULING R3 gives for `arm()`: this is where
+   * a successful spawn's side effects live, and putting the third one in
+   * `AgentsService` instead would split one pattern across two layers. It
+   * records that a session is on its way for a project whose `run.json`
+   * does not exist yet, which is the whole 1–5 minutes the board currently
+   * spends looking like the click did nothing (StartingRunsService's own
+   * class comment has the full gap).
    */
   @UseGuards(SameOriginPostGuard)
   @Post('orchestrate')
@@ -163,6 +177,24 @@ export class AgentsController {
     // call lives here rather than inside AgentsService, and why it is
     // fire-and-forget with no accompanying tick().
     this.watchdog.arm();
+    // task-14. AFTER the await, never before, and that is the whole
+    // mechanism keeping a failed spawn from leaving a ghost card: a
+    // dashboard that is down, answers 4xx, or returns no session id throws
+    // out of `orchestrate()` above, so this line is simply never reached —
+    // no `catch`, no compensating delete, nothing to keep in step.
+    //
+    // Order relative to `arm()` is immaterial here, unlike
+    // `noteBoardResume`'s deliberately-before-`arm()` placement in `resume`
+    // below: the sweeper never reads starting entries at all, so no tick
+    // `arm()` might kick can observe this stamp either way. Placed second
+    // only because `arm()` was here first.
+    //
+    // `project` is this controller's own validated local — the same trimmed
+    // string handed to the service, and the same absolute registry path
+    // `OrchestratorRun.project` carries — which is what keeps the eviction
+    // match in StartingRunsService a plain string compare with no second
+    // identity to keep in step.
+    this.starting.mark(project);
     return result;
   }
 

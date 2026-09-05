@@ -626,4 +626,61 @@ describe('POST /api/agents/orchestrate', () => {
     await post({ project: projectPath, ids: ['../../etc/passwd'] }).expect(404);
     expect(sent).toEqual([]);
   });
+
+  /* task-14 — the starting-run placeholder's marking half. Every case reads
+     `starting` back off `GET /api/orchestrator/runs` rather than spying on
+     `StartingRunsService.mark`: what matters is what the board is told, and
+     a spy would keep passing if a later refactor marked correctly and then
+     failed to surface it. (That GET also sweeps, which is harmless here —
+     each case makes exactly one.) */
+
+  it('records a starting entry for the project after a successful spawn', async () => {
+    stubDashboard();
+    await post({ project: projectPath }).expect(201);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.starting).toEqual([{ project: projectPath, requestedAt: expect.any(String) }]);
+  });
+
+  it('records nothing when the dashboard rejects the spawn', async () => {
+    // 4xx from /api/spawn: `orchestrate()` throws, so the controller's
+    // `mark()` line — placed AFTER the await for exactly this reason — is
+    // never reached. No compensating delete exists or is needed.
+    stubDashboard({ ok: false, status: 429, body: { error: 'too many' } });
+    await post({ project: projectPath }).expect(429);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.starting).toEqual([]);
+  });
+
+  it('records nothing when the spawn returns no session id', async () => {
+    // A 200 with a body this server cannot read a session out of is still a
+    // failed spawn (502) — a card claiming a run is starting would be the
+    // one thing on the board asserting otherwise.
+    stubDashboard({ ok: true, body: {} });
+    await post({ project: projectPath }).expect(502);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.starting).toEqual([]);
+  });
+
+  it('records nothing for a request refused before the spawn — the run-in-progress lock', async () => {
+    stubDashboard();
+    writeRun({ ...fixture, project: projectPath, updatedAt: new Date().toISOString() });
+    await post({ project: projectPath }).expect(409);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.starting).toEqual([]);
+  });
+
+  it('records nothing for a request refused before the spawn — a bad mergeMode', async () => {
+    // The 400 that fires inside the service before any outbound call. Same
+    // expectation as the lock above, from the other end of the gate ladder.
+    stubDashboard();
+    await post({ project: projectPath, mergeMode: 'nope' }).expect(400);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.starting).toEqual([]);
+  });
+
 });

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { OrchestratorController } from './orchestrator.controller';
 import { OrchestratorService } from './orchestrator.service';
+import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 
 /**
@@ -19,10 +20,18 @@ import { WatchdogStateService } from './watchdog-state.service';
  * already imports `OrchestratorModule` for `OrchestratorService` itself, so
  * exporting this alongside it costs nothing and opens no new dependency
  * direction (watchdog-state.service.ts's own class comment).
+ *
+ * `StartingRunsService` (task-14) is provided and exported for exactly that
+ * same shape, one layer of callers wider: `OrchestratorService.runs()` calls
+ * its pure `list()`, `OrchestratorController.runs()` calls its mutating
+ * `sweep()`, and `AgentsController.orchestrate()` calls `mark()` after a
+ * successful spawn — three call sites in two modules that must all reach the
+ * SAME singleton, which is only true because this module exports it and
+ * `AgentsModule` already imports this one.
  */
 @Module({
   controllers: [OrchestratorController],
-  providers: [OrchestratorService, WatchdogStateService],
-  exports: [OrchestratorService, WatchdogStateService]
+  providers: [OrchestratorService, StartingRunsService, WatchdogStateService],
+  exports: [OrchestratorService, StartingRunsService, WatchdogStateService]
 })
 export class OrchestratorModule {}

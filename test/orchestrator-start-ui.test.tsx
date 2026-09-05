@@ -115,7 +115,7 @@ describe('toolbar Orchestrate button', () => {
       // hint itself (that is `stubOrchestrate`'s job, below) — so no hint
       // renders and no test in this block gets a surprise DOM node.
       const payload: unknown = url.includes('/api/agents/status') ? AGENTS
-        : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/agents/merge-check') ? { covered: true, source: null }
         : url.includes('/api/agents/plan') ? {
           action: 'execute', prompt: 'do it', project: 'alpha',

@@ -576,7 +576,7 @@ describe('the board wiring', () => {
         return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') } as Response);
       }
       const payload = url.includes('/api/agents/status') ? AGENTS
-        : url.includes('/api/orchestrator/runs') ? ({ runs: RUNS } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/orchestrator/runs') ? ({ runs: RUNS, starting: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/agents/plan') ? {
           action: 'execute', prompt: 'do it', project: 'alpha',
           allowedModes: ['plan', 'acceptEdits'], defaultMode: 'acceptEdits'

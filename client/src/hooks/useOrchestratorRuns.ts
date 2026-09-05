@@ -38,9 +38,19 @@ export const POLL_MS = 5_000;
  * nothing to report" render identically. That is the right default for a
  * control (the run strip) that has to disappear outright rather than flash
  * empty while nothing is known.
+ *
+ * `starting` (task-14) rides alongside it under exactly the same default and
+ * the same reasoning: an empty array both before the first fetch lands and
+ * whenever this server has no pending spawn, so the placeholder strip can
+ * never flash on a board that simply hasn't heard back yet.
  */
-export function useOrchestratorRuns(): { runs: OrchestratorRunsPayload['runs']; refresh: () => void } {
+export function useOrchestratorRuns(): {
+  runs: OrchestratorRunsPayload['runs'];
+  starting: OrchestratorRunsPayload['starting'];
+  refresh: () => void;
+} {
   const [runs, setRuns] = useState<OrchestratorRunsPayload['runs']>([]);
+  const [starting, setStarting] = useState<OrchestratorRunsPayload['starting']>([]);
 
   // Flipped false on unmount, checked before every setRuns below. Unlike
   // useAgents/useBoard — each has at most one in-flight fetch at a time,
@@ -75,7 +85,16 @@ export function useOrchestratorRuns(): { runs: OrchestratorRunsPayload['runs']; 
   const refresh = useCallback(() => {
     fetchOrchestratorRuns()
       .then((payload) => {
-        if (mountedRef.current) setRuns(payload.runs);
+        if (!mountedRef.current) return;
+        setRuns(payload.runs);
+        // `payload.starting ?? []`, not `payload.starting`: this hook is the
+        // one place a response from an OLDER server (one built before
+        // task-14, which a dev box can absolutely be serving while a newer
+        // client bundle is open) reaches React state, and `starting` is
+        // typed non-optional. Without the fallback, `.some()` below and the
+        // board's own `.find()` would throw on undefined and take the whole
+        // board down over a field that only ever adds a card.
+        setStarting(payload.starting ?? []);
       })
       // A failed poll (the API hiccups, the box is mid-restart) keeps
       // whatever is already in state, the same fallback `useBoard`'s own
@@ -113,7 +132,16 @@ export function useOrchestratorRuns(): { runs: OrchestratorRunsPayload['runs']; 
   // `run-20260903-112622` left the FIRST time (see run-watchdog.ts's own
   // header for the incident this whole feature traces back to), just moved
   // from "the strip is blank" to "the strip is stale and doesn't say so".
-  const anyLive = runs.some((run) => run.fresh || run.status === 'running');
+  //
+  // task-14 ORs the starting placeholder into this SAME predicate rather
+  // than adding a second one beside it: a board-started run that has not
+  // written its run file yet is live in exactly the sense this poll exists
+  // for — something is happening that this tab has to learn about without a
+  // human touching it. Without it the placeholder would sit on screen until
+  // the next focus event even after the real run landed, which is the same
+  // "screenshot, not a live view" failure the crashed-run widening above
+  // fixed, just at the other end of a run's life.
+  const anyLive = runs.some((run) => run.fresh || run.status === 'running') || starting.length > 0;
 
   /**
    * The point of this hook: an interval that exists only while it has
@@ -147,5 +175,5 @@ export function useOrchestratorRuns(): { runs: OrchestratorRunsPayload['runs']; 
     return () => clearInterval(id);
   }, [anyLive, refresh]);
 
-  return { runs, refresh };
+  return { runs, starting, refresh };
 }

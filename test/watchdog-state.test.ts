@@ -220,7 +220,7 @@ describe('WatchdogStateService', () => {
 
   it('observe does not throw when no armer has been registered', () => {
     const service = new WatchdogStateService();
-    const payload: OrchestratorRunsPayload = { runs: [fakeRun({ status: 'running', fresh: false })] };
+    const payload: OrchestratorRunsPayload = { runs: [fakeRun({ status: 'running', fresh: false })], starting: [] };
     expect(() => service.observe(payload)).not.toThrow();
   });
 
@@ -229,7 +229,7 @@ describe('WatchdogStateService', () => {
     const spy = jest.fn();
     service.setArmer(spy);
 
-    service.observe({ runs: [fakeRun({ status: 'done', fresh: false })] });
+    service.observe({ runs: [fakeRun({ status: 'done', fresh: false })], starting: [] });
 
     expect(spy).not.toHaveBeenCalled();
   });
@@ -239,7 +239,7 @@ describe('WatchdogStateService', () => {
     const spy = jest.fn();
     service.setArmer(spy);
 
-    service.observe({ runs: [fakeRun({ status: 'running', fresh: true })] });
+    service.observe({ runs: [fakeRun({ status: 'running', fresh: true })], starting: [] });
 
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -249,7 +249,7 @@ describe('WatchdogStateService', () => {
     const spy = jest.fn();
     service.setArmer(spy);
 
-    service.observe({ runs: [fakeRun({ status: 'running', fresh: false })] });
+    service.observe({ runs: [fakeRun({ status: 'running', fresh: false })], starting: [] });
 
     expect(spy).toHaveBeenCalledTimes(1);
   });

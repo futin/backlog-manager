@@ -19,6 +19,7 @@ import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunDrawer } from './RunDrawer';
 import { RunStrip } from './RunStrip';
+import { StartingStrip } from './StartingStrip';
 import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
 import type { BacklogItem, OrchestratorRun, RunStage, RunWatchdog, Section } from '../../../../shared/types';
 
@@ -187,7 +188,7 @@ export default function BoardView() {
   // poll rather than up to `POLL_MS` late — see OrchestrateSheet.tsx's own
   // comment on `start` for why the conflict path needs it just as much as
   // the success path does.
-  const { runs, refresh: refreshRuns } = useOrchestratorRuns();
+  const { runs, starting, refresh: refreshRuns } = useOrchestratorRuns();
   /* Separate from `open`: the sheet can be opened from a card (drawer closed)
      or from inside the drawer (drawer stays open behind it), so one piece of
      state cannot serve both. */
@@ -299,6 +300,29 @@ export default function BoardView() {
      future reader of `freshRuns` have to re-derive which half of it is safe
      to trust for THAT purpose. */
   const runningRuns = runs.filter((run) => run.status === 'running');
+
+  /* task-14: the projects this server has spawned a run for that have not
+     written a run file yet, minus any that ALREADY have a live strip on
+     screen. The second half is the whole point of this derivation — without
+     it the board can show two rows for one project.
+
+     The gate is "no `running` run at all for this project", fresh or
+     crashed, and NOT "no fresh run": `RunStrip` returns null only for
+     `!fresh && status !== 'running'`, and the row above maps `runningRuns`,
+     so a crashed run already renders a strip of its own.
+
+     That collision is reachable from the UI rather than theoretical. The
+     server's pre-spawn lock refuses only a FRESH run, so pressing
+     Orchestrate on a project whose last run crashed is allowed: the spawn
+     succeeds and the server marks the project. Worse, the spawned session's
+     own `init` refuses any run file that still says `running`, stale or
+     not, so no new run ever lands, the server's eviction rule 1 never
+     matches, and the entry survives the full RUN_STALE_MS — fifteen minutes
+     of a second card sitting next to the crashed strip claiming a run is
+     starting. This filter is what makes that case render exactly one row. */
+  const startingRuns = starting.filter(
+    (s) => !runningRuns.some((run) => run.project === s.project)
+  );
 
   /* The id→queue-entry lookup, one map per fresh run, keyed by the run's own
      `project` — the registry's absolute path, the exact string
@@ -703,8 +727,17 @@ export default function BoardView() {
           for anything that is neither fresh nor crashed, so this never
           mounts a strip only to have it immediately render null — the set
           of things worth trying just grew from one shape to two. */}
-      {runningRuns.length > 0 && (
+      {(runningRuns.length > 0 || startingRuns.length > 0) && (
         <div className="run-strips">
+          {/* task-14's placeholders first, above the live strips: a run
+              nobody can see yet is the one thing on this stack a person is
+              actively waiting on, and it stops being a placeholder the
+              moment its run file lands. `startingRuns` (above) already
+              excludes any project that has a strip below, so these two maps
+              can never both render a row for the same project. */}
+          {startingRuns.map((s) => (
+            <StartingStrip key={`starting:${s.project}`} starting={s} />
+          ))}
           {runningRuns.map((run) => {
             // Per-run, not hoisted: `projectDispatchGate` is already the
             // one shared implementation (see `orchestrateGate`'s own use of

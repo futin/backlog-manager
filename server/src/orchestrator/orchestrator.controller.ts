@@ -1,6 +1,7 @@
 import { Controller, Get, HttpException, Query } from '@nestjs/common';
 
 import { OrchestratorService } from './orchestrator.service';
+import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 import type { OrchestratorArchivePayload, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
 
@@ -14,7 +15,8 @@ import type { OrchestratorArchivePayload, OrchestratorRun, OrchestratorRunsPaylo
 export class OrchestratorController {
   constructor(
     private readonly orchestrator: OrchestratorService,
-    private readonly watchdogState: WatchdogStateService
+    private readonly watchdogState: WatchdogStateService,
+    private readonly starting: StartingRunsService
   ) {}
 
   @Get('runs')
@@ -35,6 +37,19 @@ export class OrchestratorController {
     // sweeper, so every call this endpoint makes today takes that no-op
     // path.
     this.watchdogState.observe(payload);
+    // task-14's own half of that same split, in the same position and for
+    // the identical reason: `OrchestratorService.runs()` called the PURE
+    // `list()` to build `payload.starting`, and this is the mutation that
+    // actually deletes what that filter hid. Placed after the payload is
+    // finished, so the response is decided by a pure function and the prune
+    // is visibly a separate concern.
+    //
+    // Nothing about the response depends on this line — `list()` re-applies
+    // both eviction rules on every call, so a map nobody ever swept leaks at
+    // most one entry per project and never reports a stale one. That is what
+    // makes AgentsService's own direct `runs()` calls (the RUN_IN_PROGRESS
+    // lock, `resume()`) safe without a sweep of their own.
+    this.starting.sweep(payload.runs);
     return payload;
   }
 
