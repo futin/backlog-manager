@@ -653,6 +653,54 @@ export interface OrchestratorRun {
  */
 export interface OrchestratorRunsPayload {
   runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog }>;
+  /**
+   * Projects this server has spawned an orchestrator session for that have
+   * not yet produced a run file — the starting-run placeholder (task-14).
+   * See `StartingRun` below for what one entry is and how long it lives.
+   *
+   * **A separate top-level array, deliberately NOT a `status: 'starting'`
+   * member of `runs` above.** `OrchestratorRun` is documented (its own
+   * comment) as a verbatim read of a file `orchestrate.mjs` wrote, and
+   * `runs` is iterated by `aggregateRuns` (client/src/lib/run-stats.ts), by
+   * `ArchiveView` and by `RunsView`. A synthetic member of that array would
+   * reach every one of those consumers plus every `RunStage`/`RunStatus`
+   * exhaustiveness site, and each would have to learn to skip a run that
+   * has no queue, no runId and no startedAt — for a card that exists for a
+   * minute or two. A separate field reaches only what opts into reading it,
+   * which today is exactly one component (`StartingStrip`).
+   */
+  starting: StartingRun[];
+}
+
+/**
+ * One "the board asked for a run and this server spawned it, but
+ * `orchestrate.mjs init` has not written `run.json` yet" record (task-14).
+ *
+ * This exists because `GET /api/orchestrator/runs` can only see run files,
+ * and the first one is written in SKILL.md §2 — so the dashboard spawning
+ * `claude -p`, the session booting, the model reading a 1360-line SKILL.md
+ * and the §1 `plan` turn are all invisible, 1–5 minutes of a board that
+ * looks like the click did nothing. It closes the FEEDBACK gap only; boot
+ * latency is unchanged and nothing here makes a run start sooner.
+ *
+ * Held in server memory (`StartingRunsService`), never written to disk and
+ * in particular never into a run file — CLAUDE.md's single-writer invariant
+ * is untouched by this feature, and this is not a cache of anything
+ * `orchestrate.mjs` wrote. Consequences worth stating rather than
+ * discovering: an API restart forgets every entry (the real run is
+ * unaffected — this is a hint about a request this process made, not state
+ * anything depends on), and an entry that never gets a matching run file
+ * disappears after `RUN_STALE_MS` rather than lying forever.
+ */
+export interface StartingRun {
+  /** The registered project's absolute path — the same string
+   *  `OrchestratorRun.project` and `RegistryProject.path` carry, which is
+   *  what lets eviction be a plain string compare against a real run. */
+  project: string;
+  /** ISO timestamp of the moment the spawn RESOLVED (not of the request):
+   *  a spawn that throws never records anything, so this always names an
+   *  instant at which a session really was on its way. */
+  requestedAt: string;
 }
 
 /**

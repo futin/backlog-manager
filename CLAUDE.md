@@ -39,7 +39,11 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   current run and archived `runs/` alike — see Invariants; plus
   `watchdog-state.service.ts`, the in-memory record of what the watchdog
   did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs
-  only, and `watchdog-config.util.ts`, the one file the server writes),
+  only, `starting-runs.service.ts`, the in-memory record of a spawn this
+  server itself requested, surfaced as the payload's separate `starting`
+  array so a board-started run is visible before `init` writes a run file —
+  see Invariants — and `watchdog-config.util.ts`, the one file the server
+  writes),
   `registry/` (read-only view of the registry file), `static.ts` (serves
   `client/dist` only when built).
 - `client/src/` — React SPA: side rail (Board / Runs / Archive / Settings —
@@ -83,8 +87,8 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   the one re-ask a click against a project-visibility block provokes — see
   Invariants),
   and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
-  run is fresh or still `running` — a crashed run keeps the strip polling
-  too).
+  run is fresh or still `running`, or any `starting` entry is present — a
+  crashed run and an unstarted one both keep the strip polling).
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
   `dispatchGate` — see Invariants), `theme.css` (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
@@ -167,6 +171,45 @@ happened.
   the filesystem, 404 for every failure alike. Both stay as fresh-per-request
   and cache-nothing as `runs()` always has — the single-writer rule is
   unchanged; only the one reader's reach grew.
+- **A board-started run is visible before its run file exists, from server
+  memory that is never written to disk.** `GET /api/orchestrator/runs` can
+  only see `run.json`, and `orchestrate.mjs init` writes it in SKILL.md §2 —
+  after the dashboard spawn, the session boot, a 1360-line SKILL.md read and
+  the §1 `plan` turn, i.e. 1–5 minutes in which the board showed nothing and
+  a click that silently failed looked identical to one that worked.
+  `StartingRunsService` closes that FEEDBACK gap only; boot latency is
+  unchanged and nothing here makes a run start sooner. It is a
+  `Map<project, requestedAt>` in the API process, lost on restart on purpose,
+  and adds **no** writer to the run file — the alternative of having the
+  server call `init` itself was rejected because the spawned session would
+  then hit `init` exit `4` (lock held), whose documented answer is "never
+  retry, go to `--resume`". It rides the payload as a **separate top-level
+  `starting` array**, never a `status: 'starting'` member of `runs`: that
+  array is documented as a verbatim read of a file `orchestrate.mjs` wrote
+  and is iterated by `aggregateRuns`, `ArchiveView` and `RunsView`, so a
+  synthetic member would reach all of them and every exhaustiveness site,
+  where a separate field reaches only what opts in. An entry dies when a run
+  in the same payload matches the project AND its `startedAt` parses to at or
+  after `requestedAt` — **`startedAt`, not "a run.json exists"**, since
+  `cmdInit` archives the old file and writes a new one, so a project that has
+  ever run always has one — or after `RUN_STALE_MS`, the app's one freshness
+  number, reused rather than joined by a second. It is `mark`ed from
+  `AgentsController` **after** the awaited spawn, beside `arm()` and for the
+  same layering reason, so a failed spawn leaves no ghost; `runs()` calls the
+  pure `list()` and `OrchestratorController.runs()` calls the mutating
+  `sweep()`, the same pure/mutating seam `annotate()`/`observe()` already
+  keep, both deferring to one shared predicate. Correctness never depends on
+  the sweep — `list` re-applies both rules every call, so an unswept map
+  leaks at most one entry per project and never lies, which is what makes
+  `AgentsService`'s own direct `runs()` calls safe without one. The board
+  renders `StartingStrip` only when the project has **no `running` run at
+  all, fresh or crashed**: the pre-spawn lock refuses only a *fresh* run, so
+  orchestrating a crashed project is allowed, and `init` then refuses that
+  run file forever — the entry would live out the full `RUN_STALE_MS` beside
+  a crashed strip unless the gate excludes it. `POST /api/agents/resume` is
+  deliberately not marked: the run it resumes already reads `running`, so the
+  board is already drawing a crashed strip for it and the screen was never
+  blank.
 - **Item files are read-only to the server and client**; every write goes
   through the skills. Dispatch writes no item files either — the spawned
   session runs the skills, which remain the only writers.

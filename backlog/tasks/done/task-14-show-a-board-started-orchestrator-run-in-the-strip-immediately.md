@@ -3,6 +3,10 @@ id: task-14
 title: Show a board-started orchestrator run in the strip immediately
 created: 2026-09-04
 tags: orchestrator, board, server
+updated: 2026-09-05T17:04:26Z
+started: 2026-09-05T16:46:25Z
+execute-elapsed: 1081
+execute-tokens: 189289
 ---
 
 ## Goal
@@ -145,3 +149,79 @@ implementation is right:
 - `pnpm test` green and `pnpm run typecheck` clean.
 - A board-started run shows a card in the strip within one poll of pressing
   Start, and that card is replaced by the real `RunStrip` once `init` lands.
+
+## Outcome
+
+2026-09-05 — implemented as planned, on `backlog/task-14`. The payload gained a
+separate top-level `starting: StartingRun[]`; `StartingRunsService`
+(`server/src/orchestrator/starting-runs.service.ts`) holds the
+`Map<project, requestedAt>`, split pure/mutating (`list` from
+`OrchestratorService.runs()`, `sweep` from `OrchestratorController.runs()`)
+over one shared `expired()` predicate; `AgentsController.orchestrate()` calls
+`mark(project)` after the awaited spawn, beside `arm()`. The client hook
+surfaces `starting` and ORs it into `anyLive`; `StartingStrip.tsx` renders the
+placeholder, gated in BoardView on "no `running` run at all for this project,
+fresh or crashed".
+
+Two things the plan did not call for and that were added anyway, both narrow:
+`isOrchestratorRunsPayload` (`client/src/lib/agents.ts`) now checks `starting`
+— **absent accepted** (an older server must not blank the strip), present-but-
+wrong rejected, since `BoardView` calls `.filter` on it during render and an
+unguarded throw there unmounts the tree; and the hook defaults `payload.starting
+?? []` for the same older-server case. CLAUDE.md gained the invariant paragraph
+and two layout-line updates.
+
+Both load-bearing rules were red-green verified rather than merely asserted.
+Replacing the eviction predicate with the naive "a run.json exists for this
+project":
+
+```
+    ✕ keeps the entry when the only run for that project started BEFORE it was marked (1 ms)
+    ✕ keeps the entry when a run for that project has an unparseable startedAt
+    ✕ sweep leaves an entry list would have kept (1 ms)
+Tests:       3 failed, 9 passed, 12 total
+--- restored, re-running ---
+Tests:       12 passed, 12 total
+```
+
+Narrowing the BoardView gate to the approved-but-wrong "no fresh run":
+
+```
+    ✕ renders the crashed strip and NOT the placeholder when the run crashed (11 ms)
+Tests:       1 failed, 8 passed, 9 total
+--- restored ---
+Tests:       9 passed, 9 total
+```
+
+Full verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+TYPECHECK_EXIT=0
+
+$ pnpm run build
+dist/assets/BoardView-Bu3kUNrV.js                                   55.15 kB │ gzip:   8.02 kB
+dist/assets/index-D03LL75k.js                                      340.08 kB │ gzip: 103.57 kB
+✓ built in 1.38s
+BUILD_EXIT=0
+
+$ pnpm test
+Test Suites: 69 passed, 69 total
+Tests:       1170 passed, 1170 total
+Snapshots:   0 total
+Time:        51.942 s
+```
+
+Not verified end to end: the third "Done when" bullet (a card appearing within
+one poll of a real board Start, then being replaced once `init` lands) needs an
+actual headless orchestrator run against the dashboard, which this session did
+not start. Its two halves are covered mechanically instead — `records a starting
+entry for the project after a successful spawn` and `filters starting against
+the real runs it just read` (`test/orchestrator-start.test.ts`,
+`test/orchestrator-runs.test.ts`) for the server, and the five BoardView cases
+in `test/starting-strip.test.tsx` for the render.
+
+Note for whoever picks this branch up: the worktree had no `node_modules`, so
+`pnpm install` was run inside it to make jest's `moduleNameMapper` resolve.
+`pnpm-lock.yaml` is unchanged.

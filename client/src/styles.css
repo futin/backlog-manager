@@ -865,6 +865,37 @@ body {
   background: color-mix(in srgb, var(--amber) 8%, var(--strip));
 }
 .run-strip-crashed:hover { border-color: var(--amber) }
+/* task-14's placeholder row (StartingStrip.tsx) — a run this server spawned
+   whose run.json has not been written yet. Dashed border and `cursor:
+   default`, both saying the same thing in the two languages this stack
+   already speaks: the row is provisional, and unlike either RunStrip shape
+   there is nothing here to click (no run file means no drawer to open). No
+   `:hover` rule for the same reason — a hover response on a row that does
+   not respond to a click is a promise the row cannot keep.
+
+   Declared after `.run-strip` above so the dashed border and default cursor
+   win on equal specificity by source order, exactly as `.run-strip-crashed`
+   relies on for its own colours. */
+.run-strip-starting {
+  border-style: dashed;
+  border-color: var(--hairline);
+  cursor: default;
+}
+/* Hollow, never the cyan `.run-strip-dot-live`: cyan means "heartbeating
+   right now", and this run has not reported anything at all yet. A ring
+   rather than a fill is the same "present but not filled in" register the
+   dashed border above carries. */
+.run-strip-dot-starting {
+  background: none;
+  border: 1px solid var(--ink3);
+}
+/* The word itself, in `.run-strip-crashed-label`'s slot and register but in
+   the quiet ink rather than amber: "starting" is not an alert, it is the
+   most ordinary thing a run can be doing. */
+.run-strip-starting-label {
+  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink2);
+}
 /* The open-the-drawer control inside a crashed strip's `<div>` root (fix
    round 1) — everything `.run-strip` itself used to BE, now split into a
    button that only covers the informational body, with Resume as a

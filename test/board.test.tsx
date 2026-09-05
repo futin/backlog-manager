@@ -112,7 +112,7 @@ const AGENTS_STATUS: AgentsStatus = {
  * once the Board/Archive split does.
  */
 type RunPayload = OrchestratorRunsPayload['runs'][number];
-const NO_RUNS: OrchestratorRunsPayload = { runs: [] };
+const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [] };
 
 /** One fresh run for `/abs/alpha` holding exactly `id` at `stage`. Built off
  *  the contract fixture, like every other suite that needs a run payload, so
@@ -171,7 +171,7 @@ function stubItems(items: BacklogItem[], runs: RunPayload[] = []) {
   (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
     const url = String(input);
     const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
+      : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects') ? PROJECTS : { items, errors: [] };
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   });

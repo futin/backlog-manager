@@ -23,7 +23,7 @@ const fixture = rawFixture as OrchestratorRun;
  * parameter nobody would vary.
  */
 function payload(fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, fresh, pastRuns: 0 }] };
+  return { runs: [{ ...fixture, fresh, pastRuns: 0 }], starting: [] };
 }
 
 /**
@@ -35,7 +35,7 @@ function payload(fresh: boolean): OrchestratorRunsPayload {
  * lib/run-watchdog.ts) — the poll must still be running for it.
  */
 function payloadWith(status: OrchestratorRun['status'], fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, status, fresh, pastRuns: 0 }] };
+  return { runs: [{ ...fixture, status, fresh, pastRuns: 0 }], starting: [] };
 }
 
 /** Same shape as test/agents-client.test.ts's own `stub`: every call answers
@@ -447,4 +447,68 @@ describe('useOrchestratorRuns', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  // task-14: a starting entry is `anyLive` too. Without this the placeholder
+  // sits on screen until a window-focus event even after the real run lands
+  // — the same "screenshot, not a live view" failure the crashed case above
+  // fixes, at the other end of a run's life. Asserted through the observable
+  // effect (a second fetch after the timer advances), never by reaching into
+  // the predicate.
+  it('polls while a starting entry is present with no runs at all', async () => {
+    const fetchMock = stubFetch({
+      runs: [],
+      starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }]
+    });
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not poll when both runs and starting are empty', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [] });
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops polling once the starting entry is replaced by a finished run', async () => {
+    // The whole point of the widening: the placeholder's own poll is what
+    // notices the real run landing, and the interval has to stand back down
+    // once that run is over rather than outliving both shapes.
+    const fetchMock = stubFetchSequence([
+      { runs: [], starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }] },
+      payloadWith('done', false)
+    ]);
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('surfaces the starting array to its caller', async () => {
+    const entry = { project: '/abs/alpha', requestedAt: new Date().toISOString() };
+    const { result } = renderHook(() => useOrchestratorRuns());
+    stubFetch({ runs: [], starting: [entry] });
+    result.current.refresh();
+    await flush();
+
+    expect(result.current.starting).toEqual([entry]);
+  });
+
 });

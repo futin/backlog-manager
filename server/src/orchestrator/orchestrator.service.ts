@@ -11,6 +11,7 @@ import type {
   OrchestratorRun,
   OrchestratorRunsPayload
 } from '../../../shared/types';
+import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 
 /**
@@ -236,10 +237,21 @@ function toArchiveEntry(run: OrchestratorRun, current: boolean): OrchestratorArc
  * gets notified stops being a function you can reason about as "just
  * builds the response" — see that method's own comment for the rest of the
  * reasoning.
+ *
+ * `StartingRunsService` (task-14) is injected for the same reason and split
+ * along that same seam: `runs()` calls its PURE `list()` to fill the
+ * payload's `starting` array, and the mutating counterpart (`sweep()`) is
+ * called from the controller afterwards. It is not a cache of anything on
+ * disk — it answers a question no run file can, namely "did this process
+ * spawn a session that has not written its run file yet" — see that
+ * service's own class comment.
  */
 @Injectable()
 export class OrchestratorService {
-  constructor(private readonly watchdogState: WatchdogStateService) {}
+  constructor(
+    private readonly watchdogState: WatchdogStateService,
+    private readonly starting: StartingRunsService
+  ) {}
 
   runs(): OrchestratorRunsPayload {
     const root = orchHome();
@@ -251,7 +263,15 @@ export class OrchestratorService {
       // Not an error: the board's "no runs yet" empty state, the same
       // spirit as RegistryService returning { projects: [] } for a missing
       // registry file rather than a 500.
-      return { runs: [] };
+      //
+      // `starting` still has to be filled here, and this is the MOST
+      // important of the two return paths to get right rather than an
+      // afterthought: a project whose very first orchestrator run is the one
+      // starting right now has no state directory at all yet, so this catch
+      // is the exact shape a first-ever run takes. `[]` as the real runs,
+      // because there genuinely are none — which also means rule 1 cannot
+      // match and only the RUN_STALE_MS rule can retire an entry here.
+      return { runs: [], starting: this.starting.list([]) };
     }
 
     const runs: OrchestratorRunsPayload['runs'] = [];
@@ -293,7 +313,18 @@ export class OrchestratorService {
       runs.push({ ...run, fresh, pastRuns, ...(watchdog ? { watchdog } : {}) });
     }
 
-    return { runs };
+    // `list`, the pure half — this method stays a pure read (see the class
+    // comment). The prune that drops the entries this filter just hid lives
+    // in OrchestratorController.runs(), beside watchdogState.observe(), and
+    // nothing depends on it having run: `list` re-applies both eviction
+    // rules on every call, so an unswept entry is filtered out here anyway.
+    //
+    // Filtered against `runs`, the real runs just read off disk, rather than
+    // against `[]` — that argument IS eviction rule 1, and passing an empty
+    // list would leave every placeholder alive until its RUN_STALE_MS
+    // expiry, i.e. a card claiming a run is still starting for fifteen
+    // minutes after it started.
+    return { runs, starting: this.starting.list(runs) };
   }
 
   /**

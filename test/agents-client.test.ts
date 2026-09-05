@@ -183,11 +183,35 @@ describe('the agents client', () => {
 // a mystery in the hook suite.
 describe('the orchestrator calls', () => {
   it('reads runs from the same-origin API', async () => {
-    const body: OrchestratorRunsPayload = { runs: [{ ...fixture, fresh: true, pastRuns: 0 }] };
+    const body: OrchestratorRunsPayload = { runs: [{ ...fixture, fresh: true, pastRuns: 0 }], starting: [] };
     const calls = stub({ ok: true, body });
     await expect(fetchOrchestratorRuns()).resolves.toEqual(body);
     expect(calls[0].url).toBe('/api/orchestrator/runs');
     expect(calls[0].init).toBeUndefined();
+  });
+
+  /* task-14's own half of that same guard, which is deliberately asymmetric:
+     an ABSENT `starting` is accepted (an older server, built before the
+     field existed, must not blank the whole run strip over a field that only
+     ever adds a card — the hook defaults it to []), while a present-but-
+     wrong one is refused for exactly the reason `fresh` is. BoardView calls
+     `.filter` on this array during render and StartingStrip reads
+     `project`/`requestedAt` out of each entry; an unguarded throw there
+     unmounts the tree to a blank page. */
+  it('accepts a runs body with no starting field at all — an older server', async () => {
+    const body = { runs: [{ ...fixture, fresh: true, pastRuns: 0 }] };
+    stub({ ok: true, body });
+    await expect(fetchOrchestratorRuns()).resolves.toEqual(body);
+  });
+
+  it('rejects a runs body whose starting is not an array', async () => {
+    stub({ ok: true, body: { runs: [], starting: 'nope' } });
+    await expect(fetchOrchestratorRuns()).rejects.toThrow(/malformed/);
+  });
+
+  it('rejects a starting entry missing its requestedAt', async () => {
+    stub({ ok: true, body: { runs: [], starting: [{ project: '/abs/alpha' }] } });
+    await expect(fetchOrchestratorRuns()).rejects.toThrow(/malformed/);
   });
 
   // Fix round 1 (IMPORTANT): fetchOrchestratorRuns now validates the shape

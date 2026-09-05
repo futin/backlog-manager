@@ -333,7 +333,7 @@ const RUN_B = run({
 
 async function renderRunsView(archiveRuns: OrchestratorArchiveRun[], liveRuns: OrchestratorRunsPayload['runs'] = []): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
-  mockRuns.mockResolvedValue({ runs: liveRuns } satisfies OrchestratorRunsPayload);
+  mockRuns.mockResolvedValue({ runs: liveRuns, starting: [] } satisfies OrchestratorRunsPayload);
   const result = render(<RunsView />);
   if (archiveRuns.length === 0 && liveRuns.length === 0) {
     await screen.findByText('no runs yet');
@@ -819,7 +819,7 @@ describe('RunsView', () => {
       };
 
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
-      mockRuns.mockResolvedValue({ runs: [liveAlpha] } satisfies OrchestratorRunsPayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [] } satisfies OrchestratorRunsPayload);
 
       render(<RunsView />);
       // Flushes the mount-time fetches (both hooks') and whatever effects
@@ -848,7 +848,7 @@ describe('RunsView', () => {
         fresh: true,
         pastRuns: 0
       };
-      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta] } satisfies OrchestratorRunsPayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [] } satisfies OrchestratorRunsPayload);
 
       await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
 

@@ -6,6 +6,8 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
+import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
+import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
@@ -104,7 +106,7 @@ describe('GET /api/orchestrator/runs', () => {
 
   it('returns an empty list when the state dir does not exist yet', async () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
-    expect(res.body).toEqual({ runs: [] });
+    expect(res.body).toEqual({ runs: [], starting: [] });
   });
 
   it('reports a fresh running fixture with its queue passed through intact', async () => {
@@ -270,4 +272,68 @@ describe('GET /api/orchestrator/runs', () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect('watchdog' in res.body.runs[0]).toBe(false);
   });
+
+  /* task-14 — the starting-run placeholder's own half of this payload. These
+     cases exist at the endpoint level (rather than only against
+     StartingRunsService, which test/orchestrator-starting.test.ts covers in
+     isolation) because the two things most easily got wrong here are both
+     about wiring, not about the rule: the `readdirSync` catch dropping the
+     field entirely, and the prune ending up in the wrong layer. */
+
+  it('carries a marked project through the missing-state-dir path — the first-ever-run shape', () => {
+    // No state directory at all is exactly what a project's FIRST run looks
+    // like while it is starting, so this is the shape the placeholder must
+    // survive, not an edge case. Called on the service directly: the catch
+    // being tested is inside runs(), and going through HTTP here would also
+    // sweep, which is a different question (see the controller case below).
+    app.get(StartingRunsService).mark('/abs/first-ever');
+
+    expect(app.get(OrchestratorService).runs()).toEqual({
+      runs: [],
+      starting: [{ project: '/abs/first-ever', requestedAt: expect.any(String) }]
+    });
+  });
+
+  it('filters starting against the real runs it just read, not against an empty list', async () => {
+    // A run file whose startedAt is AFTER the mark: the run this spawn asked
+    // for has landed, so the placeholder must be gone from the very payload
+    // that first reports the run. Passing `[]` as the filter's runs would
+    // leave both on screen for the full RUN_STALE_MS.
+    app.get(StartingRunsService).mark(fixture.project);
+    writeRun({ ...fixture, updatedAt: new Date().toISOString(), startedAt: new Date().toISOString() });
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs).toHaveLength(1);
+    expect(res.body.starting).toEqual([]);
+  });
+
+  it('runs() filters but never prunes — the entry is still in the map after two calls', () => {
+    // The pair that fails if `sweep` is ever merged back into `list`.
+    // `runs()` is documented as a pure read (its class comment), and the
+    // watchdog's own mutation was moved out to the controller for exactly
+    // that reason; this is task-14's half of the same seam.
+    const starting = app.get(StartingRunsService);
+    starting.mark(fixture.project);
+    writeRun({ ...fixture, updatedAt: new Date().toISOString(), startedAt: new Date().toISOString() });
+
+    const service = app.get(OrchestratorService);
+    expect(service.runs().starting).toEqual([]);
+    expect(service.runs().starting).toEqual([]);
+    // Asked a question the landed run does not answer: with no runs at all,
+    // a surviving entry proves neither call deleted anything.
+    expect(starting.list([])).toHaveLength(1);
+  });
+
+  it('the controller prunes — one GET empties the map', async () => {
+    // Pins the LAYER, not just the behaviour: same setup as the case above,
+    // driven through HTTP instead of the service.
+    const starting = app.get(StartingRunsService);
+    starting.mark(fixture.project);
+    writeRun({ ...fixture, updatedAt: new Date().toISOString(), startedAt: new Date().toISOString() });
+
+    await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+
+    expect(starting.list([])).toEqual([]);
+  });
+
 });
