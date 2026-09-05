@@ -21,6 +21,12 @@ const config: Config = {
   // spawn a real agent session against the developer's own repo. See that
   // file's own header for the full reasoning.
   setupFiles: ['reflect-metadata', '<rootDir>/test/helpers/env.ts'],
+  // Timezone pin — unconditional, so `TZ=... pnpm test` does NOT reach the
+  // suite. Must be `globalSetup` rather than a `setupFiles` entry: the latter
+  // runs inside the test context, where `process.env` is jest's own copy and
+  // an assignment to `TZ` never reaches Node's timezone cache. See that file's
+  // header for the measurement and for why an inherited TZ is discarded.
+  globalSetup: '<rootDir>/test/helpers/global-setup.ts',
   testTimeout: 30_000,
   // marked ships ESM-only (package.json "type": "module", no cjs entry), but
   // ts-jest compiles this repo's own code to CommonJS, so a plain `require`

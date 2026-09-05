@@ -358,6 +358,18 @@ describe('itemQueueWaitMs', () => {
     const item = { stageAt: { pending: 'garbage', dispatched: at(20_000) } };
     expect(itemQueueWaitMs(item)).toBeNull();
   });
+
+  // Case 6: the `Math.max(0, ...)` clamp, which no case above reaches —
+  // every one of them stamps `pending` at or before the first work stamp, so
+  // the clamp could be deleted today with this suite still green. Same input
+  // class as cases 4 and 5 (a hand-edited or corrupt run file): here the
+  // earliest non-pending arrival PRECEDES `pending`. A negative wait is not a
+  // real fact about the world — nothing waited backwards — so it reads as
+  // zero rather than as a negative duration a caller would go on to format.
+  it('clamps to zero when the earliest non-pending arrival precedes the pending stamp', () => {
+    const item = { stageAt: { pending: at(40_000), dispatched: at(10_000) } };
+    expect(itemQueueWaitMs(item)).toBe(0);
+  });
 });
 
 describe('itemDoneClock', () => {

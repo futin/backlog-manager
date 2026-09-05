@@ -89,6 +89,20 @@ describe('StageTrack', () => {
     nodes.forEach((node, i) => {
       expect(node.querySelector('.run-track-name')).toHaveTextContent(stepperStages('merged')[i]);
     });
+
+    // The grid container's own class, asserted nowhere else in this file. A
+    // typo in that one string silently drops the whole track LAYOUT while
+    // every per-node assertion above keeps passing, because they all resolve
+    // through `data-testid` rather than through the CSS.
+    expect(screen.getByTestId('run-track-bug-1')).toHaveClass('run-track');
+
+    // Every dot is decorative: the sibling `.run-track-name` span carries the
+    // stage word, so a dot with an accessible name of its own would make a
+    // screen reader read each stage twice. `aria-hidden` is what makes that
+    // true, and until now nothing pinned it.
+    const dots = container.querySelectorAll('.run-track-dot');
+    expect(dots).toHaveLength(7);
+    dots.forEach((dot) => expect(dot).toHaveAttribute('aria-hidden', 'true'));
   });
 
   // Regression guard: merge mode must render exactly as it does today. This
@@ -203,6 +217,13 @@ describe('StageTrack', () => {
     const fixingNode = screen.getByTestId('run-track-bug-3-fixing');
     expect(fixingNode.querySelector('.run-track-dot')).toHaveClass('run-track-dot-current');
     expect(fixingNode).toHaveAttribute('data-in', 'live');
+    // The OUT segment of a current node, checked on a current node for the
+    // first time here: `segmentState` only paints a segment `done` once the
+    // node is strictly behind `lastVisited`, so the line LEAVING the node the
+    // run is sitting on is `idle` — nothing has happened past it yet. Asserted
+    // beside `data-in` because the pair is what draws the seam between done
+    // and not-yet, and only half of it was pinned.
+    expect(fixingNode).toHaveAttribute('data-out', 'idle');
     expect(screen.getByTestId('run-track-bug-3-fixing-val')).toHaveTextContent('10m 44s');
 
     for (const stage of ['verifying', 'merging', 'merged']) {
@@ -216,6 +237,10 @@ describe('StageTrack', () => {
     expect(badge).toHaveTextContent('×1');
     expect(badge).toHaveAttribute('title', '1 fix loop');
     expect(badge).toHaveAttribute('aria-label', '1 fix loop');
+    // A roleless <span> maps to `generic`, on which ARIA 1.2 prohibits an
+    // accessible name — so without this role the `aria-label` right above is
+    // not reliably announced. `title` stays the sighted-hover affordance.
+    expect(badge).toHaveAttribute('role', 'img');
   });
 
   it('pluralises the fix-loop badge at 2 and renders no badge at all when fixLoops is 0', () => {
@@ -275,6 +300,33 @@ describe('StageTrack', () => {
     expect(mergedVal).toHaveTextContent('—');
     expect(mergedVal).toHaveClass('run-track-val-none');
     expect(mergedVal).not.toHaveClass('run-track-val-when');
+  });
+
+  // The FILLED counterpart of the parked case right above, and the one node
+  // rung 2 used to get wrong. `bug-7` reaches `-none` through rung 4 because
+  // its terminal node is HOLLOW; this item's terminal node is filled — the
+  // item is `merged` — and rung 2 therefore fires for it. When the stamp will
+  // not parse there is no clock to print, and printing `—` in the `-when`
+  // register would claim `--ink2` ("a real fact, a different one") for a fact
+  // the node does not have. It falls through to rung 4 instead, so `--ink3`
+  // ("nothing was recorded") is the single register every `—` on the track
+  // uses.
+  it('reads the terminal node as — with -none, not -when, when its own stamp will not parse', () => {
+    const stageAt = {
+      pending: at(0), dispatched: at(10_000), inspecting: at(20_000), reviewing: at(30_000),
+      verifying: at(40_000), merging: at(50_000), merged: 'garbage'
+    };
+    render(<StageTrack item={trackItem('bug-9', 'merged', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="merge" />);
+
+    const node = screen.getByTestId('run-track-bug-9-merged');
+    // Filled, not hollow — otherwise this would be the parked case again and
+    // would pass without rung 2 ever being reached.
+    expect(node.querySelector('.run-track-dot')).toHaveClass('run-track-dot-filled');
+
+    const val = screen.getByTestId('run-track-bug-9-merged-val');
+    expect(val).toHaveTextContent('—');
+    expect(val).toHaveClass('run-track-val-none');
+    expect(val).not.toHaveClass('run-track-val-when');
   });
 
   it('reads a hollow — with -none when the current stage\'s own stamp will not parse', () => {
