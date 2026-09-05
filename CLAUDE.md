@@ -516,13 +516,27 @@ happened.
   run is `running`, fresh or crashed alike, and disarms itself the tick it
   finds none. Arms on the reads the board already makes (every
   `GET /api/orchestrator/runs` whose payload holds a `running` run), on a
-  boot-time scan, and on a successful `orchestrate`/`resume` spawn — the
-  last two wired at controller level (`AgentsController`, not
-  `AgentsService`: `WatchdogService` already injects `AgentsService` for
-  `resume()`, so the reverse edge would be a cycle). A run started by
-  typing the trigger with the board never opened for its whole life is
-  never watched; CLAUDE.md already says to start runs from the board, and
-  this is one more reason.
+  boot-time scan, on a successful `orchestrate`/`resume` spawn — the last
+  two wired at controller level (`AgentsController`, not `AgentsService`:
+  `WatchdogService` already injects `AgentsService` for `resume()`, so the
+  reverse edge would be a cycle) — and on every `POST
+  /api/agents/watchdog/config` save, which calls `arm()` and then an
+  unawaited `tick()` regardless of which field changed. That fourth
+  trigger earns its own call, not a footnote on the other three: `arm()`
+  alone is a no-op whenever a timer is already pending, which is exactly
+  the state a watchdog already watching a crashed-but-disabled run sits
+  in, so flipping `enabled` back on in Settings for an already-crashed run
+  would otherwise wait out the already-scheduled tick (up to a full
+  `tickMs`, a minute by default) instead of acting on the save itself. The
+  kicked `tick()` is unawaited so the HTTP response isn't held hostage to
+  a live resume spawn that depends on a third process, the dashboard;
+  firing it unconditionally, even right after `arm()` may have just
+  started an identical chain, is safe rather than a double-sweep because
+  `tick()`'s own in-flight guard returns the already-running sweep's
+  promise instead of starting a second one. A run started by typing the
+  trigger with the board never opened for its whole life is never
+  watched; CLAUDE.md already says to start runs from the board, and this
+  is one more reason.
 - **`useOrchestratorRuns` polls while any run is `running`, fresh or not.**
   Widened from "any run is fresh" — a crashed run's attempt counter, error
   text and the moment it goes fresh again would otherwise wait for a
@@ -539,11 +553,13 @@ happened.
   person wait out a grace window to be told nobody is coming.
 - **Every agents POST is guarded by content-type and origin**
   (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the
-  access control. Named "the two" when only `dispatch` and `orchestrate`
-  spawned anything; `resume` (the watchdog's manual counterpart) made
-  three, `watchdog/config` makes four — the guard itself never changed,
-  only the count of routes it has to cover. Absent `Origin` stays allowed;
-  the guard compares host and port, not scheme.
+  access control (`plan`, `dispatch`, `orchestrate`, `resume` and
+  `watchdog/config` today; `test/agents-origin-guard.test.ts`'s own
+  parametrized route list is where that set actually lives, not a count in
+  this sentence — a hand-maintained "the two … now three … now four"
+  version of this line already went stale once, inside this same branch,
+  the moment a fifth route landed). Absent `Origin` stays allowed; the
+  guard compares host and port, not scheme.
 - **The launch sheet's model/effort pickers seed from Settings, never the
   last launch** (`dispatchDefaultModel` / `dispatchDefaultEffort` in
   `client/src/lib/settings.ts`, clamped against `MODELS`/`EFFORTS`).

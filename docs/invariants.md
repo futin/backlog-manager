@@ -896,14 +896,14 @@ which broke the moment the wording changed, so the lock case alone gets a
 stable, machine-readable answer and the other 409s this endpoint can throw
 deliberately do not, because nothing about them needs to be told apart.
 
-## The two agents POSTs are guarded by content-type and origin
+## Every agents POST is guarded by content-type and origin
 
 (`server/src/agents/origin.guard.ts`) — this is the one place in the app
 where loopback is NOT the access control. Nest registers
 `express.urlencoded` on every app it builds, and
 `application/x-www-form-urlencoded` is a content type a cross-origin HTML
-form posts with no CORS preflight — so before this guard, any page in the
-developer's browser could auto-submit a hidden form at
+form posts with no CORS preflight — so before this guard existed, any page
+in the developer's browser could auto-submit a hidden form at
 `/api/agents/dispatch` and spawn a session with an attacker-written prompt.
 The browser is already inside the loopback boundary; a bind cannot help.
 Both halves are load-bearing: a non-`application/json` content type is
@@ -911,11 +911,28 @@ refused (which forces a preflight there is deliberately no `enableCors` to
 answer), and a present `Origin` that is not this request's own host is
 refused (which is what closes `Origin: null` from a sandboxed iframe).
 Absent `Origin` stays allowed — curl and every server-side test send none.
-`GET /api/agents/status` is deliberately outside it, like every other GET
-here. Known consequence: a TLS-terminating proxy in front of this that
-rewrites `Host` without rewriting `Origin` will 403 — the guard compares
-host and port only, not the scheme, precisely so a `tailscale serve` that
-preserves `Host` keeps working.
+`GET /api/agents/status` and `GET /api/agents/watchdog` are deliberately
+outside it, like every other GET here. Known consequence: a
+TLS-terminating proxy in front of this that rewrites `Host` without
+rewriting `Origin` will 403 — the guard compares host and port only, not
+the scheme, precisely so a `tailscale serve` that preserves `Host` keeps
+working.
+
+`dispatch` is the guard's original, motivating route — the hidden-form
+story above is its own. `plan` carries the identical guard because it
+also reads an arbitrary registered item and reaches the dashboard;
+`orchestrate` and `resume` carry it because each spawns a headless
+session the same way `dispatch` does; `watchdog/config` carries it
+because it writes a settings file that changes this server's own spawn
+cadence, and because a save there can itself kick an immediate spawn
+(see "The watchdog spawns" below) — a cross-origin page must not drive
+either effect. The set has grown from one route to five without the
+guard itself ever changing, which is exactly why this section's own
+heading used to name a count ("the two agents POSTs…") and went stale the
+moment a third route (`resume`) landed, then again when a fourth and
+fifth did: `test/agents-origin-guard.test.ts`'s own parametrized route
+list — `plan`, `dispatch`, `orchestrate`, `resume`, `watchdog/config` — is
+where the actual set lives now, not a number carried in this prose.
 
 ## Launch sheet model/effort pickers seed from Settings, never the last launch
 
@@ -1013,8 +1030,28 @@ Three phases, and no standing interval backs any of them:
   `run.json` reads `status: "running"`, fresh or crashed alike. Arms on a
   boot-time scan, on every `GET /api/orchestrator/runs` whose payload
   already holds a `running` run (the read the board already makes on
-  mount, focus and its own poll), and on a successful `orchestrate`/
-  `resume` spawn.
+  mount, focus and its own poll), on a successful `orchestrate`/`resume`
+  spawn, and on every `POST /api/agents/watchdog/config` save
+  (`agents.controller.ts`'s `watchdogConfig`), which calls `arm()` and
+  then an unawaited `tick()` regardless of which field changed or what it
+  changed to. That fourth trigger is not a restatement of the first
+  three: `arm()` alone is a no-op whenever a timer is already pending
+  (`watchdog.service.ts`'s own guard, `if (this.timer !== null ||
+  this.inFlight !== null) return;`), which is exactly the state a
+  watchdog already watching a crashed-but-disabled run sits in — so an
+  operator flipping `enabled` back on in Settings for an already-crashed
+  run would, without the kick, wait out the already-scheduled next tick
+  (up to a full `tickMs`, a minute by default) before the sweeper acted,
+  rather than see it act on the save itself. `tick()` is fired unawaited
+  not because the spawn it may trigger is unimportant, but because this
+  route's job is to persist a setting and report the state that follows
+  from it — waiting for a live resume spawn, which depends on a third
+  process (the dashboard), would give a settings save the latency profile
+  of a dispatch for no benefit the response body would show. Firing it
+  unconditionally, even immediately after `arm()` may have just started
+  an identical chain, is safe rather than a double-sweep because
+  `tick()`'s own in-flight guard returns the already-running sweep's
+  promise instead of starting a second one.
 - **Idle** — no run file anywhere says `running`; the timer is cleared. A
   run that finishes normally costs one extra tick, not a lifetime of them.
 - **Off** — `BM_AGENTS` is off (nothing on this server can spawn, so there
