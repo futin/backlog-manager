@@ -3,6 +3,9 @@ id: bug-20
 title: Every orchestrator-owned headless session pays a 600s Stop hold at the end of its turn
 created: 2026-09-05
 tags: orchestrate, skills, server, hooks
+updated: 2026-09-05T21:35:20Z
+groom-elapsed: 18
+groom-tokens: 6057
 ---
 
 ## Symptom
@@ -120,18 +123,30 @@ different readers and neither replaces the other. **Do not** collapse them into
 one — and note that bug-18's own fix is the second edit to the same dispatch
 line, so whichever of the two lands first, the other rebases onto its wording.
 
-**2. Skip the hold when the marker is present (machine-local).** In
-`stop-notify.sh`, after the `HEADLESS` determination and before the wait POST:
-a set, non-empty `BM_ORCH_RUN` takes the `notify_fallback` path — report the
-finished turn, exit `0`, do not hold. Not an early `exit 0`: the "task
+**2. Skip the hold when the marker is present — ALREADY DONE, 2026-09-05.** A
+set, non-empty `BM_ORCH_RUN` takes the `notify_fallback` path: report the
+finished turn, exit `0`, do not hold. Not an early `exit 0` — the "task
 finished" push is worth keeping, and `notify_fallback` is the existing function
-that does exactly that.
+that sends it. Placed after the `remoteAnswer` gate and immediately before the
+idle gate, since both answer the same question ("should this session hold?").
 
-This half cannot be tested from this repo and does not ship with the plugin. A
-machine without the hook has no bug to fix — the hold is the hook's behaviour,
-not Claude Code's — which is why half 1 is still worth doing on its own: it is
-what makes the fix *possible* for anyone who has the hook, and it costs one
-assignment on a line that is being rewritten anyway.
+**Do not implement this half again.** `~/.claude/hooks/stop-notify.sh` turned
+out to be a **symlink into the `claude-agents-dashboard` repo**
+(`scripts/stop-notify-hook.sh`) rather than a loose machine-local file, so it
+is tracked source and the change went in there as a normal commit: `65a2ccc` on
+branch `fix/hooks-orchestrator-aware`, alongside the unrelated
+`remote-decision-hook.sh` fix. Verified both ways with `bash -x`: with the
+variable set the trace reaches `notify_fallback` and never touches the idle
+gate or `/api/messages/wait`; without it the pre-change path runs unchanged.
+Correct the `## Affects` line above when implementing half 1 — "machine-local,
+not in this repo" was right about ownership and wrong about the file.
+
+That half is inert until half 1 exists, because nothing sets the variable yet —
+which is exactly what makes half 1 the whole of the remaining work. A machine
+without the hook has no bug to fix at all (the hold is the hook's behaviour,
+not Claude Code's), so half 1 is not merely worth doing on its own: it is what
+makes the fix reachable for anyone who has the hook, and it costs one
+assignment on a line bug-18 is rewriting anyway.
 
 **Test cases** (in `skills/backlog-orchestrate/tools/orchestrate.test.mjs`,
 which already reads `SKILL.md` off disk and already guards this line):

@@ -404,6 +404,18 @@ Recorded here because it is the cause of the investigation, not because this
 repo owns it. Nothing in the plugin depends on it, and the skill behaviour
 above is correct on a machine that has no such hook.
 
+**Landed 2026-09-05, and the file was not where this section said it was.**
+`~/.claude/hooks/remote-decision.sh` is a **symlink into the
+`claude-agents-dashboard` repo** (`scripts/remote-decision-hook.sh`), so it is
+tracked source with a history, not a loose machine-local file — the change got
+a commit there, `65a2ccc` on `fix/hooks-orchestrator-aware`, together with the
+sibling `stop-notify-hook.sh` fix that bug-20 needs. The distinction matters
+for one reason beyond tidiness: a file in a sibling repo can be reviewed and
+reverted, where a hand-edited dotfile cannot, so "outside this repo" was right
+and "machine-local" was wrong. The landed text also keeps rule 1's existing
+`(e.g. the brainstorming skill's session-mode pick)` parenthetical, which the
+block above dropped by accident rather than by decision.
+
 ## 10. Testing
 
 Cases, not code. Every one of these is a behaviour a later reader could

@@ -535,23 +535,24 @@ Under Invariants, in the house voice, covering: the two values and that `park` i
 
 ---
 
-### Task 10: The hook (outside this repo — no commit)
+### Task 10: The hook — **DONE 2026-09-05**, outside this repo
 
 **Spec:** §9.
 
 **Files:**
-- Modify: `~/.claude/hooks/remote-decision.sh` (the heredoc's rule 1)
+- Modified: `claude-agents-dashboard/scripts/remote-decision-hook.sh` (the heredoc's rule 1)
 
-This file is machine-local and is **not** part of this repo. It produces no commit and no test. It is in this plan because it is the cause of the investigation and would otherwise be forgotten once the feature lands.
+**Correction to the spec.** `~/.claude/hooks/remote-decision.sh` is a **symlink into the `claude-agents-dashboard` repo**, not a loose machine-local file — it is tracked source with git history, so the change belongs there and got a commit: `65a2ccc` on branch `fix/hooks-orchestrator-aware`, alongside the sibling `stop-notify-hook.sh` fix bug-20 needs. No orchestrator run can ever perform this task: a run cannot edit a file outside the repo it is draining. It is recorded here because it is the cause of the whole investigation.
 
-- [ ] **Step 1: Replace rule 1 in the heredoc**
+- [x] **Step 1: Replace rule 1 in the heredoc**
 
-Exact replacement text:
+Replacement text as landed. It keeps the existing `(e.g. the brainstorming skill's session-mode pick)` parenthetical, which the spec's quoted version dropped by accident rather than by decision:
 
 ```
 1. Put EVERY decision through the AskUserQuestion tool — approach choices,
-   "should I proceed?", scope calls, and questions a skill tells you to ask.
-   Never end a turn on a prose question WHILE THAT TOOL IS AVAILABLE.
+   "should I proceed?", scope calls, and questions a skill tells you to ask
+   (e.g. the brainstorming skill's session-mode pick). Never end a turn on a
+   prose question WHILE THAT TOOL IS AVAILABLE.
    If AskUserQuestion is not available in this session, this rule does not
    apply: follow whatever the running skill says to do without a channel,
    and if it says nothing, ask in prose rather than deciding silently.
@@ -559,9 +560,9 @@ Exact replacement text:
 
 The final clause is as load-bearing as the conditional: without it, a session that lacks the tool is left with no instruction at all, which is the state that produced the original silent deciding.
 
-- [ ] **Step 2: Verify the hook still runs**
+- [x] **Step 2: Verify the hook still runs**
 
-The heredoc is quoted (`<<'EOF'`), so no shell expansion applies to the new text. Confirm with `bash -n ~/.claude/hooks/remote-decision.sh`, then start any session in an auto permission mode and confirm the banner still appears with the new wording.
+The heredoc is quoted (`<<'EOF'`), so no shell expansion applies to the new text. Verified with `bash -n`, then by piping a `{"permission_mode":"auto"}` payload into the script with `CLAUDECODE=1` and reading the banner back — both gates still pass and rule 1 emits with the new wording. Driving it from a real session's payload beats waiting for the next session to start, and it is the only way to check a hook whose two gates depend on live dashboard state.
 
 ---
 
