@@ -292,12 +292,20 @@ export type StageTotals = Partial<Record<RunStage, number>>;
  *     time the orchestrator was idle or the run was somehow slow. Summing
  *     five items' queue waits into this total would report four run-lengths
  *     of pure nothing on top of whatever the run actually did.
- *   - A span labeled by a TERMINAL stage (`merged`, `parked`, ...) cannot
- *     occur from `itemStageSpans` in the first place — a terminal arrival is
- *     always the LAST recorded stamp, and `itemStageSpans` never opens a
- *     span from the last stamp (see that function's own doc comment) — so
- *     the only place a terminal stage could contribute is the open-span step
- *     below, which is guarded against it explicitly by `isTerminalStage`.
+ *   - A span labeled by a TERMINAL stage (`merged`, `parked`, ...) is
+ *     dropped by that SAME `MACHINE_STAGES.includes(span.stage)` filter,
+ *     which lists only the seven working stages and so excludes every
+ *     terminal one. That filter is the guarantee, and it is therefore NOT
+ *     redundant — a reader who believed the weaker claim below could delete
+ *     it. What is true, but only of files the orchestrator itself writes, is
+ *     that a terminal arrival is the LAST recorded stamp and `itemStageSpans`
+ *     opens no span from the last stamp: an ordering convention, not a
+ *     structural invariant. `parsedArrivals` sorts by TIME and this module's
+ *     whole stated posture (see that function's own comment) is that a
+ *     hand-edited or corrupt file is the input it exists to survive — so a
+ *     terminal stamp that is not chronologically last WILL open a span, and
+ *     the filter is what stops it counting. The open-span step below is
+ *     guarded separately, by `isTerminalStage`.
  *
  * On top of `itemStageSpans`'s own completed spans, this adds an OPEN span
  * for a still-live item — `now` minus (a corrected version of) the current
@@ -482,7 +490,21 @@ export function sumStageTotals(totals: readonly StageTotals[]): StageTotals {
   const sum: StageTotals = {};
   for (const t of totals) {
     for (const stage of Object.keys(t) as RunStage[]) {
-      sum[stage] = (sum[stage] ?? 0) + (t[stage] ?? 0);
+      // `Partial<Record<RunStage, number>>` admits a key that is PRESENT
+      // with an `undefined` value, and `Object.keys` enumerates it like any
+      // other. Folding that in as `0` would materialise exactly the entry
+      // this return type exists to avoid: an absent key means "this stage
+      // was never recorded", a `0` means "measured, and it took no time".
+      // Skip the key before it can contribute — keyed on `undefined` rather
+      // than on falsiness, because an explicit `0` IS a measurement and has
+      // to survive the fold.
+      const ms = t[stage];
+      if (ms === undefined) continue;
+      // The one `??` left is the load-bearing one, and it asks a different
+      // question than the one just removed: this side reads the ACCUMULATOR,
+      // where a missing key means only that no earlier record in this list
+      // has mentioned the stage yet.
+      sum[stage] = (sum[stage] ?? 0) + ms;
     }
   }
   return sum;

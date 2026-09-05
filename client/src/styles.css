@@ -1697,7 +1697,6 @@ body {
   text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
   margin: 14px 0 6px; display: flex; align-items: baseline; gap: 8px;
 }
-.run-detail-heading:first-of-type { margin-top: 0 }
 /* The "queue wait excluded" caveat riding at the heading's right edge
    (Task 6, "Machine time by stage") — `margin-left: auto` inside the
    heading's own flex layout above pushes it there without a second wrapper

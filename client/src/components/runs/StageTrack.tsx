@@ -77,9 +77,21 @@ import type { MergeMode, RunQueueItem } from '../../../../shared/types';
  * ring — the one place on the whole track where "this is happening right
  * now, this instant" is a fact a static reading cannot state. Everywhere
  * else, motion would just be decoration competing with the numbers for
- * attention. `prefers-reduced-motion` (styles.css) already zeroes every
- * animation in the app, these two included, landing both on a plain solid
- * cyan instead.
+ * attention. Under `prefers-reduced-motion` both degrade, but NOT via the
+ * file's blanket `* { animation-duration: .01ms !important }` rule, which
+ * cannot reach either: `*` matches real elements and never the generated
+ * content a `::before` paints, so the sweep is untouched by it, and the
+ * current dot is a real element but the blanket rule floors only the TIMING
+ * properties, which parks the ring on its last keyframe rather than stopping
+ * it. What actually degrades both is the run-track section's own
+ * `@media (prefers-reduced-motion: reduce)` carve-out at the end of that
+ * section in styles.css, whose `animation: none` the blanket rule cannot
+ * contest because it never sets `animation-name`. The sweep lands on a solid
+ * cyan fill; the dot drops to its own resting rule, which sets
+ * `background`/`border-color` and no `box-shadow` — so the pulsing RING
+ * disappears entirely and a plain solid cyan dot remains. (styles.css's
+ * comment on that carve-out explains all of this at length and is the
+ * authoritative copy.)
  *
  * Every attribute selector a node's `data-in`/`data-out` feed into is
  * scoped in the CSS to `.run-track-node[...]` rather than left as a bare
@@ -145,12 +157,17 @@ function segmentState(
  *    bounded now that the clock is clamped at the run's last heartbeat
  *    instead of ticking against the wall clock forever.
  * 2. The run's own success exit (`terminal` — 'merged' or 'branched'), once
- *    visited, reads the finish CLOCK instead of a span — `-when`, a distinct
- *    register from `-none`: this is a known fact ("when it finished"), not
- *    an absent one, and the last arrival on any item has no "next stamp" for
- *    a span to measure it against in the first place. Both success exits
- *    take this branch identically — a branch-mode item finished exactly as
- *    much as a merge-mode one did, just at a different destination.
+ *    visited AND only when its own stamp actually PARSES, reads the finish
+ *    CLOCK instead of a span — `-when`, a distinct register from `-none`:
+ *    this is a known fact ("when it finished"), not an absent one, and the
+ *    last arrival on any item has no "next stamp" for a span to measure it
+ *    against in the first place. Both success exits take this branch
+ *    identically — a branch-mode item finished exactly as much as a
+ *    merge-mode one did, just at a different destination. A visited terminal
+ *    stage whose stamp will NOT parse falls through to (3) and then (4)
+ *    rather than printing `—` in this register: `-when` says "a real fact,
+ *    a different one", which an unreadable stamp is not, so every `—` on the
+ *    track reads `-none` and `--ink2` only ever prints an actual clock time.
  * 3. Any other visited node reads its own span from `itemStageSpans` —
  *    but only when one actually exists FOR that stage. A node can be
  *    visited (filled) and still have no span: the item's own chronologically
@@ -173,7 +190,11 @@ function trackValue(
   }
 
   if (dot.stage === terminal && dot.state !== 'hollow') {
-    return { text: formatClock(item.stageAt[terminal]) ?? '—', modifier: 'when' };
+    const clock = formatClock(item.stageAt[terminal]);
+    // A `null` clock deliberately does NOT return from here — it continues
+    // to the span lookup below and, failing that, to the plain `-none` of
+    // rung 4. See this function's doc comment, rung 2.
+    if (clock !== null) return { text: clock, modifier: 'when' };
   }
 
   const span = spans.find((s) => s.stage === dot.stage);
@@ -223,6 +244,12 @@ export function StageTrack({ item, now, live, mergeModeEffective }: {
               <span
                 className="run-track-loops"
                 data-testid={`run-track-${item.id}-loops`}
+                // A roleless <span> maps to `generic`, and ARIA 1.2 prohibits
+                // an accessible name on `generic` — so the `aria-label` below
+                // is not reliably announced without this. `role="img"` accepts
+                // a name, changes nothing visually or in layout, and leaves
+                // `title` as the sighted-hover affordance it already was.
+                role="img"
                 title={`${item.fixLoops} fix loop${item.fixLoops === 1 ? '' : 's'}`}
                 aria-label={`${item.fixLoops} fix loop${item.fixLoops === 1 ? '' : 's'}`}
               >

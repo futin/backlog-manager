@@ -3,6 +3,10 @@ id: task-15
 title: Sweep the eight residual minor findings from the runs-view redesign reviews
 created: 2026-09-04
 from: ref-2
+updated: 2026-09-05T17:56:39Z
+started: 2026-09-05T17:22:19Z
+execute-elapsed: 2060
+execute-tokens: 156229
 ---
 
 ## Goal
@@ -343,3 +347,151 @@ inconsistency the finding was trying to remove.
 Recorded here rather than silently dropped because the review reports it came
 from are preserved at `.superpowers/sdd/2026-09-02-runs-view-redesign/`, and
 without this note the same wrong claim would be re-derived from them.
+
+## Outcome
+
+2026-09-05. All eight findings addressed — ten edits across four clusters, plus
+one mechanism change the plan itself authorised as a fallback and one plan value
+that turned out to be wrong. `pnpm run typecheck` clean, `pnpm test` green
+(1179/1179, 69 suites), browser check run against the worktree's own client with
+the detail pane measured in the live DOM. **Nothing is committed** —
+`backlog-execute` never commits, so the four-commit split the plan asked for is
+left for whoever stages this.
+
+### What landed
+
+- **1a** `sumStageTotals` now skips a key whose value is `undefined` before it
+  can contribute, with a comment saying which of the two `??`s is load-bearing
+  and why (the accumulator side reads a key this function may not have written
+  yet; the operand side was materialising zero-value noise).
+- **1b** `role="img"` on the `×N` fix-loop badge, `title` and `aria-label`
+  untouched.
+- **1c** rung 2 no longer returns on a `null` clock — it falls through to the
+  span lookup and then to rung 4's `{ text: '—', modifier: 'none' }`. The 1–4
+  precedence comment above `trackValue` was rewritten to state the new
+  condition.
+- **2** `.run-detail-heading:first-of-type { margin-top: 0 }` deleted;
+  `.run-detail-heading` itself untouched.
+- **3a** the `runStageTotals` bullet now names `MACHINE_STAGES.includes(span.stage)`
+  as the guarantee, says explicitly that it is therefore not redundant, and
+  demotes the last-stamp ordering to a convention of orchestrator-written files
+  rather than a structural invariant.
+- **3b** the reduced-motion sentence in `StageTrack.tsx` now points at the
+  run-track section's own `@media` carve-out instead of the blanket rule,
+  explains why the blanket rule cannot reach either animation, and says the ring
+  is *dropped* (no `box-shadow` in the resting rule) rather than frozen.
+  `styles.css`'s own prose was left byte-for-byte alone, as required.
+- **4a** a DST `describe` in `test/run-range.test.ts` (spring-forward week,
+  `inRange` either side of that boundary, fall-back month), with the
+  `America/Santiago`-class omission noted in a comment.
+- **4b** a sixth `itemQueueWaitMs` case pinning the `Math.max(0, ...)` clamp.
+- **4c** the root's `run-track` class, `aria-hidden="true"` on all seven dots,
+  `data-out` on the current node, and `role="img"` on the badge — all added to
+  existing tests.
+- **11** a new `stage-track` case: a *filled* terminal node with an unparseable
+  stamp reads `—` with `run-track-val-none` and not `-when`.
+
+### Two deviations from the plan
+
+**The `TZ` pin had to move to `globalSetup`.** The plan's `beforeAll` approach
+does not work, and this was measured rather than reasoned: jest hands each test
+file a COPY of `process.env`, so `process.env.TZ = 'America/New_York'` lands on
+the copy and never reaches the setter Node uses to invalidate its timezone
+cache. A probe test read the variable back as `America/New_York` while
+`new Date(Date.parse('2026-03-11T12:00:00Z')).getHours()` still answered `13`
+(CET, the host's zone) instead of `8`. The plan named `globalSetup` as the
+fallback for exactly this, so `test/helpers/global-setup.ts` now sets `TZ` when
+it is not already set, wired in from `jest.config.ts`. Consequence, stated
+plainly because it is wider than the plan's own framing: the WHOLE suite now
+runs in one pinned zone rather than the developer's. That removes a class of
+machine-dependent failure rather than adding one, and an explicit `TZ` in the
+environment still wins. Case 10 ("TZ is restored after the block") is therefore
+moot and was dropped — there is no per-block pin left to leak.
+
+**Test case 7's expected value was wrong in the plan, twice over.** It named
+`now = 2026-03-11T16:00:00Z` with `rangeStart('week', now)` equal to
+`Date.parse('2026-03-09T05:00:00Z')`. Two problems: 9 March is inside EDT
+(UTC−4), so Monday local midnight is `04:00Z`, not `05:00Z`; and more
+importantly the week Mon 9 – Sun 15 March contains no transition at all — 8
+March is a *Sunday*, which belongs to the preceding week. The case as written
+would have passed after the arithmetic fix while testing nothing about DST. It
+was rewritten onto `now = 2026-03-08T17:00:00Z` (Sunday, on the transition day
+itself), whose week start is Mon 2 March 00:00 EST = `2026-03-02T05:00:00Z` —
+a walk back across the seam, which is the thing the case exists to pin. Case 8
+was rebuilt on the same `now`, asserting the boundary instant in, one second
+earlier out, and the preceding Saturday out.
+
+### Red-green
+
+The new guards were verified to actually fail against the pre-fix code, not
+merely to pass against the fixed code: reverting 1a, 1b and 1c and re-running
+the two suites turned exactly four assertions red.
+
+```
+$ npx jest test/run-stats.test.ts test/stage-track.test.tsx --runInBand   # with 1a/1b/1c reverted
+Tests:       4 failed, 48 passed, 52 total
+```
+
+Restored, both suites are green again.
+
+### Verification
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+(no output — clean)
+
+$ pnpm test
+$ jest --runInBand
+Test Suites: 69 passed, 69 total
+Tests:       1179 passed, 1179 total
+Snapshots:   0 total
+Time:        59.27 s
+Ran all test suites.
+```
+
+The worktree had no `node_modules` of its own (`pnpm test` failed with
+`sh: jest: command not found`), so `pnpm install` was run in it first.
+
+### Browser check (case 20)
+
+The docker stack on 5177 mounts the MAIN checkout, so it cannot see this
+worktree's client. A Vite dev server was started from this worktree on port
+5188 instead, proxying `/api` to the already-running API on 4322 — the change
+is client-only, so the data source is irrelevant to what is being checked.
+Runs → range **All** → clicked `run-20260904-204912` (done, backlog-manager,
+2/2). Measured in the live DOM rather than eyeballed:
+
+```
+headings: [
+  { text: "Machine time by stage…", marginTop: "14px" },
+  { text: "Items",                  marginTop: "14px" },
+  { text: "Attention",              marginTop: "14px" }
+]
+tracks: [
+  { nodes: 7, rows: 1, vals: [":24m 24s", ":46s", ":8m 50s",
+      "run-track-val-none:—", ":1m 44s", ":26s", "run-track-val-when:23:26"] },
+  { nodes: 7, rows: 1, vals: ["run-track-val-none:—", …,
+      "run-track-val-when:23:38"] }
+]
+```
+
+All three headings keep their 14px top margin — which is itself the proof the
+deleted rule never matched, since the first heading would have read `0px` if it
+had. Each track is seven nodes on a single row (`grid-template-columns:
+140px ×7`, one distinct `getBoundingClientRect().top`). Both merged items still
+read their finish clock in `run-track-val-when`, so rung 2 was narrowed and not
+removed. Screenshot taken and reviewed; kept out of the repo at
+`/tmp/task-15-run-detail-pane.png` rather than committed as a binary.
+
+### One thing left open, deliberately not hidden
+
+Two full-suite runs early in this session each reported `1 failed` — one test,
+one suite — and in both cases the output was piped to `tail` and the identity of
+the failure was lost. It has not reproduced since: **15 consecutive full-suite
+runs, 1179/1179 each**, including 8 run back-to-back specifically to catch it.
+Both failures occurred while the Vite dev server, a Playwright Chromium and the
+docker stack were competing for the machine, which points at a load-sensitive
+timeout in one of the jsdom suites rather than at anything in this diff — but
+that is a hypothesis, not a finding, and it is recorded here rather than
+dropped. Nothing in this change touches timers or async behaviour.

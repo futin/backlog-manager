@@ -476,6 +476,35 @@ describe('sumStageTotals', () => {
       { dispatched: 2_000 }
     ])).toEqual({ dispatched: 3_000, fixing: 500 });
   });
+
+  // A key PRESENT with an `undefined` value is admitted by
+  // `Partial<Record<RunStage, number>>` and enumerated by `Object.keys`, so it
+  // reaches the fold like any other. It must not materialise an entry: an
+  // absent key means "this stage was never recorded", where a `0` means
+  // "measured, and it took no time" — a different fact, and the one the
+  // consuming tiles would print. `toEqual` alone cannot tell the two apart
+  // (it treats `{ merging: undefined }` as `{}`), which is why these assert on
+  // `Object.keys` and `in`.
+  it('drops a key whose value is explicitly undefined rather than folding it in as zero', () => {
+    const result = sumStageTotals([{ merging: undefined }]);
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  it('keeps a real measurement alongside an undefined sibling key', () => {
+    const result = sumStageTotals([{ preflight: 1_000, merging: undefined }]);
+    expect(result.preflight).toBe(1_000);
+    expect(Object.keys(result)).toEqual(['preflight']);
+    expect('merging' in result).toBe(false);
+  });
+
+  // The regression guard on the fix above, and the reason it keys on
+  // `undefined` rather than on falsiness: an explicit `0` IS a measurement and
+  // has to survive the fold as a present key.
+  it('keeps an explicit zero, which is a measurement and not an absence', () => {
+    const result = sumStageTotals([{ merging: 0 }]);
+    expect(result.merging).toBe(0);
+    expect('merging' in result).toBe(true);
+  });
 });
 
 describe('aggregateRuns', () => {
