@@ -1,6 +1,14 @@
 # Starting-run placeholder — make a board-started run visible immediately
 
-**Status:** approved 2026-09-04, not yet implemented.
+**Status:** approved 2026-09-04, not yet implemented. **Re-anchored 2026-09-05
+against `fcf4680`** (the orchestrator-watchdog merge), which landed after this
+plan was approved and moved three things it depends on: `runs()` became an
+explicitly *pure* read with its one side effect relocated to the controller,
+`arm()`/`noteBoardResume()` established the controller as where spawn-success
+side effects live, and `RunStrip` stopped rendering nothing for a stale run.
+The re-anchored passages are marked **▲** in §2–§5 and in the test cases. The
+Problem, the Decisions and §1 are untouched by that merge and stand as
+approved.
 
 ## How to read this plan
 
@@ -63,6 +71,15 @@ Read `CLAUDE.md` before starting. The two that bear directly:
   starting map is not a cache of run files; it is a record of a spawn this
   process itself requested. Keep that distinction visible in the comments, or
   the next reader will think the service grew a cache.
+- **▲ `OrchestratorService.runs()` is a PURE read; its side effects live in
+  the controller.** `fcf4680` made this explicit rather than incidental: the
+  watchdog's one mutation (`WatchdogStateService.observe()`, which can arm the
+  sweeper) is called from `OrchestratorController.runs()` *after* the service
+  has returned a finished payload, while its pure half (`annotate()`) is
+  called inside `runs()` — and the service's class comment now states the rule
+  in those words. §2 and §3 below are split along exactly that seam for the
+  same reason, and it is the single biggest change this re-anchor makes to the
+  approved design.
 
 ## Design
 
@@ -100,13 +117,26 @@ accumulating. (Two rapid POSTs before `init` is an existing race the lock
 check cannot catch, because that check only fires against a *fresh*
 `run.json`. Overwriting neither creates nor worsens it.)
 
-Two methods:
+**▲ Three methods, split pure/mutating** — the approved version had two, with
+`list` evicting on read. That is a side effect inside `runs()`, which
+`fcf4680` has since documented as a pure read (see the invariant above), so
+the prune moves out to the controller and `list` becomes a filter:
 
 - `mark(project: string): void` — record `Date.now()` for that project.
 - `list(realRuns: readonly OrchestratorRun[], now?: number): StartingRun[]` —
-  return the live entries, **evicting on read** (no timers, no background
-  work — the same "compute per request" posture the rest of this service
-  keeps).
+  return the live entries. **Pure: it never touches the map.** This is
+  `annotate()`'s counterpart, called from `OrchestratorService.runs()`.
+- `sweep(realRuns: readonly OrchestratorRun[], now?: number): void` — delete
+  every entry `list` would have filtered out. This is `observe()`'s
+  counterpart, called from `OrchestratorController.runs()` after the payload
+  is built. No timers and no background work; the prune still happens per
+  request, just one layer up.
+
+Both apply the identical rule, and that rule must have ONE implementation — a
+private predicate the two share, not two expressions that agree. Same reason
+`watchdogStoodDown` is one function rather than the strip's expression plus
+the sweeper's: a `list` that could return an entry `sweep` would keep, or the
+reverse, is the bug this shape exists to make impossible.
 
 Eviction fires when either holds:
 
@@ -122,8 +152,14 @@ Eviction fires when either holds:
    comment claims to be the one such number in the app and this must not make
    that false.
 
-Eviction removes the map entry, not just the returned row — a `list` call is
-the only thing that ever prunes the map, and an unpruned map is a leak.
+**▲ Correctness does not depend on the prune.** `list` re-applies both rules
+on every call, so an entry that never gets swept is filtered out of every
+payload anyway — the map can only ever leak memory, never lie. That matters
+because one caller reads without sweeping: `AgentsService` calls
+`this.orchestrator.runs()` directly for the `RUN_IN_PROGRESS` lock and inside
+`resume()`, bypassing the controller entirely. Do not "fix" that by sweeping
+inside `runs()`; the leak is bounded by one entry per project, and the next
+`GET /api/orchestrator/runs` clears it.
 
 Export the provider from `OrchestratorModule`. `AgentsModule` already imports
 that module (for the `RUN_IN_PROGRESS` lock check), so no new wiring.
@@ -131,7 +167,13 @@ that module (for the `RUN_IN_PROGRESS` lock check), so no new wiring.
 ### 3. `server/src/orchestrator/orchestrator.service.ts`
 
 Inject `StartingRunsService`. `runs()` returns
-`{ runs, starting: this.starting.list(runs) }`.
+`{ runs, starting: this.starting.list(runs) }` — `list`, the pure half, for
+the reason §2 gives. **▲ The prune is a separate line in
+`OrchestratorController.runs()`**: call `sweep(payload.runs)` there, beside
+the existing `watchdogState.observe(payload)` call and for the identical
+reason. Read that method's own comment first — it already explains why a
+payload builder that also decides who else gets notified stops being a
+function you can reason about as "just builds the response".
 
 Note the early-return path: the `catch` around `readdirSync(root)` returns
 `{ runs: [] }` today for "no orchestrator directory at all". That path must
@@ -139,28 +181,62 @@ also carry `starting`, and it is the **most important** one to get right — a
 project whose very first run is starting has no orchestrator directory yet, so
 this is the exact shape a first-ever run takes. Pass `[]` as `realRuns` there.
 
-### 4. `server/src/agents/agents.service.ts`
+### 4. `server/src/agents/agents.controller.ts` ▲
 
-In `orchestrate()`, call `mark(project)` **after** `spawn()` resolves, never
-before. A spawn that throws (dashboard down, dashboard 4xx, no session id) must
-leave no ghost card behind.
+**▲ The controller, not the service.** The approved version put `mark()` in
+`AgentsService.orchestrate()`. `fcf4680` made the controller the place a
+successful spawn's side effects live — `this.watchdog.arm()` sits right after
+the awaited `orchestrate()` result, and the `resume` route carries
+`noteBoardResume()` + `arm()` in the same position — with `AgentsController`'s
+own doc comment (RULING R3) giving the reasoning. A third spawn-success side
+effect landing in a different layer would put one pattern in two places.
 
-Use the same `project` string the rest of the method uses — the registry path
-that `OrchestratorRun.project` also carries — so the eviction match in §2 is a
-plain string compare against the same value, with no second identity to keep
-in step.
+Call `mark(project)` after `await this.agents.orchestrate(...)` returns,
+beside `arm()`. **After, never before**: a spawn that throws (dashboard down,
+dashboard 4xx, no session id) throws out of that `await`, so the line is never
+reached and no ghost card is left behind — the controller gets that for free.
+Order relative to `arm()` is immaterial (the sweeper never reads starting
+entries), unlike `noteBoardResume`'s deliberate before-`arm()` placement — say
+so in the comment, so the next reader does not assume a coupling that isn't
+there.
+
+`project` is the controller's own validated local (trimmed, non-empty) — the
+same string it hands the service, and the registry path
+`OrchestratorRun.project` also carries — so the eviction match in §2 stays a
+plain string compare with no second identity to keep in step.
+
+`AgentsController` needs `StartingRunsService` injected. `AgentsModule`
+already imports `OrchestratorModule`, which must export the new provider
+alongside `OrchestratorService` and `WatchdogStateService`; that module's own
+comment already describes exactly this shape for the watchdog's state service.
 
 ### 5. Client
 
 - `client/src/hooks/useOrchestratorRuns.ts` — surface `starting` alongside
-  `runs`. Polling cadence is unchanged: mount, window focus, and 5s while any
-  run is fresh. **A starting entry does not currently trigger the 5s poll**,
-  and it should — otherwise the placeholder sits on screen until the next
-  focus event even after the real run lands. Include "has a starting entry" in
-  whatever predicate decides the fast poll.
-- `client/src/components/board/BoardView.tsx` — when this project has a
-  starting entry and no fresh run, render the placeholder card in the strip
-  slot.
+  `runs`. Cadence is otherwise unchanged: mount, window focus, and 5s while
+  any run is live. **A starting entry does not currently trigger the 5s
+  poll**, and it should — otherwise the placeholder sits on screen until the
+  next focus event even after the real run lands. ▲ That predicate is now
+  `anyLive`, widened by `fcf4680` to `run.fresh || run.status === 'running'`
+  so a crashed run keeps polling; OR the starting entry into that same
+  expression rather than adding a second predicate beside it.
+- `client/src/components/board/BoardView.tsx` — **▲ when this project has a
+  starting entry and no `running` run at all, fresh or crashed.** The approved
+  wording was "no fresh run" and that is now wrong: `RunStrip` returns null
+  only for `!fresh && status !== 'running'`, and BoardView maps `runningRuns`,
+  not `freshRuns`, so a crashed run for this project already renders a crashed
+  strip. Gate on "no run in `runningRuns` for this project" and the
+  placeholder can never appear beside one.
+
+  **▲ That collision is reachable, not theoretical.** The server's pre-spawn
+  lock refuses only a *fresh* run, so Orchestrate over a project whose last
+  run crashed is allowed: the spawn succeeds, `mark()` fires, and the
+  placeholder would sit next to the crashed strip. Worse, the spawned
+  session's own `init` refuses a run file that still says `running`, stale or
+  not, so no new run ever lands and eviction rule 1 never matches — the entry
+  lives out the full `RUN_STALE_MS` before rule 2 clears it. The gate above is
+  what makes that harmless instead of a second card lying for fifteen
+  minutes.
 - A small sibling to `RunStrip` (same visual frame, its own file). Shows the
   project name, "starting…", and elapsed since `requestedAt` via the existing
   `elapsedSince` (`lib/item-age.ts`) that `RunStrip` already reuses. **No
@@ -204,6 +280,15 @@ needs one:
    not be swallowed by the `readdirSync` catch.
 10. `runs()` with real run files present → `starting` reflects `list` run
     against those real runs, not against `[]`.
+10a. **▲ `runs()` does not prune.** Mark a project, land a matching real run,
+    then call `OrchestratorService.runs()` **twice**: `starting` is empty both
+    times (the filter did its job) and the map still holds the entry — assert
+    that through the service, e.g. a `list([])` afterwards still returning it.
+    This is the case that fails if someone re-merges `sweep` back into
+    `list`, and it is the whole point of the §2 split.
+10b. **▲ `OrchestratorController.runs()` prunes.** Same setup through the
+    controller instead → after one GET, a subsequent `list([])` returns
+    empty. Pin the layer, not just the behaviour.
 
 ### Agents
 
@@ -216,22 +301,39 @@ needs one:
 
 ### Client
 
-14. Starting entry present, no fresh run for that project → the placeholder
+14. Starting entry present, no run at all for that project → the placeholder
     card renders, showing the project name and "starting…".
 15. Starting entry present **and** a fresh run for the same project → the real
     `RunStrip` renders and the placeholder does not. (The server should
     already have evicted, but the client must not double-render if it hasn't
     yet — the two arrive in the same payload, so this is a real ordering the
     client can see.)
-16. No starting entry, no fresh run → nothing renders, exactly as today.
+15a. **▲ Starting entry and a CRASHED run for the same project** (`status:
+    'running'`, `fresh: false`) → the crashed `RunStrip` renders and the
+    placeholder does **not**. This is the case the approved "no fresh run"
+    wording got wrong, and unlike case 15 the server will NOT have evicted:
+    `init` refuses a run file that still says `running`, so nothing ever
+    matches eviction rule 1 and the entry survives the full `RUN_STALE_MS`.
+    Reachable from the UI — the pre-spawn lock only refuses a *fresh* run.
+    Without this test the board shows two cards for one project for fifteen
+    minutes.
+16. No starting entry and no `running` run → nothing renders, exactly as
+    today.
 17. The placeholder shows no progress bar and no percentage.
+17a. **▲ A starting entry makes the hook poll.** With `starting` non-empty and
+    `runs` empty, the 5s interval runs; with both empty it does not. Assert
+    through `anyLive`'s observable effect (a second fetch after the timer
+    advances), not by reaching into the predicate.
 
 ### Existing suites
 
 18. Every fixture constructing an `OrchestratorRunsPayload` gains
-    `starting: []`. Expect this to touch several files; a type error is the
-    mechanism that finds them, so run `pnpm run typecheck` early rather than
-    hunting by grep.
+    `starting: []`. **▲ Sixteen test files touch that payload as of
+    `fcf4680`** — the watchdog branch added `watchdog-sweep`,
+    `watchdog-state`, `run-watchdog` and grew `orchestrator-hook` — so this
+    is a bigger sweep than "several files" suggested when the plan was
+    approved. A type error is still the mechanism that finds them: run
+    `pnpm run typecheck` early rather than hunting by grep.
 
 ## Deliberate limits — state these in the code comments, not just here
 
@@ -242,6 +344,13 @@ needs one:
   dashboard where its transcript is, not in a card that lies about it forever.
 - **Boot latency is unchanged.** Anyone reading this later looking for a
   speed-up will not find one here.
+- **▲ `POST /api/agents/resume` is out of scope.** `fcf4680` added a second
+  board control that spawns a headless session with the identical invisible
+  boot gap. It is deliberately not covered: the run it resumes is already
+  `status: 'running'`, so the board is already rendering a crashed strip for
+  it — the screen is not blank, which is the whole condition this feature
+  exists for. Do not `mark()` from the resume path; a placeholder there would
+  collide with the very strip that makes it unnecessary.
 
 ## Done when
 
