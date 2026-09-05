@@ -124,6 +124,7 @@ be the project root — the same string every later command will derive from
 its own cwd. Real output looks like this:
 
 ```
+ready         task-4  Re-ask the dispatch route for a project it cannot see  (runner fix — hoisted)
 ungroomed     bug-2  Settings hue swatch preview lags one theme change behind
     - ## Fix is still the "unknown" placeholder — nobody has diagnosed this yet
 ready         bug-7  Dispatch launch sheet drops the selected model on a fast double-click
@@ -162,16 +163,49 @@ minute:
 
 Only bugs and tasks are ever candidates, bugs first then tasks, oldest first
 within each — ideas, refactors and out-of-scope items have nothing to execute
-by definition. Two optional flags, and they pass through to `init`
+by definition.
+
+**One thing outranks that ordering: a `runner-fix:` frontmatter key.** It
+means *executing this item repairs machinery this run itself depends on* —
+this SKILL.md, `orchestrate.mjs`, the reviewer agent, the dispatch route —
+and any item carrying it is hoisted to the front of the queue, ahead of every
+unmarked item of either section, with `(runner fix — hoisted)` printed on its
+row. The reason is an observed run that queued a permission-flag fix as item
+3 of 5 and had item 1's very first dispatch refused by exactly the flag item 3
+existed to replace. Four things about the key:
+
+- **Presence hoists; only `false` opts out.** `runner-fix: true`,
+  `runner-fix: yes` and a bare `runner-fix:` all hoist. A key that hoisted on
+  `true` alone would let `runner-fix: yes` silently do nothing — a queue in
+  the wrong order with nobody told, which is the failure this marker exists
+  to remove.
+- **It is read at `<base>`, exactly like the gate verdict beside it.** A
+  marker present only in the working copy does not reorder the run, for the
+  same reason a plan present only there does not pass the gate: the worktree
+  this run creates would not contain it. An item absent from `<base>`
+  altogether never hoists either.
+- **The gate is untouched.** An ungroomed marked item hoists too, appears
+  first labelled `ungroomed`, and is skipped at pre-flight like any other —
+  "the thing that would fix your runner is not groomed" is information, at
+  the top where it will be read.
+- **A human writes it**, during grooming. There is no path heuristic: most
+  `skills/` edits do not affect a running orchestrator, and a dispatch-route
+  fix that does need not name any particular path.
+
+Two optional flags, and they pass through to `init`
 identically, which is the point: whatever you previewed is what you get.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD" --ids task-3,bug-7 --max 2
 ```
 
-- **`--ids a,b,c`** restricts the run to those ids **in the order given**,
-  overriding the bugs-then-tasks ordering. An id no open item matches exits
-  `1` naming it — relay that rather than guessing what was meant.
+- **`--ids a,b,c`** restricts the run to those ids **in the order given,
+  after any runner-fix item is hoisted to the front**, overriding the
+  bugs-then-tasks ordering. An id no open item matches exits `1` naming it —
+  relay that rather than guessing what was meant. (The hoist applies here
+  too because the board sends `ids` for any strict subset of its checkbox
+  list: that list is a *selection*, not an ordering — nobody chose the order
+  it arrives in.)
 - **`--max N`** bounds how much of the queue this run will look at at all:
   counting from the top, once `N` ready items have been placed, every item
   after that is dropped from the run — including ones that would have read
@@ -1230,6 +1264,64 @@ before the next item builds on a `main` you may have misread.
 
 Then the next item starts from the updated `main`, so later items build on
 earlier ones.
+
+### After a runner-fix item lands
+
+A merged fix does **not** reach this run on its own. Every skill body and
+every `orchestrate.mjs` invocation here resolves through
+`$CLAUDE_PLUGIN_ROOT` — the *installed plugin copy* — while the merge just
+landed in this repo's `main`. Hoisting the item to the front of the queue
+(§1) buys ordering and nothing else unless the run is told, once, to follow
+the repo's copy for the rest of the run.
+
+So after every merge, print what it brought in:
+
+```bash
+git -C "$PWD" diff --name-only HEAD^1 HEAD
+```
+
+- If those paths include **`skills/backlog-orchestrate/SKILL.md`**, re-read
+  that file from this repo's working tree and follow it for the remainder of
+  the run. The body you were handed came from the installed copy and cannot
+  know about the fix.
+- If they **also** include
+  **`skills/backlog-orchestrate/tools/orchestrate.mjs`**, switch the CLI
+  invocation to the repo copy for the remainder of the run as well.
+
+**Prose and tool move together or not at all.** Following freshly merged
+prose while still invoking the installed tool is the one genuinely dangerous
+combination: the new body may name a flag the old tool refuses. Both come
+from the same checkout, so taking both keeps them consistent with each other,
+and taking neither leaves the run exactly as it was. Never one.
+
+Record the switch on the item that carried the fix, through the note channel
+that already exists rather than a new field:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged --note "runner fix — the remainder of this run follows the repo copy"
+```
+
+(or `branched` under branch mode, same note). **No `attention` entry** —
+`ATTENTION_KINDS` is the closed set of three and means "a human must look at
+this item", which a run that successfully picked up its own fix does not
+warrant.
+
+**A resumed session does not inherit the switch, and has to re-derive it.**
+The switch is session state; nothing on disk carries it. A run that crashes
+after picking up its own fix is continued by a *fresh* headless session —
+the board's Resume control, or the server's watchdog resuming it unattended —
+and that session is handed the **installed** SKILL.md again, exactly as the
+first one was. Both halves revert together, so nothing becomes inconsistent;
+what lapses silently is the whole point of the marker, at the one moment a
+broken runner makes a crash most likely. The note written just above is the
+durable record: a resumed session that finds any queue item staged `merged`
+or `branched` carrying that note takes the switch again before it works the
+rest of the queue. `references/recovery.md` carries that step for `--resume`.
+
+**None of this substitutes for the sync.** A merged runner fix is inert for
+the *next* run either way until this repo's HEAD is pushed and
+`pnpm run plugin:sync` has run — git is the publishing boundary. This
+subsection is a within-run workaround for one run, nothing more.
 
 ## 10. Finishing, resuming, aborting
 

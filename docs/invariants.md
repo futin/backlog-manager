@@ -309,6 +309,89 @@ still passed as explicit values (`stage --worktree <path> --branch <name>`,
 `verify --cwd <dir>`), never implied by cwd, and those flags are deliberately
 exempt from the check: they name a worktree on purpose.
 
+## A `runner-fix:` item is hoisted to the front of the queue, and the marker is read at `<base>`
+
+The failure this exists for is recorded in idea-5: run `run-20260901-112035`
+queued a permission-flag fix as item 3 of 5, and item 1's very first dispatch
+was refused by exactly the flag item 3 existed to replace. The natural
+ordering — bugs then tasks, oldest first — cannot see the one property that
+mattered: *this item repairs the thing that is about to execute the rest of
+the queue*. A human marks it (`runner-fix:` in the item's frontmatter),
+`buildGatedQueue` hoists it, `plan` prints `(runner fix — hoisted)` on the
+row. Marking is a judgement; hoisting is mechanical.
+
+**No path heuristic.** The mechanical option — `## Affects` or `## Fix`
+naming `skills/`, `agents/`, `server/src/agents/` — was considered and
+rejected on its own terms: most `skills/` edits do not affect a running
+orchestrator, and a dispatch-route fix that does affect one need not name any
+of those paths. `backlog-groom`'s SKILL.md asks the question in both verdicts
+that produce an executable item, naming the exact key spelling.
+
+**Presence hoists; only `false` opts out.** `runner-fix: true`,
+`runner-fix: yes` and a bare `runner-fix:` all hoist. A key that hoisted on
+the literal `true` alone would let `runner-fix: yes` silently not hoist —
+a queue in the wrong order with nobody told, which is the exact failure class
+the marker exists to remove. `false` is honoured because "considered, and it
+is not a runner fix" is worth being able to write down; the compare is
+case-insensitive, since `False` is the same YAML boolean and reading it as
+"hoist" would be the mistake in the direction that actually reorders a run.
+
+Two halves a future reader will otherwise undo:
+
+- **The marker is read at `<base>`, not off the working copy.** It is parsed
+  inside `parseItemForGate`, the one function both `readItemForGate` and the
+  `git show <base>:<path>` blob path funnel through, so an item's marker
+  always comes off the same bytes its gate verdict did. Identical rule to the
+  gate's own, for the identical reason: the worktree this run creates from
+  `<base>` would not contain a marker that only exists on disk. The
+  `committed === null` branch (item absent from `<base>`) reports **not
+  hoisted** even though it reads its *title* off the working copy — a title
+  labels a row that prints either way, a marker moves other items.
+- **`--ids` is hoisted too**, deliberately narrowing SKILL.md §1's old "in
+  the order given". `OrchestrateSheet` sends `ids` for any strict subset of
+  its checkbox list, so that list is a *selection*, not an ordering — nobody
+  chose the order it arrives in, and exempting `--ids` would defeat the hoist
+  on the one surface CLAUDE.md tells you to start runs from. It is also what
+  makes a client change unnecessary: no new typed field on `BacklogItem`, no
+  server-side parse, no badge, to restate a decision the tool already makes
+  correctly for every launch path.
+
+The partition is stable and outranks the section ordering rather than sorting
+inside it: hoisted items keep bugs-before-tasks and oldest-first among
+themselves, the rest keep the order they had, and a marked *task* hoists
+ahead of an unmarked bug. It runs before `--max` is counted, which is most of
+the point — a runner fix that was going to fall outside the cap now lands
+inside it. The gate itself is untouched, so an ungroomed marked item hoists
+too and prints first labelled `ungroomed`; "the thing that would fix your
+runner is not groomed" is information, and the top of the list is where it
+gets read.
+
+**Ordering alone would buy nothing.** Every skill body and every
+`orchestrate.mjs` invocation in a run resolves through `$CLAUDE_PLUGIN_ROOT`
+— the installed plugin copy — while the merge lands in this repo's `main`, so
+a merged fix does not reach the run that merged it. SKILL.md §9's "After a
+runner-fix item lands" is the within-run half: print `git diff --name-only
+HEAD^1 HEAD`, and if it names `skills/backlog-orchestrate/SKILL.md`, follow
+the repo's copy for the rest of the run — plus the repo's `orchestrate.mjs`
+if that moved too. **Prose and tool move together or not at all**: following
+freshly merged prose while still invoking the installed tool is the one
+genuinely dangerous combination, because the new body may name a flag the old
+tool refuses.
+
+The switch is session state and nothing on disk carries it, so a crashed run
+resumed by the board or the watchdog is handed the installed copy again.
+Both halves revert together, so nothing becomes *inconsistent* — what lapses,
+silently, is the whole point of the marker, at the one moment a broken runner
+makes a crash most likely. The durable record is the note the run already
+writes (`stage <id> merged --note "runner fix — the remainder of this run
+follows the repo copy"`), and `references/recovery.md`'s `--resume` procedure
+re-derives the switch from it before the first item is taken over. A note
+rather than a new run-file field, and no `attention` entry: `ATTENTION_KINDS`
+stays the closed set of three and means "a human must look at this item",
+which a run that successfully picked up its own fix does not warrant. None of
+this substitutes for the sync — a merged runner fix is inert for the *next*
+run until HEAD is pushed and `pnpm run plugin:sync` has run.
+
 ## `agents/` is part of the plugin's publish surface
 
 Claude Code discovers a plugin's agents by the same directory convention it

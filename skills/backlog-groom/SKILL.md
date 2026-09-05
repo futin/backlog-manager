@@ -243,6 +243,16 @@ called out in the steps themselves — there is exactly one such place, step 1's
    take, and the thing that must be visible. The prefix is what tells the executing
    session which tool the check runs on; a check phrased for a human ("visual
    inspection", "verify manually") is a check that session skips.
+
+   **If executing this task would change `backlog-orchestrate`'s SKILL.md, its CLI
+   (`skills/backlog-orchestrate/tools/orchestrate.mjs`), the reviewer agent
+   (`agents/backlog-reviewer.md`) or the dispatch route (`server/src/agents/`), add
+   `runner-fix: true` to the new task's frontmatter** — that exact key spelling,
+   hyphenated. The orchestrator hoists a marked item to the front of its queue, so the
+   rest of the run is not executed by the version this item exists to repair. It is a
+   judgement, which is why it is asked here and not derived from paths: most `skills/`
+   edits do not affect a running orchestrator, and a dispatch-route fix that does need
+   not name any of those paths.
 5. Only now edit the idea: add a `promoted-to: task-N` line inside its existing
    frontmatter block, before the closing `---`, leaving every other line untouched.
 6. Release the marker on the idea — not on the task step 3 just created; nobody has
@@ -282,6 +292,16 @@ task carrying `from: idea-N` already exists before creating a second one.
    take, and the expected result. Same reason a task's `## Test cases` carries one — the
    headless session that executes this fix can drive that browser, and it only will if
    the fix names the tool.
+
+   **If fixing this bug would change `backlog-orchestrate`'s SKILL.md, its CLI
+   (`skills/backlog-orchestrate/tools/orchestrate.mjs`), the reviewer agent
+   (`agents/backlog-reviewer.md`) or the dispatch route (`server/src/agents/`), add
+   `runner-fix: true` to the bug's own frontmatter** — that exact key spelling,
+   hyphenated. The orchestrator hoists a marked item to the front of its queue, so the
+   rest of the run is not executed by the version this bug exists to repair. It is a
+   judgement, which is why it is asked here and not derived from paths: most `skills/`
+   edits do not affect a running orchestrator, and a dispatch-route fix that does need
+   not name any of those paths.
 3. Release the marker:
 
    ```bash
