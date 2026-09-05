@@ -620,7 +620,7 @@ worse than no field.
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p "/backlog-execute <id>" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -633,6 +633,50 @@ the session outlive the single tool call that started it. stdout is the
 stream-json transcript and goes to the `.jsonl` that `watch` reads; stderr
 goes to its own file, so a warning printed by the CLI never lands in the
 middle of the transcript.
+
+**The prompt is spent on more than the trigger, and every word of the marker
+is load-bearing.** The prompt is the *entire* channel from this run to that
+session — after it the two processes share nothing but a directory — and
+everything else the session could infer is genuinely ambiguous: a worktree cwd
+is also what a human makes by hand, and a `backlog/<id>` branch is also what a
+*previous* run leaves behind for a hand-merge (§3 has a probe for exactly that
+state). Left as the bare trigger, a dispatched session reads as a
+hand-started one, and the one that was messaged through the dashboard mid-run
+answered the user instead of leaving the problem for this run to find — three
+message round-trips with the whole queue idle behind it. Six constraints on
+that string:
+
+- **The id stays the first token after the trigger**, marker after it.
+  `backlog-execute`'s "Pick an item" reads the trigger's own words for an id.
+  Putting anything between the two is how this line teaches it to guess.
+- **One line, and no apostrophes.** The dispatch is `nohup sh -c '…'` — a
+  single-quoted body with the prompt double-quoted inside it. One apostrophe
+  closes the outer quote and the whole dispatch becomes a syntax error, on the
+  one line whose failure mode is "every item in the queue parks". Write
+  "you cannot", never the contraction.
+- **The marker opens with `[orchestrator-run`,** a fixed, greppable token.
+  `backlog-execute`'s own section names that exact literal, and a test reads it
+  off this line and asserts it into that file, so the two cannot drift into two
+  markers that merely look alike.
+- **`<runId>`, `<n> of <m>` and the branch are substituted**, the standing rule
+  is fixed text. Fill the first three from this run and this item's position in
+  the queue; change none of the words after the colon.
+- **The prompt, not `--append-system-prompt` and not an env var.** Both reach
+  the model; neither reaches the dashboard drawer. The prompt is the only
+  string the model and the *human* reading that conversation both see, and the
+  human not knowing a run owns the work is the other half of the same defect.
+  This rules an env var out for *this* marker and for nothing else — a marker
+  whose reader is a hook belongs in the environment, because a hook cannot read
+  a prompt. The channel follows the reader.
+- **Merge mode is deliberately left out.** Nothing the session may do differs
+  between `merge` and `branch` — it never merges either way — and a marker
+  naming facts the session cannot act on trains it to skim the ones it must.
+
+The marker also arrives in that session as `$2`…`$N`, substituted into
+`backlog-execute`'s SKILL.md before it is read. That is safe only because no
+fenced block under `skills/` reads a positional parameter — the bug-9 guard,
+which this line makes load-bearing for a second, unrelated reason.
+
 
 **`--verbose` is required, not a contingency.** With `--print`, the installed
 CLI refuses the stream-json format without it, and in `-p` mode `--verbose` is

@@ -2581,6 +2581,13 @@ test('no fenced block under skills/ reads a positional parameter', () => {
   // Fenced blocks only. Prose has to be able to say `$1` in order to explain
   // why it must not be used — the same allowance the flag guard above makes,
   // for the same reason.
+  //
+  // Do not retire this as a one-bug relic: bug-18 made it load-bearing a
+  // second time, for an unrelated reason. The orchestrator's dispatch prompt
+  // now carries a run marker after the id, so those words reach the dispatched
+  // session as `$2`..`$N` and are substituted into backlog-execute/SKILL.md
+  // before it is read. That substitution is only safe while no fenced block
+  // under skills/ reads a positional — i.e. while this test passes.
   const offenders = []
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -3005,5 +3012,100 @@ test('every file under references/ is named by the body', () => {
   assert.ok(files.length > 0, 'references/ has no .md files')
   for (const f of files) {
     assert.ok(text.includes(`references/${f}`), `references/${f} is never named in SKILL.md`)
+  }
+})
+
+// --- bug-18: the dispatch prompt has to say the session is inside a run ------
+// A dispatched execute session had nothing in its context saying so: its
+// prompt was the bare trigger, its cwd a worktree (which a human also makes
+// by hand) and its branch `backlog/<id>` (which a *previous* run also leaves
+// behind for a hand-merge). So when the user messaged it through the
+// dashboard — a channel the run never gave it and did not know it had — it
+// answered the user, and the queue sat idle for three round-trips.
+//
+// The prompt is the only string both the model and the human reading the
+// dashboard drawer see, which is why the fix lives there rather than in
+// `--append-system-prompt` or an env var. These cases pin the shape of that
+// string and the coupling between the two SKILL.md files that read it.
+
+const EXECUTE_SKILL_MD = path.join(SKILLS_ROOT, 'backlog-execute', 'SKILL.md')
+
+// One constant, both halves. The marker is worthless if orchestrate emits one
+// token and execute recognises a different one that merely reads alike — the
+// same posture test/watchdog-coupling.ts takes for the board and the sweeper.
+const RUN_MARKER_TOKEN = '[orchestrator-run'
+
+test('exactly one dispatch line carries the run marker, and it is the fresh dispatch', () => {
+  // The --resume retry deliberately does NOT repeat the marker: a resumed
+  // session still carries its original prompt, so a second copy would be
+  // noise in the one string a human reads in the dashboard drawer.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
+  const marked = dispatchLines.filter((l) => l.includes(RUN_MARKER_TOKEN))
+  assert.equal(marked.length, 1, `expected exactly 1 dispatch line carrying ${RUN_MARKER_TOKEN}, found ${marked.length}`)
+  assert.ok(!marked[0].includes('--resume'), 'the run marker landed on the --resume retry line rather than the fresh dispatch')
+})
+
+test('the marker follows the id rather than preceding it', () => {
+  // backlog-execute's "Pick an item" reads the trigger's own words for an id.
+  // Putting the marker between the trigger and the id is how this fix would
+  // teach that section to guess.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const line = text.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN))
+  assert.ok(line, 'no dispatch line carries the run marker at all')
+  const trigger = line.indexOf('/backlog-execute')
+  const marker = line.indexOf(RUN_MARKER_TOKEN)
+  assert.ok(trigger !== -1, 'the marked dispatch line no longer invokes /backlog-execute')
+  assert.ok(marker > trigger, 'the marker sits before the trigger')
+  // `<id>` is the placeholder the section substitutes; it must still be the
+  // first token after the trigger, i.e. before the marker opens.
+  const id = line.indexOf('<id>', trigger)
+  assert.ok(id !== -1 && id < marker, 'the item id no longer sits between the trigger and the marker')
+})
+
+test('no dispatch line contains an apostrophe', () => {
+  // The dispatch is `nohup sh -c '…'`: a single-quoted body with the prompt
+  // double-quoted inside it. One apostrophe closes the outer quote and the
+  // whole line becomes a syntax error — on the one line whose failure mode is
+  // "every item in the queue parks". Asserted on the line, never on prose
+  // promising the line is clean.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
+  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`)
+  for (const line of dispatchLines) {
+    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"))
+    assert.ok(!body.includes("'"), `an apostrophe is back inside the single-quoted dispatch body: ${line}`)
+  }
+})
+
+test('the marker orchestrate emits is the one backlog-execute recognises', () => {
+  // Read out of orchestrate's own dispatch line rather than hard-coded twice,
+  // so the two files cannot drift into two markers that look alike.
+  const orchestrate = fs.readFileSync(SKILL_MD, 'utf8')
+  const execute = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  const line = orchestrate.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN))
+  assert.ok(line, 'no dispatch line carries the run marker at all')
+  assert.ok(line.includes(RUN_MARKER_TOKEN), `the dispatch line no longer opens its marker with ${RUN_MARKER_TOKEN}`)
+  assert.ok(
+    execute.includes(RUN_MARKER_TOKEN),
+    `backlog-execute/SKILL.md does not name ${RUN_MARKER_TOKEN}, so a dispatched session cannot recognise the marker it is handed`,
+  )
+})
+
+test('backlog-execute keeps the rules a dispatched session runs on', () => {
+  // One assertion per rule, naming the rule rather than the string, so a
+  // failure says which rule was compressed away. This section is injected on
+  // every turn of every execute session, so it is under constant pressure to
+  // shrink — and the rule most likely to go is the one whose absence produced
+  // the bug.
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  const RULES = [
+    ['Never escalate to the user', 'a dispatched session never escalates to the user'],
+    ['not an instruction', 'a user message that arrives mid-run is not an instruction'],
+    ['orchestrate.mjs', 'orchestrate.mjs is unreachable from inside a worktree, so the session cannot park itself'],
+    ['final assistant message', 'the escalation channel is the final assistant message and the item Outcome'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`)
   }
 })

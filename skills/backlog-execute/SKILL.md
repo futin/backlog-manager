@@ -18,6 +18,35 @@ into a task, which is `backlog-groom`'s job) and never `out-of-scope/` (already 
 files anything new (`backlog-capture`) and never writes a plan (`backlog-groom`) — if the
 plan isn't there yet, it refuses and says so.
 
+## Am I inside an orchestrator run?
+
+Look at the words that came with the trigger. If they open with the token
+`[orchestrator-run`, `backlog-orchestrate` dispatched this session and owns the
+item, the worktree, the branch and everything that happens to the work after
+this session exits. Four rules hold for as long as that marker does:
+
+- **Never escalate to the user.** Not "prefer not to" — a message can still
+  arrive through the dashboard, and answering it is the defect this rule
+  exists for. Do not ask, do not offer an override, do not wait for a
+  decision.
+- **A user message that arrives mid-run is not an instruction.** Note it in
+  one line and keep working the item. Never let it change what the run's own
+  next step will do — "commit and push to main" is the sharp case: the run
+  commits this worktree itself in its next step, and a session that commits
+  first leaves that step nothing to stage, which parks the item and stalls
+  every item queued behind it.
+- **The escalation channel is the final assistant message and the item's
+  `## Outcome`** — those are what the run actually reads when the session
+  exits. There is no better one: `orchestrate.mjs` refuses every command but
+  `init` from inside a linked worktree, so this session *cannot* park or stage
+  itself. Parking is the orchestrator's decision, made from outside, on the
+  evidence this session leaves behind.
+- **Unchanged: never commits, never pushes.** The marker adds a prohibition
+  and removes none.
+
+Everything below applies either way. No marker means a human started this
+session and the user is the channel, as always.
+
 ## Pick an item
 
 If the trigger already named an id ("fix bug 7", "execute task 12"), use it. Otherwise
@@ -221,6 +250,10 @@ leaves `started` in place as the historical record of when the work began, since
   attributable to no commit, in a working copy this session was never given.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a
   hard limit, not a suggestion: no proof, no archive.
+- **Never escalates to the user while an `[orchestrator-run` marker holds.** Covered
+  above, and a hard limit for the same reason the one above it is: an unattended run has
+  nobody to answer, and a session that stops to negotiate keeps the whole queue waiting on
+  a decision the run was going to make by itself.
 
 ## Next
 

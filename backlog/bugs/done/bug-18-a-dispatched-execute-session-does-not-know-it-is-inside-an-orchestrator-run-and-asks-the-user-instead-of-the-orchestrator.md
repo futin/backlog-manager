@@ -3,9 +3,12 @@ id: bug-18
 title: A dispatched execute session does not know it is inside an orchestrator run, and asks the user instead of the orchestrator
 created: 2026-09-05
 tags: orchestrate, execute, skills, board
-updated: 2026-09-05T21:27:00Z
+updated: 2026-09-05T21:50:09Z
 groom-elapsed: 195
 groom-tokens: 32612
+started: 2026-09-05T21:38:26Z
+execute-elapsed: 703
+execute-tokens: 61010
 ---
 
 ## Symptom
@@ -224,3 +227,101 @@ dashboard link. That is deliberately **not** in this fix: it is board→session
 *navigation*, and the person in the symptom had already found the session. What
 they lacked was a marker inside it, which edit 1 puts there. A session link on
 the run drawer is a real convenience and belongs in its own captured item.
+
+## Outcome
+
+2026-09-05 — Fixed as groomed: two edits under `skills/`, no client and no
+server change.
+
+**1. `skills/backlog-orchestrate/SKILL.md` §4** — the dispatch prompt now
+carries the run marker after the id:
+
+```
+/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]
+```
+
+All six constraints are written into the section as the reasons they are: id
+first, one line and no apostrophes (with "you cannot" spelled out rather than
+contracted, which is what keeps the outer single quote closed), the fixed
+`[orchestrator-run` token, which fields are substituted and which words are
+fixed, prompt-not-env-var-not-`--append-system-prompt` (with the "channel
+follows the reader" ruling that leaves bug-20's env marker untouched), and
+merge mode deliberately omitted. The `--resume` retry line is unchanged and
+carries no marker. A closing paragraph records that the marker reaches the
+dispatched session as `$2`…`$N`, which makes the bug-9 positional guard
+load-bearing a second time — said again in that test's own comment so it is
+not retired as a one-bug relic.
+
+**2. `skills/backlog-execute/SKILL.md`** — new 30-line section "Am I inside an
+orchestrator run?" ahead of Pick an item (soft target was ~25; a rule
+compressed out is worse than a long section), plus one new hard limit. It
+recognises the token, then: never escalate to the user, a user message
+mid-run is not an instruction, the escalation channel is the final assistant
+message and the item's `## Outcome` — with the reason there is no better one,
+that `orchestrate.mjs` refuses every command but `init` from inside a linked
+worktree — and never commits, never pushes, restated as unchanged.
+
+**Guards** — four new cases in `orchestrate.test.mjs` (which now also reads
+`backlog-execute/SKILL.md`), one shared `RUN_MARKER_TOKEN` constant driving
+both halves of the coupling case. All four were watched failing before either
+SKILL.md was touched:
+
+```
+not ok 143 - exactly one dispatch line carries the run marker, and it is the fresh dispatch
+not ok 144 - the marker follows the id rather than preceding it
+not ok 146 - the marker orchestrate emits is the one backlog-execute recognises
+not ok 147 - backlog-execute keeps the rules a dispatched session runs on
+# tests 147
+# pass 143
+# fail 4
+```
+
+Case 145 (no apostrophe inside either single-quoted dispatch body) passed from
+the start by design — it guards a line that was already clean and had to stay
+that way through this edit.
+
+### Verification
+
+`pnpm run test:skills` — 360/360, including the pre-existing
+`--permission-mode auto` dispatch-line case and the bug-9 positional sweep:
+
+```
+1..360
+# tests 360
+# pass 360
+# fail 0
+# duration_ms 59694.627125
+```
+
+`pnpm test` (jest):
+
+```
+Test Suites: 69 passed, 69 total
+Tests:       1179 passed, 1179 total
+Time:        94.078 s
+```
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+TYPECHECK_EXIT=0
+```
+
+The quoting constraint proved on the real line rather than argued: placeholders
+substituted as a run would substitute them, then handed to `sh -n`, then run
+with `claude` swapped for `printf` to show the prompt arrives as one argument.
+
+```
+--- sh -n parse ---
+PARSE OK (exit 0)
+--- what the prompt argument actually becomes ---
+PROMPT=[/backlog-execute bug-18 [orchestrator-run run-20260905-113818 item 2 of 5 branch backlog/bug-18: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]]
+exit=0
+```
+
+Out of scope as groomed: the `RunStrip.tsx` / `ItemCard.tsx` board→session
+link. Still open for whoever lands bug-20 second: that item rewrites this same
+dispatch line, and its env assignment goes before `exec claude` while this
+marker sits after the id inside the prompt — read the merged wording, not the
+wording quoted in bug-20.
