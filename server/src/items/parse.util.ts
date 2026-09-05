@@ -114,13 +114,17 @@ export function clampPhase(value: string | undefined): '' | 'groom' | 'execute' 
 }
 
 /**
- * `groom-elapsed` / `execute-elapsed` are whole seconds the CLI accumulates
- * on every `stop`. Only a plain string of digits is trusted — no sign, no
- * decimal point, no exponent — so `parseInt` is never given the chance to
- * silently truncate `"1.5"` to `1` or turn `""`/`"abc"` into `NaN`: anything
- * that isn't `/^\d+$/` reads as `0`, the same as the key being absent. The
- * CLI itself refuses to write a bad value; this only matters for a file
- * edited by hand.
+ * The four accumulating counters the CLI stamps on every billable `stop`, two
+ * per activity: `groom-elapsed` / `execute-elapsed` in whole seconds, and
+ * `groom-tokens` / `execute-tokens` in tokens. One parser rather than two
+ * because the clamp is the only thing either needs and it is identical — a
+ * second copy would be a second place for the refusal rule to drift, and the
+ * token keys are unsigned integers for exactly the same reason the seconds
+ * are. Only a plain string of digits is trusted — no sign, no decimal point,
+ * no exponent — so `parseInt` is never given the chance to silently truncate
+ * `"1.5"` to `1` or turn `""`/`"abc"` into `NaN`: anything that isn't
+ * `/^\d+$/` reads as `0`, the same as the key being absent. The CLI itself
+ * refuses to write a bad value; this only matters for a file edited by hand.
  */
 export function parseElapsed(value: string | undefined): number {
   return value !== undefined && /^\d+$/.test(value) ? parseInt(value, 10) : 0;

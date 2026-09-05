@@ -528,10 +528,26 @@ transcript matching it, a file that cannot be read — writes **no key**, not
 (the stop still exits 0, and the seconds it did bill are unaffected) but it is
 never silent either — one stderr line names what was missing, the same non-fatal
 note pattern `registryRoot` uses for a registration it could not make. That note
-exists for a specific reason: every measurement behind this feature came from a
-headless `sdk-cli` session, and whether an interactive session exports
-`CLAUDE_CODE_SESSION_ID` has not been observed, so the first interactive `stop`
-either records a number or says out loud why it could not.
+was built because every measurement behind this feature came from a headless
+`sdk-cli` session, so the first non-headless `stop` would either record a number
+or say out loud why it could not.
+
+It recorded a number. Measured 2026-09-05 in a session whose
+`CLAUDE_CODE_ENTRYPOINT` is `claude-desktop`, through the installed plugin copy
+rather than the working tree: a `start --as groom` / `stop` pair on task-11
+billed `groom-elapsed: 43` and `groom-tokens: 6527`, with no stderr note. So
+`CLAUDE_CODE_SESSION_ID` is not `-p`-only, and the mid-session transcript flush
+the whole mechanism rests on holds outside a headless run too. An independent
+counter over that same 43-second window found 6 records under 3 request ids:
+deduped `6527` — exactly what the CLI wrote — against a naive per-record sum of
+`13054` and a `cache_read_input_tokens` of `676452`. That last figure restates
+the cache-read exclusion for a desktop session carrying a large resident
+context, and it runs the same way as the original 9:1 headless measurement only
+harder — roughly 104x the billed number. The exclusion matters more in an
+interactive session, not less. The terminal TUI (`CLAUDE_CODE_ENTRYPOINT=cli`)
+is still unmeasured; the entrypoint is set by the harness rather than the skill,
+and the stderr note remains the answer for any environment that turns out to
+lack the variable.
 
 The `started:` value is a second-precision UTC timestamp
 (`2026-08-28T14:03:07Z`), not a date, because the useful resolution for "is
