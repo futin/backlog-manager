@@ -3,8 +3,9 @@ id: bug-16
 title: The toolbar Orchestrate control swallows a click behind a stale project-visibility block
 created: 2026-09-03
 tags: board, dispatch, agents, orchestrate
-updated: 2026-09-04T21:01:02Z
-groom-elapsed: 244
+updated: 2026-09-05T11:36:18Z
+groom-elapsed: 302
+groom-tokens: 12427
 ---
 
 ## Symptom
@@ -40,9 +41,9 @@ something that is already fine.
 
 ## Affects
 
-- `client/src/components/board/BoardView.tsx:417-422` — `orchestrateGate`,
+- `client/src/components/board/BoardView.tsx:442-447` — `orchestrateGate`,
   `showOrchestrate`, `orchestrateBlockedReason`
-- `client/src/components/board/BoardView.tsx:599-605` — `onClick`'s
+- `client/src/components/board/BoardView.tsx:624-630` — `onClick`'s
   `if (orchestrateBlockedReason !== null) return;`, whose own comment cites
   "DispatchButton's identical guard" — the guard that no longer is
 - `client/src/hooks/useAgents.ts` — `reload` already resolves to the fetched
@@ -56,15 +57,15 @@ degree that makes this control *worse*, not merely equal.
 
 The mechanism, end to end. `BoardView` holds `agents` from `useAgents()`, which
 refetches on mount and window focus alone (`useAgents.ts`; the cadence is
-deliberate — what changes the answer happens outside the tab). Line 417 derives
+deliberate — what changes the answer happens outside the tab). Line 442 derives
 `orchestrateGate = projectDispatchGate(agents, projectValue)`, whose second rung
 returns `{ control: 'disabled', reason: 'the dashboard does not list <path> …' }`
 straight from the `projectPaths` array in whatever status the tab last fetched.
-`orchestrateBlockedReason` (line 421) is that reason, and the button's own
-`onClick` (line 604) returns early on it. A window that never loses focus has no
+`orchestrateBlockedReason` (line 447) is that reason, and the button's own
+`onClick` (line 629) returns early on it. A window that never loses focus has no
 trigger that could re-fetch, so the array — and the reason derived from it —
 never moves. `reverifyAgents` is already destructured three lines from the gate
-(`BoardView.tsx:176`) and threaded to every card; the toolbar simply never calls
+(`BoardView.tsx:180`) and threaded to every card; the toolbar simply never calls
 it, because bug-13's Fix and Affects named the per-item control only.
 
 **Question 1 — does `OrchestrateSheet` re-derive the gate on open?** No, and it
@@ -84,7 +85,7 @@ submit. Nothing about that second half is a defect to fix here; it is the reason
 the fix cannot be "let the sheet sort it out."
 
 **Question 2 — does the fresh-run rule interact?** No, and the way it fails to
-interact removes work rather than adding it. `showOrchestrate` (line 420) is
+interact removes work rather than adding it. `showOrchestrate` (line 446) is
 `gate !== null && gate.control !== 'hidden' && !orchestrateHasFreshRun`: a fresh
 run **hides** the control outright rather than disabling it, and the unfiltered
 case (`projectValue === ALL`) leaves the gate `null`, which hides it too. So a
@@ -163,14 +164,14 @@ already the whole condition, and no "only block" clause is needed here.
 `.board-orchestrate[aria-busy='true'] { color: var(--ink2); cursor: progress }`
 **after** the existing `[aria-disabled='true']` rule, same specificity, so the
 busy look wins over the disabled colour. That is the identical rule and identical
-ordering constraint `.dispatch-tab`/`.dispatch-chip` already carry at line 1270.
+ordering constraint `.dispatch-tab`/`.dispatch-chip` already carry at line 1369.
 
 **5. Documentation.** Two places assert the current, now-wrong scope and must
 move with the code:
-- `CLAUDE.md` (~line 442): "Exactly one of the three lets the click through"
+- `CLAUDE.md` (~line 467): "Exactly one of the three lets the click through"
   describes `DispatchButton`; extend the paragraph to say the toolbar Orchestrate
   control re-asks on the same block, by the same hook.
-- `docs/invariants.md` (~line 755): the "One of the three lets the click through
+- `docs/invariants.md` (~line 839): the "One of the three lets the click through
   anyway" section. Add the toolbar, and correct the sentence claiming a stale
   *enable* is corrected by the sheet's `plan()` — true of `LaunchSheet`, false of
   `OrchestrateSheet`, which re-checks only at Start and only as an uncoded 409.
