@@ -325,3 +325,79 @@ link. Still open for whoever lands bug-20 second: that item rewrites this same
 dispatch line, and its env assignment goes before `exec claude` while this
 marker sits after the id inside the prompt — read the merged wording, not the
 wording quoted in bug-20.
+
+### Review round 1 — two Important findings, both fixed
+
+Both were real, and both were the same class of defect: a rule written in a
+section that the session reading the offending line is not necessarily
+re-reading.
+
+**1. The recognition condition described a string the orchestrator never
+emits.** The section said "if they open with the token `[orchestrator-run`",
+but the id is always the first word after the trigger — pinned by the dispatch
+line and by the "marker follows the id" case — so read strictly, the marker is
+never first and no rule under it ever fired. Recognition is now by **presence
+anywhere after the id**, and the section says why that ordering exists rather
+than leaving the next reader to re-derive it.
+
+**2. "Everything below applies either way" re-affirmed the exact sentence
+`## Cause` gap 3 names as the defect.** `## If verification fails, nothing
+moves` still ended "Tell the user what failed and let them decide whether to
+retry, re-groom, or escalate" — the stall, verbatim, on the one path a
+dispatched session reaches after failing. The never-commits hard limit had the
+same shape ("tell the user what files changed"). Both now carry the exception
+in their own text: under the marker there is no user to tell, the `## Outcome`
+and the final message are the whole report, and the run decides retry/skip/park
+from outside. The closing sentence of the new section was rewritten from
+"everything below applies either way" to "except where it names the user as
+that channel", and names those two exits.
+
+Two new guards, both watched failing first:
+
+```
+not ok 148 - backlog-execute recognises the marker by presence, never by position
+not ok 149 - backlog-execute redirects its user-facing exits when the marker holds
+# tests 149
+# pass 147
+# fail 2
+```
+
+Case 148 asserts the "anywhere after the id" phrasing **and** that the file no
+longer says the trigger words open with the token — the positive needle alone
+would pass beside a leftover contradiction. Case 149 is section-scoped rather
+than a whole-file substring search: it slices the verification-failure section
+and the never-commits bullet out of the body and requires the marker token
+inside each, so a third section naming the marker cannot satisfy it on their
+behalf. That is what the first round got wrong — the coupling case proved the
+literal existed in both files and nothing about where.
+
+### Verification (re-run after the review fixes)
+
+`pnpm run test:skills` — 362/362 (two more cases than the first round):
+
+```
+1..362
+# tests 362
+# pass 362
+# fail 0
+# duration_ms 55516.130708
+```
+
+`pnpm test` (jest):
+
+```
+Test Suites: 69 passed, 69 total
+Tests:       1179 passed, 1179 total
+Time:        66.11 s, estimated 78 s
+```
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+TYPECHECK_EXIT=0
+```
+
+`skills/backlog-orchestrate/SKILL.md` was not touched in this round, so the
+dispatch line and its `sh -n` proof above stand unchanged; the apostrophe guard
+covering it stayed green throughout.

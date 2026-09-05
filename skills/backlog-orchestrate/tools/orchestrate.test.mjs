@@ -3109,3 +3109,44 @@ test('backlog-execute keeps the rules a dispatched session runs on', () => {
     assert.ok(text.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`)
   }
 })
+
+test('backlog-execute recognises the marker by presence, never by position', () => {
+  // The marker is deliberately NOT the first thing in the trigger words — the
+  // id is, and a sibling case pins that. A recognition rule phrased as "if the
+  // trigger words open with the token" therefore describes a string the
+  // orchestrator never emits, and every rule under it silently never fires.
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  assert.ok(
+    text.includes('anywhere after the id'),
+    'backlog-execute no longer says the marker is recognised anywhere after the id',
+  )
+  assert.ok(
+    !/open(s)? with the token/.test(text),
+    'backlog-execute is back to requiring the marker to come first, which the dispatch line never does',
+  )
+})
+
+test('backlog-execute redirects its user-facing exits when the marker holds', () => {
+  // Two sentences in the body name the user as the channel, and both are on
+  // paths a dispatched session reaches: the verification-failure exit, and the
+  // never-commits hard limit. A new section elsewhere saying "never escalate"
+  // does not reach a session already reading one of those sentences — each has
+  // to carry the exception itself.
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+
+  const failure = text.slice(text.indexOf('## If verification fails'))
+  const failureSection = failure.slice(0, failure.indexOf('\n## ', 1))
+  assert.ok(failureSection.length > 0, 'the verification-failure section is gone')
+  assert.ok(
+    failureSection.includes(RUN_MARKER_TOKEN),
+    `the verification-failure path still hands the decision to a user with no exception for ${RUN_MARKER_TOKEN}`,
+  )
+
+  const bulletStart = text.indexOf('- **Never commits, never pushes.**')
+  assert.ok(bulletStart !== -1, 'the never-commits hard limit is gone')
+  const bullet = text.slice(bulletStart, text.indexOf('\n- ', bulletStart + 1))
+  assert.ok(
+    bullet.includes(RUN_MARKER_TOKEN),
+    `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`,
+  )
+})
