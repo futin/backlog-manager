@@ -19,7 +19,7 @@ import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunDrawer } from './RunDrawer';
 import { RunStrip } from './RunStrip';
 import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
-import type { BacklogItem, OrchestratorRun, RunStage, Section } from '../../../../shared/types';
+import type { BacklogItem, OrchestratorRun, RunStage, RunWatchdog, Section } from '../../../../shared/types';
 
 /* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
    the two surfaces are separate lazy chunks — see lib/view-keys.ts for why a
@@ -38,8 +38,12 @@ type SortKey = 'created' | 'name' | 'project';
 /** The endpoint's wrapper shape (Task 8) — the same local alias RunStrip.tsx
  *  declares for its own `run` prop, redeclared here rather than imported:
  *  neither file exports it, and a two-field intersection type is cheaper to
- *  restate per consumer than to thread a shared export through for. */
-type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
+ *  restate per consumer than to thread a shared export through for. `watchdog?`
+ *  (orchestrator-watchdog design §4.1) joined the intersection alongside
+ *  RunStrip.tsx's own copy — this file never reads it directly, but `openRun`
+ *  and every entry in `runningRuns` below are typed off this alias, and both
+ *  get handed straight to `RunStrip`, which does. */
+type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
 
 /**
  * Fixed column order — the design's order (Refactoring · Ideas · Bugs ·
@@ -266,8 +270,29 @@ export default function BoardView() {
      `matches` and `hasLive` just below now need the run's own view of an item:
      the Status filter's "In progress" and the board's ticking clock both have
      to count orchestrated work, and an orchestrated item's FILE says nothing
-     about the run working it (ItemCard's `liveBarFor` has the full finding). */
+     about the run working it (ItemCard's `liveBarFor` has the full finding).
+
+     orchestrator-watchdog (design §6.2): stays exactly this — freshness-based,
+     feeding cards, badges and `runClaimBlock` alone — because a crashed run
+     must not keep a card pinned to the top of its column or dead to dispatch
+     forever; only `RunStrip` itself needed a wider view, and `runningRuns`
+     just below is that second list, kept deliberately separate rather than
+     widening this one. */
   const freshRuns = runs.filter((run) => run.fresh);
+
+  /* orchestrator-watchdog (design §6.1/§6.2): the strip's own list, wider than
+     `freshRuns` above on purpose. `RunStrip` now renders BOTH a live run
+     (`fresh: true`) and a crashed one (`fresh: false, status: 'running'`) —
+     `isCrashed`, lib/run-watchdog.ts — and returns null for anything else
+     (a run that is merely stale because it finished), so mapping this
+     board's strip row over every `status === 'running'` entry is safe: it
+     hands RunStrip both shapes it knows how to render and nothing it
+     doesn't. A second list rather than widening `freshRuns` itself, per
+     that constant's own comment just above — cards, badges and dispatch
+     claims must stay freshness-only, and folding this in here would make a
+     future reader of `freshRuns` have to re-derive which half of it is safe
+     to trust for THAT purpose. */
+  const runningRuns = runs.filter((run) => run.status === 'running');
 
   /* The id→queue-entry lookup, one map per fresh run, keyed by the run's own
      `project` — the registry's absolute path, the exact string
@@ -615,27 +640,57 @@ export default function BoardView() {
         </div>
       </div>
 
-      {/* One row per fresh run, ahead of the warnings: a run actually in
-          flight is live, actionable information, where the warnings below
+      {/* One row per LIVE run (fresh or crashed — `runningRuns`, above),
+          ahead of the warnings: a run actually in flight or freshly gone
+          quiet is live, actionable information, where the warnings below
           are a standing fact about the registry that will still be true the
-          next time this board loads. RunStrip filters its own staleness (see
-          its file-level comment) — `freshRuns` here exists for the id→entry
-          map above, not to protect this render, but reusing it keeps this
-          from ever mounting a strip only to have it immediately render null. */}
-      {freshRuns.length > 0 && (
+          next time this board loads.
+
+          orchestrator-watchdog (design §6.1/§6.2) widened this from
+          `freshRuns` to `runningRuns`: `RunStrip` no longer merely "filters
+          its own staleness" (a fresh-or-null split) — it now renders a
+          THIRD shape, the crashed strip, for exactly the runs `freshRuns`
+          itself was built to exclude everywhere else on this page. Mapping
+          `runningRuns` here is still safe by the same "reuse rather than
+          protect" reasoning the old comment gave: `RunStrip` returns null
+          for anything that is neither fresh nor crashed, so this never
+          mounts a strip only to have it immediately render null — the set
+          of things worth trying just grew from one shape to two. */}
+      {runningRuns.length > 0 && (
         <div className="run-strips">
-          {freshRuns.map((run) => (
-            <RunStrip
-              key={run.runId}
-              run={run}
-              // `r.project`, not the run object itself — see
-              // `openRunProject`'s own comment for why the drawer has to be
-              // keyed on identity rather than holding a frozen snapshot. Goes
-              // through `openRunDrawer`, not `setOpenRunProject` directly —
-              // see that function's own comment for why.
-              onOpen={(r) => openRunDrawer(r.project)}
-            />
-          ))}
+          {runningRuns.map((run) => {
+            // Per-run, not hoisted: `projectDispatchGate` is already the
+            // one shared implementation (see `orchestrateGate`'s own use of
+            // it above for the toolbar's identical project-level control),
+            // and a crashed run's Resume button is exactly that same
+            // question — can THIS project's dashboard even be reached —
+            // asked per strip instead of per toolbar filter.
+            const gate = agents === null ? null : projectDispatchGate(agents, run.project);
+            const canResume = gate !== null && gate.control !== 'hidden';
+            const resumeBlockedReason = gate?.control === 'disabled' ? gate.reason : null;
+            return (
+              <RunStrip
+                key={run.runId}
+                run={run}
+                // `r.project`, not the run object itself — see
+                // `openRunProject`'s own comment for why the drawer has to be
+                // keyed on identity rather than holding a frozen snapshot. Goes
+                // through `openRunDrawer`, not `setOpenRunProject` directly —
+                // see that function's own comment for why.
+                onOpen={(r) => openRunDrawer(r.project)}
+                canResume={canResume}
+                resumeBlockedReason={resumeBlockedReason}
+                // A successful (or 409-recovered) Resume click changes the
+                // run's own state on the server, not anything this board
+                // already holds — `refreshRuns` is the same re-fetch
+                // OrchestrateSheet's own Start button already calls after a
+                // launch, for the identical reason: get the strip off its
+                // last-known state one poll early rather than waiting up to
+                // POLL_MS for the next scheduled tick to notice.
+                onResumed={refreshRuns}
+              />
+            );
+          })}
         </div>
       )}
 

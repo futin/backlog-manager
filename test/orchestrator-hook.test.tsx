@@ -26,6 +26,18 @@ function payload(fresh: boolean): OrchestratorRunsPayload {
   return { runs: [{ ...fixture, fresh, pastRuns: 0 }] };
 }
 
+/**
+ * Same shape as `payload` above, with `status` overridable too — needed for
+ * the crashed-run polling cases below, which are exactly the case `payload`
+ * cannot express: `fresh: false` alone reuses the fixture's own
+ * `status: 'running'`, which after the orchestrator-watchdog feature is no
+ * longer "a finished run", it is a CRASHED one (`isCrashed`,
+ * lib/run-watchdog.ts) — the poll must still be running for it.
+ */
+function payloadWith(status: OrchestratorRun['status'], fresh: boolean): OrchestratorRunsPayload {
+  return { runs: [{ ...fixture, status, fresh, pastRuns: 0 }] };
+}
+
 /** Same shape as test/agents-client.test.ts's own `stub`: every call answers
  *  the same body, for the cases that only care about CALL COUNT in one
  *  unchanging world. */
@@ -167,22 +179,30 @@ describe('useOrchestratorRuns', () => {
   });
 
   /**
-   * The fresh→stale transition, missing from fix round 1's original
+   * The fresh→done transition, missing from fix round 1's original
    * suite (every case there answered the SAME body on every call, so the
    * polling effect's dependency on `anyFresh` actually changing value was
    * never exercised — only the two static worlds either side of it). A run
-   * finishing or going stale mid-poll must stop the interval on the very
-   * render that discovers it, not merely stop scheduling new ones from that
-   * point while an old one silently keeps ticking.
+   * finishing for real must stop the interval on the very render that
+   * discovers it, not merely stop scheduling new ones from that point while
+   * an old one silently keeps ticking.
+   *
+   * `payloadWith('done', false)`, not `payload(false)` — orchestrator-watchdog
+   * (§6.3) widened `anyLive` to also cover a run that is `status: 'running'`
+   * but no longer `fresh` (a CRASHED run, `isCrashed` in lib/run-watchdog.ts),
+   * which is exactly the shape `payload(false)` produces off this fixture
+   * (whose own `status` is `'running'`) — that shape must now keep polling,
+   * not stop it. This case needs the run to actually be OVER, so it says so
+   * with `status: 'done'` rather than relying on `fresh` alone.
    */
-  it('stops polling the instant a poll discovers every run has gone stale', async () => {
-    const fetchMock = stubFetchSequence([payload(true), payload(false)]);
+  it('stops polling the instant a poll discovers every run has genuinely finished', async () => {
+    const fetchMock = stubFetchSequence([payload(true), payloadWith('done', false)]);
     renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(1);
 
-    // This tick's answer (the sequence's second body) is stale.
+    // This tick's answer (the sequence's second body) is truly done.
     await act(async () => {
       await jest.advanceTimersByTimeAsync(5_000);
     });
@@ -196,10 +216,15 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // --- Test case 3: an all-stale payload never polls ------------------------
+  // --- Test case 3: an all-done payload never polls -------------------------
 
-  it('never polls when every known run is stale', async () => {
-    const fetchMock = stubFetch(payload(false));
+  it('never polls when every known run has genuinely finished', async () => {
+    // `payloadWith('done', false)`, not `payload(false)` — see the comment
+    // on the case just above for why: this fixture's own `status` is
+    // `'running'`, so `payload(false)` alone is a CRASHED run post-watchdog,
+    // which must keep polling, not the truly-inert shape this case means to
+    // test.
+    const fetchMock = stubFetch(payloadWith('done', false));
     renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -231,17 +256,22 @@ describe('useOrchestratorRuns', () => {
   });
 
   /**
-   * The stale→fresh transition via focus, the other half of the gap fix
-   * round 1 flagged: a board sitting quiet (nothing fresh, no interval) must
+   * The done→fresh transition via focus, the other half of the gap fix
+   * round 1 flagged: a board sitting quiet (nothing live, no interval) must
    * resume polling the instant a focus refetch discovers a run has gone
    * live — not wait for some later mount/focus to notice.
+   *
+   * `payloadWith('done', false)` for the starting state, not `payload(false)`
+   * — see the two comments above for why this fixture's own `status:
+   * 'running'` makes `payload(false)` alone a CRASHED (still-polling) shape
+   * post-watchdog, not the truly-quiet starting point this case needs.
    */
   it('a focus refetch that discovers a newly-fresh run re-arms the interval', async () => {
-    const fetchMock = stubFetchSequence([payload(false), payload(true)]);
+    const fetchMock = stubFetchSequence([payloadWith('done', false), payload(true)]);
     renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(jest.getTimerCount()).toBe(0); // stale on arrival: nothing armed
+    expect(jest.getTimerCount()).toBe(0); // done on arrival: nothing armed
 
     act(() => {
       window.dispatchEvent(new Event('focus'));
@@ -366,6 +396,55 @@ describe('useOrchestratorRuns', () => {
     });
     await flush();
 
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // --- orchestrator-watchdog design §6.3: a CRASHED run still polls -------
+  //
+  // `status: 'running', fresh: false` is exactly `isCrashed` (lib/run-watchdog.ts):
+  // the run file still claims to be working, but the heartbeat has gone
+  // stale. Before this feature that shape was indistinguishable, from this
+  // hook's own vantage point, from a run that simply finished — both read
+  // `fresh: false` — so `anyFresh` (now `anyLive`) stopped polling either
+  // way. A crashed run left unpolled is a screenshot: the watchdog's own
+  // attempt counter and any recovery would sit unseen until a window-focus
+  // event that might not come for hours, the exact gap the whole feature
+  // exists to close.
+  it('keeps polling for a run that is crashed (status running, stale heartbeat)', async () => {
+    const fetchMock = stubFetch(payloadWith('running', false));
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // The other half of the same case: once the crashed run is truly over —
+  // `status` moves off `'running'` (here: `'done'`, the way a resumed run
+  // that finally finishes leaves it) — polling must stop again, the same
+  // "nothing live, no timer" contract every other case in this file already
+  // pins for the plain stale case.
+  it('stops polling once a crashed run is reconciled and reported done', async () => {
+    const fetchMock = stubFetchSequence([payloadWith('running', false), payloadWith('done', false)]);
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(1);
+
+    // This tick's answer (the sequence's second body) is truly done.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jest.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

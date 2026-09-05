@@ -119,6 +119,24 @@ const PROMPT_MAX = 8_000;
 const ORCHESTRATE_PROMPT = '/backlog-orchestrate';
 
 /**
+ * The base of every prompt `resume()` will ever send — and, unlike
+ * `ORCHESTRATE_PROMPT` just above, the WHOLE of it: `POST /api/agents/resume`
+ * has no `ids`, no `mergeMode`, not even a `prompt` field for a caller to
+ * occupy in the request body (see `AgentsController.resume` — the body is
+ * rebuilt down to one field, `project`, and nothing else is ever read off
+ * it). There is therefore nothing here for a caller to influence at all,
+ * which is a NARROWER surface than orchestrate's already-narrow one:
+ * orchestrate at least has to validate two fields before composing a string
+ * from them, resume has nothing to validate because nothing rides along.
+ * `orchestrate.mjs`'s SKILL.md documents `--resume` as a flag its own
+ * trigger accepts for recovering an interrupted run (see
+ * skills/backlog-orchestrate/references/recovery.md), so this constant is
+ * that flag appended to the same literal trigger `ORCHESTRATE_PROMPT` holds
+ * — not a second, independent string this file invented.
+ */
+const RESUME_PROMPT = '/backlog-orchestrate --resume';
+
+/**
  * Body of `POST /api/agents/orchestrate`, already reduced to exactly the
  * fields that survive the controller's field-by-field rebuild — see
  * AgentsController.orchestrate(). Not declared in shared/types.ts alongside
@@ -555,6 +573,137 @@ export class AgentsService {
   }
 
   /**
+   * Resume a crashed run through the exact same spawn path `orchestrate()`
+   * uses — `POST /api/agents/resume`'s whole implementation, and the
+   * sweeper's own recovery action (design §2.2 step 5, a later task) once it
+   * exists. Two callers, `origin: 'board'` and `origin: 'watchdog'`, sharing
+   * one method rather than each composing its own spawn call — see
+   * `resumeSessionName` below for the one place that distinction actually
+   * shows up (the dashboard row's name).
+   *
+   * Mirrors `orchestrate()` step for step and SHARES its gate code rather
+   * than re-deriving it — `status()` for the environment kill switch,
+   * `projectDispatchGate` for everything else the environment or the
+   * project's own visibility can refuse. This is not a style preference: an
+   * earlier version of `orchestrate()` reimplemented one line of
+   * `projectDispatchGate`'s five-line ladder by hand and silently dropped
+   * the other four (see `environmentBlock`'s own doc comment, shared/agent.ts,
+   * for the full incident — an unreachable dashboard read as "cannot see
+   * this project", and a dashboard with no `CLAUDE_BIN` or remote answers
+   * off let a spawn through that should have been refused first). Writing a
+   * second, resume-flavoured copy of that ladder here would be the same
+   * mistake with a different name attached to it — so this method calls the
+   * shared function and repeats none of its strings.
+   *
+   * The one place this method is DELIBERATELY STRICTER than `orchestrate()`,
+   * and in the opposite direction: `orchestrate()`'s own activeRun lock
+   * refuses to start a new run while an existing one is FRESH, because two
+   * runs racing for the same project is the failure that check exists to
+   * prevent. `resume()` exists for the opposite premise — a run has gone
+   * SILENT — so it refuses unless the run it finds is STALE. A future
+   * reader tempted to "align" these two checks so they read the same way
+   * would be erasing the actual distinction between the two endpoints: one
+   * guards against starting a run that already exists, the other exists
+   * only because one has stopped heartbeating.
+   */
+  async resume(project: string, origin: 'watchdog' | 'board'): Promise<AgentDispatchResult> {
+    const status = await this.status();
+    if (!status.enabled) {
+      // Same 404 orchestrate() answers for the same condition, and the same
+      // reason: the board's own control for this feature is either rendered
+      // or it is not (see the "environment-level block hides the dispatch
+      // control" invariant), so "this feature is not on" is the honest
+      // answer for a route that, as far as this caller is concerned, is not
+      // here at all.
+      throw new HttpException({ error: 'not found' }, 404);
+    }
+
+    // The remaining four environmentBlock reasons, plus project visibility —
+    // see this method's own doc comment above for why this is a call, not a
+    // hand-written copy of projectDispatchGate's ladder.
+    const gate = projectDispatchGate(status, project);
+    if (gate.control === 'hidden') {
+      // Same split orchestrate() makes for the identical situation: 502 only
+      // when there is a genuine upstream to blame (unreachable), every
+      // other environment block is a state the reader can go and fix on the
+      // dashboard's own side, so 409.
+      throw new HttpException({ error: gate.reason }, !status.reachable ? 502 : 409);
+    }
+    if (gate.control === 'disabled') {
+      throw new HttpException({ error: gate.reason }, 409);
+    }
+
+    // The run this project actually has, if any — read fresh, the same
+    // "never cache a run file" posture OrchestratorService.runs() itself
+    // takes, since a run this stale might be resumed by the very call this
+    // method is about to make.
+    const run = this.orchestrator.runs().runs.find((r) => r.project === project);
+    if (run === undefined || run.status !== 'running') {
+      // Both "no run has ever existed for this project" and "the last run
+      // already finished (done/aborted/failed)" collapse to the identical
+      // uncoded 409: neither has anything a resume spawn could act on, and
+      // telling them apart would tell the caller nothing it could do
+      // differently — reopen the board, there is nothing here to recover.
+      throw new HttpException({ error: 'no crashed run to resume for this project' }, 409);
+    }
+    if (run.fresh) {
+      // `run.fresh` is the one and only freshness number this app computes
+      // (OrchestratorService.runs(), against RUN_STALE_MS) — not a second
+      // threshold minted here, so this check can never drift from what the
+      // strip itself is already showing as "still going."
+      //
+      // RUN_IN_PROGRESS_CODE is reused here rather than minting a resume-
+      // specific code, on purpose: both this 409 and orchestrate()'s
+      // activeRun-lock 409 mean the exact same fact — "a run is alive for
+      // this project, right now" — just reached from opposite directions
+      // (one caller tried to START a run, the other tried to RESUME one).
+      // Two codes for one fact is precisely the drift RUN_IN_PROGRESS_CODE's
+      // own doc comment (shared/types.ts) exists to rule out, and both of
+      // this endpoint's actual callers (the strip's Resume button and
+      // OrchestrateSheet) already treat the code identically — "the run
+      // recovered on its own, nothing to do here" — so there is nothing for
+      // a second code to distinguish even if one existed.
+      throw new HttpException(
+        {
+          error: `run ${run.runId} is alive (last heartbeat ${run.updatedAt}) — nothing to resume`,
+          code: RUN_IN_PROGRESS_CODE
+        },
+        409
+      );
+    }
+
+    const cfg = readAgentsConfig();
+    const dirName = (await this.projectMap(cfg)).get(project);
+    if (dirName === undefined) {
+      // The same TTL-race guard orchestrate() and dispatch() both carry:
+      // projectDispatchGate's visibility check and this lookup read the same
+      // cache, and only a TTL expiry between the two reads reaches here.
+      // Refuse rather than derive a dirName from the path — see the "cannot
+      // be dispatched to" invariant this exists to uphold a second time.
+      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+    }
+
+    return this.spawn(cfg, {
+      project: dirName,
+      // The whole of what a caller — board or sweeper alike — can ever make
+      // this session do. See RESUME_PROMPT's own comment for why there is
+      // nothing here to validate: unlike orchestrate's ids/mergeMode, no
+      // field of the request body ever reaches this string.
+      prompt: RESUME_PROMPT,
+      name: resumeSessionName(project, origin),
+      // 'auto', clamped to the ceiling — the identical trade orchestrate()
+      // and plan() both document for an unattended session: asking for the
+      // most a host allows is how a convenience becomes an incident, and a
+      // session that stops on the first tool call it cannot self-approve
+      // does nothing at all. No model/effort/remoteControl: a resume is not
+      // a new choice about how to run the queue, it is the SAME run picking
+      // up where its own heartbeat stopped, so there is no new preference to
+      // express here.
+      permissionMode: clampMode('auto', status.spawnMaxPermission)
+    });
+  }
+
+  /**
    * POST /api/spawn against the dashboard, and the one place this app
    * decides what its answer means — shared by dispatch() and orchestrate().
    * Each composes a different body for a different reason (one item vs. one
@@ -851,6 +1000,40 @@ export function authHeaders(cfg: AgentsConfig): Record<string, string> {
  */
 function orchestrateSessionName(projectPath: string): string {
   return `orchestrate ${basename(projectPath)}`.slice(0, 60);
+}
+
+/**
+ * `orchestrateSessionName`'s counterpart for a resumed run — same
+ * `basename(projectPath)`, same 60-character cap for the same silent-drop
+ * reason (see that function's own comment), and the same reason to exist at
+ * all: `resume()` has no `BacklogItem` to build a name from either. The one
+ * addition is the `origin` prefix, and it is the whole reason `resume()`
+ * takes an `origin` parameter in the first place — the dashboard's session
+ * list is the one durable trail this feature leaves behind (this app writes
+ * nothing to `run.json`; see the class doc comment on `resume()`), so a row
+ * reading "watchdog resume alpha" versus "resume alpha" is the only place a
+ * reader can later tell "the sweeper did this while nobody was watching"
+ * apart from "I clicked the button" — see the design's own §3 for why that
+ * distinction is worth a name change rather than a fifth field on the
+ * run-payload's `RunWatchdog`.
+ *
+ * The prefix-to-basename separator is a plain space, not the middle dot
+ * (`·`, U+00B7) the design doc originally wrote it with. `orchestrateSessionName`
+ * above already tells this story once for `:` and `/`; it applies just as
+ * exactly to `·`, which is also outside `NAME_RE`'s
+ * `[A-Za-z0-9][A-Za-z0-9 ._-]*` character class. A name that fails that
+ * regex is not rejected — `parseSpawnRequest` on the dashboard side drops it
+ * to `undefined` and the row falls back to the bare project name, silently,
+ * with no failed request anywhere to notice. That is exactly the failure
+ * this field exists to prevent (see the comment above): a middle-dot name
+ * would make every resumed session's row indistinguishable from a
+ * hand-started one, defeating `origin`'s only purpose without ever
+ * producing an error. Do not "restore" the middle dot for readability — a
+ * space reads fine and, unlike `·`, the dashboard actually keeps it.
+ */
+export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
+  const prefix = origin === 'watchdog' ? 'watchdog resume' : 'resume';
+  return `${prefix} ${basename(projectPath)}`.slice(0, 60);
 }
 
 /** Never throws — used only to build messages and to compare paths. */

@@ -5,6 +5,7 @@ import { HttpException } from '@nestjs/common';
 
 import { OrchestratorController } from '../server/src/orchestrator/orchestrator.controller';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
+import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import type { OrchestratorRun, RunQueueItem, RunVerification } from '../shared/types';
 
 // Same layout orchestrate.mjs's own projectDir()/runFilePath() write:
@@ -129,7 +130,11 @@ describe('OrchestratorService.archive', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'bm-orch-archive-'));
     orchHome = join(tmpRoot, 'orchestrator');
     process.env.BM_ORCH_HOME = orchHome;
-    service = new OrchestratorService();
+    // archive() never touches WatchdogStateService (only runs() does) — a
+    // bare, unwired instance is enough to satisfy the constructor here, the
+    // same "construct directly, no Nest DI needed" style this suite already
+    // uses for OrchestratorService itself.
+    service = new OrchestratorService(new WatchdogStateService());
   });
 
   afterEach(() => {
@@ -235,7 +240,10 @@ describe('OrchestratorController.archivedRun', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'bm-orch-archive-detail-'));
     orchHome = join(tmpRoot, 'orchestrator');
     process.env.BM_ORCH_HOME = orchHome;
-    controller = new OrchestratorController(new OrchestratorService());
+    // archivedRun() calls straight through to OrchestratorService.archivedRun()
+    // and never reads watchdogState — a bare unwired instance is enough here
+    // too, for the same reason as OrchestratorService's own construction above.
+    controller = new OrchestratorController(new OrchestratorService(new WatchdogStateService()), new WatchdogStateService());
   });
 
   afterEach(() => {

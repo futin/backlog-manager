@@ -11,7 +11,16 @@ const config: Config = {
   testMatch: ['<rootDir>/test/**/*.test.ts', '<rootDir>/test/**/*.test.tsx'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   // Nest's DI reads decorator metadata at class-definition time.
-  setupFiles: ['reflect-metadata'],
+  //
+  // `test/helpers/env.ts` runs alongside it, before any module under test is
+  // imported, and defaults `BM_WATCHDOG=off` for every suite. That is not a
+  // convenience: without it, any suite that builds `AppModule` arms the
+  // orchestrator watchdog, whose bootstrap scan reads the DEVELOPER'S REAL
+  // `~/.backlog-manager/orchestrator/` directory unless the suite overrode
+  // `BM_ORCH_HOME` — and a crashed run sitting there would make `pnpm test`
+  // spawn a real agent session against the developer's own repo. See that
+  // file's own header for the full reasoning.
+  setupFiles: ['reflect-metadata', '<rootDir>/test/helpers/env.ts'],
   testTimeout: 30_000,
   // marked ships ESM-only (package.json "type": "module", no cjs entry), but
   // ts-jest compiles this repo's own code to CommonJS, so a plain `require`

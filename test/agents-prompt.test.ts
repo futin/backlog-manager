@@ -1,4 +1,5 @@
 import { readAgentsConfig } from '../server/src/agents/config.util';
+import { resumeSessionName } from '../server/src/agents/agents.service';
 import { composePrompt, sessionName } from '../server/src/agents/prompt.util';
 import type { BacklogItem } from '../shared/types';
 
@@ -223,5 +224,36 @@ describe('sessionName', () => {
     const name = sessionName(fakeItem({ project: 'a'.repeat(80), id: 'task-1' }));
     expect(name).toMatch(DASHBOARD_NAME_RE);
     expect(name).toHaveLength(DASHBOARD_NAME_CAP);
+  });
+});
+
+/**
+ * `resumeSessionName` is the one place this codebase has already gotten this
+ * wrong once: the plan it was built from specified a middle dot (`·`,
+ * U+00B7) as the prefix/basename separator, which is just as outside
+ * `NAME_RE`'s charset as the `:`/`/` the comment above already guards
+ * against, and would have been silently dropped by the dashboard on every
+ * resumed run for both origins. Pinning both origins' output against the
+ * same `DASHBOARD_NAME_RE`/`DASHBOARD_NAME_CAP` `sessionName` is checked
+ * against above is the whole point of this suite — it is what stops the
+ * next edit from reintroducing a character the dashboard drops, rather than
+ * relying on a reader noticing prose that says not to.
+ */
+describe('resumeSessionName', () => {
+  it('composes a name the dashboard will actually keep, for both origins', () => {
+    for (const origin of ['board', 'watchdog'] as const) {
+      const name = resumeSessionName('/abs/alpha', origin);
+      expect(name).toMatch(DASHBOARD_NAME_RE);
+      expect(name.length).toBeLessThanOrEqual(DASHBOARD_NAME_CAP);
+    }
+  });
+
+  it('stays inside the cap for a project path long enough to blow it, for both origins', () => {
+    const longPath = `/abs/${'a'.repeat(80)}`;
+    for (const origin of ['board', 'watchdog'] as const) {
+      const name = resumeSessionName(longPath, origin);
+      expect(name).toMatch(DASHBOARD_NAME_RE);
+      expect(name).toHaveLength(DASHBOARD_NAME_CAP);
+    }
   });
 });

@@ -30,13 +30,18 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 
 - `server/src/` — Nest: `health/`, `items/` (`/api/items`, `/api/projects`,
   `/api/items/body`), `agents/` (the one outbound-calling module — status,
-  plan, dispatch, orchestrate, plus the local read-only `merge-check`),
-  `orchestrator/` (`GET /api/orchestrator/runs`
-  for the live board strip, plus `GET /api/orchestrator/archive` and
-  `GET /api/orchestrator/archive/run` for run history — all three a
-  read-only view of the run-state directory, current run and archived
-  `runs/` alike — see Invariants), `registry/` (read-only view of the
-  registry file), `static.ts` (serves `client/dist` only when built).
+  plan, dispatch, orchestrate, resume, and the run watchdog
+  (`watchdog.service.ts`, armed only while some `run.json` says running),
+  plus the local read-only `merge-check`), `orchestrator/`
+  (`GET /api/orchestrator/runs` for the live board strip, plus
+  `GET /api/orchestrator/archive` and `GET /api/orchestrator/archive/run`
+  for run history — all three a read-only view of the run-state directory,
+  current run and archived `runs/` alike — see Invariants; plus
+  `watchdog-state.service.ts`, the in-memory record of what the watchdog
+  did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs
+  only, and `watchdog-config.util.ts`, the one file the server writes),
+  `registry/` (read-only view of the registry file), `static.ts` (serves
+  `client/dist` only when built).
 - `client/src/` — React SPA: side rail (Board / Runs / Archive / Settings —
   `SECTIONS` in `SideRail.tsx` is the one runtime list of them, and
   `resolveSection` in `App.tsx` maps a stored value that names no tab, the
@@ -51,7 +56,9 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   mode picker seeded from Settings and, in merge mode, a setup hint fed by
   `GET /api/agents/merge-check`), and a run strip
   above the columns — `RunStrip`/`RunDrawer` — showing every project's
-  orchestrator runs), Runs (`RunsView` — aggregate stat tiles including a
+  orchestrator runs; a crashed run — `running`, heartbeat stale — renders
+  as crashed with the watchdog's verdict and, when the watchdog is
+  exhausted or off, a Resume control), Runs (`RunsView` — aggregate stat tiles including a
   wide "machine time by stage" tile, a Today / This week / This month / All
   range control (calendar-aligned, local-time windows on a run's
   `startedAt`, `lib/run-range.ts`) that scopes the tiles, the list and the
@@ -66,7 +73,9 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   refactors/ideas/bugs/out-of-scope — grouped under sticky month subheaders
   keyed on `updated ?? created` (`lib/item-month.ts`), project filter and
   search only, no status or sort control; the same cards, drawer and launch
-  sheet the board uses, no run strip), Settings. Board and Archive share one
+  sheet the board uses, no run strip), Settings, and an Orchestrator
+  watchdog group (`WatchdogGroup.tsx`, server-side knobs and activity, via
+  `hooks/useWatchdog.ts`). Board and Archive share one
   persisted project filter, declared in `lib/view-keys.ts` rather than exported
   from either — they are separate lazy chunks, and an import between them would
   undo the split. Fed by `lib/agents.ts` (same-origin
@@ -74,7 +83,8 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   the one re-ask a click against a project-visibility block provokes — see
   Invariants),
   and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
-  run is fresh).
+  run is fresh or still `running` — a crashed run keeps the strip polling
+  too).
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
   `dispatchGate` — see Invariants), `theme.css` (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
@@ -480,10 +490,116 @@ happened.
   409 with a machine-readable `code: RUN_IN_PROGRESS_CODE` on that lock case
   alone — every other 409 this endpoint can throw carries no code, because
   nothing about them needs to be told apart.
-- **The two agents POSTs are guarded by content-type and origin**
+- **The watchdog spawns; it never writes the run file.** `runs()` stays the
+  one reader; `WatchdogService` only ever calls `AgentsService.resume()` —
+  the same spawn path a board click uses — so a resumed session's own
+  heartbeat is what re-stamps `run.json`, never the watchdog itself.
+  Attempts, phase and the event log live in `WatchdogStateService`, in
+  memory, lost on restart on purpose: a second writer beside
+  `orchestrate.mjs` in the run-state directory is the one thing this
+  feature must never become. `settings/watchdog.json`
+  (`watchdog-config.util.ts`) is the one exception — the server's
+  first-ever write, its own single writer, under its own nested read-write
+  mount inside the otherwise read-only `~/.backlog-manager`.
+- **A crashed run renders as crashed, never as nothing.** Supersedes the
+  strip's old doctrine that a stale run must render nothing because its
+  stage can't be trusted — right about the stage, wrong that the whole
+  strip had to go silent; a run sat crashed for four hours behind exactly
+  that silence. The strip states only facts the payload carries: heartbeat
+  age, the *last reported* stage (never claimed current), and the
+  watchdog's own verdict (`lib/run-watchdog.ts`'s `watchdogClause`). Badges,
+  card run bars and `runClaimBlock` stay freshness-based — a crashed run
+  does not stop being a live claim on its item just because the board now
+  says so out loud.
+- **The watchdog is armed only while some `run.json` says `running`.** No
+  standing interval — a `setTimeout` chain exists only while at least one
+  run is `running`, fresh or crashed alike, and disarms itself the tick it
+  finds none. Arms on the reads the board already makes (every
+  `GET /api/orchestrator/runs` whose payload holds a `running` run), on a
+  boot-time scan, on a successful `orchestrate`/`resume` spawn — the last
+  two wired at controller level (`AgentsController`, not `AgentsService`:
+  `WatchdogService` already injects `AgentsService` for `resume()`, so the
+  reverse edge would be a cycle) — and on every `POST
+  /api/agents/watchdog/config` save, which calls `arm()` and then an
+  unawaited `tick()` regardless of which field changed. That fourth
+  trigger earns its own call, not a footnote on the other three: `arm()`
+  alone is a no-op whenever a timer is already pending, which is exactly
+  the state a watchdog already watching a crashed-but-disabled run sits
+  in, so flipping `enabled` back on in Settings for an already-crashed run
+  would otherwise wait out the already-scheduled tick (up to a full
+  `tickMs`, a minute by default) instead of acting on the save itself. The
+  kicked `tick()` is unawaited so the HTTP response isn't held hostage to
+  a live resume spawn that depends on a third process, the dashboard;
+  firing it unconditionally, even right after `arm()` may have just
+  started an identical chain, is safe rather than a double-sweep because
+  `tick()`'s own in-flight guard returns the already-running sweep's
+  promise instead of starting a second one. A run started by typing the
+  trigger with the board never opened for its whole life is never
+  watched; CLAUDE.md already says to start runs from the board, and this
+  is one more reason.
+- **`useOrchestratorRuns` polls while any run is `running`, fresh or not.**
+  Widened from "any run is fresh" — a crashed run's attempt counter, error
+  text and the moment it goes fresh again would otherwise wait for a
+  window focus, and the crashed strip would read as a screenshot instead
+  of something live.
+- **Any spawn attempt starts the grace clock; only a success counts against
+  the cap.** A failed attempt still stamps `lastSpawnAt`, so a dashboard
+  that is down is asked once per grace window, not once per tick — a retry
+  storm dressed as monitoring. Only a spawn that returned a session id
+  increments `attempts`, so the same downed dashboard cannot burn a
+  crashed run's whole cap without a single resume ever having actually
+  started. `exhausted` is decided before grace, not after, so a run on its
+  last attempt reads exhausted on the very next tick rather than making a
+  person wait out a grace window to be told nobody is coming. **A resume a
+  person starts from the board is a spawn attempt too**
+  (`WatchdogService.noteBoardResume`, called from the controller beside
+  `arm()` and BEFORE it, since `arm()`'s tick reads the stamp
+  synchronously): it stamps the grace clock and leaves a `spawned` line in
+  Activity, and it deliberately does NOT count against the cap. Grace asks
+  "is a resume session already on its way into this run", which a board
+  resume is; the cap asks "how many times has the watchdog tried on its own
+  before asking a human", to which a board resume is the answer rather than
+  an instance — and since the Resume control renders precisely when the
+  watchdog has stood down, counting hand resumes would let a person retire
+  the automation using the only control the board offers them.
+- **The board offers a hand resume exactly when the watchdog will not spawn
+  one, and that is one function, not two agreeing expressions.**
+  `watchdogStoodDown` (`shared/agent.ts`) is the single implementation:
+  `RunStrip` renders its Resume control on it, and `watchdog.service.ts`'s
+  `visit()` returns without spawning on it. Nothing else prevents a click and
+  a tick from both driving `--resume` into one `run.json` — `resume()`
+  refuses a *fresh* run, not a second resume of a crashed one, and grace is a
+  backoff, not a lock; two `--resume` sessions reconcile, stage-write and
+  merge against a file whose single-writer guarantee assumes one process, and
+  both end in a merge to `main`. Its two inputs are single implementations
+  too, for the same reason: `spawningEnabled()` (`WatchdogStateService`,
+  which the sweeper calls rather than re-testing `config.enabled` itself)
+  fills the wire's `enabled`, and **`exhausted` is DERIVED**
+  (`watchdogExhausted`, `attempts >= maxAttempts`), never stored — it was a
+  flag written once and never cleared while the sweeper re-read the config
+  every tick, so raising "Give up after" in Settings, the exact action the
+  strip's own "exhausted after N — resume by hand" invites, restarted the
+  sweeper while the board kept the button. A stored flag whose input is
+  re-read every tick is the bug class, not just that bug; this is the same
+  posture as "Groomed is derived" and "Board-versus-Archive is derived".
+  `WatchdogEntry.exhaustedLogged` is what remains: a once-per-condition log
+  guard, cleared again the tick the derivation reads false, never a verdict.
+  The rule survived a whole branch as two hand-written expressions and two
+  prose sentences that merely agreed — widening the strip's half to
+  `canResume === true` left all 1102 tests green — so it is now pinned by
+  `test/watchdog-coupling.test.tsx` (board) and `test/watchdog-sweep.test.ts`
+  (sweeper) driving both sides from one table, `test/helpers/watchdog-coupling.ts`,
+  whose rows carry a hand-checked verdict so the predicate itself cannot be
+  broken into a constant both halves would then agree with.
+- **Every agents POST is guarded by content-type and origin**
   (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the
-  access control. Absent `Origin` stays allowed; the guard compares host and
-  port, not scheme.
+  access control (`plan`, `dispatch`, `orchestrate`, `resume` and
+  `watchdog/config` today; `test/agents-origin-guard.test.ts`'s own
+  parametrized route list is where that set actually lives, not a count in
+  this sentence — a hand-maintained "the two … now three … now four"
+  version of this line already went stale once, inside this same branch,
+  the moment a fifth route landed). Absent `Origin` stays allowed; the
+  guard compares host and port, not scheme.
 - **The launch sheet's model/effort pickers seed from Settings, never the
   last launch** (`dispatchDefaultModel` / `dispatchDefaultEffort` in
   `client/src/lib/settings.ts`, clamped against `MODELS`/`EFFORTS`).

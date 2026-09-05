@@ -1,9 +1,15 @@
+import { useState } from 'react';
+
 import { POLL_MS } from '../../hooks/useOrchestratorRuns';
+import { ApiError, resumeOrchestrate } from '../../lib/agents';
 import { elapsedSince } from '../../lib/item-age';
 import { projectLabel } from '../../lib/project-label';
 import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { formatSpanCompact, isTerminalStage, runElapsedMs } from '../../lib/run-time';
-import type { OrchestratorRun } from '../../../../shared/types';
+import { isCrashed, watchdogClause } from '../../lib/run-watchdog';
+import { watchdogStoodDown } from '../../../../shared/agent';
+import { RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
+import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../../shared/types';
 
 /**
  * `RunStage`'s own doc comment (shared/types.ts) states the shape "current"
@@ -45,10 +51,198 @@ import type { OrchestratorRun } from '../../../../shared/types';
  */
 const LIVE_THRESHOLD_MS = POLL_MS;
 
-type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
+type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
 
 /**
- * RunStrip — the board's one window onto an orchestrator run in progress.
+ * The queue entry a crashed strip calls "last reported" — the LAST entry in
+ * queue order whose stage is neither one of the seven terminal exits
+ * (`isTerminalStage`, imported above) nor `pending`. Last, not first: queue
+ * order is dispatch order, so every entry BEFORE the one the run was
+ * actually working has already exited one way or another (merged, branched,
+ * parked, whatever), and every entry AFTER it is `pending` — untouched, with
+ * no more claim to being "what the run was doing" than a `pending` entry
+ * three slots further down the same queue. The one entry sitting between
+ * those two runs is the one this run's last heartbeat was actually
+ * reporting progress on.
+ *
+ * `pending` is excluded BY NAME, not merely by happening to be non-terminal
+ * — `RUN_CLAIMED_STAGES` (shared/types.ts) lists it as claimed, correctly,
+ * for `runClaimBlock`'s different question of "can a person hand-dispatch
+ * this". A queue can have every stage it actually visited already terminal,
+ * leaving only a tail of entries nothing has touched yet; a run frozen
+ * there was reporting nothing in progress at all, which "all items at
+ * rest" (the caller's own fallback for `null`) says plainly instead of
+ * naming whichever untouched entry happens to sit first in that tail.
+ */
+function lastReportedEntry(queue: RunQueueItem[]): RunQueueItem | null {
+  const inFlight = queue.filter((q) => !isTerminalStage(q.stage) && q.stage !== 'pending');
+  return inFlight.length === 0 ? null : inFlight[inFlight.length - 1];
+}
+
+/**
+ * The crashed strip's own render, called from `RunStrip` once `isCrashed`
+ * is true. A plain function rather than a second component: the hooks rule
+ * this file's own comment on `resumeError` explains is why that state has
+ * to live in `RunStrip` itself and simply pass through here, not a reason
+ * to duplicate it — a genuinely separate component would need its OWN
+ * `useState`, which is the one thing a conditionally-called function must
+ * not do.
+ *
+ * **Fix round 1 (review finding, Critical): a `<button>` cannot contain
+ * another interactive element.** The first cut of this function kept the
+ * strip's root as one `<button>` and rendered Resume as a nested
+ * `<span role="button" tabIndex={0}>` inside it — which satisfies neither
+ * half of the HTML content model for `button` ("no interactive content
+ * descendant, and no descendant with a `tabindex` attribute"): the span is
+ * interactive by ARIA role AND separately carries `tabIndex`. jsdom and
+ * Testing Library never fail on this — both operate on the DOM tree, not on
+ * HTML validity or the accessibility tree a real browser/AT combination
+ * constructs from it — which is exactly why a green suite shipped it
+ * anyway. `stopPropagation` fixed the click BEHAVIOUR (Resume no longer also
+ * opened the drawer) but did nothing about the markup itself; which control
+ * a screen reader's virtual cursor exposes, whether the nested one is even
+ * reachable, and what a single-switch/voice-control "click" activates all
+ * stay implementation-defined once that shape exists.
+ *
+ * **This is why the CRASHED strip's root is a `<div>` while the fresh
+ * strip's stays a real `<button>` (`RunStrip`'s own return below) — do not
+ * "unify" the two.** The fresh strip has exactly one control (open-the-
+ * drawer), so a single `<button>` is the correct, simplest element for it.
+ * The crashed strip has TWO independent controls — open-the-drawer over
+ * most of the strip's body, and Resume, a genuinely separate action with
+ * its own click target — and two controls cannot both be the same `button`
+ * element, nor can one nest inside the other. The `<div>` root here carries
+ * the `run-strip`/`run-strip-crashed` classes and the `run-strip` testid
+ * (both consumed by every existing test and by this component's own CSS
+ * selectors, unaffected by which element they're on); a real, focusable
+ * `<button className="run-strip-open">` inside it covers the whole
+ * informational area (project, "crashed", heartbeat, last-reported stage,
+ * watchdog clause, any resume error) and is what `onOpen` binds to; Resume
+ * is a second, SIBLING `<button>`, not a descendant of the open-button, so
+ * neither is ever nested inside the other and the button-in-button defect
+ * cannot recur here. Both being real buttons also means neither needs
+ * hand-rolled Enter/Space handling — a native `<button>` gets that for
+ * free — and Resume's click handler no longer needs `stopPropagation`
+ * either: propagation only matters between an element and its ANCESTOR's
+ * handler, and Resume has no ancestor with a click handler to escape now
+ * that it is a sibling of the open-button rather than nested inside it.
+ * `aria-disabled` + `title` (CLAUDE.md's own idiom, matching
+ * DispatchButton) stays for the blocked case rather than the native
+ * `disabled` attribute, for the same reason the first cut chose it: a
+ * genuinely `disabled` button is pulled out of the tab order, which is
+ * exactly the wrong outcome for a control whose whole point is to stay
+ * inspectable ("why can't I resume this") by a keyboard user.
+ */
+function renderCrashedStrip({
+  run, onOpen, canResume, resumeBlockedReason, onResumed, resumeError, setResumeError
+}: {
+  run: RunPayload;
+  onOpen: (run: RunPayload) => void;
+  canResume?: boolean;
+  resumeBlockedReason: string | null;
+  onResumed?: () => void;
+  resumeError: string | null;
+  setResumeError: (err: string | null) => void;
+}) {
+  const label = projectLabel(run.project);
+  const age = elapsedSince(run.updatedAt);
+  const reported = lastReportedEntry(run.queue);
+  const clause = watchdogClause(run.watchdog);
+
+  // The one hard constraint this task must not relax: the Resume control
+  // renders ONLY once the watchdog itself has stood down — exhausted its
+  // attempts, or been switched off — never while it might still be mid-cycle.
+  // Those two states are exactly the ones in which the watchdog's own next
+  // tick will NOT spawn a resume on its own, which is the only thing
+  // preventing a board click and a sweep from both spawning `--resume` into
+  // the same run at the same moment. Widening this to "whenever the board
+  // allows it" would reintroduce that double-spawn race — and, until the
+  // whole-branch review, that widening left every one of 1102 tests green,
+  // because the rule lived in two hand-written expressions in two files and
+  // in prose. It is now `watchdogStoodDown` (shared/agent.ts), the SAME
+  // function `watchdog.service.ts`'s `visit()` returns on without spawning,
+  // pinned from one table of states by `test/watchdog-coupling.test.tsx`.
+  // Do not inline it back into an `||` here, however obvious it looks.
+  //
+  // `canResume` is the SEPARATE, board-side half of the same gate (CLAUDE.md's
+  // "an environment-level block hides the dispatch control; the per-item ones
+  // disable it" — applied here to a project-level control) — both halves
+  // must agree before any control renders at all.
+  const watchdogAllowsResume = run.watchdog !== undefined && watchdogStoodDown(run.watchdog);
+  const showResume = canResume === true && watchdogAllowsResume;
+  const blocked = resumeBlockedReason;
+
+  const attemptResume = (): void => {
+    if (blocked !== null) return;
+    setResumeError(null);
+    resumeOrchestrate(run.project)
+      .then(() => {
+        onResumed?.();
+      })
+      .catch((err: unknown) => {
+        // A 409 run-in-progress answer means the run recovered under this
+        // very click (design §6.1) — a success, not a failure, so it takes
+        // the same path a clean 200 would rather than rendering an error
+        // for something that just fixed itself.
+        if (err instanceof ApiError && err.code === RUN_IN_PROGRESS_CODE) {
+          onResumed?.();
+          return;
+        }
+        setResumeError(err instanceof Error ? err.message : String(err));
+      });
+  };
+
+  return (
+    <div className="run-strip run-strip-crashed" data-testid="run-strip">
+      {/* The open-the-drawer control. Everything a person can currently
+          learn about this crashed run from the strip lives inside it —
+          project, "crashed", the heartbeat age, the last-reported stage
+          (or "all items at rest"), the watchdog's own clause, and any
+          resume error — so clicking anywhere across that whole body opens
+          the drawer, matching a fresh strip's "click anywhere" behaviour
+          (brief case 14) without hand-wiring a click handler onto every
+          individual span. */}
+      <button
+        type="button"
+        className="run-strip-open"
+        onClick={() => onOpen(run)}
+      >
+        <span className="run-strip-dot" aria-hidden="true" />
+        <span className="run-strip-project">{label}</span>
+        <span className="run-strip-crashed-label">crashed</span>
+        <span className="run-strip-heartbeat">no heartbeat for {age ?? '—'}</span>
+        <span className="run-strip-current">
+          {reported === null ? 'all items at rest' : `last reported ${reported.id} at ${reported.stage}`}
+        </span>
+        {clause !== '' && <span className="run-strip-watchdog">{clause}</span>}
+        {resumeError !== null && <span className="run-strip-error">{resumeError}</span>}
+        <span className="run-strip-mark" aria-hidden="true">▸</span>
+      </button>
+      {/* Resume: a genuine sibling `<button>`, never nested inside the
+          open-button above — see this function's own doc comment for why
+          that split is the fix, not `stopPropagation` on a nested control.
+          Being a real button means Enter/Space activation and focusability
+          come from the browser for free; `attemptResume` itself already
+          no-ops while `blocked !== null`, so no keydown handler is needed
+          here either. */}
+      {showResume && (
+        <button
+          type="button"
+          className="run-strip-resume"
+          aria-disabled={blocked !== null || undefined}
+          title={blocked ?? undefined}
+          onClick={attemptResume}
+        >
+          Resume run
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * RunStrip — the board's one window onto an orchestrator run in progress,
+ * live or crashed alike.
  *
  * Why this reads the RUN payload at all, rather than the items the columns
  * below it already render: an orchestrator run works each queued item
@@ -67,22 +261,68 @@ type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
  * BoardView's own comment on the id→entry lookup for the other half of
  * this).
  *
- * The flip side of that same fact is why a stale run must render nothing at
- * all rather than a dimmed or frozen version of its last known state: once
- * `fresh` goes false, this component has no way to tell "the run is still
- * exactly where it last reported" from "the run moved on three more stages
- * and we simply stopped hearing about it" — RUN_STALE_MS (shared/types.ts)
- * exists precisely because the watch loop can go silent (crash, wedge) with
- * no further writes to the run file at all. A strip left on screen after
- * that point would be presenting a guess as a fact. Returning null here is
- * the same call DispatchButton already makes for its own four
- * environment-level blocks — render nothing, not a control that LOOKS live
- * but cannot be trusted.
+ * The flip side of that same fact is why the STAGE this strip prints, once
+ * the heartbeat goes stale, gets prefixed "last reported" rather than
+ * stated as a plain fact: once `fresh` goes false, this component has no
+ * way to tell "the run is still exactly where it last reported" from "the
+ * run moved on three more stages and we simply stopped hearing about it" —
+ * RUN_STALE_MS (shared/types.ts) exists precisely because the watch loop
+ * can go silent (crash, wedge) with no further writes to the run file at
+ * all. Printing that stage as a plain, unqualified fact would be
+ * presenting a guess as a fact.
+ *
+ * What this file used to conclude from that same reasoning — that the
+ * whole strip must therefore render NOTHING once a run goes stale — is
+ * exactly what let `run-20260903-112622` disappear from the board for four
+ * hours on 2026-09-03 (design doc's own "Why this exists"): that run's
+ * headless session quit believing it was waiting on a `sleep`, `run.json`
+ * stayed frozen at `status: "running"`, staleness was detected right on
+ * schedule, and the board's only window onto that run vanished at exactly
+ * the moment a person most needed it to say something. This file was right
+ * that it could not trust the STAGE; it was wrong to conclude from that it
+ * could say NOTHING at all — "no heartbeat for 4h" is a fact this payload
+ * has always been able to state, guess-free, the whole time.
+ *
+ * `isCrashed` (lib/run-watchdog.ts) is the split drawn instead:
+ * `!fresh && status !== 'running'` (a run that finished, however long ago)
+ * still renders nothing — that silence is not a fault, it is the ordinary
+ * end of every run that ever ran, and dressing it up as one would be its
+ * own kind of lie. `!fresh && status === 'running'` now renders a CRASHED
+ * strip: every fact this component can still state honestly (the project,
+ * how long the heartbeat has been silent, the last stage actually
+ * reported, and — this feature's own addition — the watchdog's verdict on
+ * what happens next), with the one thing it genuinely cannot vouch for,
+ * the current stage, named as a guess ("last reported") rather than
+ * dressed as one. Returning null for the finished-and-stale case is still
+ * the same call DispatchButton makes for its own environment-level
+ * blocks — render nothing, not a control that looks live but cannot be
+ * trusted; it is simply no longer the ONLY call this component ever makes
+ * about a quiet run.
  */
-export function RunStrip({ run, onOpen }: { run: RunPayload; onOpen: (run: RunPayload) => void }) {
-  // See this function's own doc comment above for why a stale run gets
-  // silence instead of a dimmed rendering of its last known state.
-  if (!run.fresh) return null;
+export function RunStrip({
+  run, onOpen, canResume, resumeBlockedReason = null, onResumed
+}: {
+  run: RunPayload;
+  onOpen: (run: RunPayload) => void;
+  canResume?: boolean;
+  resumeBlockedReason?: string | null;
+  onResumed?: () => void;
+}) {
+  // Declared unconditionally, ahead of every early return below — React's
+  // own rule for hooks, not a style preference — even though it is read
+  // only by the crashed branch this component may or may not take on any
+  // given render.
+  const [resumeError, setResumeError] = useState<string | null>(null);
+
+  // See this function's own doc comment above for why a run that finished
+  // (however long ago) still gets silence, while a run that stopped
+  // reporting mid-`running` gets a crashed rendering instead (`isCrashed`,
+  // checked next).
+  if (!run.fresh && run.status !== 'running') return null;
+
+  if (isCrashed(run)) {
+    return renderCrashedStrip({ run, onOpen, canResume, resumeBlockedReason, onResumed, resumeError, setResumeError });
+  }
 
   // total excludes `ungroomed`: a controller ruling this task exists to
   // honour (see the fixture comment in test/orchestrator-strip.test.tsx) —

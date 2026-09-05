@@ -640,10 +640,206 @@ export interface OrchestratorRun {
  * every client doesn't re-implement it against its own clock, and
  * `pastRuns` is a count the client has no other way to obtain (it is a
  * directory listing on the server's filesystem, not a field the run file
- * carries about itself).
+ * carries about itself). `watchdog` (orchestrator-watchdog design, Task 2)
+ * is optional for a reason distinct from `fresh`/`pastRuns` being mandatory:
+ * every run this endpoint lists has a freshness fact and a history count
+ * whether or not anyone is watching it, but a watchdog record only exists
+ * once a run has actually BEEN a watchdog subject — `status === 'running'
+ * && !fresh`, the crashed case (see `RunWatchdog` below). A fresh, healthy
+ * run was never armed against, so there is nothing true to attach to it;
+ * forcing the field to be present with some placeholder value would make
+ * every caller branch on a default that means nothing, instead of on
+ * absence, which means exactly "this run has never crashed."
  */
 export interface OrchestratorRunsPayload {
-  runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number }>;
+  runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog }>;
+}
+
+/**
+ * The orchestrator watchdog's own configuration — see
+ * `docs/superpowers/specs/2026-09-04-orchestrator-watchdog-design.md` §5 for
+ * the full "why". Lives beside the run-payload shapes above rather than in
+ * `server/src/agents/config.util.ts` (which owns the OTHER three env vars
+ * this repo has) because this one is not env-only: it is read and written by
+ * both the server (`watchdog-config.util.ts`, the clamp and the file) and the
+ * client (the Settings group's `<select>` ladders, design §6.4), and a shape
+ * both sides must agree on can only have one definition — the same reason
+ * `MergeMode`/`isMergeMode` live here rather than in either side alone.
+ */
+export interface WatchdogConfig {
+  /**
+   * The user's own switch (design §1's "Disabled"), orthogonal to the
+   * sweeper's phase below: a disabled watchdog still arms, ticks and
+   * reports the crashed run it would have resumed — it only ever withholds
+   * the resume spawn itself. Watching stays cheap and honest even while
+   * spawning is turned off.
+   */
+  enabled: boolean;
+  /** How often the sweeper re-reads every project's run file for staleness, while armed. */
+  tickMs: number;
+  /**
+   * How long a crashed run is left alone after any resume attempt OR
+   * failure before the sweeper will try it again (design §1's "Grace") —
+   * long enough for a resumed session to reach its first heartbeat even on
+   * a bad day, short enough that a genuine crash is not left unattended for
+   * the whole window.
+   */
+  graceMs: number;
+  /** How many resume spawns a single crashed run gets before the sweeper marks it exhausted and stops trying. */
+  maxAttempts: number;
+}
+
+/**
+ * The floor, ceiling and default for each numeric `WatchdogConfig` field.
+ * Lives here, in `shared/`, rather than as a server-only constant, because
+ * BOTH the server's clamp (`clampWatchdogConfig`, `watchdog-config.util.ts`)
+ * and the Settings group's `<select>` ladders (design §6.4 — `TICK_LADDER`
+ * etc, each a small subset of the range below) read the same triples: if a
+ * floor changed on only one side, the UI could offer a value the server
+ * would silently clamp away, or the server could accept a value the UI
+ * would never let anyone select. One definition rules that drift out rather
+ * than relying on two files being edited together forever.
+ *
+ * The specific numbers are design §5.2's, not chosen here: `graceMs`'s
+ * five-minute floor in particular is not a placeholder — the incident this
+ * design responds to was an overload event, and a resume spawned into the
+ * same overload can take several minutes just to run its first command,
+ * against a measured ninety-second time-to-heartbeat on a good day.
+ */
+export const WATCHDOG_LIMITS = {
+  tickMs: { min: 30_000, max: 600_000, default: 60_000 },
+  graceMs: { min: 300_000, max: 3_600_000, default: 600_000 },
+  maxAttempts: { min: 1, max: 5, default: 2 }
+} as const;
+
+/**
+ * The config an unreadable, missing or non-object `watchdog.json` degrades
+ * to — the same "never a 500, always a default" posture the registry and
+ * `run.json` readers both already take on a bad file. `enabled: true`
+ * because the design's whole premise is a watchdog that watches unless a
+ * person turns it off, not one a fresh install has to opt into by hand —
+ * the same reasoning `BM_AGENTS` deliberately does NOT follow (that one
+ * defaults off because it can spawn a session with file-write permission in
+ * another repo; the watchdog can only ever resume a run `orchestrate.mjs`
+ * itself already started).
+ */
+export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
+  enabled: true,
+  tickMs: 60_000,
+  graceMs: 600_000,
+  maxAttempts: 2
+};
+
+/**
+ * The sweeper's own three phases (design §1) — NOT the same axis as
+ * `WatchdogConfig.enabled` above, which is the user's toggle. `'off'` means
+ * `BM_AGENTS` is off (nothing on this server can spawn at all) or
+ * `BM_WATCHDOG=off` (the operator's kill switch, §5.1) — either way no timer
+ * ever exists. `'idle'` means no run file anywhere says `running`, so
+ * nothing is being watched. `'armed'` means at least one does, fresh or
+ * crashed alike: a crashed run is still `running` until a human or a
+ * resumed session says otherwise, so arming does not wait for trouble, it
+ * starts the moment there is anything to lose track of.
+ */
+export type WatchdogPhase = 'off' | 'idle' | 'armed';
+
+/**
+ * Every kind of line the Settings Activity feed (design §6.4) can print.
+ * `'armed'`/`'idle'` are phase transitions, not spawn outcomes, logged so
+ * the feed can answer "when did watching last start or stop" without a
+ * viewer having polled `phase` at the right moment themselves. `'disabled'`
+ * is not a phase — it is one tick observing a crashed run while
+ * `config.enabled` is false, worth its own line because it is the one
+ * situation where the sweeper is doing everything BUT the one thing anyone
+ * actually wants from it, and that is worth surfacing on its own.
+ */
+export type WatchdogEventKind =
+  | 'armed'
+  | 'idle'
+  | 'spawned'
+  | 'failed'
+  | 'exhausted'
+  | 'recovered'
+  | 'disabled';
+
+/**
+ * One line of the watchdog's own history — entirely separate from a run
+ * file's own contents, because nothing here is a fact `orchestrate.mjs`
+ * ever records: this is the sweeper's memory of what IT did, not a change
+ * to the run it acted on. `project`/`runId` are `null` for an event that is
+ * not about one particular run (`'armed'`, `'idle'`). `detail` is the
+ * pre-rendered sentence a person reads, not fields for the feed to
+ * reassemble — the same choice `RunVerification.tail` makes: a history list
+ * is for reading, not recomputing.
+ */
+export interface WatchdogEvent {
+  at: string;
+  project: string | null;
+  runId: string | null;
+  kind: WatchdogEventKind;
+  detail: string;
+}
+
+/**
+ * How many `WatchdogEvent`s the state service keeps before dropping the
+ * oldest. A plain number here in `shared/`, rather than a constant private
+ * to the server, because the Settings Activity list (design §6.4) is SIZED
+ * to this exact cap — its own "showing all N" / empty-state wording reads
+ * this constant rather than hard-coding a second `50` that could silently
+ * drift from the one the ring buffer actually enforces.
+ */
+export const WATCHDOG_EVENT_CAP = 50;
+
+/**
+ * One crashed run's watchdog record, held by `WatchdogStateService`
+ * in-memory (design §4) — never written into `run.json` itself, which stays
+ * `orchestrate.mjs`'s alone to touch (design's own non-goals: no durable
+ * per-run record of "auto-resumed"). `lastSessionId` is the id a resume
+ * spawn returned, the same role `RunQueueItem.sessionId` plays for the
+ * original dispatch, so the strip and drawer can link to whichever session
+ * is (or was) actually doing the recovery work.
+ *
+ * `exhausted` rides alongside `attempts` and `maxAttempts` so the strip and
+ * the Settings row can render a boolean directly instead of every reader
+ * re-deriving the same comparison — but it is DERIVED from those same two
+ * numbers at the one place this record is built
+ * (`WatchdogStateService.annotate()`, through `watchdogExhausted` in
+ * shared/agent.ts), never stored anywhere and never carried forward from an
+ * earlier read. It used to be a flag the sweeper set once and never cleared,
+ * which is how raising "Give up after" in Settings could restart the sweeper
+ * while this field still said it had given up — see `watchdogExhausted`'s own
+ * comment for the failure that produced, and `watchdogStoodDown` for why the
+ * board and the sweeper must agree about this field to the letter.
+ */
+export interface RunWatchdog {
+  enabled: boolean;
+  attempts: number;
+  maxAttempts: number;
+  lastSpawnAt: string | null;
+  lastSessionId: string | null;
+  lastError: string | null;
+  exhausted: boolean;
+}
+
+/**
+ * `GET /api/agents/watchdog` (design §4.2) — the whole state the Settings
+ * group and the strip's watchdog clause read in one call. `config` rides
+ * along rather than needing a second fetch, because every save in Settings
+ * has to redraw the State row too: flipping `enabled` changes what the
+ * phase-plus-config combination means without the phase itself moving.
+ * `watching` (run ids currently `running`) and `events` (newest first, at
+ * most `WATCHDOG_EVENT_CAP`) are independent axes on purpose — a viewer
+ * needs both "what is being watched right now" and "what happened
+ * recently", and a run that just recovered can leave the first list in the
+ * same tick that produces the newest line in the second.
+ */
+export interface WatchdogStatus {
+  phase: WatchdogPhase;
+  reason?: string;
+  nextTickAt: string | null;
+  config: WatchdogConfig;
+  watching: string[];
+  events: WatchdogEvent[];
 }
 
 /**

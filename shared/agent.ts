@@ -527,3 +527,69 @@ const ITEM_ID_MAX = 64;
 export function isItemId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= ITEM_ID_MAX && ITEM_ID_SHAPE.test(value);
 }
+
+/**
+ * `RunWatchdog.exhausted`, derived — the ONE implementation of "has this run
+ * used up the cap", read by the sweeper's own stand-down
+ * (`watchdog.service.ts`'s `visit()`) and by the record the board is handed
+ * (`WatchdogStateService.annotate()`), so the two can never disagree.
+ *
+ * It is a function rather than a stored boolean because of a Critical the
+ * whole-branch review caught: `exhausted` used to be a flag the sweeper set
+ * `true` once and never cleared, while the condition it stood for —
+ * `attempts >= maxAttempts` — was re-derived from a config file that is read
+ * FRESH on every tick. Raising "Give up after" in Settings (the exact action
+ * the strip's own "exhausted after N — resume by hand" sentence invites)
+ * therefore restarted the sweeper while the payload kept reporting
+ * `exhausted: true`, so the board kept rendering its Resume control against a
+ * run the sweeper had started spawning into again — two concurrent
+ * `--resume` sessions against one `run.json`, whose single-writer guarantee
+ * assumes one process. The bug class is broader than that one bug: a stored
+ * flag whose inputs are re-read every tick is a second copy of the answer,
+ * and it is the copy that goes stale. This repo already answers that with
+ * derivation everywhere it matters — "Groomed is derived … never stored",
+ * "Board-versus-Archive is derived … never stored" (CLAUDE.md) — and this is
+ * the same rule applied to the same shape of mistake.
+ *
+ * Both numbers ride the same `RunWatchdog` record and are read from the same
+ * config read at each call site, so a reader can always check the sentence
+ * against the two numbers printed beside it.
+ */
+export function watchdogExhausted(attempts: number, maxAttempts: number): boolean {
+  return attempts >= maxAttempts;
+}
+
+/**
+ * Has the watchdog stood down for this run — i.e. will its next tick decline
+ * to spawn a resume of its own?
+ *
+ * **This is the coupling the whole feature's safety rests on, and it is why
+ * this predicate is a shared function rather than two `||`s in two files.**
+ * The board's crashed strip renders its Resume control on exactly this
+ * condition (`RunStrip.tsx`), and the sweeper returns from `visit()` without
+ * spawning on exactly this condition (`watchdog.service.ts`). Those two
+ * statements have to describe the same set of states, because nothing else
+ * prevents a person's click and the sweeper's next tick from both spawning
+ * `--resume` into the same run: `AgentsService.resume()` refuses a *fresh*
+ * run, not a second resume of a crashed one, and grace is measured from the
+ * last spawn rather than enforced as a lock. Two concurrent `--resume`
+ * sessions reconcile, stage-write and merge against one `run.json` whose
+ * single-writer guarantee assumes one process, and both end in a merge to
+ * `main`.
+ *
+ * Design §6.1 states the rule for the board ("a Resume button renders on the
+ * crashed strip only when `watchdog.exhausted` or `!watchdog.enabled`") and
+ * §2.2 states it for the sweeper (steps 2 and 3 — off, and cap spent), and
+ * for the length of one branch those were two prose sentences and two
+ * hand-written expressions that merely happened to agree. The whole-branch
+ * review confirmed the obvious consequence: widening the board's half to
+ * "whenever the board allows it" left all 1102 tests green. One function,
+ * read by both, plus the coupling suite that drives both sides from one table
+ * of states, is what makes that mutation loud instead of silent.
+ *
+ * `exhausted` is the DERIVED value above, never a stored flag — see it for
+ * the other half of the same Critical.
+ */
+export function watchdogStoodDown(w: { enabled: boolean; exhausted: boolean }): boolean {
+  return w.exhausted || !w.enabled;
+}

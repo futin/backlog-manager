@@ -574,6 +574,24 @@ body {
 .set-control input[type=number] { width: 84px; font-variant-numeric: tabular-nums }
 .set-unit { font-size: 10px; color: var(--ink3); font-family: var(--mono) }
 
+/* The watchdog Settings group's Activity feed (WatchdogGroup.tsx) — up to
+   WATCHDOG_EVENT_CAP (50) newest-first lines of what the sweeper itself did.
+   `flex: 1 1 100%` forces it onto its own line below the row's name/hint
+   label rather than sharing the `.set-row` flex line with it (that row has
+   no fixed-width control the way every select/checkbox row above it does,
+   so without an explicit full-width basis a short label could leave enough
+   room for both to sit side by side, which reads wrong for a list this
+   dense). Deliberately plain — a mono timestamp, the project's basename,
+   then the sentence, one per line, no card chrome: this is a log, not a
+   stack of cards, and a busy afternoon should read like one. */
+.watchdog-events { flex: 1 1 100%; list-style: none; margin: 0; padding: 0 }
+.watchdog-events-empty { flex: 1 1 100% }
+.watchdog-events, .watchdog-events-empty { font-size: 10.5px; color: var(--ink3) }
+.watchdog-events { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto }
+.watchdog-events li { display: flex; gap: 8px; align-items: baseline; color: var(--ink2) }
+.watchdog-events time { font-family: var(--mono); color: var(--ink3); flex-shrink: 0 }
+.watchdog-event-project { font-weight: 600; color: var(--ink); flex-shrink: 0 }
+
 .set-seg { display: flex; gap: 4px }
 .set-seg button {
   font-family: var(--display); font-size: 10.5px; font-weight: 600;
@@ -811,6 +829,87 @@ body {
 /* Trailing "there is more here" mark, same glyph and same aria-hidden
    reasoning as DispatchButton's own .dispatch-mark. */
 .run-strip-mark { flex: none; font-size: 9px; line-height: 1; color: var(--ink3) }
+
+/* ---------------------------------------------- crashed run strip
+   orchestrator-watchdog (design §6.1): a run whose heartbeat has gone
+   stale while `status` still reads `running` — `isCrashed`,
+   lib/run-watchdog.ts. --amber, not a new colour and not the red
+   `.board-card-stage-bad`/`--red` uses for a genuine item-level `failed` —
+   this reuses the exact tone `.board-card-stage-warn` already carries for
+   `parked`/`needs-answers` (lib/run-stage.ts's own `STAGE_TONE`), because a
+   crashed run is the same register as those two: the pipeline has stopped
+   and needs a person, not proof that anything is broken beyond repair (the
+   watchdog itself, or a person via Resume, may well fix it unattended).
+   Declared after the plain `.run-strip`/`.run-strip:hover` rules above so
+   its equal-specificity `:hover` still wins by source order.
+
+   Fix round 1: `.run-strip-crashed` now lands on a `<div>`, not a
+   `<button>` — the root had to change shape so Resume could become a real
+   sibling `<button>` instead of a `role="button"` span nested inside one
+   (RunStrip.tsx's own doc comment on `renderCrashedStrip` has the full
+   reasoning). Every rule below is keyed on the CLASS, not the element, so
+   none of it needed to change to keep applying; `.run-strip`'s own base
+   rule (flex row, border, background, padding, pointer cursor) still lands
+   on this div exactly as it did on the button, for the same reason. */
+.run-strip-crashed {
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--amber) 8%, var(--strip));
+}
+.run-strip-crashed:hover { border-color: var(--amber) }
+/* The open-the-drawer control inside a crashed strip's `<div>` root (fix
+   round 1) — everything `.run-strip` itself used to BE, now split into a
+   button that only covers the informational body, with Resume as a
+   sibling outside it. A full reset (no border, no background, no padding
+   of its own — the div already carries `.run-strip`'s) plus `flex: 1 1
+   auto; min-width: 0` so it still gives up width the same way the bar
+   segment in a fresh strip does, keeping `.run-strip-current`'s own
+   ellipsis working; `font`/`color: inherit` so none of the text inside it
+   quietly picks up a browser's default button typography. */
+.run-strip-open {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+/* The word itself — deliberately not folded into `.run-strip-project`,
+   which keeps its own uppercase-mono treatment for the project name alone;
+   this is a second, independent fact sitting next to it. */
+.run-strip-crashed-label {
+  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--amber);
+}
+/* The watchdog's own one-sentence clause (lib/run-watchdog.ts's
+   `watchdogClause`) — quiet, matching `.run-strip-heartbeat`'s own
+   register: it is context sitting next to the louder amber facts either
+   side of it, not itself an alarm. */
+.run-strip-watchdog { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+/* The Resume control — fix round 1: a real, sibling `<button>` now (see
+   RunStrip.tsx's own comment on why a nested `role="button"` span was the
+   defect), so this reset undoes a plain `<button>`'s own UA chrome
+   (background, border) before the pill styling below applies — `cursor:
+   pointer` stays even though a real button supplies its own, cheap
+   insurance against a future UA default overriding it. `[aria-disabled=
+   "true"]` (not the native `disabled` attribute — CLAUDE.md's per-item
+   disable-not-hide rule, applied to a project-level control the same way
+   it already applies to DispatchButton) dims it rather than hiding it, and
+   deliberately does NOT use `:disabled` — a genuinely `disabled` button
+   drops out of the tab order, which this control must not do. */
+.run-strip-resume {
+  flex: none; display: inline-flex; align-items: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
+  padding: 2px 8px; margin: 0; background: none;
+  border: 1px solid var(--amber); border-radius: 999px;
+  color: var(--amber); cursor: pointer;
+}
+.run-strip-resume:hover { background: color-mix(in srgb, var(--amber) 12%, transparent) }
+.run-strip-resume[aria-disabled="true"] { opacity: .5; cursor: not-allowed }
+/* A failed Resume click's own message (anything but the 409 "already
+   recovered" case, which renders no error at all) — --red, the same
+   danger-threshold tone `.board-card-stage-bad` uses for an item's own
+   `failed`, because this genuinely is a request that came back wrong,
+   distinct from the amber "needs a person" register the rest of this
+   strip reads in. */
+.run-strip-error { flex: none; font-family: var(--mono); font-size: 10px; color: var(--red) }
 
 @media (max-width: 700px) {
   /* The bar is the one segment built to give up its width first — the dot,
