@@ -3,9 +3,9 @@ id: bug-18
 title: A dispatched execute session does not know it is inside an orchestrator run, and asks the user instead of the orchestrator
 created: 2026-09-05
 tags: orchestrate, execute, skills, board
-updated: 2026-09-05T17:03:48Z
-groom-elapsed: 170
-groom-tokens: 24928
+updated: 2026-09-05T21:27:00Z
+groom-elapsed: 195
+groom-tokens: 32612
 ---
 
 ## Symptom
@@ -142,6 +142,15 @@ load-bearing, all to be written into the section as the reasons they are:
 - **The prompt, not `--append-system-prompt` and not an env var.** Both would
   reach the model; neither reaches the drawer. The prompt is the only string
   the model and the human both read, which is the whole of symptom 2.
+
+  **This rules an env var out for *this* marker's job, and for nothing else.**
+  bug-20 puts a second marker — `BM_ORCH_RUN=<runId>` — on the same dispatch
+  line, deliberately in the environment, because its reader is a `Stop` hook
+  and a hook can read an environment and cannot read a prompt. Read the two
+  rulings together and they are one rule, not a contradiction: the channel
+  follows the reader. A human and a model read the prompt; a hook reads the
+  environment; neither marker can do the other's job and neither replaces the
+  other. Do not collapse them into one when implementing either.
 - **Merge mode is deliberately left out of the marker.** Nothing the session is
   allowed to do differs between `merge` and `branch` — it never merges either
   way — and a marker that names facts the session cannot act on trains it to
@@ -150,6 +159,19 @@ load-bearing, all to be written into the section as the reasons they are:
 §5's `--resume` retry line does **not** repeat the marker: a resumed session
 still carries its original prompt. The existing test asserting `--permission-mode
 auto` on *both* `exec claude -p` lines stays exactly as it is.
+
+**Coordinate with bug-20 — both items rewrite this same dispatch line.** They
+are independent fixes to independent defects and either can land first, but
+whichever lands second rebases onto a line the other already rewrote, so the
+second implementer must read the merged wording rather than the wording quoted
+in their own item. Two consequences worth naming rather than rediscovering: the
+no-apostrophe quoting guard now covers both substitutions at once, and bug-20's
+env assignment goes *before* `exec claude`, while this marker goes *after* the
+id inside the prompt — so the two never compete for a position on the line.
+Where the `--resume` retry line is concerned they differ on purpose: bug-20's
+marker belongs there (a resumed session is still owned by the run and still
+pays the hold), this one does not (the resumed session already carries its
+original prompt).
 
 **2. `skills/backlog-execute/SKILL.md` — give it a notion of being dispatched.**
 A short section (soft target: under ~25 lines — it is injected on every turn of
