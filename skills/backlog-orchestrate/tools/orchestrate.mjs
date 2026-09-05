@@ -502,7 +502,8 @@ function listOpenItems(backlogDir, section) {
   return items
 }
 
-// A narrow read: just `title` off the frontmatter fence and the raw body
+// A narrow read: `title` and the `runner-fix:` marker off the frontmatter
+// fence, plus the raw body
 // text after it, via the same `key:` line-splitter parseFrontmatter uses
 // (see this section's own header comment for why a full parse is not worth
 // duplicating here). A file that doesn't even open the fence the way
@@ -521,19 +522,39 @@ function readItemForGate(absPath) {
 // whatever the worktree gets from that ref, not the file sitting on disk
 // here. Split out of readItemForGate rather than copied so the two can never
 // drift into parsing the same item two different ways.
+//
+// `runnerFix` is the task-13 marker: *executing this item repairs machinery
+// this run itself depends on*, so buildGatedQueue hoists it to the front of
+// the queue rather than letting it sit behind the very items it unblocks.
+// It is read HERE, in the one function both the working-copy and the
+// `<base>` blob path funnel through, so an item's marker always comes off
+// the same bytes its gate verdict did — a `runner-fix:` present only in the
+// working copy must not reorder a run whose worktree will not contain it.
+//
+// Presence hoists; only `false` opts out. `runner-fix: true`,
+// `runner-fix: yes` and a bare `runner-fix:` all hoist, deliberately: a key
+// that hoisted on `true` alone would let `runner-fix: yes` silently not
+// hoist, which is the exact failure this marker exists to remove — a queue
+// in the wrong order with nobody told. The `false` compare is
+// case-insensitive because `False` and `FALSE` are the same YAML boolean a
+// human meant to write, and reading one of them as "hoist" would be the
+// mistake in the direction that actually reorders a run.
 function parseItemForGate(text) {
   const lines = text.split('\n')
-  if (lines[0] !== '---') return { title: '', body: '' }
+  if (lines[0] !== '---') return { title: '', body: '', runnerFix: false }
   let i = 1
   let title = ''
+  let runnerFix = false
   for (; i < lines.length; i++) {
     if (lines[i] === '---') break
     const sep = lines[i].indexOf(':')
     if (sep === -1) continue
-    if (lines[i].slice(0, sep).trim() === 'title') title = lines[i].slice(sep + 1).trim()
+    const key = lines[i].slice(0, sep).trim()
+    if (key === 'title') title = lines[i].slice(sep + 1).trim()
+    else if (key === 'runner-fix') runnerFix = lines[i].slice(sep + 1).trim().toLowerCase() !== 'false'
   }
-  if (i === lines.length) return { title, body: '' }
-  return { title, body: lines.slice(i + 1).join('\n') }
+  if (i === lines.length) return { title, body: '', runnerFix }
+  return { title, body: lines.slice(i + 1).join('\n'), runnerFix }
 }
 
 // Finds one `## <heading>` section's own content: everything between that
@@ -845,29 +866,66 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
   const readBlob = blobReaderAt(projectRoot, base)
   const gateEntry = (entry) => {
     if (readBlob === null) {
-      const { title, body } = readItemForGate(entry.path)
-      return { title, ...gateItem(entry.section, body, projectRoot) }
+      const { title, body, runnerFix } = readItemForGate(entry.path)
+      return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) }
     }
     const relPath = path.relative(projectRoot, entry.path).split(path.sep).join('/')
     const committed = readBlob(relPath)
     if (committed === null) {
       return {
         title: readItemForGate(entry.path).title,
+        // Deliberately NOT the working copy's marker, even though the title
+        // right above it is: an item the run cannot see the content of is
+        // not an item whose frontmatter gets to reorder the queue. The title
+        // is a label on a row that will be printed either way; the marker
+        // moves other items.
+        hoisted: false,
         gate: 'ungroomed',
         reasons: [`not committed on ${base} — the worktree this run creates from ${base} would not contain ${relPath}`],
         questions: [],
       }
     }
-    const { title, body } = parseItemForGate(committed)
-    return { title, ...gateItem(entry.section, body, projectRoot) }
+    const { title, body, runnerFix } = parseItemForGate(committed)
+    return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) }
   }
 
+  // Gate everything first, THEN reorder, THEN count the cap. The marker is
+  // one of the things gateEntry reads off the item, so it cannot be known
+  // before this walk; and `--max` has to be counted over the hoisted order
+  // rather than the natural one, which is most of the point — a runner fix
+  // that was going to fall outside the cap now lands inside it.
+  const gated = ordered.map((entry) => ({ id: entry.id, ...gateEntry(entry) }))
+
+  // A stable partition, not a sort: every item keeps its relative position
+  // inside its own half, so the hoisted items stay bugs-before-tasks and
+  // oldest-first among themselves (or, under --ids, in the order the caller
+  // gave) and everything else keeps the order it already had. The partition
+  // OUTRANKS the bugs-then-tasks rule rather than sorting inside it — a
+  // marked task hoists ahead of an unmarked bug, because "repairs the thing
+  // about to execute the rest of this queue" is a property of the item, not
+  // of its section.
+  //
+  // This applies to `--ids` too, narrowing SKILL.md §1's old "in the order
+  // given" promise on purpose: OrchestrateSheet sends `ids` for any strict
+  // subset of its checkbox list, so that list is a *selection*, not an
+  // ordering — nobody chose the order it arrives in, and exempting `--ids`
+  // would defeat the hoist on the one surface CLAUDE.md tells you to start
+  // runs from.
+  //
+  // The gate itself is untouched: membership and verdicts are decided
+  // exactly as before, this only reorders. An ungroomed marked item
+  // therefore hoists too and appears first in the preview labelled
+  // `ungroomed` — "the thing that would fix your runner is not groomed" is
+  // information, and the top of the list is where it will be read.
+  const hoistedOrder = [...gated.filter((item) => item.hoisted), ...gated.filter((item) => !item.hoisted)]
+
+  // `readyCount` is read BEFORE it is possibly incremented for the item
+  // currently being examined — see the long comment above gateEntry.
   let readyCount = 0
-  return ordered.map((entry) => {
-    const { title, gate, reasons, questions } = gateEntry(entry)
+  return hoistedOrder.map(({ id, title, gate, reasons, questions, hoisted }) => {
     const beyondMax = maxItems !== null && readyCount >= maxItems
     if (gate === 'ready') readyCount++
-    return { id: entry.id, title, gate, reasons, questions, beyondMax }
+    return { id, title, gate, reasons, questions, beyondMax, hoisted }
   })
 }
 
@@ -1295,8 +1353,13 @@ function cmdPlan(argv) {
     console.log(JSON.stringify(queue))
   } else {
     for (const item of queue) {
+      // Two independent suffixes that concatenate rather than exclude each
+      // other: `--max 0` puts even a hoisted item beyond the cap, and a row
+      // that was moved to the front AND will not be dispatched needs to say
+      // both. Hoist first, because it explains why this row is where it is.
+      const hoist = item.hoisted ? '  (runner fix — hoisted)' : ''
       const flag = item.beyondMax ? '  (beyond --max)' : ''
-      console.log(`${item.gate.padEnd(13)} ${item.id}  ${item.title}${flag}`)
+      console.log(`${item.gate.padEnd(13)} ${item.id}  ${item.title}${hoist}${flag}`)
       for (const reason of item.reasons) console.log(`    - ${reason}`)
       for (const question of item.questions) console.log(`    ? ${question}`)
     }

@@ -1401,6 +1401,259 @@ test('plan against a store that is not a git work tree falls back to the working
   assert.ok(!/commit/i.test(out.stdout + out.stderr), `fallback should say nothing about commits: ${out.stdout}${out.stderr}`)
 })
 
+// --- task-13: a runner-fix item is hoisted to the front of the queue -------
+// The defect this section pins: an item that repairs the machinery a run
+// depends on (backlog-orchestrate's own SKILL.md, its CLI, the reviewer
+// agent, the dispatch route) used to sit wherever bugs-then-tasks-oldest-
+// first put it — idea-5 records run-20260901-112035 queueing the
+// permission-flag fix as item 3 of 5, where item 1's very first dispatch was
+// refused by exactly the flag item 3 existed to replace. A `runner-fix:`
+// frontmatter key now hoists it, read off the SAME bytes the gate reads.
+//
+// The marker is seeded by rewriting a seeded item's frontmatter rather than
+// by adding a fourth seeder: what these cases vary is one line, and a
+// seeder that took a marker would let a future reader think the marker is
+// something the fixtures own rather than something a human writes.
+function markRunnerFix(file, value = 'true') {
+  const text = fs.readFileSync(file, 'utf8')
+  assert.ok(text.startsWith('---\n'), `expected a frontmatter fence in ${file}`)
+  fs.writeFileSync(file, text.replace('---\n', `---\nrunner-fix: ${value}\n`))
+}
+
+// Case 1 of the plan's own list, and case 11 with it: orchFixture's project
+// is a git repo with NO commits, so `main` resolves to nothing, blobReaderAt
+// returns null and the whole section below reads the working copy — the
+// documented fallback, exercised by every case here that isn't explicitly a
+// planGitFixture one.
+test('plan: a runner-fix item is hoisted to the front of the default bugs-then-tasks order', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
+  seedReadyTask(project, 'task-1', 'An ordinary task')
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const queue = JSON.parse(out.stdout)
+  assert.deepEqual(queue.map((q) => q.id), ['bug-3', 'bug-2', 'task-1'])
+  assert.deepEqual(
+    Object.fromEntries(queue.map((q) => [q.id, q.hoisted])),
+    { 'bug-3': true, 'bug-2': false, 'task-1': false },
+  )
+})
+
+// Case 2: a stable partition, not a sort. Both halves keep the order they
+// already had — the hoisted items stay oldest-first among themselves.
+test('plan: hoisting is stable — each half keeps the order it already had', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
+  markRunnerFix(seedReadyBug(project, 'bug-5', 'Also repairs the runner'))
+  seedReadyTask(project, 'task-1', 'An ordinary task')
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout).map((q) => q.id), ['bug-3', 'bug-5', 'bug-2', 'task-1'])
+})
+
+// Case 3: the partition OUTRANKS the bugs-then-tasks rule rather than
+// sorting inside it. Without this, a marked task would hoist only as far as
+// the front of the tasks — behind every bug, which is exactly the position
+// the incident this marker exists for was in.
+test('plan: a marked task hoists ahead of an unmarked bug', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyTask(project, 'task-1', 'Repairs the runner'))
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout).map((q) => q.id), ['task-1', 'bug-2'])
+})
+
+// Case 4: `--ids` is hoisted too — a deliberate narrowing of SKILL.md §1's
+// "in the order given". OrchestrateSheet sends `ids` for any strict subset
+// of its checkboxes, so that list is a selection and not an ordering;
+// exempting it would defeat the hoist on the one surface CLAUDE.md tells you
+// to start runs from. The caller's relative order survives among the rest.
+test('plan: --ids is hoisted too, and the caller order survives among the unmarked items', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
+  seedReadyTask(project, 'task-1', 'An ordinary task')
+
+  const out = plan(project, home, '--ids', 'bug-2,bug-3,task-1', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(out.stdout).map((q) => q.id), ['bug-3', 'bug-2', 'task-1'])
+})
+
+// Case 5: the hoist happens BEFORE `--max` is counted, which is most of the
+// point — a runner fix that was going to fall outside the cap now lands
+// inside it. Asserted on the written run file rather than on `plan`, so the
+// cap's effect on real queue membership is what gets pinned.
+test('init: the hoist precedes the --max cap, so a marked item inside a cap of 1 is the one item queued', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  seedReadyTask(project, 'task-1', 'An ordinary task')
+  markRunnerFix(seedReadyTask(project, 'task-5', 'Repairs the runner'))
+
+  const out = run(project, home, 'init', '--project', project, '--max', '1')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(written.queue.map((q) => q.id), ['task-5'])
+})
+
+// Case 6: `false` is the one opt-out, because "considered, and it is not a
+// runner fix" is worth being able to write down.
+test('plan: runner-fix: false does not hoist', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Considered, and not a runner fix'), 'false')
+  seedReadyTask(project, 'task-1', 'An ordinary task')
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const queue = JSON.parse(out.stdout)
+  assert.deepEqual(queue.map((q) => q.id), ['bug-2', 'bug-3', 'task-1'])
+  assert.ok(queue.every((q) => q.hoisted === false), `nothing should be hoisted: ${out.stdout}`)
+})
+
+// Case 7: the typo case, and the reason presence hoists rather than the
+// literal `true`. A key that hoisted on `true` alone would let this exact
+// line silently not hoist — a queue in the wrong order with nobody told,
+// which is the failure class this marker exists to remove.
+test('plan: any non-false value hoists, so runner-fix: yes is not a silent no-op', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'), 'yes')
+  seedReadyTask(project, 'task-1', 'An ordinary task')
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const queue = JSON.parse(out.stdout)
+  assert.deepEqual(queue.map((q) => q.id), ['bug-3', 'bug-2', 'task-1'])
+  assert.equal(queue.find((q) => q.id === 'bug-3').hoisted, true)
+})
+
+// Case 8: the load-bearing half. The marker is read at `<base>`, exactly
+// like the gate verdict beside it — a `runner-fix:` present only in the
+// working copy must not reorder a run whose worktree, created from `<base>`,
+// would not contain it. Both halves in sequence, because the uncommitted one
+// passes trivially against an implementation that never reads the marker at
+// all; it is the commit that proves the assertion has teeth.
+test('plan on a git store: the runner-fix marker is read at <base>, not off the working copy', (t) => {
+  const { home, project } = planGitFixture(t)
+  const file = path.join(project, 'backlog', 'tasks', 'open', 'task-5-let-the-run-drawer-jump-straight-to-a-parked-items-worktree.md')
+  const naturalOrder = ['bug-2', 'bug-7', 'task-1', 'task-3', 'task-4', 'task-5']
+
+  markRunnerFix(file)
+
+  const uncommitted = plan(project, home, '--json')
+  assert.equal(uncommitted.status, 0, uncommitted.stderr)
+  const before = JSON.parse(uncommitted.stdout)
+  assert.deepEqual(before.map((q) => q.id), naturalOrder)
+  assert.ok(before.every((q) => q.hoisted === false), `an uncommitted marker must not hoist: ${uncommitted.stdout}`)
+
+  commitEverything(project, 'mark task-5 as a runner fix')
+
+  const committed = plan(project, home, '--json')
+  assert.equal(committed.status, 0, committed.stderr)
+  const after = JSON.parse(committed.stdout)
+  assert.deepEqual(after.map((q) => q.id), ['task-5', 'bug-2', 'bug-7', 'task-1', 'task-3', 'task-4'])
+  assert.equal(after.find((q) => q.id === 'task-5').hoisted, true)
+})
+
+// Case 9: an item absent from `<base>` never hoists, even though the row's
+// TITLE does come off the working copy. An item the run cannot see the
+// content of is not an item whose frontmatter gets to reorder the queue —
+// and the existing "not committed" verdict is untouched by the marker.
+test('plan on a git store: an item absent from <base> never hoists, and still gates ungroomed naming its path', (t) => {
+  const { home, project } = planGitFixture(t)
+  fs.writeFileSync(path.join(project, TASK_9_REL), TASK_9_BODY.replace('---\nid: task-9', '---\nrunner-fix: true\nid: task-9'))
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const queue = JSON.parse(out.stdout)
+  const item = queue.find((q) => q.id === 'task-9')
+  assert.equal(item.hoisted, false)
+  assert.equal(item.gate, 'ungroomed')
+  assert.ok(item.reasons[0].includes(TASK_9_REL), `reason should name ${TASK_9_REL}: ${item.reasons[0]}`)
+  assert.notEqual(queue[0].id, 'task-9', 'an item the run cannot read must not be hoisted to the front')
+})
+
+// Case 10: the gate is untouched by the hoist — an ungroomed marked item
+// hoists too, and is skipped at pre-flight like any other ungroomed item.
+// "The thing that would fix your runner is not groomed" is information, and
+// the top of the list is where it will actually be read.
+test('plan: an ungroomed runner-fix item still hoists, and init queues it first', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  const dir = path.join(project, 'backlog', 'bugs', 'open')
+  const file = path.join(dir, 'bug-3-ungroomed.md')
+  fs.writeFileSync(
+    file,
+    '---\nid: bug-3\nrunner-fix: true\ntitle: Repairs the runner, ungroomed\ncreated: 2026-08-01\n---\n\n## Symptom\n\nSomething is wrong.\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n',
+  )
+
+  const previewed = plan(project, home, '--json')
+  assert.equal(previewed.status, 0, previewed.stderr)
+  const queue = JSON.parse(previewed.stdout)
+  assert.deepEqual(queue.map((q) => q.id), ['bug-3', 'bug-2'])
+  assert.equal(queue[0].gate, 'ungroomed')
+
+  const out = run(project, home, 'init', '--project', project)
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(written.queue.map((q) => q.id), ['bug-3', 'bug-2'])
+})
+
+// Case 12: the human-readable printer names the hoist, and both suffixes
+// concatenate rather than exclude each other — `--max 0` puts even the
+// hoisted row beyond the cap, and that row has to say both things.
+test('plan without --json: the hoisted row names the hoist, and carries (beyond --max) alongside it', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
+  seedReadyTask(project, 'task-1', 'An ordinary task')
+
+  const plain = plan(project, home)
+  assert.equal(plain.status, 0, plain.stderr)
+  const rows = plain.stdout.split('\n')
+  const hoistedRow = rows.find((l) => l.includes('bug-3'))
+  const ordinaryRow = rows.find((l) => l.includes('bug-2'))
+  assert.match(hoistedRow, /runner fix/i)
+  assert.ok(!/runner fix/i.test(ordinaryRow), `an unmarked row must not claim a hoist: ${ordinaryRow}`)
+
+  const capped = plan(project, home, '--max', '0')
+  assert.equal(capped.status, 0, capped.stderr)
+  const cappedRow = capped.stdout.split('\n').find((l) => l.includes('bug-3'))
+  assert.match(cappedRow, /runner fix/i)
+  assert.ok(cappedRow.includes('(beyond --max)'), `both suffixes should appear: ${cappedRow}`)
+})
+
+// Case 13: the twin of the plan section's own "writes nothing" case, with a
+// marked item present — the new frontmatter read must not have introduced a
+// write of any kind.
+test('plan writes nothing at all with a runner-fix item present: store and state dir are byte-identical after', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-2', 'An ordinary bug')
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
+  const before = snapshotTree(path.join(project, 'backlog'))
+  const homeBefore = fs.readdirSync(home)
+
+  const out = plan(project, home, '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(snapshotTree(path.join(project, 'backlog')), before)
+  assert.deepEqual(fs.readdirSync(home), homeBefore)
+})
+
 // --- Fix round 1 (Important): pidAlive's zombie fallback ------------------
 // `process.kill(pid, 0)` alone can't tell a live process from an unreaped
 // zombie (see pidAlive's own long comment for the full reasoning and the

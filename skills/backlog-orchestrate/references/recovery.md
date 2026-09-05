@@ -43,6 +43,27 @@ file still read stale. Stamping one here, before reconcile or any
 inspection, shrinks that window to the few seconds `status` and `heartbeat`
 themselves take.
 
+Then re-derive the runner-fix switch, before the first item is taken over.
+A run that picked up its own merged fix (§9, "After a runner-fix item lands")
+switched to following this repo's copy of `SKILL.md` and `orchestrate.mjs`
+for the rest of the run — but that switch is *session* state, and this is a
+fresh session, handed the installed copy again exactly as the crashed one
+was. Nothing on disk carries the switch itself; the note does. So read the
+queue and look for any item staged `merged` or `branched` whose note says the
+remainder of the run follows the repo copy:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
+```
+
+If one is there, take the switch again — **both halves or neither**, per §9:
+re-read `skills/backlog-orchestrate/SKILL.md` from this repo's working tree
+and invoke the repo's `orchestrate.mjs` for the rest of this run. If none is,
+change nothing. Doing this here rather than later matters because the whole
+value of the marker is that the *remaining* queue is not executed by the
+broken version, and a crash is most likely at precisely the moment the runner
+is broken.
+
 Then start from what is actually on disk, not from what the run file hoped:
 
 ```bash

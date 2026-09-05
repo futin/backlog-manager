@@ -369,6 +369,28 @@ happened.
   resolves to itself. Worktree-scoped commands take that path as an explicit
   flag instead (`stage --worktree`/`--branch`, `verify --cwd`), never implied
   by cwd, and those flags are exempt from the check.
+- **A `runner-fix:` item is hoisted to the front of the queue, and the marker
+  is read at `<base>`.** It means "executing this item repairs machinery this
+  run depends on" — a human's judgement, written during grooming, never a path
+  heuristic. Presence hoists; only `false` (case-insensitively) opts out, so
+  `runner-fix: yes` cannot silently do nothing. `parseItemForGate` reads it, so
+  it comes off the same bytes the gate verdict did: a marker only in the
+  working copy does not reorder a run whose worktree from `<base>` would not
+  contain it, and an item absent from `<base>` never hoists even though its
+  *title* still prints off disk. The partition is stable, outranks
+  bugs-then-tasks rather than sorting inside it, and runs before `--max` is
+  counted. **`--ids` is hoisted too** — the board sends `ids` for any strict
+  subset of its checkboxes, so that list is a selection, not an ordering, and
+  exempting it would defeat the hoist on the one surface runs are started
+  from; that is also what makes a client change unnecessary. Ordering alone
+  buys nothing, because a run resolves everything through
+  `$CLAUDE_PLUGIN_ROOT` while the merge lands in `main`: SKILL.md §9 tells a
+  run that just merged a runner fix to follow the repo's copy of SKILL.md
+  **and** `orchestrate.mjs` for the remainder — both or neither, since new
+  prose may name a flag the old tool refuses — and to record it as a `stage`
+  note, which is what `references/recovery.md` re-derives the switch from
+  after a resume (session state; nothing on disk carries it). Inert for the
+  *next* run until push + `pnpm run plugin:sync`.
 - **Editing `skills/` changes nothing until it is committed, pushed, and
   `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD,
   never the working tree — git is the publishing boundary, and the sync

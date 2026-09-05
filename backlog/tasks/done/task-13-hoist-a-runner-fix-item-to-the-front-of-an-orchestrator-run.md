@@ -3,9 +3,12 @@ id: task-13
 title: Hoist a runner-fix item to the front of an orchestrator run
 created: 2026-09-04
 from: idea-5
-updated: 2026-09-05T11:09:39Z
+updated: 2026-09-05T12:42:00Z
 groom-elapsed: 75
 groom-tokens: 12757
+started: 2026-09-05T12:26:59Z
+execute-elapsed: 901
+execute-tokens: 101030
 ---
 
 ## Goal
@@ -310,3 +313,97 @@ CLI stdout or a `run.json` the node suite reads directly.
 8. Noted, not run: none of the skill edits change any real run until this repo's HEAD is
    pushed and `pnpm run plugin:sync` succeeds — `plugin:sync` refuses a dirty or unpushed
    tree, so it cannot be part of an orchestrated run's own verification.
+
+## Outcome
+
+2026-09-05 — done, both halves.
+
+**Order.** `parseItemForGate` (`skills/backlog-orchestrate/tools/orchestrate.mjs`) now
+also returns `runnerFix`, so the marker is read off whatever bytes the gate verdict was
+read from — the `<base>` blob when there is a git view, the working copy when there is
+none, and never at all for an item absent from `<base>` (that branch reports
+`hoisted: false` explicitly, even though it still takes its *title* off disk).
+`buildGatedQueue` gates every candidate first, stable-partitions `[…hoisted, …rest]`, and
+only then counts `--max`, so a marked item that would have fallen outside the cap lands
+inside it. `--ids` is hoisted too. `cmdPlan` prints `  (runner fix — hoisted)`, and
+`--json` carries a `hoisted` boolean per row; no run-file field, no `RunStage`, no client
+or shared type moved.
+
+**Effect.** `SKILL.md` §1 documents the key and the amended `--ids` sentence; §9 gained
+"After a runner-fix item lands" (diff the merge, follow the repo's SKILL.md and
+`orchestrate.mjs` — both or neither — record it as a `stage … --note`, no attention
+entry, still inert for the next run until push + `plugin:sync`).
+`references/recovery.md`'s `--resume` procedure re-derives that switch from the note
+before the first item is taken over. `backlog-groom`'s SKILL.md asks for the exact key in
+both the Promote and the Plan-the-fix verdicts. `CLAUDE.md` and `docs/invariants.md`
+carry the invariant.
+
+Twelve new cases in `skills/backlog-orchestrate/tools/orchestrate.test.mjs`. Red-green
+checked: with the partition replaced by `const hoistedOrder = gated`, 8 of the 12 go red
+(68–72, 74, 75, 77) and go green again when it is restored.
+
+### Verification
+
+`pnpm run test:skills`:
+
+```
+1..355
+# tests 355
+# suites 0
+# pass 355
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 52869.435
+```
+
+`pnpm test`:
+
+```
+Test Suites: 67 passed, 67 total
+Tests:       1133 passed, 1133 total
+Snapshots:   0 total
+Time:        99.538 s
+Ran all test suites.
+```
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+TYPECHECK_EXIT=0
+```
+
+Done when 3 — a real `plan` against a real store. Run in a throwaway clone of this repo
+rather than here, because this skill never commits and the second half of the check needs
+the stamp on `main`; the tool invoked is this branch's copy, the store is the repo's own.
+`task-18` stamped `runner-fix: true` in the working copy only:
+
+```
+ungroomed     bug-18  A dispatched execute session does not know it is inside an orchestrator run, and asks the user instead of the orchestrator
+    - ## Fix is still the "unknown" placeholder — nobody has diagnosed this yet
+ready         task-13  Hoist a runner-fix item to the front of an orchestrator run
+ready         task-14  Show a board-started orchestrator run in the strip immediately
+ready         task-15  Sweep the eight residual minor findings from the runs-view redesign reviews
+ready         task-16  Bound the runs list to one viewport and page its history behind a load-more control
+ready         task-17  Orchestrator pause — stop at the next item boundary, resume from the board
+ready         task-18  Move the watchdog's live view from Settings into Runs behind a Runs / Watchdog mode switch
+```
+
+— unchanged, no marker printed. The same stamp committed on `main`:
+
+```
+ready         task-18  Move the watchdog's live view from Settings into Runs behind a Runs / Watchdog mode switch  (runner fix — hoisted)
+ungroomed     bug-18  A dispatched execute session does not know it is inside an orchestrator run, and asks the user instead of the orchestrator
+    - ## Fix is still the "unknown" placeholder — nobody has diagnosed this yet
+ready         task-13  Hoist a runner-fix item to the front of an orchestrator run
+ready         task-14  Show a board-started orchestrator run in the strip immediately
+ready         task-15  Sweep the eight residual minor findings from the runs-view redesign reviews
+ready         task-16  Bound the runs list to one viewport and page its history behind a load-more control
+ready         task-17  Orchestrator pause — stop at the next item boundary, resume from the board
+```
+
+Done when 8 stands as written: none of the skill edits change a real run until this
+repo's HEAD is pushed and `pnpm run plugin:sync` succeeds. Not run here — `plugin:sync`
+refuses a dirty or unpushed tree.
