@@ -6,16 +6,19 @@ import type { RunRange } from '../client/src/lib/run-range';
  * week / This month / All range control (Task 1 of the Runs view redesign —
  * nothing here renders anything; `RunsView`, Task 7, is the only consumer).
  *
- * Every `now` is built with the local `Date` constructor
- * (`new Date(2026, 8, 2, 14, 7)`), never an ISO string or `Date.UTC(...)`:
- * this suite has to pass in whatever timezone happens to run it, and
- * `rangeStart` reads `now` through `new Date(now)` plus local getters and
- * setters (`getDay`, `setHours`, `setDate`). A `now` built from an ISO string
- * would already be pinned to a specific offset before the arithmetic under
- * test ever sees it, which would make the suite assert something true only
- * in the runner's own timezone. 2026-08-31 is a Monday and 2026-09-06 is a
- * Sunday — checked against a real calendar, not assumed — and the week cases
- * below depend on both.
+ * Every `now` in the blocks BELOW is built with the local `Date` constructor
+ * (`new Date(2026, 8, 2, 14, 7)`), never an ISO string or `Date.UTC(...)`, so
+ * that nothing here asserts anything specific to one zone: `rangeStart` reads
+ * `now` through `new Date(now)` plus local getters and setters (`getDay`,
+ * `setHours`, `setDate`), and a `now` built from an ISO string would already
+ * be pinned to a specific offset before the arithmetic under test ever sees
+ * it. 2026-08-31 is a Monday and 2026-09-06 is a Sunday — checked against a
+ * real calendar, not assumed — and the week cases below depend on both.
+ *
+ * The DST block at the END of this file is the deliberate exception and does
+ * the opposite: it asserts absolute instants that are only correct in one
+ * zone, and gets that zone from `test/helpers/global-setup.ts`, which pins it
+ * for the whole run. See that file for why the pin is unconditional.
  */
 
 /**
@@ -135,7 +138,10 @@ describe('RUN_RANGES / RANGE_BUTTON / RANGE_SCOPE', () => {
  * (`America/New_York`, chosen because US transition rules are rule-derived and
  * stable across tzdata releases — "second Sunday in March, first Sunday in
  * November" since 2007 — so 2026-03-08 and 2026-11-01 will not move under a
- * dependency bump).
+ * dependency bump). Every expectation below is an absolute instant that is
+ * correct in that zone and in no other, which is exactly why that pin
+ * OVERRIDES an inherited `TZ` rather than deferring to one: a run under
+ * `TZ=UTC` would otherwise turn these four cases red.
  *
  * The pin lives in `globalSetup` rather than in a `beforeAll` here because a
  * `beforeAll` DOES NOT WORK, measured rather than assumed: jest gives each
@@ -155,10 +161,12 @@ describe('RUN_RANGES / RANGE_BUTTON / RANGE_SCOPE', () => {
  * nothing to do with this code. The omission is a choice, not an oversight.
  */
 describe('rangeStart / inRange across DST transitions', () => {
-  // Case 6: the pin itself. Everything below is meaningless if the zone is not
-  // the one asserted, and a wrong-zone run would fail the later cases with
-  // confusing arithmetic rather than saying why — so assert the zone first, on
-  // a known instant. 2026-03-11 is inside EDT (UTC−4).
+  // Case 6: the pin itself, and the guard that keeps the rest of this block
+  // honest. Everything below is meaningless if the zone is not the one
+  // asserted, and a wrong-zone run would fail the later cases with confusing
+  // arithmetic rather than saying why — so assert the zone first, on a known
+  // instant. 2026-03-11 is inside EDT (UTC−4). This case is also what fails
+  // first if someone makes the `globalSetup` pin conditional again.
   it('the global TZ pin reached Date (2026-03-11T12:00:00Z is 08:00 local)', () => {
     expect(new Date(Date.parse('2026-03-11T12:00:00Z')).getHours()).toBe(8);
   });

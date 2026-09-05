@@ -400,13 +400,27 @@ the copy and never reaches the setter Node uses to invalidate its timezone
 cache. A probe test read the variable back as `America/New_York` while
 `new Date(Date.parse('2026-03-11T12:00:00Z')).getHours()` still answered `13`
 (CET, the host's zone) instead of `8`. The plan named `globalSetup` as the
-fallback for exactly this, so `test/helpers/global-setup.ts` now sets `TZ` when
-it is not already set, wired in from `jest.config.ts`. Consequence, stated
-plainly because it is wider than the plan's own framing: the WHOLE suite now
-runs in one pinned zone rather than the developer's. That removes a class of
-machine-dependent failure rather than adding one, and an explicit `TZ` in the
-environment still wins. Case 10 ("TZ is restored after the block") is therefore
-moot and was dropped — there is no per-block pin left to leak.
+fallback for exactly this, so `test/helpers/global-setup.ts` now sets `TZ`,
+wired in from `jest.config.ts`. Consequence, stated plainly because it is wider
+than the plan's own framing: the WHOLE suite now runs in one pinned zone rather
+than the developer's. That removes a class of machine-dependent failure rather
+than adding one. Case 10 ("TZ is restored after the block") is therefore moot
+and was dropped — there is no per-block pin left to leak.
+
+The pin is **unconditional**, and this is the one thing about it a later reader
+must not "improve". It shipped in review as `if (process.env.TZ === undefined)`,
+on the reasoning that a developer running `TZ=UTC pnpm test` deliberately should
+get UTC. That is wrong here: the DST cases assert absolute instants that are
+correct only in `America/New_York` (`2026-03-02T05:00:00Z` is Monday local
+midnight there and nowhere else), so a conditional pin does not let an explicit
+`TZ` win — it lets an explicit `TZ` turn four passing tests red in a suite that
+was green in every zone before the block existed. Caught in review, reproduced
+as `TZ=UTC npx jest test/run-range.test.ts` → 4 failures, and fixed by dropping
+the condition. The accepted cost, recorded in the file's own header: a
+`TZ=<anything> pnpm test` run can no longer be used to check that the rest of
+the suite is zone-agnostic. That property is maintained by reading now — every
+other date-sensitive suite builds its instants with the local `Date`
+constructor — rather than by being executable.
 
 **Test case 7's expected value was wrong in the plan, twice over.** It named
 `now = 2026-03-11T16:00:00Z` with `rangeStart('week', now)` equal to
@@ -452,6 +466,32 @@ Ran all test suites.
 
 The worktree had no `node_modules` of its own (`pnpm test` failed with
 `sh: jest: command not found`), so `pnpm install` was run in it first.
+
+The timezone pin was proved both ways rather than asserted. With the pin
+unconditional, `test/run-range.test.ts` is green under an unset `TZ` and under
+three explicit ones, two of them on the far side of the date line from the
+pinned zone:
+
+```
+TZ=UNSET             exit=0 :: Tests: 17 passed, 17 total
+TZ=UTC               exit=0 :: Tests: 17 passed, 17 total
+TZ=Australia/Sydney  exit=0 :: Tests: 17 passed, 17 total
+TZ=Pacific/Kiritimati exit=0 :: Tests: 17 passed, 17 total
+```
+
+and with the condition temporarily put back, the reviewer's failure reproduces
+exactly:
+
+```
+$ TZ=UTC npx jest test/run-range.test.ts --runInBand   # with `if (process.env.TZ === undefined)` restored
+Tests:       4 failed, 13 passed, 17 total
+```
+
+Case 6 (the zone sanity assertion) is one of those four, so the guard against
+someone reintroducing the condition is the block's own first test rather than a
+comment asking them not to. The whole suite is green under an explicit `TZ` too
+— `TZ=Australia/Sydney pnpm test` → 1179/1179 — which is what confirms the pin
+reaches every suite and not just this one.
 
 ### Browser check (case 20)
 
