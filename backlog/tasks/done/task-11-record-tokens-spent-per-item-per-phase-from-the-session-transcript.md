@@ -3,8 +3,10 @@ id: task-11
 title: Record tokens spent per item, per phase, from the session transcript
 created: 2026-09-04
 from: idea-1
-updated: 2026-09-04T21:09:36Z
+updated: 2026-09-05T11:10:53Z
 execute-elapsed: 1105
+groom-elapsed: 43
+groom-tokens: 6527
 ---
 
 ## Goal
@@ -510,21 +512,87 @@ the existing publish invariant. The absence is that invariant working, not a
 missed write. This item will gain a token count on the first `start`/`stop` pair
 run after this branch is merged, pushed and `pnpm run plugin:sync`ed.
 
-## What is left
+### 2026-09-05 — the interactive-session question, settled
 
-The implementation is finished and verified; this item stays open on purpose,
-waiting for exactly one thing — the interactive-session measurement `## Done
-when` requires. In order:
+Both open steps are now closed, in order.
 
-1. Merge and push this branch, then `pnpm run plugin:sync`. Until that runs, the
-   installed CLI is the pre-change copy and no `stop` anywhere can write a token
-   key (see the publish-boundary note above).
-2. From an **ordinary interactive** Claude Code session (not `claude -p`, not a
-   board-spawned run — `CLAUDE_CODE_ENTRYPOINT` should not be `sdk-cli`), run a
-   `start --as groom` / `stop` pair on any open item and read the result:
-   - a `groom-tokens:` line appears → the variable is exported interactively
-     too. Record that here and `move task-11 done`.
-   - the stderr note `CLAUDE_CODE_SESSION_ID is not set` appears instead → file
-     a new bug citing this task. The feature still works headlessly, which is
-     where the expensive items are, but half its intended surface is unreachable
-     and that is a finding, not a failure of this work.
+**1. Published.** The branch merged as `28b8d21`, `main` is level with
+`origin/main`, and `pnpm run plugin:sync` has run: the installed copy
+(`~/.claude/plugins/cache/backlog-manager-marketplace/backlog-manager/0.1.1/skills/backlog/tools/backlog.mjs`)
+carries `sumFreshTokens`, and the marketplace clone sits at the same HEAD as the
+repo. So the publish-boundary note above — accurate on 2026-09-04 — no longer
+describes the installed state.
+
+**2. `CLAUDE_CODE_SESSION_ID` is exported outside headless too.** Measured in a
+Claude Code session whose `CLAUDE_CODE_ENTRYPOINT` is `claude-desktop` — not
+`sdk-cli`, not `claude -p`, not board-spawned. The `start --as groom` / `stop`
+pair below was run through the **installed** CLI, from the repo root, in that
+session's own environment, so it exercises the whole published path rather than
+the working tree:
+
+```
+started: 2026-09-05T11:10:10Z
+phase: groom
+---
+groom-elapsed: 43
+groom-tokens: 6527
+```
+
+The stderr note from plan step 4 did **not** fire, which is the unambiguous
+signal `## Done when` asked for: the variable is present, the transcript was
+resolved by directory scan (one file, the main transcript, flushed live
+mid-session at 160KB), and a real number was billed. A separate read-only probe
+of `sessionTokensSince` over a 20-minute window in the same session returned
+`63569`, so the mechanism is not merely non-null — it tracks the session's
+actual fresh spend at the right order of magnitude.
+
+**Cross-checked by an independent counter over the same window**
+(`2026-09-05T11:10:10Z` → `11:10:53Z`), the way the 2026-09-04 entry checked
+the headless number — because a plausible figure is exactly what a missed
+dedupe also produces:
+
+```
+records in window      : 6
+distinct request ids   : 3
+deduped fresh total    : 6527    ← what the CLI wrote
+naive per-record sum   : 13054   ← what a missed requestId dedupe writes
+cache_read in window   : 676452  ← what a raw total would have written
+```
+
+Both rules the plan called load-bearing are therefore active on real
+*interactive* data, not just headless: the number is not the 2x, and it is not
+the ~104x a raw total would have made of the same 43 seconds. That last ratio
+is worth keeping in view — it is the step-3 measurement (9:1 fresh-to-cache-read
+on a headless session) restated for a desktop session with a large resident
+context, and it runs the other way, harder. The exclusion matters more here,
+not less.
+
+**What this does and does not prove.** It proves the variable is not
+`-p`-only, and that the mid-session transcript flush the whole task rests on
+holds outside a headless run. It does *not* separately cover the terminal TUI
+(`CLAUDE_CODE_ENTRYPOINT=cli`), which was not measured. That gap is deliberately
+not treated as blocking: the entrypoint values are set by the harness, not by
+the skill, and a session that somehow lacks the variable exits 0 with one
+stderr line saying so — so the failure mode is self-reporting rather than
+silent, which was the point of building the note in the first place.
+
+**One drift found and fixed while verifying.**
+`server/src/items/parse.util.ts`'s `parseElapsed` doc comment still described
+itself as the parser for `groom-elapsed` / `execute-elapsed` alone, though
+`scan.util.ts` had been routing the two token keys through it since this task
+landed. Plan step 8's sweep was scoped to `skills/` and `docs/`, which is
+exactly why `server/` escaped it — worth recording, because the next
+enumeration-widening task will want a wider grep than that one used. The
+comment now names all four counters and says why one parser serves both.
+
+**Verification re-run fresh on 2026-09-05**, after the watchdog and merge-mode
+branches merged on top of this work:
+
+```
+pnpm run test:skills  → 343/343 pass, 0 fail
+pnpm test             → 67 suites, 1126/1126 pass
+pnpm run typecheck    → exit 0
+```
+
+The jest count grew from 952 to 1126 with those later branches; the skill count
+is unchanged at 343, and nothing in this task's own surface regressed.
