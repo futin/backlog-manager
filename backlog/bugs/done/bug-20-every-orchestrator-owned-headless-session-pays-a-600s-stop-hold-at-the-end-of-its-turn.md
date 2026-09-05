@@ -3,9 +3,12 @@ id: bug-20
 title: Every orchestrator-owned headless session pays a 600s Stop hold at the end of its turn
 created: 2026-09-05
 tags: orchestrate, skills, server, hooks
-updated: 2026-09-05T21:35:20Z
+updated: 2026-09-05T22:27:08Z
 groom-elapsed: 18
 groom-tokens: 6057
+started: 2026-09-05T22:15:32Z
+execute-elapsed: 696
+execute-tokens: 65276
 ---
 
 ## Symptom
@@ -67,8 +70,10 @@ own session.
   spawns
 - `server/src/agents/agents.service.ts` — `orchestrate()`/`resume()`'s spawn,
   the equivalent seam for the run's own session
-- `~/.claude/hooks/stop-notify.sh` — machine-local, not in this repo; the half
-  that actually decides whether to hold
+- `~/.claude/hooks/stop-notify.sh` — the half that actually decides whether to
+  hold. Not in this repo, but not a loose machine-local file either: it is a
+  symlink to `claude-agents-dashboard`'s `scripts/stop-notify-hook.sh`, i.e.
+  tracked source in another repo (corrected while implementing half 1)
 - `skills/backlog-orchestrate/tools/orchestrate.test.mjs` — where the dispatch
   line's guards already live
 
@@ -165,3 +170,92 @@ which already reads `SKILL.md` off disk and already guards this line):
 **Not in this fix:** changing `answerSecs`, changing the idle gate, or
 exempting headless sessions generally. Each would trade this bug for a worse
 one — a hand-started headless session must stay reachable.
+
+## Outcome
+
+2026-09-05 — Half 1 implemented, skill-only, as the Fix anticipated. Both of
+`skills/backlog-orchestrate/SKILL.md`'s headless dispatch lines now assign
+`BM_ORCH_RUN=<runId>` immediately before `exec claude` inside the existing
+single-quoted `sh -c` body — §4's fresh dispatch and §5's `--resume` retry
+alike, the retry included because a resumed session keeps its original prompt
+but gets a brand-new environment. A paragraph in §4 records why the variable is
+not the prompt marker by another spelling, why it sits inside the body rather
+than in front of `nohup`, and why the retry carries it where the prompt marker
+deliberately does not.
+
+**The server half was checked and is genuinely unavailable, not skipped.** The
+dashboard's spawn contract (`claude-agents-dashboard`, `shared/types.ts`
+`SpawnRequest`) has no env field at all — `project`, `prompt`, `name`, `model`,
+`effort`, `permissionMode`, `remoteControl`, `resume` and nothing else — and
+`server/lib/spawn.ts` builds the child's environment as `{...process.env}` minus
+`CLAUDE_CODE_ENTRYPOINT`. There is no channel for `agents.service.ts` to pass
+the variable through, so the run's own session keeps its single once-per-run
+hold, exactly as the Fix said it would in that case. Adding an env field to
+another repo's public spawn API is not this item.
+
+Half 2 was already in place and was not touched: the hook reads the variable at
+`stop-notify-hook.sh:122` (`if [ -n "$BM_ORCH_RUN" ]; then`).
+
+### Verification
+
+The two new guards were red before the edit and green after (TDD, red observed
+first):
+
+```
+$ node --test skills/backlog-orchestrate/tools/orchestrate.test.mjs   # before the SKILL.md edit
+not ok 150 - both dispatch lines export the run id to the session they spawn
+not ok 151 - the run id assignment sits inside the sh -c body, not in front of nohup
+not ok 152 - SKILL.md names no environment variable but the three it owns
+# tests 152
+# pass 149
+# fail 3
+```
+
+```
+$ pnpm run test:skills
+1..365
+# tests 365
+# pass 365
+# fail 0
+# duration_ms 56427.356792
+```
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+(no output, exit 0)
+
+$ pnpm test
+Test Suites: 69 passed, 69 total
+Tests:       1179 passed, 1179 total
+Time:        129.53 s
+```
+
+End-to-end proof that the real line — read out of SKILL.md, placeholders
+substituted, only the `claude` binary swapped for a stub that prints its
+environment and argv — still parses, still lands in the worktree, still hands
+the prompt over as one argv element, and now exports the run id:
+
+```
+$ PATH=/tmp/bm20/bin:$PATH sh /tmp/bm20/run.sh   # §4 dispatch line
+BM_ORCH_RUN=run-20260905-213627
+cwd=/tmp/bm20/.worktrees/bug-20
+argc=7
+arg2=/backlog-execute bug-20 [orchestrator-run run-20260905-213627 item 2 of 7 branch backlog/bug-20: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]
+
+$ PATH=/tmp/bm20r/bin:$PATH sh /tmp/bm20r/run.sh # §5 --resume retry line
+BM_ORCH_RUN=run-20260905-213627
+argv=-p --resume sess-abc redo the failing verification step --output-format stream-json --verbose --permission-mode auto
+```
+
+And the POSIX semantics the placement relies on, checked on this machine rather
+than assumed — an assignment prefixing `exec` reaches the exec'd program:
+
+```
+$ /bin/sh -c 'cd /tmp && BM_ORCH_RUN=run-20260905-213627 exec env' | grep BM_ORCH_RUN
+BM_ORCH_RUN=run-20260905-213627
+```
+
+**Inert until published.** Editing `skills/` changes nothing until the merge is
+pushed and `pnpm run plugin:sync` runs; until then every dispatched session,
+including the one that wrote this, still pays the hold.

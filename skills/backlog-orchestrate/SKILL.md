@@ -620,7 +620,7 @@ worse than no field.
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -633,6 +633,27 @@ the session outlive the single tool call that started it. stdout is the
 stream-json transcript and goes to the `.jsonl` that `watch` reads; stderr
 goes to its own file, so a warning printed by the CLI never lands in the
 middle of the transcript.
+
+**`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the
+prompt marker by another spelling.** It says "a run owns this process" to a
+reader that cannot see the prompt at all: the machine's `Stop` hook, which
+holds a finished turn open at the dashboard for up to ten minutes so a remote
+answer can arrive. That hold is right for a hand-started headless session — no
+terminal to type into means the dashboard is its only channel — and pure
+wall-clock for this one, which nobody is going to answer and which is under
+orders to ignore a dashboard message anyway. A hook set up to read the
+variable notifies and exits instead; a machine without that hook is unaffected,
+so the assignment costs nothing either way. Substituted from this run, exactly
+like the prompt marker's own `<runId>`, and safe inside the single-quoted body
+by construction: a run id is `run-YYYYMMDD-HHMMSS`, no quote, space or
+metacharacter in it. It goes **inside** the `sh -c '…'` body as a prefix on
+`exec` — POSIX puts a simple command's assignments in the environment of the
+program it execs — rather than in front of `nohup`, where it would be one more
+thing a stray space can detach from the command. **§5's `--resume` retry
+carries it too**, unlike the prompt marker, which that line deliberately does
+not repeat: a resumed session keeps its original prompt but gets a brand-new
+environment, so the assignment has to be made again or the retry pays the hold
+the fresh dispatch was spared.
 
 **The prompt is spent on more than the trigger, and every word of the marker
 is load-bearing.** The prompt is the *entire* channel from this run to that
@@ -782,7 +803,7 @@ For both failure shapes, ask the user — best-effort, exactly like pre-flight
 resumes that item's own session so its context is not paid for twice:
 
 ```bash
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 

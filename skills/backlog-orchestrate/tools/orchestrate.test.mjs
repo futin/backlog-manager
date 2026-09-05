@@ -3150,3 +3150,77 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
     `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`,
   )
 })
+
+// --- bug-20: the environment marker the Stop hook reads ---------------------
+//
+// Every orchestrator-owned headless session used to finish its work and then
+// sit for up to ten minutes doing nothing. The dashboard's Stop hook holds a
+// finished turn open at POST /api/messages/wait so a remote answer can still
+// arrive, and it deliberately skips the idle gate for a headless session —
+// there is no terminal to type into, so the dashboard window is that session's
+// only channel. An orchestrator-dispatched session is headless and nobody is
+// ever going to answer it, so the hold was pure wall-clock: per item, not per
+// run, plus a guaranteed extra `watch` round-trip past the one that would have
+// caught the exit.
+//
+// The hook already reads `BM_ORCH_RUN` and takes its notify-and-exit path when
+// it is set (claude-agents-dashboard, scripts/stop-notify-hook.sh — a symlink
+// target, tracked source, not a loose machine-local file). That half is inert
+// until something sets the variable, which is what these cases pin.
+//
+// This is the SECOND marker on the same dispatch line and it does not replace
+// the first: bug-18's `[orchestrator-run …]` lives in the prompt because its
+// reader is the model and the human reading the dashboard drawer, and neither
+// can see an environment. This one lives in the environment because its reader
+// is a hook, and a hook cannot see a prompt. The channel follows the reader.
+
+// One constant, read into every case below, so SKILL.md and any future
+// consumer cannot drift into two spellings of the same variable.
+const ORCH_RUN_ENV = 'BM_ORCH_RUN'
+
+test('both dispatch lines export the run id to the session they spawn', () => {
+  // Both lines, unlike the prompt marker above, which is deliberately on the
+  // fresh dispatch only. A resumed session is owned by the run exactly as much
+  // as the original was, and it is a separate `exec claude -p` process with a
+  // separate environment — the first line's assignment does not reach it.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
+  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`)
+  for (const line of dispatchLines) {
+    assert.ok(
+      line.includes(`${ORCH_RUN_ENV}=<runId> exec claude -p`),
+      `dispatch line does not assign ${ORCH_RUN_ENV} immediately before exec claude: ${line}`,
+    )
+  }
+})
+
+test('the run id assignment sits inside the sh -c body, not in front of nohup', () => {
+  // `VAR=x nohup sh -c '…'` would export the variable to nohup and thence to
+  // the shell, and the shell would pass it on — but the run composes this line
+  // by substituting into a template, and an assignment outside the quoted body
+  // is one whose value a stray space or an unquoted substitution can detach
+  // from the command entirely. Inside the body it is a plain simple-command
+  // prefix on `exec`, which POSIX places in the exec'd program's environment.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
+  for (const line of dispatchLines) {
+    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"))
+    assert.ok(body.includes(ORCH_RUN_ENV), `${ORCH_RUN_ENV} is outside the single-quoted dispatch body: ${line}`)
+  }
+})
+
+test('SKILL.md names no environment variable but the three it owns', () => {
+  // A closed allowlist rather than a search for near-misses: the failure this
+  // guards is a second spelling of the run-ownership marker (BM_ORCH_RUN_ID,
+  // BM_ORCHESTRATOR_RUN, …), which no pattern can tell from a legitimate new
+  // variable, and the hook tests one name only — prose naming another is how
+  // this dispatch line gets "fixed" into inertness. BM_PLUGIN_ROOT and
+  // BM_RUN_DIR are the verify line's own two, passed in through `nohup env`
+  // because its body dereferences them; this one is substituted at compose
+  // time instead, so it is a plain assignment on the command.
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const ALLOWED = new Set([ORCH_RUN_ENV, 'BM_PLUGIN_ROOT', 'BM_RUN_DIR'])
+  const unexpected = [...new Set([...text.matchAll(/BM_[A-Z_]+/g)].map((m) => m[0]))].filter((n) => !ALLOWED.has(n))
+  assert.deepEqual(unexpected, [], `SKILL.md names an environment variable nothing reads: ${unexpected.join(', ')}`)
+  assert.ok(text.includes(ORCH_RUN_ENV), `SKILL.md no longer names ${ORCH_RUN_ENV} at all`)
+})
