@@ -867,6 +867,19 @@ export class AgentsService {
       // bearing: `--ids` runs items IN THE ORDER GIVEN, overriding the
       // tool's own bugs-then-tasks ordering (orchestrate.mjs, SKILL.md §1),
       // so this loop must never reorder what it was handed.
+      //
+      // `buildGatedQueue` reserves exactly one exception to that, and it is
+      // the tool's to make, never this loop's: an item marked `runner-fix:`
+      // is hoisted to the front of whatever list arrives, because executing
+      // it repairs machinery the rest of the run depends on. The caller's
+      // relative order survives among everything else. That narrowing is
+      // deliberate and it is aimed at precisely this code path — the board
+      // sends `ids` for any strict subset of its checkboxes, so what arrives
+      // here is a *selection*, not an ordering, and nobody chose the
+      // sequence it came in. Which is also why the exception belongs in the
+      // tool: a second copy of "hoist the runner fix" here would have to
+      // re-read every item's frontmatter at `<base>` to know which one that
+      // is, and the two copies would drift the first time either rule moved.
       if (!seen.includes(id)) seen.push(id);
     }
     return seen;

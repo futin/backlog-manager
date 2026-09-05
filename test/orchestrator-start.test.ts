@@ -480,7 +480,16 @@ describe('POST /api/agents/orchestrate', () => {
      ordering (orchestrate.mjs, and SKILL.md section 1) — so the order this
      list arrives in is a real instruction and re-sorting it here would
      silently change what the run does. `bug-2` before `task-1` is the
-     board's own order; the assertion deliberately sends the reverse. */
+     board's own order; the assertion deliberately sends the reverse.
+
+     One exception exists downstream and is deliberately not asserted here:
+     `buildGatedQueue` hoists an item marked `runner-fix:` ahead of the
+     caller's order, because executing it repairs machinery the rest of the
+     run depends on. That is the tool's decision, made against each item's
+     frontmatter at `<base>` — this layer cannot see it and must not try to,
+     so what this case pins is unchanged: whatever arrives, the prompt
+     carries it through verbatim. The hoist is covered where it lives, in
+     `skills/backlog-orchestrate/tools/orchestrate.test.mjs`. */
   it('preserves the order the ids arrived in, not the board order', async () => {
     const sent = stubDashboard();
     await post({ project: projectPath, ids: ['task-1', 'bug-2'] }).expect(201);
