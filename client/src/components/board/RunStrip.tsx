@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import type { KeyboardEvent, MouseEvent } from 'react';
 
 import { POLL_MS } from '../../hooks/useOrchestratorRuns';
 import { ApiError, resumeOrchestrate } from '../../lib/agents';
@@ -88,21 +87,50 @@ function lastReportedEntry(queue: RunQueueItem[]): RunQueueItem | null {
  * `useState`, which is the one thing a conditionally-called function must
  * not do.
  *
- * **A `<button>` cannot contain a `<button>`.** The strip's root stays a
- * real `<button>` here too (`onOpen` and the drawer have to keep working
- * exactly as they do for a fresh strip), so the Resume control is a
- * `<span role="button" tabIndex={0}>` instead of a nested `<button>` — it
- * stops propagation on click and handles Enter/Space itself, matching
- * DispatchButton's own `aria-disabled` + `title` idiom (CLAUDE.md) for the
- * blocked case, rather than the native `disabled` attribute, which would
- * pull the control out of the tab order altogether for a keyboard user.
- * The alternative the brief also offered — restructuring this strip's root
- * as a `<div>` with an inner open-button — was not taken because `RunStrip`
- * is explicitly kept as ONE `<button>` per this file's own doc comment
- * above ("the crashed strip keeps the outer `<button>`"), and a `<div>`
- * root would mean either duplicating the fresh strip's click-opens-the-
- * drawer behaviour by hand on every non-button descendant, or giving up the
- * one-element click target the fresh strip already has for free.
+ * **Fix round 1 (review finding, Critical): a `<button>` cannot contain
+ * another interactive element.** The first cut of this function kept the
+ * strip's root as one `<button>` and rendered Resume as a nested
+ * `<span role="button" tabIndex={0}>` inside it — which satisfies neither
+ * half of the HTML content model for `button` ("no interactive content
+ * descendant, and no descendant with a `tabindex` attribute"): the span is
+ * interactive by ARIA role AND separately carries `tabIndex`. jsdom and
+ * Testing Library never fail on this — both operate on the DOM tree, not on
+ * HTML validity or the accessibility tree a real browser/AT combination
+ * constructs from it — which is exactly why a green suite shipped it
+ * anyway. `stopPropagation` fixed the click BEHAVIOUR (Resume no longer also
+ * opened the drawer) but did nothing about the markup itself; which control
+ * a screen reader's virtual cursor exposes, whether the nested one is even
+ * reachable, and what a single-switch/voice-control "click" activates all
+ * stay implementation-defined once that shape exists.
+ *
+ * **This is why the CRASHED strip's root is a `<div>` while the fresh
+ * strip's stays a real `<button>` (`RunStrip`'s own return below) — do not
+ * "unify" the two.** The fresh strip has exactly one control (open-the-
+ * drawer), so a single `<button>` is the correct, simplest element for it.
+ * The crashed strip has TWO independent controls — open-the-drawer over
+ * most of the strip's body, and Resume, a genuinely separate action with
+ * its own click target — and two controls cannot both be the same `button`
+ * element, nor can one nest inside the other. The `<div>` root here carries
+ * the `run-strip`/`run-strip-crashed` classes and the `run-strip` testid
+ * (both consumed by every existing test and by this component's own CSS
+ * selectors, unaffected by which element they're on); a real, focusable
+ * `<button className="run-strip-open">` inside it covers the whole
+ * informational area (project, "crashed", heartbeat, last-reported stage,
+ * watchdog clause, any resume error) and is what `onOpen` binds to; Resume
+ * is a second, SIBLING `<button>`, not a descendant of the open-button, so
+ * neither is ever nested inside the other and the button-in-button defect
+ * cannot recur here. Both being real buttons also means neither needs
+ * hand-rolled Enter/Space handling — a native `<button>` gets that for
+ * free — and Resume's click handler no longer needs `stopPropagation`
+ * either: propagation only matters between an element and its ANCESTOR's
+ * handler, and Resume has no ancestor with a click handler to escape now
+ * that it is a sibling of the open-button rather than nested inside it.
+ * `aria-disabled` + `title` (CLAUDE.md's own idiom, matching
+ * DispatchButton) stays for the blocked case rather than the native
+ * `disabled` attribute, for the same reason the first cut chose it: a
+ * genuinely `disabled` button is pulled out of the tab order, which is
+ * exactly the wrong outcome for a control whose whole point is to stay
+ * inspectable ("why can't I resume this") by a keyboard user.
  */
 function renderCrashedStrip({
   run, onOpen, canResume, resumeBlockedReason, onResumed, resumeError, setResumeError
@@ -156,61 +184,51 @@ function renderCrashedStrip({
       });
   };
 
-  const handleResumeClick = (e: MouseEvent): void => {
-    // The whole strip is a `<button>` that opens the drawer on click.
-    // Without this, a Resume click would both attempt the resume AND open
-    // the drawer underneath it.
-    e.stopPropagation();
-    attemptResume();
-  };
-
-  const handleResumeKeyDown = (e: KeyboardEvent): void => {
-    // A `role="button"` span gets none of a real `<button>`'s built-in
-    // Enter/Space activation, so this is that behaviour, hand-rolled —
-    // matching the native element's own contract (Enter activates
-    // immediately; Space is conventionally on keyUP, but keyDown here is
-    // enough to match this board's existing keyboard idiom, e.g. the strip's
-    // own outer button relies on the browser's native handling for the same
-    // two keys). `stopPropagation` for the same reason the click handler
-    // needs it — this span sits inside a `<button>` whose own click would
-    // otherwise still fire from the bubbled key event's synthetic click.
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    e.preventDefault();
-    e.stopPropagation();
-    attemptResume();
-  };
-
   return (
-    <button
-      type="button"
-      className="run-strip run-strip-crashed"
-      data-testid="run-strip"
-      onClick={() => onOpen(run)}
-    >
-      <span className="run-strip-dot" aria-hidden="true" />
-      <span className="run-strip-project">{label}</span>
-      <span className="run-strip-crashed-label">crashed</span>
-      <span className="run-strip-heartbeat">no heartbeat for {age ?? '—'}</span>
-      <span className="run-strip-current">
-        {reported === null ? 'all items at rest' : `last reported ${reported.id} at ${reported.stage}`}
-      </span>
-      {clause !== '' && <span className="run-strip-watchdog">{clause}</span>}
-      {resumeError !== null && <span className="run-strip-error">{resumeError}</span>}
+    <div className="run-strip run-strip-crashed" data-testid="run-strip">
+      {/* The open-the-drawer control. Everything a person can currently
+          learn about this crashed run from the strip lives inside it —
+          project, "crashed", the heartbeat age, the last-reported stage
+          (or "all items at rest"), the watchdog's own clause, and any
+          resume error — so clicking anywhere across that whole body opens
+          the drawer, matching a fresh strip's "click anywhere" behaviour
+          (brief case 14) without hand-wiring a click handler onto every
+          individual span. */}
+      <button
+        type="button"
+        className="run-strip-open"
+        onClick={() => onOpen(run)}
+      >
+        <span className="run-strip-dot" aria-hidden="true" />
+        <span className="run-strip-project">{label}</span>
+        <span className="run-strip-crashed-label">crashed</span>
+        <span className="run-strip-heartbeat">no heartbeat for {age ?? '—'}</span>
+        <span className="run-strip-current">
+          {reported === null ? 'all items at rest' : `last reported ${reported.id} at ${reported.stage}`}
+        </span>
+        {clause !== '' && <span className="run-strip-watchdog">{clause}</span>}
+        {resumeError !== null && <span className="run-strip-error">{resumeError}</span>}
+        <span className="run-strip-mark" aria-hidden="true">▸</span>
+      </button>
+      {/* Resume: a genuine sibling `<button>`, never nested inside the
+          open-button above — see this function's own doc comment for why
+          that split is the fix, not `stopPropagation` on a nested control.
+          Being a real button means Enter/Space activation and focusability
+          come from the browser for free; `attemptResume` itself already
+          no-ops while `blocked !== null`, so no keydown handler is needed
+          here either. */}
       {showResume && (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           className="run-strip-resume"
           aria-disabled={blocked !== null || undefined}
           title={blocked ?? undefined}
-          onClick={handleResumeClick}
-          onKeyDown={handleResumeKeyDown}
+          onClick={attemptResume}
         >
           Resume run
-        </span>
+        </button>
       )}
-      <span className="run-strip-mark" aria-hidden="true">▸</span>
-    </button>
+    </div>
   );
 }
 

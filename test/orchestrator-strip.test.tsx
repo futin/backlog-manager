@@ -290,6 +290,32 @@ describe('RunStrip', () => {
       expect(onOpen).not.toHaveBeenCalled();
     });
 
+    // Fix round 1 (review finding, Minor): row 11's own click path exercises
+    // `attemptResume`, but nothing exercised Resume's KEYBOARD path — worth
+    // pinning on its own now that Resume is a genuine `<button>` (fix round
+    // 1's Critical fix) rather than a hand-rolled `role="button"` span with
+    // its own keydown handler. Same fixture, same stub, same assertions as
+    // row 11 — the only difference is Enter on a focused button instead of
+    // a click, matching the idiom this file's own "activates onOpen from
+    // the keyboard" case (below) already uses for the strip's OPEN control.
+    it('activates Resume from the keyboard, with the same outcome as a click', async () => {
+      const fetchMock = stubResume(200, { sessionId: 's' });
+      const onOpen = jest.fn();
+      const onResumed = jest.fn();
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={onOpen} canResume onResumed={onResumed} />);
+
+      screen.getByRole('button', { name: 'Resume run' }).focus();
+      await userEvent.keyboard('{Enter}');
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(String(url)).toBe('/api/agents/resume');
+      expect(JSON.parse((init as RequestInit).body as string)).toEqual({ project: fixture.project });
+      await waitFor(() => expect(onResumed).toHaveBeenCalledTimes(1));
+      expect(onOpen).not.toHaveBeenCalled();
+    });
+
     // Row 12: a 409 "already running" answer means the run recovered under
     // the click (design §6.1) — treated as success, not an error.
     it('treats a 409 run-in-progress answer as success, not an error', async () => {

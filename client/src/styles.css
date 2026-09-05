@@ -823,12 +823,35 @@ body {
    and needs a person, not proof that anything is broken beyond repair (the
    watchdog itself, or a person via Resume, may well fix it unattended).
    Declared after the plain `.run-strip`/`.run-strip:hover` rules above so
-   its equal-specificity `:hover` still wins by source order. */
+   its equal-specificity `:hover` still wins by source order.
+
+   Fix round 1: `.run-strip-crashed` now lands on a `<div>`, not a
+   `<button>` — the root had to change shape so Resume could become a real
+   sibling `<button>` instead of a `role="button"` span nested inside one
+   (RunStrip.tsx's own doc comment on `renderCrashedStrip` has the full
+   reasoning). Every rule below is keyed on the CLASS, not the element, so
+   none of it needed to change to keep applying; `.run-strip`'s own base
+   rule (flex row, border, background, padding, pointer cursor) still lands
+   on this div exactly as it did on the button, for the same reason. */
 .run-strip-crashed {
   border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
   background: color-mix(in srgb, var(--amber) 8%, var(--strip));
 }
 .run-strip-crashed:hover { border-color: var(--amber) }
+/* The open-the-drawer control inside a crashed strip's `<div>` root (fix
+   round 1) — everything `.run-strip` itself used to BE, now split into a
+   button that only covers the informational body, with Resume as a
+   sibling outside it. A full reset (no border, no background, no padding
+   of its own — the div already carries `.run-strip`'s) plus `flex: 1 1
+   auto; min-width: 0` so it still gives up width the same way the bar
+   segment in a fresh strip does, keeping `.run-strip-current`'s own
+   ellipsis working; `font`/`color: inherit` so none of the text inside it
+   quietly picks up a browser's default button typography. */
+.run-strip-open {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
+  background: none; border: none; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
 /* The word itself — deliberately not folded into `.run-strip-project`,
    which keeps its own uppercase-mono treatment for the project name alone;
    this is a second, independent fact sitting next to it. */
@@ -841,18 +864,23 @@ body {
    register: it is context sitting next to the louder amber facts either
    side of it, not itself an alarm. */
 .run-strip-watchdog { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
-/* The Resume control — a `<span role="button">`, never a nested `<button>`
-   (RunStrip.tsx's own comment on why), so its clickable affordance has to
-   come from styling alone: a pill outline in the same amber the rest of
-   this strip already reads in, `cursor: pointer` since no native button
-   chrome supplies one. `[aria-disabled="true"]` dims it rather than hiding
-   it — CLAUDE.md's per-item disable-not-hide rule, applied to a
-   project-level control the same way it already applies to DispatchButton. */
+/* The Resume control — fix round 1: a real, sibling `<button>` now (see
+   RunStrip.tsx's own comment on why a nested `role="button"` span was the
+   defect), so this reset undoes a plain `<button>`'s own UA chrome
+   (background, border) before the pill styling below applies — `cursor:
+   pointer` stays even though a real button supplies its own, cheap
+   insurance against a future UA default overriding it. `[aria-disabled=
+   "true"]` (not the native `disabled` attribute — CLAUDE.md's per-item
+   disable-not-hide rule, applied to a project-level control the same way
+   it already applies to DispatchButton) dims it rather than hiding it, and
+   deliberately does NOT use `:disabled` — a genuinely `disabled` button
+   drops out of the tab order, which this control must not do. */
 .run-strip-resume {
   flex: none; display: inline-flex; align-items: center;
   font-family: var(--mono); font-size: 10px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
-  padding: 2px 8px; border: 1px solid var(--amber); border-radius: 999px;
+  padding: 2px 8px; margin: 0; background: none;
+  border: 1px solid var(--amber); border-radius: 999px;
   color: var(--amber); cursor: pointer;
 }
 .run-strip-resume:hover { background: color-mix(in srgb, var(--amber) 12%, transparent) }
