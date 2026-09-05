@@ -1,7 +1,8 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 
 import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
+import { useReverify } from '../../hooks/useReverify';
 import { progressBlock } from '../../lib/item-progress';
 
 /**
@@ -107,13 +108,16 @@ export function DispatchButton(
   // drawer renders a second button for an item the card already rendered one
   // for. A duplicated id would point aria-describedby at the wrong card's span.
   const reasonId = useId();
-  /* Only ever true between a click on a project-visibility block and the
-     status answering it (bug-13). It exists for two reasons: `aria-busy`
-     below, so a click that looks like it did nothing is legible as "asked,
-     same answer"; and as the guard that keeps an impatient reader from
-     queueing one status fetch per click on a control that stays disabled
-     while the first is still in flight. */
-  const [verifying, setVerifying] = useState(false);
+  /* The re-ask a click on a project-visibility block provokes (bug-13).
+     `verifying` is only ever true between that click and the status answering
+     it, and drives `aria-busy` below so a click that looks like it did nothing
+     is legible as "asked, same answer"; `ask` carries the guard that keeps an
+     impatient reader from queueing one status fetch per click on a control
+     that stays disabled while the first is still in flight. Both now live in
+     `useReverify` (bug-16), which the toolbar's Orchestrate control shares —
+     see its own comment for why the gate check stays out here with the
+     callers. */
+  const { verifying, ask } = useReverify(reverify);
   const action = deriveAction(item);
   if (action === null || status === null) return null;
 
@@ -204,13 +208,12 @@ export function DispatchButton(
           // — except for the one block a click is allowed to re-ask (bug-13;
           // see `reverifiable` above for the three conditions).
           if (blocked !== null) {
-            if (!reverifiable || verifying) return;
-            setVerifying(true);
-            // `reverify` never rejects (useAgents.ts explains why it resolves
-            // to a flatly-off status instead), so there is no failure branch
-            // here: an off status simply is not `enabled` and opens nothing.
-            void reverify().then((fresh) => {
-              setVerifying(false);
+            if (!reverifiable) return;
+            // `ask` no-ops while an ask is already in flight, and `reverify`
+            // never rejects (useAgents.ts explains why it resolves to a
+            // flatly-off status instead), so there is no failure branch here:
+            // an off status simply is not `enabled` and opens nothing.
+            ask((fresh) => {
               // Re-derived from the FRESH answer, not from the render this
               // click came from — and through the same gate, so a status that
               // came back with dispatch off or the dashboard gone opens

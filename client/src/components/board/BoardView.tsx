@@ -5,6 +5,7 @@ import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { useReverify } from '../../hooks/useReverify';
 import { useSettings } from '../../hooks/useSettings';
 import { isInProgress } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
@@ -209,6 +210,11 @@ export default function BoardView() {
   // but `useId()` is still the right tool for a value that must survive
   // Strict Mode's double-invoke with the same identity both times.
   const orchestrateReasonId = useId();
+  /* bug-16: the toolbar's own half of the one-question click, from the same
+     hook DispatchButton uses. Declared up here with the other board-level
+     state rather than beside the gate below, because it is a hook and the
+     gate is a derivation. */
+  const { verifying: orchestrateVerifying, ask: askOrchestrate } = useReverify(reverifyAgents);
   /*
    * Task 12: which project's run drawer is open, keyed by `project` (the
    * registry path) rather than holding the clicked run object itself. That
@@ -621,12 +627,53 @@ export default function BoardView() {
                 title={orchestrateBlockedReason ?? `drain ${orchestrateProjectName}'s groomed queue in a Claude session`}
                 aria-disabled={orchestrateBlockedReason !== null}
                 aria-describedby={orchestrateBlockedReason === null ? undefined : orchestrateReasonId}
+                // The one signal that a swallowed-looking click was actually
+                // answered (bug-16), for the reason DispatchButton carries the
+                // same attribute: the re-ask below is one request long, and
+                // styles.css keys a `progress` cursor and a lighter label off
+                // this, so the feedback is not screen-reader-only either.
+                aria-busy={orchestrateVerifying}
                 onClick={() => {
                   // The other half of aria-disabled: the browser fires a
-                  // click on it regardless, so this guard is what actually
-                  // makes a blocked button inert — same reasoning as
-                  // DispatchButton's identical guard.
-                  if (orchestrateBlockedReason !== null) return;
+                  // click on it regardless, so this is what decides what a
+                  // blocked button does — and since bug-16 that is "ask the
+                  // question once", not "nothing".
+                  //
+                  // Only ONE block can be speaking here, which is why there is
+                  // no equivalent of DispatchButton's three-condition
+                  // `reverifiable`: `showOrchestrate` above hides the control
+                  // outright for the environment ladder, for an unfiltered
+                  // board, and for a project with a fresh run, so a rendered
+                  // disabled button is necessarily blocked on project
+                  // visibility alone — the one block that can be silently
+                  // stale, because `useAgents` refetches on mount and window
+                  // focus only and a window that never loses focus is never
+                  // asked again. (The fresh-run rule is fed by
+                  // `useOrchestratorRuns`, which polls every 5s while any run
+                  // is fresh, so it is never stale in this way and a status
+                  // refetch could not see runs at all.) Nothing else recovers
+                  // it here: unlike LaunchSheet, OrchestrateSheet re-derives
+                  // no gate on open — its only server re-check is at Start,
+                  // as an uncoded 409 — so the sheet that would correct a
+                  // stale answer sits behind the control the stale answer
+                  // made inert.
+                  if (orchestrateBlockedReason !== null) {
+                    // Captured, not re-read at resolve time: the filter is a
+                    // live <select>, and the sheet must open for the project
+                    // the reader actually clicked for. Deliberately no "the
+                    // filter moved, discard the answer" guard — `orchestrating`
+                    // is keyed on the project path precisely so a sheet
+                    // outlives a filter change (see its declaration), and the
+                    // window here is one request wide.
+                    const path = projectValue;
+                    askOrchestrate((fresh) => {
+                      // Re-derived from the FRESH answer through the same
+                      // gate, so a status that came back with dispatch off or
+                      // the dashboard gone opens nothing either.
+                      if (projectDispatchGate(fresh, path).control === 'enabled') openOrchestrateSheet(path);
+                    });
+                    return;
+                  }
                   openOrchestrateSheet(projectValue);
                 }}
               >

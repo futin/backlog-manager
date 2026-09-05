@@ -198,6 +198,15 @@ body {
 .board-orchestrate[aria-disabled='true'] {
   color: var(--ink3); background: var(--steel); border-color: var(--hairline); cursor: default;
 }
+/* Disabled and DOING something: the status re-ask a click on a
+   project-visibility block now provokes (bug-16, BoardView.tsx). Declared
+   after the disabled rule deliberately — equal specificity, both matching at
+   once, so the later one wins and the busy look is not swallowed by the
+   disabled colour. Identical rule and identical ordering constraint
+   .dispatch-tab/.dispatch-chip already carry for bug-13. */
+.board-orchestrate[aria-busy='true'] {
+  color: var(--ink2); cursor: progress;
+}
 /* A centred flex line, not plain centred text: the loading fallback puts an icon
    beside the word, and `vertical-align` would not align it — an inline SVG's
    baseline is its bottom edge, which hangs the arc below the x-height of the text
