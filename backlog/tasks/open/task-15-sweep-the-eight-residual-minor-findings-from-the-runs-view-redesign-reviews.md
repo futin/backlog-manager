@@ -83,7 +83,7 @@ keep passing unchanged — it is not the case this change is about.
 
 ### Commit 2 — dead CSS (1 finding)
 
-**`client/src/styles.css:1561` — `.run-detail-heading:first-of-type { margin-top: 0 }`.**
+**`client/src/styles.css:1660` — `.run-detail-heading:first-of-type { margin-top: 0 }`.**
 This has never matched anything. `:first-of-type` selects the first element of
 its *type* (tag name) among its siblings — the first `div` — and the detail
 pane's first `div` children are `.run-detail-head` and `.run-drawer-chips`
@@ -97,7 +97,7 @@ from `.run-detail-heading` is the spacing that is actually wanted. Deleting a
 selector that matches nothing is a provable no-op on rendered output — that is
 the whole reason this cluster is separable from the others.
 
-Leave the `.run-detail-heading` block itself (`styles.css:1556–1560`) untouched.
+Leave the `.run-detail-heading` block itself (`styles.css:1655–1659`) untouched.
 
 ### Commit 3 — comment accuracy (2 findings)
 
@@ -134,12 +134,12 @@ of these two: `*` matches real elements and never the generated content a
 `::before` paints, so the sweep is untouched by it; and the current dot is a real
 element but the blanket rule only floors the *timing* properties, which parks the
 ring on its last keyframe rather than stopping it. What actually degrades both is
-this section's own carve-out at `styles.css:1905–1908` — and `styles.css`'s
-comment at 1875–1904 already explains all of this correctly and at length. The
+this section's own carve-out at `styles.css:2004–2007` — and `styles.css`'s
+comment at 1974–2003 already explains all of this correctly and at length. The
 `.tsx` sentence is the one that drifted, not the CSS one.
 
 Second, it omits what the dot actually looks like afterwards: `animation: none`
-drops `.run-track-dot-current` to its resting rule (`styles.css:1809–1812`),
+drops `.run-track-dot-current` to its resting rule (`styles.css:1908–1911`),
 which sets `background`/`border-color` but no `box-shadow` — so the *ring*
 disappears entirely and a plain solid cyan dot remains. "Landing both on a plain
 solid cyan" is right about the fill and silent about the ring, which is the part
@@ -147,7 +147,7 @@ a reader would want to know.
 
 Rewrite the sentence to point at the carve-out rather than the blanket rule, and
 to say the ring is dropped rather than frozen. Do **not** edit
-`styles.css:1875–1908` — that prose is already correct, and this task must not
+`styles.css:1974–2007` — that prose is already correct, and this task must not
 "fix" it into agreement with the sentence that was wrong.
 
 (ref-2 quotes this finding as the prose saying the ring freezes "at its first
@@ -264,8 +264,11 @@ Every check below is one a headless session can run itself.
     `run-track-val-none` and NOT `run-track-val-when`. Build an item whose
     `stage` is `merged` and whose `stageAt.merged` is a string that will not
     parse (`'garbage'`), with at least one earlier parseable stamp so the node
-    is `filled` rather than `hollow`. This is the one case commit 1c changes;
-    today it produces `run-track-val-when`.
+    is `filled` rather than `hollow`. Pass `mergeModeEffective="merge"` so
+    `stepperTerminal` resolves the seventh node to `merged` — `StageTrack`
+    takes that prop since the branch-mode work landed, and every existing
+    test in the file already passes it. This is the one case commit 1c
+    changes; today it produces `run-track-val-when`.
 12. The terminal node with a *parseable* stamp still reads its clock in the
     `run-track-val-when` register — the existing test at line 142/165 covers
     this and must pass unchanged. Rung 2 is narrowed, not removed.
@@ -310,9 +313,9 @@ Every check below is one a headless session can run itself.
 - Four commits exist, one per cluster, each independently revertible.
 - The two comment rewrites (3a, 3b) name the mechanism that actually does the
   work — the `MACHINE_STAGES.includes` filter, and the `@media` carve-out at
-  `styles.css:1905–1908` — and neither reads as if the old claim were merely
+  `styles.css:2004–2007` — and neither reads as if the old claim were merely
   softened.
-- `styles.css:1875–1908` is **unchanged**. It was already correct.
+- `styles.css:1974–2007` is **unchanged**. It was already correct.
 - No behaviour changed anywhere except the one settled register change (1c):
   an unparseable terminal stamp now reads `--ink3` instead of `--ink2`.
 
