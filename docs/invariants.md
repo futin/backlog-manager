@@ -967,6 +967,172 @@ the browser's own parser, not a regex — and rejects any scheme but
 `http(s)`. It is the one settings key a hand-edited localStorage value could
 turn into script execution.
 
+## The watchdog spawns; it never writes the run file
+
+Full design:
+`docs/superpowers/specs/2026-09-04-orchestrator-watchdog-design.md`.
+
+On 2026-09-03, `run-20260903-112622` (backlog-manager, four bugs) went quiet
+at its last item and nobody knew for four hours:
+
+| time (UTC) | what happened |
+|---|---|
+| 14:55 | bug-15 enters `reviewing`; the orchestrator dispatches the reviewer subagent |
+| 15:02 | the subagent dies: `API Error: 529 Overloaded` |
+| 15:02:41 | the orchestrator schedules `sleep 120` in the background, prints a status table, ends its turn |
+| 15:02:46 | the headless `claude -p` process exits — a print-mode session terminates background work a few seconds after its final result. `run.json` stays `status: "running"`, `updatedAt` frozen at 14:58:51 |
+| 15:13 | the run crosses `RUN_STALE_MS` (15 minutes). `RunStrip` renders nothing for a stale run, so the board's only window onto it disappears |
+| 18:57 | a person types `/backlog-orchestrate --resume` by hand; verdict in 4 minutes, bug-15 merged 19:31 |
+
+Every existing piece had worked: staleness was detected on time, `reconcile`
+read the disk correctly, and the hand-typed resume finished the item in 35
+minutes of machine time. The only missing part was a *trigger* — and the
+board's silence for a stale run hid the one fact that would have prompted a
+person to supply one. `RunStrip`'s own old doc comment argued, correctly,
+that a stale run's reported *stage* can't be trusted (has it moved on three
+times since, or died exactly here?); it then drew the wrong conclusion from
+that — that the whole strip had to say nothing — when "no heartbeat for 4h"
+was a fact the payload could have stated the entire time. The watchdog
+(`server/src/agents/watchdog.service.ts`) is the missing trigger and nothing
+more: it decides *when* `--resume` is spawned, never *what* `--resume` does,
+and it is never the run file's writer — that stays `orchestrate.mjs`'s alone
+(see "The orchestrator's run file has exactly one writer" above) — the
+resumed session's own heartbeat is what turns `run.json` live again, exactly
+as if a human had typed the trigger themselves.
+
+The user's own ask, verbatim, ahead of any of this being designed: "a
+self-recovery mechanism that verifies every N minutes if any orchestrator is
+still running … monitors all orchestrators and makes sure that nothing is
+blocked."
+
+### Armed, idle, off
+
+Three phases, and no standing interval backs any of them:
+
+- **Armed** — a `setTimeout` chain is pending because at least one
+  `run.json` reads `status: "running"`, fresh or crashed alike. Arms on a
+  boot-time scan, on every `GET /api/orchestrator/runs` whose payload
+  already holds a `running` run (the read the board already makes on
+  mount, focus and its own poll), and on a successful `orchestrate`/
+  `resume` spawn.
+- **Idle** — no run file anywhere says `running`; the timer is cleared. A
+  run that finishes normally costs one extra tick, not a lifetime of them.
+- **Off** — `BM_AGENTS` is off (nothing on this server can spawn, so there
+  is nothing to watch for) or `BM_WATCHDOG=off` (the operator's kill
+  switch, below) — no timer ever exists.
+
+A standing `setInterval` was the obvious shape and is deliberately not what
+shipped. The requirement was that an idle watchdog cost nothing and be
+*observably* idle, and a standing interval fails both halves: it would read
+every project's run directory once a minute forever on a machine where
+nothing has run in a month, and a Settings State row fed by it could then
+only ever say "on," never "there is nothing to watch." A chain that exists
+only while there is something to lose track of makes idle a checkable state
+rather than a claim — and the chain schedules its next link only after the
+current tick's own awaits resolve, never on a bare wall-clock interval, so
+two ticks can never race the same crashed run for the same spawn.
+
+### Grace: any attempt starts the clock, only a success counts
+
+The sweeper's own per-run pass checks, in order, `exhausted` before grace,
+grace before spawn — and the rule that ordering encodes is: **any spawn
+attempt starts the grace clock; only a success counts against the cap.** The
+two halves close two different failures. Grace applies to a failed attempt
+exactly as it does to a successful one, because a dashboard that is
+unreachable or out of launch slots would otherwise be re-asked on every
+single tick for as long as it stays down — a retry storm dressed up as
+monitoring. The cap counts successes only, because those same failures must
+not *burn* it either: a dashboard down for a day must not leave every
+crashed run marked `exhausted` without a single resume ever having actually
+started, or the one thing this feature exists to do would silently never
+happen. `exhausted` is checked *before* grace so a run that has used its
+last attempt reads exhausted on the very next tick, rather than making a
+person wait out a whole grace window to be told nobody is coming. The floor
+on `graceMs` (five minutes) is not a conservative placeholder: the measured
+time for a resumed session to reach its first heartbeat is ninety seconds on
+a good day (`run-20260903-112622`'s own resume — spawned 18:57:44, heartbeat
+18:59:11), and the incident this design responds to was itself an overload
+event, so a resume spawned into the same overload can take several minutes
+just to run its first command.
+
+### In-memory state, and what a restart costs
+
+Attempts, phase and the event log live only in `WatchdogStateService`'s
+memory (`server/src/orchestrator/watchdog-state.service.ts`), lost on every
+restart, deliberately. The alternative — a durable attempt record beside
+`run.json` — was rejected because the whole run-file design exists to have
+exactly one writer in that directory, and a second writer there, just to
+count "how many times has the watchdog tried this," would be a permanent
+structural exception for state that does not need to survive a restart to
+do its job. The cost is bounded and named rather than hidden: a restart
+forgets every attempt already spent, so a crashed run can receive up to
+`maxAttempts` *more* spawns after one restart than the cap alone would
+otherwise allow. That is a bounded over-eagerness, not an unbounded
+pile-up — the price of not teaching a second file how to survive concurrent
+writers.
+
+### The settings-file exception, and why it is a directory mount
+
+`~/.backlog-manager/settings/watchdog.json`
+(`server/src/orchestrator/watchdog-config.util.ts`) is the first file this
+server has ever written. Every other JSON file it reads belongs to a
+skill's own CLI — `registry.json` to `backlog.mjs`, a project's `run.json`
+to `orchestrate.mjs` — and neither skill has anything to say about how
+eagerly *this server* watches for a crashed run, so there was no existing
+single-writer file for the setting to join. Env vars alone would have
+worked too, at the cost of editing `.env` and restarting the container for
+every change; the user asked for Settings, which needs a file a server-side
+write can actually reach. `docker-compose.yml` mounts `~/.backlog-manager`
+read-only for everything else and gains one nested mount,
+`~/.backlog-manager/settings`, read-write. It is a mount of the
+*directory*, not of `watchdog.json` itself, for a mechanical reason:
+bind-mounting a path that does not yet exist on the host creates a
+directory of that name, never a file — mounting the file directly would
+either fail on a fresh machine or silently create a directory where a file
+was expected, either way.
+
+Two switches guard this file's effect, and they answer different
+questions. `WatchdogConfig.enabled` (the file's own field, read fresh on
+every tick) is the *user's* switch: a disabled watchdog still arms, ticks
+and reports the crashed run it would have resumed — it only withholds the
+spawn, which is what keeps the strip's "off — resume by hand" clause an
+honest fact rather than a guess produced by nothing watching at all.
+`BM_WATCHDOG=off` is the *operator's* switch: no timer, no reads, no spawn,
+full stop. It exists for one concrete, verified reason — the sweeper's
+boot-time scan reads `orchHome()`, which for any jest suite that leaves
+`BM_ORCH_HOME` unset resolves to the developer's *real* orchestrator
+directory. This was not a hypothetical: while implementing the sweeper, a
+read of that real directory (read-only, no writes) turned up a live,
+currently-heartbeating run — `run-20260904-210004`, heartbeat 28 seconds
+old at the time, which was the very run executing this feature's own
+implementation plan. Had `test/helpers/env.ts` not defaulted
+`BM_WATCHDOG=off` for every suite first, any test that builds `AppModule`
+with `BM_AGENTS` on would have armed a live sweeper against that directory
+for the length of every `pnpm test` run — not a stubbed spawn, a real
+`claude -p` session against the developer's own repository. The helper
+treats an *empty* `BM_WATCHDOG` the same as absent (`||=`, not `??=`) for
+the identical reason: a shell that exports `BM_WATCHDOG=` with nothing after
+the `=` is not "off" under `watchdogEnvOff`'s strict, trimmed comparison,
+and would otherwise slip past the one guard meant to catch exactly that.
+
+### The declined prevention layer
+
+Two ways to stop the incident's mechanism at the source were offered and
+**declined for this round**: a plugin `Stop` hook that could refuse to let
+an orchestrator session end its turn while its own run is `running`, and a
+`SKILL.md` rule banning `run_in_background` inside the orchestrator
+entirely. Either would have kept `run-20260903-112622`'s own headless
+session from exiting mid-`sleep` in the first place. Declining them was a
+deliberate trade, not an oversight: the sweeper covers the *outcome* of a
+crash, not its cause, so the incident's exact mechanism can still recur — it
+is now bounded to roughly `RUN_STALE_MS` (15 minutes) plus one `tickMs` of
+dead time plus one resume session's own context floor (~50k tokens,
+headless) per crash, rather than prevented outright. Both declined layers
+stay on the table for a later round; this design's premise is that sweeping
+the outcome was enough to close the four-hour gap the incident actually
+produced, without also having to get a hook or a skill-prose rule right on
+the first try.
+
 ## Queue wait is not work
 
 `itemDurationMs` (`client/src/lib/run-time.ts`) is the one implementation of

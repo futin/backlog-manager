@@ -81,14 +81,19 @@ describe('the agents POST guard', () => {
   });
   // orchestrate's and resume's bodies have no itemPath/action at all — both
   // name a project, not an item (server/src/agents/agents.service.ts,
-  // AgentOrchestrateRequest, and resume()'s own `{ project }` body) — so the
-  // loop below needs a route-aware body rather than body() itself, which
-  // stays exactly as every pre-existing plan/dispatch call site here already
-  // uses it.
+  // AgentOrchestrateRequest, and resume()'s own `{ project }` body) —
+  // watchdog/config's body is a WatchdogConfig patch, not an item or a
+  // project at all (AgentsController.watchdogConfig) — so the loop below
+  // needs a route-aware body rather than body() itself, which stays exactly
+  // as every pre-existing plan/dispatch call site here already uses it.
   const bodyFor = (route: string): Record<string, unknown> =>
-    route === 'orchestrate' || route === 'resume' ? { project: projectPath } : body();
+    route === 'orchestrate' || route === 'resume'
+      ? { project: projectPath }
+      : route === 'watchdog/config'
+        ? { enabled: true }
+        : body();
 
-  for (const route of ['plan', 'dispatch', 'orchestrate', 'resume']) {
+  for (const route of ['plan', 'dispatch', 'orchestrate', 'resume', 'watchdog/config']) {
     /* The exact shape of a cross-origin form auto-submit: the one content type
        that needs no preflight, carrying a body Nest's unconditional urlencoded
        parser is happy to parse. */
