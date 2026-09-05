@@ -12,8 +12,38 @@ dispatch line, "step 5" is Inspect, "step 6" is Commit.
 
 Read `mergeModeEffective` out of `status --json` first: a run downgraded to
 branch mode before the crash stays downgraded, and §9 then takes its branch
-path for every remaining item. Then start from what is actually on disk, not
-from what the run file hoped:
+path for every remaining item.
+
+Then, before reconcile, before Inspect, before anything else this file
+describes, close the gap the board's watchdog is timing:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
+```
+
+Only when that line reads `running` — never on `done`, `aborted` or
+`failed` — stamp a heartbeat immediately, before doing anything else:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
+```
+
+`status` runs first for exactly that reason, and it is the guard, not a
+formality: a finished run is not this step's to re-stamp, and `status` is
+what tells the difference before `heartbeat` ever touches the file. On a
+`running` run, though, this one call is what turns a crashed strip back into
+a live one — the board's watchdog stands down the instant the run file reads
+fresh, so a heartbeat stamped here cancels a second spawn that grace alone
+would only delay, it does not merely postpone it. It also shrinks the
+window in which a human's resume and the watchdog's own resume can land on
+the same crashed run at once: on the incident's own resume
+(`run-20260903-112622`), the session spawned at 18:57:44 and did not reach
+its first heartbeat until 18:59:11 — about ninety seconds in which the run
+file still read stale. Stamping one here, before reconcile or any
+inspection, shrinks that window to the few seconds `status` and `heartbeat`
+themselves take.
+
+Then start from what is actually on disk, not from what the run file hoped:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" reconcile

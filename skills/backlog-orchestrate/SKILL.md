@@ -1298,6 +1298,10 @@ marker is billed with a plain `stop` rather than `--abandon` (deliberately the
 opposite of what `backlog-groom` prescribes for a marker that looks identical),
 and abort's order-of-operations, which is its entire safety property.
 
+The board may spawn `--resume` itself for a run whose heartbeat has gone
+stale, so this path is entered unattended and must stay safe to enter that
+way — which it is, everything before `reconcile`'s verdicts being read-only.
+
 Two rules stay here, because a reader who stops at this line still has to know
 them:
 
