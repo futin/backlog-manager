@@ -67,6 +67,16 @@ const PROJECTS_TWO: ProjectSummary[] = [
 describe('toolbar Orchestrate button', () => {
   const realFetch = global.fetch;
 
+  /* What the stub answers `/api/agents/status` with, read PER CALL rather
+     than frozen into `stub`'s closure the way every other option still is
+     (bug-16). The re-ask cases below need the answer to change between the
+     board's mount fetch and the refetch a click provokes, with no window
+     focus event in between — a constant body cannot express "the world
+     changed while the tab kept focus", which is the entire failing
+     condition. Same mutable-let shape dispatch-button.test.tsx's own
+     board-wiring block already uses for bug-13's repro. */
+  let AGENTS: AgentsStatus = READY;
+
   afterEach(() => {
     global.fetch = realFetch;
   });
@@ -76,7 +86,7 @@ describe('toolbar Orchestrate button', () => {
   function stub(
     opts: { agents?: AgentsStatus; runs?: RunPayload[]; items?: BacklogItem[]; projects?: ProjectSummary[] }
   ): jest.Mock {
-    const agents = opts.agents ?? READY;
+    AGENTS = opts.agents ?? READY;
     const runs = opts.runs ?? [];
     const items = opts.items ?? [];
     const projects = opts.projects ?? PROJECTS;
@@ -104,7 +114,7 @@ describe('toolbar Orchestrate button', () => {
       // Settings' own well-configured case — nothing here is testing the
       // hint itself (that is `stubOrchestrate`'s job, below) — so no hint
       // renders and no test in this block gets a surprise DOM node.
-      const payload: unknown = url.includes('/api/agents/status') ? agents
+      const payload: unknown = url.includes('/api/agents/status') ? AGENTS
         : url.includes('/api/orchestrator/runs') ? ({ runs } satisfies OrchestratorRunsPayload)
         : url.includes('/api/agents/merge-check') ? { covered: true, source: null }
         : url.includes('/api/agents/plan') ? {
@@ -186,6 +196,108 @@ describe('toolbar Orchestrate button', () => {
     stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0 }] });
     await renderNarrowed();
     expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeEnabled();
+  });
+
+  // --- bug-16: the click may re-ask a stale project-visibility block -----
+  // The same one-question click bug-13 gave the card, one control over. Every
+  // case here renders the real BoardView for the reason bug-13's own board
+  // case does: what is being proven is the WIRING — `useAgents().reload` is
+  // already held three lines from the gate as `reverifyAgents` and was simply
+  // never called by the toolbar, so a test that handed the button a
+  // hand-written re-ask would pass on a board that threads none.
+
+  /** How many times this stub has been asked for the dashboard status. The
+   *  re-ask is scoped to the blocked path, and "asked nothing extra" is only
+   *  a claim you can make by counting. */
+  const statusCalls = (fn: jest.Mock): number =>
+    fn.mock.calls.filter(([input]) => String(input).includes('/api/agents/status')).length;
+
+  /** Hold `/api/agents/status` open until the test releases it by hand,
+   *  delegating every other URL to the stub already installed. The controlled
+   *  deferred is the only way to observe a state that exists between the click
+   *  and the very next microtask — a `waitFor` would sample it after it is
+   *  already gone. Same technique dispatch-button.test.tsx's own aria-busy
+   *  case and the merge-check cases below use. */
+  function holdStatus(base: jest.Mock): { release: () => void; statusCalls: () => number } {
+    let release = (): void => {};
+    let calls = 0;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (!url.includes('/api/agents/status')) return base(input, init);
+      calls += 1;
+      return new Promise<Response>((resolve) => {
+        release = () => resolve({ ok: true, status: 200, json: () => Promise.resolve(AGENTS) } as Response);
+      });
+    }) as unknown as jest.Mock;
+    return { release: () => release(), statusCalls: () => calls };
+  }
+
+  it('clears a stale project-visibility block on click, with the window never losing focus', async () => {
+    stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+
+    // The world changes. No focus event, no reload — only the click.
+    AGENTS = READY;
+    await userEvent.click(btn);
+
+    expect(await screen.findByRole('dialog', { name: 'orchestrate alpha' })).toBeInTheDocument();
+  });
+
+  it('opens nothing and settles back when the re-ask returns the same block', async () => {
+    const fn = stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    const before = statusCalls(fn);
+
+    await userEvent.click(btn);
+
+    // The question was actually asked — without this the assertions below
+    // would also pass on the old swallow-the-click behaviour.
+    await waitFor(() => expect(statusCalls(fn)).toBe(before + 1));
+    await waitFor(() => expect(btn).toHaveAttribute('aria-busy', 'false'));
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+  });
+
+  it('marks itself busy while the re-ask is in flight', async () => {
+    const base = stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(btn).toHaveAttribute('aria-busy', 'false');
+
+    const held = holdStatus(base);
+    await userEvent.click(btn);
+    expect(btn).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => { held.release(); });
+    expect(btn).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('asks once however many times it is clicked while the first ask is in flight', async () => {
+    const base = stub({ agents: { ...READY, projectPaths: [] } });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+
+    const held = holdStatus(base);
+    await userEvent.click(btn);
+    await userEvent.click(btn);
+    expect(held.statusCalls()).toBe(1);
+
+    await act(async () => { held.release(); });
+  });
+
+  it('asks nothing extra when the button is not blocked at all', async () => {
+    const fn = stub({});
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    const before = statusCalls(fn);
+
+    await userEvent.click(btn);
+
+    expect(await screen.findByRole('dialog', { name: 'orchestrate alpha' })).toBeInTheDocument();
+    expect(statusCalls(fn)).toBe(before);
   });
 
   // --- Dialog mutual exclusion ------------------------------------------

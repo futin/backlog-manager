@@ -3,9 +3,12 @@ id: bug-16
 title: The toolbar Orchestrate control swallows a click behind a stale project-visibility block
 created: 2026-09-03
 tags: board, dispatch, agents, orchestrate
-updated: 2026-09-05T11:36:18Z
+updated: 2026-09-05T11:52:51Z
 groom-elapsed: 302
 groom-tokens: 12427
+started: 2026-09-05T11:39:32Z
+execute-elapsed: 799
+execute-tokens: 106796
 ---
 
 ## Symptom
@@ -210,3 +213,94 @@ Orchestrate button now reads `aria-disabled="true"` with the "does not list …"
 reason. Restore the original `window.fetch` in a second `browser_evaluate` — no
 reload, no focus event — then click Orchestrate: the `orchestrate <project>`
 dialog must open, and before this fix nothing happens at all.
+
+## Outcome
+
+2026-09-05 — Fixed as planned. The toolbar's Orchestrate button now re-asks the
+dashboard status on a project-visibility block and opens the sheet for the
+project the click captured if the fresh answer reads `enabled`, and the
+mechanism bug-13 wrote once is now shared rather than copied.
+
+What landed, against the five numbered steps of the Fix:
+
+1. `client/src/hooks/useReverify.ts` — new. `ask` no-ops without a `reverify`
+   or while one is in flight; otherwise it marks `verifying`, asks once, clears
+   it, and calls back with the fresh status. No failure branch, for the reason
+   the Fix gave. One deviation, deliberate and stated: the in-flight guard is a
+   `useRef` rather than the `verifying` state `DispatchButton` used, because two
+   clicks dispatched before React re-renders would both read a stale `false`
+   from state. Strictly stronger, and the four bug-13 tests still hold it to the
+   old contract.
+2. `DispatchButton` converted. `test/dispatch-button.test.tsx` is byte-for-byte
+   unchanged (`git diff --stat` on it is empty) and all 44 of its cases pass —
+   which is what makes step 1 a refactor rather than a rewrite.
+3. `BoardView.tsx` — `aria-busy` on the button, and an `onClick` that captures
+   `projectValue` into a local before asking. The comment claiming this mirrors
+   "DispatchButton's identical guard" is replaced by one saying which block may
+   be re-asked and why no equivalent of `reverifiable`'s three conditions is
+   needed here.
+4. `client/src/styles.css` — `.board-orchestrate[aria-busy='true']` added after
+   the `[aria-disabled='true']` rule, same specificity, so the busy look wins.
+5. `CLAUDE.md` and `docs/invariants.md` both extended; the invariants sentence
+   claiming a stale *enable* self-corrects is now scoped to `LaunchSheet`, since
+   `OrchestrateSheet` re-checks only at Start and only as an uncoded 409.
+
+Six new cases in `test/orchestrator-start-ui.test.tsx`'s `toolbar Orchestrate
+button` block (its `stub()` now reads the status per call from a mutable `let`,
+the shape `dispatch-button.test.tsx` already used). Four of them were watched
+failing first, for the right reason — no re-ask, and `aria-busy` absent
+entirely:
+
+```
+  ● toolbar Orchestrate button › clears a stale project-visibility block on click, with the window never losing focus
+    Unable to find role="dialog" and name "orchestrate alpha"
+  ● toolbar Orchestrate button › opens nothing and settles back when the re-ask returns the same block
+    expect(statusCalls(fn)).toBe(before + 1)   // 258:49
+  ● toolbar Orchestrate button › marks itself busy while the re-ask is in flight
+    Expected the element to have attribute: aria-busy="false"  Received: null
+  ● toolbar Orchestrate button › asks once however many times it is clicked while the first ask is in flight
+    Expected: 1  Received: 0
+
+Tests: 4 failed, 29 skipped, 9 passed, 42 total
+```
+
+The fifth ("asks nothing extra when the button is not blocked at all") passed
+before the fix by design — it is the guard that the re-ask stays on the blocked
+path — and the sixth is the pre-existing fresh-run case, kept as proof the new
+path did not resurrect a control rule 4 removes.
+
+Verification, after the change:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm test
+Test Suites: 67 passed, 67 total
+Tests:       1131 passed, 1131 total
+Snapshots:   0 total
+Time:        63.315 s
+```
+
+In the browser, against a real dashboard: this worktree's client served on
+:5188 (5177 holds the main tree), narrowed to `claude-agents-dashboard` —
+backlog-manager itself was unusable for the check because a live orchestrator
+run holds it and rule 4 hides its button, which is itself the rule working.
+`window.fetch` patched to answer `/api/agents/status` with `projectPaths: []`
+plus one dispatched `focus` event:
+
+```
+{ "disabled": "true", "busy": "false",
+  "title": "the dashboard does not list /Users/.../claude-agents-dashboard — most likely no Claude session there inside its LOOKBACK_HOURS" }
+```
+
+`window.fetch` then restored — no reload, no focus event — and the button
+clicked once (through `element.click()`, since Playwright's own actionability
+check refuses an `aria-disabled` control that a real browser clicks happily):
+
+```
+{ "dialog": "orchestrate claude-agents-dashboard",
+  "button": { "disabled": "false", "busy": "false" } }
+```
+
+Before this fix that click did nothing at all.

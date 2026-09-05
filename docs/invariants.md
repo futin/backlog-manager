@@ -844,10 +844,11 @@ afterwards — and that reasoning simply has no purchase on a window that never
 loses focus (a board on a second monitor, or the only window in use). The
 staleness that follows was argued to be bounded: `PROJECT_TTL_MS`'s own comment
 said a minute of it "costs a disabled button that would have worked, which the
-sheet's own re-check then corrects". True in exactly one direction. A stale
-*enable* is corrected by the sheet, because clicking opens it and `plan()`
-re-derives the block server-side; a stale *disable* is not, because the sheet
-that would correct it is behind the control the stale answer just made inert.
+sheet's own re-check then corrects". True in exactly one direction, and — as
+bug-16 later found — only of this control. A stale *enable* is corrected by
+`LaunchSheet`, because clicking opens it and `plan()` re-derives the block
+server-side; a stale *disable* is not, because the sheet that would correct it
+is behind the control the stale answer just made inert.
 The self-correcting path was unreachable from the state that needed it, so the
 board sat on a confidently actionable message that was no longer true with
 nothing in the UI able to clear it.
@@ -877,6 +878,55 @@ question on a timer for every reader whether or not anyone is looking at a
 blocked button, which is what the mount+focus cadence was chosen over; and a
 `visibilitychange` listener narrows the window without closing it, since the
 failing case has the tab visible and the window focused the whole time.
+
+### The toolbar's Orchestrate control asks the same question, from one hook
+
+bug-16 is bug-13 one control over. The board toolbar's Orchestrate button is
+gated by the same `projectDispatchGate`, renders the same reason string, and
+sat inert behind the same stale `projectPaths` array — bug-13 deliberately did
+not touch it, because its own Fix and Affects named the per-item control only.
+Worse there than here in one respect: a project-scoped control is the entry
+point to an unattended queue drain, so the reader who cannot start a run has no
+per-card fallback for the whole queue, and the message sends them to fix
+something that is already fine.
+
+The mechanism is now shared rather than written twice. `useReverify`
+(`client/src/hooks/useReverify.ts`) owns "ask once, mark `aria-busy`, act on the
+fresh answer"; both `DispatchButton` and `BoardView`'s toolbar call it, and
+`test/dispatch-button.test.tsx` passing unchanged is what makes that extraction
+a refactor rather than a rewrite. What the hook deliberately does NOT own is the
+gate check: the two callers derive different answers
+(`dispatchGate(item, fresh)` versus `projectDispatchGate(fresh, path)`) and have
+different sibling blocks, so folding the policy in would mean a config object
+per caller. The drift-prone half is the mechanics — a hand-written copy that
+acts on the stale render, or drops the in-flight guard, looks right and is
+wrong. This repo does repeat small idioms on purpose (three copies of the
+Escape effect), but those are stateless and have no wrong answer.
+
+Three differences from the per-item case, each a consequence of the control
+being project-scoped rather than item-scoped:
+
+- **No three-condition `reverifiable`.** `showOrchestrate` *hides* the button
+  for the environment ladder, for an unfiltered board (`projectValue === ALL`
+  leaves the gate `null`) and for a project with a fresh run. So a rendered
+  disabled button is blocked on project visibility and nothing else — the
+  condition reduces to "the reason is non-null", and the hook's own in-flight
+  guard covers the rest. The fresh-run rule must not be re-derived from a
+  status refetch in any case: it comes from `useOrchestratorRuns`, which polls
+  every 5s while any run is fresh and which a status payload cannot see at all.
+- **The project is captured at click time**, not re-read when the answer lands.
+  The filter is a live `<select>`; the sheet has to open for what the reader
+  clicked. There is deliberately no "the filter moved, discard the answer"
+  guard: `orchestrating` is keyed on the project path precisely so a sheet
+  outlives a filter change, and the window is one request wide.
+- **The sheet cannot correct a stale answer in either direction.**
+  `OrchestrateSheet` takes `spawnMaxPermission` alone rather than the whole
+  `AgentsStatus`, and argues against re-running the gate's checks client-side;
+  it calls `fetchMergeCheck` on open and nothing else. Its only server re-check
+  is at **Start**, where the same gate runs server-side and returns an
+  *uncoded* 409 the sheet renders as an error and stays open on. That second
+  half is not a defect to fix — it is the reason the fix could not be "let the
+  sheet sort it out."
 
 ## One run per project, checked twice
 

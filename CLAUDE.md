@@ -475,7 +475,22 @@ happened.
   either — clearing one half of a doubly-blocked button changes nothing. The
   reason string states the missing path as fact and the lookback only as a
   likelihood for the same reason: no reader of it is closer to the dashboard
-  than a cached list.
+  than a cached list. **The toolbar's Orchestrate control re-asks on that same
+  block, through that same mechanism** (bug-16): `useReverify`
+  (`client/src/hooks/useReverify.ts`) is the one implementation of "ask once,
+  mark `aria-busy`, act on the *fresh* answer" that both controls call, and it
+  deliberately owns the mechanics only — each caller runs its own gate over the
+  fresh status, because the two derive different answers
+  (`dispatchGate(item, fresh)` versus `projectDispatchGate(fresh, path)`) and
+  have different sibling blocks. The toolbar needs no equivalent of
+  `reverifiable`'s three conditions: `showOrchestrate` *hides* the control for
+  the environment ladder, for an unfiltered board and for a project with a
+  fresh run, so a rendered disabled button is blocked on project visibility
+  alone. It re-asks for the project the click captured, never the one the live
+  `<select>` names when the answer lands. And unlike `LaunchSheet`,
+  `OrchestrateSheet` re-derives no gate on open — its only server re-check is
+  at Start, as an uncoded 409 — so nothing behind the control corrects a stale
+  answer either way.
   `progressBlock` lives beside `isInProgress`/`progressLabel` rather than with
   the other two in `shared/`: it is built from both of them, `shared/` must not
   import from `client/`, and the block is client-only — the server's dispatch
