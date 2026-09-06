@@ -98,6 +98,10 @@ describe('WatchdogStateService', () => {
       project: '/p',
       attempts: 0,
       lastSpawnAt: null,
+      // bug-19: the resume lock starts unheld, like every other clock on a
+      // fresh entry — an entry that came into existence holding one would
+      // refuse the very resume that created it.
+      resumeSpawnAt: null,
       lastSessionId: null,
       lastError: null,
       recovered: false,

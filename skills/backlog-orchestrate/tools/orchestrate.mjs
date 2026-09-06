@@ -472,6 +472,144 @@ function writeRunAtomic(dir, run) {
   fs.renameSync(tmp, file)
 }
 
+// --- the driver lease (bug-19) ---------------------------------------------
+//
+// `--resume` is not a command. It is a prose flow in references/recovery.md
+// that a session carries out with the ordinary commands below, and `init` —
+// the one command that takes a lock at all — is deliberately never part of it,
+// since exit 4 is what `init` answers for the very run file a resume exists to
+// take over. Everything downstream is a blind read-modify-write:
+// `writeRunAtomic` is atomic per write, so no reader ever sees a torn file,
+// and last-writer-wins across processes, so two drivers each read a copy,
+// mutate their own and write over each other. `run.json`'s single-writer
+// guarantee is a statement about which PROGRAM writes it, which two instances
+// of that program satisfy while destroying each other's state.
+//
+// That is not hypothetical: on 2026-09-05 two live sessions held one crashed
+// run — one spawned by this app's own `POST /api/agents/resume`, one by the
+// dashboard's session-resume, which nothing in backlog-manager requested and
+// no server-side lock could ever refuse. Both were heading for a merge to
+// `main`. This is the only layer both spawn shapes pass through, which is why
+// the durable half of the fix lives here rather than only in the server.
+//
+// The lease gives a DETERMINISTIC SINGLE SURVIVOR with no cross-process
+// locking primitive: on a crashed run both resumers may claim, the later write
+// wins, and the loser's very next write refuses and stops it. Last-writer-wins
+// — the property that makes a racing `stage` dangerous — is exactly what makes
+// `claim` safe: precisely one of the two claims is visible afterwards, and
+// every subsequent write is checked against it.
+
+// Exit code for "another session has taken this run over". Its own number
+// rather than a `1` for `6`'s reason: the reaction is not "fix this call and
+// retry", it is STOP — write nothing more and exit.
+const EXIT_FOREIGN_DRIVER = 7
+
+// This session's identity, or `null` when there is none.
+//
+// `CLAUDE_CODE_SESSION_ID` is the same variable `backlog.mjs` reads for token
+// accounting, and deliberately NOT a synthetic per-process id: each invocation
+// of this tool is its own process, so a generated id would present a different
+// identity on every command and the run would lock itself out of its own file
+// on the second one.
+function sessionIdentity() {
+  const raw = process.env.CLAUDE_CODE_SESSION_ID
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+  return trimmed === '' ? null : trimmed
+}
+
+// The lease a run file carries, or `null` for one that carries none.
+// **Absent means unclaimed, never locked**: every run file written before this
+// feature existed lacks the key, and a missing field must never be able to
+// strand a run.
+function runDriver(run) {
+  const driver = run.driver
+  if (!driver || typeof driver !== 'object') return null
+  return typeof driver.sessionId === 'string' && driver.sessionId !== '' ? driver : null
+}
+
+// Refuses a mutating command whose run is leased to a DIFFERENT session.
+//
+// Called by every command that writes and by none that only reads: `status`,
+// `plan`, `denials` and `reconcile` are what a session evicted from a run
+// should still be able to run in order to understand what happened to it.
+//
+// An unidentified caller (no CLAUDE_CODE_SESSION_ID — a hand-run terminal)
+// proceeds with a warning rather than being refused. Refusing would strand the
+// one person recovering a run by hand, which is the situation this whole
+// feature exists to leave open; the warning is there so nobody reads a
+// successful command as proof the lease held.
+function assertDriver(run) {
+  const me = sessionIdentity()
+  const driver = runDriver(run)
+  if (me === null) {
+    console.error(
+      'warning: CLAUDE_CODE_SESSION_ID is not set, so this run\'s driver lease cannot be enforced for this command' +
+        (driver ? ` (run.json names ${driver.sessionId} as its driver)` : ''),
+    )
+    return
+  }
+  if (driver === null || driver.sessionId === me) return
+  throw new OrchestrateError(
+    `this run is being driven by session ${driver.sessionId} (since ${driver.at}), not this one — another session has ` +
+      'taken it over. Stop immediately: write nothing more, and exit. See references/recovery.md.',
+    EXIT_FOREIGN_DRIVER,
+  )
+}
+
+const CLAIM_USAGE = 'usage: orchestrate.mjs claim'
+
+// `claim` — take this run over, and heartbeat it in the same write.
+//
+// The first thing a `--resume` session does, replacing the unconditional
+// `heartbeat` recovery.md used to open with: same position, same purpose (shrink
+// the window in which two resumes can both believe they are alone), now also
+// recording WHO, which is what makes the shrinking into a guarantee rather than
+// a narrowing.
+//
+// It refuses exactly one situation: a run that is `running`, FRESH, and leased
+// to another session — one that is actively heartbeating already has a driver
+// and needs no second one. A crashed run is claimable by anybody, which is the
+// point: that is the state a resume exists for, and refusing there would make
+// this lease the thing that strands a run instead of the thing that protects it.
+function cmdClaim(argv) {
+  if (argv.length > 0) {
+    throw new OrchestrateError(CLAIM_USAGE, 1)
+  }
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const run = readRun(dir)
+
+  const me = sessionIdentity()
+  const driver = runDriver(run)
+  if (
+    driver !== null &&
+    driver.sessionId !== me &&
+    run.status === 'running' &&
+    isFresh(run.updatedAt)
+  ) {
+    throw new OrchestrateError(
+      `run ${run.runId} is alive (last heartbeat ${run.updatedAt}) and driven by session ${driver.sessionId} — ` +
+        'nothing to take over. Stop immediately: write nothing, and exit.',
+      EXIT_FOREIGN_DRIVER,
+    )
+  }
+
+  // One clock reading for both stamps, the same rule `unpause` follows: the
+  // lease's `at` and the heartbeat are the same instant, so nothing can land
+  // between them and be judged against the wrong one.
+  const at = nowISO()
+  // `null` for an unidentified caller rather than a placeholder string: a
+  // hand-run terminal cannot hold a lease, and writing a made-up id would let
+  // it lock out the very session that comes to recover the run afterwards.
+  run.driver = me === null ? null : { sessionId: me, at }
+  run.updatedAt = at
+  writeRunAtomic(dir, run)
+  if (me === null) {
+    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run is now unclaimed, and the lease cannot be enforced')
+  }
+  console.log(JSON.stringify({ runId: run.runId, driver: run.driver, updatedAt: at }))
+  return 0
+}
+
 // --- queue items -------------------------------------------------------
 
 // The full RunStage vocabulary, verbatim from shared/types.ts's own
@@ -1444,9 +1582,23 @@ function cmdInit(argv) {
     questionMode,
     queue,
     attention: [],
+    // bug-19: the initiating session is a driver like any other, stamped from
+    // the same `stamp` the run's own clock readings all come from. `null` when
+    // this process has no identity to record (a hand-run terminal), which
+    // reads as "unclaimed" everywhere the lease is checked — see
+    // `runDriver`/`assertDriver` above.
+    driver: sessionIdentity() === null ? null : { sessionId: sessionIdentity(), at: stamp },
   }
 
   writeRunAtomic(dir, newRun)
+  // bug-19: said out loud rather than left to be inferred from a `null` in the
+  // file. A run started without an identity can never enforce its own driver
+  // lease, and the one place that is worth knowing is here — at the start,
+  // where whoever launched it is still watching — not three hours later when a
+  // second `--resume` session walks in and nothing refuses it.
+  if (newRun.driver === null) {
+    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run records no driver, so its lease cannot be enforced')
+  }
   console.log(JSON.stringify({ runId, dir }))
   return 0
 }
@@ -1552,6 +1704,7 @@ function cmdStage(argv) {
 
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
+  assertDriver(run)
 
   // Design §3: enforcement lives in the TOOL, not in SKILL.md's prose — a
   // prose reminder has to survive several hundred turns of a headless
@@ -1679,6 +1832,7 @@ function cmdMergeMode(argv) {
 
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
+  assertDriver(run)
 
   if (!(run.mergeModeEffective === 'merge' && target === 'branch')) {
     throw new OrchestrateError(
@@ -1698,6 +1852,7 @@ function cmdMergeMode(argv) {
 function cmdHeartbeat() {
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
+  assertDriver(run)
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)
   console.log(run.updatedAt)
@@ -1727,6 +1882,7 @@ function cmdAttention(argv) {
 
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
+  assertDriver(run)
 
   const item = run.queue.find((q) => q.id === itemId)
   if (!item) {
@@ -1793,6 +1949,7 @@ function cmdAssume(argv) {
 
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
+  assertDriver(run)
 
   // Checked BEFORE the file is opened, let alone parsed, so a refused call
   // reports exactly one thing: that this run parks its unanswerable items.
@@ -1882,6 +2039,7 @@ function cmdFinish(argv) {
 
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
+  assertDriver(run)
 
   run.status = status
   run.updatedAt = nowISO()
@@ -1905,6 +2063,7 @@ function cmdFinish(argv) {
 function cmdUnpause() {
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
+  assertDriver(run)
 
   if (run.status !== 'paused') {
     throw new OrchestrateError(`this run is ${run.status}, not paused — nothing to unpause`, 1)
@@ -2240,6 +2399,7 @@ function cmdWatch(argv) {
     // uses (see that function's own header comment for why that reuse
     // matters, not just that it is convenient).
     const run = readRun(dir)
+    assertDriver(run)
     if (newlyFoundSessionId !== null) {
       applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId })
     }
@@ -2471,6 +2631,7 @@ function cmdVerify(argv) {
   // an interrupted verify must leave the run file exactly as it found it, so
   // the merge gate can never read a half-written verification.
   const run = readRun(dir)
+  assertDriver(run)
   const item = findQueueItem(run, itemId)
   item.verification = item.verification.concat(rows)
   run.updatedAt = nowISO()
@@ -2663,6 +2824,7 @@ function cmdAbort() {
   const projectRoot = resolveProjectRoot()
   const dir = projectDir(orchHome(), projectRoot)
   const run = readRun(dir)
+  assertDriver(run)
 
   const removedIds = []
   const preservedIds = []
@@ -2768,6 +2930,7 @@ const USAGE = `usage: orchestrate.mjs <command>
 
 commands:
   init         create and lock a new run for a project
+  claim        take a crashed run over as its driver, and heartbeat it
   plan         preview the gated queue init would build, without writing
   stage        move a queue item to a new stage
   merge-mode   record a merge mode downgrade (merge -> branch only)
@@ -2819,6 +2982,12 @@ commands:
 //      identically).
 //   5  `verify` found nothing it could resolve to prove the item works —
 //      that command's own exit alone; no other command ever returns it.
+//   7  another session holds this run's driver lease (bug-19): every
+//      mutating command refuses it, and `claim` refuses to take over a run
+//      that is `running`, FRESH and already led. Nothing is written. Its own
+//      number rather than a `1` for the same reason `6` is: the reaction is
+//      not "fix this call and retry" but STOP — another session is driving
+//      this run, so write nothing more and exit (references/recovery.md).
 //   6  `stage <id> preflight` and `stage <id> dispatched` alone: a pause
 //      request is effective for this run and the call is a transition into
 //      one of those two stages (see cmdStage's own comment for why exactly
@@ -2830,6 +2999,7 @@ export function main(argv) {
   const [cmd, ...rest] = argv
   try {
     if (cmd === 'init') return cmdInit(rest)
+    if (cmd === 'claim') return cmdClaim(rest)
     if (cmd === 'plan') return cmdPlan(rest)
     if (cmd === 'stage') return cmdStage(rest)
     if (cmd === 'merge-mode') return cmdMergeMode(rest)

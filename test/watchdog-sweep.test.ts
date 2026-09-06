@@ -9,7 +9,7 @@ import { AppModule } from '../server/src/app.module';
 import { WatchdogService } from '../server/src/agents/watchdog.service';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
 import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
-import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
+import { WatchdogStateService, type WatchdogEntry } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { makeProject, makeRegistry } from './helpers/store';
 import { COUPLING_ROWS, rowWatchdog } from './helpers/watchdog-coupling';
@@ -182,6 +182,25 @@ describe('watchdog sweeper', () => {
     const dir = join(orchRoot, encodeURIComponent(run.project));
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+  }
+
+  /**
+   * Rewind BOTH of an entry's spawn clocks by `ms` — grace's `lastSpawnAt`
+   * and bug-19's `resumeSpawnAt`.
+   *
+   * Both, because they are two different windows over the same event and a
+   * case that ages only one is testing a state the clock can never actually
+   * produce: real time moves both stamps together. Cases 6, 7 and 7c used to
+   * rewind `lastSpawnAt` alone, which is fine while grace is the only thing
+   * holding a second spawn back and wrong the moment the resume lock (15m,
+   * RUN_STALE_MS) outlives the grace window (10m by default) it sits behind —
+   * see case 6b for that interaction pinned on its own.
+   */
+  function rewind(entry: WatchdogEntry, ms: number): void {
+    if (entry.lastSpawnAt !== null) entry.lastSpawnAt = new Date(Date.parse(entry.lastSpawnAt) - ms).toISOString();
+    if (entry.resumeSpawnAt !== null) {
+      entry.resumeSpawnAt = new Date(Date.parse(entry.resumeSpawnAt) - ms).toISOString();
+    }
   }
 
   function writeConfig(raw: unknown): void {
@@ -405,12 +424,51 @@ describe('watchdog sweeper', () => {
 
     await svc().tick();
     const entry = state().entry(fixture.runId)!;
-    entry.lastSpawnAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    // Sixteen minutes, not eleven: past grace AND past the resume lock, which
+    // is what "the second attempt lands" actually requires now (case 6b is the
+    // eleven-minute state, pinned on its own).
+    rewind(entry, 16 * 60 * 1000);
 
     await svc().tick();
 
     expect(dash.spawns()).toHaveLength(2);
     expect(state().entry(fixture.runId)?.attempts).toBe(2);
+  });
+
+  // --- 6b (bug-19): past grace but inside the resume lock -------------------
+  // The documented consequence of the lock being RUN_STALE_MS (15m) while
+  // grace defaults to 10m: a sweeper retry at t+11m is REFUSED, because the
+  // resume session it spawned at t+0 is still alive by this app's own
+  // definition of alive. That is correct — a second `--resume` into a run
+  // somebody is already resuming is the whole bug — and it is a visible change
+  // in Activity, so it is pinned here rather than left to be discovered and
+  // "fixed" by shortening the lock. Attempt 2 lands near t+20m instead: the
+  // refusal re-stamps grace, so the next tick past the lock is the one that
+  // spawns.
+
+  it('is refused past grace but inside the resume lock, and spawns once the lock expires', async () => {
+    const dash = stubDashboard();
+    await createApp();
+    writeRun(crashedRun(projectPath));
+
+    await svc().tick();
+    const entry = state().entry(fixture.runId)!;
+    rewind(entry, 11 * 60 * 1000);
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(1);
+    expect(entry.attempts).toBe(1);
+    expect(kinds('failed')).toHaveLength(1);
+    expect(kinds('failed')[0].detail).toContain('already started');
+
+    // The refusal re-stamped grace (a refused spawn is still an attempt by
+    // design §1's definition), so both clocks have to move for the retry.
+    rewind(entry, 16 * 60 * 1000);
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(2);
+    expect(entry.attempts).toBe(2);
   });
 
   // --- 7: the cap, and the once-only exhausted line -------------------------
@@ -422,9 +480,9 @@ describe('watchdog sweeper', () => {
 
     await svc().tick();
     const entry = state().entry(fixture.runId)!;
-    entry.lastSpawnAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    rewind(entry, 16 * 60 * 1000);
     await svc().tick();
-    entry.lastSpawnAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    rewind(entry, 16 * 60 * 1000);
 
     await svc().tick();
 
@@ -500,10 +558,11 @@ describe('watchdog sweeper', () => {
     // about the route's arming behaviour (which has its own case in
     // test/watchdog-routes.test.ts).
     writeConfig({ maxAttempts: 3 });
-    // Past grace — otherwise step 4 would hold the spawn back for a reason
+    // Past grace AND past bug-19's resume lock — otherwise step 4, or the
+    // lock inside `resume()` itself, would hold the spawn back for a reason
     // that has nothing to do with the cap, and this case would pass while
     // proving nothing.
-    state().entry(fixture.runId)!.lastSpawnAt = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    rewind(state().entry(fixture.runId)!, 16 * 60 * 1000);
 
     await svc().tick();
 
@@ -626,6 +685,38 @@ describe('watchdog sweeper', () => {
 
     expect(dash.spawns()).toHaveLength(1);
     expect(state().entry(fixture.runId)?.attempts).toBe(0);
+  });
+
+  // --- 9b (bug-19): the resume lock refuses the sweeper too -----------------
+  // The lock lives in `AgentsService.resume()`, the one method both origins
+  // share, so the sweeper obeys it without a second expression of it here.
+  // What that refusal must NOT do is spend an attempt: a refused spawn started
+  // no session, the same split cases 8 and 9 above already pin for a rejected
+  // one. `lastSpawnAt` is re-stamped regardless, so the sweeper backs off for
+  // a grace window rather than asking again every tick while the resume it was
+  // refused for is still on its way.
+  //
+  // `lastSpawnAt` is left null in the setup on purpose: a real board resume
+  // stamps grace as well (`noteBoardResume`), which would refuse this tick one
+  // step earlier and prove nothing about the lock.
+
+  it('records a failed line and spends no attempt when a resume is already in flight', async () => {
+    const dash = stubDashboard();
+    await createApp();
+    writeRun(crashedRun(projectPath));
+
+    const entry = state().upsert(fixture.runId, projectPath);
+    entry.resumeSpawnAt = new Date().toISOString();
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(0);
+    expect(entry.attempts).toBe(0);
+    expect(entry.lastSpawnAt).not.toBeNull();
+    const failed = kinds('failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0].detail).toContain('already started');
+    expect(failed[0].detail).toContain('not counted');
   });
 
   // --- 10: the gate refusing is a failure, recorded the same way ------------

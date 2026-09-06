@@ -3771,3 +3771,149 @@ test('pauseRequestEffective refuses every malformed shape rather than throwing',
     false,
   )
 })
+
+// --- bug-19: the driver lease ---------------------------------------------
+//
+// The layer BOTH resume shapes reach, and therefore the only one that can
+// refuse a resume this app never asked for. `--resume` is not a command: it is
+// a prose flow in references/recovery.md carried out with the ordinary
+// commands, and every one of those is a blind read-modify-write. `init` is the
+// only command that takes a lock at all, and a resume never calls it. So two
+// drivers each read a copy of run.json, mutate their own and write over each
+// other — last-writer-wins across processes, with `writeRunAtomic`'s atomicity
+// guaranteeing only that neither ever reads a torn file.
+//
+// The lease makes the survivor deterministic without any cross-process locking
+// primitive: on a crashed run both resumers may claim, the later write wins,
+// and the loser's very next write refuses and stops it. That is why
+// last-writer-wins is safe for `claim` specifically where it is dangerous for
+// `stage` — exactly one claim is visible afterwards, and every subsequent
+// write is checked against it.
+
+// `run()` with an explicit session identity, since the lease is keyed on
+// CLAUDE_CODE_SESSION_ID. `null` unsets it — the hand-run terminal case, which
+// must still work.
+function runAs(sessionId, cwd, home, ...args) {
+  const env = { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` }
+  if (sessionId === null) delete env.CLAUDE_CODE_SESSION_ID
+  else env.CLAUDE_CODE_SESSION_ID = sessionId
+  return spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd, env })
+}
+
+function makeStale(home, project) {
+  const file = runFile(home, project)
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'))
+  body.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString()
+  fs.writeFileSync(file, JSON.stringify(body, null, 2))
+  return body
+}
+
+test('init stamps the initiating session as the run driver', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+
+  const body = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(body.driver.sessionId, 'sess-a')
+  assert.equal(body.driver.at, body.startedAt, 'the driver stamp and the run start are one clock reading')
+})
+
+test('claim takes an unclaimed crashed run and heartbeats it in the same write', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+  const stale = makeStale(home, project)
+  // No driver at all — every run file written before this feature existed.
+  const file = runFile(home, project)
+  const noDriver = JSON.parse(fs.readFileSync(file, 'utf8'))
+  delete noDriver.driver
+  fs.writeFileSync(file, JSON.stringify(noDriver, null, 2))
+
+  const out = runAs('sess-b', project, home, 'claim')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.equal(after.driver.sessionId, 'sess-b')
+  // The heartbeat recovery.md already requires at this point, not a second
+  // call: claim IS that heartbeat, and it records who as well.
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(stale.updatedAt))
+  assert.equal(after.updatedAt, after.driver.at)
+})
+
+test('a second claim on a crashed run evicts the first, whose next writes then refuse', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+  makeStale(home, project)
+
+  assert.equal(runAs('sess-a', project, home, 'claim').status, 0, 'the original driver may re-claim its own run')
+  // That re-claim heartbeated the run, so it reads fresh again — and a fresh
+  // run another session leads is exactly what `claim` refuses. Back to crashed,
+  // which is the state a resume actually arrives into.
+  makeStale(home, project)
+  const evicting = runAs('sess-b', project, home, 'claim')
+  assert.equal(evicting.status, 0, evicting.stderr)
+
+  const file = runFile(home, project)
+  const afterClaim = fs.readFileSync(file, 'utf8')
+
+  for (const args of [['heartbeat'], ['stage', 'task-5', 'preflight'], ['finish', '--status', 'done']]) {
+    const refused = runAs('sess-a', project, home, ...args)
+    assert.notEqual(refused.status, 0, `${args[0]} was not refused for the evicted session`)
+    assert.match(refused.stderr, /sess-b/, `${args[0]}'s refusal does not name the session holding the run`)
+    // Byte-for-byte: a refused command must write nothing at all, or the
+    // loser's own stage-write is the very thing the lease exists to prevent.
+    assert.equal(fs.readFileSync(file, 'utf8'), afterClaim, `${args[0]} wrote to the run file it was refused`)
+  }
+
+  // And the winner still drives it.
+  assert.equal(runAs('sess-b', project, home, 'heartbeat').status, 0)
+})
+
+test('claim refuses a fresh run another session is driving, and writes nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+  const file = runFile(home, project)
+  const before = fs.readFileSync(file, 'utf8')
+
+  const out = runAs('sess-b', project, home, 'claim')
+
+  assert.notEqual(out.status, 0)
+  assert.match(out.stderr, /sess-a/)
+  assert.equal(fs.readFileSync(file, 'utf8'), before)
+})
+
+test('a run file with no driver key accepts every command exactly as before', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+  const file = runFile(home, project)
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'))
+  delete body.driver
+  fs.writeFileSync(file, JSON.stringify(body, null, 2))
+
+  // Absent means unclaimed, never locked: every run file already on disk when
+  // this shipped lacks the key, and a missing field must not strand a run.
+  assert.equal(runAs('sess-b', project, home, 'heartbeat').status, 0)
+  assert.equal(runAs('sess-b', project, home, 'stage', 'task-5', 'preflight').status, 0)
+  assert.equal(runAs('sess-c', project, home, 'attention', 'task-5', '--kind', 'parked', '--detail', 'x').status, 0)
+})
+
+test('an unidentified session runs every command and warns that the lease cannot be enforced', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  // A hand-run terminal: no CLAUDE_CODE_SESSION_ID anywhere.
+  const init = runAs(null, project, home, 'init', '--project', project)
+  assert.equal(init.status, 0, init.stderr)
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).driver, null)
+  assert.match(init.stderr, /lease/i)
+
+  // And it is not locked out by somebody else's lease either — refusing here
+  // would strand the one person recovering a run by hand.
+  assert.equal(runAs('sess-a', project, home, 'claim').status, 0)
+  const beat = runAs(null, project, home, 'heartbeat')
+  assert.equal(beat.status, 0, beat.stderr)
+  assert.match(beat.stderr, /lease/i)
+})

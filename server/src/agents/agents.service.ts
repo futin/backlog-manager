@@ -17,7 +17,8 @@ import { composePrompt, sessionName } from './prompt.util';
 import {
   clearPauseRequest, pauseRequestEffective, readPauseRequest, writePauseRequest
 } from '../orchestrator/pause-control.util';
-import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
+import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
+import { RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, MergeMode,
   PauseResult, PermissionMode, QuestionMode
@@ -212,7 +213,17 @@ export class AgentsService {
 
   constructor(
     private readonly registry: RegistryService,
-    private readonly orchestrator: OrchestratorService
+    private readonly orchestrator: OrchestratorService,
+    /**
+     * bug-19 — the resume lock's home, and the reason this is
+     * `WatchdogStateService` rather than `WatchdogService`: the sweeper
+     * injects THIS service to call `resume()`, so injecting it back would be
+     * the cycle Nest cannot construct (the same one `arm()` and
+     * `noteBoardResume` live in the controller to avoid). The state holder
+     * has no such edge — it is a plain in-memory record, provided and
+     * exported by `OrchestratorModule`, which `AgentsModule` already imports.
+     */
+    private readonly watchdogState: WatchdogStateService
   ) {}
 
   async status(): Promise<AgentsStatus> {
@@ -705,7 +716,94 @@ export class AgentsService {
       );
     }
 
-    const cfg = readAgentsConfig();
+    // bug-19 — the resume LOCK, and the one refusal in this method that is
+    // taken rather than merely decided.
+    //
+    // Everything above this line is a check: `run.fresh` refuses a run that
+    // is still alive, and nothing refused a SECOND resume of a crashed one.
+    // That is not a hole a further check could close, because the fact being
+    // checked does not change fast enough: a resumed session takes ~90s to
+    // reach its first `heartbeat`, so for that whole window every arriving
+    // call re-reads the identical stale run file and every one spawns. Three
+    // sessions inside ten seconds is what it looked like on
+    // run-20260905-113818, and they were harmless only because a spend limit
+    // killed all three ~600ms in.
+    //
+    // Three properties, none of them optional:
+    //
+    // **Synchronous.** The check and the stamp sit in one run of the event
+    // loop, before the next `await` below — a lock taken after an await is
+    // not a lock, it is a check every concurrent caller passes. That is
+    // precisely what `noteBoardResume` (called from the controller, after
+    // `await this.agents.resume(...)` returns) could never fix from where it
+    // stands, and why the fix lives here rather than beside it.
+    //
+    // **On the shared path.** Both origins funnel through this method — the
+    // board's click and the sweeper's own `spawn()` — so the sweeper obeys
+    // the same lock a person does without a second expression of it
+    // anywhere. What the sweeper does with the refusal is its own business
+    // (a `failed` line, `attempts` untouched, grace re-stamped): a refused
+    // spawn started no session, which is the split it already makes.
+    //
+    // **`RUN_STALE_MS`, not a new number.** The question is "is a resume
+    // session believed to be alive in this run", and this app computes
+    // liveness exactly once. A resumed session that has not heartbeated in
+    // fifteen minutes is dead by the app's own definition, and a second
+    // resume is then the right answer.
+    //
+    // Deliberately UNCODED, unlike the `run.fresh` refusal just above:
+    // `RUN_IN_PROGRESS_CODE` means "a run is alive for this project, right
+    // now", which is false here — the run is crashed (or paused) and a resume
+    // is on its way to it. Both of this endpoint's callers treat that code as
+    // a silent success ("the run recovered under this very click"), which is
+    // exactly the wrong reaction to being told to wait.
+    const entry = this.watchdogState.upsert(run.runId, run.project);
+    const now = Date.now();
+    if (entry.resumeSpawnAt !== null && now - Date.parse(entry.resumeSpawnAt) < RUN_STALE_MS) {
+      const ageSec = Math.round((now - Date.parse(entry.resumeSpawnAt)) / 1000);
+      throw new HttpException(
+        {
+          error:
+            `a resume for run ${run.runId} was already started ${ageSec}s ago — a resumed session takes about ` +
+            'ninety seconds to reach its first heartbeat, so this run will keep reading crashed for a while yet. ' +
+            'Two --resume sessions on one run.json both stage-write and both end in a merge to main.'
+        },
+        409
+      );
+    }
+    const stamp = new Date(now).toISOString();
+    entry.resumeSpawnAt = stamp;
+
+    try {
+      return await this.spawnResume(readAgentsConfig(), project, run, origin, status);
+    } catch (e) {
+      // Cleared, not kept: a spawn that threw started no session, and holding
+      // the lock through a dashboard that was briefly down would silence the
+      // board's only resume control for a full RUN_STALE_MS. Only OUR stamp is
+      // cleared — a later caller that took the lock in the meantime (possible
+      // once this method has awaited) owns a live session this one knows
+      // nothing about. This is the same success-versus-attempt split the
+      // watchdog's own cap already makes; grace covers the failure case and is
+      // untouched.
+      if (entry.resumeSpawnAt === stamp) entry.resumeSpawnAt = null;
+      throw e;
+    }
+  }
+
+  /**
+   * The second half of `resume()` — everything from the dashboard lookup to
+   * the spawn, split out for one reason only: it is the whole of what the
+   * resume lock above wraps in a `try`, and inlining it would put a
+   * forty-line `try` block around code whose own error handling is already
+   * three deep.
+   */
+  private async spawnResume(
+    cfg: AgentsConfig,
+    project: string,
+    run: { runId: string; status: string },
+    origin: 'watchdog' | 'board',
+    status: AgentsStatus
+  ): Promise<AgentDispatchResult> {
     const dirName = (await this.projectMap(cfg)).get(project);
     if (dirName === undefined) {
       // The same TTL-race guard orchestrate() and dispatch() both carry:

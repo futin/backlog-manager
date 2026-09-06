@@ -70,14 +70,27 @@ type RunPayload = OrchestratorRun & {
  * `renderCrashedStrip`'s doc comment) — the state lives in `RunStrip` and
  * is threaded through here.
  */
-function makeAttemptResume({ run, blocked, onResumed, setResumeError }: {
+function makeAttemptResume({ run, blocked, busy, setBusy, onResumed, setResumeError }: {
   run: RunPayload;
   blocked: string | null;
+  /** bug-19: a request from THIS strip is already out. */
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
   onResumed?: () => void;
   setResumeError: (err: string | null) => void;
 }): () => void {
   return () => {
     if (blocked !== null) return;
+    // bug-19 — the synchronous half of the guard, and the only half that can
+    // catch a second click before the first answer lands. The board's own
+    // `resuming` mark (useOrchestratorRuns) is set from `onResumed`, i.e.
+    // AFTER the request settles, so for the whole in-flight window nothing
+    // above this line has changed on screen: occurrence 1 was three clicks
+    // inside ten seconds against a strip that looked identical after each
+    // one. The same guard `RunControls` already carries, for the same reason
+    // its own comment gives.
+    if (busy) return;
+    setBusy(true);
     setResumeError(null);
     resumeOrchestrate(run.project)
       .then(() => {
@@ -93,7 +106,17 @@ function makeAttemptResume({ run, blocked, onResumed, setResumeError }: {
           return;
         }
         setResumeError(err instanceof Error ? err.message : String(err));
-      });
+      })
+      // Cleared on BOTH settle paths, success included — and the control does
+      // not simply come back on a success, because `onResumed` has by then set
+      // the board's `resuming` mark for this project, which outlives the
+      // request (RESUME_POLL_GRACE_MS, or until the run heartbeats). Re-enabling
+      // on settle alone would restore the exact state occurrence 1 came out of:
+      // a run that goes on reading `crashed` for the ~90s a resumed session
+      // needs to reach its first heartbeat. A failure clears it and leaves
+      // nothing behind, which is right — a spawn that threw started no session,
+      // and the server's own lock is likewise cleared on that path.
+      .finally(() => setBusy(false));
   };
 }
 
@@ -121,13 +144,15 @@ function makeAttemptResume({ run, blocked, onResumed, setResumeError }: {
  *     every paused run.
  */
 function renderPausedStrip({
-  run, onOpen, canResume, resumeBlockedReason, resuming, onResumed, resumeError, setResumeError
+  run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
 }: {
   run: RunPayload;
   onOpen: (run: RunPayload) => void;
   canResume?: boolean;
   resumeBlockedReason: string | null;
   resuming?: boolean;
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
   onResumed?: () => void;
   resumeError: string | null;
   setResumeError: (err: string | null) => void;
@@ -140,7 +165,7 @@ function renderPausedStrip({
   const completed = run.queue.filter((q) => q.stage === 'merged' || q.stage === 'branched').length;
   const modeLabel = mergeModeLabel(run.mergeMode, run.mergeModeEffective);
   const blocked = resumeBlockedReason;
-  const attemptResume = makeAttemptResume({ run, blocked, onResumed, setResumeError });
+  const attemptResume = makeAttemptResume({ run, blocked, busy, setBusy, onResumed, setResumeError });
 
   return (
     <div className="run-strip run-strip-paused" data-testid="run-strip">
@@ -155,7 +180,10 @@ function renderPausedStrip({
         {resumeError !== null && <span className="run-strip-error">{resumeError}</span>}
         <span className="run-strip-mark" aria-hidden="true">▸</span>
       </button>
-      {resuming === true ? (
+      {/* bug-19 adds `busy` to what was the mark alone: the mark is set from
+          `onResumed`, so without it this strip keeps a live button for the
+          whole in-flight window and a second click issues a second POST. */}
+      {resuming === true || busy ? (
         <span className="run-strip-resuming" data-testid="run-strip-resuming">Resuming…</span>
       ) : (
         canResume === true && (
@@ -229,12 +257,18 @@ function renderPausedStrip({
  * inspectable ("why can't I resume this") by a keyboard user.
  */
 function renderCrashedStrip({
-  run, onOpen, canResume, resumeBlockedReason, onResumed, resumeError, setResumeError
+  run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
 }: {
   run: RunPayload;
   onOpen: (run: RunPayload) => void;
   canResume?: boolean;
   resumeBlockedReason: string | null;
+  /** bug-19: this board has already asked for a resume of this project — the
+   *  same `useOrchestratorRuns` mark the paused strip reads, which outlives
+   *  the request the click made. */
+  resuming?: boolean;
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
   onResumed?: () => void;
   resumeError: string | null;
   setResumeError: (err: string | null) => void;
@@ -266,8 +300,13 @@ function renderCrashedStrip({
   const watchdogAllowsResume = run.watchdog !== undefined && watchdogStoodDown(run.watchdog);
   const showResume = canResume === true && watchdogAllowsResume;
   const blocked = resumeBlockedReason;
+  // bug-19: the two halves of "a resume is already on its way" — this
+  // component's own in-flight flag, which is the only thing that can catch a
+  // second click before the first answer lands, and the board's mark, which is
+  // the only thing that survives past it. Either one disables the control.
+  const inFlight = busy || resuming === true;
 
-  const attemptResume = makeAttemptResume({ run, blocked, onResumed, setResumeError });
+  const attemptResume = makeAttemptResume({ run, blocked, busy, setBusy, onResumed, setResumeError });
 
   return (
     <div className="run-strip run-strip-crashed" data-testid="run-strip">
@@ -306,11 +345,18 @@ function renderCrashedStrip({
         <button
           type="button"
           className="run-strip-resume"
-          aria-disabled={blocked !== null || undefined}
+          // `aria-disabled`, and the button KEPT rather than swapped for the
+          // paused strip's placeholder span (bug-19): this is the one of the
+          // two Resume controls that can also be blocked by a reason a person
+          // needs to be able to focus and read (`resumeBlockedReason`, the
+          // project-visibility block), and a control that vanishes mid-flight
+          // takes that reason and the focus ring with it. The paused strip has
+          // no such reason to carry while resuming, so its placeholder stays.
+          aria-disabled={blocked !== null || inFlight || undefined}
           title={blocked ?? undefined}
           onClick={attemptResume}
         >
-          Resume run
+          {inFlight ? 'Resuming…' : 'Resume run'}
         </button>
       )}
     </div>
@@ -403,6 +449,10 @@ export function RunStrip({
   // only by the crashed branch this component may or may not take on any
   // given render.
   const [resumeError, setResumeError] = useState<string | null>(null);
+  // bug-19. Declared here for the same reason `resumeError` is: both render
+  // functions below are plain functions called conditionally, so neither may
+  // own state of its own.
+  const [busy, setBusy] = useState(false);
 
   // See this function's own doc comment above for why a run that finished
   // (however long ago) still gets silence, while a run that stopped
@@ -419,12 +469,14 @@ export function RunStrip({
 
   if (run.status === 'paused') {
     return renderPausedStrip({
-      run, onOpen, canResume, resumeBlockedReason, resuming, onResumed, resumeError, setResumeError
+      run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
     });
   }
 
   if (isCrashed(run)) {
-    return renderCrashedStrip({ run, onOpen, canResume, resumeBlockedReason, onResumed, resumeError, setResumeError });
+    return renderCrashedStrip({
+      run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
+    });
   }
 
   // total excludes `ungroomed`: a controller ruling this task exists to

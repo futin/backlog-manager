@@ -344,6 +344,70 @@ describe('RunStrip', () => {
       expect(onResumed).not.toHaveBeenCalled();
     });
 
+    // --- bug-19: the click is guarded, and it says something happened ------
+    //
+    // What made a person supply occurrence 1's three clicks in ten seconds:
+    // a successful resume changed NOTHING on screen. The strip kept saying
+    // `crashed` with the same heartbeat age until the resumed session stamped
+    // its first heartbeat ~90s later, so a click that worked and a click that
+    // was swallowed looked identical — the same FEEDBACK gap
+    // `StartingRunsService` was built for on the orchestrate path, reached
+    // from the resume path.
+
+    it('issues one request for a double click, and reads Resuming… while in flight', async () => {
+      // A spawn held open, so the assertions below run in the window that
+      // actually produced the bug: after the click, before the answer.
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const fetchMock = jest.fn(async () => {
+        await gate;
+        return { ok: true, status: 200, json: () => Promise.resolve({ sessionId: 's' }) } as Response;
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={() => {}} canResume onResumed={() => {}} />);
+
+      const button = screen.getByRole('button', { name: /Resume/ });
+      await userEvent.click(button);
+      await userEvent.click(button);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const inFlight = screen.getByRole('button', { name: /Resum/ });
+      expect(inFlight).toHaveTextContent('Resuming…');
+      expect(inFlight).toHaveAttribute('aria-disabled', 'true');
+
+      release?.();
+    });
+
+    it('stays out of action after a success, while the run still reads crashed', () => {
+      // The board's own `resuming` mark (useOrchestratorRuns, keyed on the
+      // project) is what holds this past the request: re-enabling on settle
+      // would restore the exact state occurrence 1 came out of, since the run
+      // goes on reading crashed for ~90s after a resume that worked.
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={() => {}} canResume resuming onResumed={() => {}} />);
+
+      const button = screen.getByRole('button', { name: /Resum/ });
+      expect(button).toHaveTextContent('Resuming…');
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('comes back after a failed resume, with the error on the strip', async () => {
+      stubResume(502, { error: 'dashboard down' });
+      const run = crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) });
+      render(<RunStrip run={run} onOpen={() => {}} canResume onResumed={() => {}} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Resume run' }));
+
+      await waitFor(() => expect(screen.getByTestId('run-strip')).toHaveTextContent('dashboard down'));
+      // A failure spawned nothing, so the control has to be usable again —
+      // this is the one settle path that re-enables it.
+      const button = screen.getByRole('button', { name: 'Resume run' });
+      expect(button).toHaveTextContent('Resume run');
+      expect(button).not.toHaveAttribute('aria-disabled');
+    });
+
     // Row 14: clicking anywhere else on a crashed strip still opens the
     // drawer, exactly as a fresh strip's click always has.
     it('calls onOpen when a crashed strip is clicked anywhere but the Resume control', async () => {

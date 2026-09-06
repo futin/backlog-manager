@@ -109,11 +109,17 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `4` | lock held: a `run.json` still marked `running` (fresh *or* stale) refusing a plain `init` |
 | `5` | `verify` only: nothing resolvable to verify with |
 | `6` | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; go to §10, *Pausing* |
+| `7` | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit |
 
-`6` is the one code whose reaction is a *different finish* rather than a fix
-and a retry, which is exactly why it is not a `1`. A `1` means "this call was
-wrong". A `6` means "this call was right and the run is being asked to stop":
-never retry it, never work around it, go to §10.
+`6` and `7` are the two codes whose reaction is neither a fix nor a retry,
+which is exactly why neither is a `1`. A `1` means "this call was wrong". A
+`6` means "this call was right and the run is being asked to stop": never
+retry it, never work around it, go to §10. A `7` means "this call was right
+and this session is no longer the one driving this run": another `--resume`
+session claimed it, and two sessions past that point both stage-write one
+`run.json` and both end in a merge to `main`. Stop — do not retry, do not
+re-claim, do not finish the run. `references/recovery.md` has the whole of
+the lease, including the `claim` a resume opens with.
 
 That `3` carries two meanings for `watch` deliberately: "no run yet" and
 "still running, call me again" are the same shape of retry from here. And
@@ -1562,10 +1568,18 @@ and abort's order-of-operations, which is its entire safety property.
 
 The board may spawn `--resume` itself for a run whose heartbeat has gone
 stale, so this path is entered unattended and must stay safe to enter that
-way — which it is, the only write before `reconcile`'s verdicts being
-`heartbeat` re-stamping `updatedAt` on a run `status` has just confirmed is
-`running`, the identical stamp the run's own loop writes on every turn,
-gated by `status` alone so a finished run is never re-stamped.
+way — which it is, the only write before `reconcile`'s verdicts being `claim`
+re-stamping `updatedAt` on a run `status` has just confirmed is `running`,
+the identical stamp the run's own loop writes on every turn, gated by `status`
+alone so a finished run is never re-stamped.
+
+`claim` also records **which** session is driving the run, and that half is
+not optional: a resume can arrive from this app's own board and from the
+dashboard's session-resume at once, and nothing outside the run file can see
+both. If `claim`, or any later write, exits `7`, another session took the run
+over — stop immediately, write nothing more, and exit. `references/recovery.md`
+has the mechanism and why the loser stopping on the first refusal is the whole
+guarantee.
 
 Two rules stay here, because a reader who stops at this line still has to know
 them:

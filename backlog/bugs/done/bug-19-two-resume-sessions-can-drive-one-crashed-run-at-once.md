@@ -3,9 +3,12 @@ id: bug-19
 title: Two --resume sessions can drive one crashed run at once
 created: 2026-09-05
 tags: orchestrator, watchdog, resume
-updated: 2026-09-05T20:25:15Z
+updated: 2026-09-06T16:09:41Z
 groom-elapsed: 423
 groom-tokens: 87417
+started: 2026-09-06T15:38:41Z
+execute-elapsed: 1860
+execute-tokens: 231233
 ---
 
 ## Symptom
@@ -381,3 +384,147 @@ and a crashed run staged for a registered project — write a `run.json` with
 `Resume run` button, click it twice in quick succession, and confirm the button
 reads `Resuming…` and is `aria-disabled` after the first click and that
 `POST /api/agents/resume` appears exactly once in the network log.
+
+## Outcome
+
+2026-09-06 — fixed, all three parts, in the order the Fix prescribes.
+
+**1. `RunStrip` (client).** `makeAttemptResume` — the factory both strips
+share — now takes a synchronous `busy` flag threaded from `RunStrip`'s own
+state: a second click while a request is out returns immediately, and the
+crashed strip's button reads `Resuming…` with `aria-disabled` while either
+`busy` or the board's `resuming` mark is set. The button is KEPT rather than
+swapped for the paused strip's placeholder span, because this is the one
+Resume control that can also carry a `resumeBlockedReason` a keyboard user
+has to be able to focus and read.
+
+One deviation from the Fix as written, and it replaces the local
+"clear-on-settle-but-stay-disabled" state it described: the sustained disable
+comes from `useOrchestratorRuns`' existing `resuming` mark, whose end
+condition was widened from `status === 'running'` to `running` **and
+`fresh`**. That mark already implemented everything part 1 wanted (a
+three-minute bound, cleared when the run heartbeats, per project) and was
+already wired into the crashed strip via `onResumed` — it was simply
+inert there, because a crashed run *is* `status: 'running'`, so the mark was
+dropped by the very next payload. `busy` covers the in-flight window, the mark
+covers the ~90s after it, and no second copy of "a resume is on its way" was
+added. The paused strip's placeholder now also honours `busy`, since it had
+the same missing in-flight guard.
+
+**2. `AgentsService.resume()` (server).** `WatchdogEntry.resumeSpawnAt`, taken
+synchronously after the `run.fresh` refusal and before the next `await`,
+`RUN_STALE_MS` wide, cleared when the spawn throws, refused as an uncoded 409
+naming the age of the resume already started. `AgentsService` injects
+`WatchdogStateService` (the state holder, never `WatchdogService`).
+Everything from the dashboard lookup to the spawn moved into a private
+`spawnResume` so the lock has one `try` to wrap rather than forty lines.
+The four decisions the item said not to re-open are all as specified, and the
+delayed-second-attempt consequence is pinned by its own sweeper case rather
+than left to be discovered.
+
+**3. `orchestrate.mjs` (tool).** `driver: { sessionId, at } | null`, the new
+`claim` command, and `assertDriver` in every mutating command. Guarded wider
+than the Fix's list: `heartbeat`, `stage`, `merge-mode`, `attention`,
+`assume`, `finish`, `unpause`, `watch`, `verify` and `abort` — every command
+that writes. `status`, `plan`, `denials` and `reconcile` stay unchecked, so an
+evicted session can still find out what happened to it. Exit `7`; identity is
+`CLAUDE_CODE_SESSION_ID`; absent identity warns and proceeds (`init` warns
+too, at the start, where somebody is still watching); absent `driver` means
+unclaimed. `driver` is declared in `shared/types.ts` and added to
+`test/fixtures/orchestrator-run.json`, because that fixture is what the tool's
+own key-set contract test compares `init`'s output against.
+
+Docs: `references/recovery.md`'s `--resume` opening sequence is now `claim`
+rather than `heartbeat` (same position, same purpose), with "another session
+has taken this run over — stop immediately, write nothing, exit" stated in as
+many words for both `claim` and any later refusal; `SKILL.md`'s exit-code
+table gains `7` and its §"`--resume` and `--abort`" pointer follows; CLAUDE.md
+gains the invariant and `docs/invariants.md` the long form.
+
+### Verification
+
+`npx tsc -p tsconfig.json --noEmit`:
+
+```
+TYPECHECK OK
+```
+
+`npx jest --runInBand` (the four suites this item touched are in it:
+`agents-resume`, `watchdog-sweep`, `orchestrator-strip`, `orchestrator-hook`):
+
+```
+Test Suites: 76 passed, 76 total
+Tests:       1444 passed, 1444 total
+Snapshots:   0 total
+Time:        53.921 s, estimated 59 s
+Ran all test suites.
+```
+
+`node --test skills/backlog-orchestrate/tools/orchestrate.test.mjs`:
+
+```
+# pass 190
+# fail 0
+```
+
+`pnpm run test:skills` (all skills' tools, node's runner):
+
+```
+1..403
+# tests 403
+# suites 0
+# pass 403
+# fail 0
+```
+
+`pnpm run build`:
+
+```
+✓ built in 1.49s
+```
+
+New cases, all of which failed before the change and pass after:
+
+- `test/agents-resume.test.ts` — three concurrent POSTs produce one
+  `/api/spawn` and two uncoded 409s (occurrence 1's own shape); a spawn that
+  rejects leaves no lock; the lock stops holding `RUN_STALE_MS` after its
+  stamp; a paused run's resumes serialize the same way.
+- `test/watchdog-sweep.test.ts` — the sweeper is refused by the same lock with
+  `attempts` unchanged, one `failed` line and grace re-stamped; past grace but
+  inside the lock it is refused and then spawns once the lock expires. Cases
+  6, 7 and 7c now rewind BOTH spawn clocks through one `rewind` helper, since
+  ageing only `lastSpawnAt` describes a state real time cannot produce.
+- `test/orchestrator-strip.test.tsx` — a double click issues one fetch and the
+  button reads `Resuming…`/`aria-disabled` in flight; it stays out of action
+  under the board's mark while the run still reads crashed; a failure brings it
+  back with the error on the strip.
+- `test/orchestrator-hook.test.tsx` — the mark survives a crashed run's
+  payload and ends when the heartbeat returns.
+- `skills/backlog-orchestrate/tools/orchestrate.test.mjs` — `init` stamps the
+  driver; `claim` takes an unclaimed crashed run and heartbeats it in one
+  write; a second `claim` evicts the first, whose `heartbeat`, `stage` and
+  `finish` then each exit non-zero with the run file byte-for-byte unchanged;
+  `claim` refuses a fresh run led by another session, writing nothing; a run
+  file with no `driver` key accepts every command; an unidentified session runs
+  and warns.
+
+### Not done: the in-browser check
+
+The Fix's last verification step (docker stack up, stage a crashed run under
+`$BM_ORCH_HOME`, click Resume twice in a browser) was deliberately NOT run,
+and it is the one thing left. Two reasons, both about this session being an
+unattended orchestrator run on a machine whose real stack is live:
+
+1. `http://localhost:5177` is currently served from a build of `main`, so a
+   browser check would exercise the old client. Making it exercise this branch
+   means rebuilding and restarting the user's own running stack.
+2. Staging a crashed run means writing a `run.json` into the very run-state
+   directory the live run — `run-20260906-151336`, the run dispatching this
+   session — is heartbeating into. `GET /api/orchestrator/runs` on 4322
+   confirms that run is there and fresh.
+
+The three assertions that step exists to make are the three the jsdom cases
+above make against the same component: exactly one `POST /api/agents/resume`
+for a double click, `Resuming…` on the control, and `aria-disabled` after the
+first click. What jsdom cannot show is the real strip's layout with a longer
+label in it, which is a visual check for a human at a keyboard.

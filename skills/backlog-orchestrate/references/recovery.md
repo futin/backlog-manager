@@ -23,11 +23,24 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stat
 
 `status` has three outcomes here, not two.
 
-**`running`** — stamp a heartbeat immediately, before doing anything else:
+**`running`** — claim the run immediately, before doing anything else:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" claim
 ```
+
+`claim` *is* the heartbeat this step used to stamp — it writes `updatedAt`
+from the same clock reading — and it also records that **this** session is the
+one driving the run. Do not follow it with a separate `heartbeat`.
+
+If `claim` exits non-zero, **another session has taken this run over. Stop
+immediately: write nothing, and exit.** The same is true of a refusal from any
+later `heartbeat`, `stage`, `attention`, `merge-mode`, `verify`, `watch` or
+`finish` in this run: exit `7` means a different session claimed the run after
+you did, so it — not you — is the one carrying the queue forward. Two sessions
+past this point both stage-write one `run.json` and both end in a merge to
+`main`; that is the failure the lease exists to make impossible, and it only
+works if the loser stops on the first refusal instead of retrying.
 
 **`paused`** — this run was not crashed, it was stopped on purpose at an item
 boundary (SKILL.md §10, *Pausing*). Put it back to `running` first:
@@ -39,15 +52,17 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" unpa
 The run is `running` again from this instant, and the request that paused it
 is retired by that same stamp — so the first `stage <id> preflight` of the
 rest of the queue will not exit `6` all over again. No separate heartbeat is
-needed: `unpause` writes `updatedAt` itself. Then continue exactly as the
-`running` path does, `reconcile` next.
+needed: `unpause` writes `updatedAt` itself. Then `claim` the run exactly as
+the `running` path above does, and continue, `reconcile` next — a paused run
+carries the lease of whichever session paused it, and this is a different
+session.
 
 **Anything else** — `done`, `aborted`, `failed` — is not this path's to
 touch. Refuse and say which.
 
 `status` runs first for exactly that reason, and it is the guard, not a
 formality: a finished run is not this step's to re-stamp, and `status` is
-what tells the difference before `heartbeat` ever touches the file. On a
+what tells the difference before `claim` ever touches the file. On a
 `running` run, though, this one call is what turns a crashed strip back into
 a live one — the board's watchdog stands down the instant the run file reads
 fresh, so a heartbeat stamped here cancels a second spawn that grace alone
@@ -57,8 +72,18 @@ the same crashed run at once: on the incident's own resume
 (`run-20260903-112622`), the session spawned at 18:57:44 and did not reach
 its first heartbeat until 18:59:11 — about ninety seconds in which the run
 file still read stale. Stamping one here, before reconcile or any
-inspection, shrinks that window to the few seconds `status` and `heartbeat`
+inspection, shrinks that window to the few seconds `status` and `claim`
 themselves take.
+
+Shrinking is not closing, which is why `claim` records a driver rather than
+only re-stamping the clock (bug-19). Two resumes that both land inside those
+few seconds both see a stale run and both proceed; the lease is what decides
+between them afterwards, deterministically and without either of them having
+to coordinate with the other. The later `claim` wins — that is the one place
+in this system where last-writer-wins is the mechanism rather than the hazard,
+because exactly one claim survives the write and every subsequent write is
+checked against it. The loser finds out on its very next command, and its
+whole job then is to stop.
 
 Then re-derive the runner-fix switch, before the first item is taken over.
 A run that picked up its own merged fix (§9, "After a runner-fix item lands")

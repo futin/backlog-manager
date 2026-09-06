@@ -84,6 +84,28 @@ export interface WatchdogEntry {
   project: string;
   attempts: number;
   lastSpawnAt: string | null;
+  /**
+   * bug-19 — the resume LOCK, and deliberately not a second grace clock.
+   *
+   * `lastSpawnAt` above is written by the sweeper and by `noteBoardResume`
+   * and read by `visit()` alone: a backoff, asked once per tick, that a board
+   * click writes and never reads. This field is the opposite shape — written
+   * and read by `AgentsService.resume()` itself, synchronously, on the one
+   * path both origins share — and it answers a different question: not "how
+   * long since anyone last tried" but "is a resume session believed to be
+   * alive in this run right now". Two questions, two fields; folding them
+   * into one would make every board click reset the sweeper's backoff and
+   * every sweeper backoff refuse a person's click.
+   *
+   * Held for `RUN_STALE_MS` — this app's one freshness number, reused rather
+   * than joined by a second — because a resumed session that has not
+   * heartbeated in fifteen minutes is dead by the app's own definition, and a
+   * second resume is then the right answer. Cleared again when the spawn it
+   * was taken for throws: a spawn that never started a session must not
+   * silence the board's only resume control for a quarter of an hour because
+   * the dashboard was briefly down.
+   */
+  resumeSpawnAt: string | null;
   lastSessionId: string | null;
   lastError: string | null;
   recovered: boolean;
@@ -153,6 +175,7 @@ export class WatchdogStateService {
         project,
         attempts: 0,
         lastSpawnAt: null,
+        resumeSpawnAt: null,
         lastSessionId: null,
         lastError: null,
         recovered: false,
