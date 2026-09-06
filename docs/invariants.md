@@ -481,6 +481,18 @@ Two halves a future reader will otherwise undo:
   server-side parse, no badge, to restate a decision the tool already makes
   correctly for every launch path.
 
+  task-20 gave the sheet a step 2 that *does* choose the order, and the rule
+  is unchanged by it: a runner fix still hoists above a hand order. The
+  reasoning simply moves off "nobody chose this" and onto what the hoist is
+  for — executing that item repairs machinery the rest of the run depends on,
+  which is true no matter who arranged the queue or in what sequence. What
+  the sheet owes a person who has just arranged one is a *warning*, and step
+  2 carries it: a `runner-fix:` item may still jump the line, and this screen
+  deliberately cannot say which one, because the preview is client-side off
+  `BacklogItem` (no `runnerFix` field) while the marker's authority is the
+  blob at `<base>` — a derived badge would be confidently wrong for an item
+  marked but not yet committed.
+
 The partition is stable and outranks the section ordering rather than sorting
 inside it: hoisted items keep bugs-before-tasks and oldest-first among
 themselves, the rest keep the order they had, and a marked *task* hoists

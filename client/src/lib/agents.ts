@@ -1,7 +1,7 @@
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeMode,
   OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
-  PauseResult, PermissionMode, StartingRun, WatchdogConfig, WatchdogStatus
+  PauseResult, PermissionMode, QuestionMode, StartingRun, WatchdogConfig, WatchdogStatus
 } from '../../../shared/types';
 
 /**
@@ -295,6 +295,16 @@ export interface StartOrchestrateRequest {
    * decision in two places.
    */
   mergeMode?: MergeMode;
+  /**
+   * What the run should do with an item's open questions when nobody is
+   * there to answer them. Narrowed from the server's `string` for
+   * `mergeMode`'s reason above, and sent on every launch for it too: absent
+   * resolves to `'park'` server-side, so an omitted field would land on the
+   * same value an untouched sheet shows — but the value is written verbatim
+   * into `run.json` and read out of the archive months later, where "the
+   * runner was told to park" and "nobody said" are different claims.
+   */
+  questionMode?: QuestionMode;
   /** The board's item selection, sent ONLY when it is a strict subset of the
    *  project's queue — an absent `ids` means "drain everything", and the two
    *  are genuinely different instructions rather than two spellings of one
