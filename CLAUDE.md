@@ -113,7 +113,10 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   refactors/ideas/bugs/out-of-scope — grouped under sticky month subheaders
   keyed on `updated ?? created` (`lib/item-month.ts`), project filter and
   search only, no status or sort control; the same cards, drawer and launch
-  sheet the board uses, no run strip), and Settings, whose Orchestrator
+  sheet the board uses, no run strip), and Settings, whose `Orchestrator ·
+  this device` group is the two run-scoped defaults the Orchestrate sheet
+  seeds from (`Default merge mode`, which moved out of the Claude Agents group
+  in task-19, and `Default question mode`), and whose Orchestrator
   watchdog group (`WatchdogGroup.tsx`) is the four server-side knobs and a
   `Live view` pointer — nothing else. It calls
   `hooks/useWatchdog.ts`'s `useWatchdog({ live: false })`, so it installs no
@@ -419,6 +422,42 @@ happened.
   keep. The converse is deliberately *not* enforced: `stage <id> branched` is
   legal under `merge` mode too, because that is exactly what a denied merge
   degrades an item to.
+- **Question mode is run-scoped, and it only ever takes effect in a headless
+  run.** `QuestionMode` (`shared/types.ts`) is `decide | park`, with
+  `isQuestionMode` as its one guard for the reason `isMergeMode` has one, and
+  it travels the exact route `mergeMode` does: Settings seed
+  (`orchestrateDefaultQuestionMode`, default `park`) → sheet → the spawn
+  prompt's compile-time ` --question-mode decide` → `init` → one `run.json`
+  field. **`park` is the default and appends nothing**, so a default run's
+  prompt stays byte-identical to what shipped before the field existed —
+  inverted from merge mode's silent `merge` and following the same rule, that
+  whichever value is the default appends nothing. **Absent means `park`;
+  present-but-invalid is a 400, never a clamp**, for `mergeMode`'s reason
+  restated in this field's terms: the value is written verbatim into
+  `run.json` and read out of the archive months later, so a typo resolving to
+  the default would put a claim there that no caller made. **One field, not
+  three** — nothing degrades or promotes a question mode mid-run the way a
+  denied merge moves `merge` → `branch`, so a `questionModeEffective` would
+  record a divergence that cannot occur. The two modes are **identical
+  whenever `AskUserQuestion` is reachable**: the ask itself (SKILL.md §3,
+  once, best-effort) is unchanged in both, and the mode governs only the
+  unanswered branch — which gives the feature its one doctrine, repeated in
+  the Settings hint, the sheet's hint, SKILL.md §3 and here: want control over
+  a question, start the run from a harness that has `AskUserQuestion`; start
+  it from the board and you are choosing between skipping the item and letting
+  the runner answer. What a `decide` run settled is recorded by
+  `orchestrate.mjs assume <id> --json <file>`, the one writer of
+  `RunQueueItem.assumptions`, appending rather than replacing, and **the tool
+  refuses it under `park`** — exit `1`, run file byte-identical — the same
+  division of labour `stage <id> merged` under branch mode keeps, because
+  SKILL.md is re-read on every one of a run's several hundred turns and prose
+  drifts where a tool refusal does not. The converse is deliberately not
+  enforced: `attention --kind needs-answers` stays legal under `decide`,
+  because `decide` is permission to answer and not an obligation to invent.
+  **No fourth `ATTENTION_KIND`** — that list stays the closed set of three and
+  means "a human must look at this item", which a decided-and-merged item does
+  not warrant; the same precedent a classifier denial already set, one entry
+  below.
 - **A classifier denial degrades a run to branch mode; every other merge
   failure still parks.** Denied means the work is green and only the last step
   of the pipeline was refused, so the item is staged `branched`, the run
@@ -538,9 +577,11 @@ happened.
   `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal
   `/backlog-orchestrate` — `backlog-orchestrate`'s own `trigger:` — and
   `POST /api/agents/orchestrate`'s body has no `prompt` field to begin with,
-  so a caller-supplied one is not rejected, it is simply never read. A caller
-  can influence exactly two things in that string. The first is `ids`, the
-  board's item
+  so a caller-supplied one is not rejected, it is simply never read. What a
+  caller can influence is enumerated by the prompt composition in
+  `orchestrate()` and nowhere else — deliberately not by a count in this
+  sentence, which is the shape of line that already went stale once here. The
+  first influence is `ids`, the board's item
   selection, and only after `resolveIds` proves every entry both *is* an id
   (`isItemId`, `shared/agent.ts` — the same `^[a-z]+-\d+$` `backlog.mjs`
   enforces, so no whitespace, path separator, shell metacharacter or newline
@@ -549,12 +590,18 @@ happened.
   walk). 400 for a malformed list, 409 for one the files disagree with, both
   uncoded. An absent `ids` means the whole queue; an explicitly empty one is
   a 400, never "everything" — `parseIdsArg`'s own distinction in
-  `orchestrate.mjs`, enforced at the only layer a browser reaches. The second
-  is `mergeMode`, a tighter surface still: the appended text is the
-  compile-time literal ` --merge-mode branch` selected by `isMergeMode`, with
-  no caller string in it at all, and `merge` appends nothing so a default
-  run's prompt stays byte-identical to what shipped before the field existed.
-  The "derive, never accept" rule dispatch already follows, applied to a route
+  `orchestrate.mjs`, enforced at the only layer a browser reaches. The others
+  are `mergeMode` and `questionMode`, tighter surfaces still and identical in
+  shape: each appends a compile-time literal selected by a guard
+  (` --merge-mode branch` by `isMergeMode`, ` --question-mode decide` by
+  `isQuestionMode`), with no caller string in it at all, and each one's
+  DEFAULT appends nothing — `merge` there, `park` here — so a default run's
+  prompt stays byte-identical to what shipped before either field existed.
+  Order is ids, then `--merge-mode`, then `--question-mode`: ids first because
+  the tool reads bare tokens as ids and a flag ahead of them would swallow the
+  first one, and `--question-mode` last so every prompt this endpoint composed
+  before it existed stays a byte-exact prefix of what it composes now. The
+  "derive, never accept" rule dispatch already follows, applied to a route
   with no item file to derive anything from at all.
 - **The browser never talks to the dashboard.** Every call goes board → this
   API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off.

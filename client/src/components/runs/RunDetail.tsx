@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 
 import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
@@ -114,6 +114,11 @@ interface DetailRow {
   stageAt: Partial<Record<RunStage, string>>;
   fixLoops: number;
   questions: string[];
+  /** What the run decided on its own for this item (task-19). `?? []` at
+   *  both mapping sites below, not here: an archived run written before the
+   *  field existed carries no key at all, and the archive endpoints serve
+   *  run files verbatim. */
+  assumptions: { question: string; answer: string }[];
   verify: { cmd: string; ok: boolean; tail: string | null } | null;
   branch: string | null;
 }
@@ -124,6 +129,7 @@ function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[] {
     return {
       id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
       fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
+      assumptions: q.assumptions ?? [],
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: null }
     };
   });
@@ -135,6 +141,7 @@ function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
     return {
       id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
       fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
+      assumptions: q.assumptions ?? [],
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: last.tail }
     };
   });
@@ -602,6 +609,30 @@ export function RunDetail(
                   per-item `DetailRow`) carries no such field — an item
                   cannot say which mode the run around it is running. */}
               <StageTrack item={row} now={clock} live={runLive} mergeModeEffective={source.mergeModeEffective} />
+
+              {/* Beside the stage track, on the item row — the same placement
+                  and the same reasoning as RunDrawer's own block: a decided
+                  item produces no attention entry (design §6, ATTENTION_KINDS
+                  stays three), so this record would be invisible under
+                  Attention for exactly the runs that have any. Gated on the
+                  length rather than the key, because every item of every
+                  `park` run carries an empty list. */}
+              {row.assumptions.length > 0 && (
+                <div
+                  className="run-drawer-item-assumptions"
+                  data-testid={`run-detail-assumptions-${row.id}`}
+                >
+                  <div className="run-drawer-assumptions-label">assumed</div>
+                  <dl className="run-drawer-assumptions-list">
+                    {row.assumptions.map((a, i) => (
+                      <Fragment key={`${a.question}-${i}`}>
+                        <dt>{a.question}</dt>
+                        <dd>{a.answer}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                </div>
+              )}
 
               {row.verify !== null && (
                 // RunDrawer's own one-way-seed pattern, unchanged: React

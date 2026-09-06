@@ -1,7 +1,7 @@
-import { ATTENTION_RUN_STAGES, MERGE_MODES, RUN_CLAIMED_STAGES } from './types';
+import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
 import type {
-  AgentsStatus, BacklogItem, MergeMode, OrchestratorRunsPayload, PermissionMode, RunQueueItem,
-  RunStage
+  AgentsStatus, BacklogItem, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode,
+  RunQueueItem, RunStage
 } from './types';
 
 /**
@@ -49,6 +49,24 @@ export function isAgentAction(value: unknown): value is AgentAction {
  */
 export function isMergeMode(value: unknown): value is MergeMode {
   return typeof value === 'string' && (MERGE_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Is this unvalidated value one of the two `QuestionMode`s? Sits beside
+ * `isMergeMode` because it answers the identical question for the identical
+ * caller — `AgentsService.orchestrate` judging a request body field — and a
+ * hand-written `!== 'decide' && !== 'park'` chain would be a second copy of
+ * `QUESTION_MODES`, which is the copy that goes stale.
+ *
+ * It carries more weight than its neighbour, though, and that is worth
+ * knowing before anyone loosens it. `mergeMode` rejects an unrecognised value
+ * and so does this one, but this value is written verbatim into `run.json`
+ * and read back out of the archive months later, so the failure mode of a
+ * too-permissive guard here is not a rejected request — it is a run file
+ * claiming a mode nobody asked for.
+ */
+export function isQuestionMode(value: unknown): value is QuestionMode {
+  return typeof value === 'string' && (QUESTION_MODES as readonly string[]).includes(value);
 }
 
 /**

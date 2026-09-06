@@ -164,6 +164,14 @@ export class AgentsController {
       // be able to select it by having an unrecognised value silently
       // resolve to the default.
       mergeMode: body?.mergeMode,
+      // Same posture as `mergeMode` above, for the same reason and with the
+      // same one distinction the service alone can draw: absent defaults (to
+      // 'park'), present-and-wrong is a 400. See `resolveQuestionMode` for
+      // why a clamp is the wrong answer here — the value ends up written
+      // verbatim into `run.json` and read out of the archive later, so a
+      // typo quietly resolving to the default would put a claim there that
+      // nobody made.
+      questionMode: body?.questionMode,
       // Also unvalidated here, and the most important one to leave alone:
       // `resolveIds` (in the service) is the single place this becomes a
       // list of strings, because it is the only place that can also check

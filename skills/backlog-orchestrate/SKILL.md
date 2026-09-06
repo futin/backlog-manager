@@ -38,12 +38,17 @@ worth having in mind before the first command runs:
   could have caught it.
 
 The trigger carries the whole invocation surface:
-`/backlog-orchestrate [ids…] [--max N] [--merge-mode branch] [--resume]
-[--abort]`. Ids and `--max` shape the queue (section 1); `--merge-mode`
-decides whether a verified item is merged to `main` or stops at its reviewed
-branch (section 2); `--resume` takes over a run that was interrupted and
-`--abort` ends one (section 10). With none of them, the run is every ready
-item in the project's backlog, in the board's own order, merged.
+`/backlog-orchestrate [ids…] [--max N] [--merge-mode branch]
+[--question-mode decide] [--resume] [--abort]`. Ids and `--max` shape the
+queue (section 1); `--merge-mode` decides whether a verified item is merged to
+`main` or stops at its reviewed branch (section 2); `--question-mode` decides
+what happens to an item whose open questions nobody is there to answer —
+`park` (the default: record them, skip the item, keep draining) or `decide`
+(answer them yourself, write the answers into the item, record what you
+assumed, and execute it), section 3; `--resume` takes over a run that was
+interrupted and `--abort` ends one (section 10). With none of them, the run is
+every ready item in the project's backlog, in the board's own order, merged,
+parking anything it cannot get an answer for.
 
 The run's state lives in a machine-local run file, and
 `skills/backlog-orchestrate/tools/orchestrate.mjs` is its **only** writer —
@@ -99,7 +104,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | Code | Meaning |
 |---|---|
 | `0` | success |
-| `1` | bad args, an unknown item id, an unknown stage or kind, missing required input, or a cwd (or `--project`) inside a linked worktree — **nothing is ever written on a `1`** |
+| `1` | bad args, an unknown item id, an unknown stage or kind, missing required input, a cwd (or `--project`) inside a linked worktree, or `assume` on a `park`-mode run — **nothing is ever written on a `1`** |
 | `3` | no run exists for this project — and, for `watch` only, "budget elapsed, child still alive" |
 | `4` | lock held: a `run.json` still marked `running` (fresh *or* stale) refusing a plain `init` |
 | `5` | `verify` only: nothing resolvable to verify with |
@@ -269,7 +274,13 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stat
 
 When the trigger carries `--merge-mode branch`, add that flag to the `init`
 above and change nothing else. Absent, the run is `merge` mode —
-today's behaviour byte for byte. The mode is run-level — set at `init`, applied
+today's behaviour byte for byte.
+
+When the trigger carries `--question-mode decide`, add that flag to the `init`
+above too, and change nothing else. Absent, the run is `park` mode — also
+today's behaviour byte for byte. Kept as its own sentence rather than merged
+into the one above deliberately: a run reading this on turn 300 skims, and a
+compound sentence about two flags is where one of them gets dropped. The mode is run-level — set at `init`, applied
 to the whole queue, and only ever moved one way afterwards (`merge` → `branch`,
 below). `status --json` carries it as `mergeModeEffective`, which is where a
 resumed session reads it.
@@ -427,10 +438,15 @@ stalled unattended run is the exact failure this whole design exists to
 avoid, and an item skipped with its question recorded costs one groom edit
 and one re-run.
 
-**Answered** → the answer is written into the item body, but *not yet* and
-*not here*; see "Writing an answer into the item" below.
+There are three outcomes, not two, and which of the last two applies is the
+run's `questionMode` (`status --json` carries it; `park` if the field is
+absent, which is every run file written before the mode existed).
 
-**Not answered** → record the questions verbatim and move on:
+**Answered**, in either mode → the answer is written into the item body, but
+*not yet* and *not here*; see "Writing an answer into the item" below.
+
+**Not answered, `questionMode: park`** → record the questions verbatim and
+move on:
 
 ```bash
 mkdir -p "<dir>/questions"
@@ -445,6 +461,53 @@ read the flag and validate it, then ignore its content. Both lines: the
 `attention` entry is what the run drawer surfaces to the user, the `stage` is
 what stops this item being treated as still in flight. Then continue with the
 next item; a `needs-answers` item is not a failed run.
+
+**Not answered, `questionMode: decide`** → decide each question yourself,
+then record what you decided:
+
+1. Answer every question, using the item, the repo's `CLAUDE.md` and the code
+   as it actually is. Prefer the smallest answer that lets the plan proceed.
+2. Write those answers into the item body through the **same** path an
+   answered question takes — "Writing an answer into the item" below, inside
+   the worktree, in step 4. That is what makes the answer ride the branch into
+   `main` and show up in the item's own diff, instead of living only in a run
+   file nobody reads.
+3. Record the pairs on the queue item, so the archive can answer months later
+   whether this item's plan was written by a human or filled in by the runner:
+
+```bash
+printf '%s' '[{"question":"question one","answer":"what you decided"}]' > "<dir>/questions/<id>-assumed.json"
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" assume <id> --json "<dir>/questions/<id>-assumed.json"
+```
+
+Then continue to the loop and dispatch the item like any other. `assume`
+appends rather than replaces, so a second question decided later in this same
+pre-flight does not erase the first. It **exits `1` on a `park` run**, nothing
+written — the tool enforces this, not this file, because this file is re-read
+on every one of a run's several hundred turns and prose drifts across them
+where a refusal does not. It is the same division of labour `stage <id>
+merged` under branch mode already keeps.
+
+Two rules go with all three outcomes, and both carry their reasons because a
+bare prohibition is exactly what drifts:
+
+1. **Never restate an unanswered question in prose**, in either mode. A prose
+   question ends the turn. In a board-started run that exits the session,
+   `watch` sees it die, and the whole run then needs `--resume` — so "ask in
+   prose and wait" is not a milder park, it is stopping the entire run.
+   Someone who wants a question actually put to a human starts the run from a
+   harness that has `AskUserQuestion`; a run started from the board is
+   choosing between skipping the item and answering it itself.
+2. **A decided answer is an assumption, and is written as one.** The item body
+   records what was assumed and that the runner assumed it — never phrased as
+   though a human had settled it. Someone reading that item in six months has
+   to be able to tell the two apart without opening a run file.
+
+And one thing `decide` does **not** change: `attention <id> --kind
+needs-answers` stays legal and stays right under it. `decide` is permission to
+answer, never an obligation to invent. A question that genuinely cannot be
+answered — a plan citing a section nobody wrote, an either/or between two
+products — still parks its item, in either mode.
 
 ### Writing an answer into the item
 

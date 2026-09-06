@@ -55,7 +55,8 @@ function queueItem(id: string, stage: RunStage): RunQueueItem {
     stageAt: {},
     verification: [],
     questions: [],
-    note: null
+    note: null,
+    assumptions: []
   };
 }
 
@@ -72,6 +73,7 @@ function liveRun(over: Partial<LiveRun> = {}): LiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    questionMode: 'park',
     queue: [],
     attention: [],
     fresh: true,

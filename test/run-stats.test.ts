@@ -47,6 +47,7 @@ function archiveItem(over: Partial<ArchiveQueueItem> = {}): ArchiveQueueItem {
     verification: [],
     questions: [],
     note: null,
+    assumptions: [],
     ...over
   };
 }
@@ -62,6 +63,7 @@ function archiveRun(over: Partial<OrchestratorArchiveRun> = {}): OrchestratorArc
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    questionMode: 'park',
     queue: [],
     attention: [],
     current: false,

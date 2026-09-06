@@ -503,6 +503,21 @@ const RUN_STAGES = [
 // scattered set of string literals.
 const MERGE_MODES = ['merge', 'branch']
 
+// The QuestionMode vocabulary, verbatim from shared/types.ts's own
+// QuestionMode union and its QUESTION_MODES const — the same standalone
+// duplication MERGE_MODES just above and RUN_STAGES before it already are,
+// for the same reason (this file may not import from shared/). `park` is
+// today's behaviour, byte for byte: an item whose preflight questions
+// nobody answered gets an `attention --kind needs-answers` row, is staged
+// `needs-answers`, and the run moves on. `decide` is permission for the run
+// to answer those questions itself, write the answers into the item body
+// and record what it assumed via the `assume` command below — permission,
+// not obligation, which is why `attention --kind needs-answers` stays legal
+// under it. `init --question-mode` validates against this exact list rather
+// than a hand-written `=== 'decide' || === 'park'` chain, for the "one copy
+// of the vocabulary" reason MERGE_MODES' own comment gives.
+const QUESTION_MODES = ['decide', 'park']
+
 // Builds one full RunQueueItem from just an id and a title, with every
 // other field at the shape's own documented default: `pending` is the
 // stage every item starts in (shared/types.ts's own words), the three
@@ -532,6 +547,13 @@ function makeQueueItem(id, title, stamp) {
     // mode that produced it recorded next to it.
     permissionMode: null,
     note: null,
+    // Empty until the `assume` command writes into it, which only ever
+    // happens on a run whose questionMode is 'decide'. Present on every
+    // queue item regardless of mode — the key set this function produces is
+    // the run file's contract (see this function's own comment above), and
+    // a field that appeared only on some items would make every reader
+    // branch on its absence rather than on its emptiness.
+    assumptions: [],
   }
 }
 
@@ -1169,7 +1191,7 @@ function branchExists(projectRoot, branch) {
 // command style, so the contract for "what does `stage` do" lives entirely
 // inside cmdStage and not spread across a bigger switch.
 
-const INIT_USAGE = 'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch>]'
+const INIT_USAGE = 'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch>] [--question-mode <decide|park>]'
 
 function cmdInit(argv) {
   let project
@@ -1187,12 +1209,19 @@ function cmdInit(argv) {
   // not silently change the behaviour of a board that has been working for
   // a fortnight").
   let mergeMode = 'merge'
+  // Same defaulting reasoning as `mergeMode` directly above, with the
+  // default inverted: 'park' is what every run did before this flag
+  // existed, so an absent flag has to read as the literal 'park' here for a
+  // board that has been working for a fortnight to keep behaving the way it
+  // always has.
+  let questionMode = 'park'
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--project') project = argv[++i]
     else if (argv[i] === '--ids') idsArg = argv[++i]
     else if (argv[i] === '--max') maxArg = argv[++i]
     else if (argv[i] === '--base') base = argv[++i]
     else if (argv[i] === '--merge-mode') mergeMode = argv[++i]
+    else if (argv[i] === '--question-mode') questionMode = argv[++i]
   }
 
   // Validated before anything else touches disk: an unusable --project is a
@@ -1234,6 +1263,22 @@ function cmdInit(argv) {
   if (!MERGE_MODES.includes(mergeMode)) {
     throw new OrchestrateError(
       `--merge-mode must be one of ${MERGE_MODES.join(', ')} (got ${mergeMode === undefined ? 'no value' : mergeMode})`,
+      1,
+    )
+  }
+
+  // Checked in the same pre-write block, immediately after --merge-mode,
+  // and the ordering carries more weight here than the message shape does:
+  // cmdInit ARCHIVES any existing run.json before writing the new one, so a
+  // validation that ran after that point would destroy a real run's file on
+  // behalf of a call that was never going to succeed. Exit 1 with nothing
+  // written is the same posture --merge-mode takes, and the `(got no
+  // value)` branch is the same one, because a flag whose argv slot does not
+  // exist is a different mistake from a flag whose value is misspelled and
+  // the caller has to be able to tell them apart.
+  if (!QUESTION_MODES.includes(questionMode)) {
+    throw new OrchestrateError(
+      `--question-mode must be one of ${QUESTION_MODES.join(', ')} (got ${questionMode === undefined ? 'no value' : questionMode})`,
       1,
     )
   }
@@ -1388,6 +1433,15 @@ function cmdInit(argv) {
     mergeMode,
     mergeModeEffective: mergeMode,
     mergeModeNote: null,
+    // Written once, here, and never moved by anything — deliberately ONE
+    // field where mergeMode above needs three. Nothing degrades or promotes
+    // a question mode mid-run the way a denied merge degrades merge->branch,
+    // so a `questionModeEffective` beside this would record a divergence
+    // that cannot occur and leave every later reader working out which of
+    // the two to trust. See shared/types.ts's OrchestratorRun.questionMode
+    // for the fuller rationale this file may not import but must uphold byte
+    // for byte.
+    questionMode,
     queue,
     attention: [],
   }
@@ -1707,6 +1761,106 @@ function cmdAttention(argv) {
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)
   console.log(JSON.stringify({ id: itemId, kind }))
+  return 0
+}
+
+const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{question, answer}, …]>'
+
+// The one writer of RunQueueItem.assumptions — what this run decided on its
+// own for an item whose pre-flight questions nobody was there to answer.
+//
+// Placed beside cmdAttention because the two are the two halves of the same
+// fork: `attention --kind needs-answers` records that a question could not
+// be answered and the item was skipped; this records that it was answered
+// by the runner and the item went ahead. They are NOT alternatives the tool
+// picks between — SKILL.md §3 does that — and deliberately neither one
+// disables the other under `decide` (see the refusal below for the single
+// direction that IS enforced).
+//
+// `--json <file>` rather than inline argv, matching --questions-json's own
+// convention for the same reason: the content is prose the run composed,
+// and prose does not survive shell quoting intact.
+function cmdAssume(argv) {
+  const itemId = argv[0]
+  let jsonFile
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--json') jsonFile = argv[++i]
+  }
+
+  if (!itemId || jsonFile === undefined) {
+    throw new OrchestrateError(ASSUME_USAGE, 1)
+  }
+
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const run = readRun(dir)
+
+  // Checked BEFORE the file is opened, let alone parsed, so a refused call
+  // reports exactly one thing: that this run parks its unanswerable items.
+  // A refusal that also complained about a malformed file would invite the
+  // caller to fix the file and retry, which is the one reaction that must
+  // never work here.
+  //
+  // This is the enforcement point design §5 calls for, and it is the same
+  // division of labour `stage <id> merged` under branch mode already keeps:
+  // SKILL.md is re-read on every one of a run's several hundred turns and
+  // prose drifts across them, where a tool refusal does not. A run told to
+  // park an item and found writing assumptions about it is a run whose
+  // prose has drifted — precisely the failure worth making impossible
+  // rather than merely discouraged.
+  //
+  // Absent reads as 'park' for the same reason cmdInit defaults it there:
+  // a run file written before this field existed had park's behaviour.
+  if ((run.questionMode ?? 'park') !== 'decide') {
+    throw new OrchestrateError(
+      `assume is refused: this run's questionMode is '${run.questionMode ?? 'park'}', so an item whose questions ` +
+        `nobody answered is parked, not decided — record it with ` +
+        `\`attention ${itemId} --kind needs-answers --questions-json <file>\` and stage it 'needs-answers' instead`,
+      1,
+    )
+  }
+
+  // Through the shared lookup rather than a second `run.queue.find`, which
+  // is what that helper exists for: a new writer must not become a second
+  // code path that can drift from the one `stage` and `watch` already use.
+  const item = findQueueItem(run, itemId)
+
+  let parsed
+  try {
+    parsed = JSON.parse(fs.readFileSync(jsonFile, 'utf8'))
+  } catch (e) {
+    throw new OrchestrateError(`--json ${jsonFile}: ${e.message}`, 1)
+  }
+  if (!Array.isArray(parsed)) {
+    throw new OrchestrateError(`--json must be a JSON array of {question, answer} objects: ${jsonFile}`, 1)
+  }
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new OrchestrateError(`--json entries must be {question, answer} objects: ${jsonFile}`, 1)
+    }
+    // Named individually rather than as one "malformed entry" message: the
+    // pair is the whole point of the field (shared/types.ts spells out why
+    // half of it is useless), so a caller that wrote only one of the two
+    // keys needs to be told WHICH one it left out.
+    if (typeof entry.question !== 'string') {
+      throw new OrchestrateError(`--json entry is missing a string 'question' key: ${jsonFile}`, 1)
+    }
+    if (typeof entry.answer !== 'string') {
+      throw new OrchestrateError(`--json entry is missing a string 'answer' key: ${jsonFile}`, 1)
+    }
+  }
+
+  // Appends. A second question decided later in the same item's pre-flight
+  // must not erase the first — the archive's question is "what did this run
+  // assume about this item", and a replace answers it with whatever
+  // happened to be decided last.
+  //
+  // `?? []` covers a queue item written before this field existed, which a
+  // `--resume` against an older run file can genuinely produce.
+  item.assumptions = [...(item.assumptions ?? []), ...parsed]
+
+  run.updatedAt = nowISO()
+  writeRunAtomic(dir, run)
+  console.log(JSON.stringify({ id: itemId, assumptions: item.assumptions.length }))
   return 0
 }
 
@@ -2619,6 +2773,7 @@ commands:
   merge-mode   record a merge mode downgrade (merge -> branch only)
   heartbeat    re-stamp the run's updatedAt
   attention    record something a human should look at
+  assume       record a question this run answered itself (decide mode only)
   finish       set the run's final status
   unpause      mark a paused run running again (a --resume session's first write)
   status       print the current run
@@ -2643,15 +2798,16 @@ commands:
 //   0  success.
 //   1  bad args, an unknown item id, an unknown stage/kind string, or
 //      missing required input — a problem with THIS call, independent of
-//      run state. Nothing is ever written when a command exits 1. One exit
-//      1 is the deliberate exception to "independent of run state": `stage
-//      <id> merged` under a branch-mode run (see cmdStage's own comment)
-//      and `merge-mode` refusing anything but a merge -> branch move (see
-//      cmdMergeMode's own comment) both depend on the run file's own
-//      mergeModeEffective, not on the call's args alone — listed here so
-//      this contract doc doesn't quietly go stale on the one case where it
-//      isn't quite true. The "nothing written" half of the guarantee still
-//      holds for both.
+//      run state. Nothing is ever written when a command exits 1. Three
+//      exit 1s are the deliberate exceptions to "independent of run state":
+//      `stage <id> merged` under a branch-mode run (see cmdStage's own
+//      comment) and `merge-mode` refusing anything but a merge -> branch
+//      move (see cmdMergeMode's own comment) both depend on the run file's
+//      own mergeModeEffective, and `assume` under a park-mode run (see
+//      cmdAssume's own comment) depends on its questionMode — none of the
+//      three on the call's args alone. Listed here so this contract doc
+//      doesn't quietly go stale on the cases where it isn't quite true. The
+//      "nothing written" half of the guarantee still holds for all three.
 //   3  no run exists for this project (readRun's own refusal) — EXCEPT for
 //      `watch`, which also exits 3 when its own `--budget-ms` elapses with
 //      the child still alive. That second meaning is a deliberate reuse of
@@ -2679,6 +2835,7 @@ export function main(argv) {
     if (cmd === 'merge-mode') return cmdMergeMode(rest)
     if (cmd === 'heartbeat') return cmdHeartbeat(rest)
     if (cmd === 'attention') return cmdAttention(rest)
+    if (cmd === 'assume') return cmdAssume(rest)
     if (cmd === 'finish') return cmdFinish(rest)
     if (cmd === 'unpause') return cmdUnpause()
     if (cmd === 'status') return cmdStatus(rest)

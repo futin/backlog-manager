@@ -1,12 +1,13 @@
 import {
   AGENT_ACTIONS, EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction,
-  dispatchBlock, dispatchGate, isAgentAction, isItemId, isMergeMode, modesUpTo, pickFrom,
-  projectDispatchGate, resumeGate, runClaimBlock, runHoldsItem
+  dispatchBlock, dispatchGate, isAgentAction, isItemId, isMergeMode, isQuestionMode, modesUpTo,
+  pickFrom, projectDispatchGate, resumeGate, runClaimBlock, runHoldsItem
 } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
-import { ATTENTION_RUN_STAGES, MERGE_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
+import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type {
-  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, RunQueueItem, RunStage
+  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem,
+  RunStage
 } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -102,6 +103,38 @@ describe('the merge mode vocabulary', () => {
     expect(isMergeMode(undefined)).toBe(false);
     expect(isMergeMode(1)).toBe(false);
     expect(isMergeMode(['merge'])).toBe(false);
+  });
+});
+
+describe('the question mode vocabulary', () => {
+  it('holds exactly the two modes', () => {
+    expect(QUESTION_MODES).toEqual(['decide', 'park']);
+  });
+
+  it('accepts each of them and nothing else', () => {
+    // `AgentsService.orchestrate`'s whole body check for a request's
+    // `questionMode`, exactly as the merge-mode sibling above is for
+    // `mergeMode` — and the stakes are higher here, because an unrecognised
+    // value is a 400 rather than a clamp, so this guard is the only thing
+    // standing between a typo and a mode nobody asked for in the archive.
+    for (const mode of QUESTION_MODES) expect(isQuestionMode(mode)).toBe(true);
+    expect(isQuestionMode('Decide')).toBe(false);   // case matters; the value is written verbatim
+    expect(isQuestionMode('merge')).toBe(false);    // a MergeMode member is not a QuestionMode one
+    expect(isQuestionMode('')).toBe(false);
+    expect(isQuestionMode(null)).toBe(false);
+    expect(isQuestionMode(undefined)).toBe(false);
+    expect(isQuestionMode(42)).toBe(false);
+    expect(isQuestionMode({})).toBe(false);
+  });
+
+  /* The same compile-time device the `RunStage` partition test below uses,
+     for the same reason: `Record<QuestionMode, true>` refuses the literal if
+     a member is missing, so the day a third mode is added the build fails
+     here rather than the new member silently reaching `run.json` with nobody
+     having decided what the tool, the prompt and the sheet do with it. */
+  it('fails the build the day a third member lands unclassified', () => {
+    const everyMode: Record<QuestionMode, true> = { decide: true, park: true };
+    expect(Object.keys(everyMode).sort()).toEqual([...QUESTION_MODES].sort());
   });
 });
 

@@ -232,4 +232,78 @@ describe('SettingsView', () => {
       expect(stored.orchestrateDefaultMergeMode).toBe('branch');
     });
   });
+
+  /*
+   * task-19: the orchestrate defaults get a group of their own, and `Default
+   * merge mode` MOVES into it. The Claude Agents group's own comment says a
+   * reader arrives there asking "how does dispatch behave on this device" —
+   * merge mode never answered that question, and with a second orchestrate
+   * default landing beside it the mismatch stops being cosmetic. Model and
+   * effort stay: they genuinely are dispatch defaults, and the orchestrate
+   * sheet borrowing them is not a reason to move them.
+   */
+  describe('the Orchestrator group', () => {
+    /** Every group heading on screen, in render order — `SettingsGroup`
+     *  renders its title as an `.mdetail-label` div, which has no ARIA role
+     *  to query by, so this reads the class the component actually uses. */
+    function groupTitles(): string[] {
+      return [...document.querySelectorAll('.set-group > .mdetail-label')]
+        .map((el) => el.textContent ?? '');
+    }
+
+    it('renders above the watchdog group', async () => {
+      renderView();
+      await screen.findByLabelText('Default question mode');
+      const titles = groupTitles();
+      const orchestrator = titles.indexOf('Orchestrator · this device');
+      const watchdog = titles.indexOf('Orchestrator watchdog · this server');
+      expect(orchestrator).toBeGreaterThanOrEqual(0);
+      expect(watchdog).toBeGreaterThanOrEqual(0);
+      expect(orchestrator).toBeLessThan(watchdog);
+    });
+
+    /** The rows inside one named group, by their visible name — how this
+     *  suite tells "moved into the new group" apart from "rendered twice". */
+    function rowNamesIn(title: string): string[] {
+      const group = [...document.querySelectorAll('.set-group')]
+        .find((el) => el.querySelector('.mdetail-label')?.textContent === title);
+      if (!group) throw new Error(`no settings group titled ${title}`);
+      return [...group.querySelectorAll('.set-name')].map((el) => el.textContent ?? '');
+    }
+
+    it('holds both orchestrate defaults, and the Agents group holds neither', async () => {
+      renderView();
+      await screen.findByLabelText('Default question mode');
+
+      expect(rowNamesIn('Orchestrator · this device'))
+        .toEqual(expect.arrayContaining(['Default merge mode', 'Default question mode']));
+
+      const agents = rowNamesIn('Claude Agents · this machine');
+      expect(agents).not.toContain('Default merge mode');
+      expect(agents).toEqual(expect.arrayContaining(['Default model', 'Default effort']));
+    });
+
+    // Starts on `park` — what every run did before the mode existed — and
+    // offers both real members with no blank "CLI default" third state, for
+    // the same reason the merge-mode row above has none: the union is closed
+    // and absent already means one of the two server-side.
+    it('offers a default question mode, starting on park, and persists a pick', async () => {
+      renderView();
+      const select = await screen.findByLabelText('Default question mode') as HTMLSelectElement;
+      expect(select.value).toBe('park');
+      expect([...select.options].map((o) => o.value)).toEqual(['decide', 'park']);
+
+      await userEvent.selectOptions(select, 'decide');
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
+      expect(stored.orchestrateDefaultQuestionMode).toBe('decide');
+    });
+
+    it('still persists a merge-mode pick from its new home', async () => {
+      renderView();
+      const select = await screen.findByLabelText('Default merge mode') as HTMLSelectElement;
+      await userEvent.selectOptions(select, 'branch');
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
+      expect(stored.orchestrateDefaultMergeMode).toBe('branch');
+    });
+  });
 });

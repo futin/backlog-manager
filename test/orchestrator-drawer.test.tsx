@@ -41,6 +41,7 @@ function queueItem(id: string, stage: RunStage, over: Partial<RunQueueItem> = {}
   return {
     id, title: `${id} title`, stage, sessionId: null, worktree: null, branch: null,
     permissionMode: null, fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null,
+    assumptions: [],
     ...over
   };
 }
@@ -85,6 +86,56 @@ describe('RunDrawer', () => {
     // not paraphrased or truncated.
     const question = fixture.queue.find((q) => q.id === 'task-21')!.questions[0];
     expect(screen.getByText(question)).toBeInTheDocument();
+  });
+
+  /*
+   * task-19: what a `decide`-mode run settled on its own, per item. Rendered
+   * on the QUEUE row rather than under Attention on purpose — an item whose
+   * questions the runner answered and which then passed review, verification
+   * and merge produces no attention entry at all (design §6: ATTENTION_KINDS
+   * stays the closed set of three, and that list means "a human must look at
+   * this item"), so an assumptions block that lived there would be invisible
+   * for exactly the runs that have any.
+   */
+  describe('assumptions', () => {
+    const PAIRS = [
+      { question: 'Which column does a rejected item land in?', answer: 'Out of scope — Archive renders it there.' },
+      { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' }
+    ];
+
+    it('renders every question and answer on the item that carries them', () => {
+      const queue = [queueItem('bug-1', 'merged', { assumptions: PAIRS })];
+      render(<RunDrawer run={runPayload({ queue })} onClose={() => {}} {...CONTROL_PROPS} />);
+
+      const row = screen.getByTestId('run-drawer-item-bug-1');
+      for (const pair of PAIRS) {
+        expect(row).toHaveTextContent(pair.question);
+        expect(row).toHaveTextContent(pair.answer);
+      }
+    });
+
+    // An empty list renders NO section, not an empty heading: every item of
+    // every `park` run has `assumptions: []`, so a heading gated on the key
+    // rather than on its contents would print on every row of every run this
+    // app has ever shown.
+    it('renders no section at all for an item with an empty list', () => {
+      const queue = [queueItem('bug-1', 'merged', { assumptions: [] })];
+      render(<RunDrawer run={runPayload({ queue })} onClose={() => {}} {...CONTROL_PROPS} />);
+
+      expect(screen.queryByTestId('run-drawer-assumptions-bug-1')).toBeNull();
+    });
+
+    // An archived run from before the field existed has no `assumptions` key
+    // at all. The archive endpoints serve run files verbatim, so this is a
+    // real shape this component receives — and it must not throw.
+    it('renders no section, and does not throw, when the key is absent entirely', () => {
+      const { assumptions: _dropped, ...legacy } = queueItem('bug-1', 'merged');
+      const queue = [legacy as RunQueueItem];
+      render(<RunDrawer run={runPayload({ queue })} onClose={() => {}} {...CONTROL_PROPS} />);
+
+      expect(screen.getByTestId('run-drawer-item-bug-1')).toBeInTheDocument();
+      expect(screen.queryByTestId('run-drawer-assumptions-bug-1')).toBeNull();
+    });
   });
 
   it('renders a stage chip per row matching the fixture stage', () => {

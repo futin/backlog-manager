@@ -708,6 +708,241 @@ test('init --merge-mode with no value exits 1 and writes nothing', (t) => {
   assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --merge-mode has no value')
 })
 
+// --- task-19: question mode in the run file -----------------------------
+// The same six-case shape the merge-mode block above uses, because the flag
+// is the same kind of thing: a run-scoped enum validated before anything is
+// written. The one asymmetry worth noticing while reading these is which
+// value is the silent default — `merge` there, `park` here — which is why
+// the "no flag" case below asserts `park` rather than mirroring its
+// neighbour's `merge`.
+
+test('init --question-mode decide writes questionMode "decide"', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--question-mode', 'decide')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(written.questionMode, 'decide')
+})
+
+test('init --question-mode park writes questionMode "park"', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--question-mode', 'park')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(written.questionMode, 'park')
+})
+
+// The regression guard, the twin of the merge-mode block's Case 2: a run
+// started with no flag at all must be the run this tool has always written,
+// key set included — and its question behaviour must be the behaviour every
+// run had before the flag existed, which is `park`.
+test('init with no --question-mode flag writes "park", key set unchanged from the contract fixture', (t) => {
+  const { home, project } = orchFixture(t)
+  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
+
+  const out = run(project, home, 'init', '--project', project)
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(written.questionMode, 'park')
+  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)))
+})
+
+// "Validate first, mutate last" again, and it matters more here than the
+// exit code does: `cmdInit` archives any existing run.json before it writes
+// the new one, so a validation that ran late would destroy a real run's
+// file on behalf of a call that was never going to succeed.
+test('init --question-mode auto exits 1, names both legal values, and writes nothing at all', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--question-mode', 'auto')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /decide/)
+  assert.match(out.stderr, /park/)
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --question-mode is invalid')
+})
+
+test('init --question-mode with no value exits 1, says so, and writes nothing', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--question-mode')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /no value/)
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --question-mode has no value')
+})
+
+// The two flags are independent run-scoped facts and neither reads the
+// other; this is the case that would catch a parse loop where one flag's
+// argv slot swallowed the other's.
+test('init --merge-mode branch --question-mode decide sets both fields independently', (t) => {
+  const { home, project } = orchFixture(t)
+
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'branch', '--question-mode', 'decide')
+
+  assert.equal(out.status, 0, out.stderr)
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(written.mergeMode, 'branch')
+  assert.equal(written.mergeModeEffective, 'branch')
+  assert.equal(written.questionMode, 'decide')
+})
+
+// --- task-19: `assume`, the one writer of RunQueueItem.assumptions -------
+// A local helper rather than a shared one: only these tests need a JSON
+// file of pairs, and the temp directory is torn down per test the same way
+// the --questions-json tests above do it.
+function assumptionsFile(t, pairs) {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-assume-')), 'assumptions.json')
+  fs.writeFileSync(file, JSON.stringify(pairs))
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }))
+  return file
+}
+
+function decideRun(t, id = 'bug-1', title = 'An ordinary bug') {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, id, title)
+  assert.equal(run(project, home, 'init', '--project', project, '--question-mode', 'decide').status, 0)
+  return { home, project }
+}
+
+test('assume writes the pairs onto the queue item, in file order', (t) => {
+  const { home, project } = decideRun(t)
+  const file = assumptionsFile(t, [
+    { question: 'Which column does a rejected item land in?', answer: 'Out of scope — Archive renders it there.' },
+    { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' },
+  ])
+
+  const out = run(project, home, 'assume', 'bug-1', '--json', file)
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(after.queue.find((q) => q.id === 'bug-1').assumptions, [
+    { question: 'Which column does a rejected item land in?', answer: 'Out of scope — Archive renders it there.' },
+    { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' },
+  ])
+})
+
+// Appends, never replaces: an item's pre-flight can decide a second
+// question after the first has already been recorded, and a replace would
+// erase the earlier decision with no trace it ever happened.
+test('a second assume on the same item appends rather than replacing', (t) => {
+  const { home, project } = decideRun(t)
+  assert.equal(run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [
+    { question: 'q1', answer: 'a1' },
+    { question: 'q2', answer: 'a2' },
+  ])).status, 0)
+
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q3', answer: 'a3' }]))
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(after.queue.find((q) => q.id === 'bug-1').assumptions, [
+    { question: 'q1', answer: 'a1' },
+    { question: 'q2', answer: 'a2' },
+    { question: 'q3', answer: 'a3' },
+  ])
+})
+
+test('assume with no --json exits 1 and prints the usage', (t) => {
+  const { home, project } = decideRun(t)
+
+  const out = run(project, home, 'assume', 'bug-1')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /--json/)
+})
+
+test('assume --json naming a file that does not exist exits 1 and names the path', (t) => {
+  const { home, project } = decideRun(t)
+  const missing = path.join(os.tmpdir(), 'bm-orch-assume-does-not-exist', 'nope.json')
+
+  const out = run(project, home, 'assume', 'bug-1', '--json', missing)
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /nope\.json/)
+})
+
+test('assume --json holding an object rather than an array exits 1 and says an array was expected', (t) => {
+  const { home, project } = decideRun(t)
+
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, {}))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /array/)
+})
+
+test('assume --json holding an entry with no answer key exits 1 and names the missing key', (t) => {
+  const { home, project } = decideRun(t)
+
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q' }]))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /answer/)
+})
+
+test('assume for an id that is not in this run\'s queue exits 1', (t) => {
+  const { home, project } = decideRun(t)
+
+  const out = run(project, home, 'assume', 'nope-9', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /nope-9/)
+})
+
+// THE case this whole command exists to be constrained by. A run told to
+// park an unanswerable item and found writing assumptions about it is a run
+// whose SKILL.md prose has drifted across several hundred turns — which is
+// exactly the failure a tool refusal makes impossible and a prose reminder
+// only discourages. Byte-identical, not "the item's assumptions are still
+// empty": the refusal must land before any write at all, so nothing else in
+// the file can have moved either.
+test('assume is refused under a park-mode run, naming the mode, leaving run.json byte-identical', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-1', 'An ordinary bug')
+  assert.equal(run(project, home, 'init', '--project', project, '--question-mode', 'park').status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /park/)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
+// A run started with no flag at all is a park run, and gets the same
+// refusal — the default has to be the enforced default, not just the
+// written one.
+test('assume is refused on a run started with no --question-mode flag at all', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyBug(project, 'bug-1', 'An ordinary bug')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]))
+
+  assert.equal(out.status, 1)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
+})
+
+// The converse is deliberately NOT enforced: `decide` is permission to
+// answer, never an obligation to invent. An item whose questions genuinely
+// cannot be answered — a plan citing a section nobody wrote, an either/or
+// between two products — must still be able to park.
+test('attention --kind needs-answers still succeeds under a decide-mode run', (t) => {
+  const { home, project } = decideRun(t)
+
+  const out = run(project, home, 'attention', 'bug-1', '--kind', 'needs-answers', '--detail', 'genuinely undecidable')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.deepEqual(after.attention, [{ id: 'bug-1', kind: 'needs-answers', detail: 'genuinely undecidable' }])
+})
+
 // Case 5 — the enforcement point design §3 calls for: a tool refusal, not a
 // SKILL.md reminder, because the reminder has to survive several hundred
 // turns of a headless session re-reading its own body and the refusal

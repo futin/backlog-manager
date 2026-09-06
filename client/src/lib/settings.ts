@@ -13,7 +13,7 @@
  */
 
 import { EFFORTS, MODELS } from '../../../shared/agent';
-import { MERGE_MODES, type MergeMode } from '../../../shared/types';
+import { MERGE_MODES, QUESTION_MODES, type MergeMode, type QuestionMode } from '../../../shared/types';
 import { SECTIONS, type Section } from '../components/SideRail';
 
 export const THEMES = [
@@ -91,6 +91,20 @@ export interface Settings {
    */
   orchestrateDefaultMergeMode: MergeMode;
   /**
+   * Preselected in the orchestrate sheet's question-mode picker;
+   * overridable for that one launch, exactly like the merge-mode default
+   * above and for the same reasons.
+   *
+   * `'park'` is the default — it is what every run did before the mode
+   * existed — so a board that has never touched this setting keeps behaving
+   * exactly as it does today. Like `orchestrateDefaultMergeMode` and unlike
+   * `dispatchDefaultModel`/`dispatchDefaultEffort`, there is no `''`/"CLI
+   * default" third state: `QuestionMode` is a closed two-member enum and
+   * every run has some behaviour here whether or not anyone chose it, so
+   * there is no absent-flag reading for a blank option to represent.
+   */
+  orchestrateDefaultQuestionMode: QuestionMode;
+  /**
    * Days. How long an open item may go untouched before it leaves the Board
    * for Archive (`client/src/lib/item-stale.ts`).
    *
@@ -114,6 +128,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dispatchDefaultModel: '',
   dispatchDefaultEffort: '',
   orchestrateDefaultMergeMode: 'merge',
+  orchestrateDefaultQuestionMode: 'park',
   staleDays: 30
 };
 
@@ -257,6 +272,10 @@ export function clampSettings(raw: unknown): Settings {
     ),
     orchestrateDefaultMergeMode: pickOne(
       s.orchestrateDefaultMergeMode, MERGE_MODES, DEFAULT_SETTINGS.orchestrateDefaultMergeMode
+    ),
+    orchestrateDefaultQuestionMode: pickOne(
+      s.orchestrateDefaultQuestionMode, QUESTION_MODES,
+      DEFAULT_SETTINGS.orchestrateDefaultQuestionMode
     ),
     staleDays: clampDays(
       s.staleDays, DEFAULT_SETTINGS.staleDays,

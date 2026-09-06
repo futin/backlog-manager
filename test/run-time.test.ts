@@ -599,7 +599,8 @@ function fullQueueItem(id: string, stage: RunStage): RunQueueItem {
     stageAt: {},
     verification: [],
     questions: [],
-    note: null
+    note: null,
+    assumptions: []
   };
 }
 

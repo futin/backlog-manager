@@ -99,7 +99,8 @@ function item(
     stageAt: over.stageAt ?? {},
     verification: over.verification ?? [],
     questions: [],
-    note: null
+    note: null,
+    assumptions: []
   };
 }
 
@@ -130,14 +131,15 @@ function liveQueueItem(
     stageAt: over.stageAt ?? {},
     verification: over.verification ?? [],
     questions: [],
-    note: null
+    note: null,
+    assumptions: []
   };
 }
 
 function run(over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun, 'runId' | 'project' | 'status' | 'startedAt' | 'updatedAt' | 'queue'>): OrchestratorArchiveRun {
   return {
     maxItems: null, mergeMode: 'merge', mergeModeEffective: 'merge', mergeModeNote: null,
-    attention: [], current: false, ...over
+    questionMode: 'park', attention: [], current: false, ...over
   };
 }
 
@@ -300,6 +302,7 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
     maxItems: null,
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
+    questionMode: 'park',
     mergeModeNote: null,
     queue: [
       liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
@@ -736,6 +739,7 @@ describe('RunsView', () => {
       maxItems: null,
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
+      questionMode: 'park',
       mergeModeNote: null,
       attention: [],
       queue: [
@@ -792,6 +796,7 @@ describe('RunsView', () => {
       maxItems: null,
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
+      questionMode: 'park',
       mergeModeNote: null,
       attention: [],
       queue: [
@@ -877,6 +882,7 @@ describe('RunsView', () => {
         maxItems: null,
         mergeMode: 'merge',
         mergeModeEffective: 'merge',
+        questionMode: 'park',
         mergeModeNote: null,
         queue: [],
         attention: [],
@@ -908,6 +914,7 @@ describe('RunsView', () => {
         maxItems: null,
         mergeMode: 'merge',
         mergeModeEffective: 'merge',
+        questionMode: 'park',
         mergeModeNote: null,
         queue: [],
         attention: [],
@@ -1288,6 +1295,7 @@ describe('RunsView history paging (task-16)', () => {
       maxItems: null,
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
+      questionMode: 'park',
       mergeModeNote: null,
       queue: [liveQueueItem('pl-1', 'dispatched')],
       attention: [],

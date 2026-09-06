@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Fragment, useEffect } from 'react';
 
 import { projectLabel } from '../../lib/project-label';
 import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
@@ -456,6 +456,41 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
                     {q.fixLoops > 0 && (
                       <div className="run-drawer-item-fixloops">
                         {q.fixLoops} fix loop{q.fixLoops === 1 ? '' : 's'}
+                      </div>
+                    )}
+                    {/* What a `decide`-mode run settled on its own for this
+                        item (task-19). On the QUEUE row, not under Attention:
+                        an item whose questions the runner answered and which
+                        then passed review, verification and merge produces no
+                        attention entry at all — ATTENTION_KINDS stays the
+                        closed set of three and that list means "a human must
+                        look at this item", which a decided-and-merged item
+                        does not warrant. A block rendered there would be
+                        invisible for exactly the runs that have any.
+                          `?? []` because an archived run written before this
+                        field existed has no key here at all, and the archive
+                        endpoints serve run files verbatim. Gated on the
+                        LENGTH, not on the key: every item of every `park` run
+                        carries an empty list, so a key-gated heading would
+                        print on every row of every run this app has shown. */}
+                    {(q.assumptions ?? []).length > 0 && (
+                      <div
+                        className="run-drawer-item-assumptions"
+                        data-testid={`run-drawer-assumptions-${q.id}`}
+                      >
+                        <div className="run-drawer-assumptions-label">assumed</div>
+                        <dl className="run-drawer-assumptions-list">
+                          {(q.assumptions ?? []).map((a, i) => (
+                            // Index in the key: nothing stops a run from
+                            // deciding the same question twice across two
+                            // `assume` calls, and this list appends rather
+                            // than replaces.
+                            <Fragment key={`${a.question}-${i}`}>
+                              <dt>{a.question}</dt>
+                              <dd>{a.answer}</dd>
+                            </Fragment>
+                          ))}
+                        </dl>
                       </div>
                     )}
                     {verify !== null && (

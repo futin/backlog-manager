@@ -51,6 +51,7 @@ function queueItem(overrides: Partial<RunQueueItem> = {}): RunQueueItem {
     verification: [verification()],
     questions: [],
     note: null,
+    assumptions: [],
     ...overrides
   };
 }
@@ -68,6 +69,7 @@ function makeRun(overrides: Partial<OrchestratorRun> = {}): OrchestratorRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    questionMode: 'park',
     queue: [queueItem()],
     attention: [],
     ...overrides
