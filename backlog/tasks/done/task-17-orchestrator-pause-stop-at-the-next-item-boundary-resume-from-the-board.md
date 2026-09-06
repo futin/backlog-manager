@@ -170,6 +170,65 @@ dist/assets/index-sOFJg6ET.js    340.23 kB │ gzip: 103.62 kB
 build exit: 0
 ```
 
+### Review round 1 — one Critical, fixed
+
+`resume()` cleared the pause request unconditionally after a successful
+spawn. That is right for a `paused` run and wrong for a **crashed** one, and
+the crashed path is the one automation takes by default: a person pauses a
+running run, the run crashes before reaching its next dispatch gate, the
+watchdog resumes it, and the clear deletes a request that nothing has yet
+seen — the resumed session never exits `6` and drains the whole queue against
+an explicit pause. Design §4.4 says the opposite in as many words: "a crashed
+run with an effective request is still resumed by the sweeper — the request
+is honoured by the resumed session at its first gate."
+
+The bug came from reading §4.3's "tidiness, not correctness" as unconditional.
+It is not: that argument holds only for the paused case, because that is the
+only one where an `unpause` is coming to retire the request anyway. A crashed
+run's resumed session takes `recovery.md`'s `running` path, which heartbeats
+and never unpauses, so the gate honouring the request is the *only* thing
+that would ever act on it.
+
+Fix: the clear is now guarded on `run.status === 'paused'`, with the
+reasoning above in the code beside it.
+
+Two assertions were missing, which is why the branch went green with the
+bug in it — `test/watchdog-sweep.test.ts`'s crashed-run case asserted the
+spawn count while its own comment claimed "let the resumed session decide
+what the request means", a claim nothing tested:
+
+- `test/agents-resume.test.ts` — a crashed-run resume leaves the request on
+  disk **and still effective** (present-but-refused would be the same failure
+  with an extra step).
+- `test/watchdog-sweep.test.ts` — the sweeper's own crashed-run resume leaves
+  it in place too, closing the gap between that case's comment and its
+  assertions.
+
+Red-green verified rather than assumed: with the guard reverted, exactly
+those two cases fail (2 failed, 51 passed); with it restored, 53/53.
+
+Re-verification after the fix:
+
+```
+===== pnpm test =====
+Test Suites: 73 passed, 73 total
+Tests:       1313 passed, 1313 total
+Snapshots:   0 total
+Time:        53.528 s
+Ran all test suites.
+===== pnpm run test:skills =====
+# tests 381
+# pass 381
+# fail 0
+===== pnpm run typecheck =====
+$ tsc --noEmit
+typecheck exit: 0
+===== pnpm run build =====
+dist/assets/index-sOFJg6ET.js    340.23 kB │ gzip: 103.62 kB
+✓ built in 1.06s
+build exit: 0
+```
+
 Not part of this item, and required before a run can actually be paused from
 the board: the merge has to be pushed and `pnpm run plugin:sync` run — the
 board spawns runs from the *installed* plugin, and tasks 2 and 9 edited

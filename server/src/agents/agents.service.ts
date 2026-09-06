@@ -712,22 +712,40 @@ export class AgentsService {
       permissionMode: clampMode('auto', status.spawnMaxPermission)
     });
 
-    // task-17, after the spawn and never before it: a spawn that threw leaves
-    // the request in place, which is what keeps the board drawing the run as
+    // task-17. Two conditions, and the STATUS one is the load-bearing half:
+    //
+    // **Only for a `paused` run.** A crashed run's request has never been
+    // seen by anything — the run died before reaching a dispatch gate, and
+    // the watchdog that resumes it does not read this file at all (design
+    // §4.4). The resumed session is what honours it, at its first gate, by
+    // exiting `6`. Clearing it here for a crashed run would delete a request
+    // that is still fully effective and that nobody has acted on, and the
+    // resumed session would then drain the whole queue against an explicit
+    // pause somebody asked for — the exact outcome this feature exists to
+    // prevent, reached through the automation that is on by default. §4.3's
+    // own "tidiness, not correctness" argument holds ONLY for the paused
+    // case, because that is the only one where an `unpause` is coming to
+    // retire the request anyway: a crashed run's resumed session takes
+    // `recovery.md`'s `running` path, which heartbeats and never unpauses,
+    // so nothing else would ever retire it.
+    //
+    // **After the spawn, never before it.** A spawn that threw leaves the
+    // request in place, which is what keeps the board drawing the run as
     // paused for a resume that never started.
     //
-    // Tidiness, not correctness. What actually retires the request is the
-    // resumed session's own `unpause`, whose `unpausedAt` stamp moves past
-    // the request's `requestedAt` and makes it ineffective on both sides of
-    // the predicate. Clearing it here just stops `status` and the board from
+    // For the paused case it is genuinely tidiness: `unpause` retires the
+    // request by moving `unpausedAt` past its `requestedAt`, on both sides
+    // of the predicate. Clearing it here only stops `status` and the board
     // reporting a pause that is already being undone, in the minute or two
     // before that session gets there. Swallowed, therefore: a failure to
     // delete a file must not turn a successful resume into an error the
     // caller sees, when the thing that matters has already happened.
-    try {
-      clearPauseRequest(project);
-    } catch {
-      /* see above — the unpause is the real retirement */
+    if (run.status === 'paused') {
+      try {
+        clearPauseRequest(project);
+      } catch {
+        /* see above — the unpause is the real retirement */
+      }
     }
     return result;
   }

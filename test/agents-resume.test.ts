@@ -11,7 +11,9 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { projectDispatchGate } from '../shared/agent';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
+import {
+  pauseRequestEffective, readPauseRequest, writePauseRequest
+} from '../server/src/orchestrator/pause-control.util';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { AgentsStatus, OrchestratorRun } from '../shared/types';
 
@@ -376,6 +378,33 @@ describe('POST /api/agents/resume', () => {
   // The clear happens AFTER the spawn, so a spawn that never happened leaves
   // the request alone — the run is still paused, and the board must still
   // show it that way.
+  /* The Critical finding from this branch's own review, pinned. The clear
+     above is guarded on `status === 'paused'`, and this is the case that
+     guard exists for: a CRASHED run's request has never been seen by
+     anything — the run died before reaching a dispatch gate, and neither the
+     watchdog nor this route reads the control file to decide anything. The
+     resumed session is what honours it, by exiting `6` at its first gate
+     (design §4.4). Deleting it here would silently drain the whole queue
+     against a pause somebody explicitly asked for. */
+  it('leaves a crashed run\'s pause request in place — the resumed session is what honours it', async () => {
+    stubDashboard({ ok: true }, 'auto');
+    writeRun({
+      ...fixture, project: projectPath, status: 'running',
+      updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    });
+    writePauseRequest(projectPath, fixture.runId, new Date(), controlRoot);
+
+    await post({ project: projectPath }).expect(201);
+
+    const survived = readPauseRequest(projectPath, controlRoot);
+    expect(survived).not.toBeNull();
+    // Still EFFECTIVE, not merely present: a file left on disk that the
+    // predicate would refuse is the same failure with an extra step.
+    expect(pauseRequestEffective(survived, {
+      runId: fixture.runId, startedAt: fixture.startedAt, unpausedAt: undefined
+    })).toBe(true);
+  });
+
   it('leaves the pause request in place when the spawn fails', async () => {
     stubDashboard({ ok: false, status: 429, body: { error: 'busy' } }, 'auto');
     writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });

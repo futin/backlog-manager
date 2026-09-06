@@ -8,7 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { WatchdogService } from '../server/src/agents/watchdog.service';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
-import { writePauseRequest } from '../server/src/orchestrator/pause-control.util';
+import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { makeProject, makeRegistry } from './helpers/store';
@@ -349,6 +349,14 @@ describe('watchdog sweeper', () => {
     await svc().tick();
 
     expect(dash.spawns()).toHaveLength(1);
+    // The half this case's own comment used to only CLAIM: "let the resumed
+    // session decide what the request means" is only true if the request is
+    // still there for it to read. The sweeper resumes through
+    // `AgentsService.resume()`, whose clear is guarded on `status ===
+    // 'paused'` precisely so this path does not delete a request nothing has
+    // acted on yet (design §4.4). Asserting the spawn count alone left that
+    // guard unpinned — and it shipped inverted on this branch's first cut.
+    expect(readPauseRequest(projectPath)).not.toBeNull();
   });
 
   it('stands down when there is no run file at all, with exactly one idle event', async () => {
