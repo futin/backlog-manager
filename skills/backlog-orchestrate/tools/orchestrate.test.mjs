@@ -3985,3 +3985,115 @@ test('unpause is exempt from the lease, so a fresh session can resume a paused r
   // not the driver still refuses.
   assert.equal(runAs('sess-paused', project, home, 'heartbeat').status, 7)
 })
+
+// --- bug-28: the per-item execute session is named ------------------------
+// Every other session this system spawns carries a `-n` display name
+// (`orchestrate <project>`, `bl <project> <id>`, `resume <project>`,
+// `watchdog resume <project>` — all composed server-side and sent to the
+// dashboard's POST /api/spawn). The per-item execute session is the one that
+// never goes through that route: the running orchestrator spawns it itself
+// from the line written into SKILL.md, and that line passed no `-n` at all, so
+// its dashboard row read as a bare project name — indistinguishable from a
+// session someone started in a terminal, for the one session actually doing
+// the work.
+//
+// Pinned as a text assertion because the fix IS prose: there is no function to
+// unit-test. Measured end-to-end before it was written, on CLI 2.1.250:
+// `claude -p … -n "orch bug-28"` appends a `{"type":"custom-title",
+// "customTitle":"orch bug-28"}` record to the transcript, which is exactly the
+// record the dashboard reads (`titleFromRecord`, title-cache.ts). Repeating it
+// with `--resume <id> -n "orch bug-28 retry 1"` exits 0 and appends a second
+// such record to the SAME file — and the dashboard's own reader scans
+// newest-first, so the row renames to the retry rather than gaining a second
+// entry. That is why both lines carry the flag and why the retry name is
+// allowed to differ from the dispatch one.
+//
+// NAME_RE and NAME_CAP are COPIES of the dashboard's own
+// (../claude-agents-dashboard/server/lib/spawn.ts), for the reason
+// test/agents-prompt.test.ts states for its copy: importing from a sibling
+// repo would make this suite depend on a checkout of another one. They are
+// checked here even though this spawn path never touches the dashboard's
+// validator — the CLI accepts any string — because the three server-side
+// helpers all concluded the same charset, and a name that agrees with them is
+// one that keeps working if this line ever does grow a server hop.
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/
+const NAME_CAP = 60
+
+/** The `-n "…"` argument of every headless dispatch line, in file order. */
+function dispatchNames() {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const lines = text.split('\n').filter((l) => l.includes('exec claude -p'))
+  assert.equal(lines.length, 2, `expected exactly 2 headless dispatch lines, found ${lines.length}`)
+  return lines.map((line) => {
+    const m = /-n "([^"]*)"/.exec(line)
+    assert.ok(m, `dispatch line passes no -n "<name>": ${line}`)
+    return { line, name: m[1] }
+  })
+}
+
+test('both dispatch lines name the session they spawn', () => {
+  for (const { line, name } of dispatchNames()) {
+    // Double-quoted, and inside the single-quoted sh -c body: the name holds a
+    // space, so an unquoted one would split into `-n orch` plus a stray word
+    // the CLI would read as another argument, and a flag outside the body
+    // would be handed to `nohup` instead of to `claude`. Same failure shape
+    // BM_ORCH_RUN's own placement test guards, for the same reason.
+    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"))
+    assert.ok(body.includes(`-n "${name}"`), `-n is outside the single-quoted dispatch body: ${line}`)
+  }
+})
+
+test('the two names are the documented spellings, and neither carries the run id', () => {
+  const [dispatch, retry] = dispatchNames()
+  // Exact spellings rather than a pattern: this is where bug-28's one open
+  // judgement is recorded. The run id is deliberately absent — the worktree
+  // already gives the row its own project (`…--worktrees-<id>`), `run.json`
+  // maps session id to run for anything machine-side, `BM_ORCH_RUN` carries it
+  // in the environment for the hook, and a `run-20260906-151336` in the name
+  // would eat a third of the cap to repeat what a reader is not looking for.
+  // The id is what a reader IS looking for, so the id is what the name says.
+  assert.equal(dispatch.name, 'orch <id>')
+  // `retry 1` and not `retry <n>`: the log file this same block writes is
+  // `<id>-retry-1.jsonl`, so one counter is substituted into both and a reader
+  // comparing the row to the transcript sees the same number. `<n>` is also
+  // already spent on the dispatch prompt's `item <n> of <m>`, and two meanings
+  // for one placeholder on adjacent lines is how a substitution goes wrong.
+  assert.equal(retry.name, 'orch <id> retry 1')
+})
+
+test('both composed names satisfy the dashboard charset and cap', () => {
+  // Rendered, not asserted as templates: `<id>` and `<n>` are placeholders the
+  // run substitutes, and `<`/`>` are outside NAME_RE — so the raw line can
+  // never be tested against the regex directly, and a test that did would
+  // either be red forever or quietly weakened until it passed.
+  for (const { name } of dispatchNames()) {
+    const rendered = name.replace('<id>', 'bug-28')
+    assert.match(rendered, NAME_RE, `composed name is outside the dashboard charset: ${rendered}`)
+    assert.ok(rendered.length <= NAME_CAP, `composed name is over the ${NAME_CAP}-char cap: ${rendered}`)
+  }
+})
+
+test('a pathologically long id still composes a name under the cap', () => {
+  // The cap matters because going over it is SILENT on the server-side route
+  // (parseSpawnRequest drops the name and the row falls back to the project),
+  // and nothing here can slice: the name is composed by substitution into
+  // prose, so headroom is the only mechanism available. 40 characters is far
+  // past anything backlog.mjs mints (`^[a-z]+-\d+$`); leaving the project and
+  // the run id out of the name is what buys the room.
+  const id = 'x'.repeat(40)
+  for (const { name } of dispatchNames()) {
+    const rendered = name.replace('<id>', id)
+    assert.ok(rendered.length <= NAME_CAP, `a ${id.length}-char id overflows the cap: ${rendered.length} chars`)
+  }
+})
+
+test('the retry name differs from the dispatch name for the same item', () => {
+  // `-n` on a `--resume` renames the existing row rather than adding one
+  // (measured; see this section's head), so the two names are not independent:
+  // the retry must stay recognisable as the same item — same `orch <id>`
+  // prefix — while still reading as the retry it now is, or the row silently
+  // claims the first dispatch is still the thing running.
+  const [dispatch, retry] = dispatchNames()
+  assert.notEqual(retry.name, dispatch.name)
+  assert.ok(retry.name.startsWith(dispatch.name), `retry name no longer extends the dispatch name: ${retry.name}`)
+})

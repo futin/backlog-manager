@@ -709,7 +709,7 @@ re-enters at this same dispatch line onto that same worktree —
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -743,6 +743,42 @@ carries it too**, unlike the prompt marker, which that line deliberately does
 not repeat: a resumed session keeps its original prompt but gets a brand-new
 environment, so the assignment has to be made again or the retry pays the hold
 the fresh dispatch was spared.
+
+**`-n "orch <id>"` is the third marker, and its reader is a person.** The
+prompt marker is read by the model, `BM_ORCH_RUN` by a hook, and this one by
+whoever opens the dashboard mid-run to see what is happening — the channel
+follows the reader, three times on one line. Without it this was the one
+session in the whole system with no display name: every other spawn goes
+through the board's own server, which composes one (`orchestrate <project>`,
+`bl <project> <id>`, `resume <project>`, `watchdog resume <project>`) and
+posts it to the dashboard, while this line spawns `claude` itself and reached
+none of that code. An unnamed session's row falls back to the bare project
+name, so the session actually doing the work read exactly like one somebody
+started in a terminal, identifiable only by opening its transcript.
+
+The name is the **item id**, not the project and not the run id. The worktree
+cwd already files the row under a project of its own
+(`…backlog-manager--worktrees-<id>`), `run.json` maps session id to run for
+anything machine-side, and `BM_ORCH_RUN` above carries the run id to the one
+reader that needs it — so spending the name on either would repeat what is
+already on screen instead of the one thing a reader is looking for. It also
+keeps the whole name far under the dashboard's 60-character cap, which matters
+because going over it is silent (`parseSpawnRequest` drops an over-long or
+mis-charactered name and the row falls back to the project name, with no
+failed request anywhere to notice). Same reason there is no `:` or `/` in it
+and the separator is a space: the dashboard's `NAME_RE` is
+`/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/`, which is what the three server-side helpers
+each concluded independently.
+
+**§5's `--resume` retry names itself too, and differently** — `orch <id> retry
+1`, the same counter its own `<id>-retry-1.jsonl` carries. `-n` on a resume
+renames the existing row rather than adding a second one (measured on CLI
+2.1.250: the flag appends a fresh `custom-title` record to the same
+transcript, and the dashboard reads the newest), which is exactly what should
+happen — the row should say the item is on its retry, while still reading as
+the same item. Double-quoted inside the single-quoted body because the name
+holds a space; unquoted it would split, and `claude` would take `orch` as the
+name and the id as a stray argument.
 
 **The prompt is spent on more than the trigger, and every word of the marker
 is load-bearing.** The prompt is the *entire* channel from this run to that
@@ -892,7 +928,7 @@ For both failure shapes, ask the user — best-effort, exactly like pre-flight
 resumes that item's own session so its context is not paid for twice:
 
 ```bash
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --permission-mode auto' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --permission-mode auto -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
