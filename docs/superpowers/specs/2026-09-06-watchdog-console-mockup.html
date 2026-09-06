@@ -1,0 +1,427 @@
+<meta charset="utf-8">
+<title>Watchdog Redesign</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;600;700&display=swap">
+<style>
+/* The app's own palette, verbatim from shared/theme.css: daylight as the light
+   set, midnight as the dark one. Three-state theme: bare :root = light, the
+   media query covers the un-stamped system-dark viewer, the attribute block
+   covers an explicit dark choice. */
+:root{
+  --board:#e8e3d7;--steel:#f2eee5;--strip:#fbf8f1;--strip-hi:#f2ecdd;
+  --hairline:#cdc4b1;--hairline2:#ab9f88;
+  --ink:#231f1a;--ink2:#5a5346;--ink3:#8a8172;
+  --green:#1f7a4d;--amber:#a86414;--mustard:#8a7415;--cyan:#136d78;--red:#a83420;
+  --mono:'IBM Plex Mono','SF Mono','JetBrains Mono',monospace;
+  --font:'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --display:'Barlow Condensed','Barlow',sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --board:#0c1220;--steel:#131a2b;--strip:#182238;--strip-hi:#1e2a44;
+  --hairline:#2a3752;--hairline2:#354463;
+  --ink:#dde6f4;--ink2:#9fadc6;--ink3:#66738c;
+  --green:#46d48c;--amber:#ffb03a;--mustard:#d1ba52;--cyan:#55d0dd;--red:#e0533f;
+}}
+:root[data-theme="dark"]{
+  --board:#0c1220;--steel:#131a2b;--strip:#182238;--strip-hi:#1e2a44;
+  --hairline:#2a3752;--hairline2:#354463;
+  --ink:#dde6f4;--ink2:#9fadc6;--ink3:#66738c;
+  --green:#46d48c;--amber:#ffb03a;--mustard:#d1ba52;--cyan:#55d0dd;--red:#e0533f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--steel);color:var(--ink2);font-family:var(--font);font-size:12px;line-height:1.45}
+.page{max-width:1120px;margin:0 auto;padding:28px 24px 56px;display:flex;flex-direction:column;gap:26px}
+
+/* ---- page chrome (the document around the screens) ---- */
+header h1{margin:0;font-family:var(--display);font-size:26px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink);text-wrap:balance}
+.mock{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-top:6px}
+.design{display:flex;flex-direction:column;gap:10px}
+.dh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.dh .tag{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--cyan);letter-spacing:.06em}
+.dh h2{margin:0;font-family:var(--display);font-size:16px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink)}
+.dh .rec{font-family:var(--mono);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--green);border:1px solid color-mix(in srgb,var(--green) 45%,transparent);border-radius:9px;padding:1px 7px}
+.cap{max-width:78ch;margin:0;color:var(--ink2)}
+.cap b{color:var(--ink);font-weight:600}
+.cap code{font-family:var(--mono);font-size:10.5px;color:var(--ink)}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px 22px;font-size:11.5px}
+.notes div{display:flex;flex-direction:column;gap:2px}
+.notes .nl{font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3)}
+
+/* ---- a framed screen: the app's board ground inside the document ---- */
+.screen{background:var(--board);border:1px solid var(--hairline2);border-radius:3px;padding:14px;display:flex;flex-direction:column;gap:12px}
+
+/* ---- the Runs bar, as shipped: title left, tools cluster right-anchored ---- */
+.bar{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px;row-gap:8px}
+.bar .title{font-family:var(--display);font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink)}
+.tools{margin-left:auto;display:flex;align-items:stretch;flex-wrap:wrap;gap:6px}
+.seg{display:inline-flex;background:var(--steel);border:1px solid var(--hairline);border-radius:2px;overflow:hidden}
+.seg button{border:0;background:transparent;font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink2);padding:4px 10px;cursor:pointer;transition:color .15s,background .15s}
+.seg button+button{border-left:1px solid var(--hairline)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{color:var(--ink);background:var(--strip-hi);box-shadow:inset 0 -2px 0 var(--cyan)}
+.seg button:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--cyan)}
+.sel{font-family:var(--mono);font-size:10px;letter-spacing:.04em;color:var(--ink2);background:var(--steel);border:1px solid var(--hairline);border-radius:2px;padding:4px 8px;max-width:190px}
+.divider{width:1px;background:var(--hairline2);margin:3px 4px;align-self:stretch}
+.bar-note{font-family:var(--mono);font-size:9.5px;color:var(--ink3);width:100%}
+.ghost{outline:1px dashed color-mix(in srgb,var(--cyan) 55%,transparent);outline-offset:3px}
+
+/* ---- shared monitor vocabulary ---- */
+.lamp{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink3);vertical-align:middle;flex:none}
+.lamp.armed{background:var(--cyan);animation:ring 2s ease-in-out infinite}
+@keyframes ring{0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--cyan) 28%,transparent)}50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--cyan) 10%,transparent)}}
+.sect{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);margin-top:2px}
+.sect .sub{font-family:var(--mono);text-transform:none;letter-spacing:.02em;font-weight:400;margin-left:auto;color:var(--ink3)}
+.tbl-wrap{overflow-x:auto;background:var(--strip);border:1px solid var(--hairline);border-radius:2px}
+.tbl-wrap.bounded{max-height:260px;overflow-y:auto}
+.wd-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:10.5px;color:var(--ink2)}
+.wd-table th{position:sticky;top:0;z-index:1;text-align:left;font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);background:var(--strip-hi);padding:6px 10px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.wd-table td{padding:6px 10px;border-top:1px solid var(--hairline);vertical-align:baseline;white-space:nowrap}
+.wd-table tbody tr:first-child td{border-top:0}
+.wd-table td.detail{white-space:normal;color:var(--ink);min-width:220px}
+.wd-table td.num{font-variant-numeric:tabular-nums}
+.wd-table td.proj{font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink);font-size:10px}
+.wd-table td.dim,.dim{color:var(--ink3)}
+.wd-table td.ink{color:var(--ink)}
+.wd-table tr.clickable{cursor:pointer}
+.wd-table tr.clickable:hover td{background:var(--strip-hi)}
+.wd-table tr.crashed td:first-child{box-shadow:inset 2px 0 0 var(--amber)}
+.kind{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;border:1px solid;border-radius:9px;padding:1px 7px 1px 5px;white-space:nowrap;line-height:1.5}
+.k-spawned{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 45%,transparent)}
+.k-recovered{color:var(--green);border-color:color-mix(in srgb,var(--green) 45%,transparent)}
+.k-failed{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,transparent)}
+.k-exhausted,.k-disabled{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 45%,transparent)}
+.k-armed{color:var(--ink2);border-color:var(--hairline2)}
+.k-idle{color:var(--ink3);border-color:var(--hairline2)}
+.verdict{font-family:var(--mono);font-size:10.5px;font-weight:600;white-space:nowrap}
+.v-ok{color:var(--ink3)}
+.v-crashed{color:var(--amber)}
+.skew{font-family:var(--mono);font-size:9px;color:var(--ink3);border:1px dashed var(--hairline2);border-radius:9px;padding:0 6px;margin-left:6px;white-space:nowrap;text-transform:none;letter-spacing:0;font-weight:400}
+.warn{color:var(--amber)}
+
+/* ---- A · Ledger: one-line head, two tables ---- */
+.a-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;background:var(--strip);border:1px solid var(--hairline);border-radius:2px;font-family:var(--mono);font-size:11px;color:var(--ink2)}
+.a-head .phase{display:inline-flex;align-items:center;gap:7px;font-weight:700;color:var(--ink);letter-spacing:.06em;text-transform:uppercase}
+.a-head b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.a-head .cfg{margin-left:auto;color:var(--ink3);font-size:10.5px}
+.a-head .cfg b{color:var(--ink2)}
+.a-head .to{color:var(--ink3);font-size:10px}
+
+/* ---- B · Console: three tiles, run cards with freshness meters ---- */
+.tiles3{display:grid;grid-template-columns:1.2fr 1fr 1.5fr;gap:8px}
+.tile{display:flex;flex-direction:column;gap:6px;min-width:0;background:var(--strip);border:1px solid var(--hairline);border-radius:2px;padding:10px 12px}
+.tl{font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3)}
+.tv{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px;line-height:1.1}
+.tv small{font-size:10.5px;font-weight:400;color:var(--ink3)}
+.tsub{font-family:var(--mono);font-size:9.5px;color:var(--ink3);display:flex;gap:4px 10px;flex-wrap:wrap}
+.tsub b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.cd{position:relative;height:5px;background:var(--steel);border:1px solid var(--hairline);border-radius:3px;overflow:hidden}
+.cd-fill{position:absolute;left:0;top:0;bottom:0;background:var(--cyan);transition:width 1s linear}
+.kv{display:grid;grid-template-columns:1fr auto;gap:3px 12px;font-family:var(--mono);font-size:10.5px;color:var(--ink3)}
+.kv b{color:var(--ink);font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.rcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:8px}
+.rcard{display:flex;flex-direction:column;gap:7px;width:100%;text-align:left;background:var(--strip);border:1px solid var(--hairline);border-radius:2px;padding:10px 12px;cursor:pointer;color:var(--ink2);font-family:var(--mono);font-size:10.5px;transition:border-color .15s}
+.rcard:hover{border-color:var(--hairline2)}
+.rcard:focus-visible{outline:none;box-shadow:inset 0 0 0 1px var(--cyan)}
+.rcard.crashed{border-color:var(--amber)}
+.rc-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.rc-head .proj{font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink);font-size:10px}
+.rc-head .rid{color:var(--ink3);font-size:10px}
+.rc-head .verdict{margin-left:auto}
+.rc-item{color:var(--ink);font-size:11px}
+.meter{display:flex;flex-direction:column;gap:4px}
+.m-track{position:relative;height:6px;background:var(--steel);border:1px solid var(--hairline);border-radius:3px}
+.m-fill{position:absolute;left:0;top:0;bottom:0;background:var(--cyan);border-radius:3px 0 0 3px;transition:width 1s linear;min-width:2px}
+.crashed .m-fill{background:var(--amber);border-radius:3px}
+.m-tick{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--hairline2)}
+.m-labels{display:flex;justify-content:space-between;gap:8px;font-size:9.5px;color:var(--ink3)}
+.m-labels b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.rc-wd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--amber)}
+.rc-wd b{font-weight:600;font-variant-numeric:tabular-nums}
+.pips{display:inline-flex;gap:3px;align-items:center;margin-right:2px}
+.pips i{display:inline-block;width:7px;height:7px;border-radius:50%;border:1.5px solid var(--amber)}
+.pips i.on{background:var(--amber)}
+
+/* ---- C · Timeline: the sweeper's day on lanes, the table as the record ---- */
+.tline{background:var(--strip);border:1px solid var(--hairline);border-radius:2px;padding:10px 12px 8px;display:flex;flex-direction:column;gap:2px;overflow-x:auto}
+.tline-inner{min-width:640px;display:flex;flex-direction:column;gap:2px}
+.axis{display:grid;grid-template-columns:190px 1fr;gap:8px;align-items:end;height:16px}
+.ticks{position:relative;height:16px;font-family:var(--mono);font-size:9px;color:var(--ink3)}
+.ticks span{position:absolute;bottom:0;transform:translateX(-50%);white-space:nowrap}
+.ticks span::after{content:'';position:absolute;left:50%;top:100%;width:1px;height:3px;background:var(--hairline2)}
+.lane{display:grid;grid-template-columns:190px 1fr;gap:8px;align-items:center;min-height:30px}
+.lane-name{display:flex;flex-direction:column;gap:1px;font-family:var(--mono);font-size:9px;line-height:1.2;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lane-name b{color:var(--ink);font-weight:600;text-transform:uppercase;letter-spacing:.05em;font-size:10px}
+.track{position:relative;height:30px}
+.track::before{content:'';position:absolute;left:0;right:0;top:50%;border-top:1px dashed var(--hairline)}
+.span{position:absolute;top:50%;height:2px;transform:translateY(-50%);background:var(--hairline2)}
+.span.live{background:color-mix(in srgb,var(--cyan) 55%,transparent)}
+.ev{position:absolute;top:50%;transform:translate(-50%,-50%);font-family:var(--mono);font-size:11px;font-weight:700;line-height:1;background:var(--strip);padding:1px 2px;cursor:default}
+.ev.spawned{color:var(--cyan)}.ev.recovered{color:var(--green)}.ev.failed{color:var(--red)}
+.ev.exhausted,.ev.disabled{color:var(--amber)}.ev.armed{color:var(--ink2)}.ev.idle{color:var(--ink3)}
+.ev.up{top:24%}
+.nowline{position:absolute;top:2px;bottom:2px;width:1px;background:var(--cyan);opacity:.7}
+.legend{display:flex;gap:6px 14px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;color:var(--ink3);margin-top:6px;padding-top:6px;border-top:1px solid var(--hairline)}
+.legend span b{font-weight:700;margin-right:3px}
+
+/* ---- the side-by-side table at the foot ---- */
+.cmp{width:100%;border-collapse:collapse;font-size:11.5px;background:var(--strip);border:1px solid var(--hairline);border-radius:2px}
+.cmp th,.cmp td{text-align:left;vertical-align:top;padding:8px 10px;border-top:1px solid var(--hairline)}
+.cmp th{font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);background:var(--strip-hi);border-top:0}
+.cmp td:first-child{font-family:var(--display);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);white-space:nowrap}
+.cmp td b{color:var(--ink);font-weight:600}
+.cmp-wrap{overflow-x:auto}
+
+@media (max-width:900px){.tiles3{grid-template-columns:1fr 1fr}.tiles3 .tile:last-child{grid-column:1/-1}}
+@media (max-width:700px){.page{padding:16px 12px 40px}.tiles3{grid-template-columns:1fr}.a-head .cfg{margin-left:0}.rc-head .verdict{margin-left:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="page">
+  <header>
+    <h1>Watchdog Redesign</h1>
+    <div class="mock">mockup · one baked afternoon, frozen at 14:09:30 local and ticking from there · the same three running runs and twelve sweeper events under every design · light and dark follow your theme</div>
+  </header>
+
+  <!-- ───────── 0 · the View switch, far right ───────── -->
+  <section class="design" id="toggle">
+    <div class="dh"><span class="tag">0</span><h2>View switch, far right</h2></div>
+    <p class="cap">The <code>Runs | Watchdog</code> group becomes the <b>last</b> child of the tools cluster. The cluster is already right-anchored (<code>margin-left: auto</code>), so the switch's right edge is pinned by the bar itself; the range control and the project select drop out to its <b>left</b> when Watchdog is chosen, and nothing under the pointer moves. The hairline divider is the one optional addition: three controls in a row, two of which scope history and one of which picks the surface, should not read as a single instrument.</p>
+    <div class="screen">
+      <div class="bar">
+        <div class="title">Runs</div>
+        <div class="tools">
+          <div class="seg" role="group" aria-label="Range"><button aria-pressed="false">Today</button><button aria-pressed="false">This week</button><button aria-pressed="false">This month</button><button aria-pressed="true">All</button></div>
+          <select class="sel" aria-label="Project"><option>All projects</option><option>backlog-manager</option><option>claude-agents-dashboard</option><option>ixray</option></select>
+          <span class="divider" aria-hidden="true"></span>
+          <div class="seg ghost" role="group" aria-label="View"><button aria-pressed="true">Runs</button><button aria-pressed="false">Watchdog</button></div>
+        </div>
+        <div class="bar-note">runs mode · range and project to the left of the switch</div>
+      </div>
+      <div class="bar">
+        <div class="title">Runs</div>
+        <div class="tools">
+          <div class="seg ghost" role="group" aria-label="View"><button aria-pressed="false">Runs</button><button aria-pressed="true">Watchdog</button></div>
+        </div>
+        <div class="bar-note">watchdog mode · the switch has not moved; the dashed outline marks the same footprint in both bars</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── A · Ledger ───────── -->
+  <section class="design" id="a">
+    <div class="dh"><span class="tag">A</span><h2>Ledger</h2></div>
+    <p class="cap">Everything the page says today, set as <b>two tables under a one-line head</b>. No new readings and no new chrome: the head is the current three sentences on one line, the watched runs get real columns and a header row, and the activity log gains a <b>kind</b> column it has never had — the payload already carries <code>kind</code>, the page has only ever printed <code>detail</code>. The "watchdog:" prefix the strip needs is dropped here because the column header carries the word.</p>
+    <div class="screen" id="screen-a"></div>
+    <div class="notes">
+      <div><span class="nl">moves on a clock</span><span>the countdown and the heartbeat ages, as today</span></div>
+      <div><span class="nl">new derived readings</span><span>none</span></div>
+      <div><span class="nl">cost</span><span>component markup and its 18 tests rewritten, CSS only; no lib or hook change</span></div>
+    </div>
+  </section>
+
+  <!-- ───────── B · Console ───────── -->
+  <section class="design" id="b">
+    <div class="dh"><span class="tag">B</span><h2>Console</h2><span class="rec">recommended</span></div>
+    <p class="cap">Three tiles state the sweeper, the watched set and the policy, in the same tile idiom Runs mode already uses. Each running run is a card with a <b>freshness meter</b>: the heartbeat age drawn against the 15-minute stale line, with a tick at 9.5 minutes where a beat is due — so a run is seen <b>drifting toward crashed</b> before the strip calls it. A crashed card adds attempt pips and how much of the grace window is left before the sweeper may try again. Activity is the same kind-badged table as A. Every new reading is derived on the client from fields already on the wire: <code>updatedAt</code> against <code>RUN_STALE_MS</code>, <code>lastSpawnAt</code> plus <code>graceMs</code>, <code>nextTickAt</code> over <code>tickMs</code>.</p>
+    <div class="screen" id="screen-b"></div>
+    <div class="notes">
+      <div><span class="nl">moves on a clock</span><span>sweep countdown bar, every meter, the ages, the grace remaining</span></div>
+      <div><span class="nl">new derived readings</span><span>freshness fraction, grace remaining, sweep fraction — three pure functions beside <code>stateLine</code>, each unit-tested against an explicit <code>now</code></span></div>
+      <div><span class="nl">cost</span><span>A, plus one meter element and the three derivations; still no server, hook or wire change</span></div>
+    </div>
+  </section>
+
+  <!-- ───────── C · Timeline ───────── -->
+  <section class="design" id="c">
+    <div class="dh"><span class="tag">C</span><h2>Timeline</h2></div>
+    <p class="cap">B's head and cards, then the day's sweeper events laid on <b>lanes</b> — one for the sweeper's own arm/idle beats, one per run it ever acted on — with the kind glyphs as the marks and the table beneath as the record. It answers "what has the watchdog been doing today" in one look and shows attempt spacing against the grace window. Marks a minute apart — the failed attempt and its retry at 14:06 and 14:07 — stack rather than overprint, and the real implementation needs the same rule. The honest caveat: the feed holds fifty events in API memory, so on most afternoons this chart is three dots; its value is highest on exactly the bad days.</p>
+    <div class="screen" id="screen-c"></div>
+    <div class="notes">
+      <div><span class="nl">moves on a clock</span><span>everything B moves, plus the now-line</span></div>
+      <div><span class="nl">new derived readings</span><span>B's three, plus lane grouping by (project, runId) and a time axis over the feed's span</span></div>
+      <div><span class="nl">cost</span><span>B, plus the axis, lane grouping and mark placement, each with its own tests; the largest of the three by a clear margin</span></div>
+    </div>
+  </section>
+
+  <!-- ───────── side by side ───────── -->
+  <section class="design" id="cmp">
+    <div class="dh"><span class="tag">·</span><h2>Side by side</h2></div>
+    <div class="cmp-wrap"><table class="cmp">
+      <thead><tr><th></th><th>A · Ledger</th><th>B · Console</th><th>C · Timeline</th></tr></thead>
+      <tbody>
+        <tr><td>overall state</td><td>one line: lamp, phase, count, countdown, policy</td><td><b>three tiles</b>: sweeper with a depleting sweep bar, watched set, policy</td><td>as B</td></tr>
+        <tr><td>watched runs</td><td>a five-column table, amber stripe on a crashed row</td><td><b>cards with a freshness meter</b>; a crashed card shows attempt pips and grace left</td><td>as B</td></tr>
+        <tr><td>activity</td><td>kind-badged table</td><td>kind-badged table</td><td><b>lanes per run</b> above the same table</td></tr>
+        <tr><td>what it answers at a glance</td><td>is it armed, which run is crashed, what happened last</td><td>the above, plus <b>how close each run is to crashing</b> and when the sweeper may retry</td><td>the above, plus the day's rhythm of attempts and recoveries</td></tr>
+        <tr><td>weakest moment</td><td>a quiet afternoon reads as a screenshot</td><td>none of the meters mean much once every run is crashed</td><td>empty most days; needs a bad day to earn its space</td></tr>
+        <tr><td>recommendation</td><td>the safe floor</td><td><b>this one</b> — informative every minute a run is live, no new wire</td><td>keep as a later addition on top of B if the bad days keep coming</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</div>
+
+<script>
+// ---------- one baked afternoon ----------
+const DAY = Date.parse('2026-09-06T00:00:00+02:00');
+const T = (s) => { const [h, m, sec = '0'] = s.split(':'); return DAY + ((+h) * 3600 + (+m) * 60 + (+sec)) * 1000; };
+const FROZEN = T('14:09:30'), LOAD = Date.now();
+const now = () => FROZEN + (Date.now() - LOAD);
+const TICK = 60e3, GRACE = 10 * 60e3, STALE = 15 * 60e3, BEAT = 9.5 * 60e3, NEXT0 = FROZEN + 42e3;
+
+const RUNS = [
+  { proj: 'backlog-manager', id: 'run-20260906-134512', item: 'bug-24 · reviewing', beat: FROZEN - 38e3, crashed: false, watched: true },
+  { proj: 'ixray', id: 'run-20260906-121904', item: 'bug-14 · fixing', beat: FROZEN - 17 * 60e3, crashed: true, watched: true,
+    wd: { attempts: 1, max: 2, spawnAt: T('14:07'), session: 'b7e2c9a1' } },
+  { proj: 'claude-agents-dashboard', id: 'run-20260906-140851', item: null, beat: FROZEN - 4e3, crashed: false, watched: false }
+];
+
+// Newest first, exactly as GET /api/agents/watchdog returns them; the detail
+// sentences are the server's own (watchdog.service.ts).
+const EVENTS = [
+  { at: '14:07', kind: 'spawned',   proj: 'ixray',                   run: 'run-20260906-121904', detail: 'spawned resume 1/2 → session b7e2c9a1' },
+  { at: '14:06', kind: 'failed',    proj: 'ixray',                   run: 'run-20260906-121904', detail: 'resume failed: dashboard returned 503 (not counted)' },
+  { at: '13:41', kind: 'recovered', proj: 'claude-agents-dashboard', run: 'run-20260906-125530', detail: 'run fresh again — standing down' },
+  { at: '13:29', kind: 'spawned',   proj: 'claude-agents-dashboard', run: 'run-20260906-125530', detail: 'spawned resume 1/2 → session 41d0f7e3' },
+  { at: '12:19', kind: 'armed',     proj: null, run: null, detail: 'watching for crashed runs' },
+  { at: '11:53', kind: 'idle',      proj: null, run: null, detail: 'no running run — standing down' },
+  { at: '11:52', kind: 'exhausted', proj: 'guide-manager',           run: 'run-20260906-101344', detail: 'exhausted after 2 attempts — resume by hand' },
+  { at: '11:41', kind: 'spawned',   proj: 'guide-manager',           run: 'run-20260906-101344', detail: 'spawned resume 2/2 → session 9c3e5b20' },
+  { at: '11:20', kind: 'spawned',   proj: 'guide-manager',           run: 'run-20260906-101344', detail: 'spawned resume 1/2 → session 5aa81d6f' },
+  { at: '10:13', kind: 'armed',     proj: null, run: null, detail: 'watching for crashed runs' },
+  { at: '09:14', kind: 'disabled',  proj: 'backlog-manager',         run: 'run-20260906-084401', detail: 'watchdog off — resume by hand' },
+  { at: '08:44', kind: 'armed',     proj: null, run: null, detail: 'watching for crashed runs' }
+];
+
+// The app's own glyph vocabulary (RUN_STATUS_GLYPH / stage chips), extended
+// to the seven event kinds so no mark is colour alone.
+const KG = { spawned: '●', recovered: '✓', failed: '✕', exhausted: '⚠', disabled: '‖', armed: '◉', idle: '○' };
+
+const pad2 = (n) => String(n).padStart(2, '0');
+function fmtC(ms) {
+  ms = Math.max(0, Math.floor(ms));
+  if (ms < 6e4) return `${Math.floor(ms / 1e3)}s`;
+  if (ms < 36e5) return `${Math.floor(ms / 6e4)}m`;
+  return `${Math.floor(ms / 36e5)}h ${pad2(Math.floor(ms % 36e5 / 6e4))}m`;
+}
+function clock(t) { const d = new Date(t); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+
+// ---------- shared pieces ----------
+const kindBadge = (k) => `<span class="kind k-${k}"><span aria-hidden="true">${KG[k]}</span>${k}</span>`;
+const skew = (r) => (r.watched ? '' : '<span class="skew">not yet watched</span>');
+function eventsTable(bounded) {
+  return `<div class="tbl-wrap${bounded ? ' bounded' : ''}"><table class="wd-table">
+    <thead><tr><th>time</th><th>kind</th><th>project</th><th>run</th><th>what the sweeper did</th></tr></thead>
+    <tbody>${EVENTS.map((e) => `<tr>
+      <td class="num">${e.at}</td><td>${kindBadge(e.kind)}</td>
+      <td class="${e.proj ? 'proj' : 'dim'}">${e.proj ?? '—'}</td>
+      <td class="dim">${e.run ?? '—'}</td>
+      <td class="detail">${e.detail}</td></tr>`).join('')}</tbody></table></div>`;
+}
+const activityHead = () => `<div class="sect">Activity <span class="sub">newest first · last 50 · held in the API process, an API restart empties it</span></div>`;
+
+// ---------- A · Ledger ----------
+function renderA() {
+  const head = `<div class="a-head">
+    <span class="phase"><span class="lamp armed"></span>armed</span>
+    <span>watching <b>${RUNS.length}</b> running runs · next check in <b data-cd></b></span>
+    <span class="cfg">check every <b>1m</b> · leave alone for <b>10m</b> · give up after <b>2</b></span>
+    <span class="to">Settings › Orchestrator watchdog</span>
+  </div>`;
+  const runs = `<div class="sect">Watched runs</div><div class="tbl-wrap"><table class="wd-table">
+    <thead><tr><th>project</th><th>run</th><th>working on</th><th>heartbeat</th><th>watchdog</th></tr></thead>
+    <tbody>${RUNS.map((r, i) => `<tr class="clickable ${r.crashed ? 'crashed' : 'ok'}" title="opens this run's detail in Runs">
+      <td class="proj">${r.proj}</td><td class="dim">${r.id}</td><td class="ink">${r.item ?? 'between items'}</td>
+      <td class="num"><span data-age="${i}"></span> ago</td>
+      <td>${r.crashed
+        ? `<span class="verdict v-crashed">⚠ crashed · attempt ${r.wd.attempts}/${r.wd.max} spawned ${clock(r.wd.spawnAt)}</span>`
+        : '<span class="verdict v-ok">● ok</span>'}${skew(r)}</td></tr>`).join('')}</tbody></table></div>`;
+  document.getElementById('screen-a').innerHTML = head + runs + activityHead() + eventsTable(false);
+}
+
+// ---------- B · Console ----------
+function tiles() {
+  const crashed = RUNS.filter((r) => r.crashed).length, unwatched = RUNS.filter((r) => !r.watched).length;
+  return `<div class="tiles3">
+    <div class="tile"><div class="tl">sweeper</div><div class="tv"><span class="lamp armed"></span>armed</div>
+      <div class="cd"><span class="cd-fill" data-cdbar></span></div>
+      <div class="tsub"><span>next sweep in <b data-cd></b></span><span>every 1m</span></div></div>
+    <div class="tile"><div class="tl">watching</div><div class="tv">${RUNS.length}<small>running runs</small></div>
+      <div class="tsub"><span class="warn">⚠ ${crashed} crashed</span><span>${RUNS.length - crashed} fresh</span>${unwatched ? `<span>${unwatched} not yet watched</span>` : ''}</div></div>
+    <div class="tile"><div class="tl">policy</div>
+      <div class="kv"><span>check every</span><b>1m</b><span>leave a resumed run alone for</span><b>10m</b><span>give up after</span><b>2 attempts</b></div>
+      <div class="tsub"><span>Settings › Orchestrator watchdog</span></div></div>
+  </div>`;
+}
+function cards() {
+  return `<div class="sect">Watched runs <span class="sub">meter: heartbeat age against the 15m stale line · tick at 9.5m, where a beat is due</span></div>
+  <div class="rcards">${RUNS.map((r, i) => `<button type="button" class="rcard ${r.crashed ? 'crashed' : 'ok'}" title="opens this run's detail in Runs">
+    <span class="rc-head"><span class="proj">${r.proj}</span><span class="rid">${r.id}</span>${skew(r)}
+      <span class="verdict ${r.crashed ? 'v-crashed' : 'v-ok'}">${r.crashed ? '⚠ crashed' : '● ok'}</span></span>
+    <span class="rc-item">${r.item ?? 'between items'}</span>
+    <span class="meter"><span class="m-track"><span class="m-fill" data-meter="${i}"></span><span class="m-tick" style="left:${(BEAT / STALE * 100).toFixed(1)}%"></span></span>
+      <span class="m-labels"><span>heartbeat <b data-age="${i}"></b> ago</span><span>${r.crashed ? 'past the 15m stale line' : 'stale at 15m'}</span></span></span>
+    ${r.crashed ? `<span class="rc-wd"><span class="pips">${Array.from({ length: r.wd.max }, (_, k) => `<i class="${k < r.wd.attempts ? 'on' : ''}"></i>`).join('')}</span>
+      attempt ${r.wd.attempts}/${r.wd.max} · spawned ${clock(r.wd.spawnAt)} → session ${r.wd.session} · leave alone <b data-grace></b> more</span>` : ''}
+  </button>`).join('')}</div>`;
+}
+function renderB() {
+  document.getElementById('screen-b').innerHTML = tiles() + cards() + activityHead() + eventsTable(true);
+}
+
+// ---------- C · Timeline ----------
+function timeline() {
+  const W0 = T('08:30'), W1 = T('14:15');
+  const x = (t) => `${((t - W0) / (W1 - W0) * 100).toFixed(2)}%`;
+  const ticks = [9, 10, 11, 12, 13, 14].map((h) => `<span style="left:${x(T(`${h}:00`))}">${pad2(h)}:00</span>`).join('');
+  // Marks under 1.6% of the axis apart (about five minutes here) alternate
+  // between the baseline and a raised row instead of overprinting — the
+  // failed attempt at 14:06 and its retry at 14:07 are the case in the data.
+  const marks = (es) => {
+    let last = -9, up = false;
+    return [...es].sort((a, b) => T(a.at) - T(b.at)).map((e) => {
+      const p = (T(e.at) - W0) / (W1 - W0) * 100;
+      up = (p - last) < 1.6 ? !up : false; last = p;
+      return `<span class="ev ${e.kind}${up ? ' up' : ''}" style="left:${p.toFixed(2)}%" title="${e.at} · ${e.kind} · ${e.detail.replace(/"/g, '&quot;')}">${KG[e.kind]}</span>`;
+    }).join('');
+  };
+  const nowline = `<span class="nowline" style="left:${x(now())}" title="now"></span>`;
+  const sweeper = EVENTS.filter((e) => e.run === null);
+  const lanes = [];
+  for (const e of EVENTS) if (e.run !== null && !lanes.some((l) => l.run === e.run)) lanes.push({ proj: e.proj, run: e.run });
+  const laneHtml = lanes.map((l) => {
+    const es = EVENTS.filter((e) => e.run === l.run);
+    const first = Math.min(...es.map((e) => T(e.at)));
+    const still = RUNS.some((r) => r.id === l.run);
+    const last = still ? now() : Math.max(...es.map((e) => T(e.at)));
+    return `<div class="lane"><span class="lane-name"><b>${l.proj}</b><span>${l.run}</span></span>
+      <span class="track"><span class="span${still ? ' live' : ''}" style="left:${x(first)};width:calc(${x(last)} - ${x(first)})"></span>${marks(es)}${still ? nowline : ''}</span></div>`;
+  }).join('');
+  return `<div class="sect">The sweeper's day <span class="sub">08:30 → now · hover a mark for its line</span></div>
+  <div class="tline"><div class="tline-inner">
+    <div class="axis"><span></span><span class="ticks">${ticks}</span></div>
+    <div class="lane"><span class="lane-name"><b>sweeper</b><span>armed / idle</span></span><span class="track">${marks(sweeper)}${nowline}</span></div>
+    ${laneHtml}
+    <div class="legend">${Object.entries(KG).map(([k, g]) => `<span class="ev-l ${k}"><b class="ev ${k}" style="position:static;transform:none;padding:0">${g}</b>${k}</span>`).join('')}</div>
+  </div></div>`;
+}
+function renderC() {
+  document.getElementById('screen-c').innerHTML = tiles() + cards() + timeline() + activityHead() + eventsTable(true);
+}
+
+// ---------- the clocks ----------
+function tick() {
+  const n = now();
+  const rem = ((NEXT0 - n) % TICK + TICK) % TICK;
+  document.querySelectorAll('[data-cd]').forEach((el) => { el.textContent = fmtC(rem); });
+  document.querySelectorAll('[data-cdbar]').forEach((el) => { el.style.width = `${(rem / TICK * 100).toFixed(1)}%`; });
+  RUNS.forEach((r, i) => {
+    const age = n - r.beat;
+    document.querySelectorAll(`[data-age="${i}"]`).forEach((el) => { el.textContent = fmtC(age); });
+    document.querySelectorAll(`[data-meter="${i}"]`).forEach((el) => { el.style.width = `${Math.min(100, age / STALE * 100).toFixed(1)}%`; });
+  });
+  const grace = RUNS[1].wd.spawnAt + GRACE - n;
+  document.querySelectorAll('[data-grace]').forEach((el) => { el.textContent = fmtC(Math.max(0, grace)); });
+}
+
+renderA(); renderB(); renderC(); tick();
+setInterval(tick, 1000);
+</script>
