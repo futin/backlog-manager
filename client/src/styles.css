@@ -1252,6 +1252,32 @@ body {
 .orchestrate-preview-action.groom { color: var(--mustard) }
 .orchestrate-preview-action.execute { color: var(--cyan) }
 
+/* The three-step chrome (task-20; design §7). A monospace kicker row rather
+   than a progress bar or numbered circles: this app's other "where am I"
+   affordance is `.sheet-kicker`, and matching it keeps the sheet reading as
+   one dialog with three screens rather than a wizard bolted on. `.current`
+   is the only styled state — a completed step and an unreached one look the
+   same because Back makes them equally reachable, so distinguishing them
+   would imply a progression the control does not enforce. */
+.orchestrate-steps {
+  display: flex; gap: 12px; list-style: none; margin: 0; padding: 0 0 2px;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink3);
+}
+.orchestrate-step.current { color: var(--accent) }
+/* Each step's own body owns the column gap `.sheet-body` used to provide
+   directly, now that one of three children is a step rather than all of
+   them being content. */
+.orchestrate-step-body { display: flex; flex-direction: column; gap: 10px }
+
+/* The per-row ↑/↓ pair (§7.5). `margin-left: auto` pushes it to the right
+   edge of the row head, mirroring where `.orchestrate-select-actions` puts
+   its own buttons, so the two lists read as the same list with a different
+   control on it. Square rather than text-width so a row's arrows do not
+   shift horizontally as the title above them changes length. */
+.orchestrate-move { display: flex; gap: 4px; margin-left: auto; flex: none }
+.orchestrate-move button { padding: 0 6px; line-height: 1.6 }
+
 /* The merge-mode setup hint (Task 8; design §6). Plain `.sheet-note` tone,
    not `.sheet-error`'s amber: the sheet still launches a perfectly good run
    without this file, so the copy is a fact plus a likelihood, never an

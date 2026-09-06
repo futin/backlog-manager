@@ -56,11 +56,22 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   column at all and belongs to Archive; stale items leave it too, see
   Invariants — card drawer,
   dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
-  a toolbar Orchestrate control opening `OrchestrateSheet` (previews the
-  queue and selects a subset of it — `ids` rides along only for a strict
-  subset, so an untouched sheet still starts a whole-queue run — plus a merge
-  mode picker seeded from Settings and, in merge mode, a setup hint fed by
-  `GET /api/agents/merge-check`), and a run strip
+  a toolbar Orchestrate control opening `OrchestrateSheet` — three steps
+  (items / order / modes), with Start on the last one alone so it never sits
+  under a scroll region whose length is the project's queue. Step 1 previews
+  the queue and selects a subset of it; step 2 hand-orders that selection
+  with ↑/↓ and a reset (`order: string[] | null`, `null` meaning queue order,
+  reconciled against the live queue every render, never stored resolved);
+  step 3 holds all five pickers — permission mode, model, effort, merge mode,
+  question mode, the last two seeded from Settings — plus, in merge mode, a
+  setup hint fed by `GET /api/agents/merge-check`. `ids` rides along for
+  `narrowed || order !== null`: a strict subset **or** a hand order, since
+  choosing an order is choosing a membership, so an untouched sheet still
+  starts a whole-queue run and an arranged one is pinned to exactly what it
+  arranged (step 2 says so on screen, next to a note that a `runner-fix:`
+  item may still hoist above the chosen order and that this screen cannot
+  tell which). No server, tool or wire change: `--ids` is already run in the
+  order given by both `resolveIds` and `buildGatedQueue`. And a run strip
   above the columns — `RunStrip`/`RunDrawer` — showing every project's
   orchestrator runs; a crashed run — `running`, heartbeat stale — renders
   as crashed with the watchdog's verdict and, when the watchdog is
@@ -508,10 +519,20 @@ happened.
   contain it, and an item absent from `<base>` never hoists even though its
   *title* still prints off disk. The partition is stable, outranks
   bugs-then-tasks rather than sorting inside it, and runs before `--max` is
-  counted. **`--ids` is hoisted too** — the board sends `ids` for any strict
-  subset of its checkboxes, so that list is a selection, not an ordering, and
-  exempting it would defeat the hoist on the one surface runs are started
-  from; that is also what makes a client change unnecessary. Ordering alone
+  counted. **`--ids` is hoisted too, and that survived the list becoming a
+  hand order.** The board sends `ids` for a strict subset **or** any hand
+  order (`OrchestrateSheet` step 2, task-20), and exempting it would defeat
+  the hoist on the one surface runs are started from. Until task-20 that list
+  was only ever a selection and the rule could rest on "nobody chose this
+  order"; it no longer can, and it does not need to — the hoist is for an
+  item whose execution repairs machinery the rest of the run depends on,
+  which is true whoever arranged the queue and however. What a person who
+  just arranged one is owed is a warning, not a veto, and step 2 carries it:
+  a `runner-fix:` item may still jump the line, and that screen deliberately
+  cannot say which one (`BacklogItem` has no `runnerFix`, and the marker's
+  authority is the blob at `<base>`, so a derived badge would be confidently
+  wrong for an item marked but not yet committed). Still no server, tool or
+  wire change on either side of this. Ordering alone
   buys nothing, because a run resolves everything through
   `$CLAUDE_PLUGIN_ROOT` while the merge lands in `main`: SKILL.md §9 tells a
   run that just merged a runner fix to follow the repo's copy of SKILL.md

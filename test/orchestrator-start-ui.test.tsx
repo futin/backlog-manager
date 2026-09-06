@@ -431,10 +431,18 @@ describe('OrchestrateSheet', () => {
     global.fetch = realFetch;
   });
 
-  function renderSheet(props: Partial<Parameters<typeof OrchestrateSheet>[0]> = {}) {
+  type SheetProps = Partial<Parameters<typeof OrchestrateSheet>[0]>;
+
+  function renderSheet(props: SheetProps = {}) {
     const onClose = jest.fn();
     const refresh = jest.fn();
-    render(
+    // A factory rather than one frozen element, so `rerender` below can hand
+    // the SAME component instance a different `items` prop — which is the
+    // only way to express "the queue changed while the sheet was open", the
+    // condition task-20's order reconciliation exists for. Re-rendering a
+    // fresh <OrchestrateSheet> under a fresh <SettingsProvider> would reset
+    // every piece of state the reconciliation is supposed to survive.
+    const ui = (over: SheetProps) => (
       <SettingsProvider>
         <OrchestrateSheet
           project="/abs/alpha"
@@ -444,10 +452,27 @@ describe('OrchestrateSheet', () => {
           onClose={onClose}
           refresh={refresh}
           {...props}
+          {...over}
         />
       </SettingsProvider>
     );
-    return { onClose, refresh };
+    const { rerender } = render(ui({}));
+    return { onClose, refresh, rerender: (over: SheetProps) => rerender(ui(over)) };
+  }
+
+  /**
+   * Walk the sheet from step 1 to step 3 (task-20; design §7).
+   *
+   * Every case written before the sheet became a wizard reaches Start, the
+   * five pickers or the merge-check hint — all of which now live on step 3 —
+   * so they all funnel through this rather than each restating two clicks.
+   * Deliberately NOT a "jump straight to step 3" test hook on the component:
+   * the navigation is the feature, and a helper that bypassed it would let a
+   * broken Next keep every one of those cases green.
+   */
+  async function toModes(): Promise<void> {
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
   }
 
   /**
@@ -491,11 +516,12 @@ describe('OrchestrateSheet', () => {
   }
 
   // --- Test case 5 -------------------------------------------------------
-  it('seeds model, effort and permission mode from settings and the ceiling, never a previous launch', () => {
+  it('seeds model, effort and permission mode from settings and the ceiling, never a previous launch', async () => {
     localStorage.setItem('backlog-manager.settings', JSON.stringify({
       dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'low'
     }));
     renderSheet({ spawnMaxPermission: 'acceptEdits' });
+    await toModes();
 
     expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('sonnet');
     expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('low');
@@ -585,6 +611,7 @@ describe('OrchestrateSheet', () => {
   it('starts with exactly the picked project/model/effort/permissionMode and refreshes on success', async () => {
     const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     const { onClose, refresh } = renderSheet();
+    await toModes();
 
     await userEvent.selectOptions(screen.getByLabelText('Model'), 'opus');
     await userEvent.selectOptions(screen.getByLabelText('Effort'), 'high');
@@ -599,7 +626,7 @@ describe('OrchestrateSheet', () => {
     // for the cases that pin ITS behaviour; this assertion only has to keep
     // proving it rides along unconditionally, same as every other body here.
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', model: 'opus', effort: 'high', permissionMode: 'plan', mergeMode: 'merge'
+      project: '/abs/alpha', model: 'opus', effort: 'high', permissionMode: 'plan', mergeMode: 'merge', questionMode: 'park'
     });
     expect(onClose).toHaveBeenCalled();
   });
@@ -607,9 +634,10 @@ describe('OrchestrateSheet', () => {
   it('omits model and effort when both are left on default', async () => {
     const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     renderSheet();
+    await toModes();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
   });
 
   // --- Test case 7 ---------------------------------------------------
@@ -625,6 +653,7 @@ describe('OrchestrateSheet', () => {
       body: { error: 'a run is already in progress for this project (run-9)', code: RUN_IN_PROGRESS_CODE }
     });
     const { onClose, refresh } = renderSheet();
+    await toModes();
 
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
@@ -648,6 +677,7 @@ describe('OrchestrateSheet', () => {
       body: { error: 'nope, not right now', code: RUN_IN_PROGRESS_CODE }
     });
     const { onClose, refresh } = renderSheet();
+    await toModes();
 
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
@@ -673,6 +703,7 @@ describe('OrchestrateSheet', () => {
       body: { error: 'the dashboard does not list /abs/alpha — most likely no Claude session there inside its LOOKBACK_HOURS' }
     });
     const { onClose, refresh } = renderSheet();
+    await toModes();
 
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
@@ -690,6 +721,7 @@ describe('OrchestrateSheet', () => {
   it('leaves the sheet open and retryable for any other error', async () => {
     stubOrchestrate({ ok: false, status: 502, body: { error: 'dashboard unreachable' } });
     const { onClose, refresh } = renderSheet();
+    await toModes();
 
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
@@ -750,10 +782,11 @@ describe('OrchestrateSheet', () => {
     const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     renderSheet({ items: THREE });
 
+    await toModes();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
   });
 
   it('sends exactly the still-checked ids, in board order, once one is unchecked', async () => {
@@ -761,11 +794,12 @@ describe('OrchestrateSheet', () => {
     renderSheet({ items: THREE });
 
     await userEvent.click(boxFor('task-1'));
+    await toModes();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', ids: ['bug-1', 'task-2']
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', ids: ['bug-1', 'task-2']
     });
   });
 
@@ -776,30 +810,35 @@ describe('OrchestrateSheet', () => {
      explain the distinction: unchecking everything means "run nothing",
      which is never what anyone wants, and is emphatically not the same as
      "run everything". */
-  it('disables start, with a reason, when every row is unchecked', async () => {
-    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+  /* Since task-20 the refusal is one step earlier: Start lives on step 3 and
+     `next` is what an empty selection blocks, so the assertion moves to the
+     control that is actually reachable in that state. The reason sentence is
+     unchanged and still renders beside it — and "no start control exists at
+     all" is a strictly stronger claim than the old "start is disabled". */
+  it('disables next, with a reason, when every row is unchecked', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     renderSheet({ items: THREE });
 
     await userEvent.click(screen.getByRole('button', { name: /select none/i }));
 
-    expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'next' })).toBeDisabled();
     expect(screen.getByText(/pick at least one/i)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'start' }));
-    expect(calls).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
   });
 
-  it('re-enables start as soon as one row is checked again', async () => {
+  it('re-enables next as soon as one row is checked again', async () => {
     const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     renderSheet({ items: THREE });
 
     await userEvent.click(screen.getByRole('button', { name: /select none/i }));
     await userEvent.click(boxFor('task-2'));
 
-    expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'next' })).toBeEnabled();
+    await toModes();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', ids: ['task-2']
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', ids: ['task-2']
     });
   });
 
@@ -816,10 +855,11 @@ describe('OrchestrateSheet', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /select none/i }));
     await userEvent.click(screen.getByRole('button', { name: /select all/i }));
+    await toModes();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
   });
 
   /* An ungroomed item is a legal pick. The run really will queue it, gate
@@ -842,11 +882,12 @@ describe('OrchestrateSheet', () => {
     expect(boxFor('bug-2')).toBeEnabled();
     await userEvent.click(screen.getByRole('button', { name: /select none/i }));
     await userEvent.click(boxFor('bug-2'));
+    await toModes();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', ids: ['bug-2']
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', ids: ['bug-2']
     });
   });
 
@@ -887,11 +928,16 @@ describe('OrchestrateSheet', () => {
     renderSheet({ items: [fakeItem({ status: 'done' })] });
 
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    // An empty queue is emphatically NOT the "nothing ticked" state task-20's
+    // Next guard refuses — there is nothing to tick — so the wizard has to
+    // walk all the way to a live Start.
+    expect(screen.getByRole('button', { name: 'next' })).toBeEnabled();
+    await toModes();
     expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
   });
 
   // =====================================================================
@@ -903,9 +949,10 @@ describe('OrchestrateSheet', () => {
   // =====================================================================
 
   // --- Test case 1 -----------------------------------------------------
-  it('seeds the merge-mode picker from the Settings default "branch"', () => {
+  it('seeds the merge-mode picker from the Settings default "branch"', async () => {
     localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
     renderSheet();
+    await toModes();
     const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
     expect(picker.value).toBe('branch');
     // The design's own binding wording (§2.2): each option names the
@@ -923,12 +970,13 @@ describe('OrchestrateSheet', () => {
     localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
     const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     renderSheet();
+    await toModes();
 
     await userEvent.selectOptions(screen.getByLabelText('Merge mode'), 'merge');
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
   });
 
   // --- Test case 3 -----------------------------------------------------
@@ -940,17 +988,19 @@ describe('OrchestrateSheet', () => {
   it('sends the Settings default mergeMode on an untouched launch, never omitted', async () => {
     const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
     renderSheet();
+    await toModes();
 
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
   });
 
   // --- Test case 4 -----------------------------------------------------
   it('shows the setup hint, naming the file and the JSON to paste, when merge-check reports no coverage', async () => {
     stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: false, source: null });
     renderSheet();
+    await toModes();
 
     // `findBy`, not a synchronous `getBy`: the hint depends on the
     // merge-check response actually landing, and this is the one case in
@@ -993,6 +1043,10 @@ describe('OrchestrateSheet', () => {
     let settle: (value: Response) => void = () => {};
     global.fetch = jest.fn(() => new Promise<Response>((resolve) => { settle = resolve; })) as jest.Mock;
     renderSheet();
+    // Step 3 is where the hint lives since task-20, so the absence claim
+    // below has to be made from there — asserted on step 1 it would pass for
+    // the wrong reason, on a screen that never renders a hint at all.
+    await toModes();
 
     await act(async () => {
       // Deliberately missing `covered` — the reviewer's own reproduction of
@@ -1022,6 +1076,10 @@ describe('OrchestrateSheet', () => {
     let settle: (value: Response) => void = () => {};
     global.fetch = jest.fn(() => new Promise<Response>((resolve) => { settle = resolve; })) as jest.Mock;
     renderSheet();
+    // Step 3 is where the hint lives since task-20, so the absence claim
+    // below has to be made from there — asserted on step 1 it would pass for
+    // the wrong reason, on a screen that never renders a hint at all.
+    await toModes();
 
     await act(async () => {
       settle({
@@ -1038,11 +1096,15 @@ describe('OrchestrateSheet', () => {
   // made SYNCHRONOUSLY, in the effect's own `mergeMode !== 'merge'` branch
   // (OrchestrateSheet.tsx), which RTL's `render` already flushes before
   // returning — there is no async step for this assertion to race against.
-  it('never fetches merge-check at all when branch mode is selected', () => {
+  it('never fetches merge-check at all when branch mode is selected', async () => {
     localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
     const fetchSpy = jest.fn();
     global.fetch = fetchSpy as unknown as jest.Mock;
     renderSheet();
+    // Walking to step 3 must not provoke the request either — the effect's
+    // `mergeMode !== 'merge'` branch is what refuses it, and no amount of
+    // navigation changes `mergeMode`.
+    await toModes();
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
@@ -1074,6 +1136,7 @@ describe('OrchestrateSheet', () => {
       } as Response);
     }) as jest.Mock;
     const { onClose, refresh } = renderSheet();
+    await toModes();
 
     await act(async () => {
       reject(new Error('network down'));
@@ -1093,6 +1156,252 @@ describe('OrchestrateSheet', () => {
     await waitFor(() => expect(calls).toHaveLength(1));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // =====================================================================
+  // The three steps (task-20; design §7). The restructure's own trigger is
+  // the fifth picker, but its justification is that Start used to sit below
+  // a scroll region whose length is the size of the project's queue — so the
+  // cases below pin BOTH halves: where each control lives, and that nothing
+  // about the request the last screen sends has changed.
+  //
+  // Every case above already carries the other half of this contract by
+  // going through `toModes()` — a Next that stops working takes the whole
+  // file down with it, which is the point.
+  // =====================================================================
+
+  it('opens on step 1 — the queue and a next control, with no start and no pickers', () => {
+    renderSheet({ items: THREE });
+
+    expect(screen.getByTestId('orchestrate-step-items')).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'next' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
+    // Nothing to go back to yet — a disabled Back would be one more control
+    // to read on the screen that already carries the longest list.
+    expect(screen.queryByRole('button', { name: 'back' })).not.toBeInTheDocument();
+  });
+
+  it('puts all five pickers on step 3 and none of them before it', async () => {
+    const labels = ['Permission mode', 'Model', 'Effort', 'Merge mode', 'Question mode'];
+    renderSheet({ items: THREE });
+
+    for (const label of labels) expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+
+    await toModes();
+
+    for (const label of labels) expect(screen.getByLabelText(label)).toBeInTheDocument();
+    expect(screen.getByTestId('orchestrate-step-modes')).toBeInTheDocument();
+    // The queue itself is gone by step 3 — that is the whole point of the
+    // restructure, since its length is what used to push Start off-screen.
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('lists exactly the selected ids in queue order on step 2, then reaches the modes', async () => {
+    renderSheet({ items: THREE });
+
+    await userEvent.click(boxFor('task-1'));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+
+    const rows = within(screen.getByTestId('orchestrate-order')).getAllByTestId('orchestrate-order-row');
+    expect(rows.map((r) => r.getAttribute('data-id'))).toEqual(['bug-1', 'task-2']);
+    // Still no Start: the whole reason this step exists is that Start must
+    // not be reachable from underneath a list.
+    expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    expect(screen.getByRole('button', { name: 'start' })).toBeInTheDocument();
+  });
+
+  it('goes back through step 2 to step 1 with the selection intact', async () => {
+    renderSheet({ items: THREE });
+
+    await userEvent.click(boxFor('task-1'));
+    await toModes();
+
+    await userEvent.click(screen.getByRole('button', { name: 'back' }));
+    expect(screen.getByTestId('orchestrate-step-order')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'back' }));
+    expect(screen.getByTestId('orchestrate-step-items')).toBeInTheDocument();
+    expect(boxFor('task-1').checked).toBe(false);
+    expect(boxFor('bug-1').checked).toBe(true);
+    expect(boxFor('task-2').checked).toBe(true);
+  });
+
+  // --- The question-mode picker (task-19's vocabulary, task-20's control) ---
+
+  it('seeds the question-mode picker from Settings and names the outcomes, never the flag', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultQuestionMode: 'decide' }));
+    renderSheet();
+    await toModes();
+
+    const picker = screen.getByLabelText('Question mode') as HTMLSelectElement;
+    expect(picker.value).toBe('decide');
+    // Same binding rule the merge-mode picker's own case pins: the option
+    // text names what the run will DO, never `decide`/`park` as typed.
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Decide and continue', 'Skip the item for me']);
+  });
+
+  /* The doctrine sentence, in the third of the four places a reader can meet
+     this feature first (Settings' hint, this picker, SKILL.md §3, CLAUDE.md).
+     Asserted on the one word that carries it: the two modes are identical
+     whenever `AskUserQuestion` is reachable, so a board-started run is
+     choosing between skipping the item and letting the runner answer. */
+  it('carries the question-mode doctrine beside the picker', async () => {
+    renderSheet();
+    await toModes();
+    expect(screen.getByText(/AskUserQuestion/)).toBeInTheDocument();
+  });
+
+  /* Seeded on the Settings default 'park' and switched away from, so a
+     passing assertion can only mean the OVERRIDE was sent. The other value
+     is pinned by every `toEqual` body above, all of which carry
+     `questionMode: 'park'` on an untouched sheet — which is what "sent on
+     every launch, both values" actually means. */
+  it('sends the picked questionMode once the user switches away from the seeded default', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Question mode'), 'decide');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'decide'
+    });
+  });
+
+  // =====================================================================
+  // Step 2 as a reorder control (task-20; design §7.1-§7.5). `--ids` is
+  // already run in the order given by both `resolveIds` and
+  // `buildGatedQueue`, so everything below is client-side: what is being
+  // pinned is that the sheet can express an order at all, and that
+  // expressing one changes the request's MEMBERSHIP rule as well as its
+  // sequence.
+  // =====================================================================
+
+  /** The ids step 2 is currently showing, top to bottom. */
+  const orderRows = (): string[] =>
+    within(screen.getByTestId('orchestrate-order'))
+      .getAllByTestId('orchestrate-order-row')
+      .map((row) => row.getAttribute('data-id') as string);
+
+  const toOrder = (): Promise<void> => userEvent.click(screen.getByRole('button', { name: 'next' }));
+
+  it('disables up on the first row and down on the last, and nothing else', async () => {
+    renderSheet({ items: THREE });
+    await toOrder();
+
+    expect(screen.getByRole('button', { name: 'move bug-1 up' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'move task-2 down' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'move bug-1 down' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'move task-2 up' })).toBeEnabled();
+  });
+
+  it('moves a row down and a row up', async () => {
+    renderSheet({ items: THREE });
+    await toOrder();
+    expect(orderRows()).toEqual(['bug-1', 'task-1', 'task-2']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    expect(orderRows()).toEqual(['task-1', 'bug-1', 'task-2']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'move task-2 up' }));
+    expect(orderRows()).toEqual(['task-1', 'task-2', 'bug-1']);
+  });
+
+  /* The pinning rule, in the direction that is easy to get wrong: nothing
+     was deselected, so `narrowed` is false — and the request must still
+     carry an explicit list, because an order IS a membership decision. */
+  it('sends every id in the chosen order once anything is reordered, with nothing deselected', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await toOrder();
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park',
+      ids: ['task-1', 'bug-1', 'task-2']
+    });
+  });
+
+  /* And the way back out of it. Reset is the only control that can return
+     `order` to `null`, which is the only thing that returns the request to
+     the whole-queue instruction it opened with — the same asymmetry "select
+     all" already has against "select none". */
+  it('resets to queue order, and back to sending no ids at all', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ items: THREE });
+
+    await toOrder();
+    expect(screen.getByRole('button', { name: 'reset order' })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    await userEvent.click(screen.getByRole('button', { name: 'reset order' }));
+    expect(orderRows()).toEqual(['bug-1', 'task-1', 'task-2']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park'
+    });
+  });
+
+  /* Reconciliation (§7.2). The order is a list of ids resolved against the
+     live queue on every render, never a stored resolved list — so an item
+     that leaves the queue while the sheet is open simply stops appearing,
+     and one that joins lands at the end rather than nowhere. Driven by a
+     changed `items` prop, which is exactly how BoardView's own poll delivers
+     a queue that moved underneath an open sheet. */
+  it('drops an id that leaves the queue and appends one that joins', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    const { rerender } = renderSheet({ items: THREE });
+
+    await toOrder();
+    await userEvent.click(screen.getByRole('button', { name: 'move bug-1 down' }));
+    expect(orderRows()).toEqual(['task-1', 'bug-1', 'task-2']);
+
+    // task-1 is gone (merged, say) and task-3 has just been groomed.
+    rerender({
+      items: [
+        THREE[0], THREE[2],
+        fakeItem({ id: 'task-3', title: 'A third task', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-3.md' })
+      ]
+    });
+
+    expect(orderRows()).toEqual(['bug-1', 'task-2', 'task-3']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({
+      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park',
+      ids: ['bug-1', 'task-2', 'task-3']
+    });
+  });
+
+  /* Both notes, and they are two different facts rather than one restated.
+     The first is the consequence of §7.3 — an order reintroduces exactly the
+     sheet-open snapshot the strict-subset rule exists to avoid, so the step
+     that causes it has to say so. The second is §7.4: a `runner-fix:` item
+     still hoists above the chosen order, and this screen deliberately cannot
+     name which one, because `BacklogItem` carries no `runnerFix` and the
+     marker's authority is the blob at `<base>`. */
+  it('renders the pinning note and the runner-fix note on step 2', async () => {
+    renderSheet({ items: THREE });
+    await toOrder();
+
+    expect(screen.getByText(/pins this run to these items/i)).toBeInTheDocument();
+    expect(screen.getByText(/runner-fix/i)).toBeInTheDocument();
   });
 
   it('closes on Escape', async () => {

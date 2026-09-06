@@ -3,6 +3,10 @@ id: task-20
 title: Three-step orchestrate sheet with a hand-ordered queue
 created: 2026-09-05
 tags: orchestrate, client, board
+updated: 2026-09-06T09:26:29Z
+started: 2026-09-06T09:06:27Z
+execute-elapsed: 1202
+execute-tokens: 191846
 ---
 
 ## Goal
@@ -114,3 +118,91 @@ are in the plan document.
 - Start appears only on step 3, and the sheet's 409 handling still works from
   there.
 - No file under `server/`, `skills/` or `shared/` is modified by this task.
+
+## Outcome
+
+2026-09-06 — done. `OrchestrateSheet` is now three steps (items / order /
+modes) with Start on the last one alone, a fifth (question-mode) picker, and a
+hand-orderable queue on step 2.
+
+Both plan stages landed test-first, in order:
+
+- **T6, step chrome and the fifth picker.** `step: 1 | 2 | 3`, a `STEPS`-driven
+  indicator with `aria-current="step"`, Back/Next in the one existing
+  `.sheet-actions` row, and Start rendered only on step 3 alongside the five
+  pickers, the merge-check hint and the error slot. The empty-selection refusal
+  moved from Start to Next — the same refusal one screen earlier — and an empty
+  *queue* still walks all the way to a live Start, which is a separate case and
+  has its own test. The question-mode picker is driven by
+  `QUESTION_MODE_LABELS`, a `Record<QuestionMode, string>` for the reason
+  `MERGE_MODE_LABELS` is one, and `questionMode` now rides every request body
+  unconditionally (`questionMode?: QuestionMode` added to
+  `StartOrchestrateRequest`).
+- **T7, step 2 as a reorder control.** `order: string[] | null`, `null` meaning
+  queue order, with the rendered list derived against the live selection every
+  render rather than stored — so an id that leaves the queue drops out and one
+  that joins appends at the end. ↑/↓ per row plus `reset order` (disabled while
+  `order === null`), not drag-and-drop. The request condition widened from
+  `narrowed` to `narrowed || order !== null`, and `narrowed`'s existing comment
+  was extended rather than replaced: an order *is* a membership decision, so it
+  deliberately reintroduces the sheet-open snapshot the strict-subset rule
+  avoids — which is why step 2 states it on screen, beside the runner-fix note
+  that deliberately does not claim to know which item hoists.
+
+Docs kept true rather than left to drift: CLAUDE.md's Layout entry for the
+sheet and `docs/invariants.md`'s "`--ids` is hoisted too" bullet both asserted
+things this task changes (the `ids` condition; "nobody chose the order it
+arrives in"). Both were amended — the hoist rule itself is unchanged, its
+justification just moves onto what the hoist is *for*.
+
+No file under `server/`, `skills/` or `shared/` was modified.
+
+### Verification
+
+`pnpm run typecheck` — clean, no output:
+
+```
+$ tsc --noEmit
+```
+
+`pnpm test` — whole suite, not just this file, since the style suites assert on
+this sheet's class names:
+
+```
+Test Suites: 76 passed, 76 total
+Tests:       1397 passed, 1397 total
+Snapshots:   0 total
+Time:        58.582 s
+Ran all test suites.
+```
+
+`test/orchestrator-start-ui.test.tsx` went 49 → 55 cases. Both stages were
+confirmed red before implementation: the T6 tests failed 29/49 (`toModes()`
+could find no `next` control), and the six T7 cases failed as a group before
+the order state existed.
+
+One note on the suite: an earlier whole-suite run had a single unrelated
+failure in `test/agents-origin-guard.test.ts` ("still spawns for a same-origin
+JSON POST", a supertest 201 assertion). It passes on its own (23/23) and on
+every subsequent whole-suite run; it is a timing flake in a server suite this
+task does not touch, not a regression from this change.
+
+### In the browser
+
+Verified against the real app rather than jsdom alone — Vite served from this
+worktree on 5178 (the user's compose stack owns 5177/4322 and serves `main`,
+so it could not have shown this change), proxying `/api` to the running API on
+4322. Narrowed the board to `claude-agents-dashboard` and opened Orchestrate:
+
+- step 1 — the two-row queue with checkboxes, `select all`/`select none`, the
+  preview disclaimer, `cancel` and `next`, and no Start control anywhere;
+- step 2 — both rows listed with per-row ↑/↓ (up disabled on the first, down
+  on the last), `reset order` disabled until something moved, the pinning note
+  and the runner-fix note; clicking `move bug-19 down` reordered the list live
+  and enabled `reset order`;
+- step 3 — all five pickers (Permission mode, Model, Effort, Merge mode,
+  Question mode, the last seeded to "Skip the item for me" from Settings' own
+  `park` default), the doctrine hint, and `start`.
+
+Start was deliberately never pressed: it would have launched a real
+orchestrator run against another project.
