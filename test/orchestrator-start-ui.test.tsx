@@ -18,7 +18,7 @@ import type {
 // applies: the fixture is plain JSON, so without this cast its string fields
 // widen to `string` instead of the narrower literal unions (RunStage, etc).
 const fixture = rawFixture as OrchestratorRun;
-type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
+type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean };
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
@@ -178,7 +178,7 @@ describe('toolbar Orchestrate button', () => {
 
   // --- Test case 4 -----------------------------------------------------
   it('renders no button once a fresh run exists for the project — the strip owns that space', async () => {
-    stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }] });
+    stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }] });
     await renderNarrowed();
     // The strip itself is proof the run landed, so the button's absence
     // here is "replaced by", not merely "coincides with".
@@ -193,7 +193,7 @@ describe('toolbar Orchestrate button', () => {
   // inverse of case 4 is exactly the kind of edge its own "fresh" qualifier
   // implies, and it costs one more stub call to pin.
   it('still renders the button when the only known run for the project is stale', async () => {
-    stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0 }] });
+    stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0, pauseRequested: false }] });
     await renderNarrowed();
     expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeEnabled();
   });
@@ -385,7 +385,7 @@ describe('toolbar Orchestrate button', () => {
   it('opening the Orchestrate sheet closes an open run drawer, and vice versa — never more than one dialog', async () => {
     stub({
       projects: PROJECTS_TWO,
-      runs: [{ ...fixture, project: '/abs/beta', fresh: true, pastRuns: 0 }]
+      runs: [{ ...fixture, project: '/abs/beta', fresh: true, pastRuns: 0, pauseRequested: false }]
     });
     await renderNarrowed();
 

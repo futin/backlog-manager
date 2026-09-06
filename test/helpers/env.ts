@@ -1,3 +1,7 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 /**
  * env.ts — the one process-wide environment guard every jest suite in this
  * repo inherits, wired in through `jest.config.ts`'s `setupFiles` (which
@@ -59,3 +63,26 @@
  * suites keeping their own value changes.
  */
 process.env.BM_WATCHDOG ||= 'off';
+
+/**
+ * `BM_ORCH_CONTROL_HOME` — the pause-request directory (task-17,
+ * `server/src/orchestrator/pause-control.util.ts`), defaulted here for the
+ * same class of reason `BM_WATCHDOG=off` above is set, but for the writing
+ * half rather than the reading half.
+ *
+ * `POST /api/agents/pause` WRITES this directory, and its untouched default
+ * is `~/.backlog-manager/settings/orchestrator-control/` — the developer's
+ * real one, inside the same `settings/` tree the watchdog config lives in. A
+ * suite that builds `AppModule` and posts to that route without an override
+ * would leave a real pause request on the machine, and the process it would
+ * be read by is a real orchestrator run: `orchestrate.mjs` reads exactly
+ * this path at its two dispatch gates. Running `pnpm test` must never be
+ * able to pause somebody's run, and — like a spawned session — no assertion
+ * can undo a request a real run has already acted on.
+ *
+ * One temp directory for the whole process, not one per suite: nothing here
+ * needs isolation BETWEEN suites (each writes under its own project path
+ * key), only isolation from the real directory. Per-suite overrides still
+ * win, hence `||=`.
+ */
+process.env.BM_ORCH_CONTROL_HOME ||= mkdtempSync(join(tmpdir(), 'bm-control-'));

@@ -16,8 +16,8 @@ import type { OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
  * only the fields its own case cares about.
  */
 function fakeRun(
-  overrides: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number }> = {}
-): OrchestratorRun & { fresh: boolean; pastRuns: number } {
+  overrides: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean }> = {}
+): OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean } {
   return {
     runId: 'run-1',
     project: '/p',
@@ -31,7 +31,7 @@ function fakeRun(
     queue: [],
     attention: [],
     fresh: true,
-    pastRuns: 0,
+    pastRuns: 0, pauseRequested: false,
     ...overrides
   };
 }

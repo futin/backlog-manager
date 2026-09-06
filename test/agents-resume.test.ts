@@ -11,6 +11,7 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { projectDispatchGate } from '../shared/agent';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
+import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { AgentsStatus, OrchestratorRun } from '../shared/types';
 
@@ -61,6 +62,7 @@ describe('POST /api/agents/resume', () => {
   let app: INestApplication;
   let tmpRoot: string;
   let orchHome: string;
+  let controlRoot: string;
   const env = { ...process.env };
   const realFetch = global.fetch;
 
@@ -90,6 +92,11 @@ describe('POST /api/agents/resume', () => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'bm-orch-resume-'));
     orchHome = join(tmpRoot, 'orchestrator');
     process.env.BM_ORCH_HOME = orchHome;
+    // task-17: resume() deletes this project's pause request after a
+    // successful spawn, so this suite writes into a scratch directory of its
+    // own rather than the process-wide default env.ts sets.
+    controlRoot = join(tmpRoot, 'settings', 'orchestrator-control');
+    process.env.BM_ORCH_CONTROL_HOME = controlRoot;
 
     process.env.BM_AGENTS = 'on';
     process.env.BM_AGENTS_URL = 'http://dash.test:4173';
@@ -188,10 +195,10 @@ describe('POST /api/agents/resume', () => {
 
   // --- Case 5 & 6: nothing to resume -----------------------------------------
 
-  it('409s with no crashed run when there is no run.json for the project', async () => {
+  it('409s with nothing to resume when there is no run.json for the project', async () => {
     const sent = stubDashboard();
     const res = await post({ project: projectPath }).expect(409);
-    expect(res.body).toEqual({ error: 'no crashed run to resume for this project' });
+    expect(res.body).toEqual({ error: 'no crashed or paused run to resume for this project' });
     expect(res.body.code).toBeUndefined();
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
@@ -200,7 +207,7 @@ describe('POST /api/agents/resume', () => {
     const sent = stubDashboard();
     writeRun({ ...fixture, project: projectPath, status: 'done' });
     const res = await post({ project: projectPath }).expect(409);
-    expect(res.body).toEqual({ error: 'no crashed run to resume for this project' });
+    expect(res.body).toEqual({ error: 'no crashed or paused run to resume for this project' });
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
 
@@ -328,5 +335,80 @@ describe('POST /api/agents/resume', () => {
     const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
     const body = JSON.parse(String(spawn?.init?.body));
     expect(body.name).toBe(`watchdog resume ${basename(projectPath)}`);
+  });
+  /* task-17 — a `paused` run is the second thing this endpoint resumes, and
+     the FIRST one whose resume is an ordinary, expected event rather than a
+     recovery from a crash. The spawn body is deliberately identical: a
+     resume is the same run picking up where it stopped, and nothing about
+     WHY it stopped changes what the resumed session is told to do. */
+
+  it('resumes a paused run with the byte-identical spawn body a crashed one gets', async () => {
+    const sent = stubDashboard({ ok: true }, 'auto');
+    writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
+
+    const res = await post({ project: projectPath }).expect(201);
+    expect(res.body).toEqual({ sessionId: 'sess-1' });
+
+    const spawns = sent.filter((s) => s.url.endsWith('/api/spawn'));
+    expect(spawns).toHaveLength(1);
+    expect(JSON.parse(String(spawns[0].init?.body))).toEqual({
+      project: '-abs-alpha',
+      prompt: '/backlog-orchestrate --resume',
+      name: `resume ${basename(projectPath)}`,
+      permissionMode: 'auto'
+    });
+  });
+
+  // Tidiness, not correctness: the resumed session's own `unpause` is what
+  // actually retires the request (its `unpausedAt` stamp moves past it). This
+  // clears the file early so a `status` call in between does not report a
+  // pause that is already being undone.
+  it('clears the pause request after a successful resume', async () => {
+    stubDashboard({ ok: true }, 'auto');
+    writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
+    writePauseRequest(projectPath, fixture.runId, new Date(), controlRoot);
+
+    await post({ project: projectPath }).expect(201);
+
+    expect(readPauseRequest(projectPath, controlRoot)).toBeNull();
+  });
+
+  // The clear happens AFTER the spawn, so a spawn that never happened leaves
+  // the request alone — the run is still paused, and the board must still
+  // show it that way.
+  it('leaves the pause request in place when the spawn fails', async () => {
+    stubDashboard({ ok: false, status: 429, body: { error: 'busy' } }, 'auto');
+    writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
+    writePauseRequest(projectPath, fixture.runId, new Date(), controlRoot);
+
+    await post({ project: projectPath }).expect(429);
+
+    expect(readPauseRequest(projectPath, controlRoot)).not.toBeNull();
+  });
+
+  it('409s a paused run the same way as a done one when asked to PAUSE it, but resumes it here', async () => {
+    // The asymmetry stated as a test: `paused` is resumable and un-pausable.
+    // (The pause half lives in agents-pause.test.ts; this half is the one
+    // that would break if the widened 409 condition were written as
+    // `status !== 'running' && status !== 'paused'` in only one of the two.)
+    stubDashboard({ ok: true }, 'auto');
+    writeRun({ ...fixture, project: projectPath, status: 'aborted', updatedAt: new Date().toISOString() });
+    const res = await post({ project: projectPath }).expect(409);
+    expect(res.body).toEqual({ error: 'no crashed or paused run to resume for this project' });
+  });
+
+  // The watchdog only ever watches `running` runs, and a paused run is not
+  // one — so its payload entry must carry no watchdog record at all, or the
+  // strip would draw a crashed run's "attempt 1 of 3" under a run nobody is
+  // rescuing.
+  it('leaves a resumed paused run without a watchdog key on the runs payload', async () => {
+    stubDashboard({ ok: true }, 'auto');
+    writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
+
+    await post({ project: projectPath }).expect(201);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    const entry = res.body.runs.find((r: { project: string }) => r.project === projectPath);
+    expect('watchdog' in entry).toBe(false);
   });
 });

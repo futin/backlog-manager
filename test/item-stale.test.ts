@@ -46,7 +46,7 @@ type RunPayload = OrchestratorRunsPayload['runs'][number];
  *  third thing to keep honest, and this one is four lines. */
 function runWith(stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
   const entry: RunQueueItem = { ...runFixture.queue[0], id: 'bug-1', stage };
-  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, ...over };
+  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, ...over };
 }
 
 /** Stale by the file's own reckoning — 90 days quiet, no `started:`, which is

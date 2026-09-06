@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { useAgents } from '../../hooks/useAgents';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
@@ -11,7 +12,10 @@ import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
 import { StageBars } from './StageBars';
 import type { RunRange } from '../../lib/run-range';
-import type { OrchestratorArchiveRun, OrchestratorRun, RunStage } from '../../../../shared/types';
+import { resumeGate } from '../../../../shared/agent';
+import type {
+  OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RunStage
+} from '../../../../shared/types';
 
 /**
  * Runs — the board's third surface: history of every backlog-orchestrate run
@@ -109,11 +113,20 @@ interface MergedRun {
    * `fresh` flag is true — `null` otherwise, including when the run appears
    * in the live payload at all but has gone stale. Being "in the live
    * payload at all" is not enough on its own — a run whose heartbeat is
-   * older than `RUN_STALE_MS` is exactly the case RunStrip.tsx already
-   * renders nothing special for, and this list makes the same call: the
+   * older than `RUN_STALE_MS` is one the board cannot vouch for, and this
+   * list makes the same call the strip does: the
    * live accent (and, per fix round 2, the live NUMBERS) mean "the board is
    * actually still hearing from this process right now", not merely "this
    * is the most recent run.json".
+   *
+   * (The old wording said RunStrip "renders nothing special" for a stale
+   * run. That stopped being true twice over: a crashed run gets its own
+   * rendering (orchestrator-watchdog), and task-17 gave `paused` a third.
+   * Neither changes THIS field's rule — both of those runs are still
+   * un-fresh, so both still land here as `null` and read through the archive
+   * record, which is right: this list is history, and the pane's own
+   * controls read the summary's status for the one case that still has a
+   * future.)
    *
    * Carried as the object itself, not a boolean, because of fix round 2:
    * `RunRow` needs this run's actual `queue`/`status`/`startedAt`/
@@ -129,7 +142,7 @@ interface MergedRun {
   isLive: boolean;
 }
 
-type LiveRun = OrchestratorRun & { fresh: boolean; pastRuns: number };
+type LiveRun = OrchestratorRunsPayload['runs'][number];
 
 /**
  * `{project, runId}` as one string — the same composite identity `Selection`
@@ -283,7 +296,10 @@ function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
  */
 
 /** Reading order for the tiles' by-status breakdown — active state first, then the three ways a run can have left it, worst-sounding last. */
-const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed'];
+// `paused` sits beside `running` rather than among the endings: it is the
+// one non-running status a run can still leave, so the breakdown reads as
+// "in flight" then "over" rather than interleaving the two.
+const STATUS_ORDER: readonly OrchestratorRun['status'][] = ['running', 'paused', 'done', 'aborted', 'failed'];
 
 /**
  * Completed items over a run's whole queue — the same ratio the tiles
@@ -413,6 +429,15 @@ function RunRow({
         {modeLabel !== null && (
           <span className="run-mode-badge" data-testid={`runs-row-mode-${run.runId}`}>{modeLabel}</span>
         )}
+        {/* task-17: only a LIVE entry can carry this — `pauseRequested` is
+            derived per request against a run that still exists on disk, and an
+            archived row has no live entry to derive it from. Reuses
+            `.run-mode-badge` rather than minting a class: it is the same
+            register (a small qualifier on the run's own headline) and sits in
+            the same slot. */}
+        {row.live?.pauseRequested === true && (
+          <span className="run-mode-badge" data-testid={`runs-row-pausing-${run.runId}`}>pausing</span>
+        )}
         <span className="runs-row-count">{completed}/{total}</span>
       </span>
       {wall !== null && <span className="runs-row-wall">{formatSpanCompact(wall)}</span>}
@@ -444,7 +469,13 @@ export const RUNS_PAGE_SIZE = 25;
 
 export default function RunsView() {
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
-  const { runs: liveRuns } = useOrchestratorRuns();
+  const { runs: liveRuns, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  // task-17: the environment half of the resume gate, the same answer the
+  // board derives for its own strips. Read here rather than inside
+  // `RunControls` so the two hosts keep handing the component one prop
+  // rather than each reaching for the hook themselves — `resumeGate` is the
+  // single implementation, and the component stays free of a data source.
+  const { status: agents } = useAgents();
   const [projectFilter, setProjectFilter] = useState<string>('all');
   // Component state, not persisted — same as `projectFilter` immediately
   // above, and for the same reason: a saved range would silently reopen the
@@ -931,7 +962,22 @@ export default function RunsView() {
                 the first. */}
             <div className="runs-detail" data-testid="run-detail-slot">
               {selectedRow !== undefined && (
-                <RunDetail summary={selectedRow.run} live={selectedRow.live} />
+                <RunDetail
+                  summary={selectedRow.run}
+                  live={selectedRow.live}
+                  gate={resumeGate(agents, selectedRow.run.project)}
+                  resuming={resuming.has(selectedRow.run.project)}
+                  onChanged={(kind) => {
+                    // `refreshRuns` alone is enough for a pause or a cancel:
+                    // both flip `pauseRequested` on the live entry and change
+                    // nothing the archive holds. A resume additionally needs
+                    // the mark, since a paused run polls nothing by the
+                    // ordinary rule. The archive's own refresh already fires
+                    // when the fresh set changes.
+                    if (kind === 'resume') noteResume(selectedRow.run.project);
+                    refreshRuns();
+                  }}
+                />
               )}
             </div>
           </div>

@@ -1,7 +1,7 @@
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeMode,
   OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
-  PermissionMode, StartingRun, WatchdogConfig, WatchdogStatus
+  PauseResult, PermissionMode, StartingRun, WatchdogConfig, WatchdogStatus
 } from '../../../shared/types';
 
 /**
@@ -317,6 +317,39 @@ export async function startOrchestrate(req: StartOrchestrateRequest): Promise<Ag
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(req)
+  }));
+}
+
+/**
+ * "Stop this project's run at the next item boundary" — `POST
+ * /api/agents/pause` (task-17). One field, matching a request that has
+ * nothing else to carry: which run gets paused is decided server-side from
+ * the project's own `run.json`, so there is no runId for a caller to send
+ * (and therefore no way for a stale tab to pause a run that is not the one
+ * it is looking at — the server pins the request to whatever is running when
+ * it arrives).
+ *
+ * Two functions rather than one with a boolean, for the reason the call
+ * sites make obvious: `pauseOrchestrate(p)` and `cancelPauseOrchestrate(p)`
+ * cannot be turned into each other by a misread argument, and one of the two
+ * directions throws away something a person asked for.
+ */
+export async function pauseOrchestrate(project: string): Promise<PauseResult> {
+  return unwrap<PauseResult>(await fetch('/api/agents/pause', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ project })
+  }));
+}
+
+/** The withdrawal half of `pauseOrchestrate` above — `cancel: true` is the
+ *  only form the server honours (a string `'true'` is read as a pause), so
+ *  it is a literal here rather than anything derived from a caller. */
+export async function cancelPauseOrchestrate(project: string): Promise<PauseResult> {
+  return unwrap<PauseResult>(await fetch('/api/agents/pause', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ project, cancel: true })
   }));
 }
 

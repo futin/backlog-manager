@@ -660,7 +660,8 @@ export function aggregateRuns(
     running: 0,
     done: 0,
     aborted: 0,
-    failed: 0
+    failed: 0,
+    paused: 0
   };
 
   let itemsMerged = 0;

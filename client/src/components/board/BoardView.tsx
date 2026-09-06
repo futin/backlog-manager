@@ -11,7 +11,7 @@ import { isInProgress } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { PROJECT_KEY } from '../../lib/view-keys';
-import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
+import { projectDispatchGate, resumeGate, runClaimBlock } from '../../../../shared/agent';
 import { ACTIVE_RUN_STAGES, ItemCard } from './ItemCard';
 import type { RunCardState } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
@@ -45,7 +45,9 @@ type SortKey = 'created' | 'name' | 'project';
  *  RunStrip.tsx's own copy — this file never reads it directly, but `openRun`
  *  and every entry in `runningRuns` below are typed off this alias, and both
  *  get handed straight to `RunStrip`, which does. */
-type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
+type RunPayload = OrchestratorRun & {
+  fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog;
+};
 
 /**
  * Fixed column order — the design's order (Refactoring · Ideas · Bugs ·
@@ -188,7 +190,7 @@ export default function BoardView() {
   // poll rather than up to `POLL_MS` late — see OrchestrateSheet.tsx's own
   // comment on `start` for why the conflict path needs it just as much as
   // the success path does.
-  const { runs, starting, refresh: refreshRuns } = useOrchestratorRuns();
+  const { runs, starting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
   /* Separate from `open`: the sheet can be opened from a card (drawer closed)
      or from inside the drawer (drawer stays open behind it), so one piece of
      state cannot serve both. */
@@ -300,6 +302,17 @@ export default function BoardView() {
      future reader of `freshRuns` have to re-derive which half of it is safe
      to trust for THAT purpose. */
   const runningRuns = runs.filter((run) => run.status === 'running');
+
+  /* task-17: the strip's list, once more widened — `paused` is `RunStrip`'s
+     third rendering and belongs on the board exactly as a crashed run does.
+     A THIRD list rather than widening `runningRuns` itself, for the same
+     reason `runningRuns` is not `freshRuns`: `runningRuns` is also what
+     `startingRuns` below subtracts against, and that subtraction is
+     specifically about the `init` lock, which only a `running` run file
+     holds. A paused run is not that — `init` archives it like a done one —
+     so folding `paused` in there would suppress a legitimate starting
+     placeholder for a project whose previous run was paused. */
+  const stripRuns = runs.filter((run) => run.status === 'running' || run.status === 'paused');
 
   /* task-14: the projects this server has spawned a run for that have not
      written a run file yet, minus any that ALREADY have a live strip on
@@ -727,7 +740,7 @@ export default function BoardView() {
           for anything that is neither fresh nor crashed, so this never
           mounts a strip only to have it immediately render null — the set
           of things worth trying just grew from one shape to two. */}
-      {(runningRuns.length > 0 || startingRuns.length > 0) && (
+      {(stripRuns.length > 0 || startingRuns.length > 0) && (
         <div className="run-strips">
           {/* task-14's placeholders first, above the live strips: a run
               nobody can see yet is the one thing on this stack a person is
@@ -738,16 +751,14 @@ export default function BoardView() {
           {startingRuns.map((s) => (
             <StartingStrip key={`starting:${s.project}`} starting={s} />
           ))}
-          {runningRuns.map((run) => {
+          {stripRuns.map((run) => {
             // Per-run, not hoisted: `projectDispatchGate` is already the
             // one shared implementation (see `orchestrateGate`'s own use of
             // it above for the toolbar's identical project-level control),
             // and a crashed run's Resume button is exactly that same
             // question — can THIS project's dashboard even be reached —
             // asked per strip instead of per toolbar filter.
-            const gate = agents === null ? null : projectDispatchGate(agents, run.project);
-            const canResume = gate !== null && gate.control !== 'hidden';
-            const resumeBlockedReason = gate?.control === 'disabled' ? gate.reason : null;
+            const { canResume, blockedReason: resumeBlockedReason } = resumeGate(agents, run.project);
             return (
               <RunStrip
                 key={run.runId}
@@ -760,6 +771,14 @@ export default function BoardView() {
                 onOpen={(r) => openRunDrawer(r.project)}
                 canResume={canResume}
                 resumeBlockedReason={resumeBlockedReason}
+                // task-17: a resume this board already asked for is on its
+                // way, so the paused strip shows a placeholder instead of a
+                // second button. Keyed on the project rather than the runId
+                // because the mark outlives the run entry the click was made
+                // against (a resumed run gets a new `unpausedAt`, not a new
+                // file — but the entry is re-fetched, and identity by path is
+                // what every other run→project match in this file uses).
+                resuming={resuming.has(run.project)}
                 // A successful (or 409-recovered) Resume click changes the
                 // run's own state on the server, not anything this board
                 // already holds — `refreshRuns` is the same re-fetch
@@ -767,7 +786,17 @@ export default function BoardView() {
                 // launch, for the identical reason: get the strip off its
                 // last-known state one poll early rather than waiting up to
                 // POLL_MS for the next scheduled tick to notice.
-                onResumed={refreshRuns}
+                onResumed={() => {
+                  // Both, in this order: the mark is what keeps the poll
+                  // alive for a run that is neither fresh nor running (a
+                  // paused one polls nothing by the ordinary rule), and the
+                  // refresh is the one immediate re-read that stops the click
+                  // looking swallowed. `noteResume` already refreshes, but
+                  // calling it explicitly keeps this handler correct for the
+                  // crashed strip too, where no mark is needed at all.
+                  noteResume(run.project);
+                  refreshRuns();
+                }}
               />
             );
           })}
@@ -850,7 +879,20 @@ export default function BoardView() {
         />
       )}
       {openRun !== null && (
-        <RunDrawer run={openRun} onClose={() => setOpenRunProject(null)} />
+        <RunDrawer
+          run={openRun}
+          onClose={() => setOpenRunProject(null)}
+          gate={resumeGate(agents, openRun.project)}
+          resuming={resuming.has(openRun.project)}
+          onChanged={(kind) => {
+            // A resume needs the poll kept alive (see the strip's own
+            // `onResumed`); a pause or a cancel only needs the payload
+            // re-read, since `pauseRequested` flips on the live entry and
+            // nothing else about the run changes.
+            if (kind === 'resume') noteResume(openRun.project);
+            refreshRuns();
+          }}
+        />
       )}
       {dispatching !== null && (
         /* `key` on a singleton element, which looks redundant and is not: it

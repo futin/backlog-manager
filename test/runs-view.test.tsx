@@ -1,16 +1,18 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor, type RenderResult } from '@testing-library/react';
+import { act, render, screen, waitFor, within, type RenderResult } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
-import { fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns } from '../client/src/lib/agents';
+import {
+  fetchAgentsStatus, fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns, pauseOrchestrate
+} from '../client/src/lib/agents';
 import RunsView, { RUNS_PAGE_SIZE } from '../client/src/components/runs/RunsView';
 import { RUN_RANGES } from '../client/src/lib/run-range';
 import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type {
-  ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
+  AgentsStatus, ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
   OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, VerificationSummary
 } from '../shared/types';
 
@@ -30,12 +32,28 @@ jest.mock('../client/src/lib/agents', () => ({
   __esModule: true,
   fetchArchivedRun: jest.fn(),
   fetchOrchestratorArchive: jest.fn(),
-  fetchOrchestratorRuns: jest.fn()
+  fetchOrchestratorRuns: jest.fn(),
+  // task-17: this section now reads `useAgents` (for the resume gate) and
+  // hosts `RunControls` (for the three calls). A mocked module hands an
+  // un-listed export back as `undefined`, so omitting any of these four is
+  // not "the feature is untested here" — it is a TypeError inside a hook
+  // during the first render of every case in this file.
+  fetchAgentsStatus: jest.fn(),
+  pauseOrchestrate: jest.fn(),
+  cancelPauseOrchestrate: jest.fn(),
+  resumeOrchestrate: jest.fn(),
+  ApiError: class ApiError extends Error {
+    constructor(message: string, public readonly status: number, public readonly code?: string) {
+      super(message);
+      this.name = 'ApiError';
+    }
+  }
 }));
 
 const mockArchive = fetchOrchestratorArchive as jest.Mock;
 const mockRuns = fetchOrchestratorRuns as jest.Mock;
 const mockFetchArchivedRun = fetchArchivedRun as jest.Mock;
+const mockPause = pauseOrchestrate as jest.Mock;
 
 /**
  * One queue item, archive-shaped (verification already summarised — the
@@ -103,6 +121,21 @@ function run(over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun
     maxItems: null, mergeMode: 'merge', mergeModeEffective: 'merge', mergeModeNote: null,
     attention: [], current: false, ...over
   };
+}
+
+/** task-17: an archived `paused` run in beta, on the earlier of the two day
+ *  groups — deliberately not `current`, so it reads as history with no live
+ *  entry behind it, which is the shape the detail pane has to synthesise a
+ *  `RunControls` run from. */
+function pausedRun(): OrchestratorArchiveRun {
+  return run({
+    runId: 'run-paused-1',
+    project: '/abs/beta',
+    status: 'paused',
+    startedAt: '2026-08-28T13:00:00.000Z',
+    updatedAt: '2026-08-28T13:20:00.000Z',
+    queue: [item('p-1', 'merged'), item('p-2', 'pending')]
+  });
 }
 
 /**
@@ -257,7 +290,8 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
     ],
     attention: [],
     fresh: true,
-    pastRuns: 2
+    pastRuns: 2,
+    pauseRequested: false
   }
 ];
 
@@ -357,6 +391,14 @@ beforeEach(() => {
   // about Task 7's own effect to keep passing. A promise that never resolves
   // is enough: nothing here asserts on the fetched tail text.
   (fetchArchivedRun as jest.Mock).mockImplementation(() => new Promise(() => {}));
+  // task-17: an enabled status that can see both fixture projects, so the
+  // resume gate is open by default and a case that cares about a BLOCKED
+  // gate states that for itself. Same "inert but valid default" shape as the
+  // archived-run stub above.
+  (fetchAgentsStatus as jest.Mock).mockResolvedValue({
+    enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
+    spawnMaxPermission: 'auto', projectPaths: [RUN_LIVE.project, RUN_DONE_BETA.project]
+  } satisfies AgentsStatus);
 });
 
 describe('RunsView', () => {
@@ -677,7 +719,7 @@ describe('RunsView', () => {
         liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
       ],
       fresh: true,
-      pastRuns: 0
+      pastRuns: 0, pauseRequested: false
     };
 
     await renderRunsView([archiveEntry], [liveEntry]);
@@ -733,7 +775,7 @@ describe('RunsView', () => {
         liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
       ],
       fresh: true,
-      pastRuns: 0
+      pastRuns: 0, pauseRequested: false
     };
 
     await renderRunsView([archiveEntry], [liveEntry]);
@@ -815,7 +857,7 @@ describe('RunsView', () => {
         queue: [],
         attention: [],
         fresh: true,
-        pastRuns: 0
+        pastRuns: 0, pauseRequested: false
       };
 
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
@@ -846,7 +888,7 @@ describe('RunsView', () => {
         queue: [],
         attention: [],
         fresh: true,
-        pastRuns: 0
+        pastRuns: 0, pauseRequested: false
       };
       mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [] } satisfies OrchestratorRunsPayload);
 
@@ -1226,7 +1268,7 @@ describe('RunsView history paging (task-16)', () => {
       queue: [liveQueueItem('pl-1', 'dispatched')],
       attention: [],
       fresh: true,
-      pastRuns: 0
+      pastRuns: 0, pauseRequested: false
     };
 
     const { container } = await renderRunsView([live, ...minuteSeries(RUNS_PAGE_SIZE + 5)], [liveEntry]);
@@ -1353,5 +1395,77 @@ describe('RunsView history paging (task-16)', () => {
     await userEvent.click(screen.getByTestId('runs-load-more'));
 
     expect(screen.getByTestId('runs-tiles').textContent).toBe(before);
+  });
+  /* task-17 — the Runs view's own half: a `pausing` badge on a live row, the
+     `paused` status reading through the shared chip vocabulary, and the same
+     `RunControls` the board's drawer hosts, in the detail pane. */
+
+  it('badges a live row whose run has been asked to pause', async () => {
+    const liveEntry = { ...LIVE_RUNS[0], pauseRequested: true };
+    await renderRunsView(ARCHIVE_RUNS, [liveEntry]);
+
+    const row = screen.getByTestId(`runs-row-${liveEntry.runId}`);
+    expect(within(row).getByTestId(`runs-row-pausing-${liveEntry.runId}`)).toHaveTextContent('pausing');
+  });
+
+  it('badges no row when nothing is pausing', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    const row = screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`);
+    expect(within(row).queryByTestId(`runs-row-pausing-${LIVE_RUNS[0].runId}`)).toBeNull();
+  });
+
+  // A paused run with no live entry is history as far as this list is
+  // concerned: it reads through the same status chip every other row uses,
+  // and it is NOT pinned above the day groups (that pin is for fresh runs).
+  it('renders an archived paused run with its own status class, unpinned', async () => {
+    const paused = pausedRun();
+    const { container } = await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    const row = screen.getByTestId('runs-row-run-paused-1');
+    expect(row.querySelector('.runs-status-paused')).not.toBeNull();
+    expect(row).toHaveTextContent('paused');
+    const liveGroup = container.querySelector('.runs-day-live');
+    expect(liveGroup?.contains(row) ?? false).toBe(false);
+  });
+
+  it('counts a paused run in the by-status breakdown, between running and done', async () => {
+    const paused = pausedRun();
+    await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    expect(screen.getByText(/1 paused/)).toBeInTheDocument();
+  });
+
+  it('offers Resume in the detail pane for a selected paused run', async () => {
+    const paused = pausedRun();
+    await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-paused-1'));
+
+    expect(await screen.findByTestId('run-controls-resume')).toBeInTheDocument();
+  });
+
+  it('offers no Resume when the dashboard is off', async () => {
+    (fetchAgentsStatus as jest.Mock).mockResolvedValue({
+      enabled: false, reachable: false, remoteAnswer: false, spawnAvailable: false,
+      spawnMaxPermission: 'auto', projectPaths: []
+    } satisfies AgentsStatus);
+    const paused = pausedRun();
+    await renderRunsView([...ARCHIVE_RUNS, paused], []);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-paused-1'));
+
+    expect(screen.queryByTestId('run-controls-resume')).toBeNull();
+  });
+
+  it('pauses from the detail pane and re-reads the live payload', async () => {
+    mockPause.mockResolvedValue({ pauseRequested: true });
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+    const before = mockRuns.mock.calls.length;
+    await userEvent.click(await screen.findByTestId('run-controls-pause'));
+
+    await waitFor(() => expect(mockPause).toHaveBeenCalledWith(LIVE_RUNS[0].project));
+    await waitFor(() => expect(mockRuns.mock.calls.length).toBeGreaterThan(before));
   });
 });

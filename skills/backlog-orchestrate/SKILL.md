@@ -103,6 +103,12 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `3` | no run exists for this project — and, for `watch` only, "budget elapsed, child still alive" |
 | `4` | lock held: a `run.json` still marked `running` (fresh *or* stale) refusing a plain `init` |
 | `5` | `verify` only: nothing resolvable to verify with |
+| `6` | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; go to §10, *Pausing* |
+
+`6` is the one code whose reaction is a *different finish* rather than a fix
+and a retry, which is exactly why it is not a `1`. A `1` means "this call was
+wrong". A `6` means "this call was right and the run is being asked to stop":
+never retry it, never work around it, go to §10.
 
 That `3` carries two meanings for `watch` deliberately: "no run yet" and
 "still running, call me again" are the same shape of retry from here. And
@@ -393,6 +399,11 @@ Then say so on the record before doing anything slow:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> preflight
 ```
 
+**Exit `6`** — the board asked this run to pause. Do not pre-flight the item,
+do not create anything: go straight to §10, *Pausing*. Nothing was written,
+the item is still `pending`, and a resumed run picks it up from here as if
+this turn had never happened.
+
 ### Hunt for open questions
 
 Read the item file in the **main tree** (read-only — no worktree exists yet)
@@ -615,6 +626,13 @@ about to launch under. It must match that dispatch line's own flag — the
 field exists so that a denial found in a transcript has the mode that
 produced it recorded beside it, and a field recording the wrong mode is
 worse than no field.
+
+**Exit `6` here** — the pause request arrived during pre-flight. Leave the
+worktree and the branch exactly as they are (the worktree may carry the
+pre-flight answer you just wrote into it; nothing else has happened in it),
+leave the item at `preflight`, and go to §10, *Pausing*. A resumed run
+re-enters at this same dispatch line onto that same worktree —
+`references/recovery.md` names the shape.
 
 ### Dispatch the headless session
 
@@ -1398,7 +1416,8 @@ When the queue is drained:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status done
 ```
 
-`--status` takes `done`, `aborted` or `failed`; anything else exits `1`. Then
+`--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits
+`1`. Then
 summarise for the user from `status --json`: what merged or branched, what
 parked and why,
 what was skipped as `ungroomed` or `needs-answers` and therefore wants a
@@ -1445,6 +1464,29 @@ heartbeat goes stale reads to the board (and to a later `init`) as crashed:
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
 ```
+
+### Pausing
+
+You are here because `stage <id> preflight` or `stage <id> dispatched` exited
+`6`. Nothing was written by that call. Finish the run:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
+```
+
+Then summarise exactly as *Finishing* above does — what merged or branched,
+what parked and why, the branch list and its conflict pairs if any item
+finished `branched` — **plus the items still pending, by name**. Those are
+what a resume will pick up, and naming them is the difference between a
+summary and a receipt.
+
+Close with one sentence: the run resumes from the board's Resume control, on
+the strip or in the Runs view, or by `/backlog-orchestrate --resume` in a
+terminal at the project root.
+
+Then end the turn. Do not ping, do not ask whether to continue, do not wait:
+the board's own control is what asked for this pause, so the person who asked
+is already looking at the surface that will restart it.
 
 ### `--resume` and `--abort`
 

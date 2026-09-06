@@ -19,14 +19,14 @@ import type {
 // `kind`, ...) this suite keys its assertions on.
 const fixture = rawFixture as OrchestratorRun;
 
-type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number };
+type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean };
 
 /** The endpoint's exact wrapper shape (Task 8), identical to the helper
  *  orchestrator-strip.test.tsx already builds around this same fixture — kept
  *  identical rather than reinvented, since both suites exercise the same
  *  GET /api/orchestrator/runs contract. */
-function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number }> = {}): Payload {
-  return { ...fixture, fresh: true, pastRuns: 0, ...over };
+function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean }> = {}): Payload {
+  return { ...fixture, fresh: true, pastRuns: 0, pauseRequested: false, ...over };
 }
 
 /**
@@ -45,6 +45,19 @@ function queueItem(id: string, stage: RunStage, over: Partial<RunQueueItem> = {}
   };
 }
 
+/** task-17 gave `RunDrawer` three more required props (the resume gate, the
+ *  in-flight-resume flag and the change callback — all for the shared
+ *  `RunControls` in its head). Every case in this file predates them and
+ *  asserts nothing about them, so they are supplied here once, closed, so a
+ *  case that is about a duration or a stepper does not accidentally become a
+ *  case about a control. The controls' own table lives in
+ *  test/run-controls.test.tsx and test/orchestrator-drawer.test.tsx. */
+const CONTROL_PROPS = {
+  gate: { canResume: false, blockedReason: null },
+  resuming: false,
+  onChanged: () => {}
+} as const;
+
 describe('RunDrawer', () => {
   // The fixture's own queue, in order: bug-14 merged (fixLoops 1, 2
   // verification rows), task-21 needs-answers (1 question), bug-22
@@ -53,7 +66,7 @@ describe('RunDrawer', () => {
   // each kind. See test/fixtures/orchestrator-run.json for the full shape.
 
   it("renders every queue item id, and the needs-answers item's question verbatim", () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
 
     // Scoped to the queue section specifically: three of these seven ids
     // (task-21, task-16, task-9) recur in the attention section below, so an
@@ -75,7 +88,7 @@ describe('RunDrawer', () => {
   });
 
   it('renders a stage chip per row matching the fixture stage', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     for (const q of fixture.queue) {
       expect(screen.getByTestId(`run-drawer-item-${q.id}`)).toHaveTextContent(q.stage);
     }
@@ -94,7 +107,7 @@ describe('RunDrawer', () => {
    * longer contains.
    */
   it('tones each queue row by what its stage means, not by a cyan default', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const expected: Record<string, string | null> = {
       merged: 'board-card-stage-done',
       'needs-answers': 'board-card-stage-warn',
@@ -124,7 +137,7 @@ describe('RunDrawer', () => {
    * a screen reader reads "check merged" and the redundancy becomes noise.
    */
   it('leads every chip with a glyph hidden from the accessibility tree', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     for (const q of fixture.queue) {
       const glyph = screen
         .getByTestId(`run-drawer-item-${q.id}`)
@@ -136,7 +149,7 @@ describe('RunDrawer', () => {
   });
 
   it('renders the fix-loop count only when greater than zero, and pluralizes it', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     // bug-14: fixLoops 1 (singular). task-9: fixLoops 2 (plural, and also
     // the fixture's own loop-cap example — see its attention entry).
     expect(screen.getByTestId('run-drawer-item-bug-14')).toHaveTextContent('1 fix loop');
@@ -148,7 +161,7 @@ describe('RunDrawer', () => {
   });
 
   it("shows the last verification row's command, pass mark and tail — never the earlier rows, never for an item that has none", () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     // bug-14 carries TWO verification rows (pnpm test, then pnpm run
     // typecheck); only the LAST should surface on its row.
     const bug14 = screen.getByTestId('run-drawer-item-bug-14');
@@ -174,13 +187,13 @@ describe('RunDrawer', () => {
   ];
 
   it("collapses a passing row's tail and leaves a failing row's open", () => {
-    const { rerender } = render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    const { rerender } = render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     // bug-14's last row is `pnpm run typecheck`, ok: true.
     const pass = screen.getByTestId('run-drawer-item-bug-14').querySelector('details');
     expect(pass).not.toBeNull();
     expect(pass!.open).toBe(false);
 
-    rerender(<RunDrawer run={runPayload({ queue: failingQueue() })} onClose={() => {}} />);
+    rerender(<RunDrawer run={runPayload({ queue: failingQueue() })} onClose={() => {}} {...CONTROL_PROPS} />);
     const fail = screen.getByTestId('run-drawer-item-bug-99').querySelector('details');
     expect(fail).not.toBeNull();
     expect(fail!.open).toBe(true);
@@ -190,7 +203,7 @@ describe('RunDrawer', () => {
   });
 
   it('keeps the command and the pass mark in the summary, so collapsing hides output and never identity', () => {
-    const { rerender } = render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    const { rerender } = render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const passSummary = screen.getByTestId('run-drawer-item-bug-14').querySelector('summary')!;
     expect(passSummary).toHaveTextContent('pnpm run typecheck');
     expect(passSummary).toHaveTextContent('ok');
@@ -198,14 +211,14 @@ describe('RunDrawer', () => {
     // collapse actually acts on.
     expect(passSummary).not.toHaveTextContent('Found 0 errors.');
 
-    rerender(<RunDrawer run={runPayload({ queue: failingQueue() })} onClose={() => {}} />);
+    rerender(<RunDrawer run={runPayload({ queue: failingQueue() })} onClose={() => {}} {...CONTROL_PROPS} />);
     const failSummary = screen.getByTestId('run-drawer-item-bug-99').querySelector('summary')!;
     expect(failSummary).toHaveTextContent('pnpm run build');
     expect(failSummary).toHaveTextContent('failed');
   });
 
   it('renders no disclosure at all for an item that never reached verify', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     // task-21 has `verification: []`. Guards the `verify !== null` gate
     // against being folded into the new ok/failed conditional — "no rows"
     // must stay a different case from "rows that passed".
@@ -213,7 +226,7 @@ describe('RunDrawer', () => {
   });
 
   it('shows pipeline chip counts against the fixture: 3 merged, 1 active, 1 queued, 3 attention', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     // merged: bug-14, task-16, task-9. active (ACTIVE_RUN_STAGES,
     // ItemCard.tsx): task-14 (reviewing) alone. queued (pending): bug-27
     // alone. attention: the fixture's own three entries, one per kind.
@@ -224,7 +237,7 @@ describe('RunDrawer', () => {
   });
 
   it("lists each attention entry's kind and detail", () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(fixture.attention).toHaveLength(3);
     for (const a of fixture.attention) {
       const row = screen.getByTestId(`run-drawer-attention-${a.id}`);
@@ -248,7 +261,7 @@ describe('RunDrawer', () => {
       { id: 'task-9', kind: 'parked', detail: 'second pass: merge conflicted after resuming' }
     ];
 
-    render(<RunDrawer run={runPayload({ attention })} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload({ attention })} onClose={() => {}} {...CONTROL_PROPS} />);
 
     // Both render — data-testid is shared on purpose when two entries name
     // the same item (getAllByTestId is exactly the tool for that; changing
@@ -273,7 +286,7 @@ describe('RunDrawer', () => {
   });
 
   it('shows the pastRuns line, pluralized correctly', () => {
-    const { unmount } = render(<RunDrawer run={runPayload({ pastRuns: 5 })} onClose={() => {}} />);
+    const { unmount } = render(<RunDrawer run={runPayload({ pastRuns: 5 })} onClose={() => {}} {...CONTROL_PROPS} />);
     // Exact string, not a substring match: toHaveTextContent's default
     // substring semantics would let "1 past run" pass against a broken
     // implementation that always appended "s" ("1 past runs") — the exact
@@ -281,14 +294,14 @@ describe('RunDrawer', () => {
     expect(screen.getByTestId('run-drawer-past').textContent).toBe(`${fixture.status} · 5 past runs`);
     unmount();
 
-    render(<RunDrawer run={runPayload({ pastRuns: 1 })} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload({ pastRuns: 1 })} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.getByTestId('run-drawer-past').textContent).toBe(`${fixture.status} · 1 past run`);
   });
 
   it('shows the no-heartbeat note for a stale run, and hides it for a fresh one', () => {
     const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     const { unmount } = render(
-      <RunDrawer run={runPayload({ fresh: false, updatedAt: twentyMinutesAgo })} onClose={() => {}} />
+      <RunDrawer run={runPayload({ fresh: false, updatedAt: twentyMinutesAgo })} onClose={() => {}} {...CONTROL_PROPS} />
     );
     // The brief's own template, verbatim: "no heartbeat for N minutes —
     // resume or abort from the terminal" — a person reading this needs the
@@ -297,7 +310,7 @@ describe('RunDrawer', () => {
       .toBeInTheDocument();
     unmount();
 
-    render(<RunDrawer run={runPayload({ fresh: true })} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload({ fresh: true })} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByText(/no heartbeat/)).not.toBeInTheDocument();
   });
 
@@ -318,6 +331,7 @@ describe('RunDrawer', () => {
         <RunDrawer
           run={runPayload({ status, fresh: false, updatedAt: twentyMinutesAgo })}
           onClose={() => {}}
+        {...CONTROL_PROPS}
         />
       );
       // The header still prints the status it always did — that half was
@@ -329,7 +343,7 @@ describe('RunDrawer', () => {
 
   it('closes on Escape, on the close button, and on the scrim — mirroring ItemDrawer', async () => {
     const onClose = jest.fn();
-    render(<RunDrawer run={runPayload()} onClose={onClose} />);
+    render(<RunDrawer run={runPayload()} onClose={onClose} {...CONTROL_PROPS} />);
     await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
     await userEvent.click(screen.getByTestId('run-drawer-backdrop'));
@@ -337,7 +351,7 @@ describe('RunDrawer', () => {
   });
 
   it('labels the dialog for assistive tech with the project name', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     // fixture.project is "/Users/dev/code/example-app" — the readable tail,
     // same reading RunStrip.tsx prints on its own strip.
     expect(screen.getByRole('dialog', { name: 'example-app run' })).toBeInTheDocument();
@@ -360,6 +374,7 @@ describe('RunDrawer', () => {
       <RunDrawer
         run={runPayload({ queue, mergeMode: 'merge', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge on b-1' })}
         onClose={() => {}}
+      {...CONTROL_PROPS}
       />
     );
 
@@ -398,7 +413,7 @@ describe('RunDrawer', () => {
   // closes was a gap in TESTING, not a change in RunDrawer.tsx's own
   // (untouched by this task) behaviour.
   it('keeps resolving every stepper to a merged terminal dot for a plain merge-mode run', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     for (const q of fixture.queue) {
       if (q.stage === 'ungroomed') continue; // no stepper at all for this one
       const stepper = screen.getByTestId(`run-drawer-stepper-${q.id}`);
@@ -425,6 +440,7 @@ describe('RunDrawer', () => {
       <RunDrawer
         run={runPayload({ queue, mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null })}
         onClose={() => {}}
+      {...CONTROL_PROPS}
       />
     );
 
@@ -447,6 +463,7 @@ describe('RunDrawer', () => {
       <RunDrawer
         run={runPayload({ queue, mergeMode: 'merge', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge on b-1' })}
         onClose={() => {}}
+      {...CONTROL_PROPS}
       />
     );
     expect(screen.getByTestId('run-drawer-mode')).toHaveTextContent('branch mode (downgraded)');
@@ -459,7 +476,7 @@ describe('RunDrawer', () => {
   // may appear for it at all — the "byte-identical for a plain merge-mode
   // run" claim, this time for the surface finding 2 fixed.
   it('renders no mode badge and no branched chip for a plain merge-mode run', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-drawer-mode')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-drawer-chip-branched')).not.toBeInTheDocument();
   });
@@ -512,7 +529,7 @@ describe('BoardView: run drawer wiring', () => {
   }
 
   it('opens the run drawer for the clicked strip, and Escape closes it', async () => {
-    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -535,7 +552,7 @@ describe('BoardView: run drawer wiring', () => {
   // drawer sits open — the same technique orchestrator-strip.test.tsx already
   // uses to pin the card badge clearing on staleness.
   it('keeps an open drawer in sync with newer poll data instead of freezing the pipeline at click time', async () => {
-    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
     await userEvent.click(await screen.findByTestId('run-strip'));
     await screen.findByTestId('run-drawer-item-bug-27');
@@ -544,7 +561,7 @@ describe('BoardView: run drawer wiring', () => {
     // Swap the stub to answer a stale reading for the SAME run and drive the
     // hook's own window-focus refetch path (useOrchestratorRuns.ts fires
     // refresh() unconditionally on focus).
-    stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0 }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     window.dispatchEvent(new Event('focus'));
 
     // Scoped to the drawer's own note, not a bare `getByText(/no heartbeat/)`
@@ -567,7 +584,7 @@ describe('BoardView: run drawer wiring', () => {
   // openRunDrawer in BoardView.tsx) is two symmetric functions and a test
   // of only one direction wouldn't prove the other was ever wired up.
   it('opening either drawer closes the other — only one dialog is ever mounted', async () => {
-    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
 
     // Open the item drawer first (this describe block's own fakeItem()
@@ -586,5 +603,89 @@ describe('BoardView: run drawer wiring', () => {
     await userEvent.click(await screen.findByText('wire the heartbeat'));
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     expect(screen.getByRole('dialog', { name: 'wire the heartbeat' })).toBeInTheDocument();
+  });
+  /* task-17 — the drawer head hosts the shared `RunControls`, so a person
+     who opened a run to look at it can also stop it without going back out
+     to the strip. Wired at BoardView level here (the RunDrawer-level table
+     lives beside RunControls' own suite). */
+
+  it('offers Pause in the drawer head for a fresh run, and posts it', async () => {
+    const fetchMock = stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
+    await renderBoard();
+    await userEvent.click(await screen.findByTestId('run-strip'));
+
+    const head = screen.getByRole('dialog').querySelector('.drawer-head')!;
+    expect(within(head as HTMLElement).getByTestId('run-controls-pause')).toBeInTheDocument();
+
+    const runsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/orchestrator/runs')).length;
+    await userEvent.click(within(head as HTMLElement).getByTestId('run-controls-pause'));
+
+    await waitFor(() => {
+      const pauses = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/agents/pause'));
+      expect(pauses).toHaveLength(1);
+      expect(JSON.parse(String((pauses[0][1] as RequestInit).body))).toEqual({ project: '/abs/alpha' });
+    });
+    // A pause flips `pauseRequested` on the live entry, so the drawer has to
+    // re-read rather than wait out the poll.
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/orchestrator/runs')).length)
+        .toBeGreaterThan(runsBefore));
+  });
+
+  it('offers Cancel and the pausing note once a pause is pending', async () => {
+    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: true }], [fakeItem({})]);
+    await renderBoard();
+    await userEvent.click(await screen.findByTestId('run-strip'));
+
+    const head = screen.getByRole('dialog').querySelector('.drawer-head')!;
+    expect(within(head as HTMLElement).getByTestId('run-controls-cancel')).toBeInTheDocument();
+    expect(within(head as HTMLElement).getByTestId('run-controls-note')).toHaveTextContent('Pausing after task-14');
+  });
+
+  it('offers Resume in the drawer head for a paused run', async () => {
+    stub([{ ...fixture, project: '/abs/alpha', status: 'paused', fresh: false, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
+    await renderBoard();
+    // `.run-strip-open`, not the strip root: a paused strip's root is a
+    // `<div>` carrying two sibling controls (open, Resume), exactly like the
+    // crashed one — see RunStrip.tsx's own comment on why a `<button>` may
+    // not contain another interactive element.
+    const strip = await screen.findByTestId('run-strip');
+    await userEvent.click(strip.querySelector('.run-strip-open')!);
+
+    const head = screen.getByRole('dialog').querySelector('.drawer-head')!;
+    expect(within(head as HTMLElement).getByTestId('run-controls-resume')).toBeInTheDocument();
+  });
+});
+
+describe('RunDrawer — the controls in its head', () => {
+  const OPEN_GATE = { canResume: true, blockedReason: null };
+
+  function renderDrawer(over: Partial<Payload> = {}, props: Partial<{ resuming: boolean }> = {}) {
+    render(
+      <RunDrawer
+        run={runPayload(over)}
+        onClose={() => {}}
+        gate={OPEN_GATE}
+        resuming={props.resuming ?? false}
+        onChanged={() => {}}
+      />
+    );
+    return screen.getByRole('dialog').querySelector('.drawer-head') as HTMLElement;
+  }
+
+  it.each([
+    ['a fresh run', {}, 'run-controls-pause'],
+    ['a pausing run', { pauseRequested: true }, 'run-controls-cancel'],
+    ['a paused run', { status: 'paused' as const, fresh: false }, 'run-controls-resume']
+  ])('puts the right control in the head for %s', (_label, over, testid) => {
+    const head = renderDrawer(over);
+    expect(within(head).getByTestId(testid)).toBeInTheDocument();
+  });
+
+  it('puts no control in the head for a finished run', () => {
+    const head = renderDrawer({ status: 'done', fresh: false });
+    for (const testid of ['run-controls-pause', 'run-controls-cancel', 'run-controls-resume']) {
+      expect(within(head).queryByTestId(testid)).toBeNull();
+    }
   });
 });

@@ -40,12 +40,12 @@ import type { OrchestratorRun, RunWatchdog } from '../shared/types';
  */
 const fixture = rawFixture as OrchestratorRun;
 
-type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
+type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog };
 
 /** A crashed run (`status: 'running'` from the fixture, `fresh: false`) —
  *  `isCrashed`'s own definition — carrying this row's watchdog record. */
 function crashed(watchdog: RunWatchdog): Payload {
-  return { ...fixture, fresh: false, pastRuns: 0, watchdog };
+  return { ...fixture, fresh: false, pastRuns: 0, pauseRequested: false, watchdog };
 }
 
 describe('the Resume control renders exactly when the watchdog has stood down', () => {

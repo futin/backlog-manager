@@ -30,7 +30,7 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 
 - `server/src/` — Nest: `health/`, `items/` (`/api/items`, `/api/projects`,
   `/api/items/body`), `agents/` (the one outbound-calling module — status,
-  plan, dispatch, orchestrate, resume, and the run watchdog
+  plan, dispatch, orchestrate, resume, pause, and the run watchdog
   (`watchdog.service.ts`, armed only while some `run.json` says running),
   plus the local read-only `merge-check`), `orchestrator/`
   (`GET /api/orchestrator/runs` for the live board strip, plus
@@ -42,8 +42,10 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   only, `starting-runs.service.ts`, the in-memory record of a spawn this
   server itself requested, surfaced as the payload's separate `starting`
   array so a board-started run is visible before `init` writes a run file —
-  see Invariants — and `watchdog-config.util.ts`, the one file the server
-  writes),
+  see Invariants — `watchdog-config.util.ts`, the first file the server
+  writes, and `pause-control.util.ts`, the second: the pause request
+  `orchestrate.mjs` reads back at its two dispatch gates, the one file in
+  this system travelling server → tool, see Invariants),
   `registry/` (read-only view of the registry file), `static.ts` (serves
   `client/dist` only when built).
 - `client/src/` — React SPA: side rail (Board / Runs / Archive / Settings —
@@ -62,12 +64,20 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   above the columns — `RunStrip`/`RunDrawer` — showing every project's
   orchestrator runs; a crashed run — `running`, heartbeat stale — renders
   as crashed with the watchdog's verdict and, when the watchdog is
-  exhausted or off, a Resume control), Runs (`RunsView` — aggregate stat tiles including a
+  exhausted or off, a Resume control, a `paused` run renders a third strip
+  with its own Resume (no watchdog clause — see Invariants), and a fresh run
+  that has been asked to pause gains a `pausing · finishes <id>` chip; the
+  drawer's head hosts `components/RunControls.tsx`, the one
+  Pause / Cancel / Resume component both this surface and the Runs view's
+  detail pane use — top-level, like `lib/view-keys.ts`, because the two
+  hosts are separate lazy chunks), Runs (`RunsView` — aggregate stat tiles including a
   wide "machine time by stage" tile, a Today / This week / This month / All
   range control (calendar-aligned, local-time windows on a run's
   `startedAt`, `lib/run-range.ts`) that scopes the tiles, the list and the
   wide tile together, a project filter, a day-grouped run list with fresh
-  live runs pinned above history, and a persistent detail pane carrying
+  live runs pinned above history (a live row whose run has been asked to
+  pause carries a `pausing` badge, and the detail pane's head hosts the same
+  `RunControls` the board's drawer does), and a persistent detail pane carrying
   that same per-run "machine time by stage" rollup plus a full-width
   seven-node `StageTrack` per item with durations printed under each node.
   The whole section is bounded to one viewport on the wide layout
@@ -101,7 +111,10 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   Invariants),
   and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
   run is fresh or still `running`, or any `starting` entry is present — a
-  crashed run and an unstarted one both keep the strip polling).
+  crashed run and an unstarted one both keep the strip polling — plus
+  `noteResume`/`resuming`, which keep it polling a `paused` run for
+  `RESUME_POLL_GRACE_MS` after a Resume click, since a paused run is neither
+  fresh nor running and nothing else would ask again).
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
   `dispatchGate` — see Invariants), `theme.css` (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
@@ -583,6 +596,37 @@ happened.
   409 with a machine-readable `code: RUN_IN_PROGRESS_CODE` on that lock case
   alone — every other 409 this endpoint can throw carries no code, because
   nothing about them needs to be told apart.
+- **A pause request lives in a server-owned file the tool reads at its two
+  dispatch gates; `paused` is a fifth run status and `unpause` its only
+  exit.** `POST /api/agents/pause` (`{ project, cancel? }`, origin-guarded,
+  **independent of `BM_AGENTS`** and never calling the dashboard — a pause is
+  a fact on this machine's disk, and gating it on that switch would mean a
+  run started while agents were on could never be stopped after they were
+  turned off) writes
+  `~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json`
+  — `{ runId, requestedAt }`, `$BM_ORCH_CONTROL_HOME` to override. It is the
+  one file travelling **server → tool**; everything else under
+  `~/.backlog-manager` travels the other way, and `run.json` keeps its single
+  writer untouched. Effectiveness is **derived on both sides, never stored**:
+  `control.runId === run.runId && Date.parse(control.requestedAt) >
+  Date.parse(run.unpausedAt ?? run.startedAt)`, every malformed shape reading
+  as "no request". `orchestrate.mjs` refuses `stage <id> preflight` and
+  `stage <id> dispatched` with **exit `6`** when it is effective *and the call
+  is a transition* — a re-stamp of a stage the item already occupies is never
+  refused, or a live `claude -p` would have no session id recorded — and the
+  run then finishes `--status paused`. `6` rather than `1` because the
+  reaction is a different command, not a retry. `unpause` is its own command
+  and the only exit: `heartbeat` stays a pure `updatedAt` stamp that never
+  touches a status, and `unpause` writes `status`, `unpausedAt` and
+  `updatedAt` from one clock reading. **The watchdog needs no change** — it
+  only ever walks `running` runs, which is why `paused` is a status and not a
+  flag; `init` archives a paused run like a done one. Resume for a `paused`
+  run is offered on **both** surfaces through one `RunControls` and one
+  `resumeGate`; Resume for a **crashed** run stays on the strip alone, behind
+  `watchdogStoodDown`, because only that case has automation to race.
+  `noteResume` keeps the poll alive for `RESUME_POLL_GRACE_MS` after a click,
+  and does not close the two-tab double-resume exposure it inherits. Long
+  form: [docs/invariants.md](docs/invariants.md).
 - **The watchdog spawns; it never writes the run file.** `runs()` stays the
   one reader; `WatchdogService` only ever calls `AgentsService.resume()` —
   the same spawn path a board click uses — so a resumed session's own

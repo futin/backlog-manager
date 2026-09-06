@@ -66,6 +66,131 @@ this; `orchestrate.mjs` remains the only process that ever writes a byte
 under `orchHome()`, this service only reads more of what was already
 there.
 
+## A pause request is a file the server writes and the tool reads
+
+**task-17.** Everything else under `~/.backlog-manager/` travels tool →
+server: `backlog.mjs` writes `registry.json`, `orchestrate.mjs` writes
+`run.json`, and this server reads both and writes neither. The pause request
+is the one file that travels the other way — the server writes
+`~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json`
+(`{ runId, requestedAt }`, atomically, `$BM_ORCH_CONTROL_HOME` to override),
+and `skills/backlog-orchestrate/tools/orchestrate.mjs` reads it at its two
+dispatch gates.
+
+**Why `settings/`, when it is not a setting.** That subdirectory is already
+the read-write nested mount inside an otherwise read-only
+`~/.backlog-manager` (see "The settings-file exception" below) — it is the
+only ground this process can write in the container. A control directory
+anywhere else would either be unwritable there or need a second nested mount
+for one small file, and a second mount is a deployment fact a future reader
+has to discover the hard way. The directory is chosen for writability; the
+name overstates what it holds, and `pause-control.util.ts`'s own header says
+so out loud.
+
+**Why a file and not a field on `run.json`.** That file has exactly one
+writer. A pause request starts in a browser, reaches this server, and has to
+arrive at a headless session that may be minutes into a `claude -p` child;
+the filesystem is the only channel between those two processes. A second
+writer on `run.json` would trade a well-understood single-writer guarantee —
+the thing the orchestrator's whole crash recovery rests on — for a
+lost-update race against a run re-stamping its own heartbeat every few turns.
+
+**The effectiveness predicate is derived on both sides, never stored:**
+
+```
+control.runId === run.runId &&
+Date.parse(control.requestedAt) > Date.parse(run.unpausedAt ?? run.startedAt)
+```
+
+Missing file, unparseable file, missing or non-string field, unparseable date
+→ not effective, on both sides, without throwing. The `runId` clause stops a
+request that outlived its run from pausing the NEXT run of the same project.
+The timestamp clause is what RETIRES a request: `unpause` stamps
+`unpausedAt`, the request falls behind it, and a resumed run does not pause
+itself again at its first dispatch gate — forever, which is what a
+delete-only retirement would have risked, since `resume()`'s own
+`clearPauseRequest` is tidiness and a spawn that never reaches the session
+leaves the file behind. Derived rather than stored for the reason the
+watchdog's `exhausted` flag is: a stored verdict whose inputs all move
+underneath it is the bug class, not just that one bug. And a hand-typed
+`/backlog-orchestrate --resume` never passes through this server at all, so a
+verdict this server computed once could not be updated for it.
+
+**The gates live in the tool, and cover exactly two stages.** SKILL.md is
+re-read on every one of a run's several hundred turns and prose drifts across
+them; an exit code does not — the same division of labour the branch-mode
+`stage <id> merged` refusal already keeps. `preflight` and `dispatched` are
+the two calls that START work on an item: the first creates the worktree, the
+second spawns the child. Every stage past them describes an item already in
+flight, and refusing one would strand half-finished work in a worktree nobody
+is coming back to. "Stop at the next item boundary" is precisely the boundary
+those two calls sit on, and §4's own ordering (record the dispatch, then
+spawn) is what makes the second gate land before a child exists.
+
+**Only on a TRANSITION.** `item.stage !== stage` is part of the gate. A
+re-stamp of a stage the item already occupies — `stage <id> dispatched
+--session s1` after the child exists, which is exactly how §4 records a
+session id — must never be refused, or there would be a live `claude -p`
+process the run file has no id for. Strictly worse than letting the item run
+to its own end, which is what the run does before it finishes `paused`.
+
+**Exit `6`, not `1`.** A `1` means "this call was wrong, fix it and retry".
+A `6` means "this call was right and the run is being asked to stop": the
+reaction is a different command entirely, `finish --status paused`. Nothing
+is written on a `6`.
+
+**`unpause` is its own command.** `heartbeat` is a pure `updatedAt` re-stamp
+a run makes hundreds of times, and it must never change a status — folding
+"and un-pause if paused" into it would give every routine heartbeat the power
+to resurrect a run somebody deliberately stopped thirty seconds ago.
+`unpause` writes `status: 'running'`, `unpausedAt` and `updatedAt` from ONE
+clock reading: the first is what the predicate compares a request against and
+the second is what freshness is measured from, and two readings would open a
+window in which a request landing between them is judged against the wrong
+one.
+
+**The watchdog needs no change, and two tests say so.** The sweeper walks
+`running` runs; a paused run is not one. That is the whole reason `paused` is
+a fifth STATUS rather than a flag beside `running` — everything that already
+branches on "is this run still going" (the sweeper, `init`'s archive rule,
+`runClaimBlock`) gets the right answer for free. `test/watchdog-sweep.test.ts`
+pins both halves: a paused run stands the sweeper down with one `idle` event,
+and a CRASHED run with a pause request waiting for it is still resumed — a
+request is not a pause, and a run that crashed before reaching a gate never
+saw it.
+
+**`init` archives a `paused` run like a `done` one.** It refuses only a file
+that still says `running`, so a person who gives up on resuming can start
+fresh without any special case.
+
+**The controls are one component on two surfaces, behind one gate.**
+`client/src/components/RunControls.tsx` is hosted by the board's run drawer
+and the Runs view's detail pane — two lazy chunks that may not import from
+each other, which is why it sits at the top level of `components/` like
+`lib/view-keys.ts` does. `resumeGate` (`shared/agent.ts`) is the single
+environment-half gate both hosts call, hoisted out of `BoardView`'s own three
+inline lines: two expressions that merely agree is the failure
+`watchdogStoodDown` already records.
+
+**Resume for a CRASHED run stays on the strip alone,** behind
+`watchdogStoodDown`, because the watchdog may be about to spawn one itself.
+A paused run was never a watchdog subject, so `RunControls` renders nothing
+for a crashed run and the paused strip carries no watchdog clause and no
+watchdog condition on its button. Do not "align" the two.
+
+**`noteResume` keeps the poll alive for three minutes, and closes one gap
+without closing another.** `RESUME_POLL_GRACE_MS`
+(`client/src/hooks/useOrchestratorRuns.ts`) exists because a paused run is
+neither fresh nor running, so nothing else would poll it after a Resume
+click — and a resumed session takes ninety seconds to several minutes to
+reach its first heartbeat. It expires on its own so a resume that never
+started cannot pin a tab to polling. What it does NOT close: two browser tabs
+can still both click Resume on the same paused run. The `resuming` placeholder
+is per-tab state, and `resume()` refuses a *fresh* run rather than a second
+resume of a stopped one. That exposure is inherited from the crashed-run
+Resume control, unchanged by this feature, and is why
+`check-for-a-live-resume-before-resuming-a-run` is still the rule for a human.
+
 ## `backlog-orchestrate` is the only skill that commits or merges
 
 Every other skill in this repo edits item files and nothing else;
@@ -1398,6 +1523,12 @@ bind-mounting a path that does not yet exist on the host creates a
 directory of that name, never a file — mounting the file directly would
 either fail on a fresh machine or silently create a directory where a file
 was expected, either way.
+
+One thing under `settings/` is now read by a skill's tool as well:
+`settings/orchestrator-control/`, the pause request (task-17, see "A pause
+request is a file the server writes and the tool reads" above). It is still
+written only by this server — the exception is to the "nothing under here is
+ever read by a skill" half of the sentence, not to the single-writer half.
 
 Two switches guard this file's effect, and they answer different
 questions. `WatchdogConfig.enabled` (the file's own field, read fresh on

@@ -23,9 +23,9 @@ import type { OrchestratorRun, RunQueueItem, RunStage } from '../shared/types';
  */
 const fixture = rawFixture as OrchestratorRun;
 
-type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number };
+type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean };
 
-function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number }> = {}): Payload {
+function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean }> = {}): Payload {
   // `updatedAt: ago(0)` on top of the fixture's own frozen stamp, and it is
   // load-bearing since bug-15: every ITEM-level reading in the drawer now
   // derives liveness from `status` + `updatedAt` (`runIsLive`, run-time.ts)
@@ -35,7 +35,7 @@ function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: 
   // (it computes `fresh` from this very field, moments earlier). Stating a
   // fresh heartbeat alongside the fresh flag is what keeps the live-path
   // cases below exercising the live path.
-  return { ...fixture, fresh: true, updatedAt: ago(0), pastRuns: 0, ...over };
+  return { ...fixture, fresh: true, updatedAt: ago(0), pastRuns: 0, pauseRequested: false, ...over };
 }
 
 /**
@@ -76,6 +76,19 @@ function dotState(itemId: string, stage: RunStage): string {
   return state;
 }
 
+/** task-17 gave `RunDrawer` three more required props (the resume gate, the
+ *  in-flight-resume flag and the change callback — all for the shared
+ *  `RunControls` in its head). Every case in this file predates them and
+ *  asserts nothing about them, so they are supplied here once, closed, so a
+ *  case that is about a duration or a stepper does not accidentally become a
+ *  case about a control. The controls' own table lives in
+ *  test/run-controls.test.tsx and test/orchestrator-drawer.test.tsx. */
+const CONTROL_PROPS = {
+  gate: { canResume: false, blockedReason: null },
+  resuming: false,
+  onChanged: () => {}
+} as const;
+
 describe('RunStrip run elapsed', () => {
   it('reads the total elapsed of a live run at minute resolution', () => {
     render(<RunStrip run={runPayload({ startedAt: ago(38 * 60_000 + 20_000) })} onOpen={() => {}} />);
@@ -112,7 +125,7 @@ describe('RunStrip run elapsed', () => {
 describe('RunDrawer meta time', () => {
   it('reads the run start clock time and its total elapsed', () => {
     const startedAt = ago(3_840_000); // 1h 04m
-    render(<RunDrawer run={runPayload({ startedAt })} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload({ startedAt })} onClose={() => {}} {...CONTROL_PROPS} />);
 
     const meta = screen.getByTestId('run-drawer-time');
     expect(meta).toHaveTextContent('elapsed');
@@ -128,7 +141,7 @@ describe('RunDrawer meta time', () => {
   // orchestrator-drawer.test.tsx — this reading had to become a sibling span
   // rather than an extension of it, and this pins that it stayed one.
   it('leaves the status and past-runs line untouched', () => {
-    render(<RunDrawer run={runPayload({ pastRuns: 5 })} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload({ pastRuns: 5 })} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.getByTestId('run-drawer-past').textContent).toBe(`${fixture.status} · 5 past runs`);
   });
 
@@ -137,6 +150,7 @@ describe('RunDrawer meta time', () => {
       <RunDrawer
         run={runPayload({ status: 'done', fresh: false, startedAt: 'nope', updatedAt: 'nope' })}
         onClose={() => {}}
+      {...CONTROL_PROPS}
       />
     );
     expect(screen.queryByTestId('run-drawer-time')).not.toBeInTheDocument();
@@ -153,7 +167,7 @@ describe('RunDrawer row times', () => {
    * either could be dropped without the other noticing.
    */
   it('shows a merged row its duration and the clock time it finished', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const time = screen.getByTestId('run-drawer-time-bug-14');
 
     const item = fixture.queue.find((q) => q.id === 'bug-14')!;
@@ -175,7 +189,7 @@ describe('RunDrawer row times', () => {
    * duration. It has to read the ~11m it took.
    */
   it('excludes the queue wait, so a late row reports its own work and not the run', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const time = screen.getByTestId('run-drawer-time-task-9');
     expect(time).toHaveTextContent('11m 02s');
     expect(time).not.toHaveTextContent('51m');
@@ -188,14 +202,14 @@ describe('RunDrawer row times', () => {
         stageAt: { pending: ago(3_000_000), dispatched: ago(300_000), reviewing: ago(120_000) }
       })]
     });
-    render(<RunDrawer run={run} onClose={() => {}} />);
+    render(<RunDrawer run={run} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.getByTestId('run-drawer-time-task-14')).toHaveTextContent('5m 00s elapsed');
   });
 
   // An em dash, not "0s": nothing has been measured yet, and a zero claims a
   // measurement that was never taken.
   it('reads a pending row as an em dash', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.getByTestId('run-drawer-time-bug-27').textContent).toBe('—');
   });
 
@@ -206,7 +220,7 @@ describe('RunDrawer row times', () => {
         queueItem({ id: 'bug-30', stage: 'skipped', stageAt: { pending: ago(3_000_000), skipped: ago(2_900_000) } })
       ]
     });
-    render(<RunDrawer run={run} onClose={() => {}} />);
+    render(<RunDrawer run={run} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-drawer-time-bug-22')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-drawer-time-bug-30')).not.toBeInTheDocument();
   });
@@ -214,7 +228,7 @@ describe('RunDrawer row times', () => {
 
 describe('RunDrawer stage stepper', () => {
   it('fills what an active row visited, rings where it is, and leaves what is ahead hollow', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     // The fixture's task-14: dispatched, inspecting, now reviewing.
     expect(dotState('task-14', 'dispatched')).toBe('filled');
     expect(dotState('task-14', 'inspecting')).toBe('filled');
@@ -232,7 +246,7 @@ describe('RunDrawer stage stepper', () => {
         stageAt: { dispatched: ago(300_000), reviewing: ago(120_000) }
       })]
     });
-    render(<RunDrawer run={run} onClose={() => {}} />);
+    render(<RunDrawer run={run} onClose={() => {}} {...CONTROL_PROPS} />);
     const note = screen.getByTestId('run-drawer-stage-note-task-14');
     expect(note).toHaveTextContent('now reviewing');
     expect(note).toHaveTextContent('2m 00s in stage');
@@ -246,7 +260,7 @@ describe('RunDrawer stage stepper', () => {
    * position would erase it.
    */
   it('leaves a stage that was never needed hollow between filled neighbours', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(dotState('task-16', 'reviewing')).toBe('filled');
     expect(dotState('task-16', 'fixing')).toBe('hollow');
     expect(dotState('task-16', 'verifying')).toBe('filled');
@@ -256,7 +270,7 @@ describe('RunDrawer stage stepper', () => {
   });
 
   it('leaves every dot hollow on a pending row', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const dots = screen.getByTestId('run-drawer-stepper-bug-27').querySelectorAll('[data-stage]');
     expect(dots).toHaveLength(7);
     for (const dot of Array.from(dots)) {
@@ -272,7 +286,7 @@ describe('RunDrawer stage stepper', () => {
    * `generic` role, which prohibits naming, and is silently dropped.
    */
   it('names every dot for hover and for assistive tech alike', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const stepper = screen.getByTestId('run-drawer-stepper-task-14');
 
     const reviewing = stepper.querySelector('[data-stage="reviewing"]') as HTMLElement;
@@ -303,7 +317,7 @@ describe('RunDrawer stage stepper', () => {
    * that one is a promise it will enter.
    */
   it('renders no stepper for an ungroomed row, and does render one for a pending row', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-drawer-stepper-bug-22')).not.toBeInTheDocument();
     expect(screen.getByTestId('run-drawer-stepper-bug-27')).toBeInTheDocument();
   });
@@ -312,7 +326,7 @@ describe('RunDrawer stage stepper', () => {
   // `.querySelector('.board-card-stage')` and asserts its exact class list —
   // a stepper dot borrowing that class would silently break the tone tests.
   it('keeps the stepper out of the stage chip class namespace the tone tests key on', () => {
-    render(<RunDrawer run={runPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const row = screen.getByTestId('run-drawer-item-task-14');
     expect(within(row).getAllByRole('img')).toHaveLength(7);
     expect(row.querySelectorAll('.board-card-stage')).toHaveLength(1);
@@ -352,7 +366,7 @@ describe('RunDrawer rows of a run that stopped', () => {
   // `now − dispatched` this row printed before the fix, and identical on
   // every re-render since nothing in the reading touches the wall clock.
   it('freezes an in-flight row at the run\'s last heartbeat instead of counting to now', () => {
-    render(<RunDrawer run={abortedPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={abortedPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const time = screen.getByTestId('run-drawer-time-task-14');
     expect(time).toHaveTextContent('8m 24s elapsed');
     expect(time).not.toHaveTextContent('h ');
@@ -361,7 +375,7 @@ describe('RunDrawer rows of a run that stopped', () => {
   // The dot the item died on: amber and static, never the cyan pulsing ring
   // that is this app's one "happening right now" signal.
   it('marks the stage it died on stalled rather than current', () => {
-    render(<RunDrawer run={abortedPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={abortedPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(dotState('task-14', 'reviewing')).toBe('stalled');
     expect(dotState('task-14', 'dispatched')).toBe('filled');
     expect(dotState('task-14', 'fixing')).toBe('hollow');
@@ -373,7 +387,7 @@ describe('RunDrawer rows of a run that stopped', () => {
   // the row's status chip and its stalled dot already say where it stopped —
   // so the caption renders nothing at all.
   it('drops the "now <stage>" caption entirely', () => {
-    render(<RunDrawer run={abortedPayload()} onClose={() => {}} />);
+    render(<RunDrawer run={abortedPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-drawer-stage-note-task-14')).not.toBeInTheDocument();
   });
 
@@ -384,7 +398,7 @@ describe('RunDrawer rows of a run that stopped', () => {
   // second rule.
   it('treats a crashed running run exactly as a stopped one', () => {
     const crashed = { ...abortedPayload(), status: 'running' as const };
-    render(<RunDrawer run={crashed} onClose={() => {}} />);
+    render(<RunDrawer run={crashed} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.getByTestId('run-drawer-time-task-14')).toHaveTextContent('8m 24s elapsed');
     expect(dotState('task-14', 'reviewing')).toBe('stalled');
     expect(screen.queryByTestId('run-drawer-stage-note-task-14')).not.toBeInTheDocument();
@@ -405,7 +419,7 @@ describe('RunDrawer rows of a run that stopped', () => {
         stageAt: { pending: ago(900_000), dispatched: ago(504_000), reviewing: ago(444_000) }
       })]
     });
-    render(<RunDrawer run={unreadable} onClose={() => {}} />);
+    render(<RunDrawer run={unreadable} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-drawer-time-task-14')).not.toBeInTheDocument();
     expect(dotState('task-14', 'reviewing')).toBe('stalled');
   });

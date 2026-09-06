@@ -24,7 +24,7 @@ const fixture = rawFixture as OrchestratorRun;
 // §4.1's own addition to `OrchestratorRunsPayload`'s run entries) — every
 // case in this file that builds a crashed run needs it, and `Payload` is
 // the one place both `RunStrip` and `BoardView`'s cases share.
-type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
+type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog };
 
 /**
  * The endpoint's exact wrapper shape (Task 8) around one project's run.
@@ -34,7 +34,7 @@ type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: 
  * makes for the same reason.
  */
 function runPayload(over: Partial<Payload> = {}): Payload {
-  return { ...fixture, fresh: true, pastRuns: 0, ...over };
+  return { ...fixture, fresh: true, pastRuns: 0, pauseRequested: false, ...over };
 }
 
 /**
@@ -67,7 +67,7 @@ function watchdog(over: Partial<RunWatchdog> = {}): RunWatchdog {
  * absence).
  */
 function crashedRun(over: Partial<Payload> & { watchdog?: RunWatchdog } = {}): Payload {
-  return { ...fixture, fresh: false, pastRuns: 0, watchdog: watchdog(), ...over };
+  return { ...fixture, fresh: false, pastRuns: 0, pauseRequested: false, watchdog: watchdog(), ...over };
 }
 
 /**
@@ -577,7 +577,7 @@ describe('BoardView: run strips and card live bars', () => {
 
   /** One fresh alpha run over exactly the queue entries handed in. */
   function alphaRun(queue: RunQueueItem[], over: Partial<Payload> = {}): Payload {
-    return { ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, queue, ...over };
+    return { ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false, queue, ...over };
   }
 
   /** The bar on a card, found by the card's own title. */
@@ -599,8 +599,8 @@ describe('BoardView: run strips and card live bars', () => {
   it('renders two strips for two fresh runs on different projects', async () => {
     stub(
       [
-        { ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 },
-        { ...fixture, runId: 'run-2', project: '/abs/beta', fresh: true, pastRuns: 0 }
+        { ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false },
+        { ...fixture, runId: 'run-2', project: '/abs/beta', fresh: true, pastRuns: 0, pauseRequested: false }
       ],
       [fakeItem({})]
     );
@@ -615,7 +615,7 @@ describe('BoardView: run strips and card live bars', () => {
   // the other half, a run that genuinely finished going stale, which still
   // renders nothing at all.
   it('does not render a strip for a project whose run has genuinely finished and gone stale', async () => {
-    stub([{ ...fixture, project: '/abs/alpha', fresh: false, status: 'done', pastRuns: 0 }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: false, status: 'done', pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
     expect(screen.queryByTestId('run-strip')).not.toBeInTheDocument();
   });
@@ -693,7 +693,7 @@ describe('BoardView: run strips and card live bars', () => {
     stub(
       [
         alphaCrashedRun(),
-        { ...fixture, runId: 'run-2', project: '/abs/beta', fresh: true, pastRuns: 0 }
+        { ...fixture, runId: 'run-2', project: '/abs/beta', fresh: true, pastRuns: 0, pauseRequested: false }
       ],
       [fakeItem({})]
     );
@@ -720,7 +720,7 @@ describe('BoardView: run strips and card live bars', () => {
   // border class — because a cyan bar on an amber-bordered card reads as two
   // different claims about one item.
   it('gives the card matching the fresh run\'s queue entry a cyan live bar, then clears it once the run goes stale', async () => {
-    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
 
     const card = await screen.findByText('wire the heartbeat');
@@ -736,7 +736,7 @@ describe('BoardView: run strips and card live bars', () => {
     // (useOrchestratorRuns.ts fires `refresh()` unconditionally on focus),
     // proving the marker actually reacts to fresh data going stale under it
     // rather than merely being correct on first paint.
-    stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0 }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     window.dispatchEvent(new Event('focus'));
 
     await waitFor(() => {
@@ -759,7 +759,7 @@ describe('BoardView: run strips and card live bars', () => {
   // two separate, unrelated renders.
   it('gives a needs-answers card the amber bar, and no bar at all to a pending one', async () => {
     stub(
-      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }],
+      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }],
       [
         fakeItem({
           id: 'task-21', title: 'decide the archive question',
@@ -821,7 +821,7 @@ describe('BoardView: run strips and card live bars', () => {
   // a contrived one.
   it('does not mark a same-id card belonging to a different project', async () => {
     stub(
-      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0 }],
+      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }],
       [fakeItem({ project: 'beta', projectPath: '/abs/beta', path: '/abs/beta/backlog/tasks/open/task-14.md' })]
     );
     await renderBoard();
@@ -1114,5 +1114,111 @@ describe('BoardView: run strips and card live bars', () => {
     // wrong as one that swept in none of it.
     expect(screen.queryByText('still pending')).not.toBeInTheDocument();
     expect(screen.queryByText('already merged')).not.toBeInTheDocument();
+  });
+  /* task-17 — the strip's own two additions: a chip on a fresh run that has
+     been asked to pause, and a whole third rendering for a run that already
+     has. The paused strip's Resume is gated by the environment half alone
+     (`resumeGate`) with no watchdog clause, because the watchdog never
+     watched this run — it only ever walks `running` ones. */
+
+  it('renders a paused strip with a Resume button and no watchdog clause', async () => {
+    stub([{ ...fixture, project: '/abs/alpha', status: 'paused', fresh: false, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
+    await renderBoard();
+
+    const strip = await screen.findByTestId('run-strip');
+    expect(strip).toHaveClass('run-strip-paused');
+    expect(within(strip).getByText('paused')).toBeInTheDocument();
+    // 3 of 6: the fixture's queue is 7 entries, one of them `ungroomed`
+    // (excluded from the denominator exactly as the fresh strip excludes it),
+    // and three at `merged`.
+    expect(within(strip).getByText('paused · 3 of 6 done')).toBeInTheDocument();
+    expect(within(strip).getByRole('button', { name: 'Resume run' })).toBeInTheDocument();
+    expect(strip.querySelector('.run-strip-watchdog')).toBeNull();
+  });
+
+  it('offers no Resume on a paused strip when the environment ladder blocks it', async () => {
+    const runs: Payload[] = [{ ...fixture, project: '/abs/alpha', status: 'paused', fresh: false, pastRuns: 0, pauseRequested: false }];
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload: unknown = url.includes('/api/agents/status') ? { ...AGENTS_STATUS, enabled: false }
+        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/projects') ? PROJECTS
+        : { items: [fakeItem({})], errors: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    }) as unknown as typeof fetch;
+
+    await renderBoard();
+
+    const strip = await screen.findByTestId('run-strip');
+    expect(strip).toHaveClass('run-strip-paused');
+    expect(within(strip).queryByRole('button', { name: 'Resume run' })).toBeNull();
+  });
+
+  it('posts a resume from the paused strip', async () => {
+    const fetchMock = stub(
+      [{ ...fixture, project: '/abs/alpha', status: 'paused', fresh: false, pastRuns: 0, pauseRequested: false }],
+      [fakeItem({})]
+    );
+    await renderBoard();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Resume run' }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/agents/resume'))).toHaveLength(1));
+  });
+});
+
+describe('RunStrip — the pausing chip and the paused rendering', () => {
+  it('names the in-flight item in the pausing chip on a fresh run', () => {
+    render(<RunStrip run={runPayload({ pauseRequested: true })} onOpen={() => {}} />);
+    expect(screen.getByTestId('run-strip-pausing')).toHaveTextContent('pausing · finishes task-14');
+  });
+
+  it('says pausing alone when the run is between items', () => {
+    const queue = fixture.queue.filter((q) => q.stage === 'merged' || q.stage === 'pending');
+    render(<RunStrip run={runPayload({ pauseRequested: true, queue })} onOpen={() => {}} />);
+    expect(screen.getByTestId('run-strip-pausing')).toHaveTextContent('pausing');
+    expect(screen.getByTestId('run-strip-pausing').textContent).not.toContain('finishes');
+  });
+
+  it('renders no pausing chip when nothing has been requested', () => {
+    render(<RunStrip run={runPayload()} onOpen={() => {}} />);
+    expect(screen.queryByTestId('run-strip-pausing')).toBeNull();
+  });
+
+  it('renders a disabled Resume, with the reason as its title, for a project-visibility block', () => {
+    render(
+      <RunStrip
+        run={runPayload({ status: 'paused', fresh: false })}
+        onOpen={() => {}}
+        canResume
+        resumeBlockedReason="x"
+      />
+    );
+    const button = screen.getByRole('button', { name: 'Resume run' });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAttribute('title', 'x');
+  });
+
+  it('renders a Resuming… placeholder instead of the button while a resume is in flight', () => {
+    render(
+      <RunStrip
+        run={runPayload({ status: 'paused', fresh: false })}
+        onOpen={() => {}}
+        canResume
+        resuming
+      />
+    );
+    expect(screen.getByTestId('run-strip-resuming')).toHaveTextContent('Resuming…');
+    expect(screen.queryByRole('button', { name: 'Resume run' })).toBeNull();
+  });
+
+  // The one shape that must keep rendering nothing: a run that genuinely
+  // ended. `paused` is the third rendering, not a fourth silence.
+  it('still renders nothing for a stale done run', () => {
+    const { container } = render(
+      <RunStrip run={runPayload({ status: 'done', fresh: false })} onOpen={() => {}} />
+    );
+    expect(container.firstChild).toBeNull();
   });
 });

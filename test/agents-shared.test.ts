@@ -1,7 +1,7 @@
 import {
   AGENT_ACTIONS, EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction,
   dispatchBlock, dispatchGate, isAgentAction, isItemId, isMergeMode, modesUpTo, pickFrom,
-  projectDispatchGate, runClaimBlock, runHoldsItem
+  projectDispatchGate, resumeGate, runClaimBlock, runHoldsItem
 } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { ATTENTION_RUN_STAGES, MERGE_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
@@ -233,6 +233,76 @@ describe('projectDispatchGate', () => {
   });
 });
 
+/**
+ * `resumeGate` is the environment half of "may this browser offer a Resume
+ * button", flattened out of `BoardView.tsx`'s own three lines so the Runs
+ * view's detail pane can ask the identical question. It is `projectDispatchGate`
+ * re-expressed in the vocabulary the two Resume surfaces actually consume —
+ * a `canResume` boolean and a reason string that is non-null ONLY for the
+ * project-visibility block — and the last case below is what pins it as
+ * exactly that re-expression rather than a second, agreeing implementation.
+ *
+ * The watchdog half (`watchdogStoodDown`) is deliberately NOT folded in: it
+ * answers "will the automation spawn one instead", which is the CRASHED
+ * strip's question alone. A paused run was never a watchdog subject, so the
+ * paused surfaces ask this gate and nothing else.
+ */
+describe('resumeGate', () => {
+  // A status that has not landed yet is not a block — it is an unknown. The
+  // board renders no Resume control at all rather than a disabled one with a
+  // reason it cannot state, which is why `blockedReason` stays null here.
+  it('withholds the control, with no reason, while the status is still null', () => {
+    expect(resumeGate(null, '/abs/alpha')).toEqual({ canResume: false, blockedReason: null });
+  });
+
+  it('allows a resume for a visible project on a healthy dashboard', () => {
+    expect(resumeGate(OK, '/abs/alpha')).toEqual({ canResume: true, blockedReason: null });
+  });
+
+  // The environment ladder HIDES rather than disables, so every one of these
+  // four is `canResume: false` with a null reason — the reason exists (the
+  // gate computed one) but nothing renders it, exactly as the dispatch
+  // control's environment-level block shows no disabled button either.
+  it.each([
+    [{ enabled: false }],
+    [{ reachable: false, error: 'ECONNREFUSED' }],
+    [{ spawnAvailable: false }],
+    [{ remoteAnswer: false }]
+  ])('withholds the control for an environment-level block (%p)', (over) => {
+    expect(resumeGate({ ...OK, ...over }, '/abs/alpha')).toEqual({ canResume: false, blockedReason: null });
+  });
+
+  // The one block that keeps its button: a project the dashboard cannot see
+  // is the stale-answer case (bug-13/bug-16), so the control renders disabled
+  // and says which path is missing rather than vanishing.
+  it('keeps the control, disabled with the path in the reason, for the project-visibility block', () => {
+    const gate = resumeGate({ ...OK, projectPaths: ['/abs/other'] }, '/abs/alpha');
+    expect(gate.canResume).toBe(true);
+    expect(gate.blockedReason).toContain('/abs/alpha');
+  });
+
+  // The three lines this function replaced in BoardView.tsx:668-670, verbatim.
+  // Anything that changes `projectDispatchGate` and not this stays green only
+  // if the two still agree — which is the whole point of there being one
+  // implementation underneath.
+  it('is exactly the projectDispatchGate expression it replaced', () => {
+    for (const status of [
+      OK,
+      { ...OK, enabled: false },
+      { ...OK, reachable: false, error: 'ECONNREFUSED' },
+      { ...OK, spawnAvailable: false },
+      { ...OK, remoteAnswer: false },
+      { ...OK, projectPaths: ['/abs/other'] }
+    ]) {
+      const g = projectDispatchGate(status, '/abs/alpha');
+      expect(resumeGate(status, '/abs/alpha')).toEqual({
+        canResume: g.control !== 'hidden',
+        blockedReason: g.control === 'disabled' ? g.reason : null
+      });
+    }
+  });
+});
+
 describe('dispatchBlock', () => {
   it('passes a dispatchable item on a healthy dashboard', () => {
     expect(dispatchBlock(fakeItem(), OK)).toBeNull();
@@ -413,7 +483,7 @@ type RunPayload = OrchestratorRunsPayload['runs'][number];
  *  stays the real one, with only the two fields each case varies replaced. */
 function runWith(stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
   const entry: RunQueueItem = { ...runFixture.queue[0], id: 'bug-1', stage };
-  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, ...over };
+  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, ...over };
 }
 
 /*

@@ -589,7 +589,7 @@ describe('aggregateRuns', () => {
     const result = aggregateRuns([doneRun, failedRun, runningRun], T0 + 500_000);
 
     expect(result.runs).toBe(3);
-    expect(result.byStatus).toEqual({ done: 1, failed: 1, running: 1, aborted: 0 });
+    expect(result.byStatus).toEqual({ done: 1, failed: 1, running: 1, aborted: 0, paused: 0 });
     expect(result.itemsMerged).toBe(3);
     expect(result.itemsQueued).toBe(7);
     // (1 + 2 + 0 + 0) fix loops / 3 merged
@@ -732,6 +732,33 @@ describe('aggregateRuns', () => {
     expect(aggregateRuns([run], T0).itemsMerged).toBe(4);
   });
 
+  // task-17: `paused` is the fifth run status, and the one that is neither an
+  // ending nor a failure. It has to land in its own `byStatus` bucket and stay
+  // out of every success/failure count — a paused run's items are genuinely
+  // mid-flight, so the merged item beside the pending one still counts and the
+  // pending one still does not. Mixed with a `done` run so the paused bucket
+  // cannot pass by the whole list happening to be paused.
+  it('counts a paused run under its own status without treating it as done or failed', () => {
+    const pausedRun = archiveRun({
+      status: 'paused',
+      queue: [
+        archiveItem({ id: 'p-1', stage: 'merged', stageAt: { pending: at(0), dispatched: at(10_000), merged: at(60_000) } }),
+        archiveItem({ id: 'p-2', stage: 'pending', stageAt: { pending: at(0) } })
+      ]
+    });
+    const doneRun = archiveRun({
+      status: 'done',
+      queue: [archiveItem({ id: 'd-1', stage: 'merged', stageAt: { pending: at(0), dispatched: at(10_000), merged: at(60_000) } })]
+    });
+
+    const result = aggregateRuns([pausedRun, doneRun], T0 + 500_000);
+
+    expect(result.runs).toBe(2);
+    expect(result.byStatus).toEqual({ done: 1, failed: 0, running: 0, aborted: 0, paused: 1 });
+    expect(result.itemsMerged).toBe(2);
+    expect(result.itemsQueued).toBe(3);
+  });
+
   // Case 9: the empty-list floor. Every ratio is null (nothing to divide by)
   // rather than 0 or NaN — 0 would misreport "a 0% pass rate" for a run
   // history that simply does not exist yet.
@@ -739,7 +766,7 @@ describe('aggregateRuns', () => {
     const result = aggregateRuns([], T0);
     expect(result).toEqual({
       runs: 0,
-      byStatus: { done: 0, failed: 0, running: 0, aborted: 0 },
+      byStatus: { done: 0, failed: 0, running: 0, aborted: 0, paused: 0 },
       itemsMerged: 0,
       itemsQueued: 0,
       avgItemWorkMs: null,

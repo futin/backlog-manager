@@ -127,7 +127,10 @@ export const RUN_STATUS_GLYPH: Record<OrchestratorRun['status'], string> = {
   running: '●',
   done: '✓',
   aborted: '⚠',
-  failed: '✕'
+  failed: '✕',
+  // A pause bar, the one glyph in this table that reads as "stopped, not
+  // finished" — every other member is either motion or an ending.
+  paused: '‖'
 };
 
 /** The run-status chip's class list — `.runs-status-*` (styles.css),
@@ -140,7 +143,10 @@ export const RUN_STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
   running: 'runs-status-live',
   done: 'runs-status-done',
   aborted: 'runs-status-warn',
-  failed: 'runs-status-bad'
+  failed: 'runs-status-bad',
+  // Neutral ink rather than `warn`/`bad`: a paused run is a run someone
+  // deliberately stopped, not one that went wrong.
+  paused: 'runs-status-paused'
 };
 
 /**

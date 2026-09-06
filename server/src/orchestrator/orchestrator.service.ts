@@ -11,6 +11,7 @@ import type {
   OrchestratorRun,
   OrchestratorRunsPayload
 } from '../../../shared/types';
+import { pauseRequestEffective, readPauseRequest } from './pause-control.util';
 import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 
@@ -245,6 +246,15 @@ function toArchiveEntry(run: OrchestratorRun, current: boolean): OrchestratorArc
  * disk — it answers a question no run file can, namely "did this process
  * spawn a session that has not written its run file yet" — see that
  * service's own class comment.
+ *
+ * One amendment to "this service only ever walks orchHome()" above (task-17):
+ * `runs()` also reads this process's OWN pause-request file
+ * (`pause-control.util.ts`) to derive each entry's `pauseRequested`. That is
+ * not a second reader of the tool's state — the control file is written by
+ * this server and read by the tool, the one file in the system travelling
+ * that direction — so the single-writer relationship this class is built
+ * around is untouched: `orchestrate.mjs` still owns every byte of every
+ * `run.json` this service reads.
  */
 @Injectable()
 export class OrchestratorService {
@@ -310,7 +320,13 @@ export class OrchestratorService {
       // before serialisation, and correctness here shouldn't depend on this
       // object happening to cross a JSON boundary before anyone inspects it.
       const watchdog = this.watchdogState.annotate({ ...run, fresh });
-      runs.push({ ...run, fresh, pastRuns, ...(watchdog ? { watchdog } : {}) });
+      // task-17: derived per request from this process's OWN control file,
+      // never from anything the run file says — the run has no idea a request
+      // exists until it next reaches a dispatch gate. Same posture as `fresh`
+      // above: computed once here so every client isn't re-implementing the
+      // predicate against its own clock and its own copy of the rules.
+      const pauseRequested = pauseRequestEffective(readPauseRequest(run.project), run);
+      runs.push({ ...run, fresh, pastRuns, pauseRequested, ...(watchdog ? { watchdog } : {}) });
     }
 
     // `list`, the pure half — this method stays a pure read (see the class

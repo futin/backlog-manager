@@ -15,9 +15,16 @@ import { DEFAULT_WATCHDOG_CONFIG, WATCHDOG_LIMITS, type WatchdogConfig } from '.
  * watches for a crashed run — that is not a fact about a backlog item or an
  * orchestrator run, it is a fact about this process's own behaviour — so
  * there is no existing single-writer file for it to join, and `settings/` is
- * a directory neither `backlog.mjs` nor `orchestrate.mjs` ever reads. It
- * exists as its own nested directory (rather than a file dropped straight
- * into `~/.backlog-manager`) for exactly one reason: docker-compose.yml
+ * a directory neither `backlog.mjs` nor `orchestrate.mjs` ever reads — with
+ * one exception added later: `settings/orchestrator-control/`, the pause
+ * request file (`pause-control.util.ts`, task-17), which `orchestrate.mjs`
+ * DOES read, at its two dispatch gates. That subdirectory is still this
+ * server's to write and nobody else's; it lives under `settings/` for the
+ * mount reason below rather than because it is a setting. It changes nothing
+ * about THIS file.
+ *
+ * `watchdog.json` sits inside a nested directory, rather than being dropped
+ * straight into `~/.backlog-manager`, for exactly one reason: docker-compose.yml
  * mounts `~/.backlog-manager` read-only for everything else under it, and a
  * single read-write file cannot be carved out of a read-only mount of its
  * parent — only a nested mount of a whole directory can, which is why this

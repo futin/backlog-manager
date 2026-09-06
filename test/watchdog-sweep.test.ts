@@ -8,6 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { WatchdogService } from '../server/src/agents/watchdog.service';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
+import { writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { makeProject, makeRegistry } from './helpers/store';
@@ -309,6 +310,45 @@ describe('watchdog sweeper', () => {
     expect(svc().armed).toBe(false);
     expect(state().phase).toBe('idle');
     expect(kinds('idle')).toHaveLength(1);
+  });
+
+  // task-17: `paused` is the fifth run status and the sweeper needs no code
+  // to know about it — the sweeper walks `running` runs, and a paused run is
+  // not one. That is the whole reason `paused` is a status rather than a flag
+  // beside `running`, and this case is what pins it: a paused run must look
+  // exactly like a finished one to the sweeper, not like a crashed one it
+  // should rescue. A person stopped this run; nobody is coming to restart it
+  // but them.
+  it('stands down for a paused run, with exactly one idle event and no spawn', async () => {
+    const dash = stubDashboard();
+    writeRun({ ...fixture, project: projectPath, status: 'paused' });
+    await createApp();
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(0);
+    expect(svc().armed).toBe(false);
+    expect(state().phase).toBe('idle');
+    expect(kinds('idle')).toHaveLength(1);
+  });
+
+  // The converse, and the one that would break if the gates were wired the
+  // other way round: a pause REQUEST is not a pause. A run that crashed
+  // before it ever reached a dispatch gate never saw the request, so the
+  // watchdog's job is unchanged — resume it, and let the resumed session
+  // decide what the request means.
+  it('still resumes a crashed run that has a pause request waiting for it', async () => {
+    const dash = stubDashboard();
+    await createApp();
+    writeRun(crashedRun(projectPath));
+    // No explicit root: `controlHome()` reads the process-wide
+    // `BM_ORCH_CONTROL_HOME` that `test/helpers/env.ts` already points at a
+    // temp directory, which is the same path the server under test will read.
+    writePauseRequest(projectPath, fixture.runId);
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(1);
   });
 
   it('stands down when there is no run file at all, with exactly one idle event', async () => {
