@@ -326,6 +326,25 @@ happened.
   "is a run holding THIS item", which a placeholder naming no items cannot
   answer, and the window is ≤15 minutes against a 30-day staleness
   threshold. Pinned by a test rather than left as prose.
+- **Escape has one owner, and the topmost dialog is the only one that closes.**
+  `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
+  listener, installed on the first entry and removed with the last; all four
+  dialogs (`ItemDrawer`, `LaunchSheet`, `RunDrawer`, `OrchestrateSheet`) call it
+  and none binds its own listener. They used to bind four, unguarded, and two of
+  them are mounted together by design — Board and Archive both keep the item
+  drawer open behind the launch sheet — so one press ran both callbacks and took
+  the drawer with the sheet (bug-23). Ranking is by **mount order**, a contract
+  and not an accident: the entry's position is fixed for the dialog's mounted
+  lifetime (registration effect keyed on `[]`, `onClose` read through a ref
+  rewritten every render), because every call site passes an inline arrow and an
+  effect keyed on `[onClose]` would re-push the drawer above the sheet on the
+  next runs poll. Entries are removed by identity, never popped — a dialog can
+  unmount from under one that is still open. Module state rather than a context,
+  the shape `lib/view-keys.ts` already uses: Board and Archive are separate lazy
+  chunks and four suites mount these components standalone. Knowingly out of
+  scope: nothing traps focus, so a drawer opened *after* the sheet ranks above a
+  sheet still painted over it — ranking by paint order would mean a z-index
+  registry.
 - **Item files are read-only to the server and client**; every write goes
   through the skills. Dispatch writes no item files either — the spawned
   session runs the skills, which remain the only writers.

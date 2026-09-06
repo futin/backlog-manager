@@ -4,6 +4,7 @@ import { ApiError, fetchMergeCheck, startOrchestrate, type MergeCheckResult } fr
 import {
   EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction
 } from '../../../../shared/agent';
+import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { useSettings } from '../../hooks/useSettings';
 import { MERGE_MODES, QUESTION_MODES, RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
 import type { BacklogItem, MergeMode, PermissionMode, QuestionMode } from '../../../../shared/types';
@@ -105,10 +106,12 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
  * unrelated flow sharing its state. A sibling avoids that;
  * what IS genuinely shared — `MODELS`/`EFFORTS`/`clampMode`/`modesUpTo`
  * (shared/agent.ts), `useSettings()`'s seeding, the `.sheet*` CSS vocabulary,
- * and the Escape-closes-on-`window` idiom every dialog in this app already
- * repeats independently (ItemDrawer, LaunchSheet, RunDrawer) — is imported
- * or restated in the same shape those already use, never copy-pasted out of
- * LaunchSheet's own body.
+ * and `useDialogEscape`, the one owner of the Escape key every dialog in this
+ * app now shares (ItemDrawer, LaunchSheet, RunDrawer) — is imported or
+ * restated in the same shape those already use, never copy-pasted out of
+ * LaunchSheet's own body. That hook is bug-23's fix: the four dialogs each
+ * used to bind their own unguarded `window` listener, so a press with two of
+ * them open closed both.
  */
 export function OrchestrateSheet(
   { project, projectName, items, spawnMaxPermission, onClose, refresh }: {
@@ -254,18 +257,11 @@ export function OrchestrateSheet(
    */
   const [order, setOrder] = useState<string[] | null>(null);
 
-  // Same shape as LaunchSheet's and RunDrawer's own Escape effect —
-  // independently duplicated a third time rather than factored out, matching
-  // this codebase's existing choice (ItemDrawer and RunDrawer already each
-  // carry their own copy of this exact four-line effect) over introducing a
-  // shared hook this task was never asked for.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // One stack, one window listener, topmost dialog only — see
+  // hooks/useDialogEscape.ts. Replaced the four copies of this effect this app
+  // used to carry (bug-23: the sheet and the drawer it layers over both closed
+  // on one press).
+  useDialogEscape(onClose);
 
   /**
    * The setup hint's data source (§6) — fetched only while `mergeMode` is

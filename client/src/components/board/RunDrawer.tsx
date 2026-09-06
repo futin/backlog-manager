@@ -1,5 +1,6 @@
-import { Fragment, useEffect } from 'react';
+import { Fragment } from 'react';
 
+import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { projectLabel } from '../../lib/project-label';
 import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import {
@@ -217,9 +218,10 @@ function RowStageCaption({ item, now, live }: {
  *
  * Structure and behaviour below `.drawer-head` are ItemDrawer's, reused
  * rather than reinvented: a `.drawer-backdrop` behind a `role="dialog"`
- * `.drawer` aside, Escape bound on `window` (so it fires no matter where
- * focus happens to be — ItemDrawer does no other focus management, so
- * neither does this), and a `.drawer-close` button — the same three ways in,
+ * `.drawer` aside, Escape through `useDialogEscape` (bound on `window`, so it
+ * fires no matter where focus happens to be — ItemDrawer does no other focus
+ * management, so neither does this — and ranked, so only the topmost dialog
+ * closes: bug-23), and a `.drawer-close` button — the same three ways in,
  * so a keyboard-only user who already knows one drawer knows both. `.pill`
  * and the dispatch control are the only pieces of ItemDrawer's head this
  * does NOT carry over: there is no project-hue identity or dispatch action
@@ -236,13 +238,11 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
   resuming: boolean;
   onChanged: (kind: RunControlsChange) => void;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // One stack, one window listener, topmost dialog only — see
+  // hooks/useDialogEscape.ts. Replaced the four copies of this effect this app
+  // used to carry (bug-23: the sheet and the drawer it layers over both closed
+  // on one press).
+  useDialogEscape(onClose);
 
   const label = projectLabel(run.project);
   const note = staleNote(run);

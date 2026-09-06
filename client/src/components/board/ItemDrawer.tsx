@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { marked } from 'marked';
 
+import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { elapsedSince, formatSeconds } from '../../lib/item-age';
 import { isInProgress } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
@@ -243,13 +244,11 @@ export function ItemDrawer(
     };
   }, [item.path]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // One stack, one window listener, topmost dialog only — see
+  // hooks/useDialogEscape.ts. Replaced the four copies of this effect this app
+  // used to carry (bug-23: the sheet and the drawer it layers over both closed
+  // on one press).
+  useDialogEscape(onClose);
 
   /* marked is synchronous unless handed async extensions — none here. The
      HTML goes in via dangerouslySetInnerHTML below — safe not because these
