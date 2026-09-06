@@ -538,14 +538,24 @@ function runDriver(run) {
 // one person recovering a run by hand, which is the situation this whole
 // feature exists to leave open; the warning is there so nobody reads a
 // successful command as proof the lease held.
+// Once per process, not once per call: `watch` runs `assertDriver` on every
+// poll of its interval, so an unidentified caller printed this line for the
+// whole length of a dispatch. The fact does not change within a process — the
+// env var is read at every call and cannot appear mid-run — so saying it again
+// only buries whatever else that session wrote to stderr.
+let leaseWarned = false
+
 function assertDriver(run) {
   const me = sessionIdentity()
   const driver = runDriver(run)
   if (me === null) {
-    console.error(
-      'warning: CLAUDE_CODE_SESSION_ID is not set, so this run\'s driver lease cannot be enforced for this command' +
-        (driver ? ` (run.json names ${driver.sessionId} as its driver)` : ''),
-    )
+    if (!leaseWarned) {
+      leaseWarned = true
+      console.error(
+        'warning: CLAUDE_CODE_SESSION_ID is not set, so this run\'s driver lease cannot be enforced for this command' +
+          (driver ? ` (run.json names ${driver.sessionId} as its driver)` : ''),
+      )
+    }
     return
   }
   if (driver === null || driver.sessionId === me) return
@@ -571,13 +581,31 @@ const CLAIM_USAGE = 'usage: orchestrate.mjs claim'
 // and needs no second one. A crashed run is claimable by anybody, which is the
 // point: that is the state a resume exists for, and refusing there would make
 // this lease the thing that strands a run instead of the thing that protects it.
-function cmdClaim(argv) {
-  if (argv.length > 0) {
-    throw new OrchestrateError(CLAIM_USAGE, 1)
-  }
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-
+// The takeover itself, shared by `claim` and by `abort` (review round 1).
+//
+// `abort` takes the run over rather than asserting the lease because of what
+// abort IS: the run-ending command, whose entire premise is that the driver is
+// gone. A crashed run carries the lease of the dead `init` session, so
+// asserting it there refused every abort with exit `7` — "another session has
+// taken it over", which was false — and `init` then refused the project with
+// exit `4` forever, since it refuses any `running` run file fresh or stale.
+// That is the lease becoming the thing that strands a run, which
+// docs/invariants.md names as the one outcome it must never produce.
+//
+// It lives in the TOOL rather than in an extra `claim` step in
+// references/recovery.md's `--abort` section, for the reason SKILL.md's own
+// exit-code table gives about prose: recovery.md is read once by a session that
+// then makes several hundred turns, and a step it skips is a brick. A rule the
+// command applies to itself cannot be skipped.
+//
+// The refusal rule is the one `claim` has always had, unchanged and applied
+// identically here: only a run that is `running`, FRESH and led by another
+// session is refused, because that is the one state where somebody else really
+// is driving. So aborting a crashed or paused run always works, and aborting a
+// live one that another session is actively heartbeating is refused and says
+// whose it is — pause it first (a pause is server-side and needs no lease),
+// then abort the paused run.
+function takeOverRun(dir, run) {
   const me = sessionIdentity()
   const driver = runDriver(run)
   if (
@@ -606,6 +634,17 @@ function cmdClaim(argv) {
   if (me === null) {
     console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run is now unclaimed, and the lease cannot be enforced')
   }
+  return at
+}
+
+function cmdClaim(argv) {
+  if (argv.length > 0) {
+    throw new OrchestrateError(CLAIM_USAGE, 1)
+  }
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const run = readRun(dir)
+
+  const at = takeOverRun(dir, run)
   console.log(JSON.stringify({ runId: run.runId, driver: run.driver, updatedAt: at }))
   return 0
 }
@@ -1551,6 +1590,9 @@ function cmdInit(argv) {
   }
 
   const runId = makeRunId(stamp)
+  // Read once for the one field it fills — two reads of one env var for one
+  // value is two chances for them to disagree, however small.
+  const initDriver = sessionIdentity()
   const newRun = {
     runId,
     project,
@@ -1587,7 +1629,7 @@ function cmdInit(argv) {
     // this process has no identity to record (a hand-run terminal), which
     // reads as "unclaimed" everywhere the lease is checked — see
     // `runDriver`/`assertDriver` above.
-    driver: sessionIdentity() === null ? null : { sessionId: sessionIdentity(), at: stamp },
+    driver: initDriver === null ? null : { sessionId: initDriver, at: stamp },
   }
 
   writeRunAtomic(dir, newRun)
@@ -2060,21 +2102,52 @@ function cmdFinish(argv) {
 // predicate compares a request against and the second is what freshness is
 // measured from. Two readings would open a window in which a request landing
 // between them is judged against the wrong one.
+// **It TAKES the lease rather than asserting it** (review round 1) — the one
+// writing command besides `claim` and `abort` that does.
+//
+// A paused run carries the lease of the session that paused it, and that
+// session is by definition gone: `finish --status paused` is the last thing it
+// did before exiting. Asserting the lease here made a board Resume of a paused
+// run exit `7` on its very first write and stop there per SKILL.md, abandoning
+// the rest of that run's queue — task-17's whole pause → resume round trip,
+// broken.
+//
+// Taking it, rather than merely skipping the check, is what makes this
+// independent of the order `references/recovery.md` prints. `claim` refuses a
+// run that is `running`, FRESH and led by another session, and an `unpause`
+// that left the old lease in place produces exactly that state — so
+// unpause-then-claim would have died one command later than it used to. Now
+// either order works: whichever of the two this session runs first, it is the
+// driver afterwards.
+//
+// It costs the guarantee nothing. Two racing resume sessions both reach
+// `unpause`; the first succeeds and the second exits `1` ("this run is running,
+// not paused"), which is a message, not a divergence — nothing is staged,
+// dispatched or merged on the strength of an unpause. The one that got through
+// holds the lease until the other's `claim` takes it, and then last-writer-wins
+// settles it exactly as it does for two resumers of a crashed run.
 function cmdUnpause() {
   const dir = projectDir(orchHome(), resolveProjectRoot())
   const run = readRun(dir)
-  assertDriver(run)
 
   if (run.status !== 'paused') {
     throw new OrchestrateError(`this run is ${run.status}, not paused — nothing to unpause`, 1)
   }
 
   const at = nowISO()
+  const me = sessionIdentity()
   run.status = 'running'
   run.unpausedAt = at
   run.updatedAt = at
+  // Same single clock reading as the two stamps above, and the same rule
+  // `takeOverRun` follows for an unidentified caller: no id, no lease, rather
+  // than a made-up one that would lock out the session that comes next.
+  run.driver = me === null ? null : { sessionId: me, at }
   writeRunAtomic(dir, run)
-  console.log(JSON.stringify({ status: 'running', unpausedAt: at }))
+  if (me === null) {
+    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run is now unclaimed, and the lease cannot be enforced')
+  }
+  console.log(JSON.stringify({ status: 'running', unpausedAt: at, driver: run.driver }))
   return 0
 }
 
@@ -2824,7 +2897,12 @@ function cmdAbort() {
   const projectRoot = resolveProjectRoot()
   const dir = projectDir(orchHome(), projectRoot)
   const run = readRun(dir)
-  assertDriver(run)
+  // A takeover, not an assertion — see `takeOverRun` for why abort of all
+  // commands may not be refused on a dead session's lease. It also has to be a
+  // real write rather than an in-memory pass: `cmdFinish` below re-reads the
+  // file and runs `assertDriver` on what it finds, so a takeover that never
+  // landed on disk would refuse this run's own ending.
+  takeOverRun(dir, run)
 
   const removedIds = []
   const preservedIds = []
@@ -2982,12 +3060,6 @@ commands:
 //      identically).
 //   5  `verify` found nothing it could resolve to prove the item works —
 //      that command's own exit alone; no other command ever returns it.
-//   7  another session holds this run's driver lease (bug-19): every
-//      mutating command refuses it, and `claim` refuses to take over a run
-//      that is `running`, FRESH and already led. Nothing is written. Its own
-//      number rather than a `1` for the same reason `6` is: the reaction is
-//      not "fix this call and retry" but STOP — another session is driving
-//      this run, so write nothing more and exit (references/recovery.md).
 //   6  `stage <id> preflight` and `stage <id> dispatched` alone: a pause
 //      request is effective for this run and the call is a transition into
 //      one of those two stages (see cmdStage's own comment for why exactly
@@ -2995,6 +3067,13 @@ commands:
 //      `1` because a `1` means "fix this call and retry" and this one must
 //      never be retried: the reaction is a DIFFERENT command entirely,
 //      `finish --status paused` — SKILL.md §10, "Pausing".
+//   7  another session holds this run's driver lease (bug-19): every mutating
+//      command refuses it, and `claim`/`abort` refuse to take over a run that
+//      is `running`, FRESH and already led. Nothing is written. Its own number
+//      rather than a `1` for the same reason `6` is: the reaction is not "fix
+//      this call and retry" but STOP — another session is driving this run, so
+//      write nothing more and exit (references/recovery.md). `unpause` is the
+//      one writing command exempt from it; see cmdUnpause for why.
 export function main(argv) {
   const [cmd, ...rest] = argv
   try {

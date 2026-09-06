@@ -109,7 +109,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `4` | lock held: a `run.json` still marked `running` (fresh *or* stale) refusing a plain `init` |
 | `5` | `verify` only: nothing resolvable to verify with |
 | `6` | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; go to §10, *Pausing* |
-| `7` | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit |
+| `7` | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is *actively heartbeating* |
 
 `6` and `7` are the two codes whose reaction is neither a fix nor a retry,
 which is exactly why neither is a `1`. A `1` means "this call was wrong". A
@@ -118,7 +118,9 @@ retry it, never work around it, go to §10. A `7` means "this call was right
 and this session is no longer the one driving this run": another `--resume`
 session claimed it, and two sessions past that point both stage-write one
 `run.json` and both end in a merge to `main`. Stop — do not retry, do not
-re-claim, do not finish the run. `references/recovery.md` has the whole of
+re-claim, do not finish the run. (That prohibition is about a session refused
+mid-run. It does not touch `--abort`, which opens by taking the run over on
+purpose: see `references/recovery.md`.) `references/recovery.md` has the whole of
 the lease, including the `claim` a resume opens with.
 
 That `3` carries two meanings for `watch` deliberately: "no run yet" and

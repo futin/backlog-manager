@@ -3683,7 +3683,14 @@ test('unpause returns a paused run to running and stamps unpausedAt', (t) => {
   // the heartbeat have to be the same instant, or a request landing between
   // them would be judged against the wrong one.
   assert.equal(after.unpausedAt, after.updatedAt)
-  assert.deepEqual(JSON.parse(out.stdout), { status: 'running', unpausedAt: after.unpausedAt })
+  // bug-19 review round 1: `unpause` also takes the driver lease, in that same
+  // single write and off that same clock reading — a paused run's lease belongs
+  // to the session that paused it and exited, so a resume session that left it
+  // in place would be refused by its own next `claim`.
+  assert.equal(after.driver.at, after.unpausedAt)
+  assert.deepEqual(JSON.parse(out.stdout), {
+    status: 'running', unpausedAt: after.unpausedAt, driver: after.driver
+  })
 })
 
 test('unpause refuses any status but paused, writing nothing', (t) => {
@@ -3916,4 +3923,65 @@ test('an unidentified session runs every command and warns that the lease cannot
   const beat = runAs(null, project, home, 'heartbeat')
   assert.equal(beat.status, 0, beat.stderr)
   assert.match(beat.stderr, /lease/i)
+})
+
+// --- bug-19 review round 1: the lease must never strand a run --------------
+
+test('abort takes a crashed run over from its dead driver, and init can then start a new run', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  // The shape that was bricked: `init` stamped the lease, that session died,
+  // and the run file still names it. A person's `--abort` is a NEW session
+  // with a new id, and `--abort` never claims — recovery.md's abort section
+  // opens with the bare command.
+  assert.equal(runAs('sess-dead', project, home, 'init', '--project', project).status, 0)
+  makeStale(home, project)
+
+  const out = runAs('sess-human', project, home, 'abort')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'aborted')
+  assert.equal(after.driver.sessionId, 'sess-human', 'abort did not record the session that ended the run')
+  // The second half of the brick: a run stuck at `running` refuses every
+  // later `init` with exit 4, so a lease that refuses abort locks the project
+  // out of the orchestrator entirely.
+  assert.equal(runAs('sess-next', project, home, 'init', '--project', project).status, 0)
+})
+
+test('abort still refuses a fresh run another session is actively driving, and writes nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+  const file = runFile(home, project)
+  const before = fs.readFileSync(file, 'utf8')
+
+  const out = runAs('sess-b', project, home, 'abort')
+
+  assert.notEqual(out.status, 0)
+  assert.match(out.stderr, /sess-a/)
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused abort wrote to the run file')
+})
+
+test('unpause is exempt from the lease, so a fresh session can resume a paused run', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  // A run paused by the session that was driving it, which then exited —
+  // task-17's own shape. `run.json` keeps that session's lease.
+  assert.equal(runAs('sess-paused', project, home, 'init', '--project', project).status, 0)
+  assert.equal(runAs('sess-paused', project, home, 'finish', '--status', 'paused').status, 0)
+
+  // recovery.md's paused branch, in its documented order: unpause first (a run
+  // has to be `running` before there is anything to drive), claim second.
+  const unpaused = runAs('sess-resume', project, home, 'unpause')
+  assert.equal(unpaused.status, 0, unpaused.stderr)
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'running')
+
+  const claimed = runAs('sess-resume', project, home, 'claim')
+  assert.equal(claimed.status, 0, claimed.stderr)
+  assert.equal(runAs('sess-resume', project, home, 'stage', 'task-5', 'preflight').status, 0)
+
+  // The exemption is `unpause` alone — every other write by a session that is
+  // not the driver still refuses.
+  assert.equal(runAs('sess-paused', project, home, 'heartbeat').status, 7)
 })

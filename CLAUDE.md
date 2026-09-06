@@ -756,10 +756,35 @@ happened.
   run that is `running`, fresh and led by another session, which is what makes
   it safe for both resumers to claim a crashed one — the later write wins, and
   the loser's very next write refuses. That is the one place last-writer-wins
-  is the mechanism rather than the hazard. Layer 3 exists because layers 1 and
+  is the mechanism rather than the hazard. **`abort` and `unpause` TAKE the
+  lease rather than checking it, and that is the rule, not an exception to
+  paper over**: both are commands whose premise is that the previous driver is
+  gone — abort ends the run, unpause is a resume session's first write on a run
+  whose lease belongs to the session that paused it and exited. Guarding them
+  bricked exactly what the lease exists to keep open: a crashed run refused
+  every abort on its dead session's lease, and `init` then refused the project
+  forever with exit `4`; a paused run's board Resume exited `7` before it ever
+  reached `claim`. Taking rather than skipping is what makes the two
+  order-independent — an `unpause` that left the old lease behind produces a
+  fresh, foreign-led run, which is the one state `claim` refuses. The rule
+  lives in the tool, never in `recovery.md`'s step order: prose read once by a
+  session that then takes several hundred turns is a step that can be skipped,
+  and a skipped step here is a stranded run. Layer 3 exists because layers 1 and
   2 can only refuse what this app itself spawns: occurrence 2 was one
   backlog-manager resume racing a dashboard `--resume <session id>` that
   nothing here requested, can see, or could ever refuse from its own server.
+- **The sweeper's prune keeps `paused` runs, because an entry is no longer
+  only its bookkeeping.** `WatchdogEntry` now carries `resumeSpawnAt`, the
+  resume lock both origins take, whose lifetime is `RUN_STALE_MS` from the
+  stamp and not "while the sweeper is interested". Pruning on `running` alone
+  deleted that lock for a paused run on the next tick — one armed by any other
+  project, since the sweep is global — and the next Resume click spawned a
+  second session into a run already being resumed. A paused run is the one
+  non-`running` status that can still be resumed, which is exactly the
+  condition the lock exists for; every genuinely finished status still prunes
+  on the next tick. The keep set is built in `sweep()`, not decided inside
+  `prune()`, so retirement policy stays in the one place that reads the
+  payload.
 - **The watchdog spawns; it never writes the run file.** `runs()` stays the
   one reader; `WatchdogService` only ever calls `AgentsService.resume()` —
   the same spawn path a board click uses — so a resumed session's own

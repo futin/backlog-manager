@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -377,7 +377,15 @@ describe('RunStrip', () => {
       expect(inFlight).toHaveTextContent('Resuming…');
       expect(inFlight).toHaveAttribute('aria-disabled', 'true');
 
-      release?.();
+      // Released and settled inside `act`, so the `.finally(() => setBusy(false))`
+      // that follows lands while this test is still on the hook for it — a
+      // release left to resolve after the test returns is a React state update
+      // outside `act`, which is noise in every later suite's output.
+      await act(async () => {
+        release?.();
+        await Promise.resolve();
+      });
+      expect(screen.getByRole('button', { name: 'Resume run' })).toBeInTheDocument();
     });
 
     it('stays out of action after a success, while the run still reads crashed', () => {

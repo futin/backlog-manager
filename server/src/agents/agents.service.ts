@@ -759,7 +759,18 @@ export class AgentsService {
     // exactly the wrong reaction to being told to wait.
     const entry = this.watchdogState.upsert(run.runId, run.project);
     const now = Date.now();
-    if (entry.resumeSpawnAt !== null && now - Date.parse(entry.resumeSpawnAt) < RUN_STALE_MS) {
+    // `entry.project === run.project` as well as the stamp: entries are keyed
+    // by `runId` alone, and a runId is a timestamp to the second
+    // (`run-YYYYMMDD-HHMMSS`), so two projects whose runs started in the same
+    // second share one entry. That collision has always mis-attributed the
+    // sweeper's bookkeeping; without this clause it would newly refuse a
+    // perfectly legitimate resume of the OTHER project for up to RUN_STALE_MS,
+    // which is a collision upgraded from a wrong number into a wrong answer.
+    if (
+      entry.project === run.project &&
+      entry.resumeSpawnAt !== null &&
+      now - Date.parse(entry.resumeSpawnAt) < RUN_STALE_MS
+    ) {
       const ageSec = Math.round((now - Date.parse(entry.resumeSpawnAt)) / 1000);
       throw new HttpException(
         {

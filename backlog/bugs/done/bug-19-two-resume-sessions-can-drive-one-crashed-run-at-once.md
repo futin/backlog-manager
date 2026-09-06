@@ -528,3 +528,110 @@ above make against the same component: exactly one `POST /api/agents/resume`
 for a double click, `Resuming…` on the control, and `aria-disabled` after the
 first click. What jsdom cannot show is the real strip's layout with a longer
 label in it, which is a visual check for a human at a keyboard.
+
+### Review round 1 — three findings, all fixed
+
+The reviewer found that the lease, added to close the bug, had itself become
+able to strand a run — the exact outcome `docs/invariants.md` says it must
+never produce. All three are fixed with the rule in the tool rather than in
+prose, because `references/recovery.md` is read once by a session that then
+takes several hundred turns and a step it skips is a brick.
+
+**1 (Critical) — `abort` was refused by a dead session's lease.** A crashed run
+carries the lease of the `init` session that died; `--abort` never claims, so
+every abort exited `7` ("another session has taken it over", which was false)
+and `init` then refused the project forever with exit `4`. `cmdAbort` now
+*takes* the run over instead of asserting it, through a `takeOverRun` extracted
+from `cmdClaim` — one refusal rule, applied by both, so a run another session
+is actively heartbeating is still refused and says whose it is. That takeover
+is a real write, because `cmdFinish` (which abort calls) re-reads the file and
+runs its own `assertDriver`.
+
+**2 (Critical) — `unpause` was refused the same way, breaking every resume of a
+paused run.** A paused run's lease belongs to the session that paused it and
+exited, and the resume flow reaches `unpause` before `claim`, so a board Resume
+exited `7` on its first write. `cmdUnpause` now takes the lease in the same
+single write (and off the same clock reading) as `status`/`unpausedAt`/
+`updatedAt`. The first attempt at this — exempting `unpause` from the check —
+was caught by its own new test: an unpause that leaves the old lease in place
+produces a `running`, fresh, foreign-led run, which is precisely what `claim`
+refuses, so the brick simply moved one command later. Taking rather than
+skipping is what makes the two commands order-independent.
+
+**3 (Important) — a sweeper tick deleted the resume lock for a paused run.**
+`sweep()` pruned every entry whose run was not `running`, and an entry now
+carries `resumeSpawnAt`, whose lifetime is `RUN_STALE_MS` rather than "while
+the sweeper is interested". Any tick — including one armed by a different
+project, since the sweep is global — wiped a paused run's lock mid-window. The
+keep set now includes `paused`, built in `sweep()` where the payload is read
+rather than decided inside `prune()`, so retirement policy stays in one place
+and every genuinely finished status still prunes on the next tick. (Crashed
+runs were never exposed: a crashed run *is* `status: 'running'`.)
+
+Minors from the same review, also fixed: the lock now checks
+`entry.project === run.project` (entries are keyed by `runId` alone, and two
+projects can share one, which the lock would have upgraded from mis-attributed
+bookkeeping into a wrong 409); the exit-code contract lists `7` after `6`
+again; `sessionIdentity()` is read once for the one field it fills; and the
+"lease cannot be enforced" warning is once per process rather than once per
+`watch` poll.
+
+Regression tests, one per finding, each failing against the round-1 code:
+
+- `orchestrate.test.mjs` — abort takes a crashed run over from its dead driver
+  and `init` can then start a new run (both halves of the brick); abort still
+  refuses a fresh run another session is driving, writing nothing.
+- `orchestrate.test.mjs` — a fresh session unpauses and then claims a paused
+  run whose lease belongs to the session that paused it, and stages an item;
+  the old driver's `heartbeat` still exits `7`, so the guard is not weakened.
+  The `unpause` contract test now also pins the driver stamp sharing the one
+  clock reading.
+- `test/watchdog-sweep.test.ts` — the resume lock survives a tick that prunes
+  the paused run it belongs to (second resume still 409, one spawn total), and
+  the entry is still dropped on the next tick once that run genuinely finishes.
+
+`test/orchestrator-strip.test.tsx`'s held-spawn case now releases and settles
+inside `act`, so its `setBusy(false)` no longer lands after the test returns.
+
+### Verification (re-run in full)
+
+`npx tsc -p tsconfig.json --noEmit`:
+
+```
+TYPECHECK OK
+```
+
+`npx jest --runInBand`:
+
+```
+Test Suites: 76 passed, 76 total
+Tests:       1445 passed, 1445 total
+Snapshots:   0 total
+Time:        44.119 s
+Ran all test suites.
+```
+
+`pnpm run test:skills`:
+
+```
+# tests 406
+# pass 406
+# fail 0
+```
+
+`pnpm run build`:
+
+```
+✓ built in 1.15s
+```
+
+**One thing to record rather than claim away.** During this round three full-suite
+runs reported failures in `test/question-mode.test.ts` (two cases in one run,
+one in each of two others) — a suite this branch does not touch, testing
+orchestrate prompt composition, though the branch does touch `AgentsService`,
+so it cannot be excluded on that basis alone. It has not reproduced since: the
+suite passed 12/12 in isolation and the full suite passed in seven consecutive
+runs, including two back-to-back, all after the last code change. The failure
+detail was lost (the output was filtered to the summary line at the time), so
+there is nothing here to diagnose from. Recorded as an intermittent worth
+watching, not as a known-good result.

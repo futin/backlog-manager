@@ -719,6 +719,46 @@ describe('watchdog sweeper', () => {
     expect(failed[0].detail).toContain('not counted');
   });
 
+  // --- 9c (bug-19, review round 1): a sweep must not drop the resume lock ---
+  // `sweep()` prunes every entry whose run is not `running`, and a PAUSED run
+  // never is — so any tick, including one armed by a completely different
+  // project, used to delete the whole entry and with it `resumeSpawnAt`. The
+  // next Resume click then spawned a second session into a run that was
+  // already being resumed, which is the exact failure layer 2 exists to
+  // prevent. Crashed runs were never exposed (a crashed run IS `running`), so
+  // this is the paused path specifically.
+
+  it('keeps the resume lock across a sweep that prunes the run it belongs to', async () => {
+    const dash = stubDashboard();
+    await createApp();
+    writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
+
+    await request(app!.getHttpServer())
+      .post('/api/agents/resume')
+      .send({ project: projectPath })
+      .expect(201);
+    expect(dash.spawns()).toHaveLength(1);
+
+    // The tick that used to wipe it: a paused run is not `running`, so it is
+    // not in `keep`.
+    await svc().tick();
+    expect(state().entry(fixture.runId)?.resumeSpawnAt).not.toBeNull();
+
+    await request(app!.getHttpServer())
+      .post('/api/agents/resume')
+      .send({ project: projectPath })
+      .expect(409);
+    expect(dash.spawns()).toHaveLength(1);
+
+    // The retention is "still resumable", not "forever": the moment that run
+    // genuinely ends, its entry is pruned on the next tick exactly as it
+    // always has been (the case below pins the same thing for a run that
+    // recovered and finished).
+    writeRun({ ...fixture, project: projectPath, status: 'done', updatedAt: new Date().toISOString() });
+    await svc().tick();
+    expect(state().entry(fixture.runId)).toBeUndefined();
+  });
+
   // --- 10: the gate refusing is a failure, recorded the same way ------------
 
   it('records the gate\'s own wording when the dashboard is unreachable', async () => {

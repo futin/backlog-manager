@@ -1363,6 +1363,37 @@ every run file written before this existed lacks the key. An unidentified
 caller (a hand-run terminal) warns and proceeds rather than being refused —
 refusing would strand the one person recovering a run by hand.
 
+**Two commands take the lease instead of checking it, and that is the rule
+rather than a hole in it** (review round 1). `abort` and `unpause` are the two
+whose premise is that the previous driver is gone, and guarding them turned the
+lease into precisely what this section says it must never be — the thing that
+strands a run:
+
+- A crashed run carries the lease of the dead `init` session. `--abort` never
+  claims (its section opens with the bare command), so every abort was refused
+  with `7` — "another session has taken it over", which was false — and `init`
+  refuses any `running` run file, fresh or stale, with `4`. The project was
+  locked out of the orchestrator through every supported path at once.
+- A paused run carries the lease of the session that paused it and then
+  exited. The `--resume` flow reaches `unpause` before `claim`, because a run
+  has to be `running` before there is anything to drive, so a board Resume of a
+  paused run exited `7` on its first write and stopped — task-17's whole pause
+  → resume round trip, with the remaining queue abandoned.
+
+TAKING the lease, rather than merely skipping the check, is what makes this
+independent of the order the prose prints: an `unpause` that left the old lease
+in place produces a run that is `running`, fresh and foreign-led, which is the
+one state `claim` refuses — so the brick would have moved one command later
+instead of going away. Both apply `claim`'s own refusal rule, so a run another
+session is actively heartbeating still refuses both, and the answer there is to
+pause it from the board (a pause needs no lease) and abort the paused run.
+
+The rule lives in the tool rather than in an extra `claim` step in
+`references/recovery.md`, for the reason SKILL.md gives about prose generally:
+that file is read once by a session that then takes several hundred turns, and
+a step it skips is a brick. A rule a command applies to itself cannot be
+skipped.
+
 The guarantee is a deterministic single survivor with no cross-process locking
 primitive: on a crashed run both resumers may claim, the later write wins, and
 the loser's very next write exits `7` and stops it. Last-writer-wins — the
@@ -1372,6 +1403,19 @@ checked against it. `claim` refuses one situation only: a run that is
 `running`, FRESH, and led by someone else. A crashed run is claimable by
 anybody, which is the point — that is the state a resume exists for, and
 refusing there would make the lease the thing that strands a run.
+
+**The layer-2 lock outlives the sweeper's interest in a run** (review round 1).
+`resumeSpawnAt` lives on `WatchdogEntry`, and `sweep()` used to prune every
+entry whose run was not `running` — which a `paused` run never is. Any tick,
+including one armed by a completely different project, deleted the entry and
+the lock with it, and the next Resume click spawned a second session into a run
+already being resumed. Crashed runs were never exposed, since a crashed run IS
+`status: 'running'`. The keep set now includes `paused`, built in `sweep()`
+where the payload is read rather than inside `prune()`, so retirement policy
+stays in one place and every genuinely finished status still prunes on the next
+tick. `test/agents-resume.test.ts`'s paused-lock case passes with or without
+this — no sweep runs inside it — so the pin is `test/watchdog-sweep.test.ts`'s
+own case, which ticks between the two resumes.
 
 Exit `7` rather than `1` for exit `6`'s reason: the reaction is not "fix this
 call and retry" but stop, write nothing more, exit. `references/recovery.md`
