@@ -1132,8 +1132,12 @@ gate check: the two callers derive different answers
 different sibling blocks, so folding the policy in would mean a config object
 per caller. The drift-prone half is the mechanics — a hand-written copy that
 acts on the stale render, or drops the in-flight guard, looks right and is
-wrong. This repo does repeat small idioms on purpose (three copies of the
-Escape effect), but those are stateless and have no wrong answer.
+wrong. The Escape effect the four dialogs each carried their own copy of read
+as one of the stateless idioms this repo repeats on purpose, right up until
+bug-23: two of those dialogs are mounted together by design, so one press ran
+both callbacks. It is now `hooks/useDialogEscape.ts` — one stack, one listener
+— which makes it the same lesson as this hook rather than the counterexample
+to it.
 
 Three differences from the per-item case, each a consequence of the control
 being project-scoped rather than item-scoped:
