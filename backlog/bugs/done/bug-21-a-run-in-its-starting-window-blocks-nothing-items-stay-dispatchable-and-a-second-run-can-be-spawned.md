@@ -470,3 +470,83 @@ Re-verified after the prose round:
     $ pnpm run build
     dist/assets/index-B3AaWIr7.js   340.53 kB │ gzip: 103.74 kB
     ✓ built in 1.47s
+
+### Review round 2 — the claim removed everywhere, not corrected site by site
+
+`backlog-reviewer` returned `fix` again: the same stale claim at a third site,
+`shared/types.ts`'s `RUN_IN_PROGRESS_CODE` doc comment — which round 1's own
+rewrite names as the authority a reader should follow. It said the code is
+"present ONLY on the activeRun-lock refusal … never on that endpoint's other
+409s", so a reader following that pointer landed on the one statement saying
+this branch's decision was a bug, and removing the starting lock's `code` would
+have cost `OrchestrateSheet`'s close-and-hand-to-the-strip behaviour.
+
+Round 1 corrected two sites and a third was still wrong. That is the diagnosis:
+correcting occurrences of a tally is not a fix, because a tally kept in N places
+goes stale N times. So this round removes the class rather than patching the
+instance.
+
+**One rule, stated in one place.** `shared/types.ts`'s doc comment was rewritten
+to say what the code MEANS — "a run for this project is alive right now" — and
+that this is **one code, not one occasion**: three refusals send it today
+(orchestrate's `activeRun` lock, orchestrate's starting lock, `resume()`'s
+fresh-run refusal, the last of which has sent it since bug-19 and which the
+comment also mis-stated, pre-existing debt fixed in the same pass). It now says
+outright that no other site enumerates where the code appears or counts a
+route's 409 reasons, and why: that tally had gone stale in five files across two
+branches, which is the failure CLAUDE.md's origin-guard invariant already
+records for its own route list.
+
+Every other site was then rewritten to assert the MEANING and stop counting —
+found by grepping the whole repo for both patterns, per the review's
+instruction, and re-grepped afterwards to prove none survives:
+
+- `shared/types.ts` — the authority, rewritten (above).
+- `server/src/agents/agents.service.ts` — four sites: dispatch's uncoded-409
+  comment ("one and only coded 409 in this app"), `resume()`'s reuse rationale
+  (enumerated "both" refusals), `resolveIds` ("the one coded 409 this endpoint
+  has"), `resolveMergeMode` (pointed at the activeRun throw as the sole
+  sender), plus the ordering comment at the `resolveIds` call ("the activeRun
+  lock is the only 409 this endpoint codes") — and round 1's own replacement
+  text, which had itself counted ("bug-21 added a fifth reason").
+- `client/src/lib/agents.ts` — "answers 409 for four genuinely different
+  reasons", "every response except that one endpoint's activeRun-lock 409".
+- `client/src/components/board/OrchestrateSheet.tsx` — "on the lock 409 ONLY";
+  now says both of that endpoint's locks answer with it and that closing into
+  the strip world is right for both (Minor 2, which the review listed as
+  defensible and not required — corrected anyway, since this pass exists to
+  leave no site that could become the fourth).
+- `docs/invariants.md` — two sites: the `ids` 409 rationale, and the "One run
+  per project" long form's "the only one `orchestrate()` throws that carries a
+  `code`".
+- Five test suites — `orchestrator-start`, `orchestrator-start-ui`,
+  `merge-mode`, `question-mode`, `agents-dispatch` — all comment text; no
+  assertion, name or fixture touched.
+- `CLAUDE.md` — Minor 1: "rule 3 is what guarantees one row per project"
+  narrowed to the collision rule 3 actually covers, with the `paused` case
+  spelled out and an explicit warning against widening rule 3 to include it
+  (which would strip the placeholder from a project that can legitimately
+  start a run). `BoardView`'s comment already said this after round 1; the
+  invariants file now agrees.
+
+Round 2's Minor 3 needed no action and got none: three pre-existing
+`orchestrator-starting` cases now have both rule 1 and rule 3 answering, but
+the properties they pin (project scoping, purity, sweep-deletes) still hold,
+and the three cases where the ambiguity would have lost rule-1 coverage were
+already re-scoped to `done` in the first round.
+
+Comment-only round. No expression, statement, assertion or test name changed.
+
+    $ pnpm run typecheck
+    $ tsc --noEmit
+    (no output — clean)
+
+    $ pnpm test
+    Test Suites: 76 passed, 76 total
+    Tests:       1469 passed, 1469 total
+    Snapshots:   0 total
+    Time:        78.915 s
+
+    $ pnpm run build
+    dist/assets/index--XYYGF4N.js   340.53 kB │ gzip: 103.74 kB
+    ✓ built in 1.42s

@@ -146,13 +146,13 @@ describe('the agents client', () => {
   });
 
   // Fix round 2: `status === 409` alone turned out to be too coarse for
-  // OrchestrateSheet's one caller that needs to distinguish the
-  // orchestrate-lock 409 from the same endpoint's three OTHER 409 reasons
-  // (project-invisible, no CLAUDE_BIN, the dirName race) — see
+  // OrchestrateSheet's one caller, which has to tell "a run for this project
+  // is alive right now" apart from that endpoint's other 409 reasons — see
   // RUN_IN_PROGRESS_CODE's own doc comment (shared/types.ts) for the full
-  // story. These two cases are `unwrap`'s own half of that fix: a `code`
-  // field, when the body actually carries one, has to survive the same
-  // parse `error`/`status` already do.
+  // story, and for why no site outside it enumerates those. These two cases
+  // are `unwrap`'s own half of that fix: a `code` field, when the body
+  // actually carries one, has to survive the same parse `error`/`status`
+  // already do.
   it('carries an optional code through from the error body when present', async () => {
     stub({
       ok: false, status: 409,

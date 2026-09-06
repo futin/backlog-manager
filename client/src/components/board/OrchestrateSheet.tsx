@@ -516,10 +516,17 @@ export function OrchestrateSheet(
         // visibility problem is not a milder version of the bug the
         // message-substring check had — it is a confidently WRONG answer,
         // worse than the brittle one it replaced. Fix round 2: the server
-        // now sends a `code` field (RUN_IN_PROGRESS_CODE, shared/types.ts)
-        // on the lock 409 ONLY, so this checks status AND that exact code
-        // — every other 409 (uncoded) falls through to the generic path
-        // below and shows the server's own, accurate error text instead.
+        // sends a `code` field (RUN_IN_PROGRESS_CODE, shared/types.ts) on a
+        // refusal that means "a run for this project is alive right now",
+        // so this checks status AND that exact code — every other 409
+        // (uncoded) falls through to the generic path below and shows the
+        // server's own, accurate error text instead.
+        //
+        // Both of that endpoint's locks answer with it, and closing into the
+        // strip world is right for both: the activeRun lock means a run file
+        // is already there to render, and bug-21's starting lock means a
+        // `StartingStrip` is already rendering for the spawn this sheet is
+        // trying to duplicate. This deliberately does not care which.
         if (e instanceof ApiError && e.status === 409 && e.code === RUN_IN_PROGRESS_CODE) {
           refresh();
           onClose();

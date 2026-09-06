@@ -31,14 +31,15 @@ import type {
  *
  * `code` is fix round 2's addition, and it exists for a narrower reason than
  * `status`: `status === 409` alone turned out to be too coarse for
- * `POST /api/agents/orchestrate` specifically, which answers 409 for four
+ * `POST /api/agents/orchestrate` specifically, which answers 409 for several
  * genuinely different reasons (RUN_IN_PROGRESS_CODE's own doc comment,
- * shared/types.ts, has the full story). `code` is `undefined` for every
- * response that carries no `{ code }` field at all — which today is every
- * response except that one endpoint's activeRun-lock 409 — so a caller
- * checking a SPECIFIC code, not just its presence, is what keeps this
- * generic rather than growing into a wider error taxonomy no other route
- * asked for.
+ * shared/types.ts, has the full story, and is deliberately the only place
+ * that says anything about which refusals carry the code — a tally kept
+ * anywhere else has gone stale every time one was added). `code` is
+ * `undefined` for every response that carries no `{ code }` field at all,
+ * which is nearly all of them, so a caller checking a SPECIFIC code rather
+ * than merely its presence is what keeps this generic instead of growing
+ * into a wider error taxonomy no other route asked for.
  */
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly code?: string) {

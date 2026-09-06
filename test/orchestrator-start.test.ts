@@ -419,7 +419,7 @@ describe('POST /api/agents/orchestrate', () => {
      lock a window earlier, and `OrchestrateSheet` branches on that code to
      `refresh()` + `onClose()` — which is exactly right here: the sheet
      closes and hands the screen to the StartingStrip already rendering.
-     RUN_IN_PROGRESS_CODE stays the app's only coded 409; this is a second
+     RUN_IN_PROGRESS_CODE stays the app's only 409 code; this is another
      occasion for it, not a second code. */
   it('carries RUN_IN_PROGRESS_CODE on the starting lock too', async () => {
     stubDashboard();
@@ -751,9 +751,10 @@ describe('POST /api/agents/orchestrate', () => {
     expect(spawnedPrompt(sent)).toBeUndefined();
   });
 
-  /* Ordering, and the one mistake this whole feature can make. The activeRun
-     lock is the ONLY 409 this endpoint codes, and OrchestrateSheet branches
-     on that code to close itself and hand the screen to the run strip. If
+  /* Ordering, and the one mistake this whole feature can make. The two locks
+     — the activeRun one and bug-21's starting one — are the refusals this
+     endpoint CODES, and OrchestrateSheet branches on that code to close
+     itself and hand the screen to the run strip. If
      ids were validated before the lock, a stale board tab whose selection
      has since been archived would answer an uncoded 409 for a project that
      is actually mid-run — and the sheet would sit there showing "task-3 is

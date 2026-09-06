@@ -391,10 +391,11 @@ describe('POST /api/agents/dispatch', () => {
     expect(sent.some((c) => c.url.endsWith('/api/spawn'))).toBe(false);
   });
 
-  /* `RUN_IN_PROGRESS_CODE` stays the one and only coded 409 in this app (see
-     its own doc comment for the incident that rule exists to prevent). Nothing
-     needs to tell this refusal apart from dispatch's other 409s
-     programmatically, so it carries no code — asserted, because a `code` added
+  /* `RUN_IN_PROGRESS_CODE` means "a run for this project is alive right now"
+     (see its own doc comment for the incident that rule exists to prevent).
+     This refusal is a different fact — a run has CLAIMED this item — and
+     nothing needs to tell it apart from dispatch's other 409s
+     programmatically, so it carries no code. Asserted, because a `code` added
      here later is exactly the drift that comment forbids. */
   it('sends no machine-readable code on the run-claim refusal', async () => {
     stubDashboard();
@@ -436,8 +437,9 @@ describe('POST /api/agents/dispatch', () => {
 
     const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
     expect(res.body.error).toBe('an orchestrator run is starting for this project');
-    // Uncoded, like every other dispatch 409: RUN_IN_PROGRESS_CODE stays the
-    // app's one coded 409 and belongs to the orchestrate lock alone.
+    // Uncoded, like every other dispatch 409: RUN_IN_PROGRESS_CODE means "a
+    // run for this project is alive right now", and a run CLAIMING this item
+    // is a different fact that nothing needs to tell apart by machine.
     expect(res.body.code).toBeUndefined();
     // One spawn — the orchestrate one. The dispatch was refused before its
     // own, which is the difference between a block and an after-the-fact

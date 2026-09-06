@@ -313,22 +313,38 @@ export interface PauseResult {
 }
 
 /**
- * The one machine-readable discriminator `POST /api/agents/orchestrate`
- * ever sends — a `code` field alongside that 409's human-readable `error`
- * string, present ONLY on the activeRun-lock refusal (agents.service.ts's
- * `orchestrate()`), never on that endpoint's other 409s (project-invisible,
- * no CLAUDE_BIN, remote-answers-off, the dirName race).
+ * The app's ONE machine-readable 409 discriminator — a `code` field alongside
+ * a 409's human-readable `error` string. It means exactly one thing:
  *
- * Fix round 2's whole reason to exist: that endpoint has several distinct
- * 409 reasons sharing one HTTP status, so status alone cannot tell a client
- * which one happened — and a client parsing the `error` PROSE to guess is
- * exactly the fragility a fix round already had to remove once
+ *     a run for this project is alive right now.
+ *
+ * **One CODE, not one occasion, and that distinction is the whole rule.**
+ * This comment used to enumerate the single refusal that sent it and list
+ * that endpoint's other 409s by name, and it was falsified twice — by
+ * bug-19, which gave `resume()`'s fresh-run refusal the same code, and by
+ * bug-21, which gave `orchestrate()` a second lock (a `starting` entry: the
+ * window in which no run file exists yet but the server holds the record
+ * proving a session is booting into one) and the same code again. Both
+ * reuses are correct and deliberate: every one of those refusals states the
+ * identical fact, reached from a different direction, and every reader of
+ * the code — `OrchestrateSheet`, `RunStrip`, `RunControls` — reacts to it
+ * identically. Two codes for one fact is the drift this constant exists to
+ * rule out; a THIRD sender of it is not drift at all.
+ *
+ * So no site in this repo enumerates where it appears or counts a route's
+ * 409 reasons. That tally has now gone stale in five files across two
+ * branches, which is the same failure CLAUDE.md's origin-guard invariant
+ * already records for its own route list. What a caller may rely on is the
+ * MEANING above and nothing narrower; what a caller must never do is guess
+ * from the `error` prose, which is the fragility this replaced
  * (OrchestrateSheet.tsx's own history: a message-substring match broke
- * silently the moment the wording changed). `code` turns "is this the
- * lock, specifically" from a guess into a question with one right answer.
- * Deliberately not a wider taxonomy — no other 409 on this or any other
- * route gets a `code`, and none should without its own reason to exist;
- * this is the one case, kept minimal on purpose.
+ * silently the moment the wording changed).
+ *
+ * Deliberately still not a wider taxonomy. Every other 409 in this app —
+ * dispatch's run claim, the environment and visibility refusals, the dirName
+ * race, `resume()`'s own resume-spawn lock — is uncoded, because nothing
+ * about them needs telling apart by a machine, and none should gain a code
+ * without its own reason to exist.
  *
  * Exported once here rather than declared as a bare string literal in both
  * agents.service.ts (which sends it) and OrchestrateSheet.tsx (which reads

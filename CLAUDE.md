@@ -282,9 +282,16 @@ happened.
   leaks at most one entry per project and never lies, which is what makes
   `AgentsService`'s own direct `runs()` calls safe without one. The board
   maps `StartingStrip` straight over `starting`, with **no client-side
-  filter**: rule 3 is what guarantees one row per project, and keeping a
+  filter**: rule 3 is what rules out the collision that filter existed for —
+  a placeholder drawn beside a `running` run file's own strip — and keeping a
   second expression beside it that merely agreed is the shape
-  `watchdogStoodDown` and `isStale` are each one function to avoid. `POST
+  `watchdogStoodDown` and `isStale` are each one function to avoid. It is
+  deliberately not a guarantee of one row per project in every case: the
+  strip's list is `running || paused` while rule 3 is keyed on `running`
+  alone, so a stale `paused` run plus a live starting entry renders two rows,
+  which is reachable and correct — they are two different runs, and widening
+  rule 3 to `paused` to suppress the second would strip the placeholder from
+  a project that can legitimately start a run. `POST
   /api/agents/resume` is deliberately not marked: the run it resumes already
   reads `running`, so the board is already drawing a crashed strip for it and
   the screen was never blank.

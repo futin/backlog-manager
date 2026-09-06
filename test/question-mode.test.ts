@@ -274,7 +274,7 @@ describe('POST /api/agents/orchestrate — questionMode', () => {
   // --- The lock still wins ------------------------------------------------
   //
   // Same ordering point merge-mode.test.ts's case 8 makes, for the same
-  // reason: the activeRun lock is the ONLY 409 this endpoint codes, and
+  // reason: the run locks are the refusals this endpoint CODES, and
   // OrchestrateSheet branches on that code to close itself. A request
   // carrying both problems must answer with the coded 409, never the 400.
 
