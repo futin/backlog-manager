@@ -754,10 +754,22 @@ export default function BoardView() {
           {/* task-14's placeholders first, above the live strips: a run
               nobody can see yet is the one thing on this stack a person is
               actively waiting on, and it stops being a placeholder the
-              moment its run file lands. The payload guarantees these two
-              maps can never both render a row for the same project — see
-              `starting`'s own note above, and rule 3 in
-              StartingRunsService.expired(). */}
+              moment its run file lands.
+
+              Rule 3 (StartingRunsService.expired()) is what keeps these two
+              maps from both drawing a row for a project with a `running` run
+              file, fresh or crashed — which is the collision the deleted
+              client-side filter existed for. It is deliberately NOT a
+              guarantee for every pair: `stripRuns` above is `running ||
+              paused`, and rule 3 is keyed on `running` alone, so a project
+              with a stale `paused` run and a live starting entry renders
+              both. That pair is reachable (the pre-spawn `activeRun` lock
+              refuses only a FRESH run, and `cmdInit` archives a paused file,
+              so orchestrating a stale-paused project is allowed and marks
+              it) and it is also correct: the paused run and the starting one
+              are two different runs, and the second is genuinely starting.
+              The old filter permitted the identical pair, subtracting
+              `running` only. */}
           {starting.map((s) => (
             <StartingStrip key={`starting:${s.project}`} starting={s} />
           ))}

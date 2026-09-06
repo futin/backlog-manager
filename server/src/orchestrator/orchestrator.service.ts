@@ -332,8 +332,8 @@ export class OrchestratorService {
     // `list`, the pure half — this method stays a pure read (see the class
     // comment). The prune that drops the entries this filter just hid lives
     // in OrchestratorController.runs(), beside watchdogState.observe(), and
-    // nothing depends on it having run: `list` re-applies both eviction
-    // rules on every call, so an unswept entry is filtered out here anyway.
+    // nothing depends on it having run: `list` re-applies every eviction
+    // rule on every call, so an unswept entry is filtered out here anyway.
     //
     // Filtered against `runs`, the real runs just read off disk, rather than
     // against `[]` — that argument IS eviction rule 1, and passing an empty

@@ -46,8 +46,8 @@ import type { OrchestratorRun, StartingRun } from '../../../shared/types';
  * that could return an entry `sweep` would delete — or the reverse — is the
  * bug this shape makes impossible to write.
  *
- * **Correctness never depends on the sweep.** `list()` re-applies both
- * eviction rules on every call, so an entry nobody ever sweeps is filtered
+ * **Correctness never depends on the sweep.** `list()` re-applies every
+ * eviction rule on every call, so an entry nobody ever sweeps is filtered
  * out of every payload anyway: an unswept map leaks memory (bounded at one
  * entry per project), it never lies. That is what makes `AgentsService`'s own
  * direct `runs()` calls — the `RUN_IN_PROGRESS` lock check, and `resume()` —
@@ -111,8 +111,10 @@ export class StartingRunsService {
   }
 
   /**
-   * The ONE eviction rule, shared by both methods above. An entry stops
-   * being live when either holds:
+   * The ONE eviction predicate, shared by both methods above. An entry
+   * stops being live when ANY of these holds — three rules, and the count is
+   * spelled out because rule 3 arrived after the other two (bug-21) and the
+   * word this sentence used to open with was "either":
    *
    *   1. **A real run for that project has landed.** A run in `realRuns`
    *      whose `project` matches and whose `startedAt` parses to at or after

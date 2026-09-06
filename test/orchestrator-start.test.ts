@@ -385,7 +385,7 @@ describe('POST /api/agents/orchestrate', () => {
   // client-side check (RUN_IN_PROGRESS_CODE, shared/types.ts) has nothing
   // to check against if this ever regresses to sending the bare `{ error }`
   // fix round 1 shipped.
-  it('carries RUN_IN_PROGRESS_CODE on the activeRun lock 409, and only there', async () => {
+  it('carries RUN_IN_PROGRESS_CODE on the activeRun lock 409', async () => {
     const sent = stubDashboard();
     writeRun({ ...fixture, project: projectPath, updatedAt: new Date().toISOString() });
 

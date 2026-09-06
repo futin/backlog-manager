@@ -410,3 +410,63 @@ restored:
     $ pnpm run build
     dist/assets/index-BhbhSkiK.js   340.53 kB │ gzip: 103.73 kB
     ✓ built in 1.29s
+
+### Review round 1 — prose corrected
+
+`backlog-reviewer` returned `fix` on one Important finding, and it was right.
+No behaviour changed in this round; four prose sites did.
+
+The finding: the fix reused `RUN_IN_PROGRESS_CODE` for a second occasion —
+argued in the new block's own comment and in the new invariant — while two
+OLDER statements went on saying that a second coded 409 on this route would be
+a mistake. Both sat where a reader looks first.
+
+- **`server/src/agents/agents.service.ts`** — the `activeRun` throw's `code`
+  comment enumerated "FOUR distinct 409 reasons" and said the code was "sent
+  ONLY on this one 409 — every other throw in this method … deliberately left
+  without one". Four lines below it, the new starting lock sends the same
+  code. Rewritten: the tally is **removed rather than incremented** (it is the
+  same hand-maintained-count drift the origin-guard invariant already records
+  going stale once inside a single branch), and the load-bearing claim is
+  restated correctly — the code means "a run for this project is alive right
+  now" and rides exactly the two throws that mean that, the `activeRun` lock
+  and the starting lock beside it. The starting block's own comment now points
+  back at its neighbour, so neither side can drift alone.
+- **`CLAUDE.md`, "One run per project, checked twice"** — still said the
+  endpoint re-checks "only against a *fresh* run" and codes "that lock case
+  alone". Both false since this fix. Rewritten so the re-check is two
+  conditions (fresh run file, or a starting entry), a stale run file is still
+  explicitly not a refusal here, and the coded 409 names both occasions with
+  the reason one code covers both.
+
+Three Minor drifts from the same change, fixed in the same pass because each
+is a sentence made false by rule 3:
+
+- `starting-runs.service.ts` (class comment and `expired()`'s "when either
+  holds"), `orchestrator.service.ts` and `orchestrator.controller.ts` all said
+  `list` re-applies "both eviction rules". There are three.
+- `test/orchestrator-start.test.ts`'s case name ended "and only there", which
+  the sibling case added four cases below contradicts. Name trimmed; no
+  assertion touched.
+- `BoardView`'s strip comment claimed the payload guarantees the two maps can
+  never both draw a row for one project. Rule 3 is keyed on `running` while
+  `stripRuns` is `running || paused`, so a stale-`paused` run plus a live
+  starting entry renders both — reachable, and correct (two different runs).
+  The claim is now narrowed to the collision rule 3 actually covers, which is
+  the one the deleted client filter existed for.
+
+Re-verified after the prose round:
+
+    $ pnpm run typecheck
+    $ tsc --noEmit
+    (no output — clean)
+
+    $ pnpm test
+    Test Suites: 76 passed, 76 total
+    Tests:       1469 passed, 1469 total
+    Snapshots:   0 total
+    Time:        68.566 s
+
+    $ pnpm run build
+    dist/assets/index-B3AaWIr7.js   340.53 kB │ gzip: 103.74 kB
+    ✓ built in 1.47s

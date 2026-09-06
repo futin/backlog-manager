@@ -503,20 +503,33 @@ export class AgentsService {
       throw new HttpException(
         {
           error: `a run is already in progress for this project (${activeRun.runId})`,
-          // Fix round 2: this endpoint has FOUR distinct 409 reasons (this
-          // lock, project-invisible above, and the CLAUDE_BIN/remote-answer
-          // cases folded into `gate.control === 'hidden'` above) sharing one
-          // HTTP status, so a client cannot tell which one happened from
+          // Fix round 2: this endpoint throws several distinct 409s sharing
+          // one HTTP status, so a client cannot tell which one happened from
           // the status code alone — and must never guess from this `error`
           // string's prose either (RUN_IN_PROGRESS_CODE's own doc comment,
           // shared/types.ts, has the full incident that rule exists to
           // prevent a repeat of). `code` is that stable, machine-readable
-          // answer, sent ONLY on this one 409 — every other throw in this
-          // method (the two just above, and the dirName race below) is
-          // deliberately left without one; nothing about them needs to be
-          // distinguished from each other, and OrchestrateSheet's own retry
-          // path (client/src/components/board/OrchestrateSheet.tsx) is
-          // exactly right for all three of them as-is.
+          // answer.
+          //
+          // Deliberately no count of those reasons here. This line used to
+          // enumerate them ("FOUR distinct 409 reasons …") and to claim the
+          // code was "sent ONLY on this one 409"; bug-21 added a fifth
+          // reason four lines below and gave it this SAME code, which made
+          // both halves false at a stroke. A hand-maintained tally of a list
+          // that lives elsewhere is the drift class CLAUDE.md's origin-guard
+          // invariant already records going stale once inside a single
+          // branch, so the tally is gone rather than incremented.
+          //
+          // What IS load-bearing, and what a reader has to be able to trust:
+          // the code marks "a run for this project is alive right now", and
+          // it is sent on exactly the two throws that mean that — this
+          // `activeRun` lock and the starting lock immediately below, which
+          // is the same lock one window earlier. Every OTHER throw in this
+          // method (the two environment ones above, and the dirName race
+          // below) is deliberately left without one; nothing about them
+          // needs to be distinguished from each other, and OrchestrateSheet's
+          // own retry path (client/src/components/board/OrchestrateSheet.tsx)
+          // is exactly right for all of them as-is.
           code: RUN_IN_PROGRESS_CODE
         },
         409
@@ -534,7 +547,10 @@ export class AgentsService {
        to `refresh()` + `onClose()` — exactly the right behaviour here, since
        the sheet closes and hands the screen to the `StartingStrip` that is
        already rendering. `RUN_IN_PROGRESS_CODE` stays the app's only coded
-       409; this is a second occasion for it, not a second code.
+       409 — this is a second OCCASION for it, not a second code — and the
+       comment on the throw above says so from its side too, since a reader
+       who lands there first must not be told a second coded 409 on this
+       route is a mistake.
 
        No `runId` to name, which is the one way this refusal reads
        differently from the one above: a starting entry has a project and a

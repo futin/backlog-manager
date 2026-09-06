@@ -728,10 +728,23 @@ happened.
   means a crashed run, recoverable only via `--resume`/`--abort`, never
   silently overwritten. `POST /api/agents/orchestrate` re-checks before it
   spawns anything, on the one path that reaches a run without going through
-  `init` at all, but only against a *fresh* run (`RUN_STALE_MS`); it answers
-  409 with a machine-readable `code: RUN_IN_PROGRESS_CODE` on that lock case
-  alone — every other 409 this endpoint can throw carries no code, because
-  nothing about them needs to be told apart.
+  `init` at all. That re-check is **two conditions, not one**: a *fresh* run
+  file (`RUN_STALE_MS`), and — since bug-21 — a `starting` entry for the same
+  project, the window in which no run file exists yet but this same process
+  holds the record proving a session is booting into one. A stale run file is
+  still not a refusal here, deliberately: recovering one is `--resume`/
+  `--abort`'s job, and `init` is the lock that actually holds it. Both
+  conditions answer 409 with the machine-readable
+  `code: RUN_IN_PROGRESS_CODE`, and **those two occasions are the only ones**
+  — every other 409 this endpoint can throw carries no code, because nothing
+  about them needs to be told apart. One code for both is the point rather
+  than an oversight: it means "a run for this project is alive right now",
+  which is equally true either side of the run file landing, and
+  `OrchestrateSheet`'s single branch on it (close, hand the screen to the
+  strip) is the right reaction to both. Deliberately no count of this
+  endpoint's 409 reasons here or in the code — that tally went stale the
+  moment the starting lock landed, exactly as the origin-guard invariant's
+  did.
 - **A pause request lives in a server-owned file the tool reads at its two
   dispatch gates; `paused` is a fifth run status and `unpause` its only
   exit.** `POST /api/agents/pause` (`{ project, cancel? }`, origin-guarded,
