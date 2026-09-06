@@ -26,6 +26,16 @@ let projectPath: string;
 
 interface Sent { url: string; init?: RequestInit }
 
+/* The two shapes a rejected `fetch` actually arrives as, measured on Node 22
+   while grooming bug-26: a connection failure is a `TypeError` whose message
+   is the useless literal `fetch failed`, the detail living only in `.cause`;
+   the `AbortSignal.timeout` path is a `DOMException` naming no budget.
+   Duplicated per suite, exactly as the stub above them already is. */
+const CONN_REFUSED = Object.assign(new TypeError('fetch failed'), {
+  cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:4173' }
+});
+const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+
 /**
  * Same shape as orchestrator-start.test.ts's own stubDashboard — duplicated
  * rather than imported, matching this repo's existing convention of every
@@ -35,16 +45,21 @@ interface Sent { url: string; init?: RequestInit }
  * same as orchestrate.
  */
 function stubDashboard(
-  spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true },
+  spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {},
   ceiling: string = 'acceptEdits'
 ) {
   const sent: Sent[] = [];
+  const ok = spawn.ok ?? true;
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     sent.push({ url, init });
     if (url.endsWith('/api/spawn')) {
+      // `reject` fails the spawn call ALONE, health and /api/management still
+      // resolving — the shape bug-26 was invisible in, since case 3 below
+      // rejects every fetch and so never reaches spawn() at all.
+      if ('reject' in spawn) return Promise.reject(spawn.reject);
       return Promise.resolve({
-        ok: spawn.ok, status: spawn.status ?? (spawn.ok ? 200 : 429),
+        ok, status: spawn.status ?? (ok ? 200 : 429),
         json: () => Promise.resolve(spawn.body ?? { sessionId: 'sess-1' })
       } as Response);
     }
@@ -263,6 +278,41 @@ describe('POST /api/agents/resume', () => {
     const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
     const body = JSON.parse(String(spawn?.init?.body));
     expect(body.permissionMode).toBe('acceptEdits');
+  });
+
+  // --- Case 9b/9c (bug-26): the spawn call itself rejects -------------------
+  // Case 3 above rejects every fetch, so the environment gate refuses on the
+  // health probe and spawn() is never entered. These two get all the way
+  // there and fail the spawn call alone — the path that answered a bare
+  // `{ statusCode: 500, message: 'Internal server error' }`, which the client
+  // degrades to `request failed (500)`. Asserting `statusCode` is absent is
+  // what pins "not the Nest default shape"; the status alone would pass
+  // against a filter that merely relabelled the number.
+
+  it('502s with the connection detail when the resume spawn fetch is refused', async () => {
+    stubDashboard({ reject: CONN_REFUSED });
+    writeRun({
+      ...fixture, project: projectPath, status: 'running',
+      updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    });
+
+    const res = await post({ project: projectPath }).expect(502);
+    expect(res.body.error).toContain('ECONNREFUSED');
+    expect(res.body.statusCode).toBeUndefined();
+  });
+
+  it('502s naming the timeout budget when the resume spawn fetch times out', async () => {
+    stubDashboard({ reject: SPAWN_TIMED_OUT });
+    writeRun({
+      ...fixture, project: projectPath, status: 'running',
+      updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    });
+
+    const res = await post({ project: projectPath }).expect(502);
+    expect(res.body.error).toContain('10000');
+    expect(res.body.error).toMatch(/timed out/);
+    expect(res.body.error).not.toContain('The operation was aborted');
+    expect(res.body.statusCode).toBeUndefined();
   });
 
   // --- Case 10: nothing from the body reaches the spawn but `project` -------

@@ -27,15 +27,39 @@ let projectPath: string;
 
 interface Sent { url: string; init?: RequestInit }
 
-/** Records every outbound call and answers the three the service makes. */
-function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true }) {
+/* The two shapes a rejected `fetch` actually arrives as, measured on Node 22
+   while grooming bug-26 — a connection failure is a `TypeError` whose own
+   message is the useless literal `fetch failed`, with the detail only in
+   `.cause`; the `AbortSignal.timeout` path is a `DOMException` that names no
+   budget. Duplicated into each of the three spawn suites, exactly as the
+   stubs they feed already are. */
+const CONN_REFUSED = Object.assign(new TypeError('fetch failed'), {
+  cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:4173' }
+});
+const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+
+/**
+ * Records every outbound call and answers the three the service makes.
+ *
+ * `reject` is the one mode this stub could not express before bug-26: the
+ * spawn fetch *rejecting* while health and /api/management still resolve.
+ * Every 502 case in this suite before it rejected `/api/health` too, which
+ * `dispatchBlock` answers long before `spawn()` is ever reached — so the
+ * one path where a rejection escapes `spawn()` itself had no case at all,
+ * which is exactly how the unmapped 500 shipped.
+ */
+function stubDashboard(
+  spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {}
+) {
   const sent: Sent[] = [];
+  const ok = spawn.ok ?? true;
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     sent.push({ url, init });
     if (url.endsWith('/api/spawn')) {
+      if ('reject' in spawn) return Promise.reject(spawn.reject);
       return Promise.resolve({
-        ok: spawn.ok, status: spawn.status ?? (spawn.ok ? 200 : 429),
+        ok, status: spawn.status ?? (ok ? 200 : 429),
         json: () => Promise.resolve(spawn.body ?? { sessionId: 'sess-1' })
       } as Response);
     }
@@ -210,6 +234,32 @@ describe('POST /api/agents/dispatch', () => {
     global.fetch = jest.fn(() => Promise.reject(new Error('ECONNREFUSED'))) as jest.Mock;
     const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(502);
     expect(res.body.error).toContain('unreachable');
+  });
+
+  /* The case above rejects EVERY fetch, so `dispatchBlock` refuses on the
+     health probe and `spawn()` is never entered. These two let health and
+     /api/management through and fail only the spawn call itself — the path
+     that answered a bare `{ statusCode: 500, message: 'Internal server
+     error' }` before bug-26, which the client degrades to
+     `request failed (500)`. `statusCode` being absent is what actually pins
+     "not the Nest default shape": a status assertion alone would pass just
+     as well against a filter that only relabelled the number. */
+  it('502s with the connection detail when the spawn fetch is refused', async () => {
+    stubDashboard({ reject: CONN_REFUSED });
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(502);
+    expect(res.body.error).toContain('ECONNREFUSED');
+    expect(res.body.statusCode).toBeUndefined();
+  });
+
+  it('502s naming the timeout budget when the spawn fetch times out', async () => {
+    stubDashboard({ reject: SPAWN_TIMED_OUT });
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(502);
+    expect(res.body.error).toContain('10000');
+    expect(res.body.error).toMatch(/timed out/);
+    // The DOMException's own wording names neither the call nor its budget,
+    // so relaying it verbatim would be the same silence in a 502 costume.
+    expect(res.body.error).not.toContain('The operation was aborted');
+    expect(res.body.statusCode).toBeUndefined();
   });
 
   it('400s a prompt over the cap', async () => {

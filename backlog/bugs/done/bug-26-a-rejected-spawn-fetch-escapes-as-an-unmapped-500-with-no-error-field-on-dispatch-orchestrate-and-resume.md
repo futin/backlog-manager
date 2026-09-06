@@ -4,9 +4,12 @@ title: A rejected spawn fetch escapes as an unmapped 500 with no error field on 
 created: 2026-09-06
 tags: audit-2026-09-06
 runner-fix: true
-updated: 2026-09-06T13:50:51Z
+updated: 2026-09-06T15:28:14Z
 groom-elapsed: 347
 groom-tokens: 72841
+started: 2026-09-06T15:15:05Z
+execute-elapsed: 789
+execute-tokens: 101693
 ---
 
 ## Symptom
@@ -179,3 +182,79 @@ No browser check. The defect is only reachable by making the dashboard pass its 
 and then fail the spawn request itself, which no action inside the board can stage; a
 Playwright case would have to fake the failure at a layer the jest e2e cases above already
 own.
+
+## Outcome
+
+2026-09-06 — Fixed as written: caught at the two outbound seams inside
+`AgentsService`, no global exception filter.
+
+- `dashboardError(e, what, timeoutMs)` (`server/src/agents/agents.service.ts`,
+  beside `message()`, exported): abort duck-typed on `.name`
+  (`TimeoutError`/`AbortError`) → `"<what> timed out after <ms>ms"`; a `.cause`
+  carrying a string `code` or `message` → `"<what> failed: <that>"`; everything
+  else falls through to `message(e)` unchanged.
+- `spawn()`: only the `await fetch` is inside the `try` — `res.json()` and the
+  two `throw`s below it still map themselves. The catch throws
+  `HttpException({ error: dashboardError(e, 'the dashboard spawn call', SPAWN_TIMEOUT_MS) }, 502)`.
+- `projectMap()`: the same wrap around its one `get()` call, 502 with
+  `'the dashboard project list'` and `MANAGEMENT_TIMEOUT_MS`. `status()`'s
+  existing bare `catch {}` swallows the `HttpException` exactly as it swallowed
+  the raw error, so `GET /api/agents/status` is unchanged (its suite is green
+  untouched). The 409 below each of the three call sites is untouched.
+- No client change, no `code`, `status()` still on `message(e)`, no filter added.
+
+Test gap closed. The three e2e stubs gained a `reject?: unknown` spawn mode
+(spawn rejects, health and `/api/management` still resolving — the shape none
+of them could stage), `test/watchdog-sweep.test.ts` gained `spawnReject`, and
+nine cases landed: two per route (`ECONNREFUSED` → 502 with the code in
+`body.error` and `body.statusCode` undefined; `TimeoutError` → 502 naming
+`10000`, not the DOMException's own wording), the TTL-race case on
+`/orchestrate` (gate read resolves, clock advanced past `PROJECT_TTL_MS`,
+re-read rejects → 502, not 500 and not the 409 beneath it), the watchdog sweep
+case (`lastError`/Activity detail contains `ECONNREFUSED`, `attempts`
+untouched — the case that proves the seam catch reaches the non-HTTP caller),
+and three direct `dashboardError` unit cases in `test/agents-prompt.test.ts`,
+one per branch.
+
+Red first, on the four suites, before any production change:
+
+```
+Test Suites: 4 failed, 4 total
+Tests:       8 failed, 110 passed, 118 total
+
+  ● POST /api/agents/dispatch › 502s with the connection detail when the spawn fetch is refused
+    expected 502 "Bad Gateway", got 500 "Internal Server Error"
+  ● watchdog sweeper › records the connection detail, not "fetch failed", when the resume spawn is refused
+    Expected substring: "ECONNREFUSED"
+    Received string:    "fetch failed"
+```
+
+The three `dashboardError` unit cases were written after the helper, so they
+were checked by mutation instead — replacing its body with `return message(e)`:
+
+```
+  ✕ names the call and its budget for an abort, since the exception names neither (4 ms)
+  ✕ reaches into .cause, where a connection failure keeps its only detail
+Tests: 2 failed, 22 skipped, 1 passed, 25 total
+```
+
+Green, whole repo:
+
+```
+$ pnpm test
+Test Suites: 76 passed, 76 total
+Tests:       1434 passed, 1434 total
+Time:        67.498 s
+
+$ pnpm run typecheck
+$ tsc --noEmit
+typecheck exit=0
+
+$ pnpm run test:skills
+# pass 397
+# fail 0
+```
+
+No browser check, as the Fix says: the defect is only reachable by making the
+dashboard pass its health probe and then fail the spawn call itself, which no
+action inside the board can stage.

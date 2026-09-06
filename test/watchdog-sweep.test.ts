@@ -77,6 +77,13 @@ interface StubOptions {
   ceiling?: string;
   /** Reject every fetch, health included — an unreachable dashboard (case 10). */
   reject?: boolean;
+  /**
+   * Reject `/api/spawn` ALONE, with this value, health and /api/management
+   * still resolving (bug-26). `reject` above never reaches `spawn()`: the
+   * gate refuses on the health probe first, so it proves nothing about what
+   * the seam inside `spawn()` does with a rejection.
+   */
+  spawnReject?: unknown;
   /** What `/api/management` lists. Defaults to both projects. */
   projects?: Array<{ dirName: string; path: string }>;
 }
@@ -108,6 +115,7 @@ describe('watchdog sweeper', () => {
       if (opts.reject) throw new Error('ECONNREFUSED');
       if (url.endsWith('/api/spawn')) {
         if (gate) await gate;
+        if ('spawnReject' in opts) throw opts.spawnReject;
         const spawn = opts.spawn ?? {};
         const ok = spawn.ok ?? true;
         return {
@@ -567,6 +575,40 @@ describe('watchdog sweeper', () => {
     const failed = kinds('failed');
     expect(failed).toHaveLength(1);
     expect(failed[0].detail).toContain('busy');
+    expect(failed[0].detail).toContain('not counted');
+  });
+
+  // --- 8b (bug-26): the sweeper reads the seam's wording, not `fetch failed`
+  // This is the case that proves the catch belongs inside AgentsService and
+  // not in a Nest exception filter: the sweeper reaches resume() in-process,
+  // over no HTTP at all, so a filter would never run on this path and this
+  // Activity line would still read the bare `fetch failed` for the exact
+  // outage a reader opened the Watchdog console to understand. Without this
+  // case, that argument is prose nothing enforces.
+
+  it('records the connection detail, not "fetch failed", when the resume spawn is refused', async () => {
+    const dash = stubDashboard({
+      spawnReject: Object.assign(new TypeError('fetch failed'), {
+        cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:4173' }
+      })
+    });
+    await createApp();
+    writeRun(crashedRun(projectPath));
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(1);
+    const entry = state().entry(fixture.runId);
+    // A spawn that never reached the dashboard is not an attempt spent — the
+    // same rule case 8 above pins for a REJECTED spawn, restated for one
+    // that never got an answer at all.
+    expect(entry?.attempts).toBe(0);
+    expect(entry?.lastError).toContain('ECONNREFUSED');
+    expect(entry?.lastError).not.toBe('fetch failed');
+
+    const failed = kinds('failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0].detail).toContain('ECONNREFUSED');
     expect(failed[0].detail).toContain('not counted');
   });
 

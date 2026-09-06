@@ -837,12 +837,35 @@ export class AgentsService {
    * not multiply into two slightly different tellings of the same call.
    */
   private async spawn(cfg: AgentsConfig, spawnBody: Record<string, unknown>): Promise<AgentDispatchResult> {
-    const res = await fetch(`${cfg.url}/api/spawn`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...authHeaders(cfg) },
-      body: JSON.stringify(spawnBody),
-      signal: AbortSignal.timeout(SPAWN_TIMEOUT_MS)
-    });
+    // Only the call itself is inside the try — deliberately not the `json()`
+    // read or the two `throw`s below it. Those already map their own failure
+    // to a status this app chose, and pulling them in here would re-map their
+    // `HttpException`s into a second, wronger one.
+    //
+    // Uncaught, this is bug-26: a connection reset or the 10s timeout escapes
+    // spawn(), all three of its callers and a controller with no try/catch at
+    // all, and — with no exception filter registered anywhere in server/src —
+    // Nest answers a bare `{ statusCode: 500, message: 'Internal server
+    // error' }`. That body carries no `error` key, so the client's `unwrap`
+    // degrades it to `request failed (500)`: the one dashboard failure on this
+    // route the reader was told nothing about, while every other one relays a
+    // 502 naming the cause.
+    let res: Response;
+    try {
+      res = await fetch(`${cfg.url}/api/spawn`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cfg) },
+        body: JSON.stringify(spawnBody),
+        signal: AbortSignal.timeout(SPAWN_TIMEOUT_MS)
+      });
+    } catch (e) {
+      // 502 for the reason the `!res.ok` branch below already gives: nothing
+      // came back, so this is an upstream fault this app cannot vouch for.
+      throw new HttpException(
+        { error: dashboardError(e, 'the dashboard spawn call', SPAWN_TIMEOUT_MS) },
+        502
+      );
+    }
 
     const body = (await res.json().catch(() => null)) as { sessionId?: unknown; error?: unknown } | null;
     if (!res.ok) {
@@ -872,7 +895,31 @@ export class AgentsService {
     if (this.cache && this.cache.url === cfg.url && now - this.cache.at < PROJECT_TTL_MS) {
       return this.cache.map;
     }
-    const data = await this.get<DashboardManagement>(cfg, '/api/management', MANAGEMENT_TIMEOUT_MS);
+    // The second escaping seam bug-26 names, and wider than the spawn one:
+    // `get()` rejects on a connection failure or a timeout AND throws a plain
+    // Error for a non-ok answer, so a dashboard that merely 500s its own
+    // /api/management inside the TTL window reached the same unmapped 500.
+    //
+    // Caught here rather than at the three post-gate call sites for the same
+    // reason it is one function at all: one seam, three identical callers.
+    // The 409 sitting under each of those calls stays untouched and stays
+    // right — it means "the dashboard answered and this project was not in
+    // the list", where this means "we never got to ask", which is the same
+    // split `dispatch()` and `orchestrate()` already make between an
+    // unreachable dashboard and one that said no.
+    //
+    // `status()`'s bare `catch {}` swallows this HttpException exactly as it
+    // swallowed the raw error before, so GET /api/agents/status is unchanged:
+    // an empty project list, not a 502.
+    let data: DashboardManagement;
+    try {
+      data = await this.get<DashboardManagement>(cfg, '/api/management', MANAGEMENT_TIMEOUT_MS);
+    } catch (e) {
+      throw new HttpException(
+        { error: dashboardError(e, 'the dashboard project list', MANAGEMENT_TIMEOUT_MS) },
+        502
+      );
+    }
     const map = new Map<string, string>();
     for (const p of data.projects ?? []) {
       // Both fields or neither: a half-shaped entry is one we cannot spawn
@@ -1232,4 +1279,53 @@ function asMode(value: unknown): PermissionMode | null {
 
 export function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * What to tell a reader about an outbound call to the dashboard that did not
+ * come back at all — `message()`'s counterpart for the *rejection* shapes,
+ * which say nothing useful on their own.
+ *
+ * Both shapes were measured on Node 22 for bug-26, and both are why relaying
+ * the raw message is not enough:
+ *
+ * - a connection failure is a `TypeError` whose own message is the flat
+ *   literal `fetch failed`. Everything that identifies it — `ECONNREFUSED`,
+ *   the address — lives on `.cause` and nowhere else.
+ * - the `AbortSignal.timeout` path is a `DOMException` reading `The operation
+ *   was aborted due to timeout`, which names neither the call that timed out
+ *   nor the budget it blew. A reader cannot tell a 4s health probe from a 10s
+ *   spawn from that sentence, and the budget is the one number that tells
+ *   them whether to retry or go looking at the dashboard.
+ *
+ * `what` names the call so the two are distinguishable; `timeoutMs` is that
+ * call's own budget, passed in rather than looked up here because this
+ * function has no way to know which of the three constants applied.
+ *
+ * The abort branch is duck-typed on `.name` rather than `instanceof
+ * DOMException` for the reason `resumeErrorMessage` (watchdog.service.ts)
+ * already records for its own probe: jest's node environment can put a realm
+ * boundary between where an object was constructed and where it is tested,
+ * and `instanceof` silently reads false across one. `AbortError` is accepted
+ * beside `TimeoutError` because a caller-side abort arrives as the former and
+ * means the same thing to a reader — nothing came back in time.
+ *
+ * The fall-through to `message(e)` is load-bearing rather than a default:
+ * `status()`'s own failures already report a readable string (a plain
+ * `Error('connect ECONNREFUSED …')` from `get()`, whose wording a test pins),
+ * and anything that is not a fetch rejection at all — a bug in our own code —
+ * must still read as itself rather than be dressed up as an upstream fault.
+ */
+export function dashboardError(e: unknown, what: string, timeoutMs: number): string {
+  const name = (e as { name?: unknown } | null)?.name;
+  if (name === 'TimeoutError' || name === 'AbortError') {
+    return `${what} timed out after ${timeoutMs}ms`;
+  }
+  const cause = (e as { cause?: unknown } | null)?.cause;
+  if (cause !== null && typeof cause === 'object') {
+    const { code, message: detail } = cause as { code?: unknown; message?: unknown };
+    const named = typeof code === 'string' ? code : typeof detail === 'string' ? detail : null;
+    if (named !== null) return `${what} failed: ${named}`;
+  }
+  return message(e);
 }
