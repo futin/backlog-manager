@@ -43,7 +43,9 @@ import { fileURLToPath } from 'node:url'
 // input, 3 no run exists, 4 lock held (a fresh OR stale `status: "running"`
 // run.json — see cmdInit's own long comment on why both refuse
 // identically), 5 `verify` found nothing resolvable to prove itself with
-// (that command's own "cannot verify" exit, never used anywhere else). One
+// (that command's own "cannot verify" exit, never used anywhere else), 6
+// `stage <id> preflight`/`dispatched` refused because a pause request is
+// effective for this run (nothing written; the run finishes `paused`). One
 // number is deliberately overloaded: `watch` also exits 3 when its own
 // budget elapses with the child still alive — see cmdWatch's own comment
 // for why reusing "3" there (rather than minting a new code) is
@@ -130,6 +132,101 @@ export function orchHome() {
 // what "one directory per project" means here.
 export function projectDir(root, project) {
   return path.join(root, encodeURIComponent(project))
+}
+
+// --- the pause request (task-17) -----------------------------------------
+// The one file in this system that travels the OTHER way: everything else
+// under `~/.backlog-manager/` is written by a skill tool and read by the
+// server, and this is written by the SERVER (`POST /api/agents/pause`, via
+// `server/src/orchestrator/pause-control.util.ts`) and read here.
+//
+// It lives under `settings/` because that subdirectory is already the
+// read-write nested mount inside the otherwise read-only
+// `~/.backlog-manager` (docker-compose.yml) — the server's only writable
+// ground. It is emphatically not a *setting*: it is one control request
+// about one run, deleted the moment it is cancelled and retired by the
+// run's own `unpausedAt` stamp otherwise.
+//
+// Why a file at all, and not a field on `run.json`: that file has exactly
+// one writer, this tool. A pause request originates in a browser, reaches a
+// server, and has to arrive at a headless session that may be several
+// minutes into a `claude -p` child — there is no channel between those two
+// processes except the filesystem, and adding a second writer to `run.json`
+// would trade a well-understood single-writer invariant for a lost-update
+// race against a run heart-beating every few turns.
+//
+// `$BM_ORCH_CONTROL_HOME` exists for exactly the reason `$BM_ORCH_HOME`
+// does: so a test process never reads (or writes) a real machine's control
+// directory and pauses somebody's actual run.
+export function controlHome() {
+  return (
+    process.env.BM_ORCH_CONTROL_HOME ||
+    path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control')
+  )
+}
+
+// One flat file per project, keyed the same reversible encodeURIComponent
+// way `projectDir` keys its directories — but flat rather than a directory,
+// because there is only ever one control fact per project and nothing else
+// to keep beside it. The server's own `controlFile` computes this identical
+// path; the two are duplicated by comment rather than shared by import, for
+// the same reason `orchHome()` is duplicated there (a skill's `tools/` may
+// never import from the server, and vice versa).
+export function controlFilePath(root, project) {
+  return path.join(root, `${encodeURIComponent(project)}.json`)
+}
+
+// Reads this project's pause request, or `null` for every way there isn't
+// one: no file, unreadable file, unparseable JSON, or a parse that isn't an
+// object. Deliberately total — a malformed control file must never wedge a
+// run, because the process that writes it is not this one and a
+// half-written or hand-edited file is not a reason to stop working. The
+// same posture `readRun` takes toward an unparseable run.json, minus the
+// refusal: a missing pause request is the normal case, not an error.
+export function readPauseRequest(project) {
+  let text
+  try {
+    text = fs.readFileSync(controlFilePath(controlHome(), project), 'utf8')
+  } catch {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(text)
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// Is this request one THIS run must act on? Two clauses, both necessary:
+//
+//   - `runId` pins the request to one run, so a request that outlived the
+//     run it was made for (a `cancel` that never arrived, a crash) can never
+//     pause the next run of the same project.
+//   - `requestedAt` must post-date the run's most recent START — `unpausedAt`
+//     when the run has been resumed, `startedAt` otherwise. This is what
+//     retires a request: the resume stamp moves past it, and the same file
+//     that paused the run stops being effective without anyone having to
+//     delete it. Without this clause a resumed run would re-pause itself on
+//     its very first dispatch gate, forever.
+//
+// Derived, never stored — on this side and on the server's alike. A stored
+// verdict would be a second answer to a question whose inputs both move
+// underneath it, which is the exact bug class the watchdog's `exhausted`
+// flag was (a flag written once, never cleared, while the sweeper re-read
+// its inputs every tick).
+//
+// Every malformed input answers `false`: a request this function cannot
+// understand is not one a run should stop for.
+export function pauseRequestEffective(control, run) {
+  if (control === null || control === undefined || typeof control !== 'object') return false
+  if (typeof control.runId !== 'string' || typeof control.requestedAt !== 'string') return false
+  if (control.runId !== run.runId) return false
+
+  const requestedAt = Date.parse(control.requestedAt)
+  const since = Date.parse(typeof run.unpausedAt === 'string' ? run.unpausedAt : run.startedAt)
+  if (!Number.isFinite(requestedAt) || !Number.isFinite(since)) return false
+  return requestedAt > since
 }
 
 function runFilePath(dir) {
@@ -1427,6 +1524,41 @@ function cmdStage(argv) {
   }
 
   const item = findQueueItem(run, itemId)
+
+  // task-17's dispatch gate, in the tool for the same reason the branch-mode
+  // `merged` refusal one screen up is: SKILL.md is re-read on every one of a
+  // run's several hundred turns and prose drifts across them; an exit code
+  // does not.
+  //
+  // Exactly two stages, and exactly on a TRANSITION into one of them:
+  //
+  //   - `preflight` and `dispatched` are the two calls that START work on an
+  //     item — the first creates the worktree, the second spawns the child.
+  //     Every stage past them describes an item already in flight, and
+  //     refusing one of those would strand half-finished work in a worktree
+  //     nobody is coming back to. "Stop at the next item boundary" is
+  //     precisely the boundary these two calls sit on.
+  //   - `item.stage !== stage` is what makes it a transition. A RE-STAMP of a
+  //     stage the item already occupies (`stage <id> dispatched --session s1`
+  //     after the child exists, which is exactly how §4 records a session id)
+  //     must never be refused: there would then be a live `claude -p` process
+  //     the run file has no id for — strictly worse than letting the item run
+  //     to its own end, which is what the run does before it finishes paused.
+  //
+  // Placed after `findQueueItem` (the gate needs the item's current stage)
+  // and before `applyQueueItemFields`, so a refusal leaves run.json
+  // byte-identical like every other refusal in this function.
+  if (
+    (stage === 'preflight' || stage === 'dispatched') &&
+    item.stage !== stage &&
+    pauseRequestEffective(readPauseRequest(run.project), run)
+  ) {
+    throw new OrchestrateError(
+      `a pause was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. Finish the run with \`finish --status paused\` (SKILL.md §10, "Pausing").`,
+      6,
+    )
+  }
+
   applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop })
 
   run.updatedAt = nowISO()
@@ -1578,8 +1710,12 @@ function cmdAttention(argv) {
   return 0
 }
 
-const FINISH_USAGE = 'usage: orchestrate.mjs finish --status <done|aborted|failed>'
-const FINISH_STATUSES = ['done', 'aborted', 'failed']
+// `paused` (task-17) is a finish like any other as far as this command is
+// concerned — the run stops writing, the file stops being `running`, and
+// `init` will archive it. What makes it different is only that it has an
+// exit: `unpause` below, which no other finished status has.
+const FINISH_USAGE = 'usage: orchestrate.mjs finish --status <done|aborted|failed|paused>'
+const FINISH_STATUSES = ['done', 'aborted', 'failed', 'paused']
 
 function cmdFinish(argv) {
   let status
@@ -1597,6 +1733,35 @@ function cmdFinish(argv) {
   run.updatedAt = nowISO()
   writeRunAtomic(dir, run)
   console.log(JSON.stringify({ status }))
+  return 0
+}
+
+// The one exit a `paused` run has, and a `--resume` session's FIRST write
+// (task-17). Separate from `heartbeat` on purpose: heartbeat is a pure
+// `updatedAt` re-stamp that a run makes hundreds of times and that must
+// never change a status — folding "and also un-pause if paused" into it
+// would mean every routine heartbeat carried the power to resurrect a run,
+// including one a person paused deliberately thirty seconds ago.
+//
+// The single clock reading is load-bearing: `unpausedAt` and `updatedAt` are
+// the SAME instant, because the first is what the pause-effectiveness
+// predicate compares a request against and the second is what freshness is
+// measured from. Two readings would open a window in which a request landing
+// between them is judged against the wrong one.
+function cmdUnpause() {
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const run = readRun(dir)
+
+  if (run.status !== 'paused') {
+    throw new OrchestrateError(`this run is ${run.status}, not paused — nothing to unpause`, 1)
+  }
+
+  const at = nowISO()
+  run.status = 'running'
+  run.unpausedAt = at
+  run.updatedAt = at
+  writeRunAtomic(dir, run)
+  console.log(JSON.stringify({ status: 'running', unpausedAt: at }))
   return 0
 }
 
@@ -1640,6 +1805,15 @@ function cmdStatus(argv) {
   } else {
     console.log(`${run.runId}  ${run.project}  ${run.status}`)
     console.log(`updated: ${run.updatedAt}`)
+    // Only when EFFECTIVE, not merely present: a stale control file naming a
+    // previous run would otherwise make every `status` call of the next run
+    // read as "about to pause", which is the opposite of what it means.
+    // `--json` above deliberately says nothing about it — that branch is a
+    // verbatim print of the run file, and the request is not part of the run.
+    const control = readPauseRequest(run.project)
+    if (pauseRequestEffective(control, run)) {
+      console.log(`pause requested at ${control.requestedAt}`)
+    }
     console.log(`queue: ${queueSummaryLine(run)}`)
     console.log(`attention: ${run.attention.length}`)
   }
@@ -2446,6 +2620,7 @@ commands:
   heartbeat    re-stamp the run's updatedAt
   attention    record something a human should look at
   finish       set the run's final status
+  unpause      mark a paused run running again (a --resume session's first write)
   status       print the current run
   watch        survive a long headless child across the loop's own Bash cap
   denials      list the permission denials a session's transcript recorded
@@ -2488,6 +2663,13 @@ commands:
 //      identically).
 //   5  `verify` found nothing it could resolve to prove the item works —
 //      that command's own exit alone; no other command ever returns it.
+//   6  `stage <id> preflight` and `stage <id> dispatched` alone: a pause
+//      request is effective for this run and the call is a transition into
+//      one of those two stages (see cmdStage's own comment for why exactly
+//      those, and why a re-stamp is exempt). Nothing is written. It is not a
+//      `1` because a `1` means "fix this call and retry" and this one must
+//      never be retried: the reaction is a DIFFERENT command entirely,
+//      `finish --status paused` — SKILL.md §10, "Pausing".
 export function main(argv) {
   const [cmd, ...rest] = argv
   try {
@@ -2498,6 +2680,7 @@ export function main(argv) {
     if (cmd === 'heartbeat') return cmdHeartbeat(rest)
     if (cmd === 'attention') return cmdAttention(rest)
     if (cmd === 'finish') return cmdFinish(rest)
+    if (cmd === 'unpause') return cmdUnpause()
     if (cmd === 'status') return cmdStatus(rest)
     if (cmd === 'watch') return cmdWatch(rest)
     if (cmd === 'denials') return cmdDenials(rest)

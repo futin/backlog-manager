@@ -18,6 +18,27 @@ import type { OrchestratorRunsPayload } from '../../../shared/types';
 export const POLL_MS = 5_000;
 
 /**
+ * How long a `noteResume` mark keeps this hook polling a run that is neither
+ * fresh nor running — three minutes (task-17).
+ *
+ * The number is the watchdog's own worst case for the same event, borrowed
+ * rather than re-derived: `WATCHDOG_LIMITS`' `graceMs` floor is five minutes
+ * precisely because a resumed session's measured time to its FIRST heartbeat
+ * is around ninety seconds on a good day, and can be several minutes when
+ * the machine is loaded (which it usually is, since an overload is what
+ * paused or crashed the run in the first place). Three minutes covers the
+ * ordinary case with slack and still bounds the polling.
+ *
+ * It expires on its own rather than waiting for the run to come back,
+ * because a resume that never starts at all — a dashboard that went down
+ * between the click and the spawn — must not pin an open tab to a 5s poll
+ * for the rest of the afternoon. When it expires with the run still paused,
+ * the board simply goes back to mount+focus, which is the correct cadence
+ * for a run nothing is happening to.
+ */
+export const RESUME_POLL_GRACE_MS = 180_000;
+
+/**
  * The orchestrator run list, kept live while — and only while — there is
  * anything live to keep it for.
  *
@@ -48,9 +69,26 @@ export function useOrchestratorRuns(): {
   runs: OrchestratorRunsPayload['runs'];
   starting: OrchestratorRunsPayload['starting'];
   refresh: () => void;
+  noteResume: (project: string) => void;
+  resuming: ReadonlySet<string>;
 } {
   const [runs, setRuns] = useState<OrchestratorRunsPayload['runs']>([]);
   const [starting, setStarting] = useState<OrchestratorRunsPayload['starting']>([]);
+  /**
+   * project → the moment its resume mark expires (task-17).
+   *
+   * `useState`, not `useRef`: `resuming` below is derived from this and is
+   * READ BY COMPONENTS — the paused strip renders `Resuming…` instead of a
+   * button off it — so a change has to re-render. A ref would keep the poll
+   * alive correctly and leave the button unchanged on screen, which is the
+   * half of the feedback the click was for.
+   *
+   * A deadline per project rather than a single one, because two projects
+   * can be resumed independently, and a shared clock would let the second
+   * click extend the first project's polling (or the first expiry end the
+   * second's).
+   */
+  const [resumeMarks, setResumeMarks] = useState<Map<string, number>>(() => new Map());
 
   // Flipped false on unmount, checked before every setRuns below. Unlike
   // useAgents/useBoard — each has at most one in-flight fetch at a time,
@@ -95,6 +133,21 @@ export function useOrchestratorRuns(): {
         // board's own `.find()` would throw on undefined and take the whole
         // board down over a field that only ever adds a card.
         setStarting(payload.starting ?? []);
+        // task-17: drop marks this payload has answered or that have simply
+        // run out. Purely housekeeping — `resuming` below re-applies both
+        // rules on every render, so an unpruned map never lies, it only
+        // grows. Same pure/mutating split `StartingRunsService` keeps for
+        // the same reason: correctness never depends on the sweep.
+        setResumeMarks((prev) => {
+          const now = Date.now();
+          const next = new Map(
+            [...prev].filter(([project, expiresAt]) =>
+              now < expiresAt && !payload.runs.some((run) => run.project === project && run.status === 'running'))
+          );
+          // Same Map when nothing was dropped, so a landed payload that
+          // changed nothing here does not force an extra render.
+          return next.size === prev.size ? prev : next;
+        });
       })
       // A failed poll (the API hiccups, the box is mid-restart) keeps
       // whatever is already in state, the same fallback `useBoard`'s own
@@ -141,7 +194,32 @@ export function useOrchestratorRuns(): {
   // the next focus event even after the real run landed, which is the same
   // "screenshot, not a live view" failure the crashed-run widening above
   // fixed, just at the other end of a run's life.
-  const anyLive = runs.some((run) => run.fresh || run.status === 'running') || starting.length > 0;
+  /**
+   * task-17: a project whose resume mark has not expired AND whose latest
+   * payload does not yet show it `running`.
+   *
+   * Both halves are re-evaluated on every render — on every landed payload
+   * and on every tick — rather than being pruned once and trusted. That is
+   * the same posture `StartingRunsService.list()` takes on the server, and
+   * for the same reason: a derivation that re-applies its own rules cannot
+   * lie, where a stored verdict swept on some other schedule can.
+   *
+   * `status === 'running'` and not `fresh` is the right end condition: a
+   * resumed session writes `unpause` (status `running`) as its very first
+   * write, minutes before it has produced anything else, and that write IS
+   * the answer this mark was waiting for. Waiting for `fresh` as well would
+   * work, since `unpause` re-stamps `updatedAt` too — but it would tie this
+   * mark to a freshness window it has no reason to depend on.
+   */
+  const resuming: ReadonlySet<string> = new Set(
+    [...resumeMarks]
+      .filter(([project, expiresAt]) =>
+        Date.now() < expiresAt && !runs.some((run) => run.project === project && run.status === 'running'))
+      .map(([project]) => project)
+  );
+
+  const anyLive =
+    runs.some((run) => run.fresh || run.status === 'running') || starting.length > 0 || resuming.size > 0;
 
   /**
    * The point of this hook: an interval that exists only while it has
@@ -175,5 +253,27 @@ export function useOrchestratorRuns(): {
     return () => clearInterval(id);
   }, [anyLive, refresh]);
 
-  return { runs, starting, refresh };
+  /**
+   * "A resume was just asked for on this project" (task-17) — records a
+   * deadline and refreshes at once.
+   *
+   * The immediate `refresh()` is not merely eager: the click that calls this
+   * has already changed something server-side (a spawn is on its way), and a
+   * board that shows nothing until the next 5s tick reads as a swallowed
+   * click — the same feedback problem `StartingRunsService` exists to solve
+   * one layer down.
+   *
+   * Overwrites any existing deadline rather than keeping the earlier one: a
+   * second click is a second attempt, and it deserves its own full window.
+   */
+  const noteResume = useCallback((project: string) => {
+    setResumeMarks((prev) => {
+      const next = new Map(prev);
+      next.set(project, Date.now() + RESUME_POLL_GRACE_MS);
+      return next;
+    });
+    refresh();
+  }, [refresh]);
+
+  return { runs, starting, refresh, noteResume, resuming };
 }

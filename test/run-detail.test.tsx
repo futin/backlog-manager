@@ -11,6 +11,21 @@ import type {
   ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage, VerificationSummary
 } from '../shared/types';
 
+/** What `RunDetail`'s `live` prop takes since task-17: the run plus the two
+ *  annotations the runs endpoint adds, which are exactly what the
+ *  `RunControls` in its head decides from. */
+type LiveRun = OrchestratorRun & { fresh: boolean; pauseRequested: boolean };
+
+/** task-17 gave `RunDetail` three more required props for those controls.
+ *  Every pre-existing case here is about durations, stage tracks or the tail
+ *  fetch and asserts nothing about a control, so they all take a closed gate;
+ *  the controls' own table is the describe block at the foot of this file. */
+const CONTROL_PROPS = {
+  gate: { canResume: false, blockedReason: null },
+  resuming: false,
+  onChanged: () => {}
+} as const;
+
 // RunDetail's one outbound call is fetchArchivedRun (Task 4/2) — mocking at
 // the lib/agents module boundary, the same seam runs-view.test.tsx already
 // mocks at, keeps this suite exercising RunDetail's own effect/state wiring
@@ -134,8 +149,10 @@ function primarySummary(): OrchestratorArchiveRun {
 /** The full-shaped run `fetchArchivedRun`/`live` would answer with for the
  *  primary fixture above — same ids/stages/stamps, verification entries now
  *  carrying their `tail`. */
-function primaryFull(overTails: { a1?: string; a2?: string } = {}): OrchestratorRun {
+function primaryFull(overTails: { a1?: string; a2?: string } = {}): LiveRun {
   return {
+    fresh: true,
+    pauseRequested: false,
     runId: RUN_ID,
     project: PROJECT,
     status: 'done',
@@ -181,7 +198,7 @@ describe('RunDetail', () => {
     // Never resolves — proves nothing below depends on the fetch landing.
     mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
 
-    render(<RunDetail summary={primarySummary()} live={null} />);
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByText('done')).toBeInTheDocument();
     expect(screen.getByTestId('run-detail-chip-merged')).toHaveTextContent('1');
@@ -208,7 +225,7 @@ describe('RunDetail', () => {
   it('fetches tails for an archived run and fills the details body', async () => {
     mockFetchArchivedRun.mockResolvedValue(primaryFull({ a2: 'FETCHED_TAIL' }));
 
-    render(<RunDetail summary={primarySummary()} live={null} />);
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
 
     expect(await screen.findByText('FETCHED_TAIL')).toBeInTheDocument();
     expect(mockFetchArchivedRun).toHaveBeenCalledWith(PROJECT, RUN_ID);
@@ -217,7 +234,7 @@ describe('RunDetail', () => {
   it('failed verification seeds its details open; passing stays closed', () => {
     mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
 
-    render(<RunDetail summary={primarySummary()} live={null} />);
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-detail-verify-a-1')).not.toHaveAttribute('open');
     expect(screen.getByTestId('run-detail-verify-a-2')).toHaveAttribute('open');
@@ -226,7 +243,7 @@ describe('RunDetail', () => {
   it('live run renders tails without fetching', async () => {
     const full = primaryFull({ a2: 'LIVE_TAIL' });
 
-    render(<RunDetail summary={primarySummary()} live={full} />);
+    render(<RunDetail summary={primarySummary()} live={full} {...CONTROL_PROPS} />);
 
     expect(await screen.findByText('LIVE_TAIL')).toBeInTheDocument();
     expect(mockFetchArchivedRun).not.toHaveBeenCalled();
@@ -264,7 +281,9 @@ describe('RunDetail', () => {
         archiveItem('a-2', 'reviewing') // stale: a-2 hadn't merged yet as of this snapshot
       ]
     };
-    const runningLive: OrchestratorRun = {
+    const runningLive: LiveRun = {
+      fresh: true,
+      pauseRequested: false,
       runId: RUN_ID,
       project: PROJECT,
       status: 'running',
@@ -285,7 +304,9 @@ describe('RunDetail', () => {
     // What `fetchArchivedRun` returns once the run has actually finished —
     // the truth this pane's own effect goes and fetches the moment `live`
     // disappears.
-    const freshFetched: OrchestratorRun = {
+    const freshFetched: LiveRun = {
+      fresh: true,
+      pauseRequested: false,
       runId: RUN_ID,
       project: PROJECT,
       status: 'done',
@@ -307,7 +328,7 @@ describe('RunDetail', () => {
     };
     mockFetchArchivedRun.mockResolvedValue(freshFetched);
 
-    const { rerender } = render(<RunDetail summary={staleSummary} live={runningLive} />);
+    const { rerender } = render(<RunDetail summary={staleSummary} live={runningLive} {...CONTROL_PROPS} />);
     expect(screen.getByText('running')).toBeInTheDocument();
     expect(screen.getByTestId('run-detail-item-a-2')).toHaveTextContent('reviewing');
     // No fetch yet — `live` is present, so there is nothing to correct.
@@ -315,7 +336,7 @@ describe('RunDetail', () => {
 
     // The run finishes: RunsView's own next render (once the live poll's
     // `fresh` flag flips) passes live={null} for this same selection.
-    rerender(<RunDetail summary={staleSummary} live={null} />);
+    rerender(<RunDetail summary={staleSummary} live={null} {...CONTROL_PROPS} />);
 
     // The pane must show what the fresh fetch found, not what the stale
     // `staleSummary` still says.
@@ -336,12 +357,12 @@ describe('RunDetail', () => {
       queue: [archiveItem('b-1', 'failed', { verification: [{ cmd: 'pnpm test', ok: false }] })]
     };
 
-    const { rerender } = render(<RunDetail summary={primarySummary()} live={null} />);
+    const { rerender } = render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
     // Move the selection on before the first run's fetch has resolved —
     // exactly the "selection can change mid-flight" case the brief calls
     // out. The second run's own fetch is left unresolved too; only the
     // FIRST call's belated resolution is exercised below.
-    rerender(<RunDetail summary={otherSummary} live={null} />);
+    rerender(<RunDetail summary={otherSummary} live={null} {...CONTROL_PROPS} />);
 
     resolvers[RUN_ID](primaryFull({ a2: 'STALE_TAIL' }));
 
@@ -357,7 +378,7 @@ describe('RunDetail', () => {
   it('fetch failure shows the inline error and keeps rows', async () => {
     mockFetchArchivedRun.mockRejectedValue(new Error('network down'));
 
-    render(<RunDetail summary={primarySummary()} live={null} />);
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
 
     expect(await screen.findByTestId('run-detail-error')).toHaveTextContent("couldn't load verification output");
     expect(screen.getByTestId('run-detail-item-a-1')).toBeInTheDocument();
@@ -389,7 +410,7 @@ describe('RunDetail', () => {
       attention: []
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     const time = screen.getByTestId('run-detail-item-time-q-1');
     // 11:41 minus 11:16 (preflight, the earliest non-pending arrival) = 25
@@ -431,7 +452,7 @@ describe('RunDetail', () => {
       attention: []
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.queryByTestId('run-detail-lead-n-1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-detail-lead-n-2')).not.toBeInTheDocument();
@@ -470,7 +491,7 @@ describe('RunDetail', () => {
       attention: []
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-detail-machine-dispatched')).toHaveTextContent(
       formatSpanCompact(15 * 60 * 1000)
@@ -502,7 +523,9 @@ describe('RunDetail', () => {
       ...primarySummary(),
       queue: [archiveItem('f-1', 'fixing', { stageAt: { fixing: fixingAt } })]
     };
-    const fixingLive: OrchestratorRun = {
+    const fixingLive: LiveRun = {
+      fresh: true,
+      pauseRequested: false,
       runId: RUN_ID,
       project: PROJECT,
       status: 'running',
@@ -516,7 +539,7 @@ describe('RunDetail', () => {
       queue: [liveItem('f-1', 'fixing', { stageAt: { fixing: fixingAt } })]
     };
 
-    const { unmount } = render(<RunDetail summary={fixingSummary} live={fixingLive} />);
+    const { unmount } = render(<RunDetail summary={fixingSummary} live={fixingLive} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-track-f-1-fixing-val')).toHaveTextContent('10m 00s');
 
@@ -536,7 +559,7 @@ describe('RunDetail', () => {
     unmount();
 
     mockFetchArchivedRun.mockResolvedValue(primaryFull());
-    render(<RunDetail summary={primarySummary()} live={null} />);
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
     await act(async () => {
       await jest.advanceTimersByTimeAsync(0);
     });
@@ -577,7 +600,7 @@ describe('RunDetail', () => {
       })]
     };
 
-    render(<RunDetail summary={aborted} live={null} />);
+    render(<RunDetail summary={aborted} live={null} {...CONTROL_PROPS} />);
 
     // 444585ms — and it stays that number however long ago the run died,
     // because nothing in the reading touches the wall clock any more. (The
@@ -602,7 +625,7 @@ describe('RunDetail', () => {
   it('fix loops show as a badge, not a line', () => {
     mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
 
-    render(<RunDetail summary={primarySummary()} live={null} />);
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-track-a-1-loops')).toHaveTextContent('×1');
 
@@ -632,7 +655,7 @@ describe('RunDetail', () => {
       queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-detail-mode')).toHaveTextContent('branch mode (downgraded)');
     // The note is the free-text reason, verbatim — not folded into the
@@ -659,7 +682,7 @@ describe('RunDetail', () => {
       queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     const badge = screen.getByTestId('run-detail-mode');
     expect(badge).toHaveTextContent('branch mode');
@@ -686,7 +709,7 @@ describe('RunDetail', () => {
       ]
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-detail-branches')).toBeInTheDocument();
     expect(screen.getByTestId('run-detail-branch-h-1')).toHaveTextContent('git merge --no-ff backlog/h-1');
@@ -710,7 +733,7 @@ describe('RunDetail', () => {
       queue: [archiveItem('h-3', 'branched', { branch: null })]
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-detail-branch-h-3')).toHaveTextContent('git merge --no-ff backlog/h-3');
   });
@@ -738,7 +761,7 @@ describe('RunDetail', () => {
       ]
     };
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.getByTestId('run-detail-chip-merged')).toHaveTextContent('2');
     expect(screen.getByTestId('run-detail-chip-branched')).toHaveTextContent('2');
@@ -756,11 +779,105 @@ describe('RunDetail', () => {
     expect(summary.mergeMode).toBe('merge');
     expect(summary.mergeModeEffective).toBe('merge');
 
-    render(<RunDetail summary={summary} live={null} />);
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
     expect(screen.queryByTestId('run-detail-mode')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-detail-mode-note')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-detail-chip-branched')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-detail-branches')).not.toBeInTheDocument();
+  });
+});
+
+/* task-17 — the pane's own half of the shared controls. The board's drawer
+   hosts the identical component with the identical props, so what this block
+   proves is the WIRING (which run object each shape hands down), not the
+   table — that lives in test/run-controls.test.tsx. */
+describe('RunDetail — the controls in its head', () => {
+  const OPEN_GATE = { canResume: true, blockedReason: null };
+
+  function head(): HTMLElement {
+    return document.querySelector('.run-detail-head') as HTMLElement;
+  }
+
+  it('offers Pause for a live fresh run', () => {
+    render(
+      <RunDetail
+        summary={primarySummary()}
+        live={{ ...primaryFull(), status: 'running', fresh: true }}
+        gate={OPEN_GATE}
+        resuming={false}
+        onChanged={() => {}}
+      />
+    );
+    expect(within(head()).getByTestId('run-controls-pause')).toBeInTheDocument();
+  });
+
+  it('offers Cancel and the note once a pause is pending', () => {
+    render(
+      <RunDetail
+        summary={primarySummary()}
+        // `primaryFull`'s own queue is all merged (it is the finished
+        // fixture), so a-2 is re-staged here: the note names the item the run
+        // will finish before it stops, and there has to BE one for that half
+        // of the copy to be under test at all.
+        live={{
+          ...primaryFull(),
+          status: 'running',
+          fresh: true,
+          pauseRequested: true,
+          queue: [liveItem('a-1', 'merged'), liveItem('a-2', 'reviewing')]
+        }}
+        gate={OPEN_GATE}
+        resuming={false}
+        onChanged={() => {}}
+      />
+    );
+    expect(within(head()).getByTestId('run-controls-cancel')).toBeInTheDocument();
+    expect(within(head()).getByTestId('run-controls-note')).toHaveTextContent('Pausing after a-2');
+  });
+
+  // The synthesised-run path: no live entry at all, `paused` read off the
+  // archive record. This is the shape the pane exists to cover — a paused run
+  // has no live entry once its file is superseded, and it is still the one
+  // finished status with something to offer.
+  it('offers Resume for a paused summary with no live entry', () => {
+    render(
+      <RunDetail
+        summary={{ ...primarySummary(), status: 'paused' }}
+        live={null}
+        gate={OPEN_GATE}
+        resuming={false}
+        onChanged={() => {}}
+      />
+    );
+    expect(within(head()).getByTestId('run-controls-resume')).toBeInTheDocument();
+  });
+
+  it('shows the resuming placeholder instead of the button while a resume is in flight', () => {
+    render(
+      <RunDetail
+        summary={{ ...primarySummary(), status: 'paused' }}
+        live={null}
+        gate={OPEN_GATE}
+        resuming
+        onChanged={() => {}}
+      />
+    );
+    expect(within(head()).getByTestId('run-controls-resuming')).toHaveTextContent('Resuming…');
+  });
+
+  it('offers nothing for a finished run', () => {
+    render(
+      <RunDetail
+        summary={primarySummary()}
+        live={null}
+        gate={OPEN_GATE}
+        resuming={false}
+        onChanged={() => {}}
+      />
+    );
+    for (const testid of ['run-controls-pause', 'run-controls-cancel', 'run-controls-resume']) {
+      expect(within(head()).queryByTestId(testid)).toBeNull();
+    }
   });
 });

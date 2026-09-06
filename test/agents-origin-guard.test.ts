@@ -87,13 +87,15 @@ describe('the agents POST guard', () => {
   // needs a route-aware body rather than body() itself, which stays exactly
   // as every pre-existing plan/dispatch call site here already uses it.
   const bodyFor = (route: string): Record<string, unknown> =>
-    route === 'orchestrate' || route === 'resume'
+    route === 'orchestrate' || route === 'resume' || route === 'pause'
       ? { project: projectPath }
       : route === 'watchdog/config'
         ? { enabled: true }
         : body();
 
-  for (const route of ['plan', 'dispatch', 'orchestrate', 'resume', 'watchdog/config']) {
+  // This array, not a count in CLAUDE.md's prose, is where the guarded set
+  // actually lives — `pause` (task-17) is the fifth member.
+  for (const route of ['plan', 'dispatch', 'orchestrate', 'resume', 'watchdog/config', 'pause']) {
     /* The exact shape of a cross-origin form auto-submit: the one content type
        that needs no preflight, carrying a body Nest's unconditional urlencoded
        parser is happy to parse. */

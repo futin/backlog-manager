@@ -72,7 +72,7 @@ type RunPayload = OrchestratorRunsPayload['runs'][number];
 function runHolding(id: string, stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
   const fixture = rawFixture as OrchestratorRun;
   const entry: RunQueueItem = { ...fixture.queue[0], id, stage };
-  return { ...fixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, ...over };
+  return { ...fixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, ...over };
 }
 
 function stubItems(items: BacklogItem[], errors: string[] = [], runs: RunPayload[] = []) {

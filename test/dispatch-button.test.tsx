@@ -30,7 +30,7 @@ function runFor(ids: string[], stage: RunStage, over: Partial<RunPayload> = {}):
     project: '/abs/alpha',
     queue: ids.map((id) => ({ ...runFixture.queue[0], id, stage })),
     fresh: true,
-    pastRuns: 0,
+    pastRuns: 0, pauseRequested: false,
     ...over
   };
 }

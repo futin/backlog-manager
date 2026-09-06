@@ -14,10 +14,13 @@ import {
   projectDispatchGate, runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
+import {
+  clearPauseRequest, pauseRequestEffective, readPauseRequest, writePauseRequest
+} from '../orchestrator/pause-control.util';
 import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, MergeMode,
-  PermissionMode
+  PauseResult, PermissionMode
 } from '../../../shared/types';
 
 /**
@@ -638,13 +641,20 @@ export class AgentsService {
     // takes, since a run this stale might be resumed by the very call this
     // method is about to make.
     const run = this.orchestrator.runs().runs.find((r) => r.project === project);
-    if (run === undefined || run.status !== 'running') {
+    if (run === undefined || (run.status !== 'running' && run.status !== 'paused')) {
       // Both "no run has ever existed for this project" and "the last run
       // already finished (done/aborted/failed)" collapse to the identical
       // uncoded 409: neither has anything a resume spawn could act on, and
       // telling them apart would tell the caller nothing it could do
       // differently — reopen the board, there is nothing here to recover.
-      throw new HttpException({ error: 'no crashed run to resume for this project' }, 409);
+      //
+      // task-17 widened this to admit `paused`, the one status a run can
+      // still leave. A paused run is the FIRST resumable shape that is not a
+      // recovery: nothing went wrong, a person stopped it. The fresh-run
+      // refusal below deliberately does not apply to it — a paused run is
+      // never fresh (its heartbeat stopped when it finished), so it falls
+      // through to the spawn without a second condition being needed.
+      throw new HttpException({ error: 'no crashed or paused run to resume for this project' }, 409);
     }
     if (run.fresh) {
       // `run.fresh` is the one and only freshness number this app computes
@@ -683,7 +693,7 @@ export class AgentsService {
       throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
     }
 
-    return this.spawn(cfg, {
+    const result = await this.spawn(cfg, {
       project: dirName,
       // The whole of what a caller — board or sweeper alike — can ever make
       // this session do. See RESUME_PROMPT's own comment for why there is
@@ -701,6 +711,96 @@ export class AgentsService {
       // express here.
       permissionMode: clampMode('auto', status.spawnMaxPermission)
     });
+
+    // task-17. Two conditions, and the STATUS one is the load-bearing half:
+    //
+    // **Only for a `paused` run.** A crashed run's request has never been
+    // seen by anything — the run died before reaching a dispatch gate, and
+    // the watchdog that resumes it does not read this file at all (design
+    // §4.4). The resumed session is what honours it, at its first gate, by
+    // exiting `6`. Clearing it here for a crashed run would delete a request
+    // that is still fully effective and that nobody has acted on, and the
+    // resumed session would then drain the whole queue against an explicit
+    // pause somebody asked for — the exact outcome this feature exists to
+    // prevent, reached through the automation that is on by default. §4.3's
+    // own "tidiness, not correctness" argument holds ONLY for the paused
+    // case, because that is the only one where an `unpause` is coming to
+    // retire the request anyway: a crashed run's resumed session takes
+    // `recovery.md`'s `running` path, which heartbeats and never unpauses,
+    // so nothing else would ever retire it.
+    //
+    // **After the spawn, never before it.** A spawn that threw leaves the
+    // request in place, which is what keeps the board drawing the run as
+    // paused for a resume that never started.
+    //
+    // For the paused case it is genuinely tidiness: `unpause` retires the
+    // request by moving `unpausedAt` past its `requestedAt`, on both sides
+    // of the predicate. Clearing it here only stops `status` and the board
+    // reporting a pause that is already being undone, in the minute or two
+    // before that session gets there. Swallowed, therefore: a failure to
+    // delete a file must not turn a successful resume into an error the
+    // caller sees, when the thing that matters has already happened.
+    if (run.status === 'paused') {
+      try {
+        clearPauseRequest(project);
+      } catch {
+        /* see above — the unpause is the real retirement */
+      }
+    }
+    return result;
+  }
+
+  /**
+   * `POST /api/agents/pause` (task-17) — record that the board wants this
+   * project's run to stop at its next item boundary, or withdraw that
+   * request.
+   *
+   * The one POST in this file that never calls the dashboard, and the one
+   * that is deliberately INDEPENDENT of `BM_AGENTS`. Both follow from what a
+   * pause actually is: a fact written to this machine's own disk about a run
+   * that is already going. There is no session to spawn, so there is nothing
+   * `BM_AGENTS` could be gating — and gating it anyway would mean a run
+   * started while agents were on could never be stopped after somebody
+   * turned them off, which is the exact moment a person is most likely to
+   * want to stop it.
+   *
+   * It lives here rather than under `/api/orchestrator/` for the reason
+   * `watchdog/config` does: that controller is documented as a READ-ONLY
+   * view of the run-state directory, and this route writes. `agents/` is
+   * where the guarded, state-changing routes live, and `SameOriginPostGuard`
+   * is already wired across all of them — a write reachable by a
+   * cross-origin form post is exactly what that guard exists to prevent.
+   *
+   * Synchronous by nature: nothing here awaits a third process.
+   *
+   * The returned `pauseRequested` is RE-DERIVED from what landed on disk
+   * rather than echoed back from the request — a confirmation, not an
+   * acknowledgement. It is the same predicate the runs payload uses, so a
+   * request the predicate would refuse for any reason answers `false` here
+   * rather than claiming a pause the run will never see.
+   */
+  pause(project: string, cancel: boolean): PauseResult {
+    // Read fresh, the same never-cache-a-run-file posture `resume()` above
+    // takes: the runId this request gets pinned to has to be the run that is
+    // actually going right now, not one this process saw a minute ago.
+    const run = this.orchestrator.runs().runs.find((r) => r.project === project);
+    if (run === undefined || run.status !== 'running') {
+      // `running` only, fresh or stale alike — pausing a run whose heartbeat
+      // has stopped is exactly what a person watching a crashed-looking strip
+      // wants, and that run may still be minutes into a `claude -p` child.
+      // Every other status is refused with one uncoded message, for the same
+      // reason `resume()` collapses its own two cases: nothing the caller
+      // could do differently distinguishes them. A run that is already
+      // `paused` is refused here too — there is nothing left to ask it.
+      throw new HttpException({ error: 'no running run to pause for this project' }, 409);
+    }
+
+    if (cancel) {
+      clearPauseRequest(project);
+    } else {
+      writePauseRequest(project, run.runId);
+    }
+    return { pauseRequested: pauseRequestEffective(readPauseRequest(project), run) };
   }
 
   /**

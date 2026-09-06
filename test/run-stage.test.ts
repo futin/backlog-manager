@@ -91,7 +91,7 @@ describe('run status chips', () => {
    *  that check at the DEFINITION site, not at every call site that reads
    *  it, so a test which independently lists every member is what actually
    *  proves the two maps are still total. */
-  const ALL_STATUSES: OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed'];
+  const ALL_STATUSES: OrchestratorRun['status'][] = ['running', 'done', 'aborted', 'failed', 'paused'];
 
   it('gives every run status a glyph and a class', () => {
     for (const status of ALL_STATUSES) {
@@ -110,11 +110,17 @@ describe('run status chips', () => {
     expect(RUN_STATUS_CLASS.done).toBe('runs-status-done');
     expect(RUN_STATUS_CLASS.aborted).toBe('runs-status-warn');
     expect(RUN_STATUS_CLASS.failed).toBe('runs-status-bad');
+    // Neutral on purpose (task-17): a paused run is neither a success nor a
+    // failure, so it gets its own class rather than borrowing `warn`/`bad`.
+    expect(RUN_STATUS_CLASS.paused).toBe('runs-status-paused');
   });
 
   it('gives every status a distinct glyph', () => {
     const glyphs = ALL_STATUSES.map((status) => RUN_STATUS_GLYPH[status]);
     expect(new Set(glyphs).size).toBe(ALL_STATUSES.length);
+    // Restated as a literal so adding a fifth status that REUSES an existing
+    // glyph fails here rather than passing a self-referential length check.
+    expect(new Set(Object.values(RUN_STATUS_GLYPH)).size).toBe(5);
   });
 
   /** The one property that actually justifies keeping these two maps

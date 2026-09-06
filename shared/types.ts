@@ -302,6 +302,17 @@ export interface AgentDispatchResult {
 }
 
 /**
+ * 200 body of `POST /api/agents/pause` (task-17) — whether a pause request
+ * is now effective for this project's run, re-derived from what was just
+ * written rather than echoed back from the request. A `cancel` answers
+ * `false`; so does a request the predicate refuses for any reason, which is
+ * what makes this a confirmation rather than an acknowledgement.
+ */
+export interface PauseResult {
+  pauseRequested: boolean;
+}
+
+/**
  * The one machine-readable discriminator `POST /api/agents/orchestrate`
  * ever sends — a `code` field alongside that 409's human-readable `error`
  * string, present ONLY on the activeRun-lock refusal (agents.service.ts's
@@ -594,10 +605,38 @@ export interface OrchestratorRun {
   runId: string;
   /** The registered project's absolute path — the same string as `RegistryProject.path`. */
   project: string;
-  status: 'running' | 'done' | 'aborted' | 'failed';
+  /**
+   * `paused` (task-17) is the fifth member and the only one with a future:
+   * the run stopped itself at an item boundary because the board asked it
+   * to, and `orchestrate.mjs unpause` — the sole writer of that transition —
+   * is what puts it back to `running`. It is deliberately a status rather
+   * than a flag beside one: everything that already branches on "is this run
+   * still going" (the watchdog, which only ever walks `running`; `init`,
+   * which archives any non-`running` file; `runClaimBlock`) gets the right
+   * answer for free, where a `running` run carrying a `paused: true` flag
+   * would have needed each of them taught about it separately.
+   */
+  status: 'running' | 'done' | 'aborted' | 'failed' | 'paused';
   startedAt: string;
   /** Re-stamped on every write to the run file — the heartbeat `RUN_STALE_MS` measures against. */
   updatedAt: string;
+  /**
+   * When this run last came back from `paused`, written by
+   * `orchestrate.mjs unpause` and by nothing else — not `heartbeat`, which
+   * stays a pure `updatedAt` stamp that never touches a status or this field.
+   *
+   * Optional because every run file written before task-17 lacks it, and
+   * because a run that was never paused never gains one; both read as "this
+   * run has only ever begun once", which is exactly what `startedAt` alone
+   * already says.
+   *
+   * Read by both copies of the pause-effectiveness predicate (the tool's
+   * `pauseRequestEffective` and the server's, `pause-control.util.ts`) as the
+   * later of the two clocks a request must post-date: a request that paused
+   * this run is retired the instant the run resumes, so the resumed session
+   * does not immediately pause itself again on the same file.
+   */
+  unpausedAt?: string;
   /** The `--max` the run was started with, or `null` for "work the whole gated queue". */
   maxItems: number | null;
   /**
@@ -652,7 +691,17 @@ export interface OrchestratorRun {
  * absence, which means exactly "this run has never crashed."
  */
 export interface OrchestratorRunsPayload {
-  runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog }>;
+  /**
+   * `pauseRequested` (task-17, design §2.3) is mandatory like `fresh` and for
+   * the same reason: it is a fact the server can state about EVERY run it
+   * lists, not one that only some runs have ever had. It is derived per
+   * request — the control file read and the effectiveness predicate applied
+   * against this very run — and never stored anywhere, because a stored copy
+   * would be a second answer to a question whose inputs (the file, the run's
+   * `startedAt`/`unpausedAt`) both move underneath it. Same posture as
+   * "Groomed is derived" and the watchdog's `exhausted`.
+   */
+  runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog }>;
   /**
    * Projects this server has spawned an orchestrator session for that have
    * not yet produced a run file — the starting-run placeholder (task-14).

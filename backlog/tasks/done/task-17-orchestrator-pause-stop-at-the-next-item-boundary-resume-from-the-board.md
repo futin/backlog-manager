@@ -2,6 +2,10 @@
 id: task-17
 title: Orchestrator pause — stop at the next item boundary, resume from the board
 created: 2026-09-05
+updated: 2026-09-06T06:32:36Z
+started: 2026-09-06T05:33:54Z
+execute-elapsed: 3522
+execute-tokens: 459856
 ---
 
 ## Goal
@@ -110,3 +114,122 @@ pnpm run typecheck
 ```bash
 pnpm run build
 ```
+
+## Outcome
+
+2026-09-06 — Implemented, all ten plan tasks in order.
+
+The shape that shipped matches the plan with three deliberate departures,
+each recorded here because a future reader will otherwise wonder:
+
+1. **`RunStrip`'s pausing chip reads `inFlightItemId`, not the strip's own
+   `current`.** Those answer different questions — `current` is the first
+   entry the run has not let go of and includes a `pending` item (right for
+   the stage chip beside it), while the chip has to name the item the run is
+   actually *working*. Using `RunControls`' exported implementation means the
+   strip's chip and the drawer's note can never name different items for the
+   same run.
+2. **`RunDetail`'s `live` prop is typed `OrchestratorRun & { fresh;
+   pauseRequested }`, not the whole payload entry.** Those two annotations
+   are what the controls decide from; `pastRuns` and `watchdog` ride the same
+   entry and are none of that pane's business, so the prop states what it
+   reads.
+3. **`BoardView` gained a THIRD run list (`stripRuns`) rather than widening
+   `runningRuns`.** `runningRuns` is also what `startingRuns` subtracts
+   against, and that subtraction is specifically about the `init` lock, which
+   only a `running` run file holds — folding `paused` in would have
+   suppressed a legitimate starting placeholder for a project whose previous
+   run was paused.
+
+One test-only change the plan did not anticipate: `RunDrawer` and `RunDetail`
+each gained three required props, so ~45 pre-existing render call sites in
+`test/run-time-ui.test.tsx`, `test/orchestrator-drawer.test.tsx` and
+`test/run-detail.test.tsx` take a shared `CONTROL_PROPS` spread with a closed
+gate. Kept required rather than defaulted: a host that forgets to wire them
+would otherwise render no controls, silently.
+
+Verification (all four commands from Done when, run fresh in one pass):
+
+```
+===== pnpm test =====
+Test Suites: 73 passed, 73 total
+Tests:       1312 passed, 1312 total
+Snapshots:   0 total
+Time:        52.586 s
+Ran all test suites.
+===== pnpm run test:skills =====
+# tests 381
+# pass 381
+# fail 0
+===== pnpm run typecheck =====
+$ tsc --noEmit
+typecheck exit: 0
+===== pnpm run build =====
+dist/assets/index-sOFJg6ET.js    340.23 kB │ gzip: 103.62 kB
+✓ built in 1.09s
+build exit: 0
+```
+
+### Review round 1 — one Critical, fixed
+
+`resume()` cleared the pause request unconditionally after a successful
+spawn. That is right for a `paused` run and wrong for a **crashed** one, and
+the crashed path is the one automation takes by default: a person pauses a
+running run, the run crashes before reaching its next dispatch gate, the
+watchdog resumes it, and the clear deletes a request that nothing has yet
+seen — the resumed session never exits `6` and drains the whole queue against
+an explicit pause. Design §4.4 says the opposite in as many words: "a crashed
+run with an effective request is still resumed by the sweeper — the request
+is honoured by the resumed session at its first gate."
+
+The bug came from reading §4.3's "tidiness, not correctness" as unconditional.
+It is not: that argument holds only for the paused case, because that is the
+only one where an `unpause` is coming to retire the request anyway. A crashed
+run's resumed session takes `recovery.md`'s `running` path, which heartbeats
+and never unpauses, so the gate honouring the request is the *only* thing
+that would ever act on it.
+
+Fix: the clear is now guarded on `run.status === 'paused'`, with the
+reasoning above in the code beside it.
+
+Two assertions were missing, which is why the branch went green with the
+bug in it — `test/watchdog-sweep.test.ts`'s crashed-run case asserted the
+spawn count while its own comment claimed "let the resumed session decide
+what the request means", a claim nothing tested:
+
+- `test/agents-resume.test.ts` — a crashed-run resume leaves the request on
+  disk **and still effective** (present-but-refused would be the same failure
+  with an extra step).
+- `test/watchdog-sweep.test.ts` — the sweeper's own crashed-run resume leaves
+  it in place too, closing the gap between that case's comment and its
+  assertions.
+
+Red-green verified rather than assumed: with the guard reverted, exactly
+those two cases fail (2 failed, 51 passed); with it restored, 53/53.
+
+Re-verification after the fix:
+
+```
+===== pnpm test =====
+Test Suites: 73 passed, 73 total
+Tests:       1313 passed, 1313 total
+Snapshots:   0 total
+Time:        53.528 s
+Ran all test suites.
+===== pnpm run test:skills =====
+# tests 381
+# pass 381
+# fail 0
+===== pnpm run typecheck =====
+$ tsc --noEmit
+typecheck exit: 0
+===== pnpm run build =====
+dist/assets/index-sOFJg6ET.js    340.23 kB │ gzip: 103.62 kB
+✓ built in 1.06s
+build exit: 0
+```
+
+Not part of this item, and required before a run can actually be paused from
+the board: the merge has to be pushed and `pnpm run plugin:sync` run — the
+board spawns runs from the *installed* plugin, and tasks 2 and 9 edited
+`skills/`.

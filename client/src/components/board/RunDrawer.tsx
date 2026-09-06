@@ -6,11 +6,13 @@ import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runClockMs, runElapsedMs,
   runIsLive, stepperDots, stepperTerminal
 } from '../../lib/run-time';
+import { RunControls } from '../RunControls';
+import type { RunControlsChange } from '../RunControls';
 import { ACTIVE_RUN_STAGES } from './ItemCard';
 import { RowTime } from './RunRowTime';
 import type { MergeMode, OrchestratorRun, RunQueueItem, RunVerification } from '../../../../shared/types';
 
-type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number };
+type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean };
 
 /**
  * The verify step's most recent row for one queue item, or null when it has
@@ -223,7 +225,17 @@ function RowStageCaption({ item, now, live }: {
  * does NOT carry over: there is no project-hue identity or dispatch action
  * for a run the way there is for one backlog item.
  */
-export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => void }) {
+export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
+  run: RunPayload;
+  onClose: () => void;
+  /** task-17: the environment half of "may this browser resume a run"
+   *  (`resumeGate`, shared/agent.ts), computed once by BoardView and handed
+   *  down rather than re-derived here — the Runs view's detail pane takes
+   *  the identical prop from the identical function. */
+  gate: { canResume: boolean; blockedReason: string | null };
+  resuming: boolean;
+  onChanged: (kind: RunControlsChange) => void;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose();
@@ -323,6 +335,12 @@ export function RunDrawer({ run, onClose }: { run: RunPayload; onClose: () => vo
       <aside className="drawer" role="dialog" aria-label={`${label} run`}>
         <div className="drawer-head">
           <span className="drawer-title">{label} run</span>
+          {/* task-17: between the title and close, so the run's own controls
+              sit with its name rather than buried in the meta line below —
+              and so a person who opened this drawer to look at a run can act
+              on it without going back out to the strip. The component decides
+              from the run alone whether it renders anything at all. */}
+          <RunControls run={run} gate={gate} resuming={resuming} onChanged={onChanged} />
           <button className="drawer-close" onClick={onClose}>close</button>
         </div>
         <div className="drawer-meta">

@@ -5,8 +5,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
-import { fileURLToPath } from 'node:url'
-import { RUN_STALE_MS, isZombieStatState, readPermissionDenials } from './orchestrate.mjs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import {
+  RUN_STALE_MS, controlFilePath, controlHome, isZombieStatState, pauseRequestEffective, readPermissionDenials,
+} from './orchestrate.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
 
@@ -42,11 +44,23 @@ function orchFixture(t) {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-home-')))
   const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-project-')))
   spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' })
+  // task-17: the pause-request directory, derived from `home` rather than
+  // mkdtemp'd separately so `run()` below can pin it from the one argument
+  // every existing call already passes — the alternative was a signature
+  // change on every call site in this file, which would have made the
+  // harness change visible to (and therefore capable of breaking) tests that
+  // have nothing to do with pausing. Pinned for exactly the reason
+  // BM_ORCH_HOME is: this directory is one the SERVER writes for real, under
+  // a developer's `~/.backlog-manager/settings/`, and a test that reached it
+  // could pause a real run.
+  const control = `${home}-control`
+  fs.mkdirSync(control, { recursive: true })
   t.after(() => {
     fs.rmSync(home, { recursive: true, force: true })
     fs.rmSync(project, { recursive: true, force: true })
+    fs.rmSync(control, { recursive: true, force: true })
   })
-  return { home, project }
+  return { home, project, control }
 }
 
 // Spawns the real CLI as a child process with BM_ORCH_HOME pinned to this
@@ -54,7 +68,11 @@ function orchFixture(t) {
 // developer's real orchestrator state can never leak into, or be clobbered
 // by, a test run.
 function run(cwd, home, ...args) {
-  return spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd, env: { ...process.env, BM_ORCH_HOME: home } })
+  return spawnSync('node', [SCRIPT, ...args], {
+    encoding: 'utf8',
+    cwd,
+    env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` },
+  })
 }
 
 // Project keying is encodeURIComponent(<abs path>), reversible with
@@ -67,6 +85,24 @@ function runFile(home, project) {
 
 function runsDir(home, project) {
   return path.join(home, encodeURIComponent(project), 'runs')
+}
+
+// The control file's own path, mirroring `runFile` above: one file per
+// project, keyed the same encodeURIComponent way, but FLAT under the control
+// root rather than inside a per-project directory — there is only ever one
+// control fact per project, so there is nothing for a directory to hold.
+function controlFile(home, project) {
+  return path.join(`${home}-control`, `${encodeURIComponent(project)}.json`)
+}
+
+// Writes a pause request exactly as the server's `writePauseRequest` does.
+// Hand-written here rather than imported: the tool and the server keep two
+// copies of this shape on purpose (a skill's tools/ may never import from
+// the server), and a test that reached across for the server's writer would
+// hide a drift between them instead of catching it.
+function writeControl(home, project, body) {
+  fs.mkdirSync(`${home}-control`, { recursive: true })
+  fs.writeFileSync(controlFile(home, project), typeof body === 'string' ? body : JSON.stringify(body))
 }
 
 // Writes one ready-gated task item straight into `project`'s own backlog/
@@ -3223,4 +3259,280 @@ test('SKILL.md names no environment variable but the three it owns', () => {
   const unexpected = [...new Set([...text.matchAll(/BM_[A-Z_]+/g)].map((m) => m[0]))].filter((n) => !ALLOWED.has(n))
   assert.deepEqual(unexpected, [], `SKILL.md names an environment variable nothing reads: ${unexpected.join(', ')}`)
   assert.ok(text.includes(ORCH_RUN_ENV), `SKILL.md no longer names ${ORCH_RUN_ENV} at all`)
+})
+
+// --- task-17: the pause gates, finish paused, unpause ----------------------
+// The whole feature's load-bearing half lives in this tool rather than in
+// SKILL.md, for the same reason the branch-mode `merged` refusal does: a run
+// re-reads its own prose on every one of several hundred turns and prose
+// drifts across them, while a non-zero exit code does not. These cases are
+// what pin that refusal to the two stages that actually START work on an
+// item — and, just as importantly, pin that it never fires on a re-stamp of
+// a stage the item is already at, which would strand a run that had already
+// spawned a child.
+
+// A pause request that satisfies the predicate against the run just created:
+// this run's own id, stamped now (necessarily after `startedAt`).
+function effectiveControl(home, project, over = {}) {
+  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  writeControl(home, project, { runId: run.runId, requestedAt: new Date().toISOString(), ...over })
+  return run
+}
+
+test('an effective pause request refuses stage <id> preflight with exit 6, writing nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  effectiveControl(home, project)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'stage', 'task-5', 'preflight')
+
+  assert.equal(out.status, 6, out.stderr)
+  // The stderr has to carry the reaction, not just the refusal: a run reading
+  // this is mid-loop and its next move is a DIFFERENT finish, not a retry.
+  assert.match(out.stderr, /finish --status paused/)
+  assert.match(out.stderr, /task-5/)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage')
+})
+
+test('an effective pause request refuses stage <id> dispatched with exit 6, writing nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
+  effectiveControl(home, project)
+  const before = fs.readFileSync(runFile(home, project))
+
+  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b')
+
+  assert.equal(out.status, 6, out.stderr)
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage')
+})
+
+// The transition rule, and the reason the gate reads the item's CURRENT
+// stage at all: once a child session exists, its session id has to be
+// recordable. Refusing this call would leave a live `claude -p` process the
+// run file has no id for — strictly worse than letting the item finish.
+test('a re-stamp of an already-dispatched item is not a transition and still succeeds under a pause request', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0)
+  effectiveControl(home, project)
+
+  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--session', 's1')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.queue.find((q) => q.id === 'task-5').sessionId, 's1')
+})
+
+// Every stage past `dispatched` is an item already in flight: pausing must
+// never strand it half-worked, so the gate is exactly two stages wide.
+test('a pause request never blocks a stage past dispatched', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0)
+  effectiveControl(home, project)
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'inspecting').status, 0)
+})
+
+test('a pause request pinned to another runId is not effective', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  effectiveControl(home, project, { runId: 'run-19990101-000000' })
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
+})
+
+// A request older than the run it names belongs to a PREVIOUS run under the
+// same runId-less reading — the timestamp is what makes "this run" mean this
+// start of it.
+test('a pause request dated before startedAt is not effective', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const runFileBody = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  writeControl(home, project, {
+    runId: runFileBody.runId,
+    requestedAt: new Date(Date.parse(runFileBody.startedAt) - 3600_000).toISOString(),
+  })
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
+})
+
+// `unpausedAt` is the later of the two clocks the predicate compares: a
+// resumed run must not immediately re-pause itself on the very file that
+// paused it, and must still honour a request made AFTER the resume.
+test('unpausedAt, not startedAt, is what a pause request must post-date once a run has resumed', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const file = runFile(home, project)
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const unpausedAt = new Date(Date.parse(body.startedAt) + 60_000).toISOString()
+  body.unpausedAt = unpausedAt
+  fs.writeFileSync(file, JSON.stringify(body, null, 2))
+
+  writeControl(home, project, { runId: body.runId, requestedAt: new Date(Date.parse(unpausedAt) - 1000).toISOString() })
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0, 'a request older than the resume still paused the run')
+
+  // Back to `pending`: that first probe SUCCEEDED, so the item now sits at
+  // `preflight` and the second call would not be a transition — the gate
+  // would answer 0 for the wrong reason and this case would prove nothing.
+  assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0)
+  writeControl(home, project, { runId: body.runId, requestedAt: new Date(Date.parse(unpausedAt) + 1000).toISOString() })
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 6, 'a request newer than the resume did not pause the run')
+})
+
+// Every unreadable shape reads as "no request". A malformed control file must
+// never wedge a run — the file is written by another process entirely, and a
+// half-written or hand-edited one is not a reason to stop working.
+test('a missing or malformed control file is never an effective pause request', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const runId = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0, 'no control file at all')
+
+  for (const body of ['not json', { runId }, { runId, requestedAt: 'yesterday' }, { requestedAt: new Date().toISOString() }, { runId: 7, requestedAt: new Date().toISOString() }]) {
+    writeControl(home, project, body)
+    const out = run(project, home, 'stage', 'task-5', 'preflight')
+    assert.equal(out.status, 0, `${JSON.stringify(body)} was treated as an effective request: ${out.stderr}`)
+    // Put the item back so the next iteration is a transition again.
+    assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0)
+  }
+})
+
+test('finish --status paused sets the status and leaves the run archivable by a later init', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+
+  const out = run(project, home, 'finish', '--status', 'paused')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stdout.trim(), JSON.stringify({ status: 'paused' }))
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'paused')
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance')
+
+  // `init` refuses only a `running` file, so a paused one archives like a
+  // done one — a person who gives up on resuming can still start fresh.
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(fs.readdirSync(runsDir(home, project)).length, 1)
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'running')
+})
+
+test('unpause returns a paused run to running and stamps unpausedAt', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'finish', '--status', 'paused').status, 0)
+
+  const out = run(project, home, 'unpause')
+
+  assert.equal(out.status, 0, out.stderr)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(after.status, 'running')
+  // One clock reading, not two: the stamp that retires the pause request and
+  // the heartbeat have to be the same instant, or a request landing between
+  // them would be judged against the wrong one.
+  assert.equal(after.unpausedAt, after.updatedAt)
+  assert.deepEqual(JSON.parse(out.stdout), { status: 'running', unpausedAt: after.unpausedAt })
+})
+
+test('unpause refuses any status but paused, writing nothing', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+
+  for (const status of ['running', 'done', 'aborted', 'failed']) {
+    assert.equal(run(project, home, 'init', '--project', project).status, 0)
+    if (status !== 'running') assert.equal(run(project, home, 'finish', '--status', status).status, 0)
+    const before = fs.readFileSync(runFile(home, project))
+
+    const out = run(project, home, 'unpause')
+
+    assert.equal(out.status, 1, `unpause on a ${status} run: ${out.stderr}`)
+    assert.match(out.stderr, new RegExp(status))
+    assert.ok(before.equals(fs.readFileSync(runFile(home, project))), `run.json was modified by unpause on a ${status} run`)
+    // Leave the file non-running so the next iteration's init can archive it.
+    if (status === 'running') assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  }
+})
+
+test('unpause with no run exits 3', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'unpause').status, 3)
+})
+
+// The spec's "the resume retires the request that paused it", end to end:
+// without this the first `stage <id> preflight` of a resumed run would read
+// the same file and pause the run again, forever.
+test('a resumed run is not re-paused by the request that paused it', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  effectiveControl(home, project)
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 6)
+  assert.equal(run(project, home, 'finish', '--status', 'paused').status, 0)
+  assert.equal(run(project, home, 'unpause').status, 0)
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0, 'the retired request paused the resumed run again')
+})
+
+test('status names an effective pause request, and says nothing when there is none', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  assert.doesNotMatch(run(project, home, 'status').stdout, /pause requested/)
+
+  const runId = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId
+  const requestedAt = new Date().toISOString()
+  writeControl(home, project, { runId, requestedAt })
+
+  assert.match(run(project, home, 'status').stdout, new RegExp(`pause requested at ${requestedAt}`))
+  // `--json` stays a verbatim print of the run file — the request is not part
+  // of the run, and a synthetic key here would make this command the second
+  // thing claiming to describe run state.
+  assert.equal(Object.hasOwn(JSON.parse(run(project, home, 'status', '--json').stdout), 'pauseRequested'), false)
+})
+
+test('controlHome and controlFilePath are the paths the server writes', () => {
+  const withoutEnv = { ...process.env }
+  delete withoutEnv.BM_ORCH_CONTROL_HOME
+  const probe = spawnSync(
+    'node',
+    ['-e', `import('${pathToFileURL(SCRIPT).href}').then((m) => console.log(m.controlHome()))`],
+    { encoding: 'utf8', env: withoutEnv },
+  )
+  assert.equal(probe.stdout.trim(), path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control'))
+  assert.equal(controlHome(), process.env.BM_ORCH_CONTROL_HOME ?? path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control'))
+  assert.equal(controlFilePath('/r', '/a/b'), path.join('/r', '%2Fa%2Fb.json'))
+})
+
+test('pauseRequestEffective refuses every malformed shape rather than throwing', () => {
+  const run = { runId: 'run-1', startedAt: '2026-09-05T10:00:00Z' }
+  assert.equal(pauseRequestEffective(null, run), false)
+  assert.equal(pauseRequestEffective(undefined, run), false)
+  assert.equal(pauseRequestEffective({ runId: 'run-2', requestedAt: '2026-09-05T11:00:00Z' }, run), false)
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T09:00:00Z' }, run), false)
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: 'yesterday' }, run), false)
+  assert.equal(pauseRequestEffective({ runId: 'run-1' }, run), false)
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, { runId: 'run-1', startedAt: 'nonsense' }), false)
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, run), true)
+  assert.equal(
+    pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, { ...run, unpausedAt: '2026-09-05T12:00:00Z' }),
+    false,
+  )
 })

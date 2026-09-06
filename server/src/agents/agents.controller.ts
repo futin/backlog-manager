@@ -8,7 +8,8 @@ import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { isAgentAction } from '../../../shared/agent';
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, WatchdogConfig, WatchdogStatus
+  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, PauseResult, WatchdogConfig,
+  WatchdogStatus
 } from '../../../shared/types';
 
 /**
@@ -247,6 +248,45 @@ export class AgentsController {
     this.watchdog.noteBoardResume(project, result.sessionId);
     this.watchdog.arm();
     return result;
+  }
+
+  /**
+   * `POST /api/agents/pause` (task-17) — ask this project's run to stop at
+   * its next item boundary, or withdraw that request with `cancel: true`.
+   *
+   * Two fields, rebuilt by name like every other route here. `project` is
+   * trimmed and required, exactly as `resume` above does it.
+   *
+   * `cancel === true` is the ONLY form honoured, and the strictness is the
+   * point: a string `'true'` is not a cancel. Every other body field in this
+   * controller either selects nothing dangerous or is validated against a
+   * closed vocabulary, but this one selects the direction that throws work
+   * away — a person asked for a pause, and a loosely-coerced value would
+   * silently undo it. Unset, `'false'`, `0`, `'yes'` all mean "pause", which
+   * is the direction that can be reversed by asking again.
+   *
+   * `@HttpCode(200)`, not Nest's POST default of 201: nothing is created
+   * here in the sense a 201 promises. The request either records a fact
+   * about an existing run or removes one, and the body says which
+   * (`{ pauseRequested }`) — the same shape `watchdog/config` uses for the
+   * same reason.
+   *
+   * Guarded like every other POST in this controller. It is the one that
+   * starts no session at all, but it CHANGES what a running session will do,
+   * which a cross-origin page must not be able to reach either.
+   *
+   * Nothing is armed or marked afterwards: no session was spawned, so there
+   * is no spawn for `WatchdogService` to know about, and the run this
+   * touches is still `running` — the watchdog was already watching it if it
+   * needed to be.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('pause')
+  @HttpCode(200)
+  pause(@Body() body: { project?: unknown; cancel?: unknown } | undefined): PauseResult {
+    const project = typeof body?.project === 'string' ? body.project.trim() : '';
+    if (project === '') throw new HttpException({ error: 'project is required' }, 400);
+    return this.agents.pause(project, body?.cancel === true);
   }
 
   /**

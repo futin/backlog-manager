@@ -325,6 +325,49 @@ export function projectDispatchGate(status: AgentsStatus, projectPath: string): 
   return { control: 'enabled' };
 }
 
+/**
+ * May this browser offer a Resume control for a run in `projectPath`, and if
+ * it renders one disabled, why (task-17).
+ *
+ * The ENVIRONMENT half only — `projectDispatchGate` re-expressed in the
+ * vocabulary the two Resume surfaces consume. It is a hoist, not a new rule:
+ * these exact three lines lived inline in `BoardView.tsx` where the crashed
+ * strip's Resume button was the only caller, and the Runs view's detail pane
+ * needs the identical answer for a `paused` run. Two hand-written copies of a
+ * gate that merely AGREE is the failure `watchdogStoodDown`'s own doc comment
+ * records — a whole branch shipped with two expressions and two prose
+ * sentences that agreed, and widening one of them left every test green.
+ *
+ * The mapping it performs, and why it is not just `DispatchGate`:
+ * `hidden` → no control at all (`canResume: false`), because the environment
+ * ladder means the dashboard cannot spawn anything for anyone, and a disabled
+ * button explaining that on a run strip would be noise. `disabled` → the
+ * control still renders, greyed, with the reason — that is the
+ * project-visibility block alone, the one answer that can be silently stale
+ * (bug-13), so it must stay visible for the reader to act on.
+ *
+ * The WATCHDOG half is deliberately not folded in. `watchdogStoodDown`
+ * answers "will the automation resume this run instead of the human", which
+ * is the crashed strip's question and only its own: a paused run was never a
+ * watchdog subject (the sweeper walks `running` runs), so the paused
+ * surfaces ask this gate and nothing else. Folding the two together would
+ * make a paused run's Resume button depend on a watchdog state that has
+ * nothing to say about it.
+ */
+export function resumeGate(
+  status: AgentsStatus | null,
+  projectPath: string
+): { canResume: boolean; blockedReason: string | null } {
+  // A status that has not landed yet is an unknown, not a block: render
+  // nothing rather than a disabled control whose reason we cannot state.
+  if (status === null) return { canResume: false, blockedReason: null };
+  const gate = projectDispatchGate(status, projectPath);
+  return {
+    canResume: gate.control !== 'hidden',
+    blockedReason: gate.control === 'disabled' ? gate.reason : null
+  };
+}
+
 /** `item.projectPath` is the one item-shaped input `projectDispatchGate`
  *  needs; every other line of the gate is already project-scoped. Signature
  *  and behaviour unchanged by the Task 13 fix round 1 hoist above — every

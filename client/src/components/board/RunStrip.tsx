@@ -7,6 +7,7 @@ import { projectLabel } from '../../lib/project-label';
 import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { formatSpanCompact, isTerminalStage, runElapsedMs } from '../../lib/run-time';
 import { isCrashed, watchdogClause } from '../../lib/run-watchdog';
+import { inFlightItemId } from '../RunControls';
 import { watchdogStoodDown } from '../../../../shared/agent';
 import { RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
 import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../../shared/types';
@@ -51,7 +52,9 @@ import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../../sha
  */
 const LIVE_THRESHOLD_MS = POLL_MS;
 
-type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
+type RunPayload = OrchestratorRun & {
+  fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog;
+};
 
 /**
  * The queue entry a crashed strip calls "last reported" — the LAST entry in
@@ -77,6 +80,124 @@ type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog
 function lastReportedEntry(queue: RunQueueItem[]): RunQueueItem | null {
   const inFlight = queue.filter((q) => !isTerminalStage(q.stage) && q.stage !== 'pending');
   return inFlight.length === 0 ? null : inFlight[inFlight.length - 1];
+}
+
+/**
+ * The Resume click, shared by the crashed strip and the paused one (task-17).
+ *
+ * Hoisted the moment there were two callers, rather than copied: the 409
+ * rule below is a genuine decision (a run that came back to life under the
+ * click is the outcome the click wanted, not an error to render), and a
+ * second hand-written copy of it is exactly the drift shape this file's own
+ * `watchdogStoodDown` comment already records once.
+ *
+ * A factory rather than a component or a hook: both callers are plain
+ * functions called conditionally, so neither may own `useState` (see
+ * `renderCrashedStrip`'s doc comment) — the state lives in `RunStrip` and
+ * is threaded through here.
+ */
+function makeAttemptResume({ run, blocked, onResumed, setResumeError }: {
+  run: RunPayload;
+  blocked: string | null;
+  onResumed?: () => void;
+  setResumeError: (err: string | null) => void;
+}): () => void {
+  return () => {
+    if (blocked !== null) return;
+    setResumeError(null);
+    resumeOrchestrate(run.project)
+      .then(() => {
+        onResumed?.();
+      })
+      .catch((err: unknown) => {
+        // A 409 run-in-progress answer means the run recovered under this
+        // very click (design §6.1) — a success, not a failure, so it takes
+        // the same path a clean 200 would rather than rendering an error
+        // for something that just fixed itself.
+        if (err instanceof ApiError && err.code === RUN_IN_PROGRESS_CODE) {
+          onResumed?.();
+          return;
+        }
+        setResumeError(err instanceof Error ? err.message : String(err));
+      });
+  };
+}
+
+/**
+ * The paused strip (task-17) — the third rendering this component has, and
+ * the one with a future.
+ *
+ * Same two-control shape as the crashed strip, and the same `<div>` root for
+ * the same reason (see `renderCrashedStrip`'s long comment on why a
+ * `<button>` may not contain another interactive element): the body opens
+ * the drawer, Resume is a sibling button.
+ *
+ * Two deliberate differences from the crashed strip, both from the same
+ * fact — the watchdog never watched this run:
+ *
+ *   - **No watchdog clause.** There is nothing to report: the sweeper only
+ *     ever walks `running` runs, so a paused run has no attempt count, no
+ *     verdict, and nothing pending.
+ *   - **No `watchdogStoodDown` gate on Resume.** That gate exists to stop a
+ *     board click and a sweep from both driving `--resume` into one
+ *     `run.json`. Nothing is sweeping this run, so the environment half
+ *     (`resumeGate`) is the whole gate. Do NOT "align" this with the crashed
+ *     strip by adding the watchdog condition here — it would read a
+ *     `watchdog` key that is absent by construction and hide the control on
+ *     every paused run.
+ */
+function renderPausedStrip({
+  run, onOpen, canResume, resumeBlockedReason, resuming, onResumed, resumeError, setResumeError
+}: {
+  run: RunPayload;
+  onOpen: (run: RunPayload) => void;
+  canResume?: boolean;
+  resumeBlockedReason: string | null;
+  resuming?: boolean;
+  onResumed?: () => void;
+  resumeError: string | null;
+  setResumeError: (err: string | null) => void;
+}) {
+  const label = projectLabel(run.project);
+  // Computed exactly as the fresh strip computes them, `ungroomed` excluded
+  // from the denominator for the same reason — an item that was never
+  // queueable work must not make a run read as permanently short of done.
+  const total = run.queue.filter((q) => q.stage !== 'ungroomed').length;
+  const completed = run.queue.filter((q) => q.stage === 'merged' || q.stage === 'branched').length;
+  const modeLabel = mergeModeLabel(run.mergeMode, run.mergeModeEffective);
+  const blocked = resumeBlockedReason;
+  const attemptResume = makeAttemptResume({ run, blocked, onResumed, setResumeError });
+
+  return (
+    <div className="run-strip run-strip-paused" data-testid="run-strip">
+      <button type="button" className="run-strip-open" onClick={() => onOpen(run)}>
+        <span className="run-strip-dot" aria-hidden="true" />
+        <span className="run-strip-project">{label}</span>
+        <span className="run-strip-paused-label">paused</span>
+        <span className="run-strip-count">paused · {completed} of {total} done</span>
+        {modeLabel !== null && (
+          <span className="run-mode-badge" data-testid="run-strip-mode">{modeLabel}</span>
+        )}
+        {resumeError !== null && <span className="run-strip-error">{resumeError}</span>}
+        <span className="run-strip-mark" aria-hidden="true">▸</span>
+      </button>
+      {resuming === true ? (
+        <span className="run-strip-resuming" data-testid="run-strip-resuming">Resuming…</span>
+      ) : (
+        canResume === true && (
+          <button
+            type="button"
+            className="run-strip-resume"
+            aria-disabled={blocked !== null || undefined}
+            title={blocked ?? undefined}
+            onClick={attemptResume}
+          >
+            Resume run
+          </button>
+        )
+      )}
+    </div>
+  );
 }
 
 /**
@@ -172,25 +293,7 @@ function renderCrashedStrip({
   const showResume = canResume === true && watchdogAllowsResume;
   const blocked = resumeBlockedReason;
 
-  const attemptResume = (): void => {
-    if (blocked !== null) return;
-    setResumeError(null);
-    resumeOrchestrate(run.project)
-      .then(() => {
-        onResumed?.();
-      })
-      .catch((err: unknown) => {
-        // A 409 run-in-progress answer means the run recovered under this
-        // very click (design §6.1) — a success, not a failure, so it takes
-        // the same path a clean 200 would rather than rendering an error
-        // for something that just fixed itself.
-        if (err instanceof ApiError && err.code === RUN_IN_PROGRESS_CODE) {
-          onResumed?.();
-          return;
-        }
-        setResumeError(err instanceof Error ? err.message : String(err));
-      });
-  };
+  const attemptResume = makeAttemptResume({ run, blocked, onResumed, setResumeError });
 
   return (
     <div className="run-strip run-strip-crashed" data-testid="run-strip">
@@ -298,14 +401,27 @@ function renderCrashedStrip({
  * blocks — render nothing, not a control that looks live but cannot be
  * trusted; it is simply no longer the ONLY call this component ever makes
  * about a quiet run.
+ *
+ * task-17 adds the THIRD rendering: `status === 'paused'`. It is un-fresh
+ * like a finished run and, like a crashed one, still has a future — which is
+ * why it draws rather than falls into the silence above. See
+ * `renderPausedStrip` for the two ways it deliberately differs from the
+ * crashed rendering (no watchdog clause, no `watchdogStoodDown` gate) and
+ * why neither is an oversight.
  */
 export function RunStrip({
-  run, onOpen, canResume, resumeBlockedReason = null, onResumed
+  run, onOpen, canResume, resumeBlockedReason = null, resuming, onResumed
 }: {
   run: RunPayload;
   onOpen: (run: RunPayload) => void;
   canResume?: boolean;
   resumeBlockedReason?: string | null;
+  /** task-17: a resume this board asked for is on its way (the hook's own
+   *  `resuming` set). The paused strip swaps its button for a placeholder
+   *  rather than leaving a control that would spawn a SECOND `--resume`
+   *  session into the same run — two of those reconcile, stage-write and
+   *  merge against a file whose single-writer guarantee assumes one process. */
+  resuming?: boolean;
   onResumed?: () => void;
 }) {
   // Declared unconditionally, ahead of every early return below — React's
@@ -318,7 +434,20 @@ export function RunStrip({
   // (however long ago) still gets silence, while a run that stopped
   // reporting mid-`running` gets a crashed rendering instead (`isCrashed`,
   // checked next).
-  if (!run.fresh && run.status !== 'running') return null;
+  // task-17 widens this from two renderings to three. `paused` joins
+  // `running` as a status worth drawing while un-fresh: a paused run has a
+  // future, and a strip that went silent for it would be the same "the board
+  // showed nothing and a click that failed looked identical to one that
+  // worked" failure the crashed rendering was added to fix. Everything else
+  // that is not fresh — a run that genuinely ended — still renders nothing,
+  // and that silence is still not a fault.
+  if (!run.fresh && run.status !== 'running' && run.status !== 'paused') return null;
+
+  if (run.status === 'paused') {
+    return renderPausedStrip({
+      run, onOpen, canResume, resumeBlockedReason, resuming, onResumed, resumeError, setResumeError
+    });
+  }
 
   if (isCrashed(run)) {
     return renderCrashedStrip({ run, onOpen, canResume, resumeBlockedReason, onResumed, resumeError, setResumeError });
@@ -352,6 +481,16 @@ export function RunStrip({
   // merge-mode run's strip byte-identical to what it rendered before this
   // feature existed, rather than a conditional restated at this call site.
   const modeLabel = mergeModeLabel(run.mergeMode, run.mergeModeEffective);
+
+  // `inFlightItemId`, not `current` above: the two answer different
+  // questions. `current` is "the next queue entry the run has not let go
+  // of", which includes a `pending` item and is right for the stage chip
+  // (that chip prints the stage, and `pending` is a real one). This asks
+  // "which item is the run WORKING", whose answer between items is nobody —
+  // and it comes from `RunControls`' own exported implementation so the
+  // strip's chip and the drawer's note can never name different items for
+  // the same run.
+  const pausingItem = inFlightItemId(run.queue);
 
   const heartbeatMs = Date.now() - Date.parse(run.updatedAt);
   const live = Number.isFinite(heartbeatMs) && heartbeatMs < LIVE_THRESHOLD_MS;
@@ -408,6 +547,15 @@ export function RunStrip({
         <span className="run-mode-badge" data-testid="run-strip-mode">{modeLabel}</span>
       )}
       <span className="run-strip-heartbeat">{live ? 'live' : age ?? '—'}</span>
+      {/* task-17: the run has been asked to stop and has not got there yet.
+          Naming the item it will finish first is the fact a person watching
+          a pause actually wants — "how long is this" — and `null` (the run is
+          between items) prints the word alone rather than an empty phrase. */}
+      {run.pauseRequested && (
+        <span className="run-strip-pausing" data-testid="run-strip-pausing">
+          {pausingItem === null ? 'pausing' : `pausing · finishes ${pausingItem}`}
+        </span>
+      )}
       {elapsed !== null && (
         <span className="run-strip-elapsed" data-testid="run-strip-elapsed">
           {formatSpanCompact(elapsed)}

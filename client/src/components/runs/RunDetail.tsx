@@ -8,6 +8,8 @@ import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, mergeModeLabel, stageChipClass, sta
 import {
   formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive
 } from '../../lib/run-time';
+import { RunControls } from '../RunControls';
+import type { RunControlsChange } from '../RunControls';
 import { ACTIVE_RUN_STAGES } from '../board/ItemCard';
 import { RowTime } from '../board/RunRowTime';
 import { StageBars } from './StageBars';
@@ -139,7 +141,23 @@ function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
 }
 
 export function RunDetail(
-  { summary, live }: { summary: OrchestratorArchiveRun; live: OrchestratorRun | null }
+  { summary, live, gate, resuming, onChanged }: {
+    summary: OrchestratorArchiveRun;
+    /** The live poll's own entry for this runId — the whole payload entry
+     *  (task-17), not a bare `OrchestratorRun`: `RunControls` below decides
+     *  from `fresh` and `pauseRequested`, and both are annotations the
+     *  endpoint adds rather than fields the run file carries. Named as
+     *  exactly those two rather than the whole payload entry, so this prop
+     *  states what it READS: `pastRuns` and `watchdog` ride the same entry
+     *  and are none of this pane's business. */
+    live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean }) | null;
+    /** task-17: the same three props `RunDrawer` takes, from the same
+     *  `resumeGate` call — the two hosts of `RunControls` are deliberately
+     *  symmetric, so neither can drift into deriving its own gate. */
+    gate: { canResume: boolean; blockedReason: string | null };
+    resuming: boolean;
+    onChanged: (kind: RunControlsChange) => void;
+  }
 ): JSX.Element {
   // Holds the tail-bearing run this pane fetched for an ARCHIVED selection —
   // null before the fetch lands (or when this selection is live-backed and
@@ -357,6 +375,28 @@ export function RunDetail(
         {modeLabel !== null && (
           <span className="run-mode-badge" data-testid="run-detail-mode">{modeLabel}</span>
         )}
+        {/* task-17. `live` when there is one — it already carries `fresh` and
+            `pauseRequested`, the two fields the controls decide from — and a
+            synthesised entry otherwise. The synthesis is honest rather than a
+            placeholder: a run with no live entry is one this server's run
+            payload does not list, which means its file is gone or superseded,
+            so it is neither fresh nor pause-requested by construction. The
+            one thing that CAN still be true of it is `status: 'paused'`, read
+            off the archive record, and that is exactly the case the Resume
+            control exists for. `RunControls` renders nothing for every other
+            finished status regardless. */}
+        <RunControls
+          run={live ?? {
+            status: source.status,
+            project: summary.project,
+            queue: source.queue,
+            fresh: false,
+            pauseRequested: false
+          }}
+          gate={gate}
+          resuming={resuming}
+          onChanged={onChanged}
+        />
         {/* Each half renders only if its own stamp parsed — RunDrawer's own
             null-tolerant join, restated here rather than re-derived: a run
             with a readable `startedAt` and a corrupt `updatedAt` can still

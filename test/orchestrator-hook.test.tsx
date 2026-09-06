@@ -4,7 +4,7 @@
 import { StrictMode } from 'react';
 import { act, renderHook } from '@testing-library/react';
 
-import { useOrchestratorRuns } from '../client/src/hooks/useOrchestratorRuns';
+import { RESUME_POLL_GRACE_MS, useOrchestratorRuns } from '../client/src/hooks/useOrchestratorRuns';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
 
@@ -23,7 +23,7 @@ const fixture = rawFixture as OrchestratorRun;
  * parameter nobody would vary.
  */
 function payload(fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, fresh, pastRuns: 0 }], starting: [] };
+  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false }], starting: [] };
 }
 
 /**
@@ -35,7 +35,7 @@ function payload(fresh: boolean): OrchestratorRunsPayload {
  * lib/run-watchdog.ts) — the poll must still be running for it.
  */
 function payloadWith(status: OrchestratorRun['status'], fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, status, fresh, pastRuns: 0 }], starting: [] };
+  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false }], starting: [] };
 }
 
 /** Same shape as test/agents-client.test.ts's own `stub`: every call answers
@@ -511,4 +511,111 @@ describe('useOrchestratorRuns', () => {
     expect(result.current.starting).toEqual([entry]);
   });
 
+  /* task-17 — `noteResume`, the one mark that keeps this poll alive for a
+     run that is neither fresh nor running. A `paused` run polls nothing by
+     the ordinary rule (that is the whole point of it being a distinct
+     status), so after a Resume click the board would sit on a paused strip
+     until a focus event — for the 90s-to-several-minutes it takes a resumed
+     session to reach its first heartbeat. The mark closes exactly that
+     window and expires on its own, so a resume that never starts cannot pin
+     a tab to polling forever. */
+
+  it('polls immediately and then every 5s after noteResume on a paused run', async () => {
+    const fetchMock = stubFetch(payloadWith('paused', false));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The ordinary rule: nothing here is live, so no interval is armed.
+    expect(jest.getTimerCount()).toBe(0);
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // At once, not on the next tick — a click has to show something moving.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.resuming.has(fixture.project)).toBe(true);
+
+    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('drops the mark the moment the run comes back running, and keeps polling by the ordinary rule', async () => {
+    const fetchMock = stubFetchSequence([payloadWith('paused', false), payloadWith('running', true)]);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // The second fetch answered `running` — the mark has done its job.
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+
+    const before = fetchMock.mock.calls.length;
+    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    expect(fetchMock.mock.calls.length).toBe(before + 1);
+  });
+
+  it('expires the mark after the grace window and stops polling a run that never came back', async () => {
+    const fetchMock = stubFetch(payloadWith('paused', false));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    await act(async () => { await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS + 5_000); });
+    const settled = fetchMock.mock.calls.length;
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+
+    await act(async () => { await jest.advanceTimersByTimeAsync(30_000); });
+    expect(fetchMock.mock.calls.length).toBe(settled);
+  });
+
+  it('restarts the grace clock on a second noteResume', async () => {
+    stubFetch(payloadWith('paused', false));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => { await jest.advanceTimersByTimeAsync(120_000); });
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    // 4 minutes after the FIRST call is only 2 minutes after the second, so
+    // the mark is still live — a stored deadline that was never rewritten
+    // would already have expired here.
+    await act(async () => { await jest.advanceTimersByTimeAsync(120_000); });
+    expect(result.current.resuming.has(fixture.project)).toBe(true);
+
+    await act(async () => { await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS); });
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+  });
+
+  // Both are dependencies of effects and props of memoised children; a new
+  // identity every render would re-arm the poll effect on every tick.
+  it('keeps refresh and noteResume stable across a poll tick', async () => {
+    stubFetch(payload(true));
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    const { refresh, noteResume } = result.current;
+    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+
+    expect(result.current.refresh).toBe(refresh);
+    expect(result.current.noteResume).toBe(noteResume);
+  });
 });

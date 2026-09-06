@@ -865,6 +865,38 @@ body {
   background: color-mix(in srgb, var(--amber) 8%, var(--strip));
 }
 .run-strip-crashed:hover { border-color: var(--amber) }
+/* task-17's paused rendering. Neutral hairline and the plain strip
+   background, deliberately NOT the crashed row's amber: a paused run is not
+   an alert — somebody stopped it on purpose — and dressing the two the same
+   would cost the crashed row the whole point of its colour. Same
+   `.run-strip` base (flex row, border, padding) as the other two. */
+.run-strip-paused {
+  border-color: var(--hairline);
+  background: var(--strip);
+}
+.run-strip-paused:hover { border-color: var(--ink3) }
+/* The word itself, in `.run-strip-crashed-label`'s slot but in the quiet
+   ink — same construction as `.run-strip-starting-label` above and for the
+   same reason. */
+.run-strip-paused-label {
+  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--ink2);
+}
+/* `pausing · finishes <id>` on a run that is still going — amber, because
+   unlike the paused row itself this IS a state in transition that a person
+   may want to cancel, and it sits among the fresh strip's own live
+   readings. */
+.run-strip-pausing {
+  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600;
+  letter-spacing: .04em; color: var(--amber); white-space: nowrap;
+}
+/* The `Resuming…` placeholder that stands in `.run-strip-resume`'s slot
+   while a resume this board asked for is on its way — quiet ink, matching
+   `.run-strip-heartbeat`: it is a state, not a control. */
+.run-strip-resuming {
+  flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink2);
+  white-space: nowrap;
+}
 /* task-14's placeholder row (StartingStrip.tsx) — a run this server spawned
    whose run.json has not been written yet. Dashed border and `cursor:
    default`, both saying the same thing in the two languages this stack
@@ -950,6 +982,35 @@ body {
    distinct from the amber "needs a person" register the rest of this
    strip reads in. */
 .run-strip-error { flex: none; font-family: var(--mono); font-size: 10px; color: var(--red) }
+
+/* task-17's shared run controls (client/src/components/RunControls.tsx),
+   hosted by both the board's run drawer and the Runs view's detail pane.
+   The button deliberately reuses `.run-strip-resume`'s look rather than
+   inventing a second one — an amber outline pill is already this app's
+   word for "a run-level action a person can take", and the two controls
+   sit inches apart on the same screen when a drawer is open over a strip.
+   Kept as its own class rather than reusing the strip's, because the strip's
+   is sized against a single-line flex row and these live in two different
+   heads. */
+.run-controls { display: inline-flex; align-items: center; gap: 8px }
+.run-controls-btn {
+  flex: none; display: inline-flex; align-items: center;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
+  padding: 2px 8px; margin: 0; background: none;
+  border: 1px solid var(--amber); border-radius: 999px;
+  color: var(--amber); cursor: pointer;
+}
+.run-controls-btn:hover { background: color-mix(in srgb, var(--amber) 12%, transparent) }
+/* `[aria-disabled="true"]`, not `:disabled` — same reason
+   `.run-strip-resume`'s own rule gives: a natively disabled button drops out
+   of the tab order, and this one has to stay readable by a keyboard user
+   who wants to know why it will not act. */
+.run-controls-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed }
+/* `Pausing after <id>` and `Resuming…` — quiet ink, matching
+   `.run-strip-heartbeat`'s register: these are states, not alerts. */
+.run-controls-note { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink2) }
+.run-controls-error { flex: none; font-family: var(--mono); font-size: 10px; color: var(--red) }
 
 @media (max-width: 700px) {
   /* The bar is the one segment built to give up its width first — the dot,
@@ -1666,6 +1727,10 @@ body {
 .runs-status-done { color: var(--green) }
 .runs-status-warn { color: var(--amber) }
 .runs-status-bad { color: var(--red) }
+/* task-17: paused is the one status with no verdict attached — the run was
+   stopped on purpose and can still finish — so it takes the muted ink rather
+   than borrowing amber (a warning) or green (an ending that went well). */
+.runs-status-paused { color: var(--ink3) }
 .runs-row-project {
   font-family: var(--mono); font-size: 10px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .05em; color: var(--ink);

@@ -17,7 +17,7 @@ import type {
 // keys its behaviour on.
 const fixture = rawFixture as OrchestratorRun;
 
-type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; watchdog?: RunWatchdog };
+type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog };
 
 /**
  * task-14's placeholder row — the card the board shows for the 1–5 minutes
@@ -136,7 +136,7 @@ describe('BoardView: the starting placeholder beside real run strips', () => {
     // The server should have evicted the entry by now, but both arrive in
     // one payload — so this is an ordering the client can genuinely see, and
     // it must not double-render while waiting for the server to catch up.
-    stub([{ ...fixture, project: '/abs/alpha', updatedAt: new Date().toISOString(), fresh: true, pastRuns: 0 }], [marked]);
+    stub([{ ...fixture, project: '/abs/alpha', updatedAt: new Date().toISOString(), fresh: true, pastRuns: 0, pauseRequested: false }], [marked]);
     await renderBoard();
 
     await waitFor(() => expect(screen.getByTestId('run-strip')).toBeInTheDocument());
@@ -149,7 +149,7 @@ describe('BoardView: the starting placeholder beside real run strips', () => {
     // says `running`, so no new run lands, eviction rule 1 never matches,
     // and the entry survives the full RUN_STALE_MS. Reachable from the UI —
     // the pre-spawn lock only refuses a FRESH run.
-    stub([{ ...fixture, project: '/abs/alpha', status: 'running', fresh: false, pastRuns: 0 }], [marked]);
+    stub([{ ...fixture, project: '/abs/alpha', status: 'running', fresh: false, pastRuns: 0, pauseRequested: false }], [marked]);
     await renderBoard();
 
     await waitFor(() => expect(screen.getByTestId('run-strip')).toBeInTheDocument());
@@ -159,7 +159,7 @@ describe('BoardView: the starting placeholder beside real run strips', () => {
   it('still renders the placeholder for a project whose OTHER-project run is live', async () => {
     // The gate is per project, not "is anything running" — a run on beta
     // must not suppress alpha's placeholder.
-    stub([{ ...fixture, project: '/abs/beta', updatedAt: new Date().toISOString(), fresh: true, pastRuns: 0 }], [marked]);
+    stub([{ ...fixture, project: '/abs/beta', updatedAt: new Date().toISOString(), fresh: true, pastRuns: 0, pauseRequested: false }], [marked]);
     await renderBoard();
 
     await waitFor(() => expect(screen.getByTestId('starting-strip')).toBeInTheDocument());

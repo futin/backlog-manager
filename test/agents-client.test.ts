@@ -1,6 +1,6 @@
 import {
   ApiError, dispatchAgent, fetchAgentPlan, fetchAgentsStatus, fetchArchivedRun, fetchOrchestratorArchive,
-  fetchOrchestratorRuns, sessionUrl, startOrchestrate
+  fetchOrchestratorRuns, cancelPauseOrchestrate, pauseOrchestrate, sessionUrl, startOrchestrate
 } from '../client/src/lib/agents';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type {
@@ -183,7 +183,7 @@ describe('the agents client', () => {
 // a mystery in the hook suite.
 describe('the orchestrator calls', () => {
   it('reads runs from the same-origin API', async () => {
-    const body: OrchestratorRunsPayload = { runs: [{ ...fixture, fresh: true, pastRuns: 0 }], starting: [] };
+    const body: OrchestratorRunsPayload = { runs: [{ ...fixture, fresh: true, pastRuns: 0, pauseRequested: false }], starting: [] };
     const calls = stub({ ok: true, body });
     await expect(fetchOrchestratorRuns()).resolves.toEqual(body);
     expect(calls[0].url).toBe('/api/orchestrator/runs');
@@ -199,7 +199,7 @@ describe('the orchestrator calls', () => {
      `project`/`requestedAt` out of each entry; an unguarded throw there
      unmounts the tree to a blank page. */
   it('accepts a runs body with no starting field at all — an older server', async () => {
-    const body = { runs: [{ ...fixture, fresh: true, pastRuns: 0 }] };
+    const body = { runs: [{ ...fixture, fresh: true, pastRuns: 0, pauseRequested: false }] };
     stub({ ok: true, body });
     await expect(fetchOrchestratorRuns()).resolves.toEqual(body);
   });
@@ -222,7 +222,7 @@ describe('the orchestrator calls', () => {
   // read as a real answer rather than throwing). A string where a boolean
   // belongs is exactly that case, not a missing key.
   it('rejects a runs body whose fresh field is the wrong type instead of returning it silently', async () => {
-    stub({ ok: true, body: { runs: [{ ...fixture, fresh: 'true', pastRuns: 0 }] } });
+    stub({ ok: true, body: { runs: [{ ...fixture, fresh: 'true', pastRuns: 0, pauseRequested: false }] } });
     await expect(fetchOrchestratorRuns()).rejects.toThrow('malformed');
   });
 
@@ -251,6 +251,36 @@ describe('the orchestrator calls', () => {
   it('throws the server error string on a fresh-run conflict', async () => {
     stub({ ok: false, status: 409, body: { error: `a fresh run already exists (${fixture.runId})` } });
     await expect(startOrchestrate({ project: '/abs/alpha' })).rejects.toThrow(fixture.runId);
+  });
+
+  /* task-17 — the two pause helpers. Both POST the same route; the only
+     thing that distinguishes them on the wire is `cancel`, which is exactly
+     why they are two named functions rather than one with a boolean
+     parameter: the call sites read `pauseOrchestrate(p)` and
+     `cancelPauseOrchestrate(p)`, and neither can be turned into the other by
+     a misread argument. */
+
+  it('posts a pause as a project body, never a query string', async () => {
+    const calls = stub({ ok: true, body: { pauseRequested: true } });
+    await expect(pauseOrchestrate('/abs/alpha')).resolves.toEqual({ pauseRequested: true });
+    expect(calls[0].url).toBe('/api/agents/pause');
+    expect(calls[0].init?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ project: '/abs/alpha' });
+  });
+
+  it('posts cancel: true when withdrawing a pause', async () => {
+    const calls = stub({ ok: true, body: { pauseRequested: false } });
+    await expect(cancelPauseOrchestrate('/abs/alpha')).resolves.toEqual({ pauseRequested: false });
+    expect(calls[0].url).toBe('/api/agents/pause');
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ project: '/abs/alpha', cancel: true });
+  });
+
+  it('rejects with an ApiError carrying the server wording on a 409', async () => {
+    stub({ ok: false, status: 409, body: { error: 'no running run to pause for this project' } });
+    const err = await pauseOrchestrate('/abs/alpha').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).message).toContain('no running run to pause');
   });
 });
 

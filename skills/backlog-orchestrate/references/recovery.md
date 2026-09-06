@@ -21,12 +21,29 @@ describes, close the gap the board's watchdog is timing:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
 ```
 
-Only when that line reads `running` — never on `done`, `aborted` or
-`failed` — stamp a heartbeat immediately, before doing anything else:
+`status` has three outcomes here, not two.
+
+**`running`** — stamp a heartbeat immediately, before doing anything else:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
 ```
+
+**`paused`** — this run was not crashed, it was stopped on purpose at an item
+boundary (SKILL.md §10, *Pausing*). Put it back to `running` first:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" unpause
+```
+
+The run is `running` again from this instant, and the request that paused it
+is retired by that same stamp — so the first `stage <id> preflight` of the
+rest of the queue will not exit `6` all over again. No separate heartbeat is
+needed: `unpause` writes `updatedAt` itself. Then continue exactly as the
+`running` path does, `reconcile` next.
+
+**Anything else** — `done`, `aborted`, `failed` — is not this path's to
+touch. Refuse and say which.
 
 `status` runs first for exactly that reason, and it is the guard, not a
 formality: a finished run is not this step's to re-stamp, and `status` is
@@ -117,6 +134,14 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   before the crash, or never started). Reconcile cannot tell those apart from
   outside; look, then re-enter the loop at the right step — often Commit or
   Review, because the work is already done and only the plumbing died.
+
+  An `inspect` on an item whose **stage is `preflight`**, worktree present, no
+  marker, is a paused run's dispatch-gate leftover: SKILL.md §4's exit `6`
+  lands exactly there, with the worktree built and the pre-flight answer
+  possibly written into it, and nothing dispatched. Re-enter §4 at "record the
+  worktree on the run" — `stage <id> dispatched --worktree … --branch …` onto
+  the existing pair — and dispatch. Not a leftover to ask about, and not a
+  worktree to unwind: the pre-flight answer in it is the reason it was kept.
 - **`park`** — neither worktree nor branch survives. Nothing to resume:
 
   ```bash
