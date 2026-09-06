@@ -3,6 +3,10 @@ id: task-19
 title: Run-scoped question mode: vocabulary, tool, server, settings and the assumptions record
 created: 2026-09-05
 tags: orchestrate, skills, server, client, settings
+updated: 2026-09-06T08:49:54Z
+started: 2026-09-06T08:20:59Z
+execute-elapsed: 1735
+execute-tokens: 265608
 ---
 
 ## Goal
@@ -121,3 +125,118 @@ these are the groupings, not a second copy of the table.
   exactly `/backlog-orchestrate`, unchanged from before this task.
 - SKILL.md §3 states all three outcomes and the two reasoned rules, and
   CLAUDE.md carries the invariant.
+
+## Outcome
+
+2026-09-06 — done. The plan's Tasks 1, 2, 3, 4, 5, 8 and 9 all landed; Tasks 6
+and 7 stay excluded as task-20's scope.
+
+- **T1** `QuestionMode`/`QUESTION_MODES` and `OrchestratorRun.questionMode` /
+  `RunQueueItem.assumptions` in `shared/types.ts`, `isQuestionMode` in
+  `shared/agent.ts`. Both new fields are declared **required**, which is what
+  forced the contract fixture and eleven existing suites' builders to state
+  them — the point of declaring them that way.
+- **T2** `init --question-mode`, validated against the tool's own
+  `QUESTION_MODES` literal before the archive/rename of any existing
+  `run.json`, written as one field beside `mergeMode`. `INIT_USAGE` extended.
+- **T3** `assume <id> --json <file>`, appending, through the shared
+  `findQueueItem` lookup, refused under `park` **before any parse or read** so
+  a refused call cannot also report a file problem. Registered in the dispatch
+  switch and the top-level usage; the file's exit-code contract comment now
+  lists three run-state-dependent exit `1`s rather than two.
+- **T4** `resolveQuestionMode` mirroring `resolveMergeMode` (absent/`''` →
+  `park`, unrecognised → 400 uncoded with the value echoed), the controller's
+  one-line rebuild field, and the prompt gaining `--question-mode decide`
+  after any ids and after `--merge-mode branch`.
+- **T5** `orchestrateDefaultQuestionMode` (default `park`, `pickOne`-clamped)
+  and a new `Orchestrator · this device` group above the watchdog group;
+  `Default merge mode` moved into it out of `Claude Agents · this machine`,
+  whose own comment was corrected from "these three rows" to two.
+- **T8** assumptions rendered per item in `RunDrawer` and `RunDetail`, on the
+  queue row rather than under Attention — a decided item earns no attention
+  entry at all, so a block living there would be invisible for exactly the
+  runs that have any. Gated on the list's length, not the key's presence.
+- **T9** SKILL.md's trigger grammar, §2's init passthrough (a separate
+  sentence, not merged into the merge-mode one), §3 rewritten to three
+  outcomes with both reasoned rules, the exit-code table, plus the CLAUDE.md
+  invariant. Two neighbouring CLAUDE.md entries were corrected while there:
+  the spawn-prompt invariant said "a caller can influence exactly two things"
+  (the stale-count shape that file warns about — now deferred to the
+  composition itself), and the Layout paragraph described Settings as having
+  only the watchdog group.
+
+### Deviations, all deliberate
+
+1. **Nothing was committed.** The plan gives each task a commit step;
+   `backlog-execute`'s hard limit is "never commits, never pushes", and
+   CLAUDE.md's invariant makes `backlog-orchestrate` the only skill that
+   touches git history. Staging is the user's call.
+2. **T4's tests went to a new `test/question-mode.test.ts`,** not
+   `test/agents-prompt.test.ts` as the plan's file list said. That file covers
+   `composePrompt` (the *dispatch* prompt) and has never carried a `mergeMode`
+   case; the orchestrate prompt's real home on this side is beside
+   `test/merge-mode.test.ts`, which the new file mirrors row for row.
+3. **The browser check ran on 127.0.0.1:5199, not :5177.** The main checkout's
+   docker stack holds 4322/5177 on this machine, and it serves `main`'s build,
+   not this worktree's. A host API on `PORT=4399` and Vite on `WEB_PORT=5199`
+   were started, driven, and killed by the pids they were started under; the
+   user's stack was left running.
+
+### Verification
+
+`pnpm test`:
+
+```
+Test Suites: 76 passed, 76 total
+Tests:       1384 passed, 1384 total
+Snapshots:   0 total
+Time:        49.904 s
+Ran all test suites.
+```
+
+`pnpm run test:skills`:
+
+```
+# tests 397
+# pass 397
+# fail 0
+```
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+typecheck exit=0
+```
+
+In the browser (playwright, Settings on the running app), the accessibility
+snapshot showed the groups in this order and with these contents:
+
+```
+- generic: Claude Agents · this machine
+  - Dispatch / Default model / Default effort / Dashboard link / Setting it up
+- generic: Orchestrator · this device
+  - Default merge mode      → combobox: "Merge to main" [selected], "Leave branches for me"
+  - Default question mode   → combobox: "Decide and continue", "Skip the item for me" [selected]
+- generic: Orchestrator watchdog · this server
+```
+
+`Orchestrator · this device` renders above the watchdog group with both
+controls; `Claude Agents · this machine` no longer shows `Default merge mode`
+and still shows `Default model` and `Default effort`.
+
+### Done-when, item by item
+
+- `pnpm test`, `pnpm run test:skills`, `pnpm run typecheck` — all pass, above.
+- `questionMode` in `run.json` for `decide` and for a flagless run — pinned by
+  `init --question-mode decide writes questionMode "decide"` and `init with no
+  --question-mode flag writes "park", key set unchanged from the contract
+  fixture`.
+- `questionMode: 'auto'` → 400, no `code`, no spawn — pinned by
+  `questionMode: 'auto' 400s, uncoded, and spawns nothing`.
+- `assume` writes under `decide`, refuses under `park` — pinned by seven
+  `assume` cases including the byte-identical run-file assertion.
+- A request with neither field composes exactly `/backlog-orchestrate` —
+  pinned as an exact string by `leaves every pre-task-19 prompt shape
+  byte-identical`.
+- SKILL.md §3 and the CLAUDE.md invariant — written.

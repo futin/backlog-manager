@@ -6,7 +6,7 @@ import {
   FONT_SCALES, STALE_WINDOWS, THEMES, type Landing, type ThemeId
 } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
-import type { AgentsStatus, MergeMode } from '../../../../shared/types';
+import type { AgentsStatus, MergeMode, QuestionMode } from '../../../../shared/types';
 
 /**
  * Preview colors per theme — board / strip / accent, in that order. A mirror of
@@ -191,8 +191,66 @@ export default function SettingsView() {
 
       <AgentsGroup />
 
+      <OrchestratorGroup />
+
       <WatchdogGroup />
     </div>
+  );
+}
+
+/**
+ * The two run-scoped defaults the Orchestrate sheet seeds its own pickers
+ * from. A group of its own rather than more rows on `AgentsGroup` below: that
+ * group answers "how does dispatch behave on this device", and neither of
+ * these is a dispatch default. `Default model` and `Default effort` stayed
+ * there for exactly that reason — they genuinely are dispatch defaults, and
+ * the orchestrate sheet borrowing them is not a reason to move them.
+ *
+ * Placed above `WatchdogGroup` because the two are the same subject read at
+ * two scopes and in the order a person meets them: this one is what a run is
+ * started with, per device; the watchdog's is what happens to a run that has
+ * already crashed, per server. Both say which in their titles, because the
+ * distinction decides whether changing it here affects anyone else.
+ */
+function OrchestratorGroup() {
+  const { settings, update } = useSettings();
+
+  return (
+    <SettingsGroup title="Orchestrator · this device">
+      <SettingsRow
+        name="Default merge mode"
+        hint="Preselected in the Orchestrate sheet. “Merge to main” is what every run does today; “Leave branches for me” stops at a reviewed git branch per item instead. Overridable per launch."
+      >
+        <select
+          aria-label="Default merge mode"
+          value={settings.orchestrateDefaultMergeMode}
+          onChange={(e) => update({ orchestrateDefaultMergeMode: e.target.value as MergeMode })}
+        >
+          <option value="merge">Merge to main</option>
+          <option value="branch">Leave branches for me</option>
+        </select>
+      </SettingsRow>
+
+      {/* The hint carries the whole doctrine, because this is one of the four
+          places a reader can arrive at this feature first (the others are the
+          sheet's own picker, SKILL.md §3 and CLAUDE.md's invariants). The two
+          modes are IDENTICAL whenever `AskUserQuestion` is reachable — the ask
+          itself is unchanged in both — so this setting only ever takes effect
+          in a headless run, which is the only kind the board can start. */}
+      <SettingsRow
+        name="Default question mode"
+        hint="What a run does with an item's open questions when nobody can answer them. Want control over a question, start the run from a harness that has AskUserQuestion; start it from the board and you are choosing between skipping the item and letting the runner answer. Overridable per launch."
+      >
+        <select
+          aria-label="Default question mode"
+          value={settings.orchestrateDefaultQuestionMode}
+          onChange={(e) => update({ orchestrateDefaultQuestionMode: e.target.value as QuestionMode })}
+        >
+          <option value="decide">Decide and continue</option>
+          <option value="park">Skip the item for me</option>
+        </select>
+      </SettingsRow>
+    </SettingsGroup>
   );
 }
 
@@ -221,10 +279,13 @@ function AgentsGroup() {
       {/* The two picker defaults, copied from the dashboard's own "New sessions
           · this device" group. They live here rather than in a group of their
           own because the reader arrives at this group to ask "how does dispatch
-          behave on this device", and the answer is these three rows. Deliberately
-          NOT gated on `healthy`: a default is worth setting before the
-          integration works, and hiding the rows while it is down would read as
-          the setting having been lost. */}
+          behave on this device", and these two rows are that answer. `Default
+          merge mode` used to sit here as a third and moved out in task-19: it
+          never answered that question, and once a second orchestrate default
+          existed the mismatch stopped being cosmetic. Deliberately NOT gated on
+          `healthy`: a default is worth setting before the integration works, and
+          hiding the rows while it is down would read as the setting having been
+          lost. */}
       <SettingsRow
         name="Default model"
         hint="Preselected in a card's launch sheet. “CLI default” sends no --model flag and lets Claude Code pick. Overridable per launch."
@@ -250,20 +311,6 @@ function AgentsGroup() {
         >
           <option value="">CLI default</option>
           {EFFORTS.map((f) => <option key={f} value={f}>{f}</option>)}
-        </select>
-      </SettingsRow>
-
-      <SettingsRow
-        name="Default merge mode"
-        hint="Preselected in the Orchestrate sheet. “Merge to main” is what every run does today; “Leave branches for me” stops at a reviewed git branch per item instead. Overridable per launch."
-      >
-        <select
-          aria-label="Default merge mode"
-          value={settings.orchestrateDefaultMergeMode}
-          onChange={(e) => update({ orchestrateDefaultMergeMode: e.target.value as MergeMode })}
-        >
-          <option value="merge">Merge to main</option>
-          <option value="branch">Leave branches for me</option>
         </select>
       </SettingsRow>
 

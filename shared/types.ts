@@ -363,6 +363,44 @@ export type MergeMode = 'merge' | 'branch';
 export const MERGE_MODES: readonly MergeMode[] = ['merge', 'branch'];
 
 /**
+ * What a run does with an item's open questions when nobody can answer them.
+ * Run-scoped, chosen per launch, and travelling the exact route `MergeMode`
+ * above travels: Settings seed → sheet picker → `POST /api/agents/orchestrate`
+ * → the server-composed spawn prompt → `orchestrate.mjs init` → `run.json`.
+ *
+ * - `park` — today's behaviour, byte for byte. The run records the questions
+ *   (`attention --kind needs-answers`), stages the item `needs-answers` and
+ *   moves on to the next one.
+ * - `decide` — the run answers the questions itself, writes those answers
+ *   into the item body through the same write path an answered question
+ *   already uses (so they ride the worktree's commit and show up in the
+ *   diff), records the pairs with `orchestrate.mjs assume`, and executes the
+ *   item.
+ *
+ * The two modes are **identical whenever `AskUserQuestion` is reachable** —
+ * the ask itself is unchanged, once, best-effort, in both. The mode governs
+ * only the unanswered branch, and the tool's absence is in practice the
+ * "nobody is watching" signal, so this only ever takes effect in a headless
+ * run. Which gives the whole feature its one-sentence doctrine: want control
+ * over a question, start the run from a harness that has `AskUserQuestion`;
+ * start it from the board and you are choosing between skipping the item and
+ * letting the runner answer.
+ *
+ * The values name the outcome rather than the posture. `park` in an archived
+ * run file says what happened to the item, where `manual` would need the
+ * reader to already know what the run would have done instead.
+ */
+export type QuestionMode = 'decide' | 'park';
+
+/**
+ * Every member of `QuestionMode`, as a value — what a request body's
+ * `questionMode`, the CLI's `--question-mode` flag and the Settings clamp are
+ * all checked against, for the same reason `MERGE_MODES` above exists: no
+ * caller restates the union by hand.
+ */
+export const QUESTION_MODES: readonly QuestionMode[] = ['decide', 'park'];
+
+/**
  * The orchestrator's one-way pipeline for a single queue item, pending
  * through merged, plus the terminal exits that leave the pipeline early.
  * Written out as a flat union rather than modelled as "pipeline stage" +
@@ -560,6 +598,28 @@ export interface RunQueueItem {
    * (a plain `merged` or `pending` item has nothing to add).
    */
   note: string | null;
+  /**
+   * What this run decided on its own for this item, under
+   * `questionMode: 'decide'` — the questions nobody was there to answer and
+   * the answers the runner settled on. `[]` for every item that never had to
+   * assume anything, which is every item of every `park` run.
+   *
+   * **Pairs, not bare strings**, unlike `questions` above. That field carries
+   * bare strings because at the moment it is written there is no answer to
+   * carry; this one exists so the archive can answer "what was asked, *and*
+   * what did the runner decide", and half of that pair is useless on its own
+   * — an archived question with no answer cannot be told apart from one the
+   * run never got to.
+   *
+   * Written by `orchestrate.mjs assume` and by nothing else, appending rather
+   * than replacing so a second question decided later in the same item's
+   * pre-flight does not erase the first. `ArchiveQueueItem` is
+   * `Omit<RunQueueItem, 'verification'> & {…}`, so this field reaches the
+   * archive payload with no second declaration — which is the whole point of
+   * putting it on the queue item rather than inventing a parallel structure
+   * beside `attention`.
+   */
+  assumptions: { question: string; answer: string }[];
 }
 
 /**
@@ -668,6 +728,26 @@ export interface OrchestratorRun {
    * and this note is never cleared back to `null` afterwards.
    */
   mergeModeNote: string | null;
+  /**
+   * What this run does with an item's open questions when nobody can answer
+   * them — `init --question-mode`'s value, or `'park'` when the flag was
+   * omitted. Written once by `init` and never touched again by anything.
+   *
+   * **One field, not three**, deliberately unlike `mergeMode` directly above.
+   * That one needs `mergeModeEffective` and `mergeModeNote` because a denied
+   * merge moves a run from `merge` to `branch` mid-queue and the archive has
+   * to answer "did this run merge, and was that the plan?". Nothing moves
+   * `questionMode`: there is no mid-run event that degrades `decide` into
+   * `park` or promotes the reverse. A second field would record a divergence
+   * that cannot occur, and every later reader would spend real time working
+   * out which of the two to trust.
+   *
+   * A run file written before this field existed simply lacks it, and absent
+   * means `park` — the mode whose behaviour those runs actually had. The
+   * archive endpoints serve run files verbatim, so tolerating that absence is
+   * a display concern in `RunDetail`, not a migration.
+   */
+  questionMode: QuestionMode;
   queue: RunQueueItem[];
   attention: RunAttention[];
 }

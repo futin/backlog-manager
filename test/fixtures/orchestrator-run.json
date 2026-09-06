@@ -8,6 +8,7 @@
   "mergeMode": "merge",
   "mergeModeEffective": "merge",
   "mergeModeNote": null,
+  "questionMode": "park",
   "queue": [
     {
       "id": "bug-14",
@@ -30,11 +31,20 @@
         "merged": "2026-08-31T08:59:55Z"
       },
       "verification": [
-        { "cmd": "pnpm test", "ok": true, "tail": "Tests: 2 skipped, 44 passed, 46 total" },
-        { "cmd": "pnpm run typecheck", "ok": true, "tail": "Found 0 errors. Watching for file changes." }
+        {
+          "cmd": "pnpm test",
+          "ok": true,
+          "tail": "Tests: 2 skipped, 44 passed, 46 total"
+        },
+        {
+          "cmd": "pnpm run typecheck",
+          "ok": true,
+          "tail": "Found 0 errors. Watching for file changes."
+        }
       ],
       "questions": [],
-      "note": "Reviewer flagged a missing null-guard in the heartbeat writer on the first pass; fixed and re-reviewed clean before verify."
+      "note": "Reviewer flagged a missing null-guard in the heartbeat writer on the first pass; fixed and re-reviewed clean before verify.",
+      "assumptions": []
     },
     {
       "id": "task-21",
@@ -54,7 +64,8 @@
       "questions": [
         "Once backlog-execute archives this item to done/, does it move to the board's Archive view right away, or stay under its original column until the whole run finishes?"
       ],
-      "note": null
+      "note": null,
+      "assumptions": []
     },
     {
       "id": "bug-22",
@@ -71,7 +82,8 @@
       },
       "verification": [],
       "questions": [],
-      "note": "No Cause/Fix recorded yet — skipped without dispatch; needs a backlog-groom pass first."
+      "note": "No Cause/Fix recorded yet \u2014 skipped without dispatch; needs a backlog-groom pass first.",
+      "assumptions": []
     },
     {
       "id": "task-16",
@@ -94,10 +106,15 @@
         "merged": "2026-08-31T09:19:47Z"
       },
       "verification": [
-        { "cmd": "pnpm test", "ok": true, "tail": "Tests: 46 passed, 46 total" }
+        {
+          "cmd": "pnpm test",
+          "ok": true,
+          "tail": "Tests: 46 passed, 46 total"
+        }
       ],
       "questions": [],
-      "note": "Merge conflicted against main in shared/types.ts (an earlier item's change landed first); parked. Resumed after a human resolved the conflict by hand — merged clean on retry."
+      "note": "Merge conflicted against main in shared/types.ts (an earlier item's change landed first); parked. Resumed after a human resolved the conflict by hand \u2014 merged clean on retry.",
+      "assumptions": []
     },
     {
       "id": "task-9",
@@ -120,10 +137,15 @@
         "merged": "2026-08-31T09:31:12Z"
       },
       "verification": [
-        { "cmd": "pnpm test", "ok": true, "tail": "Tests: 46 passed, 46 total" }
+        {
+          "cmd": "pnpm test",
+          "ok": true,
+          "tail": "Tests: 46 passed, 46 total"
+        }
       ],
       "questions": [],
-      "note": "Reviewer asked for changes twice in a row without signing off (2 fix loops, the loop cap); asked whether to merge anyway — approved. Verification still ran and passed before the merge."
+      "note": "Reviewer asked for changes twice in a row without signing off (2 fix loops, the loop cap); asked whether to merge anyway \u2014 approved. Verification still ran and passed before the merge.",
+      "assumptions": []
     },
     {
       "id": "task-14",
@@ -143,7 +165,8 @@
       },
       "verification": [],
       "questions": [],
-      "note": null
+      "note": null,
+      "assumptions": []
     },
     {
       "id": "bug-27",
@@ -159,7 +182,8 @@
       },
       "verification": [],
       "questions": [],
-      "note": null
+      "note": null,
+      "assumptions": []
     }
   ],
   "attention": [
@@ -176,7 +200,7 @@
     {
       "id": "task-9",
       "kind": "fix-exhausted",
-      "detail": "Reviewer asked for changes twice without signing off (2 fix loops, the loop cap); asked whether to merge anyway — approved, and verification still passed before the merge."
+      "detail": "Reviewer asked for changes twice without signing off (2 fix loops, the loop cap); asked whether to merge anyway \u2014 approved, and verification still passed before the merge."
     }
   ]
 }

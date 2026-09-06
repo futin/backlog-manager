@@ -1283,6 +1283,24 @@ body {
 .run-drawer-questions { margin: 6px 0 0; padding-left: 16px }
 .run-drawer-questions li { font-size: 12px; color: var(--ink2); line-height: 1.5; margin: 3px 0 }
 
+/* task-19: what a `decide`-mode run answered for itself, per queue item.
+   Deliberately NOT the amber attention treatment above — an item whose
+   questions the runner answered and which then merged is not waiting on
+   anybody (design §6), so painting it in the "look at this" tone would say
+   the opposite of what the record means. A <dl>: the question and its answer
+   are a pair, and a flat list would lose which answer belongs to which. */
+.run-drawer-item-assumptions {
+  margin-top: 6px; padding-left: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--ink2) 25%, transparent);
+}
+.run-drawer-assumptions-label {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink2);
+}
+.run-drawer-assumptions-list { margin: 3px 0 0 }
+.run-drawer-assumptions-list dt { font-size: 12px; color: var(--ink); line-height: 1.5; margin-top: 4px }
+.run-drawer-assumptions-list dd { font-size: 12px; color: var(--ink2); line-height: 1.5; margin: 0 0 0 12px }
+
 /* ---- dispatch: the card button and the launch sheet -------------------
    z-index above the item drawer (60/61): the sheet is opened FROM the
    drawer as well as from a card, so it has to sit over it. */

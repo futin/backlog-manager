@@ -9,13 +9,13 @@ describe('clampSettings', () => {
     const s = clampSettings({
       theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
       dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14,
-      orchestrateDefaultMergeMode: 'branch'
+      orchestrateDefaultMergeMode: 'branch', orchestrateDefaultQuestionMode: 'decide'
     });
     expect(s).toEqual({
       theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
       linkBase: 'http://127.0.0.1:5174',
       dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14,
-      orchestrateDefaultMergeMode: 'branch'
+      orchestrateDefaultMergeMode: 'branch', orchestrateDefaultQuestionMode: 'decide'
     });
   });
 
@@ -23,7 +23,7 @@ describe('clampSettings', () => {
     const s = clampSettings({
       theme: 'neon', density: 7, fontScale: 'big', landing: 'guides',
       dispatchDefaultModel: 'gpt', dispatchDefaultEffort: 7, staleDays: 'soon',
-      orchestrateDefaultMergeMode: 'rebase'
+      orchestrateDefaultMergeMode: 'rebase', orchestrateDefaultQuestionMode: 'auto'
     });
     expect(s).toEqual(DEFAULT_SETTINGS);
   });
@@ -158,5 +158,44 @@ describe('orchestrateDefaultMergeMode', () => {
   it('clamps a non-string to the default', () => {
     expect(clampSettings({ orchestrateDefaultMergeMode: 7 }).orchestrateDefaultMergeMode)
       .toBe('merge');
+  });
+});
+
+/**
+ * `orchestrateDefaultQuestionMode` seeds the orchestrate sheet's
+ * question-mode picker, exactly as `orchestrateDefaultMergeMode` above seeds
+ * the merge-mode one, and clamps for the identical reason: this is a
+ * *preference*, not an instruction. The server's own `resolveQuestionMode`
+ * 400s an unrecognised value because that one is acted on unattended and
+ * ends up written verbatim into `run.json`; this one's worst case is a sheet
+ * opening on the wrong pre-selection, which the person launching the run can
+ * see and change.
+ *
+ * There is no nearest-bound behaviour to test the way `staleDays` has: the
+ * union is closed, so `pickOne` falling back to the default is the whole
+ * rule.
+ */
+describe('orchestrateDefaultQuestionMode', () => {
+  it("defaults to park — what every run did before the mode existed", () => {
+    expect(clampSettings({}).orchestrateDefaultQuestionMode).toBe('park');
+  });
+
+  it('keeps either real question mode', () => {
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 'decide' }).orchestrateDefaultQuestionMode)
+      .toBe('decide');
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 'park' }).orchestrateDefaultQuestionMode)
+      .toBe('park');
+  });
+
+  it('clamps an unrecognised string to the default', () => {
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 'auto' }).orchestrateDefaultQuestionMode)
+      .toBe('park');
+  });
+
+  it('clamps a non-string and a null to the default', () => {
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 42 }).orchestrateDefaultQuestionMode)
+      .toBe('park');
+    expect(clampSettings({ orchestrateDefaultQuestionMode: null }).orchestrateDefaultQuestionMode)
+      .toBe('park');
   });
 });

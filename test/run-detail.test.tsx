@@ -54,6 +54,7 @@ function archiveItem(
     verification?: VerificationSummary[];
     questions?: string[];
     branch?: string | null;
+    assumptions?: RunQueueItem['assumptions'];
   } = {}
 ): ArchiveQueueItem {
   return {
@@ -68,7 +69,8 @@ function archiveItem(
     stageAt: over.stageAt ?? {},
     verification: over.verification ?? [],
     questions: over.questions ?? [],
-    note: null
+    note: null,
+    assumptions: over.assumptions ?? []
   };
 }
 
@@ -82,6 +84,7 @@ function liveItem(
     stageAt?: Partial<Record<RunStage, string>>;
     verification?: RunQueueItem['verification'];
     questions?: string[];
+    assumptions?: RunQueueItem['assumptions'];
   } = {}
 ): RunQueueItem {
   return {
@@ -96,7 +99,8 @@ function liveItem(
     stageAt: over.stageAt ?? {},
     verification: over.verification ?? [],
     questions: over.questions ?? [],
-    note: null
+    note: null,
+    assumptions: over.assumptions ?? []
   };
 }
 
@@ -126,6 +130,7 @@ function primarySummary(): OrchestratorArchiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    questionMode: 'park',
     current: false,
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
     queue: [
@@ -162,6 +167,7 @@ function primaryFull(overTails: { a1?: string; a2?: string } = {}): LiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    questionMode: 'park',
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
     queue: [
       liveItem('a-1', 'merged', {
@@ -222,6 +228,68 @@ describe('RunDetail', () => {
     );
   });
 
+  /*
+   * task-19: the same per-item record RunDrawer renders, on the pane. Beside
+   * the stage track rather than under Attention, because a decided item
+   * produces no attention entry at all (design §6) — an assumptions block
+   * living there would be invisible for exactly the runs that have any.
+   *
+   * These read off the SUMMARY, not the fetched full run: `assumptions` rides
+   * `ArchiveQueueItem` (`Omit<RunQueueItem, 'verification'> & {…}`), so the
+   * listing endpoint already carries it and nothing here should wait on a
+   * detail fetch to show it.
+   */
+  describe('assumptions', () => {
+    const PAIRS = [
+      { question: 'Which column does a rejected item land in?', answer: 'Out of scope — Archive renders it there.' },
+      { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' }
+    ];
+
+    function summaryWith(assumptions: unknown): OrchestratorArchiveRun {
+      const base = primarySummary();
+      return {
+        ...base,
+        queue: base.queue.map((q) => (
+          q.id === 'a-1' ? { ...q, assumptions } as ArchiveQueueItem : q
+        ))
+      };
+    }
+
+    it('renders every question and answer on the item that carries them', () => {
+      mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+      render(<RunDetail summary={summaryWith(PAIRS)} live={null} {...CONTROL_PROPS} />);
+
+      const row = screen.getByTestId('run-detail-item-a-1');
+      for (const pair of PAIRS) {
+        expect(row).toHaveTextContent(pair.question);
+        expect(row).toHaveTextContent(pair.answer);
+      }
+    });
+
+    it('renders no section at all for an item with an empty list', () => {
+      mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+      render(<RunDetail summary={summaryWith([])} live={null} {...CONTROL_PROPS} />);
+
+      expect(screen.queryByTestId('run-detail-assumptions-a-1')).toBeNull();
+    });
+
+    // An archived run written before the field existed. The archive endpoints
+    // serve run files verbatim, so this is a real shape the pane receives.
+    it('renders no section, and does not throw, when the key is absent entirely', () => {
+      mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+      const base = primarySummary();
+      const queue = base.queue.map((q) => {
+        if (q.id !== 'a-1') return q;
+        const { assumptions: _dropped, ...legacy } = q;
+        return legacy as ArchiveQueueItem;
+      });
+      render(<RunDetail summary={{ ...base, queue }} live={null} {...CONTROL_PROPS} />);
+
+      expect(screen.getByTestId('run-detail-item-a-1')).toBeInTheDocument();
+      expect(screen.queryByTestId('run-detail-assumptions-a-1')).toBeNull();
+    });
+  });
+
   it('fetches tails for an archived run and fills the details body', async () => {
     mockFetchArchivedRun.mockResolvedValue(primaryFull({ a2: 'FETCHED_TAIL' }));
 
@@ -272,6 +340,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      questionMode: 'park',
       current: true,
       attention: [],
       queue: [
@@ -293,6 +362,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      questionMode: 'park',
       attention: [],
       queue: [
         liveItem('a-1', 'merged', {
@@ -316,6 +386,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      questionMode: 'park',
       attention: [],
       queue: [
         liveItem('a-1', 'merged', {
@@ -535,6 +606,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      questionMode: 'park',
       attention: [],
       queue: [liveItem('f-1', 'fixing', { stageAt: { fixing: fixingAt } })]
     };
@@ -652,6 +724,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'branch',
       mergeModeNote: 'classifier denied the merge on g-1',
+      questionMode: 'park',
       queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
     };
 
@@ -679,6 +752,7 @@ describe('RunDetail', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      questionMode: 'park',
       queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
     };
 
@@ -703,6 +777,7 @@ describe('RunDetail', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      questionMode: 'park',
       queue: [
         archiveItem('h-1', 'branched', { branch: 'backlog/h-1' }),
         archiveItem('h-2', 'branched', { branch: 'backlog/h-2' })
@@ -730,6 +805,7 @@ describe('RunDetail', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      questionMode: 'park',
       queue: [archiveItem('h-3', 'branched', { branch: null })]
     };
 
@@ -752,6 +828,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'branch',
       mergeModeNote: 'classifier denied the merge on k-3',
+      questionMode: 'park',
       attention: [],
       queue: [
         archiveItem('k-1', 'merged'),

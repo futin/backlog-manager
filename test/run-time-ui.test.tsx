@@ -57,7 +57,7 @@ function queueItem(over: Partial<RunQueueItem> & { id: string; stage: RunStage }
   return {
     title: 'a queue item',
     sessionId: null, worktree: null, branch: null, permissionMode: null,
-    fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null,
+    fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null, assumptions: [],
     ...over
   };
 }

@@ -10,8 +10,8 @@ import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
-  clampMode, deriveAction, dispatchBlock, isItemId, isMergeMode, modesUpTo, pickFrom,
-  projectDispatchGate, runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
+  clampMode, deriveAction, dispatchBlock, isItemId, isMergeMode, isQuestionMode, modesUpTo,
+  pickFrom, projectDispatchGate, runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
 import {
@@ -20,7 +20,7 @@ import {
 import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
 import type {
   AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, MergeMode,
-  PauseResult, PermissionMode
+  PauseResult, PermissionMode, QuestionMode
 } from '../../../shared/types';
 
 /**
@@ -170,6 +170,15 @@ export interface AgentOrchestrateRequest {
    * deliberately differs from every neighbouring field.
    */
   mergeMode?: string;
+  /**
+   * `string | undefined` for exactly the reason `mergeMode` above is: this
+   * arrives straight off a request body this service cannot trust.
+   * `resolveQuestionMode` is the only place it is read and the only place it
+   * is allowed to become a `QuestionMode` — and, like its neighbour and
+   * unlike `model`/`effort`, an unrecognised value there is a 400 rather
+   * than a drop.
+   */
+  questionMode?: string;
   /** The board's item selection, or absent for "the whole queue".
    *
    *  `unknown` rather than `string[]`: this arrives straight off a request
@@ -504,6 +513,11 @@ export class AgentsService {
     // an ids problem.
     const ids = this.resolveIds(req.project, req.ids);
     const mergeMode = this.resolveMergeMode(req.mergeMode);
+    // Beside resolveMergeMode, after the lock, for the identical reason the
+    // comment directly above gives: a malformed `questionMode` is a problem
+    // with what the run should contain, not with whether it may start, so
+    // the coded RUN_IN_PROGRESS_CODE 409 must still win over it.
+    const questionMode = this.resolveQuestionMode(req.questionMode);
 
     return this.spawn(cfg, {
       project: dirName,
@@ -522,7 +536,16 @@ export class AgentsService {
       prompt: [
         ORCHESTRATE_PROMPT,
         ...(ids === undefined ? [] : ids),
-        ...(mergeMode === 'branch' ? ['--merge-mode', 'branch'] : [])
+        ...(mergeMode === 'branch' ? ['--merge-mode', 'branch'] : []),
+        // Last of the three, and `park` appends nothing at all — which is
+        // what keeps every prompt this endpoint composed before task-19 a
+        // byte-exact PREFIX of what it composes now. The silent value is
+        // inverted from merge mode's (`merge` there, `park` here) because
+        // both follow the same rule: whichever value is the default appends
+        // nothing. As with `--merge-mode`, the appended text is two
+        // compile-time literals selected by a guard, so no caller-supplied
+        // character reaches the prompt through this channel either.
+        ...(questionMode === 'decide' ? ['--question-mode', 'decide'] : [])
       ].join(' '),
       // Unlike dispatch, which names a session after the one item it is
       // working (sessionName, prompt.util.ts), there is no item here to
@@ -1035,6 +1058,44 @@ export class AgentsService {
     // would not.
     const shown = JSON.stringify(typeof mergeMode === 'string' ? mergeMode.slice(0, 40) : mergeMode);
     throw new HttpException({ error: `mergeMode must be merge or branch — ${shown} is not one` }, 400);
+  }
+
+  /**
+   * `req.questionMode`, turned into a `QuestionMode` `orchestrate.mjs init`
+   * can be told to run with, or a 400 if it cannot be. Design §2.3
+   * (2026-09-05-orchestrate-question-mode-design.md), mirroring
+   * `resolveMergeMode` above row for row:
+   *
+   * - absent (`undefined` or `''`) → `'park'` — today's behaviour, for every
+   *   caller written before this field existed.
+   * - a member of `QUESTION_MODES` → that value.
+   * - anything else, of any type → reject.
+   *
+   * **400 rather than drop-on-unknown**, and the argument is this field's
+   * own rather than a copy of its neighbour's. `model` and `effort` drop an
+   * unrecognised value because dropping them means "let the CLI decide",
+   * which is a coherent thing to have happen. This value is written verbatim
+   * into `run.json` by `init` and read back out of the archive months later,
+   * so silently resolving a typo'd `decide` to `park` would put a claim in
+   * the archive that no caller ever made — and the archive's whole job here
+   * is answering "was this item's plan written by a human or filled in by
+   * the runner?". Absent is not a bug: it is every request written before
+   * this field existed, which is exactly the distinction a 400 preserves and
+   * a clamp destroys.
+   *
+   * Uncoded, like `resolveMergeMode`'s own 400 and for the same reason:
+   * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
+   * gives.
+   */
+  private resolveQuestionMode(questionMode: string | undefined): QuestionMode {
+    if (questionMode === undefined || questionMode === '') return 'park';
+    if (isQuestionMode(questionMode)) return questionMode;
+    // The same truncate-and-JSON.stringify echo convention resolveMergeMode
+    // and resolveIds both use — which is also what renders a non-string
+    // sensibly (`42`, not `"42"`), something a template-literal
+    // interpolation would get wrong.
+    const shown = JSON.stringify(typeof questionMode === 'string' ? questionMode.slice(0, 40) : questionMode);
+    throw new HttpException({ error: `questionMode must be decide or park — ${shown} is not one` }, 400);
   }
 
   /**
