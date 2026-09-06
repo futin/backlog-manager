@@ -2,9 +2,9 @@
 id: bug-29
 title: Runs view freezes a running-but-stale run's stages until refresh
 created: 2026-09-06
-updated: 2026-09-06T18:28:55Z
-groom-elapsed: 120
-groom-tokens: 27739
+updated: 2026-09-06T20:20:09Z
+groom-elapsed: 193
+groom-tokens: 41502
 ---
 
 ## Symptom
@@ -128,6 +128,44 @@ field, no new module, no new poll.
    vocabulary. A row whose stages now move must not read as a process
    anybody is still hearing from.
 
+   **And the status badge itself, which is the loudest of the three.** Both
+   surfaces print `authority.status` verbatim — `RunsView.tsx:441` (the list
+   row's `runs-status` span) and `RunDetail.tsx:380` (the same span in
+   `run-detail-head`) — so a run whose heartbeat died 46 minutes ago renders
+   the word `running`, in the live tone, beside a `34m elapsed` that
+   `runWallMs` has already correctly frozen. Observed on
+   `run-20260906-185312` while the Board strip one click away said `crashed`
+   and the Watchdog card said `exhausted after 2`. Marking the row and
+   qualifying the stage readout while leaving that badge alone would fix the
+   quiet half of the lie and leave the loud one, so both sites read
+   `crashed` — the strip's own word (`run-strip-crashed-label`,
+   `RunStrip.tsx:328`) — whenever `isCrashed` is true.
+
+   Three constraints on how, all of which the obvious implementation gets
+   wrong:
+
+   - **`crashed` is not a `RunStatus` and must not become one.** It stays
+     derived, exactly as `isCrashed`'s own header and CLAUDE.md's
+     "Groomed is derived" posture require. `RUN_STATUS_GLYPH` and
+     `RUN_STATUS_CLASS` (`client/src/lib/run-stage.ts:126`, `:142`) are
+     `Record<OrchestratorRun['status'], string>`, exhaustive over the five
+     wire statuses; adding a sixth key would put a word on the wire type that
+     no run file can ever contain. The substitution happens at these two
+     render sites, over the records' existing `running` entry.
+   - **Derive it from the live entry, never from `authority`.** `authority`
+     can be an archive summary, which carries no `fresh` field at all —
+     `isCrashed` needs `{ status, fresh }`, and only `row.live` /
+     `live` can supply the second half. An archive-only row has no heartbeat
+     to judge and must keep printing its recorded status unchanged. This is
+     the same split step 1 draws: the live entry is the data authority,
+     `isLive`/`fresh` is the presentation gate.
+   - **`RunsView.tsx:838` is out of scope and stays untouched.** That is the
+     aggregate tile's `byStatus` substat — a count over the archived corpus,
+     not a claim about any run right now. A crashed run is genuinely a
+     `running` run for the purpose of that tally, and re-bucketing history
+     behind a freshness flag would make the tile disagree with the archive
+     it summarises.
+
 4. **`RunDetail`'s two "active"/"queued" chips (`RunDetail.tsx:340`, `:341`
    and the `:461` render gate) move from `live !== null` to
    `live.fresh === true`.** They count what the run is doing *this instant*,
@@ -160,6 +198,27 @@ field, no new module, no new poll.
   `active` and `queued` chips render.
 - Same, stale entry → neither chip renders, and the crashed marker from step 3
   is present.
+- jsdom `RunsView`, stale live entry (`running`/`fresh: false`) → the list
+  row's `runs-status` span reads `crashed`, not `running`, and the detail
+  pane's head badge reads `crashed` too. Both, in one case: the two sites are
+  the whole point of the amendment and a test covering one would pass on a
+  half-applied fix.
+- Same, fresh live entry → both badges read `running`. This is the pair that
+  fails if the substitution is keyed on `status` alone rather than on
+  `isCrashed`.
+- jsdom `RunsView`, an archive-only row with no live entry whose recorded
+  status is `running` (a run whose file is gone or superseded) → both badges
+  still read `running`. A row with no heartbeat to judge must not be
+  reclassified; this is the case that fails if the derivation is taken from
+  `authority` instead of the live entry.
+- `RUN_STATUS_GLYPH` and `RUN_STATUS_CLASS` still key exactly the five
+  `OrchestratorRun['status']` members — a `Record<OrchestratorRun['status'],
+  string>` assertion in the same shape as `test/agents-shared.test.ts`'s
+  `Record<RunStage, true>`, so adding `crashed` as a sixth key fails the type
+  check rather than passing review.
+- The aggregate tile's `byStatus` substat over a corpus containing a stale
+  `running` run → still counts it under `running`. Pins step 3's stated
+  out-of-scope so a later reader does not "finish the job" there.
 
 In the browser (playwright MCP tools): open `http://127.0.0.1:5177`, click
 Runs, and install a `fetch` wrapper that rewrites `/api/orchestrator/runs`
@@ -168,4 +227,8 @@ queue item's stage across `reviewing`/`fixing`/`verifying`/`merging` on each
 poll. Over four polls (~20s) the detail pane's stage readout must change on
 every poll and carry the last-reported qualifier — the same experiment that
 produced this bug's Repro step 3, where it stayed on `inspecting` for all
-four.
+four. The same wrapper produces step 3's badge state for free, so assert it in
+the same pass: with `fresh: false` forced, the selected row's status badge and
+the detail head's badge must both read `crashed` rather than `running`, and
+must both go back to `running` when the wrapper is removed and a real fresh
+poll lands.
