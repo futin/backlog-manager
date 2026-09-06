@@ -3,6 +3,10 @@ id: bug-27
 title: Every item stays hand-dispatchable for the whole spawn-to-init window of a board-started run
 created: 2026-09-06
 tags: orchestrator, dispatch
+updated: 2026-09-06T18:11:50Z
+started: 2026-09-06T18:04:04Z
+execute-elapsed: 466
+execute-tokens: 41663
 ---
 
 ## Symptom
@@ -109,3 +113,87 @@ pnpm run typecheck
 ```
 
 - The gap is closed at both layers, and the narrowed-run cost is recorded in the outcome.
+
+## Outcome
+
+2026-09-06 — **Already fixed. No code change, and deliberately none.** The gap this item
+describes was closed by bug-21 (`8555cd7`, "fix(board): make a starting run block dispatch,
+orchestrate and the toolbar"), merged into `main` as `5f48dce` at 20:02 the same day this
+bug was captured. The worktree this session was given is branched off that merge, so the
+`## Cause` above — "every gate in the app still reads `runs` alone" — no longer holds
+against the code as it is.
+
+What bug-21 shipped, checked against this item's own Fix section:
+
+- The predicate lives in `shared/agent.ts` as bug-27 asked, but as a **third required
+  parameter on `runClaimBlock`** (`starting: OrchestratorRunsPayload['starting']`) rather
+  than as a separate fourth block ranked below it. Observable behaviour is what this item
+  specified: the per-item claim wording is returned first and the coarse
+  `'an orchestrator run is starting for this project'` only when no fresh run holds the
+  item — the same precedence a fourth rung would have produced. It matches on
+  `projectPath` alone and blocks every open bug and task in the project.
+- Required, no `[]` default, for the reason this item's Fix predicted the shape of: the
+  compile error at each of the four call sites is what forced every one of them to decide.
+  All four are wired — `BoardView.tsx:522`, `ArchiveView.tsx:201`, `plan()`'s `blocked`
+  (`agents.service.ts:314`) and dispatch's own 409 (`agents.service.ts:383`).
+- The block is therefore **not client-only**: `POST /api/agents/dispatch` answers 409 with
+  the identical string, uncoded like every other dispatch 409.
+
+The one structural difference — one three-argument function instead of two functions and a
+fifth ladder rung — was left as bug-21 built it rather than re-split to match this item's
+wording. `runClaimBlock`'s three-argument shape is now written into CLAUDE.md as an
+invariant ("A starting entry blocks what a run file blocks, on every surface"), and the
+argument for one function is the one that file already makes everywhere else: the question
+a caller asks is "why does a run forbid dispatching this item", and a starting run is a
+run. Splitting it would create two predicates that must agree, which is the exact shape
+`watchdogStoodDown` and `isStale` each exist to avoid.
+
+**The narrowed-run cost, recorded as this item requires.** A run launched with `--ids`
+naming a subset still blocks hand dispatch on every other open bug and task in that
+project, for as long as the window lasts. Nothing can narrow it: a `StartingRun` is
+`{ project, requestedAt }`, and even if it carried the launch's `ids`, which items a run
+actually queues is `buildGatedQueue`'s verdict inside the spawned session, over `<base>`,
+minutes later. The asymmetry settles it — a wrong allow costs a duplicated execution in two
+trees, a wrong block costs a wait bounded by the run file landing, or `RUN_STALE_MS`
+(15 min) at the very worst, after which the entry expires and dispatch is live again. This
+bug's own measurement of the window is the sharp end of that cost: `run-20260906-115323`
+took **11m26s** from session boot to `init`, more than double the 1–5 minutes CLAUDE.md
+documents.
+
+### Verification
+
+All five of this item's test cases already have a covering test. Confirmed by red-green
+rather than by reading them: replacing the starting clause in `runClaimBlock` with
+`return null;` failed 7 tests across 5 suites (`agents-shared`, `agents-dispatch`,
+`starting-strip`, `archive`, `agents-plan`), then passed again on restore.
+
+| test case | covering test |
+|---|---|
+| starting entry, no run file → disabled, reason names it | `agents-shared.test.ts:616`, `starting-strip.test.tsx` "disables every card dispatch control with the starting reason" |
+| run file with a queue arrives → run-claim reason wins | `agents-shared.test.ts:645` "prefers the per-item wording when a fresh run holds the item AND the project is starting" |
+| a different project is unaffected | `agents-shared.test.ts:636` "ignores a starting entry naming a different project" |
+| `POST /api/agents/dispatch` refuses the same way | `agents-dispatch.test.ts:433` and `:454` |
+| the entry expires at `RUN_STALE_MS` → dispatch live again | `orchestrator-starting.test.ts:155` "drops the entry once it is older than RUN_STALE_MS, and keeps it right up to the boundary" |
+
+Both "Done when" commands, run fresh on an unmodified tree (only this item file differs):
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+typecheck exit: 0
+```
+
+```
+$ pnpm test
+$ jest --runInBand
+
+Test Suites: 76 passed, 76 total
+Tests:       1469 passed, 1469 total
+Snapshots:   0 total
+Time:        93.622 s, estimated 113 s
+Ran all test suites.
+test exit: 0
+```
+
+One incidental note for whoever reads the branch: the worktree had no `node_modules`, so
+`pnpm install --frozen-lockfile` ran first. It changed no tracked file.
