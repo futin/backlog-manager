@@ -181,3 +181,70 @@ $ pnpm run test:skills
 # pass 381
 # fail 0
 ```
+
+### Review round 1 — both findings fixed
+
+**Critical — raw NUL byte in `WatchdogMonitor.tsx`.** Confirmed exactly as
+reported: one NUL at offset 7128 (line 133), standing where the separator
+belongs inside the row's React key template literal. `file` read the source as
+`data`, `grep -rn stateLine client/src/components/runs/` exited 1 with no
+match, and `git diff --stat` printed `Bin`. Replaced with a space, matching
+`runKey` (`RunsView.tsx:175`) — the same `{project, runId}` pair, keyed the
+same way, rather than inventing a separator. The file now reads as
+`Java source, Unicode text, UTF-8 text` and grep finds both `stateLine`
+references. Swept every tracked and untracked source file under `client/`,
+`server/`, `shared/`, `test/` and every `*.md` for NUL bytes: none anywhere
+else, so this was one corrupted write, not a systematic problem.
+
+Worth stating for whoever reads the history: this branch's `5f49f00` already
+carries the corrupt blob, since the orchestrator committed before the review
+ran. The worktree fix cleans the branch TIP — which is what a future 3-way
+merge of this branch uses — but `5f49f00` itself keeps a binary blob in
+history, and nothing short of a rewrite changes that.
+
+**Important — the `next check in Ns` countdown froze.** Also confirmed. The
+clock was gated on `running.length > 0` alone, on the reasoning that heartbeat
+ages were the only reading that moved. They are not: `stateLine`'s countdown
+reads the same `now`, and `armed` with nothing running in the payload is a
+state this component deliberately renders (the skew case, and the
+`watchdog-row-missing` placeholder lives in it too) — so there the countdown
+sat at whatever it read on mount while the real tick came and went. Gate is
+now `running.length > 0 || status?.phase === 'armed'`, with the comment
+rewritten to name both readings instead of one.
+
+Pinned by a new 17th case in `test/watchdog-monitor.test.tsx`, red before the
+fix and green after: armed, `watching: []`, `runs: []`, `nextTickAt = NOW +
+42s` reads `next check in 42s`, and after `advanceTimersByTimeAsync(5_000)`
+reads `next check in 37s` off the identical payload. It also asserts there are
+zero `watchdog-row`s, so a future fixture edit cannot quietly turn it into the
+rows case with extra steps.
+
+Re-verified after both fixes:
+
+```
+$ pnpm test
+Test Suites: 75 passed, 75 total
+Tests:       1356 passed, 1356 total
+Time:        52.836 s
+
+$ pnpm run typecheck
+$ tsc --noEmit
+exit=0
+
+$ pnpm run build
+dist/assets/index-BgOTdcxC.js    340.28 kB │ gzip: 103.65 kB
+✓ built in 1.14s
+exit=0
+
+$ git status --porcelain -- server shared
+(no output)
+```
+
+One thing the re-run turned up that is NOT this branch's: `pnpm test` failed
+once in six full runs, on `test/agents-plan.test.ts` › "404s an item with no
+next step", with `Parse Error: Expected HTTP/, RTSP/ or ICE/` — a supertest
+transport race. That suite passes 8/8 when run alone, and this branch touches
+no file under `server/` and none of that suite, so it is pre-existing
+flakiness under `--runInBand`, not a regression here. It deserves its own
+bug via `backlog-capture` rather than a silent note, but filing one is not
+this skill's job.

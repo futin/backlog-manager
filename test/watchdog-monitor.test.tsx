@@ -376,4 +376,36 @@ describe('WatchdogMonitor', () => {
     // has not moved — `useNow` alone is what advanced this.
     expect(screen.getByTestId('watchdog-row')).toHaveTextContent('heartbeat 9s ago');
   });
+  // --- 17: the countdown is a clock in the state a row cannot supply --------
+  //
+  // Review finding (Important): the clock used to be gated on `running.length
+  // > 0` alone, on the reasoning that heartbeat ages are the only reading
+  // that moves. They are not — `stateLine`'s own `next check in Ns` reads the
+  // same `now`, and there is a state this component deliberately RENDERS
+  // where the sweeper is armed with no running run in the payload at all
+  // (cases 4 and 10 above). In exactly that state the countdown froze at
+  // whatever it said on mount while the real next tick came and went.
+  it('counts the next tick down while armed with nothing in the payload', async () => {
+    await renderMonitor(
+      watchdogStatus({
+        phase: 'armed',
+        watching: [],
+        nextTickAt: new Date(NOW + 42_000).toISOString()
+      }),
+      []
+    );
+    expect(screen.getByTestId('watchdog-state-line')).toHaveTextContent('next check in 42s');
+    // Premise of the case, stated so a future fixture edit cannot quietly
+    // turn it into case 5 with extra steps: there is no row here to have
+    // enabled the clock.
+    expect(screen.queryAllByTestId('watchdog-row')).toHaveLength(0);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+
+    // The stub keeps answering the identical payload, so `nextTickAt` has not
+    // moved — the clock is what advanced.
+    expect(screen.getByTestId('watchdog-state-line')).toHaveTextContent('next check in 37s');
+  });
 });
