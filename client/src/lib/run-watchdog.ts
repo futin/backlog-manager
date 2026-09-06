@@ -1,11 +1,20 @@
 import { formatClock } from './run-time';
-import type { OrchestratorRun, RunWatchdog, WatchdogStatus } from '../../../shared/types';
+import type {
+  OrchestratorRun, RunWatchdog, WatchdogConfig, WatchdogEventKind, WatchdogStatus
+} from '../../../shared/types';
 
 /**
  * run-watchdog.ts — every sentence the client can print about the watchdog,
  * in one module: "is this run crashed at all" (`isCrashed`), "what is the
  * watchdog doing about THIS run, in one sentence" (`watchdogClause`), and
  * "what is the sweeper itself doing right now" (`stateLine`).
+ *
+ * task-26 added the readings that are not sentences: `sweepFraction` and
+ * `graceRemainingMs`, plus the `WATCHDOG_KIND_GLYPH`/`WATCHDOG_KIND_TONE`
+ * records the activity badges read. They live here for the reason the three
+ * sentences do — they are statements about the sweeper, two surfaces may
+ * come to read them, and the day a second one does it must not be able to
+ * derive a different number from the same payload.
  *
  * Two surfaces read them, and that is why all three live together rather
  * than beside whichever component happened to need one first: `RunStrip`
@@ -168,3 +177,103 @@ export function stateLine(status: WatchdogStatus, now: number = Date.now()): str
   const seconds = Number.isFinite(target) ? Math.max(0, Math.round((target - now) / 1000)) : 0;
   return `armed — watching ${status.watching.join(', ')}, next check in ${seconds}s${resumeDisabled}`;
 }
+
+/**
+ * How much of the sweeper's current tick is still to come — `1` just after a
+ * tick, `0` when the next is due (task-26). The bar drawn from it is the
+ * same countdown `stateLine`'s armed reading already prints in words; a
+ * depleting rule is what makes "armed" read as something that is happening
+ * rather than a label.
+ *
+ * `null` unless the sweeper is genuinely armed with a readable tick: `idle`
+ * and `off` have no next tick to be partway through (`off` has no timer at
+ * all — see `WatchdogPhase`), and a `tickMs` that is not a positive finite
+ * number would divide by zero. In every one of those cases the caller draws
+ * no bar, which is not the same as drawing an empty one — an empty bar reads
+ * as "a sweep is imminent".
+ *
+ * Clamped to `[0, 1]`: a tick the server owes us but has not run yet reads
+ * `0` rather than drawing backwards past the start of its own track.
+ */
+export function sweepFraction(status: WatchdogStatus, now: number): number | null {
+  if (status.phase !== 'armed') return null;
+
+  const target = status.nextTickAt === null ? NaN : Date.parse(status.nextTickAt);
+  if (!Number.isFinite(target)) return null;
+
+  const { tickMs } = status.config;
+  if (!Number.isFinite(tickMs) || tickMs <= 0) return null;
+
+  return Math.min(1, Math.max(0, (target - now) / tickMs));
+}
+
+/**
+ * For a crashed run the sweeper has already spawned against, how long until
+ * it may spawn again: `lastSpawnAt + graceMs − now`, floored at zero
+ * (task-26).
+ *
+ * `lastSpawnAt` is the right origin even when that spawn FAILED, and
+ * deliberately so: the server starts the grace clock on ANY spawn attempt
+ * (CLAUDE.md's "Any spawn attempt starts the grace clock; only a success
+ * counts against the cap"), precisely so a dashboard that is down is asked
+ * once per window rather than once per tick. A card that measured from the
+ * last SUCCESSFUL spawn would promise a retry the sweeper is not going to
+ * make.
+ *
+ * `null` when no attempt has been made or the stamp will not parse —
+ * distinct from `0`, which means a window opened and has since closed. The
+ * caller prints the line only while the result is positive.
+ */
+export function graceRemainingMs(
+  w: RunWatchdog,
+  config: Pick<WatchdogConfig, 'graceMs'>,
+  now: number
+): number | null {
+  if (w.lastSpawnAt === null) return null;
+  const spawned = Date.parse(w.lastSpawnAt);
+  if (!Number.isFinite(spawned)) return null;
+  return Math.max(0, spawned + config.graceMs - now);
+}
+
+/** What a kind badge is toned by — a meaning, never a colour name. */
+export type WatchdogKindTone = 'live' | 'done' | 'bad' | 'warn' | 'muted';
+
+/**
+ * The app's own status vocabulary (`RUN_STATUS_GLYPH`) extended to the seven
+ * event kinds, so a badge is never colour alone — the feed used to print
+ * `detail` and drop `kind` entirely, leaving a `failed` line and a
+ * `recovered` line the same grey until read.
+ *
+ * A `Record` over the union rather than a lookup with a fallback: adding an
+ * eighth kind fails to compile until it is classified, which is the whole
+ * mechanism `RUN_STATUS_GLYPH` already relies on.
+ */
+export const WATCHDOG_KIND_GLYPH: Record<WatchdogEventKind, string> = {
+  spawned: '●',
+  recovered: '✓',
+  failed: '✕',
+  exhausted: '⚠',
+  disabled: '‖',
+  armed: '◉',
+  idle: '○'
+};
+
+/**
+ * What each kind MEANS to the person reading the feed, which is not the same
+ * axis as whether the sweeper considered it a success.
+ *
+ * Both `exhausted` and `disabled` are `warn`, because amber in this app
+ * means a human must act, and both of those kinds end in exactly that: the
+ * strip's "resume by hand". `armed` and `idle` are `muted` — they are the
+ * sweeper's own breathing, logged so a viewer can answer "when did watching
+ * start" without having polled `phase` at the right moment, not news.
+ */
+export const WATCHDOG_KIND_TONE: Record<WatchdogEventKind, WatchdogKindTone> = {
+  spawned: 'live',
+  recovered: 'done',
+  failed: 'bad',
+  exhausted: 'warn',
+  disabled: 'warn',
+  armed: 'muted',
+  idle: 'muted'
+};

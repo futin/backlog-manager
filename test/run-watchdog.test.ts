@@ -1,6 +1,9 @@
-import { isCrashed, stateLine, watchdogClause } from '../client/src/lib/run-watchdog';
+import {
+  graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause,
+  WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE
+} from '../client/src/lib/run-watchdog';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
-import type { RunWatchdog, WatchdogStatus } from '../shared/types';
+import type { RunWatchdog, WatchdogEventKind, WatchdogStatus } from '../shared/types';
 
 /**
  * A full `RunWatchdog`, overridden per case — the same "state everything a
@@ -184,5 +187,116 @@ describe('stateLine', () => {
       watching: ['run-a'],
       nextTickAt: new Date(now - 5_000).toISOString()
     }), now)).toBe('armed — watching run-a, next check in 0s');
+  });
+});
+
+/**
+ * task-26's three readings — the same facts `stateLine` and `watchdogClause`
+ * already state in words, expressed as numbers a meter can be drawn from.
+ * Each takes an explicit `now` and returns `null` for input it cannot read,
+ * so a caller never has to tell a guess from a measurement.
+ */
+describe('sweepFraction', () => {
+  const now = Date.parse('2026-09-06T12:00:00.000Z');
+
+  /** Armed with an explicit tick length — the only phase that has a sweep to be partway through. */
+  function armed(nextTickAt: string | null, tickMs: number): WatchdogStatus {
+    return watchdogStatus({
+      phase: 'armed',
+      watching: ['run-a'],
+      nextTickAt,
+      config: { ...DEFAULT_WATCHDOG_CONFIG, tickMs }
+    });
+  }
+
+  it('is the share of the tick still to come', () => {
+    expect(sweepFraction(armed(new Date(now + 42_000).toISOString(), 60_000), now))
+      .toBeCloseTo(0.7, 10);
+  });
+
+  // A tick the server owes us but has not run yet: the bar sits empty rather
+  // than drawing backwards past its own track.
+  it('clamps an overdue tick to 0 rather than going negative', () => {
+    expect(sweepFraction(armed(new Date(now - 5_000).toISOString(), 60_000), now)).toBe(0);
+  });
+
+  // Neither phase has a next tick to be partway through: `idle` has nothing
+  // to watch and `off` has no timer at all. `null`, so the caller draws no
+  // bar rather than an empty one that would read as "a sweep is imminent".
+  it('is null for every phase but armed', () => {
+    expect(sweepFraction(watchdogStatus({ phase: 'idle' }), now)).toBeNull();
+    expect(sweepFraction(watchdogStatus({ phase: 'off', reason: 'BM_AGENTS off' }), now)).toBeNull();
+  });
+
+  it('is null when armed without a readable nextTickAt', () => {
+    expect(sweepFraction(armed(null, 60_000), now)).toBeNull();
+    expect(sweepFraction(armed('garbage', 60_000), now)).toBeNull();
+  });
+
+  // A zero tick would divide by zero; a meter is not the place to discover
+  // that a config field is nonsense.
+  it('is null when the configured tick is not a positive length', () => {
+    expect(sweepFraction(armed(new Date(now + 42_000).toISOString(), 0), now)).toBeNull();
+  });
+});
+
+describe('graceRemainingMs', () => {
+  const now = Date.parse('2026-09-06T12:00:00.000Z');
+  const config = { graceMs: 600_000 };
+
+  it('counts down from the last spawn attempt', () => {
+    expect(graceRemainingMs(watchdog({ lastSpawnAt: new Date(now - 120_000).toISOString() }), config, now))
+      .toBe(480_000);
+  });
+
+  // Floored, never negative: a window that closed eight minutes ago is
+  // simply closed, and the caller renders nothing at 0.
+  it('floors an elapsed window at 0', () => {
+    expect(graceRemainingMs(watchdog({ lastSpawnAt: new Date(now - 720_000).toISOString() }), config, now))
+      .toBe(0);
+  });
+
+  // No attempt has been made, so no window has opened — distinct from 0,
+  // which means one opened and closed.
+  it('is null when nothing has been spawned yet', () => {
+    expect(graceRemainingMs(watchdog({ lastSpawnAt: null }), config, now)).toBeNull();
+  });
+
+  it('is null for an unreadable spawn stamp', () => {
+    expect(graceRemainingMs(watchdog({ lastSpawnAt: 'garbage' }), config, now)).toBeNull();
+  });
+});
+
+describe('the kind records', () => {
+  // The same mechanism `test/agents-shared.test.ts` uses for `RunStage`: a
+  // `Record<WatchdogEventKind, true>` literal fails to compile the day an
+  // eighth kind is added, so this suite cannot silently stop covering one.
+  const every: Record<WatchdogEventKind, true> = {
+    armed: true, idle: true, spawned: true, failed: true,
+    exhausted: true, recovered: true, disabled: true
+  };
+  const kinds = Object.keys(every) as WatchdogEventKind[];
+
+  it('gives every kind a glyph, and no two the same', () => {
+    const glyphs = kinds.map((k) => WATCHDOG_KIND_GLYPH[k]);
+    for (const g of glyphs) expect(g.length).toBeGreaterThan(0);
+    expect(new Set(glyphs).size).toBe(kinds.length);
+  });
+
+  it('gives every kind a tone', () => {
+    for (const k of kinds) expect(WATCHDOG_KIND_TONE[k]).toBeTruthy();
+  });
+
+  // The tones are meanings, not decoration: red is a failure, amber is the
+  // two kinds that both end in "resume by hand", and the sweeper's own
+  // breathing is muted so a busy feed still reads at a glance.
+  it('tones a failure red and both resume-by-hand kinds amber', () => {
+    expect(WATCHDOG_KIND_TONE.spawned).toBe('live');
+    expect(WATCHDOG_KIND_TONE.recovered).toBe('done');
+    expect(WATCHDOG_KIND_TONE.failed).toBe('bad');
+    expect(WATCHDOG_KIND_TONE.exhausted).toBe('warn');
+    expect(WATCHDOG_KIND_TONE.disabled).toBe('warn');
+    expect(WATCHDOG_KIND_TONE.armed).toBe('muted');
+    expect(WATCHDOG_KIND_TONE.idle).toBe('muted');
   });
 });

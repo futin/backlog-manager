@@ -2,6 +2,10 @@
 id: task-26
 title: Pin the Runs view switch far right and rebuild the Watchdog mode as a console: tiles, freshness-meter cards, kind-badged activity table
 created: 2026-09-06
+updated: 2026-09-06T13:09:46Z
+started: 2026-09-06T12:49:40Z
+execute-elapsed: 1206
+execute-tokens: 204244
 ---
 
 ## Goal
@@ -69,3 +73,70 @@ the filters; every `WatchdogEventKind` has a glyph and a tone, pinned by a
   `shared/` and `hooks/` are byte-identical to `main`.
 - CLAUDE.md's Runs entry and the 2026-09-05 spec carry the edits the plan's Task 1
   Step 6 and Task 4 Steps 6–7 spell out.
+
+## Outcome
+
+2026-09-06 — done. The plan's five tasks landed as written, presentation only:
+nothing under `server/`, `shared/` or `hooks/` changed, `stateLine`,
+`watchdogClause` and `useWatchdog` are byte-identical to `main` (the only
+removed line in the whole diff outside test and doc files is one `import type`
+in `run-watchdog.ts`).
+
+- **Task 1** — `RunsView.tsx`: the `runs-mode` group is now the last child of
+  `.board-tools`, with a `board-tools-divider` span drawn inside the filters'
+  own fragment so watchdog mode never shows a rule beside a lone switch.
+  Three cases in `runs-view.test.tsx` pin the order in both modes and the
+  divider's condition; CLAUDE.md's switch sentence follows.
+- **Task 2** — `freshnessFraction` (`lib/run-time.ts`); `sweepFraction`,
+  `graceRemainingMs`, `WATCHDOG_KIND_GLYPH`, `WATCHDOG_KIND_TONE`,
+  `WatchdogKindTone` (`lib/run-watchdog.ts`). All derived against an explicit
+  `now`, `null` for unreadable input, never stored. Seventeen new cases,
+  including a `Record<WatchdogEventKind, true>` literal that fails to compile
+  the day an eighth kind is added unclassified.
+- **Task 3** — the monitor's head is three `.runs-tile`s (sweeper with a
+  phase lamp, `stateLine` verbatim and a depleting `role="meter"` sweep bar;
+  watching count with crashed / fresh / not-yet-watched; policy as three
+  label/value rows), and each running run is a card with a `role="meter"`
+  heartbeat meter against `RUN_STALE_MS` — amber and full on a crashed card,
+  with attempt pips, `watchdogClause` verbatim, the session id and the grace
+  remaining.
+- **Task 4** — the activity `<ul>` is a five-column `<table>` with
+  glyph+word kind badges toned by `WATCHDOG_KIND_TONE` and a sticky header,
+  taking the section's remaining viewport height inside `.runs-board`
+  (`.watchdog-monitor` → `.watchdog-activity` → `.watchdog-table-wrap`, the
+  chain `.runs-split` already models). The old `max-height: 220px` and every
+  `.watchdog-state*`/`.watchdog-row-*`/`.watchdog-events*` rule with no
+  element left are gone rather than kept beside the new ones. CLAUDE.md's
+  monitor sentence and the two superseded notes on the 2026-09-05 spec
+  followed.
+- Beyond the plan: one spacing fix found by looking at the running app — the
+  watching tile's unit read `0running runs`, since `.runs-tile-value` is a
+  plain block rather than the flex row the sweeper tile's value is.
+
+Verified in the real app as well as in jsdom: the Vite container mounts this
+working tree, so both modes were driven at 1400×900 and read as specified —
+the bar as range · project · divider · switch with the switch pinned to the
+same x in both modes, and the console rendering a fresh card (cyan meter,
+`heartbeat 4s ago`, `stale at 15m`, `● ok`) beside a crashed one (amber
+border and full amber meter, `⚠ crashed`, `· not yet watched`, pips, the
+strip's own clause, the session id, `leave alone 7m more`) over a
+kind-badged feed.
+
+```
+$ pnpm test
+Test Suites: 76 passed, 76 total
+Tests:       1423 passed, 1423 total
+Snapshots:   0 total
+Time:        66.742 s
+
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run build
+dist/assets/RunsView-jWTVozQ2.js       66.44 kB │ gzip:  10.04 kB
+dist/assets/index-DFEqQNGo.js         340.00 kB │ gzip: 103.69 kB
+✓ built in 1.28s
+
+$ git diff --name-only | grep -E '^(server|shared)/|hooks/'
+(no output)
+```

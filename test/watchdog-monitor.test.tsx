@@ -1,17 +1,21 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { WatchdogMonitor } from '../client/src/components/runs/WatchdogMonitor';
 import { projectLabel } from '../client/src/lib/project-label';
 import { formatClock, formatSpanCompact } from '../client/src/lib/run-time';
-import { watchdogClause } from '../client/src/lib/run-watchdog';
+import {
+  watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE
+} from '../client/src/lib/run-watchdog';
+import { RUN_STALE_MS } from '../shared/types';
 import { DEFAULT_WATCHDOG_CONFIG, WATCHDOG_EVENT_CAP } from '../shared/types';
 import type {
-  OrchestratorRunsPayload, RunQueueItem, RunStage, RunWatchdog, WatchdogEvent, WatchdogStatus
+  OrchestratorRunsPayload, RunQueueItem, RunStage, RunWatchdog, WatchdogEvent,
+  WatchdogEventKind, WatchdogStatus
 } from '../shared/types';
 
 /**
@@ -155,11 +159,24 @@ describe('WatchdogMonitor', () => {
     // Computed from the same formatter the component uses, never re-typed:
     // a test that hard-codes "1m" would go green against a component that
     // stopped using `formatSpanCompact` at all.
+    // task-26: the one sentence became a three-row policy tile, so the
+    // pairs are asserted individually — the vocabulary survived the shape
+    // change, which is the whole point of keeping the same words.
     const { tickMs, graceMs, maxAttempts } = DEFAULT_WATCHDOG_CONFIG;
-    expect(screen.getByTestId('watchdog-config-line')).toHaveTextContent(
-      `check every ${formatSpanCompact(tickMs)} · leave alone for ${formatSpanCompact(graceMs)} · give up after ${maxAttempts}`
-    );
+    const policy = screen.getByTestId('watchdog-config-line');
+    expect(policy).toHaveTextContent(new RegExp(`check every\\s*${formatSpanCompact(tickMs)}`));
+    expect(policy).toHaveTextContent(new RegExp(`leave alone for\\s*${formatSpanCompact(graceMs)}`));
+    expect(policy).toHaveTextContent(new RegExp(`give up after\\s*${maxAttempts}`));
     expect(screen.getByText('Configure in Settings › Orchestrator watchdog.')).toBeInTheDocument();
+
+    // Off has no timer at all, so there is no sweep to be partway through —
+    // an empty bar would read as "a sweep is imminent".
+    expect(screen.queryByTestId('watchdog-sweep')).not.toBeInTheDocument();
+    expect(screen.getByTestId('watchdog-phase')).toHaveTextContent('off');
+    // Nothing is watched while off, and the tile says so rather than
+    // printing a 0 that would look like a healthy reading.
+    expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('—');
+    expect(screen.getByText('nothing is watched while off')).toBeInTheDocument();
 
     // Nothing is being watched and the state line has already said why —
     // an empty-rows line here would be a second answer to a settled question.
@@ -174,6 +191,9 @@ describe('WatchdogMonitor', () => {
   it('reads "no running run" when idle with nothing in the payload', async () => {
     await renderMonitor(watchdogStatus({ phase: 'idle' }), []);
     expect(screen.getByTestId('watchdog-rows-empty')).toHaveTextContent('no running run');
+    // Idle has nothing to watch, so no next tick to be partway through.
+    expect(screen.queryByTestId('watchdog-sweep')).not.toBeInTheDocument();
+    expect(screen.getByTestId('watchdog-phase')).toHaveTextContent('idle');
   });
 
   it('reads the one-tick-skew line when armed with nothing in the payload', async () => {
@@ -196,9 +216,30 @@ describe('WatchdogMonitor', () => {
     expect(rows[0]).toHaveTextContent('run-1');
     expect(rows[0]).toHaveTextContent('bug-16 · dispatched');
     expect(rows[0]).toHaveTextContent('heartbeat 4s ago');
-    expect(rows[0]).toHaveTextContent('ok');
+    // Exactly `ok`, read off the verdict element itself: the glyph beside it
+    // is a SIBLING span precisely so this element's own text stays the one
+    // word every existing case matches.
+    expect(within(rows[0]).getByTestId('watchdog-verdict')).toHaveTextContent(/^ok$/);
     expect(rows[0]).not.toHaveTextContent('not yet watched');
     expect(rows[0]).toHaveClass('watchdog-row-ok');
+
+    // task-26's meter: the reading the monitor could never state before —
+    // how far this heartbeat has travelled toward the stale line. Asserted
+    // through `aria-*` rather than a parsed `style`, which is also what makes
+    // it readable to assistive tech.
+    const meter = within(rows[0]).getByTestId('watchdog-meter');
+    expect(meter).toHaveAttribute('aria-valuenow', '4');
+    expect(meter).toHaveAttribute('aria-valuemax', String(RUN_STALE_MS / 1000));
+    expect(meter).toHaveAttribute('aria-valuetext', 'heartbeat 4s ago');
+    expect(rows[0]).toHaveTextContent(`stale at ${formatSpanCompact(RUN_STALE_MS)}`);
+
+    expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('1');
+    const tile = screen.getByTestId('watchdog-watching').closest('.runs-tile') as HTMLElement;
+    // `0 crashed` prints muted and glyphless — the tile must not cry wolf on
+    // a healthy afternoon — but it prints, so the reading is never absent.
+    expect(tile).toHaveTextContent('0 crashed');
+    expect(tile).toHaveTextContent('1 fresh');
+    expect(tile).not.toHaveTextContent('not yet watched');
   });
 
   // --- 6: nothing in flight -------------------------------------------------
@@ -219,24 +260,62 @@ describe('WatchdogMonitor', () => {
       enabled: true,
       attempts: 1,
       maxAttempts: 2,
-      lastSpawnAt: '2026-09-05T11:58:00.000Z',
-      lastSessionId: 's1',
+      // Two minutes ago, so the 10m grace window is still open and the card
+      // has a "leave alone" line to print.
+      lastSpawnAt: new Date(NOW - 120_000).toISOString(),
+      lastSessionId: 'sess-1',
       lastError: null,
       exhausted: false
     };
     await renderMonitor(
       watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ fresh: false, updatedAt: new Date(NOW - 130_000).toISOString(), watchdog: annotation })]
+      // 17m: past the 15m stale line, so the meter reads full rather than
+      // partway.
+      [liveRun({ fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString(), watchdog: annotation })]
     );
 
     const row = screen.getByTestId('watchdog-row');
     expect(row).toHaveClass('watchdog-row-crashed');
-    expect(row).toHaveTextContent('heartbeat 2m ago');
+    expect(row).toHaveTextContent('heartbeat 17m ago');
+    expect(within(row).getByTestId('watchdog-verdict')).toHaveTextContent(/^crashed$/);
     // Asserted by CALLING `watchdogClause`, never by re-typing its sentence:
     // the whole reason the monitor reads that function is that the strip and
     // this surface must not be able to disagree, and a hand-copied string
-    // here would let them.
-    expect(row).toHaveTextContent(`crashed · ${watchdogClause(annotation, NOW)}`);
+    // here would let them. The `watchdog:` prefix stays for the same reason.
+    expect(within(row).getByTestId('watchdog-clause'))
+      .toHaveTextContent(watchdogClause(annotation, NOW));
+    expect(within(row).getByTestId('watchdog-attempts'))
+      .toHaveAttribute('aria-label', 'attempt 1 of 2');
+    expect(within(row).getByTestId('watchdog-grace')).toHaveTextContent('leave alone 8m more');
+    expect(row).toHaveTextContent('session sess-1');
+    expect(row).toHaveTextContent(`past the ${formatSpanCompact(RUN_STALE_MS)} stale line`);
+
+    const meter = within(row).getByTestId('watchdog-meter');
+    expect(meter).toHaveAttribute('aria-valuenow', '1020');
+  });
+
+  // --- 7b: the grace window has closed --------------------------------------
+
+  it('renders no grace line once the grace window has elapsed', async () => {
+    const annotation: RunWatchdog = {
+      enabled: true,
+      attempts: 1,
+      maxAttempts: 2,
+      // 12m ago under a 10m grace: the window opened and has since closed,
+      // which is a different fact from "no attempt has been made".
+      lastSpawnAt: new Date(NOW - 720_000).toISOString(),
+      lastSessionId: 'sess-1',
+      lastError: null,
+      exhausted: false
+    };
+    await renderMonitor(
+      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
+      [liveRun({ fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString(), watchdog: annotation })]
+    );
+
+    const row = screen.getByTestId('watchdog-row');
+    expect(within(row).getByTestId('watchdog-clause')).toBeInTheDocument();
+    expect(within(row).queryByTestId('watchdog-grace')).not.toBeInTheDocument();
   });
 
   // --- 8: crashed, not yet annotated ---------------------------------------
@@ -250,6 +329,11 @@ describe('WatchdogMonitor', () => {
     // Exactly `crashed`, with no dangling separator behind it — the empty
     // clause `watchdogClause(undefined)` returns must not print as `crashed ·`.
     expect(screen.getByTestId('watchdog-verdict')).toHaveTextContent(/^crashed$/);
+    // And nothing from the annotation half of the card, since there is no
+    // annotation: three absences rather than three empty elements.
+    expect(screen.queryByTestId('watchdog-clause')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('watchdog-attempts')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('watchdog-grace')).not.toBeInTheDocument();
   });
 
   // --- 9: the two payloads disagree, running side --------------------------
@@ -330,21 +414,92 @@ describe('WatchdogMonitor', () => {
     ];
     await renderMonitor(watchdogStatus({ events }), []);
 
-    const rows = screen.getAllByRole('listitem');
-    expect(rows).toHaveLength(3);
+    // task-26: a `<table>`, because a log IS columns — time, actor, what —
+    // and the `<ul>` printed `detail` while dropping `kind` entirely.
+    const rows = within(screen.getByTestId('watchdog-events')).getAllByRole('row');
+    expect(rows).toHaveLength(4);
 
-    expect(rows[0]).toHaveTextContent(formatClock(events[0].at) ?? '');
-    expect(rows[0]).toHaveTextContent(projectLabel('/abs/alpha'));
-    expect(rows[0]).toHaveTextContent(events[0].detail);
+    const headers = within(rows[0]).getAllByRole('columnheader').map((c) => c.textContent);
+    expect(headers).toEqual(['time', 'kind', 'project', 'run', 'what the sweeper did']);
 
-    expect(rows[1]).toHaveTextContent(formatClock(events[1].at) ?? '');
-    expect(rows[1]).toHaveTextContent(projectLabel('/abs/beta'));
-    expect(rows[1]).toHaveTextContent(events[1].detail);
+    const cells = (row: HTMLElement): (string | null)[] =>
+      within(row).getAllByRole('cell').map((c) => c.textContent);
 
-    // A project-less event (the sweeper arming, which is not about any one
-    // project) renders no project span rather than an empty one.
-    expect(rows[2]).toHaveTextContent(events[2].detail);
-    expect(rows[2].querySelector('.watchdog-event-project')).toBeNull();
+    expect(cells(rows[1])).toEqual([
+      formatClock(events[0].at), `${WATCHDOG_KIND_GLYPH.spawned}${events[0].kind}`,
+      projectLabel('/abs/alpha'), 'run-a', events[0].detail
+    ]);
+    expect(cells(rows[2])).toEqual([
+      formatClock(events[1].at), `${WATCHDOG_KIND_GLYPH.idle}${events[1].kind}`,
+      projectLabel('/abs/beta'), '—', events[1].detail
+    ]);
+    // A sweeper-level event (arming, which is about no one run) prints an
+    // em dash in both keyed cells rather than leaving them blank — a blank
+    // cell reads as missing data, a dash as "not applicable".
+    expect(cells(rows[3])).toEqual([
+      formatClock(events[2].at), `${WATCHDOG_KIND_GLYPH.armed}${events[2].kind}`,
+      '—', '—', events[2].detail
+    ]);
+  });
+
+  // --- 14b: the badge is the column the feed always carried and never drew --
+
+  it('badges each event by kind, with its glyph and tone', async () => {
+    const kinds: WatchdogEventKind[] = [
+      'armed', 'idle', 'spawned', 'failed', 'exhausted', 'recovered', 'disabled'
+    ];
+    const events: WatchdogEvent[] = kinds.map((kind, i) => ({
+      at: `2026-09-05T09:0${i}:00Z`,
+      project: '/abs/alpha',
+      runId: 'run-a',
+      kind,
+      detail: `${kind} happened`
+    }));
+    await renderMonitor(watchdogStatus({ events }), []);
+
+    // Asserted THROUGH the records, never against retyped strings: they are
+    // `Record`s over the union precisely so an eighth kind cannot be added
+    // without being classified, and a hand-copied glyph here would let this
+    // suite go green against a badge nobody had toned.
+    // Scoped to the table: two of the kind words (`armed`, `idle`) are also
+    // the sweeper's own phase, printed one tile up.
+    const table = within(screen.getByTestId('watchdog-events'));
+    for (const kind of kinds) {
+      const badge = table.getByText(kind).closest('.watchdog-kind') as HTMLElement;
+      expect(badge).toHaveClass(`watchdog-kind-${WATCHDOG_KIND_TONE[kind]}`);
+      expect(badge.querySelector('[aria-hidden="true"]')).toHaveTextContent(WATCHDOG_KIND_GLYPH[kind]);
+    }
+  });
+
+  // --- 14c: an unreadable stamp is still a row ------------------------------
+
+  it('renders an unparsable event stamp as an em-dash clock', async () => {
+    const events: WatchdogEvent[] = [
+      { at: 'garbage', project: null, runId: null, kind: 'armed', detail: 'watching for crashed runs' }
+    ];
+    await renderMonitor(watchdogStatus({ events }), []);
+
+    const rows = within(screen.getByTestId('watchdog-events')).getAllByRole('row');
+    // The line still prints: a clock nobody can read is no reason to drop
+    // what the sweeper actually did.
+    expect(within(rows[1]).getAllByRole('cell')[0]).toHaveTextContent('—:—');
+    expect(rows[1]).toHaveTextContent('watching for crashed runs');
+  });
+
+  // --- 14d: the hint is a preamble, not a footnote --------------------------
+
+  it('keeps the hint above the table', async () => {
+    const events: WatchdogEvent[] = [
+      { at: '2026-09-05T09:00:00Z', project: null, runId: null, kind: 'armed', detail: 'watching' }
+    ];
+    await renderMonitor(watchdogStatus({ events }), []);
+
+    const hint = screen.getByTestId('watchdog-events-hint');
+    const table = screen.getByTestId('watchdog-events');
+    // Both facts the hint carries — capped, lost on restart — have to be
+    // read BEFORE the list they qualify, or a short feed reads as a quiet
+    // watchdog.
+    expect(hint.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // --- 15: empty feed, and the two facts its hint has to carry --------------
@@ -359,6 +514,9 @@ describe('WatchdogMonitor', () => {
     expect(screen.getByTestId('watchdog-events-hint'))
       .toHaveTextContent(String(WATCHDOG_EVENT_CAP));
     expect(screen.getByTestId('watchdog-events-hint')).toHaveTextContent(/restart/i);
+    // The empty copy REPLACES the table rather than heading an empty one:
+    // a header row over nothing reads as a list that failed to load.
+    expect(screen.queryByRole('table')).toBeNull();
   });
 
   // --- 16: the heartbeat is a clock, not a screenshot -----------------------
@@ -369,6 +527,7 @@ describe('WatchdogMonitor', () => {
       [liveRun({ queue: [queueItem('bug-16', 'dispatched')] })]
     );
     expect(screen.getByTestId('watchdog-row')).toHaveTextContent('heartbeat 4s ago');
+    expect(screen.getByTestId('watchdog-meter')).toHaveAttribute('aria-valuenow', '4');
 
     await act(async () => {
       await jest.advanceTimersByTimeAsync(5_000);
@@ -377,6 +536,9 @@ describe('WatchdogMonitor', () => {
     // The fetch stub keeps answering the identical payload, so `updatedAt`
     // has not moved — `useNow` alone is what advanced this.
     expect(screen.getByTestId('watchdog-row')).toHaveTextContent('heartbeat 9s ago');
+    // The meter is the same clock in a second form; a bar that stepped only
+    // on a new payload would be a screenshot beside a live sentence.
+    expect(screen.getByTestId('watchdog-meter')).toHaveAttribute('aria-valuenow', '9');
   });
   // --- 17: the countdown is a clock in the state a row cannot supply --------
   //
@@ -397,6 +559,11 @@ describe('WatchdogMonitor', () => {
       []
     );
     expect(screen.getByTestId('watchdog-state-line')).toHaveTextContent('next check in 42s');
+    // `Math.round`, matching `stateLine`'s own countdown: the bar and the
+    // sentence beside it must agree to the second.
+    expect(screen.getByTestId('watchdog-sweep')).toHaveAttribute('aria-valuenow', '42');
+    expect(screen.getByTestId('watchdog-sweep'))
+      .toHaveAttribute('aria-valuemax', String(DEFAULT_WATCHDOG_CONFIG.tickMs / 1000));
     // Premise of the case, stated so a future fixture edit cannot quietly
     // turn it into case 5 with extra steps: there is no row here to have
     // enabled the clock.
@@ -409,5 +576,28 @@ describe('WatchdogMonitor', () => {
     // The stub keeps answering the identical payload, so `nextTickAt` has not
     // moved — the clock is what advanced.
     expect(screen.getByTestId('watchdog-state-line')).toHaveTextContent('next check in 37s');
+    expect(screen.getByTestId('watchdog-sweep')).toHaveAttribute('aria-valuenow', '37');
+  });
+
+  // --- 18: the watching tile counts what the cards below it show ------------
+
+  it('counts crashed, fresh and unwatched runs in the watching tile', async () => {
+    await renderMonitor(
+      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
+      [
+        liveRun(),
+        liveRun({ runId: 'run-2', project: '/abs/beta', fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString() }),
+        liveRun({ runId: 'run-3', project: '/abs/gamma' })
+      ]
+    );
+
+    const tile = screen.getByTestId('watchdog-watching').closest('.runs-tile') as HTMLElement;
+    expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('3');
+    expect(tile).toHaveTextContent('1 crashed');
+    expect(tile).toHaveTextContent('2 fresh');
+    // The skew, summed: `run-2` and `run-3` are running but absent from
+    // `watching`, and the tile says so once rather than leaving a reader to
+    // count the `· not yet watched` chips on the cards.
+    expect(tile).toHaveTextContent('2 not yet watched');
   });
 });

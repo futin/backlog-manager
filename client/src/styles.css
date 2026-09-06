@@ -1576,78 +1576,198 @@ body {
    to be painted rather than borrowed from an existing edge. */
 .runs-seg > button:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--cyan) }
 
+/* task-26. Three controls sit in this bar: two scope run history and one
+   picks the surface, and without a rule between them they read as one
+   instrument. It is drawn inside the filters' own JSX fragment rather than
+   beside the switch, so watchdog mode — where the two filters unmount —
+   never shows a rule beside a lone switch. `align-self: stretch` sizes it
+   from the bar's own height rather than a hard-coded one. */
+.board-tools-divider { width: 1px; background: var(--hairline2); align-self: stretch; margin: 3px 4px }
+
 /* Runs › Watchdog — the sweeper's live surface (WatchdogMonitor.tsx,
-   task-18). One column: a state card, the watched-run rows, then the
-   activity feed. Everything here used to be two blocks up in the Settings
-   section; the `.watchdog-events*` rules below moved verbatim with the feed
-   they style, and the card/row rules are new.
+   task-18, rebuilt as a console by task-26). One column: three state tiles,
+   a card per watched run, then the activity feed. The feed's rules came here
+   from the Settings section with the feed itself.
 
-   Deliberately plainer than `.runs-tile`: this is a monitor read at a
-   glance while something is going wrong, not a dashboard, and the one thing
-   that should catch the eye is a crashed row's amber. */
-.watchdog-monitor { display: flex; flex-direction: column; gap: 12px; padding-top: 4px }
+   The first shape of this was deliberately plainer than `.runs-tile` — "a
+   monitor read at a glance while something is going wrong, not a dashboard".
+   That is no longer true, and the spec's own "Why this exists" says why: the
+   plainness encoded no state in FORM, so a crashed run and a healthy one
+   differed by one word and one border colour, and the reading a person
+   watching a live run most wants — how close is this to being called
+   crashed — could not be drawn at all. Reusing `.runs-tile` here rather than
+   minting a second tile idiom is the same choice: one tile, two surfaces. */
+/* task-26: the flex child of `.runs-board` that absorbs the remainder, the
+   role `.runs-split` plays in runs mode — read that rule's own comment for
+   why `min-height: 0` is load-bearing rather than decoration (a flex item's
+   default `min-height: auto` refuses to shrink below its content, so without
+   it this box grows to the full event list and the viewport bound silently
+   does nothing). Before this, watchdog mode was the one section inside
+   `.runs-board` that ignored the bound. */
+.watchdog-monitor { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; flex: 1 1 auto; min-height: 0 }
 
-.watchdog-state {
-  display: flex; flex-direction: column; gap: 4px;
-  padding: 10px 12px;
-  background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
+/* 1.2fr / 1fr / 1.5fr: the sweeper tile carries a sentence and a bar, the
+   watching tile a number and three short counts, the policy tile three
+   label/value rows and a hint — so the widths follow the content rather
+   than an even third each. */
+.watchdog-tiles { display: grid; grid-template-columns: 1.2fr 1fr 1.5fr; gap: 8px }
+
+/* The phase word and its lamp share the tile's value row, so the lamp reads
+   as part of the number rather than as a bullet beside it. */
+.watchdog-tile-phase { display: flex; align-items: center; gap: 7px }
+/* `margin-left` rather than a flex gap: the value row is a plain block (the
+   sweeper tile's is the flex one), so the unit would otherwise sit hard
+   against the digit — `0running runs`. */
+.watchdog-tile-unit { margin-left: 6px; font-family: var(--display); font-size: 10px; font-weight: 600; color: var(--ink3) }
+
+/* Cyan and ringed while armed, a flat disc while idle, hollow while off —
+   three phases told apart by fill AND outline, never by colour alone, since
+   the phase word sits right beside it in text either way. */
+.watchdog-lamp { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--ink3) }
+.watchdog-lamp-armed { background: var(--cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 22%, transparent); animation: watchdog-lamp-ring 2.4s ease-in-out infinite }
+.watchdog-lamp-off { background: transparent; border: 1.5px solid var(--ink3) }
+/* The last keyframe is the RESTING appearance on purpose: the quality-floor
+   `prefers-reduced-motion` block runs every animation once, instantly, which
+   lands it here — the same trap `.board-card-stage-glyph`'s own carve-out
+   documents. The carve-out below cancels it outright anyway. */
+@keyframes watchdog-lamp-ring {
+  0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--cyan) 30%, transparent) }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--cyan) 8%, transparent) }
+  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 22%, transparent) }
 }
-.watchdog-state-line { font-family: var(--mono); font-size: 12px; color: var(--ink) }
-.watchdog-config { font-family: var(--mono); font-size: 10.5px; color: var(--ink2) }
+@media (prefers-reduced-motion: reduce) {
+  .watchdog-lamp-armed { animation: none !important }
+}
+
+.watchdog-state-line { font-family: var(--mono); font-size: 11px; color: var(--ink) }
 .watchdog-hint { font-size: 10.5px; color: var(--ink3) }
+.watchdog-warn { color: var(--amber) }
 
-.watchdog-rows { display: flex; flex-direction: column; gap: 4px }
+/* The armed countdown, drawn. A recessed track so an empty bar still reads
+   as a bar; the fill glides over the 5s the component re-renders on rather
+   than stepping, which is what makes it read as time passing. */
+.watchdog-sweep { height: 5px; background: var(--steel); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden }
+.watchdog-sweep-fill { display: block; height: 100%; background: var(--cyan); transition: width 5s linear }
 
-/* A button, so the row is keyboard-reachable — reset to look like the row
+/* Label/value rows rather than one run-on sentence: the three knobs are read
+   as a table ("what is the policy") far more often than as prose. Tabular
+   figures for the same reason `.runs-tile-value` uses them — three values in
+   a column should not shift against each other. */
+.watchdog-policy { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-family: var(--mono); font-size: 10.5px; color: var(--ink3) }
+.watchdog-policy-label { color: var(--ink3) }
+.watchdog-policy-value { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right }
+
+/* Cards, not rows (spec §8): a meter wants a line of its own under the facts
+   it qualifies, and a table with a meter in a sixth column is wider than
+   this pane on an ordinary laptop. `auto-fit` so one crashed run gets the
+   full width and four share it. */
+.watchdog-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px }
+
+/* A button, so the card is keyboard-reachable — reset to look like the card
    it is rather than like a control. `text-align: left` because the browser
-   default centres button text and these are five columns of reading. */
+   default centres button text and this is four lines of reading. */
 .watchdog-row {
-  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  display: flex; flex-direction: column; gap: 7px; align-items: stretch;
   width: 100%; text-align: left; cursor: pointer;
-  padding: 8px 12px; font-family: var(--mono); font-size: 11px;
+  padding: 10px 12px; font-family: var(--mono); font-size: 11px;
   background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
   color: var(--ink2);
 }
-.watchdog-row:hover { border-color: var(--ink3) }
+.watchdog-row:hover { border-color: var(--hairline2) }
 .watchdog-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--cyan) }
+.watchdog-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px }
 .watchdog-row-project { font-weight: 600; color: var(--ink) }
 .watchdog-row-id { color: var(--ink3) }
-.watchdog-row-item { color: var(--ink) }
-.watchdog-row-beat { color: var(--ink3) }
-/* `margin-left: auto` on the verdict alone, so it sits at the right edge
-   whatever the item id's length — the one reading a person scans a column
-   of these for. */
-.watchdog-row-verdict { margin-left: auto }
+.watchdog-card-item { color: var(--ink) }
+.watchdog-card-beat { color: var(--ink3) }
 .watchdog-row-skew { color: var(--ink3) }
+/* `margin-left: auto` on the GLYPH, which is the first of the verdict pair,
+   so the two travel to the right edge together whatever the run id's length
+   — the one reading a person scans a wall of these for. */
+.watchdog-verdict-glyph { margin-left: auto; font-size: 1.05em; line-height: 1 }
+
+/* The freshness meter: the same 6px recessed track idiom as the sweep bar
+   one tile up, at the size that reads as a measurement rather than a hairline.
+   `min-width` on the fill so a heartbeat one second old still draws something
+   — a track with literally nothing in it reads as broken. */
+.watchdog-meter { height: 6px; background: var(--steel); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden }
+.watchdog-meter-fill { display: block; height: 100%; min-width: 2px; background: var(--cyan); transition: width 5s linear }
+.watchdog-meter-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 9.5px; color: var(--ink3) }
 
 /* The same amber the crashed strip uses (see `.run-strip-crashed`'s own
    comment for why amber and not red): the run may still be recovered
    unattended. */
 .watchdog-row-crashed { border-color: var(--amber) }
-.watchdog-row-crashed .watchdog-row-verdict { color: var(--amber) }
-.watchdog-row-ok .watchdog-row-verdict { color: var(--ink3) }
+.watchdog-row-crashed .watchdog-row-verdict, .watchdog-row-crashed .watchdog-verdict-glyph { color: var(--amber) }
+.watchdog-row-crashed .watchdog-meter-fill { background: var(--amber) }
+.watchdog-row-ok .watchdog-row-verdict, .watchdog-row-ok .watchdog-verdict-glyph { color: var(--ink3) }
+
+/* The watchdog's own line on a crashed card — amber for the same reason the
+   border is, and wrapping because `watchdogClause` can be a long sentence
+   and a session id is 30-odd characters after it. */
+.watchdog-card-wd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 10px; color: var(--amber) }
+.watchdog-card-session { color: var(--ink3) }
+/* Pips, not "1/2": at a glance the filled count against the total says how
+   much rope is left without being read as a fraction first. `aria-label`
+   carries the same fact in words for anything that cannot see them. */
+.watchdog-attempts { display: inline-flex; gap: 3px; align-items: center }
+.watchdog-attempts i { width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--amber) }
+.watchdog-attempts i.on { background: var(--amber) }
 
 .watchdog-row-missing, .watchdog-rows-empty {
   padding: 8px 12px; font-family: var(--mono); font-size: 11px; color: var(--ink3);
   border: 1px dashed var(--hairline); border-radius: 2px;
 }
 
-.watchdog-activity { display: flex; flex-direction: column; gap: 6px }
+/* The activity block passes the monitor's remaining height down to the table
+   wrapper, which is the one thing on this surface that should scroll: the
+   tiles and the cards are the state, the feed is history. */
+.watchdog-activity { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0 }
 .watchdog-activity-name { font-size: 11px; font-weight: 600; color: var(--ink) }
+.watchdog-events-empty { font-size: 10.5px; color: var(--ink3) }
 
-/* Moved from the Settings block with the feed itself (task-18) — up to
-   WATCHDOG_EVENT_CAP (50) newest-first lines of what the sweeper itself
-   did. The `flex: 1 1 100%` basis the Settings `.set-row` needed is gone:
-   this column is already full width. Deliberately plain — a mono timestamp,
-   the project's tail, then the sentence, one per line, no card chrome: this
-   is a log, not a stack of cards, and a busy afternoon should read like
-   one. */
-.watchdog-events { list-style: none; margin: 0; padding: 0 }
-.watchdog-events, .watchdog-events-empty { font-size: 10.5px; color: var(--ink3) }
-.watchdog-events { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto }
-.watchdog-events li { display: flex; gap: 8px; align-items: baseline; color: var(--ink2) }
-.watchdog-events time { font-family: var(--mono); color: var(--ink3); flex-shrink: 0 }
-.watchdog-event-project { font-weight: 600; color: var(--ink); flex-shrink: 0 }
+/* task-26 replaced the old `max-height: 220px` list with a box that takes
+   whatever the section has left — 220px was a constant that was wrong in
+   both directions, cutting the feed short on a tall screen and still
+   overflowing a short one. `overscroll-behavior: contain` so reaching the
+   end of the feed does not start scrolling the page behind it. */
+.watchdog-table-wrap {
+  flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
+}
+.watchdog-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10.5px; color: var(--ink2) }
+/* Sticky, so scrolling three weeks of sweeper history never leaves a reader
+   guessing which column is which. `--strip-hi` rather than transparent: rows
+   scroll UNDER this. */
+.watchdog-table th {
+  position: sticky; top: 0; z-index: 1; background: var(--strip-hi);
+  font-family: var(--display); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+  text-align: left; white-space: nowrap; padding: 5px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+/* `nowrap` on the four keyed columns and wrapping on the detail alone: the
+   first four are short tokens whose wrapping would only ever be an accident
+   of width, where `detail` is a sentence. */
+.watchdog-table td { padding: 6px 10px; border-top: 1px solid var(--hairline); vertical-align: baseline; white-space: nowrap }
+.watchdog-table-detail { white-space: normal; color: var(--ink) }
+.watchdog-table time { color: var(--ink3) }
+
+/* The stage-chip idiom (see `.board-card-stage`'s own comment for why a full
+   round and why a leading glyph), applied to the kind column. Five tones,
+   each a MEANING rather than a colour name — `WATCHDOG_KIND_TONE` is what
+   decides which kind wears which. */
+.watchdog-kind {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+  padding: 1px 7px 1px 5px; border: 1px solid; border-radius: 9px;
+}
+.watchdog-kind-live { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline)) }
+.watchdog-kind-done { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--hairline)) }
+.watchdog-kind-bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline)) }
+.watchdog-kind-warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline)) }
+.watchdog-kind-muted { color: var(--ink3); border-color: var(--hairline2) }
 
 /* Five even tiles plus a sixth, wider one on a wide screen (the sixth is
    Task 7's own "machine time by stage" tile, added below). `minmax(0, 1fr)`
@@ -1718,14 +1838,11 @@ body {
 @media (max-width: 900px) {
   .runs-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)) }
   .runs-tile-wide { grid-column: 1 / -1 }
-}
-
-@media (max-width: 700px) {
-  /* The row is already `flex-wrap`, so on a phone it becomes a short stack —
-     at which point pushing the verdict to the right edge of its own line
-     separates it from the run it describes. */
-  .watchdog-row { flex-direction: column; gap: 2px }
-  .watchdog-row-verdict { margin-left: 0 }
+  /* The policy tile spans rather than shrinking to a third: its three
+     label/value rows are the one tile here whose content is a table, and a
+     narrowed column wraps every label onto two lines. */
+  .watchdog-tiles { grid-template-columns: 1fr 1fr }
+  .watchdog-tiles > .runs-tile:nth-child(3) { grid-column: 1 / -1 }
 }
 
 @media (max-width: 700px) {
@@ -1733,6 +1850,9 @@ body {
      the list and detail pane (already stacking under this same breakpoint,
      see .runs-split below) below a full screen of nothing but numbers. */
   .runs-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  /* One column: three tiles side by side on a phone leaves the sweeper's own
+     sentence — the longest string on this surface — three words wide. */
+  .watchdog-tiles { grid-template-columns: 1fr }
   /* Restated rather than left to inherit silently from the 900px block
      above (this value does not actually change at this narrower width — the
      wide tile already spans the full row below 900px, this block only ever
@@ -1893,7 +2013,11 @@ body {
      .runs-split's `flex: 1; min-height: 0` needs no undoing: with
      .runs-board back to `height: auto` there is no remainder for it to
      absorb, and a flex item that may shrink below its content is only
-     observable against a definite container height. */
+     observable against a definite container height. task-26's
+     `.watchdog-monitor`/`.watchdog-activity`/`.watchdog-table-wrap` chain
+     needs no undoing here either, and for exactly that reason: with no
+     remainder to absorb, the wrapper sizes to its content and the feed
+     scrolls with the page like everything else. */
   .runs-board { height: auto }
   .runs-list, .runs-detail { max-height: none; overflow: visible; min-height: auto }
   .runs-detail { min-height: 160px }

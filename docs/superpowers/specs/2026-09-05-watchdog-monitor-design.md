@@ -76,6 +76,10 @@ not a setting, and it drags a poll into a page that otherwise has none.
 
 ## 2. The mode switch — `RunsView.tsx`
 
+*Superseded on 2026-09-06 by `2026-09-06-watchdog-console-design.md` §2 for
+the switch's position (last in the bar, after a divider); the persistence
+rule below stands.*
+
 A segmented control in the Runs `board-bar`, before the range control,
 using the identical `.runs-seg` idiom: `role="group"`,
 `aria-label="View"`, two `<button>`s labelled `Runs` and `Watchdog`, each
@@ -117,6 +121,11 @@ names no row in `merged` at that moment resolves through the existing
 mode still switches, and the pane falls back to the default row.
 
 ## 3. `WatchdogMonitor` — `client/src/components/runs/WatchdogMonitor.tsx`
+
+*Superseded on 2026-09-06 by `2026-09-06-watchdog-console-design.md` §3 for
+the presentation (§3.1–3.4: tiles, cards, table); §3.2's join rules — rows
+from the runs payload, `watching` as annotation, the skew rendered both ways
+— stand.*
 
 ```ts
 interface Props {

@@ -110,14 +110,23 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   boundaries, not on a live heartbeat. The whole section sits behind a
   `Runs | Watchdog` mode switch (`lib/runs-mode.ts`, persisted under
   `backlog-manager.runs-mode`, unknown value → Runs; it renders
-  unconditionally, ahead of the range control, because the sweeper has a
-  phase to report whether or not any run has ever finished, while range and
-  project filter render in runs mode alone). Watchdog mode replaces the whole
-  body with `WatchdogMonitor` — the sweeper's state line, its read-only
-  config, one row per `running` run in the live payload (rows from the runs
-  payload, `watching` only annotates, because two projects can share a
-  `runId`; the skew shows in both directions, `· not yet watched` and a
-  placeholder row), and the activity feed. It owns the one live
+  unconditionally, last in the bar — after the range control, the project
+  select and a hairline divider, so its right edge stays put when those two
+  unmount in watchdog mode — because the sweeper has a phase to report
+  whether or not any run has ever finished, while range and project filter
+  render in runs mode alone). Watchdog mode replaces the whole body with
+  `WatchdogMonitor` — three tiles (the sweeper's phase with `stateLine` and a
+  depleting sweep meter, the watched count, the read-only policy), one card
+  per `running` run in the live payload with a heartbeat freshness meter
+  against `RUN_STALE_MS` (`freshnessFraction`, `lib/run-time.ts`) and, on a
+  crashed card, attempt pips, the strip's own `watchdogClause` verbatim and
+  the grace remaining (`sweepFraction`/`graceRemainingMs`,
+  `lib/run-watchdog.ts`, beside the
+  `WATCHDOG_KIND_GLYPH`/`WATCHDOG_KIND_TONE` records the activity badges
+  read) — cards from the runs payload, `watching` only annotates, because two
+  projects can share a `runId`; the skew shows in both directions, `· not yet
+  watched` and a placeholder row — and the activity feed as a kind-badged
+  table that takes the section's remaining viewport height. It owns the one live
   `useWatchdog()` and takes `RunsView`'s own live runs as a prop, so
   switching modes adds no request; a row click switches back to Runs on that
   run's detail), archive (`ArchiveView.tsx`: four columns —

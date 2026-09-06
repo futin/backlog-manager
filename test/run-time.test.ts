@@ -1,5 +1,5 @@
 import {
-  formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
+  formatClock, formatSpan, formatSpanCompact, freshnessFraction, inStageMs, isTerminalStage,
   itemDoneClock, itemDurationMs, itemQueueWaitMs, lastReportedEntry, runClockMs, runElapsedMs, runIsLive,
   stepperDots, stepperStages, stepperTerminal
 } from '../client/src/lib/run-time';
@@ -174,6 +174,53 @@ describe('runIsLive', () => {
   // call `heartbeat` (run-stats.ts) already makes for `runWallMs`.
   it('is false for a running run whose heartbeat will not parse', () => {
     expect(runIsLive({ status: 'running', updatedAt: 'nope' }, T0)).toBe(false);
+  });
+});
+
+/**
+ * task-26's freshness meter: the same `RUN_STALE_MS` line `runIsLive` forks
+ * on, expressed as a fraction so a card can DRAW how close a run is to being
+ * called crashed. Derived every render against an explicit `now` and never
+ * stored, the posture the Invariants already state for `exhausted`.
+ */
+describe('freshnessFraction', () => {
+  // A heartbeat this very instant is the origin of the scale, not a tiny
+  // positive number: nothing has elapsed yet.
+  it('is 0 for a heartbeat stamped at now', () => {
+    expect(freshnessFraction(at(0), T0)).toBe(0);
+  });
+
+  // The scale is the constant, never a typed 900000 — a meter drawn against
+  // a literal would keep pointing at 15m the day RUN_STALE_MS moved.
+  it('is the elapsed share of RUN_STALE_MS partway through', () => {
+    expect(freshnessFraction(at(-38_000), T0)).toBe(38_000 / RUN_STALE_MS);
+  });
+
+  // The stale line itself is full, matching `runIsLive`'s strict `<`: at
+  // exactly RUN_STALE_MS the run reads stale, and the meter reads full.
+  it('is 1 exactly at the stale line', () => {
+    expect(freshnessFraction(at(-RUN_STALE_MS), T0)).toBe(1);
+  });
+
+  // Clamped, not unbounded: a 22m-old heartbeat is 1.47 of the window, and a
+  // fill drawn at 147% would overflow its track for no added information —
+  // past the line is past the line.
+  it('clamps a long-dead heartbeat to 1 rather than reporting 1.47', () => {
+    expect(freshnessFraction(at(-22 * 60_000), T0)).toBe(1);
+  });
+
+  // Clock skew between the orchestrator's host and this browser is real, and
+  // a negative fill would draw as an empty track anyway — 0 says the same
+  // thing without a negative width in the DOM.
+  it('clamps a stamp from the future to 0 rather than going negative', () => {
+    expect(freshnessFraction(at(30_000), T0)).toBe(0);
+  });
+
+  // `null`, never 0: 0 is the reading for "a heartbeat just arrived", which
+  // is the opposite of what an unreadable stamp tells us. The caller omits
+  // the meter entirely on `null`.
+  it('is null for a stamp that will not parse', () => {
+    expect(freshnessFraction('garbage', T0)).toBeNull();
   });
 });
 

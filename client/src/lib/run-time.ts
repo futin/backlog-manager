@@ -238,6 +238,39 @@ export function runIsLive(
 }
 
 /**
+ * How far a run's heartbeat has travelled toward the same `RUN_STALE_MS`
+ * line `runIsLive` above forks on — `0` the instant after a heartbeat, `1`
+ * at or past the line (task-26).
+ *
+ * It exists because the monitor could state the age of a heartbeat and the
+ * verdict that follows from it, but never the ONE reading a person watching
+ * a live run actually wants: how close is this to being called crashed. Every
+ * input to that was already on the client — `updatedAt`, `RUN_STALE_MS` and a
+ * clock — and none of them was drawn.
+ *
+ * Derived every render against an explicit `now`, never stored, for the
+ * reason the Invariants give for `exhausted`: an input that is re-read on
+ * every tick must not feed a value written once. There is no `= Date.now()`
+ * default for the same reason `itemDurationMs` no longer has one — the
+ * caller already holds the instant its whole render is measured against.
+ *
+ * `null` rather than `0` for an unreadable stamp: `0` is the reading for
+ * "a heartbeat arrived this instant", the exact opposite of what an
+ * unparsable one tells us, and the caller omits the meter on `null` instead
+ * of drawing an empty track that claims perfect health.
+ *
+ * Clamped on both sides. Past the stale line the excess adds nothing a fill
+ * could show, and a stamp slightly in the FUTURE is ordinary clock skew
+ * between the orchestrator's host and this browser rather than a fault, so
+ * it reads `0` instead of a negative width.
+ */
+export function freshnessFraction(updatedAt: string, now: number): number | null {
+  const updated = parseStamp(updatedAt);
+  if (updated === null) return null;
+  return Math.min(1, Math.max(0, (now - updated) / RUN_STALE_MS));
+}
+
+/**
  * The last instant this run can actually PROVE — `now` while it is live, its
  * own last heartbeat once it is not, and `null` when it has neither.
  *
