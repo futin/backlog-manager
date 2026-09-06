@@ -16,8 +16,9 @@ data.
 | Rebuild the stack from scratch | `pnpm run docker:sync` |
 | API only, on the host | `pnpm run dev` |
 | Client only, on the host | `pnpm run dev:web` |
-| Tests | `pnpm test` (jest, `--runInBand`) |
-| Skill tests | `pnpm run test:skills` |
+| Tests (both runners) | `pnpm test` (`scripts/test-all.mjs` — jest, then node) |
+| Tests, jest only | `pnpm run test:jest` (`jest --runInBand`) |
+| Skill tests | `pnpm run test:skills` (`node --test`) |
 | Reinstall the plugin from the pushed HEAD | `pnpm run plugin:sync` |
 | Types | `pnpm run typecheck` |
 | Production build | `pnpm run build` |
@@ -627,6 +628,26 @@ happened.
   stores absolute host paths.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the
   image.
+- **`pnpm test` is the union of BOTH runners** — `scripts/test-all.mjs` runs
+  `test:jest` and then `test:skills`, always both, and exits `1` if either
+  failed. Do not "simplify" `test` back to bare jest: jest's `testMatch` is
+  `test/**/*.test.ts(x)` and can never reach `skills/*/tools/*.test.mjs`, so
+  for a long time the one word everything reaches for — a human, an
+  orchestrated item's verification step (`resolveVerifyCommands` resolves to
+  `['test','typecheck','build']` off `package.json`), any future CI — proved
+  nothing at all about `orchestrate.mjs` (the run file's only writer) or
+  `backlog.mjs` (the registry's only writer), 4,711 LOC of single-writer
+  tooling that could regress past every automated gate this repo has and merge
+  to `main`. `backlog/verify.json` was the rejected alternative: it closes the
+  orchestrated-merge half and leaves a human's `pnpm test` false-green, and the
+  human half is what the 2026-09-06 audit found. The price is ~210s instead of
+  ~136s, +54% per orchestrated item, paid knowingly. The two named scripts stay
+  the single copy of what each runner runs — `test-all.mjs` delegates to them
+  and never re-spells `test:skills`'s glob pair, whose `scripts/*.test.mjs`
+  half is the one most easily lost. Neither runner short-circuits the other,
+  because a run with both broken has to report both. The script has no test of
+  its own on purpose: `scripts/test-all.test.mjs` would match `test:skills`'s
+  own glob and spawn the whole suite from inside the suite.
 - **`allowBuilds` in `pnpm-workspace.yaml` lists `esbuild`**; a skipped build
   surfaces as Vite failing to start.
 - **Editing `vite.config.ts` needs `docker compose restart client`.**
@@ -978,4 +999,6 @@ happened.
 - Tests are flat in `test/`, `*.test.ts` / `*.test.tsx`; component suites opt
   into jsdom with a `@jest-environment jsdom` docblock. Skill tests live next
   to the tool they cover (`skills/*/tools/*.test.mjs`) and run under node's
-  own test runner, not jest.
+  own test runner, not jest — but `pnpm test` runs both runners, via
+  `scripts/test-all.mjs`. The split is which runner executes a file, not which
+  ones one word covers; see the Invariants entry.

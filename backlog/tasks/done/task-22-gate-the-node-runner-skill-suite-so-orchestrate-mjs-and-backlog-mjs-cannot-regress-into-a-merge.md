@@ -4,9 +4,12 @@ title: Gate the node-runner skill suite so orchestrate.mjs and backlog.mjs canno
 created: 2026-09-06
 tags: tests, audit-2026-09-06
 runner-fix: true
-updated: 2026-09-06T18:28:20Z
+updated: 2026-09-06T22:08:54Z
 groom-elapsed: 107
 groom-tokens: 20179
+started: 2026-09-06T21:48:02Z
+execute-elapsed: 1252
+execute-tokens: 44624
 ---
 
 ## Goal
@@ -172,3 +175,137 @@ pnpm run typecheck
   136s / 74s baseline in the Plan, so the +54% estimate is either confirmed or corrected.
 - CLAUDE.md's Commands table, Conventions section and Invariants section all describe what
   `test` now means.
+
+## Outcome
+
+2026-09-07 — done. `package.json`'s `test` is now `node scripts/test-all.mjs`, which runs
+`test:jest` (today's `jest --runInBand`, moved verbatim) and then `test:skills`, always both,
+and exits `1` if either failed. `test:skills` keeps its exact previous meaning and still owns
+the `skills/*/tools/*.test.mjs scripts/*.test.mjs` glob pair — `test-all.mjs` delegates to
+the two named scripts and re-spells neither. No `backlog/verify.json`, no change to
+`orchestrate.mjs`, no CI config. `scripts/test-all.test.mjs` deliberately not written
+(decision 4); the script's own header says so, and the seven hand-run cases below are its
+proof. CLAUDE.md updated in all three places (Commands table, Conventions, a new Invariants
+entry); README.md's two test tables said "Tests (jest) | `pnpm test`" and would have been
+left stating the opposite of the new behaviour, so they were corrected too.
+
+### The seven hand-run cases
+
+| # | case | exit | evidence |
+|---|---|---|---|
+| 1 | `skills/backlog/tools/backlog.test.mjs:99` broken | `1` | `PASS jest` (76 suites / 1469 tests) above `FAIL node --test (skills)`; failure names the file |
+| 2 | `test/vite-proxy.test.ts:27` broken | `1` | `FAIL jest` / `PASS node --test (skills)` (411 pass, 0 fail) |
+| 3 | **both** broken at once | `1` | both failures in the output, summary names both runners |
+| 4 | `scripts/sync-plugin.test.mjs:22` broken | `1` | node runner names `scripts/sync-plugin.test.mjs:22` — the `scripts/*.test.mjs` half of the glob is safe |
+| 5 | every break restored | `0` | `pnpm test: both runners passed.` |
+| 6 | `pnpm run test:skills` clean | `0` | 411 tests, node runner alone; zero occurrences of `jest` in its output |
+| 7 | `pnpm run test:jest` clean | `0` | 76 suites / 1469 tests, jest alone; zero occurrences of `TAP version 13` |
+
+Case 3 is the one the design turns on, and it holds: the node runner ran to completion despite
+jest having already failed, so neither break hid the other.
+
+```
+=== RUN CASE 1 (skills broken only) ===
+EXIT=1 WALL=206s
+Test Suites: 76 passed, 76 total
+Tests:       1469 passed, 1469 total
+not ok 219 - slugify lowercases and dashes punctuation
+  expected: 'deck-scroll-chains-BREAK'
+  actual: 'deck-scroll-chains'
+  location: '.../skills/backlog/tools/backlog.test.mjs:98:1'
+────────────────────────────────────────────────────────────
+PASS  jest
+FAIL  node --test (skills)
+
+pnpm test: FAILED in node --test (skills).
+
+=== RUN CASE 2 (jest broken only) ===
+EXIT=1 WALL=148s
+Tests:       1 failed, 1468 passed, 1469 total
+# fail 0
+────────────────────────────────────────────────────────────
+FAIL  jest
+PASS  node --test (skills)
+
+pnpm test: FAILED in jest.
+
+=== RUN CASE 3 (both broken) ===
+EXIT=1 WALL=147s
+Test Suites: 1 failed, 75 passed, 76 total
+Tests:       1 failed, 1468 passed, 1469 total
+ FAIL  test/vite-proxy.test.ts
+      at Object.<anonymous> (test/vite-proxy.test.ts:27:32)
+not ok 219 - slugify lowercases and dashes punctuation
+────────────────────────────────────────────────────────────
+FAIL  jest
+FAIL  node --test (skills)
+
+pnpm test: FAILED in jest and node --test (skills).
+
+=== RUN CASE 4 (scripts glob) ===
+EXIT=1 WALL=149s
+not ok 1 - publishBlocker passes a committed, pushed tree
+  location: '.../scripts/sync-plugin.test.mjs:21:1'
+────────────────────────────────────────────────────────────
+PASS  jest
+FAIL  node --test (skills)
+
+pnpm test: FAILED in node --test (skills).
+
+=== RUN CASE 5 (clean, union) ===
+EXIT=0 WALL=143s
+Test Suites: 76 passed, 76 total
+Tests:       1469 passed, 1469 total
+# tests 411
+# pass 411
+# fail 0
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+
+=== test:skills alone ===
+EXIT=0 WALL=59s
+occurrences of "jest" in output: 0
+# tests 411
+# pass 411
+# fail 0
+
+=== test:jest alone ===
+EXIT=0 WALL=60s
+occurrences of "TAP version 13" in output: 0
+Test Suites: 76 passed, 76 total
+Tests:       1469 passed, 1469 total
+
+=== typecheck ===
+EXIT=0 WALL=6s
+$ tsc --noEmit
+```
+
+### The +54% estimate is corrected downward
+
+Measured here on a clean tree in this worktree, nothing else running:
+
+| command | Plan's baseline (main tree, run in flight) | measured here |
+|---|---|---|
+| jest alone | 136s | **60s** |
+| node runner alone | 74s | **59s** |
+| union (`pnpm test`) | ~210s predicted | **143s** |
+
+So the real cost of the union is **+83s / +138% over jest alone**, not +54% — the Plan's
+baselines were taken under load and were pessimistic in absolute terms but *understated* the
+ratio, because jest sped up far more than the node runner did when the machine was free. The
+absolute number is what the verification step actually pays, and it is ~143s, well under the
+~210s the decision was taken against. The corpus also grew since grooming: the node runner is
+411 tests, not 406.
+
+### One thing found, not fixed
+
+This worktree had **no `node_modules`**, so the first `pnpm test` here failed with
+`sh: jest: command not found` — and neither `orchestrate.mjs` nor `backlog-orchestrate`'s
+SKILL.md has any dependency-install step (`grep -n "pnpm install\|node_modules"` over both:
+no matches). That is not new and is not caused by this change — `test` was `jest --runInBand`
+before, so a fresh worktree could never have run it either — but it does mean the gate this
+item installs is only as good as the worktree having had `pnpm install` run in it. Recorded
+here rather than fixed: it is a separate item, and this session files nothing.
