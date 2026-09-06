@@ -561,6 +561,35 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock.mock.calls.length).toBe(before + 1);
   });
 
+  /* bug-19 — the same mark, on the surface it was silently useless on. A
+     CRASHED run is `status: 'running'` with a stale heartbeat, so the
+     end condition "the payload says running" was already true the instant the
+     mark was written: it evaporated on the very next payload and the crashed
+     strip got its button straight back, ~90s before the resumed session could
+     possibly have heartbeated. Freshness is the condition that tells the two
+     apart, and it costs the paused case nothing — `unpause` re-stamps
+     `updatedAt` in the same write that sets `running`. */
+
+  it('keeps the mark on a crashed run until its heartbeat comes back', async () => {
+    const fetchMock = stubFetchSequence([
+      payloadWith('running', false), // crashed: running, stale heartbeat
+      payloadWith('running', false), // still crashed — the resumed session has not heartbeated yet
+      payloadWith('running', true)   // heartbeating again
+    ]);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+
+    await act(async () => {
+      result.current.noteResume(fixture.project);
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.resuming.has(fixture.project)).toBe(true);
+
+    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    expect(result.current.resuming.has(fixture.project)).toBe(false);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+  });
+
   it('expires the mark after the grace window and stops polling a run that never came back', async () => {
     const fetchMock = stubFetch(payloadWith('paused', false));
     const { result } = renderHook(() => useOrchestratorRuns());

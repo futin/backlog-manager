@@ -748,6 +748,33 @@ export interface OrchestratorRun {
    * a display concern in `RunDetail`, not a migration.
    */
   questionMode: QuestionMode;
+  /**
+   * Which session is driving this run (bug-19) — its `CLAUDE_CODE_SESSION_ID`
+   * and when it took the run over — or `null` for a run nobody has claimed.
+   *
+   * Written by `orchestrate.mjs init` and `orchestrate.mjs claim`, read back
+   * by every mutating command in that same tool, and by **nothing on this
+   * side of the wire**: no server route derives anything from it and no view
+   * renders it. It is declared here because the run file is a contract shared
+   * with `shared/types.ts` (the tool's own key-set test asserts `init`'s
+   * output against this repo's fixture), and because the archive endpoints
+   * serve run files verbatim — a field the type did not know about would be
+   * dropped from nothing, but would also be invisible to anyone reading this
+   * declaration to find out what a run file contains.
+   *
+   * `--resume` is not a command, it is a prose flow carried out with the
+   * ordinary ones, so `init`'s lock never sees it and two resume sessions —
+   * one from this app, one from the dashboard's own session-resume, which
+   * this app can neither request nor observe — could both drive one run file
+   * to a merge. The lease is what makes the survivor deterministic; see
+   * `orchestrate.mjs`'s own "the driver lease" comment for the mechanism, and
+   * why last-writer-wins is safe for `claim` alone.
+   *
+   * **Optional, and absent means unclaimed rather than locked.** Every run
+   * file written before this existed lacks it, and a missing field must never
+   * be able to strand a run.
+   */
+  driver?: { sessionId: string; at: string } | null;
   queue: RunQueueItem[];
   attention: RunAttention[];
 }

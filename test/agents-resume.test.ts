@@ -14,7 +14,8 @@ import rawFixture from './fixtures/orchestrator-run.json';
 import {
   pauseRequestEffective, readPauseRequest, writePauseRequest
 } from '../server/src/orchestrator/pause-control.util';
-import { RUN_IN_PROGRESS_CODE } from '../shared/types';
+import { RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../shared/types';
+import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import type { AgentsStatus, OrchestratorRun } from '../shared/types';
 
 // Same translation orchestrator-start.test.ts already does: the fixture is
@@ -489,5 +490,109 @@ describe('POST /api/agents/resume', () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     const entry = res.body.runs.find((r: { project: string }) => r.project === projectPath);
     expect('watchdog' in entry).toBe(false);
+  });
+  // --- bug-19: the resume lock -------------------------------------------
+  // The gap these close: `resume()`'s only run-level refusal was `run.fresh`,
+  // and a crashed run stays crashed for the ~90s a resumed session needs to
+  // reach its first heartbeat — so every call arriving in that window saw the
+  // identical stale run and every one spawned. Three sessions inside ten
+  // seconds is what that actually looked like on run-20260905-113818, and
+  // they were harmless only because a spend limit killed all three ~600ms in.
+  //
+  // The lock is `WatchdogEntry.resumeSpawnAt`, taken SYNCHRONOUSLY — checked
+  // and stamped in one run of the event loop, before any further `await` —
+  // which is the whole reason these cases fire their requests without
+  // awaiting the first: a check that sits on the far side of an await lets
+  // every concurrent caller through, which is precisely what
+  // `noteBoardResume`'s after-the-await placement already did.
+
+  it('serializes concurrent resumes of one crashed run — one spawn, the rest an uncoded 409', async () => {
+    const sent = stubDashboard({ ok: true }, 'auto');
+    writeRun({
+      ...fixture, project: projectPath, status: 'running',
+      updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    });
+
+    // Occurrence 1's own shape: three clicks, none of them awaiting the
+    // previous answer.
+    const responses = await Promise.all([
+      post({ project: projectPath }),
+      post({ project: projectPath }),
+      post({ project: projectPath })
+    ]);
+
+    expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
+
+    const ok = responses.filter((r) => r.status === 201);
+    const refused = responses.filter((r) => r.status === 409);
+    expect(ok).toHaveLength(1);
+    expect(refused).toHaveLength(2);
+    for (const r of refused) {
+      // Uncoded, deliberately: RUN_IN_PROGRESS_CODE means "a run is alive for
+      // this project right now", which is false here — the run is crashed and
+      // a resume is on its way to it. The strip treats that code as a silent
+      // success, which is exactly the wrong reaction to this refusal.
+      expect(r.body.code).toBeUndefined();
+      expect(r.body.error).toContain('resume');
+      expect(r.body.error).toContain(fixture.runId);
+    }
+  });
+
+  it('takes no lock when the spawn itself fails, so the next click still spawns', async () => {
+    // A spawn that threw started no session: leaving the stamp behind would
+    // silence the board's only resume control for a full RUN_STALE_MS because
+    // the dashboard was briefly down.
+    stubDashboard({ reject: CONN_REFUSED });
+    writeRun({
+      ...fixture, project: projectPath, status: 'running',
+      updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    });
+    await post({ project: projectPath }).expect(502);
+
+    const sent = stubDashboard({ ok: true }, 'auto');
+    await post({ project: projectPath }).expect(201);
+    expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
+  });
+
+  it('stops locking RUN_STALE_MS after the stamp — the app\'s one freshness number, not a second one', async () => {
+    const first = stubDashboard({ ok: true }, 'auto');
+    writeRun({
+      ...fixture, project: projectPath, status: 'running',
+      updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    });
+    await post({ project: projectPath }).expect(201);
+    expect(first.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
+
+    // Still locked a moment later...
+    await post({ project: projectPath }).expect(409);
+
+    // ...and no longer locked once the stamp is older than RUN_STALE_MS. Aged
+    // through the service rather than by faking the clock: a resumed session
+    // that has not heartbeated in fifteen minutes is dead by this app's own
+    // definition, and a second resume is then the right answer.
+    const state = app.get(WatchdogStateService);
+    const entry = state.entry(fixture.runId);
+    expect(entry?.resumeSpawnAt).not.toBeNull();
+    entry!.resumeSpawnAt = new Date(Date.now() - (RUN_STALE_MS + 1_000)).toISOString();
+
+    const second = stubDashboard({ ok: true }, 'auto');
+    await post({ project: projectPath }).expect(201);
+    expect(second.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
+  });
+
+  it('serializes a paused run\'s resumes too — the lock is per run, not per crash', async () => {
+    // Two tabs on the Runs view, both showing the same paused run: the
+    // per-component `busy` guard cannot see across them, so this is the only
+    // layer that can refuse the second click.
+    const sent = stubDashboard({ ok: true }, 'auto');
+    writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
+
+    const responses = await Promise.all([
+      post({ project: projectPath }),
+      post({ project: projectPath })
+    ]);
+    expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
+    expect(responses.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(responses.filter((r) => r.status === 409)).toHaveLength(1);
   });
 });

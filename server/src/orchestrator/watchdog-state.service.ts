@@ -84,6 +84,28 @@ export interface WatchdogEntry {
   project: string;
   attempts: number;
   lastSpawnAt: string | null;
+  /**
+   * bug-19 — the resume LOCK, and deliberately not a second grace clock.
+   *
+   * `lastSpawnAt` above is written by the sweeper and by `noteBoardResume`
+   * and read by `visit()` alone: a backoff, asked once per tick, that a board
+   * click writes and never reads. This field is the opposite shape — written
+   * and read by `AgentsService.resume()` itself, synchronously, on the one
+   * path both origins share — and it answers a different question: not "how
+   * long since anyone last tried" but "is a resume session believed to be
+   * alive in this run right now". Two questions, two fields; folding them
+   * into one would make every board click reset the sweeper's backoff and
+   * every sweeper backoff refuse a person's click.
+   *
+   * Held for `RUN_STALE_MS` — this app's one freshness number, reused rather
+   * than joined by a second — because a resumed session that has not
+   * heartbeated in fifteen minutes is dead by the app's own definition, and a
+   * second resume is then the right answer. Cleared again when the spawn it
+   * was taken for throws: a spawn that never started a session must not
+   * silence the board's only resume control for a quarter of an hour because
+   * the dashboard was briefly down.
+   */
+  resumeSpawnAt: string | null;
   lastSessionId: string | null;
   lastError: string | null;
   recovered: boolean;
@@ -153,6 +175,7 @@ export class WatchdogStateService {
         project,
         attempts: 0,
         lastSpawnAt: null,
+        resumeSpawnAt: null,
         lastSessionId: null,
         lastError: null,
         recovered: false,
@@ -164,12 +187,24 @@ export class WatchdogStateService {
     return entry;
   }
 
-  /** Drops every entry whose `runId` is not in `keep` — the sweeper's own
-   *  per-tick call with the full set of currently-`running` `runId`s, which
-   *  is what actually retires a run's bookkeeping once `orchestrate.mjs`
-   *  moves it to `done`/`aborted`/`failed` or archives it out from under a
-   *  fresh `init`. Nothing here decides retirement policy; it only performs
-   *  whatever the caller already decided. */
+  /**
+   * Drops every entry whose `runId` is not in `keep` — the sweeper's own
+   * per-tick call with the set of `runId`s whose runs still exist and can
+   * still be resumed, which is what actually retires a run's bookkeeping once
+   * `orchestrate.mjs` moves it to `done`/`aborted`/`failed` or archives it out
+   * from under a fresh `init`. Nothing here decides retirement policy; it only
+   * performs whatever the caller already decided.
+   *
+   * That the caller decides is load-bearing rather than incidental (bug-19,
+   * review round 1): an entry now carries `resumeSpawnAt`, which is NOT the
+   * sweeper's bookkeeping — it is `AgentsService.resume()`'s lock — so
+   * deleting an entry silently drops a lock that is still inside its window.
+   * A `paused` run is the case that made that visible: it is never `running`,
+   * so a `keep` set built from running runs alone let any tick (armed by some
+   * other project entirely) wipe the lock mid-window and the next Resume click
+   * spawn a second session into a run already being resumed. See
+   * `WatchdogService.sweep()` for the set it now builds.
+   */
   prune(keep: ReadonlySet<string>): void {
     for (const runId of this.entries.keys()) {
       if (!keep.has(runId)) this.entries.delete(runId);

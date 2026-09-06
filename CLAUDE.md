@@ -722,9 +722,69 @@ happened.
   run is offered on **both** surfaces through one `RunControls` and one
   `resumeGate`; Resume for a **crashed** run stays on the strip alone, behind
   `watchdogStoodDown`, because only that case has automation to race.
-  `noteResume` keeps the poll alive for `RESUME_POLL_GRACE_MS` after a click,
-  and does not close the two-tab double-resume exposure it inherits. Long
-  form: [docs/invariants.md](docs/invariants.md).
+  `noteResume` keeps the poll alive for `RESUME_POLL_GRACE_MS` after a click.
+  Long form: [docs/invariants.md](docs/invariants.md).
+- **A resume is serialized at three layers, and only the third one can
+  refuse a resume this app never asked for** (bug-19). `--resume` is not a
+  command: it is a prose flow in `references/recovery.md` carried out with
+  the ordinary ones, so `init`'s lock never sees it, and a crashed run stays
+  crashed for the ~90s a resumed session needs to reach its first heartbeat —
+  a window in which every arriving call re-read the identical stale run and
+  every one spawned (three sessions in ten seconds, `run-20260905-113818`,
+  harmless only because a spend limit killed all three). (1) The board's
+  Resume control carries a synchronous in-flight guard and reads `Resuming…`
+  while a request is out, and `useOrchestratorRuns`' mark now ends on
+  `running` **and `fresh`** rather than `running` alone — a crashed run IS
+  `running`, so the mark evaporated on exactly the surface it had to hold.
+  (2) `AgentsService.resume()` takes a real lock, `WatchdogEntry.resumeSpawnAt`,
+  checked and stamped **synchronously** before its next `await` (a lock taken
+  after an await is a check every concurrent caller passes, which is what
+  `noteBoardResume`'s after-the-await placement always was), held for
+  `RUN_STALE_MS` — the app's one freshness number, never a second — cleared
+  when the spawn throws, and refused as an **uncoded** 409, because
+  `RUN_IN_PROGRESS_CODE` means "a run is alive right now" and both callers
+  treat that code as a silent success. The sweeper obeys it through the same
+  method, spending no attempt; a sweeper retry at t+10m being refused until
+  the 15m lock expires is correct and pinned, not a bug to shorten the lock
+  over. (3) `orchestrate.mjs` records a **driver lease** — `driver:
+  { sessionId, at } | null`, written by `init` and the new `claim`, read by
+  every mutating command, `CLAUDE_CODE_SESSION_ID` as the identity (never a
+  synthetic per-process id, which would lock a run out of its own second
+  command), **absent means unclaimed, never locked**, an unidentified caller
+  warns and proceeds rather than being stranded. Refusal is **exit `7`**, for
+  `6`'s reason: the reaction is to stop, not to retry. `claim` refuses only a
+  run that is `running`, fresh and led by another session, which is what makes
+  it safe for both resumers to claim a crashed one — the later write wins, and
+  the loser's very next write refuses. That is the one place last-writer-wins
+  is the mechanism rather than the hazard. **`abort` and `unpause` TAKE the
+  lease rather than checking it, and that is the rule, not an exception to
+  paper over**: both are commands whose premise is that the previous driver is
+  gone — abort ends the run, unpause is a resume session's first write on a run
+  whose lease belongs to the session that paused it and exited. Guarding them
+  bricked exactly what the lease exists to keep open: a crashed run refused
+  every abort on its dead session's lease, and `init` then refused the project
+  forever with exit `4`; a paused run's board Resume exited `7` before it ever
+  reached `claim`. Taking rather than skipping is what makes the two
+  order-independent — an `unpause` that left the old lease behind produces a
+  fresh, foreign-led run, which is the one state `claim` refuses. The rule
+  lives in the tool, never in `recovery.md`'s step order: prose read once by a
+  session that then takes several hundred turns is a step that can be skipped,
+  and a skipped step here is a stranded run. Layer 3 exists because layers 1 and
+  2 can only refuse what this app itself spawns: occurrence 2 was one
+  backlog-manager resume racing a dashboard `--resume <session id>` that
+  nothing here requested, can see, or could ever refuse from its own server.
+- **The sweeper's prune keeps `paused` runs, because an entry is no longer
+  only its bookkeeping.** `WatchdogEntry` now carries `resumeSpawnAt`, the
+  resume lock both origins take, whose lifetime is `RUN_STALE_MS` from the
+  stamp and not "while the sweeper is interested". Pruning on `running` alone
+  deleted that lock for a paused run on the next tick — one armed by any other
+  project, since the sweep is global — and the next Resume click spawned a
+  second session into a run already being resumed. A paused run is the one
+  non-`running` status that can still be resumed, which is exactly the
+  condition the lock exists for; every genuinely finished status still prunes
+  on the next tick. The keep set is built in `sweep()`, not decided inside
+  `prune()`, so retirement policy stays in the one place that reads the
+  payload.
 - **The watchdog spawns; it never writes the run file.** `runs()` stays the
   one reader; `WatchdogService` only ever calls `AgentsService.resume()` —
   the same spawn path a board click uses — so a resumed session's own

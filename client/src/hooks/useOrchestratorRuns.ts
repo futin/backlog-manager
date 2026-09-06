@@ -39,6 +39,35 @@ export const POLL_MS = 5_000;
 export const RESUME_POLL_GRACE_MS = 180_000;
 
 /**
+ * "The resume this board asked for has landed" — the one end condition both
+ * the prune and the `resuming` derivation read, so the two can never answer
+ * it differently.
+ *
+ * `running` AND `fresh`, and the second half is bug-19's whole fix here. The
+ * condition used to be `running` alone, which is exactly right for a PAUSED
+ * run — the resumed session's `unpause` is its first write, minutes before it
+ * produces anything else — and silently useless for a CRASHED one, because a
+ * crashed run IS `status: 'running'` (with a stale heartbeat; that pair is
+ * `isCrashed`, lib/run-watchdog.ts). So on the one surface where the mark had
+ * to hold — the crashed strip, whose Resume control it disables — it was
+ * already satisfied the instant it was written: the very next payload dropped
+ * it, the button came back ~90s before the resumed session could possibly
+ * have heartbeated, and a person looking at an unchanged strip clicked again.
+ * That is occurrence 1 of bug-19, three spawns inside ten seconds.
+ *
+ * Freshness costs the paused case nothing: `unpause` writes `status`,
+ * `unpausedAt` and `updatedAt` from ONE clock reading (orchestrate.mjs's own
+ * `cmdUnpause`), so a run that has just unpaused is fresh by construction.
+ * It is also the honest reading of what the mark means — not "the file
+ * changed" but "something is heartbeating in there again" — and it reuses the
+ * app's one freshness number rather than introducing a second rule about how
+ * long to wait.
+ */
+function hasResumed(runs: OrchestratorRunsPayload['runs'], project: string): boolean {
+  return runs.some((run) => run.project === project && run.status === 'running' && run.fresh);
+}
+
+/**
  * The orchestrator run list, kept live while — and only while — there is
  * anything live to keep it for.
  *
@@ -141,8 +170,7 @@ export function useOrchestratorRuns(): {
         setResumeMarks((prev) => {
           const now = Date.now();
           const next = new Map(
-            [...prev].filter(([project, expiresAt]) =>
-              now < expiresAt && !payload.runs.some((run) => run.project === project && run.status === 'running'))
+            [...prev].filter(([project, expiresAt]) => now < expiresAt && !hasResumed(payload.runs, project))
           );
           // Same Map when nothing was dropped, so a landed payload that
           // changed nothing here does not force an extra render.
@@ -204,17 +232,12 @@ export function useOrchestratorRuns(): {
    * for the same reason: a derivation that re-applies its own rules cannot
    * lie, where a stored verdict swept on some other schedule can.
    *
-   * `status === 'running'` and not `fresh` is the right end condition: a
-   * resumed session writes `unpause` (status `running`) as its very first
-   * write, minutes before it has produced anything else, and that write IS
-   * the answer this mark was waiting for. Waiting for `fresh` as well would
-   * work, since `unpause` re-stamps `updatedAt` too — but it would tie this
-   * mark to a freshness window it has no reason to depend on.
+   * The end condition itself is `hasResumed` below — see that function for
+   * why it is `running` AND `fresh` rather than `running` alone.
    */
   const resuming: ReadonlySet<string> = new Set(
     [...resumeMarks]
-      .filter(([project, expiresAt]) =>
-        Date.now() < expiresAt && !runs.some((run) => run.project === project && run.status === 'running'))
+      .filter(([project, expiresAt]) => Date.now() < expiresAt && !hasResumed(runs, project))
       .map(([project]) => project)
   );
 

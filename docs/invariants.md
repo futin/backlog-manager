@@ -184,12 +184,22 @@ without closing another.** `RESUME_POLL_GRACE_MS`
 neither fresh nor running, so nothing else would poll it after a Resume
 click — and a resumed session takes ninety seconds to several minutes to
 reach its first heartbeat. It expires on its own so a resume that never
-started cannot pin a tab to polling. What it does NOT close: two browser tabs
-can still both click Resume on the same paused run. The `resuming` placeholder
-is per-tab state, and `resume()` refuses a *fresh* run rather than a second
-resume of a stopped one. That exposure is inherited from the crashed-run
-Resume control, unchanged by this feature, and is why
-`check-for-a-live-resume-before-resuming-a-run` is still the rule for a human.
+started cannot pin a tab to polling. What it did NOT close, until bug-19: two
+browser tabs could both click Resume on the same run, since the `resuming`
+placeholder is per-tab state and `resume()` refused a *fresh* run rather than
+a second resume of a stopped one. The server-side resume lock is what closes
+that (see below); the mark's own job is unchanged.
+
+**The mark ends on `running` AND `fresh`, not on `running` alone** (bug-19).
+A crashed run *is* `status: 'running'` with a stale heartbeat — that pair is
+`isCrashed` — so the original end condition was already satisfied the instant
+the mark was written on the one surface that most needed it. The crashed
+strip's Resume button came back on the very next payload, ~90s before the
+resumed session could possibly have heartbeated, and a person looking at an
+unchanged strip clicked again: that is occurrence 1 of bug-19, three spawns
+inside ten seconds. Freshness costs the paused case nothing, because
+`unpause` writes `status`, `unpausedAt` and `updatedAt` from one clock
+reading, so a just-unpaused run is fresh by construction.
 
 ## `backlog-orchestrate` is the only skill that commits or merges
 
@@ -1269,6 +1279,148 @@ the mode that produced it sitting next to it.
 the browser's own parser, not a regex — and rejects any scheme but
 `http(s)`. It is the one settings key a hand-edited localStorage value could
 turn into script execution.
+
+## A resume is serialized at three layers
+
+bug-19. On 2026-09-05 two live sessions held one crashed run
+(`run-20260905-113818`) inside one afternoon, in two different shapes, and
+earlier that day three sessions were spawned against it inside ten seconds.
+The three were harmless only because a spend limit killed all of them ~600ms
+in, before any of them reached a heartbeat — the design did not stop them.
+
+Two `--resume` sessions on one `run.json` is not a cosmetic race. Both
+reconcile, both stage-write, and both end in a merge to `main`; `run.json`'s
+single-writer guarantee is a statement about which PROGRAM writes it, which
+two instances of that program satisfy while destroying each other's state.
+
+**Why one check could never have been enough.** `--resume` is not a command.
+`orchestrate.mjs`'s dispatch table has no `resume` entry: it is a prose flow
+in `references/recovery.md` that a session carries out with the ordinary
+commands. `init` is the only command that takes a lock, and a resume never
+calls it — deliberately, since exit `4` is what `init` answers for the very
+run file a resume exists to take over. And the fact a check would test does
+not change fast enough to help: a resumed session needs ~90s to reach its
+first heartbeat, so for that whole window every arriving call re-reads the
+identical stale run file.
+
+**Layer 1 — the board.** The crashed strip's Resume control had no in-flight
+guard and, worse, no feedback: a successful resume changed nothing on screen,
+so a click that worked and a click that was swallowed looked identical for a
+minute and a half. That is what supplies a person's second and third click.
+It now carries a synchronous `busy` flag (the same one `RunControls` already
+had) and reads `Resuming…` while a request is out, and the board's own
+`resuming` mark holds past the request — see the `noteResume` section above
+for why that mark's end condition had to change from `running` to `running`
+AND `fresh`. This layer alone closes nothing: two tabs, or a click racing a
+watchdog tick, defeat it.
+
+**Layer 2 — `AgentsService.resume()`.** One lock, `WatchdogEntry.resumeSpawnAt`,
+on the one method both origins share. Four things about it are decisions, not
+details:
+
+- **Synchronous.** The check and the stamp sit in one run of the event loop,
+  before the method's next `await`. A lock taken after an await is not a lock;
+  it is a check that every concurrent caller passes, which is exactly what
+  `noteBoardResume` — called from the controller, after `await
+  this.agents.resume(...)` returns — could never fix from where it stands.
+- **`RUN_STALE_MS`, not a new number.** The question is "is a resume session
+  believed to be alive in this run", and this app computes liveness once. A
+  resumed session that has not heartbeated in fifteen minutes is dead by the
+  app's own definition and a second resume is then right.
+- **Cleared when the spawn throws.** A spawn that threw started no session;
+  keeping the stamp would silence the board's only resume control for a
+  quarter of an hour because the dashboard was briefly down. Grace still
+  covers the failure case, and is untouched — grace is a backoff (write-only
+  from a board click, read only by the sweeper), this is a lock.
+- **Uncoded 409.** `RUN_IN_PROGRESS_CODE` means "a run is alive for this
+  project, right now", which is false here: the run is crashed and a resume is
+  on its way. Both callers treat that code as a silent success, which is the
+  wrong reaction to being told to wait.
+
+A consequence to leave alone: with `graceMs` at ten minutes and the lock at
+fifteen, the sweeper's second attempt is refused at t+10m (a `failed` line, no
+attempt spent, grace re-stamped) and lands nearer t+20m. That is correct — the
+first resume was still inside its own liveness window — and it is pinned by
+`test/watchdog-sweep.test.ts`.
+
+**Layer 3 — the driver lease in the run file.** The durable one, and the only
+one that can refuse a resume this app never asked for. Occurrence 2 was one
+backlog-manager resume (`claude -p --session-id <new> … -n resume <project>`,
+this app's spawn) racing a dashboard session-resume (`claude -p --resume
+<existing id>`, `buildSpawnArgs` in the dashboard's own repo). Nothing in
+backlog-manager requested the second, nothing here can see it, and no lock
+this repo adds to its own server could ever refuse it. The run file is the one
+component both shapes reach.
+
+`driver: { sessionId, at } | null` is written by `init` and by the new `claim`
+command and read by every mutating command; `status`, `plan`, `denials` and
+`reconcile` stay unchecked, because an evicted session must still be able to
+find out what happened. Identity is `CLAUDE_CODE_SESSION_ID` — the same id
+`backlog.mjs` reads for token accounting, and never a synthetic per-process
+id, which would present a different identity on every invocation and lock a
+run out of its own second command. **Absent means unclaimed, never locked**:
+every run file written before this existed lacks the key. An unidentified
+caller (a hand-run terminal) warns and proceeds rather than being refused —
+refusing would strand the one person recovering a run by hand.
+
+**Two commands take the lease instead of checking it, and that is the rule
+rather than a hole in it** (review round 1). `abort` and `unpause` are the two
+whose premise is that the previous driver is gone, and guarding them turned the
+lease into precisely what this section says it must never be — the thing that
+strands a run:
+
+- A crashed run carries the lease of the dead `init` session. `--abort` never
+  claims (its section opens with the bare command), so every abort was refused
+  with `7` — "another session has taken it over", which was false — and `init`
+  refuses any `running` run file, fresh or stale, with `4`. The project was
+  locked out of the orchestrator through every supported path at once.
+- A paused run carries the lease of the session that paused it and then
+  exited. The `--resume` flow reaches `unpause` before `claim`, because a run
+  has to be `running` before there is anything to drive, so a board Resume of a
+  paused run exited `7` on its first write and stopped — task-17's whole pause
+  → resume round trip, with the remaining queue abandoned.
+
+TAKING the lease, rather than merely skipping the check, is what makes this
+independent of the order the prose prints: an `unpause` that left the old lease
+in place produces a run that is `running`, fresh and foreign-led, which is the
+one state `claim` refuses — so the brick would have moved one command later
+instead of going away. Both apply `claim`'s own refusal rule, so a run another
+session is actively heartbeating still refuses both, and the answer there is to
+pause it from the board (a pause needs no lease) and abort the paused run.
+
+The rule lives in the tool rather than in an extra `claim` step in
+`references/recovery.md`, for the reason SKILL.md gives about prose generally:
+that file is read once by a session that then takes several hundred turns, and
+a step it skips is a brick. A rule a command applies to itself cannot be
+skipped.
+
+The guarantee is a deterministic single survivor with no cross-process locking
+primitive: on a crashed run both resumers may claim, the later write wins, and
+the loser's very next write exits `7` and stops it. Last-writer-wins — the
+property that makes a racing `stage` dangerous — is what makes `claim` safe,
+because exactly one claim is visible afterwards and every subsequent write is
+checked against it. `claim` refuses one situation only: a run that is
+`running`, FRESH, and led by someone else. A crashed run is claimable by
+anybody, which is the point — that is the state a resume exists for, and
+refusing there would make the lease the thing that strands a run.
+
+**The layer-2 lock outlives the sweeper's interest in a run** (review round 1).
+`resumeSpawnAt` lives on `WatchdogEntry`, and `sweep()` used to prune every
+entry whose run was not `running` — which a `paused` run never is. Any tick,
+including one armed by a completely different project, deleted the entry and
+the lock with it, and the next Resume click spawned a second session into a run
+already being resumed. Crashed runs were never exposed, since a crashed run IS
+`status: 'running'`. The keep set now includes `paused`, built in `sweep()`
+where the payload is read rather than inside `prune()`, so retirement policy
+stays in one place and every genuinely finished status still prunes on the next
+tick. `test/agents-resume.test.ts`'s paused-lock case passes with or without
+this — no sweep runs inside it — so the pin is `test/watchdog-sweep.test.ts`'s
+own case, which ticks between the two resumes.
+
+Exit `7` rather than `1` for exit `6`'s reason: the reaction is not "fix this
+call and retry" but stop, write nothing more, exit. `references/recovery.md`
+says so in as many words, and it is the loser stopping on the first refusal
+that makes the whole thing a guarantee rather than a delay.
 
 ## The watchdog spawns; it never writes the run file
 

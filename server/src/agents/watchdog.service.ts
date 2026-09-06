@@ -268,9 +268,26 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     const running = payload.runs.filter((run) => run.status === 'running');
     this.watching = running.map((run) => run.runId);
 
-    // Retire the bookkeeping of every run that is no longer `running` —
-    // finished normally, aborted, or archived out from under a fresh `init`.
-    this.state.prune(new Set(this.watching));
+    // Retire the bookkeeping of every run that is over — finished normally,
+    // aborted, or archived out from under a fresh `init`.
+    //
+    // `paused` runs are kept even though this sweeper never watches one
+    // (bug-19, review round 1). An entry is not only the sweeper's own
+    // bookkeeping any more: it carries `resumeSpawnAt`, the resume lock
+    // `AgentsService.resume()` takes for BOTH origins, whose lifetime is
+    // RUN_STALE_MS from the stamp rather than "while this sweeper is
+    // interested". Pruning on `running` alone deleted that lock for a paused
+    // run on the next tick — one armed by any other project's run, since the
+    // sweep is global — and the next Resume click then spawned a second
+    // session into a run somebody was already resuming. A paused run is not
+    // over: it is the one non-`running` status that can still be resumed,
+    // which is exactly the condition the lock exists for. Every genuinely
+    // finished status still prunes immediately, so a resumed run that reached
+    // `done` drops its entry on the very next tick as it always has.
+    const keep = payload.runs
+      .filter((run) => run.status === 'running' || run.status === 'paused')
+      .map((run) => run.runId);
+    this.state.prune(new Set(keep));
 
     if (running.length === 0) {
       // The `idle` event marks the TRANSITION, not the condition: a sweeper
