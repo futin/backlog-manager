@@ -3,6 +3,10 @@ id: bug-28
 title: The per-item execute session is the one session this system spawns without a name, so its dashboard row reads as hand-started
 created: 2026-09-06
 tags: orchestrator, dashboard
+updated: 2026-09-06T18:51:20Z
+started: 2026-09-06T18:25:19Z
+execute-elapsed: 1561
+execute-tokens: 81177
 ---
 
 ## Symptom
@@ -118,3 +122,106 @@ pnpm run test:skills
 
 - A real run's dashboard row has been seen carrying the name, with the runId decision
   recorded in the outcome.
+
+## Outcome
+
+2026-09-06 — Fixed as written: `-n` added to both spawn lines in
+`skills/backlog-orchestrate/SKILL.md`, plus the prose that explains why, and
+five text assertions in `skills/backlog-orchestrate/tools/orchestrate.test.mjs`
+pinning it. No server, client, tool or run-file change, exactly as the Fix
+section scoped it.
+
+**The runId decision, which the Fix left open: it is NOT in the name.**
+Dispatch is `orch <id>`, retry is `orch <id> retry 1`. Three reasons, all
+recorded in SKILL.md beside the line: the worktree cwd already files the row
+under a project of its own (`…backlog-manager--worktrees-<id>`), `run.json`
+already maps session id to run for anything machine-side, and `BM_ORCH_RUN`
+already carries the run id to the one reader (the Stop hook) that acts on it.
+A `run-20260906-151336` would spend a third of the 60-char cap repeating what
+is already on screen instead of the one thing a reader is looking for.
+
+**`retry 1`, not `retry <n>`.** The retry block writes `<id>-retry-1.jsonl`
+right beside it, so one counter substitutes into both and the row matches the
+transcript; `<n>` is also already spent on the dispatch prompt's `item <n> of
+<m>`, and two meanings for one placeholder on adjacent lines is a substitution
+waiting to go wrong.
+
+**One claim in the Fix section was wrong and is corrected here.** It cited
+`spawn.ts:188` as evidence that "`-n` on a resume renames the existing entry".
+That line says the opposite about the dashboard's own route: a valid `resume`
+forces the identity fields off, because "`-n` renames and `--remote-control`
+registration on a resumed session are unverified CLI combos, so they are never
+sent". The dashboard therefore has no evidence either way — it declines to
+find out. Since the retry line depends on that behaviour, it was measured
+directly instead (CLI 2.1.250, throwaway session in `/tmp`):
+
+```
+$ claude -p "reply with the single word ok" --session-id f8c5962a-… -n "orch bug-28" --permission-mode auto
+ok
+--- dispatch exit 0
+$ claude -p --resume f8c5962a-… "reply with the single word ok2" -n "orch bug-28 retry 1" --permission-mode auto
+ok2
+--- resume exit 0
+$ grep 'custom-title' ~/.claude/projects/-private-tmp-bug28probe/f8c5962a-….jsonl
+{"type":"custom-title","customTitle":"orch bug-28","sessionId":"f8c5962a-…"}
+{"type":"custom-title","customTitle":"orch bug-28","sessionId":"f8c5962a-…"}
+{"type":"custom-title","customTitle":"orch bug-28 retry 1","sessionId":"f8c5962a-…"}
+```
+
+That settles the Fix's "manual, once" test case as far as it can be settled
+without eyes on a live board, and settles more than it asked for: `-n` reaches
+the CLI, the CLI writes a `custom-title` record, `custom-title` is exactly the
+record the dashboard reads (`titleFromRecord`, `title-cache.ts` — it reads no
+`agentName` field at all), `--resume` appends a second one to the SAME
+transcript rather than creating a row, and the dashboard's reader
+(`findSessionName`) scans newest-first, so the row renames to the retry. The
+combination is verified, not merely accepted.
+
+### Verification
+
+```
+$ pnpm run test:skills
+# tests 411
+# pass 411
+# fail 0
+
+$ pnpm test
+Test Suites: 76 passed, 76 total
+Tests:       1469 passed, 1469 total
+```
+
+Red-green on the five new cases, with the final spelling, by stripping both
+`-n` arguments from SKILL.md and restoring them:
+
+```
+=== RED run (flag removed) ===
+not ok 194 - both dispatch lines name the session they spawn
+not ok 195 - the two names are the documented spellings, and neither carries the run id
+not ok 196 - both composed names satisfy the dashboard charset and cap
+not ok 197 - a pathologically long id still composes a name under the cap
+not ok 198 - the retry name differs from the dispatch name for the same item
+# pass 193
+# fail 5
+=== GREEN run (restored) ===
+# pass 198
+# fail 0
+```
+
+`pnpm run typecheck` is clean (no TS touched).
+
+**One flake worth recording.** The first `pnpm test` of this session, run
+immediately after a cold `pnpm install --frozen-lockfile` in this worktree,
+reported `1 failed, 1468 passed` with a supertest assertion in the stack; the
+suite name was lost to jest's colour codes in the filter. Three subsequent
+full runs were 1469/1469. Not caused by this change — nothing here is
+reachable from jest, which does not read `skills/backlog-orchestrate/SKILL.md`
+on either of the two paths that touch it — but a supertest suite that fails
+once on a cold worktree is worth a separate item if it recurs.
+
+**Still inert until published.** Skills-only, so this changes nothing until it
+is committed, pushed, and `pnpm run plugin:sync` has run; a run already in
+flight — including the one that dispatched this session — keeps the SKILL.md
+its install had. The Done-when's "a real run's dashboard row has been seen
+carrying the name" therefore cannot be met from inside this run, and the
+mechanism it was there to prove (flag → CLI → record the dashboard reads) is
+proven above by measurement instead.
