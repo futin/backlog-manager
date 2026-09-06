@@ -391,10 +391,11 @@ describe('POST /api/agents/dispatch', () => {
     expect(sent.some((c) => c.url.endsWith('/api/spawn'))).toBe(false);
   });
 
-  /* `RUN_IN_PROGRESS_CODE` stays the one and only coded 409 in this app (see
-     its own doc comment for the incident that rule exists to prevent). Nothing
-     needs to tell this refusal apart from dispatch's other 409s
-     programmatically, so it carries no code — asserted, because a `code` added
+  /* `RUN_IN_PROGRESS_CODE` means "a run for this project is alive right now"
+     (see its own doc comment for the incident that rule exists to prevent).
+     This refusal is a different fact — a run has CLAIMED this item — and
+     nothing needs to tell it apart from dispatch's other 409s
+     programmatically, so it carries no code. Asserted, because a `code` added
      here later is exactly the drift that comment forbids. */
   it('sends no machine-readable code on the run-claim refusal', async () => {
     stubDashboard();
@@ -419,6 +420,47 @@ describe('POST /api/agents/dispatch', () => {
     stubDashboard();
     writeRun('reviewing', { updatedAt: '2020-01-01T00:00:00.000Z' });
     await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(201);
+  });
+
+  /* bug-21 — the starting window, the same block one window earlier. There is
+     no run file at all here: the entry that refuses this dispatch is
+     `StartingRunsService`'s in-memory record of the orchestrate POST above,
+     which is the ONLY way to create one (nothing writes it to disk, by
+     design). `POST /api/agents/dispatch` is the layer that actually stops a
+     double execution, so it is the one that matters most of the four gates
+     this fix feeds — a client-side hide alone leaves the API's own promise
+     unkept for any caller that is not this board. */
+  it('refuses to dispatch an item whose project has a run starting, with no run file at all', async () => {
+    const sent = stubDashboard();
+    await request(app.getHttpServer())
+      .post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
+
+    const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
+    expect(res.body.error).toBe('an orchestrator run is starting for this project');
+    // Uncoded, like every other dispatch 409: RUN_IN_PROGRESS_CODE means "a
+    // run for this project is alive right now", and a run CLAIMING this item
+    // is a different fact that nothing needs to tell apart by machine.
+    expect(res.body.code).toBeUndefined();
+    // One spawn — the orchestrate one. The dispatch was refused before its
+    // own, which is the difference between a block and an after-the-fact
+    // report.
+    expect(sent.filter((c) => c.url.endsWith('/api/spawn'))).toHaveLength(1);
+  });
+
+  /* Ruling 1 in e2e form: the block is project-wide, so it covers even an
+     item no launch selected — which is the whole point, since the server
+     cannot know what the run will queue until `buildGatedQueue` decides
+     inside the spawned session minutes later. */
+  it('refuses a second item in the same starting project', async () => {
+    stubDashboard();
+    await request(app.getHttpServer())
+      .post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
+
+    const res = await post({
+      ...good, action: 'groom', itemPath: bugPath('bug-1-a-fresh-bug.md'),
+      prompt: 'Use the backlog-manager:backlog-groom skill on bug-1.'
+    }).expect(409);
+    expect(res.body.error).toBe('an orchestrator run is starting for this project');
   });
 
   /* Precedence. `dispatchBlock` runs first, so an item that is BOTH claimed by

@@ -385,13 +385,77 @@ describe('POST /api/agents/orchestrate', () => {
   // client-side check (RUN_IN_PROGRESS_CODE, shared/types.ts) has nothing
   // to check against if this ever regresses to sending the bare `{ error }`
   // fix round 1 shipped.
-  it('carries RUN_IN_PROGRESS_CODE on the activeRun lock 409, and only there', async () => {
+  it('carries RUN_IN_PROGRESS_CODE on the activeRun lock 409', async () => {
     const sent = stubDashboard();
     writeRun({ ...fixture, project: projectPath, updatedAt: new Date().toISOString() });
 
     const res = await post({ project: projectPath }).expect(409);
     expect(res.body.code).toBe(RUN_IN_PROGRESS_CODE);
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  /* bug-21 — the same lock one window earlier. There is no run file at all
+     here: the first POST spawned and marked the project, and the second one
+     arrives inside the 1–5 minutes before that session's `init` writes
+     anything. Without this the second POST returns 200 and spawns a second
+     session; both boot, and whichever reaches `init` second exits `4` (lock
+     held) and dies, having burned a session and told its user "never retry,
+     go to --resume" for a run that never crashed.
+
+     CLAUDE.md's "One run per project, checked twice" is why this is the
+     server's business and not only the board's: `init`'s on-disk lock is the
+     check that matters, and this endpoint is the second one precisely
+     because a board click never goes through `init` before spawning. */
+  it('409s a second orchestrate for a project already starting, without a second spawn', async () => {
+    const sent = stubDashboard();
+    await post({ project: projectPath }).expect(201);
+
+    const res = await post({ project: projectPath }).expect(409);
+    expect(res.body.error).toMatch(/starting/);
+    expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
+  });
+
+  /* The SAME code as the activeRun lock, not a second one. It is the same
+     lock a window earlier, and `OrchestrateSheet` branches on that code to
+     `refresh()` + `onClose()` — which is exactly right here: the sheet
+     closes and hands the screen to the StartingStrip already rendering.
+     RUN_IN_PROGRESS_CODE stays the app's only 409 code; this is another
+     occasion for it, not a second code. */
+  it('carries RUN_IN_PROGRESS_CODE on the starting lock too', async () => {
+    stubDashboard();
+    await post({ project: projectPath }).expect(201);
+
+    const res = await post({ project: projectPath }).expect(409);
+    expect(res.body.code).toBe(RUN_IN_PROGRESS_CODE);
+  });
+
+  it('spawns for a different project while one is starting', async () => {
+    const sent = stubDashboard();
+    await post({ project: projectPath }).expect(201);
+
+    // `beta` is registered but absent from the stubbed dashboard's project
+    // list, so this asserts on the refusal it DOES get rather than a 201:
+    // what matters is that the starting entry for `alpha` is not what
+    // refused it. A starting mark is keyed by project and must say nothing
+    // about any other.
+    const res = await post({ project: otherPath }).expect(409);
+    expect(res.body.error).not.toMatch(/starting/);
+    expect(res.body.code).toBeUndefined();
+    expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
+  });
+
+  /* Ordering, restated for the new lock: the coded 409 must win over an ids
+     problem, for the reason the activeRun case below already gives — a stale
+     tab whose selection has since been archived must be told a run is in
+     progress, not that `task-3` is not open. This is what pins the starting
+     check BESIDE the activeRun throw rather than after `resolveIds`. */
+  it('lets the starting lock win over an ids problem', async () => {
+    stubDashboard();
+    await post({ project: projectPath }).expect(201);
+
+    const res = await post({ project: projectPath, ids: ['task-3'] }).expect(409);
+    expect(res.body.code).toBe(RUN_IN_PROGRESS_CODE);
+    expect(res.body.error).toMatch(/starting/);
   });
 
   // --- Test case 6: a stale run does not block a new one -------------------
@@ -687,9 +751,10 @@ describe('POST /api/agents/orchestrate', () => {
     expect(spawnedPrompt(sent)).toBeUndefined();
   });
 
-  /* Ordering, and the one mistake this whole feature can make. The activeRun
-     lock is the ONLY 409 this endpoint codes, and OrchestrateSheet branches
-     on that code to close itself and hand the screen to the run strip. If
+  /* Ordering, and the one mistake this whole feature can make. The two locks
+     — the activeRun one and bug-21's starting one — are the refusals this
+     endpoint CODES, and OrchestrateSheet branches on that code to close
+     itself and hand the screen to the run strip. If
      ids were validated before the lock, a stale board tab whose selection
      has since been archived would answer an uncoded 409 for a project that
      is actually mid-run — and the sheet would sit there showing "task-3 is

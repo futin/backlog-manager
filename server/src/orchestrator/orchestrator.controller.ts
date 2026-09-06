@@ -45,7 +45,7 @@ export class OrchestratorController {
     // is visibly a separate concern.
     //
     // Nothing about the response depends on this line — `list()` re-applies
-    // both eviction rules on every call, so a map nobody ever swept leaks at
+    // every eviction rule on every call, so a map nobody ever swept leaks at
     // most one entry per project and never reports a stale one. That is what
     // makes AgentsService's own direct `runs()` calls (the RUN_IN_PROGRESS
     // lock, `resume()`) safe without a sweep of their own.

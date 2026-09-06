@@ -17,6 +17,19 @@ function runAt(project: string, startedAt: string): OrchestratorRun {
   return { ...fixture, project, startedAt };
 }
 
+/** The same run, at whatever `status` the case is about. bug-21's third
+ *  eviction rule is the one rule here that reads a field other than
+ *  `project`/`startedAt`, so it needs a builder that can vary it — and every
+ *  case below pairs the status with a `startedAt` BEFORE the mark, which is
+ *  precisely where rule 1 does not fire and only rule 3 can decide. */
+function runWithStatus(
+  project: string,
+  startedAt: string,
+  status: OrchestratorRun['status']
+): OrchestratorRun {
+  return { ...fixture, project, startedAt, status };
+}
+
 describe('StartingRunsService', () => {
   let svc: StartingRunsService;
 
@@ -55,9 +68,14 @@ describe('StartingRunsService', () => {
     // placeholder instantly, on every project but a first-ever run. Only a
     // run whose own startedAt is at or after the mark can be the run this
     // spawn asked for.
+    //
+    // `done`, not the fixture's own `running`, since bug-21 added rule 3:
+    // this case is about rule 1 alone, and a `running` previous run is
+    // evicted by rule 3 before rule 1 is ever consulted. Pinning it to a
+    // status rule 3 does not answer for is what keeps rule 1 tested at all.
     svc.mark('/p');
     const now = Date.now();
-    const previous = runAt('/p', new Date(now - 60_000).toISOString());
+    const previous = runWithStatus('/p', new Date(now - 60_000).toISOString(), 'done');
 
     expect(svc.list([previous], now)).toHaveLength(1);
   });
@@ -66,7 +84,10 @@ describe('StartingRunsService', () => {
     svc.mark('/p');
     const now = Date.now();
 
-    expect(svc.list([runAt('/p', 'not-a-date')], now)).toHaveLength(1);
+    // `done` for the reason the case above states: rule 3 would answer for a
+    // `running` run without rule 1's NaN comparison ever running, and the
+    // NaN path is the entire point of this case.
+    expect(svc.list([runWithStatus('/p', 'not-a-date', 'done')], now)).toHaveLength(1);
   });
 
   it('keeps the entry when the only landed run belongs to a different project', () => {
@@ -74,6 +95,61 @@ describe('StartingRunsService', () => {
     const now = Date.now();
 
     expect(svc.list([runAt('/other', new Date(now).toISOString())], now)).toHaveLength(1);
+  });
+
+  /* bug-21, rule 3 — the case rule 1 structurally cannot reach.
+     `startedAt` is BEFORE the mark, so rule 1 keeps the entry (correctly:
+     that run file is not the run this spawn asked for). But a `running` run
+     file is exactly what `orchestrate.mjs init` refuses, fresh or stale, so
+     the spawned session dies and NO new run ever lands — leaving the
+     placeholder to sit out the full RUN_STALE_MS beside a crashed strip.
+     Before this rule that subtraction lived as a render-time filter in
+     BoardView alone; the four gates bug-21 adds all need it, and the
+     server's own pre-spawn lock can only read it from here. */
+  it('drops the entry while a run for that project reads running, even one started BEFORE the mark', () => {
+    svc.mark('/p');
+    const now = Date.now();
+    const crashed = runWithStatus('/p', new Date(now - 60_000).toISOString(), 'running');
+
+    expect(svc.list([crashed], now)).toEqual([]);
+  });
+
+  it('sweep deletes that entry too — list and sweep agree on rule 3', () => {
+    svc.mark('/p');
+    const now = Date.now();
+    const crashed = runWithStatus('/p', new Date(now - 60_000).toISOString(), 'running');
+
+    svc.sweep([crashed], now);
+    // Asked back with no runs at all: if the sweep had merely been hidden by
+    // the filter rather than deleted, the entry would reappear here.
+    expect(svc.list([], now)).toEqual([]);
+  });
+
+  /* The other half of rule 3, and the reason it is keyed on `status ===
+     'running'` exactly rather than on `!fresh` or on "a run file exists".
+     `cmdInit` archives any non-`running` run file and writes a fresh one, so
+     a project whose last run ended in ANY of these four can legitimately
+     start the next one — and must keep its placeholder for the whole window
+     before that run file lands. This is the same distinction BoardView keeps
+     as two separate lists (`runningRuns` versus `stripRuns`): `paused` is a
+     strip, but it is not an `init` lock. */
+  it('keeps the entry for every non-running status a landed run can hold', () => {
+    for (const status of ['paused', 'done', 'aborted', 'failed'] as const) {
+      const fresh = new StartingRunsService();
+      fresh.mark('/p');
+      const now = Date.now();
+      const previous = runWithStatus('/p', new Date(now - 60_000).toISOString(), status);
+
+      expect(fresh.list([previous], now)).toHaveLength(1);
+    }
+  });
+
+  it('keeps the entry when the running run belongs to a different project', () => {
+    svc.mark('/p');
+    const now = Date.now();
+    const elsewhere = runWithStatus('/other', new Date(now - 60_000).toISOString(), 'running');
+
+    expect(svc.list([elsewhere], now)).toHaveLength(1);
   });
 
   it('drops the entry once it is older than RUN_STALE_MS, and keeps it right up to the boundary', () => {
@@ -138,7 +214,9 @@ describe('StartingRunsService', () => {
     svc.mark('/p');
     const now = Date.now();
 
-    svc.sweep([runAt('/p', new Date(now - 60_000).toISOString())], now);
+    // `done` for the reason the two `list` cases above give: a `running` run
+    // is rule 3's answer, and this case is about sweep honouring rule 1.
+    svc.sweep([runWithStatus('/p', new Date(now - 60_000).toISOString(), 'done')], now);
     expect(svc.list([], now)).toHaveLength(1);
   });
 

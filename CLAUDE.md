@@ -258,28 +258,73 @@ happened.
   array is documented as a verbatim read of a file `orchestrate.mjs` wrote
   and is iterated by `aggregateRuns`, `ArchiveView` and `RunsView`, so a
   synthetic member would reach all of them and every exhaustiveness site,
-  where a separate field reaches only what opts in. An entry dies when a run
-  in the same payload matches the project AND its `startedAt` parses to at or
-  after `requestedAt` — **`startedAt`, not "a run.json exists"**, since
-  `cmdInit` archives the old file and writes a new one, so a project that has
-  ever run always has one — or after `RUN_STALE_MS`, the app's one freshness
-  number, reused rather than joined by a second. It is `mark`ed from
+  where a separate field reaches only what opts in. An entry dies on any of
+  **three** rules: a run in the same payload matches the project AND its
+  `startedAt` parses to at or after `requestedAt` — **`startedAt`, not "a
+  run.json exists"**, since `cmdInit` archives the old file and writes a new
+  one, so a project that has ever run always has one; or the entry is older
+  than `RUN_STALE_MS`, the app's one freshness number, reused rather than
+  joined by a second; or **a run for that project already reads `status:
+  'running'`, fresh or crashed** (bug-21) — keyed on that status exactly,
+  never on `!fresh` and never on "a run file exists", because `cmdInit`
+  archives a `done`, `aborted`, `failed` or `paused` file before writing the
+  next one, so a project holding any of those can legitimately start a new
+  run and must keep its placeholder. Rule 3 used to be a render-time filter
+  in `BoardView` guarding one thing (two strips for one project); it is
+  server-side because the four gates below all need it and the server's own
+  lock can read it from nowhere else. It is `mark`ed from
   `AgentsController` **after** the awaited spawn, beside `arm()` and for the
   same layering reason, so a failed spawn leaves no ghost; `runs()` calls the
   pure `list()` and `OrchestratorController.runs()` calls the mutating
   `sweep()`, the same pure/mutating seam `annotate()`/`observe()` already
   keep, both deferring to one shared predicate. Correctness never depends on
-  the sweep — `list` re-applies both rules every call, so an unswept map
+  the sweep — `list` re-applies all three rules every call, so an unswept map
   leaks at most one entry per project and never lies, which is what makes
   `AgentsService`'s own direct `runs()` calls safe without one. The board
-  renders `StartingStrip` only when the project has **no `running` run at
-  all, fresh or crashed**: the pre-spawn lock refuses only a *fresh* run, so
-  orchestrating a crashed project is allowed, and `init` then refuses that
-  run file forever — the entry would live out the full `RUN_STALE_MS` beside
-  a crashed strip unless the gate excludes it. `POST /api/agents/resume` is
-  deliberately not marked: the run it resumes already reads `running`, so the
-  board is already drawing a crashed strip for it and the screen was never
-  blank.
+  maps `StartingStrip` straight over `starting`, with **no client-side
+  filter**: rule 3 is what rules out the collision that filter existed for —
+  a placeholder drawn beside a `running` run file's own strip — and keeping a
+  second expression beside it that merely agreed is the shape
+  `watchdogStoodDown` and `isStale` are each one function to avoid. It is
+  deliberately not a guarantee of one row per project in every case: the
+  strip's list is `running || paused` while rule 3 is keyed on `running`
+  alone, so a stale `paused` run plus a live starting entry renders two rows,
+  which is reachable and correct — they are two different runs, and widening
+  rule 3 to `paused` to suppress the second would strip the placeholder from
+  a project that can legitimately start a run. `POST
+  /api/agents/resume` is deliberately not marked: the run it resumes already
+  reads `running`, so the board is already drawing a crashed strip for it and
+  the screen was never blank.
+- **A starting entry blocks what a run file blocks, on every surface**
+  (bug-21). For the 1–5 minutes before `init` writes `run.json` the entry is
+  the only evidence a run exists, and every gate read `payload.runs` alone —
+  so a person could hand-dispatch an item the pending run was about to claim
+  in its own worktree (the double execution bug-4 and bug-12 each closed),
+  and a second Orchestrate press returned 200 and spawned a second session
+  that died at `init` exit `4`. `runClaimBlock` (`shared/agent.ts`) takes
+  `starting` as a **required third parameter, no `[]` default** — the same
+  rule `isStale`/`leavesBoard` follow for `runs`, because the compile error
+  at each of its four call sites (`BoardView`, `ArchiveView`, `plan`'s
+  `blocked`, dispatch's 409) is the mechanism that makes the next caller
+  decide instead of silently reinheriting this. The block it produces is
+  **project-wide and deliberately coarse**: a `StartingRun` is `{ project,
+  requestedAt }`, and even carrying the launch's `ids` would not help, since
+  what a run actually queues is `buildGatedQueue`'s verdict inside the
+  spawned session minutes later. A wrong allow costs a duplicated execution;
+  a wrong block costs a wait bounded by the run file landing. Per-item
+  wording wins over the coarse one where both could apply. The toolbar
+  Orchestrate control **hides** on a starting entry rather than disabling —
+  that is what preserves bug-16's `showOrchestrate` reasoning, in which a
+  *rendered* toolbar button is blocked on project visibility alone. And
+  `POST /api/agents/orchestrate` refuses a starting project with the **same**
+  `RUN_IN_PROGRESS_CODE`, beside the `activeRun` throw and therefore still
+  before `resolveIds`: it is the same lock one window earlier, and
+  `OrchestrateSheet` already branches on that code to close and hand the
+  screen to the `StartingStrip` — which is exactly right here.
+  `runHoldsItem` deliberately does NOT gain the parameter: its caller asks
+  "is a run holding THIS item", which a placeholder naming no items cannot
+  answer, and the window is ≤15 minutes against a 30-day staleness
+  threshold. Pinned by a test rather than left as prose.
 - **Item files are read-only to the server and client**; every write goes
   through the skills. Dispatch writes no item files either — the spawned
   session runs the skills, which remain the only writers.
@@ -690,10 +735,23 @@ happened.
   means a crashed run, recoverable only via `--resume`/`--abort`, never
   silently overwritten. `POST /api/agents/orchestrate` re-checks before it
   spawns anything, on the one path that reaches a run without going through
-  `init` at all, but only against a *fresh* run (`RUN_STALE_MS`); it answers
-  409 with a machine-readable `code: RUN_IN_PROGRESS_CODE` on that lock case
-  alone — every other 409 this endpoint can throw carries no code, because
-  nothing about them needs to be told apart.
+  `init` at all. That re-check is **two conditions, not one**: a *fresh* run
+  file (`RUN_STALE_MS`), and — since bug-21 — a `starting` entry for the same
+  project, the window in which no run file exists yet but this same process
+  holds the record proving a session is booting into one. A stale run file is
+  still not a refusal here, deliberately: recovering one is `--resume`/
+  `--abort`'s job, and `init` is the lock that actually holds it. Both
+  conditions answer 409 with the machine-readable
+  `code: RUN_IN_PROGRESS_CODE`, and **those two occasions are the only ones**
+  — every other 409 this endpoint can throw carries no code, because nothing
+  about them needs to be told apart. One code for both is the point rather
+  than an oversight: it means "a run for this project is alive right now",
+  which is equally true either side of the run file landing, and
+  `OrchestrateSheet`'s single branch on it (close, hand the screen to the
+  strip) is the right reaction to both. Deliberately no count of this
+  endpoint's 409 reasons here or in the code — that tally went stale the
+  moment the starting lock landed, exactly as the origin-guard invariant's
+  did.
 - **A pause request lives in a server-owned file the tool reads at its two
   dispatch gates; `paused` is a fifth run status and `unpause` its only
   exit.** `POST /api/agents/pause` (`{ project, cancel? }`, origin-guarded,

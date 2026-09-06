@@ -921,8 +921,10 @@ running a directory scan over attacker-shaped strings. Together they mean
 the only thing a caller can put in that prompt is the id of one of this
 project's real, runnable items. Malformed input is a 400 and a file
 disagreement is a 409, matching the split `dispatch` already makes — and the
-409s here are deliberately uncoded, because `RUN_IN_PROGRESS_CODE` is the
-one 409 this endpoint has that a machine needs to tell apart.
+409s here are deliberately uncoded, because `RUN_IN_PROGRESS_CODE` means
+"a run for this project is alive right now", which an id disagreement is not
+— see that constant's own doc comment, which is deliberately the only place
+in the repo that says anything about which refusals carry it.
 
 Two smaller rules ride along, both about the difference between *absent* and
 *empty*. An absent `ids` means "the whole queue" and produces the bare
@@ -1184,13 +1186,17 @@ catch and diagnose properly, since only the skill side knows how to offer
 belt-and-suspenders in the same shape as the registry's single-writer rule: the
 check that truly matters lives with the writer, and every other path
 capable of triggering one re-checks it rather than trusting that callers
-will always go through that writer. This particular 409 is also the only
-one `orchestrate()` throws that carries a `code`
+will always go through that writer. This 409 carries a `code`
 (`RUN_IN_PROGRESS_CODE`, `shared/types.ts`) — a prior incident had a client
 guess which 409 it received by matching a substring of the `error` prose,
-which broke the moment the wording changed, so the lock case alone gets a
-stable, machine-readable answer and the other 409s this endpoint can throw
-deliberately do not, because nothing about them needs to be told apart.
+which broke the moment the wording changed, so the fact "a run for this
+project is alive right now" gets a stable, machine-readable answer while the
+409s that mean something else deliberately do not, nothing about them needing
+to be told apart. Since bug-21 that fact is reachable one window earlier too,
+before any run file exists, and the starting lock answers with the same code
+for the same reason. Which refusals carry it is stated in the constant's own
+doc comment and nowhere else, this file included — a tally kept in a second
+place has gone stale every time a sender was added.
 
 ## Every agents POST is guarded by content-type and origin
 

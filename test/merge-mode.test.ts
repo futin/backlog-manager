@@ -184,9 +184,9 @@ describe('POST /api/agents/orchestrate — mergeMode', () => {
     const sent = stubDashboard();
     const res = await post({ project: projectPath, mergeMode: 'nope' }).expect(400);
     expect(res.body.error).toMatch(/mergeMode/);
-    // RUN_IN_PROGRESS_CODE stays the one and only coded 409 this endpoint
-    // gives — nothing about a malformed enum needs telling apart from any
-    // other 4xx, so this 400 carries no `code` at all.
+    // RUN_IN_PROGRESS_CODE stays the one code this endpoint gives, reserved
+    // for the fact that a run is alive — nothing about a malformed enum needs
+    // telling apart from any other 4xx, so this 400 carries no `code` at all.
     expect(res.body.code).toBeUndefined();
     expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
@@ -212,7 +212,7 @@ describe('POST /api/agents/orchestrate — mergeMode', () => {
   //
   // Same ordering point orchestrator-start.test.ts's own "lets the
   // run-in-progress lock win over an ids problem" case makes for `ids`: the
-  // activeRun lock is the ONLY 409 this endpoint codes, and OrchestrateSheet
+  // run locks are the refusals this endpoint CODES, and OrchestrateSheet
   // branches on that code to close itself and hand the screen to the run
   // strip. A stale board tab must be told a run is already going, not that
   // its enum is malformed — so a request carrying BOTH problems must answer

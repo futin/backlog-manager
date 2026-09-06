@@ -7,7 +7,7 @@ import rawFixture from './fixtures/orchestrator-run.json';
 import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type {
   AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem,
-  RunStage
+  RunStage, StartingRun
 } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -519,6 +519,15 @@ function runWith(stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
   return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, ...over };
 }
 
+/** One starting-run placeholder (task-14) for `project`, defaulting to the
+ *  path `fakeItem` carries. It has two fields and nothing else — which is
+ *  bug-21's ruling 1 in one line: no block derived from this can be
+ *  per-item, because there is no item information in it to be per-item
+ *  about. */
+function startingFor(project: string = '/abs/alpha'): StartingRun {
+  return { project, requestedAt: new Date().toISOString() };
+}
+
 /*
  * The seven stages a run has FINISHED with an item at. Written out here
  * rather than derived as "everything RUN_CLAIMED_STAGES omits", because
@@ -555,7 +564,7 @@ const EXITED_STAGES: readonly RunStage[] = ['merged', 'branched', 'failed', 'ski
 describe('runClaimBlock', () => {
   it('names the stage for every stage a run still owns the item at', () => {
     for (const stage of RUN_CLAIMED_STAGES) {
-      const reason = runClaimBlock(fakeItem(), [runWith(stage)]);
+      const reason = runClaimBlock(fakeItem(), [runWith(stage)], []);
       expect(reason).not.toBeNull();
       // The stage itself, not a generic "a run has this": which stage it is
       // tells the reader whether to wait a moment or go look at the run.
@@ -570,7 +579,7 @@ describe('runClaimBlock', () => {
      the item back to a person. */
   it('allows dispatch once the run has left the item at a terminal stage', () => {
     for (const stage of TERMINAL_STAGES) {
-      expect(runClaimBlock(fakeItem(), [runWith(stage)])).toBeNull();
+      expect(runClaimBlock(fakeItem(), [runWith(stage)], [])).toBeNull();
     }
   });
 
@@ -580,22 +589,62 @@ describe('runClaimBlock', () => {
      is what `--resume`/`--abort` are for: cards dead until someone runs one
      of those is a worse failure than the one this block exists to prevent. */
   it('allows dispatch when the only run holding the item has gone stale', () => {
-    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { fresh: false })])).toBeNull();
+    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { fresh: false })], [])).toBeNull();
   });
 
   /* Ids are only sequential within one project's own store, so two checkouts
      can both hold `bug-1` — matching on id alone would block a card in a
      project no run is touching at all. */
   it('ignores a run for a different project holding the same id', () => {
-    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { project: '/abs/other' })])).toBeNull();
+    expect(runClaimBlock(fakeItem(), [runWith('reviewing', { project: '/abs/other' })], [])).toBeNull();
   });
 
   it('allows dispatch when the right project\'s fresh run does not mention this item', () => {
-    expect(runClaimBlock(fakeItem({ id: 'task-99' }), [runWith('reviewing')])).toBeNull();
+    expect(runClaimBlock(fakeItem({ id: 'task-99' }), [runWith('reviewing')], [])).toBeNull();
   });
 
   it('allows dispatch when there are no runs at all', () => {
-    expect(runClaimBlock(fakeItem(), [])).toBeNull();
+    expect(runClaimBlock(fakeItem(), [], [])).toBeNull();
+  });
+
+  /* bug-21 — the starting window. task-14 made a board-started run visible
+     1–5 minutes before its `run.json` exists; nothing else on the board
+     treated the project as occupied, so every card kept a live dispatch
+     button for an item the pending run was about to claim in its own
+     worktree. That is exactly the double-execution bug-4 and bug-12 each
+     closed for the run-file case, reopened for the window before the run
+     file exists. */
+  it('blocks dispatch for a project a run is starting for, with no run file at all', () => {
+    expect(runClaimBlock(fakeItem(), [], [startingFor()]))
+      .toBe('an orchestrator run is starting for this project');
+  });
+
+  /* Ruling 1, stated as a test: the block is project-wide and deliberately
+     coarse. A `StartingRun` carries no ids, and the server could not name
+     them if it wanted to — which items a run queues is `buildGatedQueue`'s
+     verdict inside the spawned session, over `<base>`, minutes later. So
+     every item in the project is blocked, not just the ones a subset launch
+     selected. */
+  it('blocks every item in that project, whatever its id', () => {
+    expect(runClaimBlock(fakeItem({ id: 'task-99' }), [], [startingFor()])).not.toBeNull();
+  });
+
+  /* The same absolute-registry-path compare `runEntryAt` documents — never a
+     display name and never anything derived from `item.path`. Two checkouts
+     can both hold `bug-1`, and a starting entry names one of them. */
+  it('ignores a starting entry naming a different project', () => {
+    expect(runClaimBlock(fakeItem(), [], [startingFor('/abs/other')])).toBeNull();
+  });
+
+  /* Ordering inside the function. Once the service's rule 3 lands these two
+     are mutually exclusive — a project with a `running` run file has no
+     starting entry — but the specific wording must win if they ever are
+     not, because "(dispatched)" tells the reader where to look and the
+     coarse sentence does not. */
+  it('prefers the per-item wording when a fresh run holds the item AND the project is starting', () => {
+    const reason = runClaimBlock(fakeItem(), [runWith('dispatched')], [startingFor()]);
+    expect(reason).toContain('dispatched');
+    expect(reason).not.toContain('starting');
   });
 
   /* The test that fails the day a new `RunStage` member is added and left
@@ -691,5 +740,17 @@ describe('runHoldsItem', () => {
 
   it('releases the item when there are no runs at all', () => {
     expect(runHoldsItem(fakeItem(), [])).toBe(false);
+  });
+
+  /* bug-21's one deliberate NON-change, pinned rather than left as prose.
+     `runHoldsItem` does NOT gain the `starting` parameter its sibling did:
+     its caller is `isStale`/`leavesBoard`, asking "is a run holding THIS
+     item", which a placeholder naming no items cannot answer. The window it
+     would affect is at most RUN_STALE_MS — fifteen minutes — against a
+     30-day staleness threshold, so an item it would newly protect was
+     already in Archive a minute earlier. The signature staying two-argument
+     while `runClaimBlock` became three-argument is the assertion. */
+  it('takes no starting parameter — a placeholder naming no items cannot say a run holds one', () => {
+    expect(runHoldsItem.length).toBe(2);
   });
 });

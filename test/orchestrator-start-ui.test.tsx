@@ -641,12 +641,14 @@ describe('OrchestrateSheet', () => {
   });
 
   // --- Test case 7 ---------------------------------------------------
-  // Fix round 2: the server now sends `code: RUN_IN_PROGRESS_CODE` ONLY on
-  // the activeRun-lock 409 (agents.service.ts's `orchestrate()`), and this
-  // is the shape a real lock conflict actually arrives in — error text AND
-  // code together, matching what test/orchestrator-start.test.ts's own
-  // "carries RUN_IN_PROGRESS_CODE on the activeRun lock 409" case pins
-  // server-side.
+  // Fix round 2: the server sends `code: RUN_IN_PROGRESS_CODE` on a refusal
+  // meaning "a run for this project is alive right now", and this is the
+  // shape a real lock conflict actually arrives in — error text AND code
+  // together, matching what test/orchestrator-start.test.ts's own "carries
+  // RUN_IN_PROGRESS_CODE on the activeRun lock 409" case pins server-side.
+  // bug-21's starting lock answers with the same code and this sheet reacts
+  // identically, which is why this case turns on the code and not on the
+  // error prose.
   it('shows the already-running message and closes into the strip world after refresh on a 409 conflict', async () => {
     stubOrchestrate({
       ok: false, status: 409,

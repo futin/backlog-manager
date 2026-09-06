@@ -2,9 +2,12 @@
 id: bug-21
 title: A run in its starting window blocks nothing: items stay dispatchable and a second run can be spawned
 created: 2026-09-05
-updated: 2026-09-06T08:34:50Z
+updated: 2026-09-06T17:26:32Z
 groom-elapsed: 138
 groom-tokens: 18128
+started: 2026-09-06T17:02:02Z
+execute-elapsed: 1470
+execute-tokens: 195572
 ---
 
 ## Symptom
@@ -327,3 +330,223 @@ scope"):
 
 Both symptoms are the gating half of the `starting` gap. The Runs view not
 showing a starting run at all is the visibility half, filed separately.
+
+## Outcome
+
+2026-09-06 — fixed as planned, all six steps, no deviation from the approved
+shape and no scope added. `starting` is now read by every gate that reads
+`runs`, and the crashed-project subtraction moved off the board into the
+service where all of them inherit it.
+
+What landed:
+
+1. **`StartingRunsService.expired()` gained rule 3** — an entry is dead while
+   any run for that project reads `status: 'running'`, fresh or crashed. Keyed
+   on that status exactly, so `paused`/`done`/`aborted`/`failed` (all archived
+   by `cmdInit`) still keep their placeholder. In `expired()`, so `sweep()`
+   deletes rather than merely hiding.
+2. **`BoardView`'s `startingRuns` filter deleted**, the strip mapping
+   `starting` directly. That orphaned `runningRuns`, whose only reader it was,
+   so that binding went too and its reasoning was folded into `stripRuns`'
+   comment — the `running`-versus-`paused` distinction it drew is exactly what
+   rule 3 is keyed on, and is recorded there.
+3. **`runClaimBlock(item, runs, starting)`** — third parameter required, no
+   default. Per-item wording first, the coarse project-wide clause second.
+4. **All four callers fed**: `BoardView`, `ArchiveView`, `plan`'s `blocked`,
+   dispatch's 409. The two server sites now destructure
+   `const { runs, starting } = this.orchestrator.runs()` instead of `.runs`.
+5. **Toolbar Orchestrate hides** on a starting entry (`orchestrateBusy`),
+   never disables — bug-16's `showOrchestrate` reasoning intact.
+6. **`POST /api/agents/orchestrate` refuses** a starting project with the same
+   `RUN_IN_PROGRESS_CODE`, beside the `activeRun` throw and so still before
+   `resolveIds`.
+
+`runHoldsItem` deliberately unchanged; the deferral is pinned by a test
+(`runHoldsItem.length === 2`) rather than left as prose.
+
+Two things the plan did not foresee, both handled without changing its shape:
+
+- Three existing `orchestrator-starting` cases and one `question-mode` case
+  broke on the new behaviour rather than on a defect. The three read rule 1
+  through the shared fixture, whose `status` is `running`, so rule 3 answered
+  before rule 1 could — each was re-scoped to a `done` run so it still
+  isolates rule 1. The `question-mode` case made three successive successful
+  spawns for one project inside one `it`, which is precisely what the new lock
+  forbids; split into three cases, each with its own app from `beforeEach`, all
+  assertions unchanged.
+- CLAUDE.md's `starting` invariant said the board renders the strip "only when
+  the project has no `running` run at all" and listed two eviction rules. Both
+  sentences were made false by this fix, so that invariant was rewritten (three
+  rules, no client filter) and a new one added for the gating contract.
+
+The browser check in Test cases was NOT run, deliberately. The stack on this
+machine is up in Docker on 4322/5177 serving `main`, not this worktree, so it
+would have exercised the unfixed code; and standing up a second API instance
+during a live orchestrator run arms a second watchdog, which spawns `--resume`
+sessions. The jsdom suites assert the same things that check does (strip
+present, every dispatch control `aria-disabled="true"` with the starting
+reason, toolbar Orchestrate absent from the document, and the per-item wording
+once the run file lands).
+
+Verification — every new test proven load-bearing first by neutering all four
+production changes and re-running the suite (8 suites, 15 tests red), then
+restored:
+
+    $ pnpm run typecheck
+    $ tsc --noEmit
+    (no output — clean)
+
+    $ pnpm test
+    Test Suites: 76 passed, 76 total
+    Tests:       1469 passed, 1469 total
+    Snapshots:   0 total
+    Time:        76.141 s
+
+    $ pnpm run test:skills
+    # tests 406
+    # pass 406
+    # fail 0
+
+    $ pnpm run build
+    dist/assets/index-BhbhSkiK.js   340.53 kB │ gzip: 103.73 kB
+    ✓ built in 1.29s
+
+### Review round 1 — prose corrected
+
+`backlog-reviewer` returned `fix` on one Important finding, and it was right.
+No behaviour changed in this round; four prose sites did.
+
+The finding: the fix reused `RUN_IN_PROGRESS_CODE` for a second occasion —
+argued in the new block's own comment and in the new invariant — while two
+OLDER statements went on saying that a second coded 409 on this route would be
+a mistake. Both sat where a reader looks first.
+
+- **`server/src/agents/agents.service.ts`** — the `activeRun` throw's `code`
+  comment enumerated "FOUR distinct 409 reasons" and said the code was "sent
+  ONLY on this one 409 — every other throw in this method … deliberately left
+  without one". Four lines below it, the new starting lock sends the same
+  code. Rewritten: the tally is **removed rather than incremented** (it is the
+  same hand-maintained-count drift the origin-guard invariant already records
+  going stale once inside a single branch), and the load-bearing claim is
+  restated correctly — the code means "a run for this project is alive right
+  now" and rides exactly the two throws that mean that, the `activeRun` lock
+  and the starting lock beside it. The starting block's own comment now points
+  back at its neighbour, so neither side can drift alone.
+- **`CLAUDE.md`, "One run per project, checked twice"** — still said the
+  endpoint re-checks "only against a *fresh* run" and codes "that lock case
+  alone". Both false since this fix. Rewritten so the re-check is two
+  conditions (fresh run file, or a starting entry), a stale run file is still
+  explicitly not a refusal here, and the coded 409 names both occasions with
+  the reason one code covers both.
+
+Three Minor drifts from the same change, fixed in the same pass because each
+is a sentence made false by rule 3:
+
+- `starting-runs.service.ts` (class comment and `expired()`'s "when either
+  holds"), `orchestrator.service.ts` and `orchestrator.controller.ts` all said
+  `list` re-applies "both eviction rules". There are three.
+- `test/orchestrator-start.test.ts`'s case name ended "and only there", which
+  the sibling case added four cases below contradicts. Name trimmed; no
+  assertion touched.
+- `BoardView`'s strip comment claimed the payload guarantees the two maps can
+  never both draw a row for one project. Rule 3 is keyed on `running` while
+  `stripRuns` is `running || paused`, so a stale-`paused` run plus a live
+  starting entry renders both — reachable, and correct (two different runs).
+  The claim is now narrowed to the collision rule 3 actually covers, which is
+  the one the deleted client filter existed for.
+
+Re-verified after the prose round:
+
+    $ pnpm run typecheck
+    $ tsc --noEmit
+    (no output — clean)
+
+    $ pnpm test
+    Test Suites: 76 passed, 76 total
+    Tests:       1469 passed, 1469 total
+    Snapshots:   0 total
+    Time:        68.566 s
+
+    $ pnpm run build
+    dist/assets/index-B3AaWIr7.js   340.53 kB │ gzip: 103.74 kB
+    ✓ built in 1.47s
+
+### Review round 2 — the claim removed everywhere, not corrected site by site
+
+`backlog-reviewer` returned `fix` again: the same stale claim at a third site,
+`shared/types.ts`'s `RUN_IN_PROGRESS_CODE` doc comment — which round 1's own
+rewrite names as the authority a reader should follow. It said the code is
+"present ONLY on the activeRun-lock refusal … never on that endpoint's other
+409s", so a reader following that pointer landed on the one statement saying
+this branch's decision was a bug, and removing the starting lock's `code` would
+have cost `OrchestrateSheet`'s close-and-hand-to-the-strip behaviour.
+
+Round 1 corrected two sites and a third was still wrong. That is the diagnosis:
+correcting occurrences of a tally is not a fix, because a tally kept in N places
+goes stale N times. So this round removes the class rather than patching the
+instance.
+
+**One rule, stated in one place.** `shared/types.ts`'s doc comment was rewritten
+to say what the code MEANS — "a run for this project is alive right now" — and
+that this is **one code, not one occasion**: three refusals send it today
+(orchestrate's `activeRun` lock, orchestrate's starting lock, `resume()`'s
+fresh-run refusal, the last of which has sent it since bug-19 and which the
+comment also mis-stated, pre-existing debt fixed in the same pass). It now says
+outright that no other site enumerates where the code appears or counts a
+route's 409 reasons, and why: that tally had gone stale in five files across two
+branches, which is the failure CLAUDE.md's origin-guard invariant already
+records for its own route list.
+
+Every other site was then rewritten to assert the MEANING and stop counting —
+found by grepping the whole repo for both patterns, per the review's
+instruction, and re-grepped afterwards to prove none survives:
+
+- `shared/types.ts` — the authority, rewritten (above).
+- `server/src/agents/agents.service.ts` — four sites: dispatch's uncoded-409
+  comment ("one and only coded 409 in this app"), `resume()`'s reuse rationale
+  (enumerated "both" refusals), `resolveIds` ("the one coded 409 this endpoint
+  has"), `resolveMergeMode` (pointed at the activeRun throw as the sole
+  sender), plus the ordering comment at the `resolveIds` call ("the activeRun
+  lock is the only 409 this endpoint codes") — and round 1's own replacement
+  text, which had itself counted ("bug-21 added a fifth reason").
+- `client/src/lib/agents.ts` — "answers 409 for four genuinely different
+  reasons", "every response except that one endpoint's activeRun-lock 409".
+- `client/src/components/board/OrchestrateSheet.tsx` — "on the lock 409 ONLY";
+  now says both of that endpoint's locks answer with it and that closing into
+  the strip world is right for both (Minor 2, which the review listed as
+  defensible and not required — corrected anyway, since this pass exists to
+  leave no site that could become the fourth).
+- `docs/invariants.md` — two sites: the `ids` 409 rationale, and the "One run
+  per project" long form's "the only one `orchestrate()` throws that carries a
+  `code`".
+- Five test suites — `orchestrator-start`, `orchestrator-start-ui`,
+  `merge-mode`, `question-mode`, `agents-dispatch` — all comment text; no
+  assertion, name or fixture touched.
+- `CLAUDE.md` — Minor 1: "rule 3 is what guarantees one row per project"
+  narrowed to the collision rule 3 actually covers, with the `paused` case
+  spelled out and an explicit warning against widening rule 3 to include it
+  (which would strip the placeholder from a project that can legitimately
+  start a run). `BoardView`'s comment already said this after round 1; the
+  invariants file now agrees.
+
+Round 2's Minor 3 needed no action and got none: three pre-existing
+`orchestrator-starting` cases now have both rule 1 and rule 3 answering, but
+the properties they pin (project scoping, purity, sweep-deletes) still hold,
+and the three cases where the ambiguity would have lost rule-1 coverage were
+already re-scoped to `done` in the first round.
+
+Comment-only round. No expression, statement, assertion or test name changed.
+
+    $ pnpm run typecheck
+    $ tsc --noEmit
+    (no output — clean)
+
+    $ pnpm test
+    Test Suites: 76 passed, 76 total
+    Tests:       1469 passed, 1469 total
+    Snapshots:   0 total
+    Time:        78.915 s
+
+    $ pnpm run build
+    dist/assets/index--XYYGF4N.js   340.53 kB │ gzip: 103.74 kB
+    ✓ built in 1.42s

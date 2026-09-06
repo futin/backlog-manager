@@ -28,16 +28,24 @@ const DONE_BUG = item('bug-9', 'a fixed bug', '## Symptom\n\nx\n\n## Cause\n\na 
 let projectPath: string;
 
 function stubDashboard(over: Record<string, unknown> = {}) {
-  global.fetch = jest.fn((input: RequestInfo | URL) =>
-    Promise.resolve({
+  global.fetch = jest.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    return Promise.resolve({
       ok: true, status: 200,
       json: () => Promise.resolve(
-        String(input).endsWith('/api/management')
+        url.endsWith('/api/management')
           ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits', ...over }
+          // `/api/spawn` answered too, for bug-21's starting-run case alone:
+          // a starting entry has exactly one writer, `POST
+          // /api/agents/orchestrate` after its own spawn resolves, so this
+          // suite cannot produce one without letting that spawn succeed.
+          // Every other case here never reaches this branch.
+          : url.endsWith('/api/spawn')
+            ? { sessionId: 'sess-1' }
+            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits', ...over }
       )
-    } as Response)
-  ) as jest.Mock;
+    } as Response);
+  }) as jest.Mock;
 }
 
 describe('POST /api/agents/plan', () => {
@@ -199,6 +207,19 @@ describe('POST /api/agents/plan', () => {
     writeRun('bug-2', 'verifying');
     const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
     expect(res.body.blocked).toContain('verifying');
+  });
+
+  /* bug-21 — `plan` is what the launch sheet renders its refusal from, so a
+     starting run has to reach it too or the sheet offers a launch button the
+     dispatch route is about to 409. Marked by the orchestrate POST, which is
+     the only writer of a starting entry. */
+  it('reports a starting run as the reason the launch is blocked', async () => {
+    stubDashboard();
+    await request(app.getHttpServer())
+      .post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
+
+    const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
+    expect(res.body.blocked).toBe('an orchestrator run is starting for this project');
   });
 
   /* The negative half, on the same route: a run that has finished with the

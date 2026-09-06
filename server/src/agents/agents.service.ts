@@ -279,6 +279,11 @@ export class AgentsService {
     }
 
     const status = await this.status();
+    // One read, both halves. `OrchestratorService.runs()` has always returned
+    // `{ runs, starting }` from a single call, and destructuring it here
+    // rather than reaching for `.runs` inline is the whole of the server-side
+    // change bug-21 needed: no new wiring, no new injection, no second read.
+    const { runs, starting } = this.orchestrator.runs();
     return {
       action,
       prompt: composePrompt(item, action),
@@ -299,8 +304,14 @@ export class AgentsService {
       // its own project/id/freshness matching against the run payload — see
       // its doc comment for why that lookup lives in one place rather than
       // being re-derived on each side.
+      //
+      // bug-21: BOTH halves of the one `runs()` call, not `.runs` alone. A
+      // run is invisible to the run file for the 1–5 minutes before `init`
+      // writes it, and this is the field the launch sheet renders its refusal
+      // from — a sheet that offers a launch button for an item the dispatch
+      // route below is about to 409 is the half-fixed state.
       blocked: dispatchBlock(item, status)
-        ?? runClaimBlock(item, this.orchestrator.runs().runs)
+        ?? runClaimBlock(item, runs, starting)
         ?? undefined
     };
   }
@@ -355,13 +366,21 @@ export class AgentsService {
     // time. Same reasoning as the orchestrate lock's own re-check below —
     // "every other path capable of triggering a write re-checks it".
     //
-    // 409 and no `code`: `RUN_IN_PROGRESS_CODE` stays the one and only coded
-    // 409 in this app (see its doc comment in shared/types.ts for the incident
-    // that rule exists to prevent a repeat of), and nothing needs to tell this
-    // refusal apart from dispatch's other 409s programmatically. Deliberately
+    // 409 and no `code`: `RUN_IN_PROGRESS_CODE` is the app's one 409 code and
+    // means "a run for this project is alive right now" (see its doc comment
+    // in shared/types.ts for the incident that rule exists to prevent a repeat
+    // of, and for why no site here counts where it appears). This refusal is a
+    // different fact — a run has CLAIMED this item — and nothing needs to tell
+    // it apart from dispatch's other 409s programmatically. Deliberately
     // not 502 either — an orchestrator run is local state, with no upstream to
     // blame for it.
-    const claimed = runClaimBlock(item, this.orchestrator.runs().runs);
+    //
+    // bug-21: both halves of the one call, for the reason `plan` above gives
+    // — this is the layer that actually stops a double execution, so it is
+    // the one gate of the four that must not be blind for the window before
+    // `init` writes the run file.
+    const { runs, starting } = this.orchestrator.runs();
+    const claimed = runClaimBlock(item, runs, starting);
     if (claimed !== null) {
       throw new HttpException({ error: claimed }, 409);
     }
@@ -472,27 +491,77 @@ export class AgentsService {
     // writer (orchestrate.mjs, there; backlog.mjs, there), and every OTHER
     // path capable of triggering a write re-checks it rather than trusting
     // that every caller will always go through that writer.
-    const activeRun = this.orchestrator.runs().runs.find((r) => r.project === req.project && r.fresh);
+    //
+    // bug-21 widened this from `.runs` to both halves of the one call. The
+    // check above is blind for the 1–5 minutes before `init` writes anything
+    // — while THIS SAME PROCESS holds the record proving a run is on its way
+    // — so a second click returned 200 and spawned a second session; both
+    // booted, and whichever reached `init` second exited `4` (lock held) and
+    // died, having burned a session and told its user "never retry, go to
+    // `--resume`" for a run that never crashed.
+    const { runs, starting } = this.orchestrator.runs();
+    const activeRun = runs.find((r) => r.project === req.project && r.fresh);
     if (activeRun) {
       throw new HttpException(
         {
           error: `a run is already in progress for this project (${activeRun.runId})`,
-          // Fix round 2: this endpoint has FOUR distinct 409 reasons (this
-          // lock, project-invisible above, and the CLAUDE_BIN/remote-answer
-          // cases folded into `gate.control === 'hidden'` above) sharing one
-          // HTTP status, so a client cannot tell which one happened from
+          // Fix round 2: this endpoint throws several distinct 409s sharing
+          // one HTTP status, so a client cannot tell which one happened from
           // the status code alone — and must never guess from this `error`
           // string's prose either (RUN_IN_PROGRESS_CODE's own doc comment,
           // shared/types.ts, has the full incident that rule exists to
           // prevent a repeat of). `code` is that stable, machine-readable
-          // answer, sent ONLY on this one 409 — every other throw in this
-          // method (the two just above, and the dirName race below) is
-          // deliberately left without one; nothing about them needs to be
-          // distinguished from each other, and OrchestrateSheet's own retry
-          // path (client/src/components/board/OrchestrateSheet.tsx) is
-          // exactly right for all three of them as-is.
+          // answer.
+          //
+          // Deliberately no tally of those reasons here, and no list of
+          // which refusals carry the code. This line used to carry both, and
+          // bug-21 falsified both at a stroke by adding a lock below and
+          // giving it this SAME code. A hand-maintained count of a list that
+          // lives elsewhere is the drift class CLAUDE.md's origin-guard
+          // invariant already records going stale once inside a single
+          // branch — so the count is gone rather than incremented, and the
+          // one place that describes where this code appears is the
+          // constant's own doc comment.
+          //
+          // What IS load-bearing here, and what a reader has to be able to
+          // trust: the code marks "a run for this project is alive right
+          // now", which is what this `activeRun` lock and the starting lock
+          // immediately below — the same lock one window earlier — each
+          // mean. Every other throw in this method means something else and
+          // is deliberately left uncoded; nothing about those needs
+          // distinguishing by machine, and OrchestrateSheet's own retry path
+          // (client/src/components/board/OrchestrateSheet.tsx) is exactly
+          // right for them as-is.
           code: RUN_IN_PROGRESS_CODE
         },
+        409
+      );
+    }
+
+    /* The same lock, one window earlier (bug-21). Beside the `activeRun`
+       throw and therefore still BEFORE `resolveIds`, for the reason that
+       ordering comment gives: a stale tab whose selection has since been
+       archived must be told a run is in progress, not that `task-3` is not
+       open.
+
+       The SAME `code`, deliberately, not a second one. It is the same lock
+       the case above enforces, and `OrchestrateSheet` branches on that code
+       to `refresh()` + `onClose()` — exactly the right behaviour here, since
+       the sheet closes and hands the screen to the `StartingStrip` that is
+       already rendering. `RUN_IN_PROGRESS_CODE` stays the app's only coded
+       409 — this is a second OCCASION for it, not a second code — and the
+       comment on the throw above says so from its side too, since a reader
+       who lands there first must not be told a second coded 409 on this
+       route is a mistake.
+
+       No `runId` to name, which is the one way this refusal reads
+       differently from the one above: a starting entry has a project and a
+       requestedAt and nothing else — there is no runId until `init` mints
+       one. That is also why the block it produces everywhere else is
+       project-wide rather than per-item (see `runClaimBlock`). */
+    if (starting.some((s) => s.project === req.project)) {
+      throw new HttpException(
+        { error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE },
         409
       );
     }
@@ -509,10 +578,10 @@ export class AgentsService {
 
     // Last, deliberately: every gate above answers a question about whether
     // this project can be orchestrated at all, and this one answers what the
-    // run should contain. Ordering matters for exactly one of them — the
-    // activeRun lock is the only 409 this endpoint codes, and
-    // OrchestrateSheet branches on that code to close itself and hand the
-    // screen to the run strip. A stale board tab whose selection has since
+    // run should contain. Ordering matters for the two locks above — they are
+    // the refusals this endpoint CODES, and OrchestrateSheet branches on that
+    // code to close itself and hand the screen to the run strip. A stale
+    // board tab whose selection has since
     // been archived must still be told "a run is already in progress", not
     // "task-3 is not open"; validating ids first would answer the second and
     // leave the sheet sitting on a project that is already mid-run. The same
@@ -697,16 +766,15 @@ export class AgentsService {
       // strip itself is already showing as "still going."
       //
       // RUN_IN_PROGRESS_CODE is reused here rather than minting a resume-
-      // specific code, on purpose: both this 409 and orchestrate()'s
-      // activeRun-lock 409 mean the exact same fact — "a run is alive for
-      // this project, right now" — just reached from opposite directions
-      // (one caller tried to START a run, the other tried to RESUME one).
-      // Two codes for one fact is precisely the drift RUN_IN_PROGRESS_CODE's
-      // own doc comment (shared/types.ts) exists to rule out, and both of
-      // this endpoint's actual callers (the strip's Resume button and
-      // OrchestrateSheet) already treat the code identically — "the run
-      // recovered on its own, nothing to do here" — so there is nothing for
-      // a second code to distinguish even if one existed.
+      // specific code, on purpose: this 409 states the same fact every other
+      // sender of that code states — "a run is alive for this project, right
+      // now" — just reached from a different direction (this caller tried to
+      // RESUME one; `orchestrate()`'s two locks refuse callers trying to
+      // START one). Two codes for one fact is precisely the drift
+      // RUN_IN_PROGRESS_CODE's own doc comment (shared/types.ts) exists to
+      // rule out, and every caller already treats the code identically —
+      // "the run recovered on its own, nothing to do here" — so there is
+      // nothing for a second code to distinguish even if one existed.
       throw new HttpException(
         {
           error: `run ${run.runId} is alive (last heartbeat ${run.updatedAt}) — nothing to resume`,
@@ -1071,9 +1139,10 @@ export class AgentsService {
    * request is malformed (not a list, an empty list, something that is not
    * an id), 409 when the request is well-formed and the FILES disagree with
    * it (no such item, archived, wrong section, another project's item). The
-   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE` is the one coded
-   * 409 this endpoint has, and nothing here needs to be told apart from the
-   * others by a machine.
+   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE` is the app's one
+   * 409 code and says "a run for this project is alive right now", which is
+   * not what an id disagreement means, and nothing here needs to be told
+   * apart from the others by a machine.
    */
   private resolveIds(project: string, ids: unknown): string[] | undefined {
     if (ids === undefined || ids === null) return undefined;
@@ -1199,9 +1268,10 @@ export class AgentsService {
    * it is rejected outright rather than defaulted or floored.
    *
    * Uncoded, like every 400 and most 409s this endpoint throws:
-   * `RUN_IN_PROGRESS_CODE` stays the one and only machine-readable answer
-   * this route gives (see the activeRun throw above, in `orchestrate()`) —
-   * nothing about a malformed enum needs telling apart from any other 4xx.
+   * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
+   * gives, reserved for the fact that a run is alive (see the two locks in
+   * `orchestrate()`, and the code's own doc comment) — nothing about a
+   * malformed enum needs telling apart from any other 4xx.
    */
   private resolveMergeMode(mergeMode: string | undefined): MergeMode {
     if (mergeMode === undefined || mergeMode === '') return 'merge';

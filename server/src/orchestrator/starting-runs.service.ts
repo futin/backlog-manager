@@ -46,8 +46,8 @@ import type { OrchestratorRun, StartingRun } from '../../../shared/types';
  * that could return an entry `sweep` would delete — or the reverse — is the
  * bug this shape makes impossible to write.
  *
- * **Correctness never depends on the sweep.** `list()` re-applies both
- * eviction rules on every call, so an entry nobody ever sweeps is filtered
+ * **Correctness never depends on the sweep.** `list()` re-applies every
+ * eviction rule on every call, so an entry nobody ever sweeps is filtered
  * out of every payload anyway: an unswept map leaks memory (bounded at one
  * entry per project), it never lies. That is what makes `AgentsService`'s own
  * direct `runs()` calls — the `RUN_IN_PROGRESS` lock check, and `resume()` —
@@ -111,8 +111,10 @@ export class StartingRunsService {
   }
 
   /**
-   * The ONE eviction rule, shared by both methods above. An entry stops
-   * being live when either holds:
+   * The ONE eviction predicate, shared by both methods above. An entry
+   * stops being live when ANY of these holds — three rules, and the count is
+   * spelled out because rule 3 arrived after the other two (bug-21) and the
+   * word this sentence used to open with was "either":
    *
    *   1. **A real run for that project has landed.** A run in `realRuns`
    *      whose `project` matches and whose `startedAt` parses to at or after
@@ -132,6 +134,40 @@ export class StartingRunsService {
    *      spawned but never reached `init` is a broken session, diagnosed at
    *      the dashboard where its transcript is — not by a card that claims
    *      it is still starting forever.
+   *
+   *   3. **A run for that project already reads `status: 'running'`** — fresh
+   *      or crashed. bug-21 moved this here from a render-time filter in
+   *      `BoardView`, whose own comment worked the case through in full and
+   *      is reproduced because it is still the whole justification: the
+   *      server's pre-spawn lock refuses only a FRESH run, so pressing
+   *      Orchestrate on a project whose last run crashed is allowed, the
+   *      spawn succeeds and this service marks the project — but the spawned
+   *      session's own `init` refuses any run file that still says
+   *      `running`, stale or not, so no new run ever lands, rule 1 never
+   *      matches, and the entry survives the full RUN_STALE_MS. The board
+   *      subtracted it to avoid drawing two rows for one project; every gate
+   *      bug-21 adds (a dispatch block, an Orchestrate hide, the endpoint's
+   *      own lock) would each be wrong for fifteen minutes in exactly the
+   *      same way, which is what makes "one expression the strip happens to
+   *      own" the wrong home for it — and this is the only place the
+   *      SERVER's lock can read it from at all.
+   *
+   *      Keyed on `status === 'running'` exactly, never on `!fresh` and
+   *      never on "a run file exists": `cmdInit` archives a `done`,
+   *      `aborted`, `failed` or `paused` run file before writing the next
+   *      one, so a project whose last run holds any of those can
+   *      legitimately start a new one and must keep its placeholder. That is
+   *      the same distinction `BoardView` keeps as two separate lists
+   *      (`runningRuns`, the `init` lock; `stripRuns`, which folds in
+   *      `paused` because a paused run still draws a strip).
+   *
+   *      The cost of putting it in `expired()` rather than in `list()` alone
+   *      is that `sweep()` now DELETES such an entry: a crashed run aborted
+   *      seconds after a mark loses its placeholder for a session that had
+   *      already hit `init` and died. That is the right trade — list and
+   *      sweep agreeing by construction is the property this whole service
+   *      is built around, and the alternative is the shape whose two halves
+   *      merely agree.
    */
   private expired(
     project: string,
@@ -140,6 +176,7 @@ export class StartingRunsService {
     now: number
   ): boolean {
     if (now - requestedAt > RUN_STALE_MS) return true;
+    if (realRuns.some((run) => run.project === project && run.status === 'running')) return true;
     return realRuns.some((run) => run.project === project && Date.parse(run.startedAt) >= requestedAt);
   }
 }

@@ -104,8 +104,17 @@ export default function ArchiveView() {
 
      `runClaimBlock` (`runBlockFor` below) is the older one. The hook polls
      only while some run is fresh (see useOrchestratorRuns), so an idle machine
-     pays nothing for either. */
-  const { runs } = useOrchestratorRuns();
+     pays nothing for either.
+
+     `starting` joins `runs` here for bug-21, and Archive is not a theoretical
+     fourth caller of that block: a long-untouched GROOMED open bug sits on
+     this surface precisely while no run holds it (`leavesBoard` pulls it back
+     to the Board the moment one does), so during the starting window it is
+     both rendered here and about to be queued — and its card here was
+     dispatchable. The hook already ORs `starting.length > 0` into its own
+     live-poll predicate, so the block clears on the 5s poll that lands the
+     run file rather than on a window focus. */
+  const { runs, starting } = useOrchestratorRuns();
 
   const [open, setOpen] = useState<BacklogItem | null>(null);
   const [dispatching, setDispatching] = useState<BacklogItem | null>(null);
@@ -189,7 +198,7 @@ export default function ArchiveView() {
      deleting the block would let exactly that card dispatch from Archive while
      its equivalent on the Board is blocked — which is the half-fixed state the
      block was added to close. */
-  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs);
+  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
 
   /* The same two overlays the Board has, with the same relationship: the sheet
      may be opened from a card (drawer closed) or from inside the drawer (drawer
