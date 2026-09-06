@@ -3,6 +3,10 @@ id: task-16
 title: Bound the runs list to one viewport and page its history behind a load-more control
 created: 2026-09-05
 from: idea-6
+updated: 2026-09-05T22:55:27Z
+started: 2026-09-05T22:36:22Z
+execute-elapsed: 1145
+execute-tokens: 148374
 ---
 
 ## Goal
@@ -289,3 +293,123 @@ text via `readStyles`/`ruleBlocks` (`test/helpers/css-rule.ts`) and assert:
   `useOrchestratorArchive` are byte-identical.
 - Cases 1–20 pass, `pnpm test` and `pnpm run typecheck` are clean, and `CLAUDE.md`'s
   RunsView bullet describes the new behaviour.
+
+## Outcome
+
+2026-09-05 — Done. The Runs section is bounded to one viewport on the wide layout
+and its history is paged behind a counted `load more`, exactly as `## Plan` §0's
+rulings describe. No server file changed; `GET /api/orchestrator/archive` and
+`useOrchestratorArchive` are byte-identical.
+
+**What landed**
+
+- `client/src/styles.css` — `.runs-board` (a definite
+  `calc(100vh / var(--font-scale, 1) - var(--body-pad) * 2)`, the `.rail` idiom
+  and not a second one), `.runs-split` as the `flex: 1; min-height: 0` child that
+  absorbs the remainder, `max-height: 100%` + `overflow-y: auto` +
+  `overscroll-behavior: contain` + a 240px floor on `.runs-list`/`.runs-detail`,
+  a sticky opaque `.runs-day-heading`, a quiet `.runs-load-more`, and a 700px
+  block that un-bounds all of it. `.runs-detail`'s own `min-height: 160px` moved
+  into the shared rule rather than being left behind it — a later, more specific
+  declaration would have silently beaten the 240px floor — and the phone block
+  restates the 160px.
+- `client/src/components/runs/RunsView.tsx` — exported `RUNS_PAGE_SIZE = 25`, a
+  non-persisted `windowSize`, a reset effect on `[range, projectFilter]`, the
+  slice between `splitPinned` and `groupByDay` and nowhere else, the counted
+  control at the foot of the list inside the scroll box, and the
+  focus-handoff on the exhausting click (`listRef` + `tabIndex={-1}`).
+- `test/runs-view.test.tsx` — 13 paging cases appended, reusing the file's own
+  `item()`/`liveQueueItem()`/`run()` factories. The 25 pre-existing cases are
+  unmodified and still pass; none needed its expectation raised.
+- `test/runs-list-scroll-style.test.ts` — new, 5 stylesheet cases. It strips CSS
+  comments before reading the text, which is load-bearing rather than tidy: this
+  sheet's comments quote the very declarations under test ("`min-height: 0` is
+  not decoration…", "back to `height: auto`") and name neighbouring selectors in
+  prose, and `ruleBlocks`' boundary check can tell a selector from a longer class
+  name but not from English. Left in, a test could pass on the strength of a
+  sentence describing a rule that had been deleted.
+- `CLAUDE.md` — the RunsView bullet now names the bound and the window.
+
+**Deviations from the plan: none.** One thing it did not anticipate: this
+worktree had no `node_modules`, so `pnpm test` failed with `jest: command not
+found` while a bare `npx jest` quietly resolved the parent checkout's binaries.
+`pnpm install --frozen-lockfile` in the worktree fixed it, and every number below
+is from the pinned toolchain rather than a neighbouring tree's.
+
+**Test-case coverage.** Cases 1–12 are the paging block, 13–17 the stylesheet
+file, 18–19 the browser checks, 20 the regression run. Two extra cases were added
+beyond the plan's list, both guarding rulings the plan states in prose but left
+unasserted: "moves no aggregate number when the window grows" (§0.5's "a window
+is a rendering decision") and the fallback case 10 phrased as a guard that
+windowing has not become a second way for `selectedRow` to resolve.
+
+**Both halves were mutation-checked, because a green suite proves nothing about
+a test that cannot fail.**
+
+```
+# remove the slice entirely
+-  const windowed = history.slice(0, windowSize);
++  const windowed = history.slice(0);
+→ 17 failed
+
+# resolve the selection against the window instead of the full ordered list
+-  ? orderedRows.find(...)
++  ? [...pinned, ...windowed].find(...)
+→ 1 failed — "keeps a selection whose row a window reset pushed out of view"
+   (exactly the case written for it; nothing else moved)
+
+# plain 100vh, and .runs-split without min-height: 0
+→ 2 failed — the two runs-list-scroll-style cases written for them
+```
+
+**Cases 18–19, in the browser** (playwright MCP, Chromium at 1440x900). The
+user's own docker stack held 4322/5177, so this ran on `PORT=4399` /
+`WEB_PORT=5199` against `BM_ORCH_HOME=/tmp/task16-orch` seeded with 40 run files
+copied from a real archived run with `runId`/`startedAt`/`updatedAt` varied 5h
+apart across ~8 days. Everything was torn down afterwards and the user's stack
+was never touched.
+
+Case 19 — on load, and after clicking the control:
+
+```
+{ rows: 25, loadMoreLabel: "load more (15 older)", loadMoreInsideList: true,
+  boardHeight: 852, viewportHeight: 900, listScrollable: true,
+  listBox: { top: 267, h: 609, scrollH: 1468 },
+  detailBox: { top: 267, bottom: 789 }, documentScrollable: false }
+
+{ rows: 40, loadMoreGone: true, focusIsList: "runs-list",
+  documentScrollable: false, detailFullyVisibleForLastRun: true }
+```
+
+and the tiles' text was byte-identical before and after that click — 40 runs,
+40/40 completed, 31m avg item work, the whole machine-time row — which is the
+number-level form of "the window must move no aggregate".
+
+Case 18 — scrolling the list to 700px:
+
+```
+{ scrolledTo: 700, chromeMoved: { tiles: 0, range: 0, select: 0 },
+  documentScrolledBy: 0, stuckHeadings: ["thu 3 sep"],
+  detailFullyVisible: true }
+```
+
+Then selecting the last of the 40 rows: `selectedIsLastRow: true`,
+`detailBox: { top: 267, bottom: 789, viewport: 900 }` — fully on screen.
+
+Two bands beyond the plan's asks, since they are the ones §1's reasoning turns
+on. At 820px, inside the 700–900 band where `.runs-tile-wide` peels onto its own
+row and the tiles block grows to 356px tall — the exact width a
+`calc(100vh - <chrome>px)` constant would have been wrong at — the section still
+fits one viewport (`boardBottom: 876` of 900, list scrollable, document not,
+detail fully visible). At 600px it un-bounds completely:
+`max-height: none`, `overflow-y: visible`, `boardHeight: 3359px`, no nested
+scroll box, page scrolls.
+
+**Regression (case 20)** — `pnpm run typecheck` silent, and:
+
+```
+Test Suites: 70 passed, 70 total
+Tests:       1197 passed, 1197 total
+Snapshots:   0 total
+Time:        54.007 s
+```

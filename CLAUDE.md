@@ -69,8 +69,21 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   wide tile together, a project filter, a day-grouped run list with fresh
   live runs pinned above history, and a persistent detail pane carrying
   that same per-run "machine time by stage" rollup plus a full-width
-  seven-node `StageTrack` per item with durations printed under each node;
-  fed by `lib/run-range.ts` and `lib/run-stats.ts`, both pure statistics
+  seven-node `StageTrack` per item with durations printed under each node.
+  The whole section is bounded to one viewport on the wide layout
+  (`.runs-board`, a definite `100vh / var(--font-scale)` height so the bar,
+  the tiles and the two controls stay put) with the list and the pane each
+  scrolling their own overflow inside it, sticky day headings, and history
+  windowed to `RUNS_PAGE_SIZE` rows behind a counted `load more` at the foot
+  of the list — a render decision over a corpus the client already holds
+  whole, exactly as `staleDays` is: the endpoint and the hook are untouched.
+  The window is sliced between `splitPinned` and `groupByDay` and nowhere
+  else, so the pinned live region is never paged and a boundary falling
+  mid-day extends one group rather than opening a second; selection, the
+  tiles and the wide tile all read the unwindowed lists, so a window moves no
+  number and a range/project change resets it without blanking a pane whose
+  run is still in range. Below 700px none of the bounding applies. Fed by
+  `lib/run-range.ts` and `lib/run-stats.ts`, both pure statistics
   libs, and `hooks/useOrchestratorArchive.ts`, which fetches on mount and
   window focus only — no polling interval, since history moves at run
   boundaries, not on a live heartbeat), archive (`ArchiveView.tsx`: four columns —
