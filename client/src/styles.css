@@ -583,24 +583,6 @@ body {
 .set-control input[type=number] { width: 84px; font-variant-numeric: tabular-nums }
 .set-unit { font-size: 10px; color: var(--ink3); font-family: var(--mono) }
 
-/* The watchdog Settings group's Activity feed (WatchdogGroup.tsx) — up to
-   WATCHDOG_EVENT_CAP (50) newest-first lines of what the sweeper itself did.
-   `flex: 1 1 100%` forces it onto its own line below the row's name/hint
-   label rather than sharing the `.set-row` flex line with it (that row has
-   no fixed-width control the way every select/checkbox row above it does,
-   so without an explicit full-width basis a short label could leave enough
-   room for both to sit side by side, which reads wrong for a list this
-   dense). Deliberately plain — a mono timestamp, the project's basename,
-   then the sentence, one per line, no card chrome: this is a log, not a
-   stack of cards, and a busy afternoon should read like one. */
-.watchdog-events { flex: 1 1 100%; list-style: none; margin: 0; padding: 0 }
-.watchdog-events-empty { flex: 1 1 100% }
-.watchdog-events, .watchdog-events-empty { font-size: 10.5px; color: var(--ink3) }
-.watchdog-events { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto }
-.watchdog-events li { display: flex; gap: 8px; align-items: baseline; color: var(--ink2) }
-.watchdog-events time { font-family: var(--mono); color: var(--ink3); flex-shrink: 0 }
-.watchdog-event-project { font-weight: 600; color: var(--ink); flex-shrink: 0 }
-
 .set-seg { display: flex; gap: 4px }
 .set-seg button {
   font-family: var(--display); font-size: 10.5px; font-weight: 600;
@@ -1550,6 +1532,79 @@ body {
    to be painted rather than borrowed from an existing edge. */
 .runs-seg > button:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--cyan) }
 
+/* Runs › Watchdog — the sweeper's live surface (WatchdogMonitor.tsx,
+   task-18). One column: a state card, the watched-run rows, then the
+   activity feed. Everything here used to be two blocks up in the Settings
+   section; the `.watchdog-events*` rules below moved verbatim with the feed
+   they style, and the card/row rules are new.
+
+   Deliberately plainer than `.runs-tile`: this is a monitor read at a
+   glance while something is going wrong, not a dashboard, and the one thing
+   that should catch the eye is a crashed row's amber. */
+.watchdog-monitor { display: flex; flex-direction: column; gap: 12px; padding-top: 4px }
+
+.watchdog-state {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
+}
+.watchdog-state-line { font-family: var(--mono); font-size: 12px; color: var(--ink) }
+.watchdog-config { font-family: var(--mono); font-size: 10.5px; color: var(--ink2) }
+.watchdog-hint { font-size: 10.5px; color: var(--ink3) }
+
+.watchdog-rows { display: flex; flex-direction: column; gap: 4px }
+
+/* A button, so the row is keyboard-reachable — reset to look like the row
+   it is rather than like a control. `text-align: left` because the browser
+   default centres button text and these are five columns of reading. */
+.watchdog-row {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  width: 100%; text-align: left; cursor: pointer;
+  padding: 8px 12px; font-family: var(--mono); font-size: 11px;
+  background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
+  color: var(--ink2);
+}
+.watchdog-row:hover { border-color: var(--ink3) }
+.watchdog-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--cyan) }
+.watchdog-row-project { font-weight: 600; color: var(--ink) }
+.watchdog-row-id { color: var(--ink3) }
+.watchdog-row-item { color: var(--ink) }
+.watchdog-row-beat { color: var(--ink3) }
+/* `margin-left: auto` on the verdict alone, so it sits at the right edge
+   whatever the item id's length — the one reading a person scans a column
+   of these for. */
+.watchdog-row-verdict { margin-left: auto }
+.watchdog-row-skew { color: var(--ink3) }
+
+/* The same amber the crashed strip uses (see `.run-strip-crashed`'s own
+   comment for why amber and not red): the run may still be recovered
+   unattended. */
+.watchdog-row-crashed { border-color: var(--amber) }
+.watchdog-row-crashed .watchdog-row-verdict { color: var(--amber) }
+.watchdog-row-ok .watchdog-row-verdict { color: var(--ink3) }
+
+.watchdog-row-missing, .watchdog-rows-empty {
+  padding: 8px 12px; font-family: var(--mono); font-size: 11px; color: var(--ink3);
+  border: 1px dashed var(--hairline); border-radius: 2px;
+}
+
+.watchdog-activity { display: flex; flex-direction: column; gap: 6px }
+.watchdog-activity-name { font-size: 11px; font-weight: 600; color: var(--ink) }
+
+/* Moved from the Settings block with the feed itself (task-18) — up to
+   WATCHDOG_EVENT_CAP (50) newest-first lines of what the sweeper itself
+   did. The `flex: 1 1 100%` basis the Settings `.set-row` needed is gone:
+   this column is already full width. Deliberately plain — a mono timestamp,
+   the project's tail, then the sentence, one per line, no card chrome: this
+   is a log, not a stack of cards, and a busy afternoon should read like
+   one. */
+.watchdog-events { list-style: none; margin: 0; padding: 0 }
+.watchdog-events, .watchdog-events-empty { font-size: 10.5px; color: var(--ink3) }
+.watchdog-events { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto }
+.watchdog-events li { display: flex; gap: 8px; align-items: baseline; color: var(--ink2) }
+.watchdog-events time { font-family: var(--mono); color: var(--ink3); flex-shrink: 0 }
+.watchdog-event-project { font-weight: 600; color: var(--ink); flex-shrink: 0 }
+
 /* Five even tiles plus a sixth, wider one on a wide screen (the sixth is
    Task 7's own "machine time by stage" tile, added below). `minmax(0, 1fr)`
    on the first five, unchanged since before Task 7: a tile's own content
@@ -1619,6 +1674,14 @@ body {
 @media (max-width: 900px) {
   .runs-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)) }
   .runs-tile-wide { grid-column: 1 / -1 }
+}
+
+@media (max-width: 700px) {
+  /* The row is already `flex-wrap`, so on a phone it becomes a short stack —
+     at which point pushing the verdict to the right edge of its own line
+     separates it from the run it describes. */
+  .watchdog-row { flex-direction: column; gap: 2px }
+  .watchdog-row-verdict { margin-left: 0 }
 }
 
 @media (max-width: 700px) {

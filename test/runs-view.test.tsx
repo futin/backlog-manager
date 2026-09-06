@@ -6,15 +6,18 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import {
-  fetchAgentsStatus, fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns, pauseOrchestrate
+  fetchAgentsStatus, fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns,
+  fetchWatchdog, pauseOrchestrate
 } from '../client/src/lib/agents';
 import RunsView, { RUNS_PAGE_SIZE } from '../client/src/components/runs/RunsView';
 import { RUN_RANGES } from '../client/src/lib/run-range';
+import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type {
   AgentsStatus, ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
-  OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, VerificationSummary
+  OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, VerificationSummary, WatchdogStatus
 } from '../shared/types';
+import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 
 // Task 6 consumes the two archive/live fetchers through the real hooks
 // (useOrchestratorArchive, useOrchestratorRuns) rather than through fetch
@@ -39,6 +42,11 @@ jest.mock('../client/src/lib/agents', () => ({
   // not "the feature is untested here" — it is a TypeError inside a hook
   // during the first render of every case in this file.
   fetchAgentsStatus: jest.fn(),
+  // task-18: the Watchdog mode mounts `WatchdogMonitor`, which owns the real
+  // `useWatchdog` — and that hook reaches the network through this same
+  // mocked module. Without an entry here the export is `undefined` and the
+  // hook's mount effect throws the first time anyone clicks the switch.
+  fetchWatchdog: jest.fn(),
   pauseOrchestrate: jest.fn(),
   cancelPauseOrchestrate: jest.fn(),
   resumeOrchestrate: jest.fn(),
@@ -54,6 +62,16 @@ const mockArchive = fetchOrchestratorArchive as jest.Mock;
 const mockRuns = fetchOrchestratorRuns as jest.Mock;
 const mockFetchArchivedRun = fetchArchivedRun as jest.Mock;
 const mockPause = pauseOrchestrate as jest.Mock;
+const mockWatchdog = fetchWatchdog as jest.Mock;
+
+/** task-18: the same "defaults everywhere a case does not care" factory the
+ *  monitor's own suite carries. */
+function watchdogStatus(over: Partial<WatchdogStatus> = {}): WatchdogStatus {
+  return {
+    phase: 'idle', nextTickAt: null, config: DEFAULT_WATCHDOG_CONFIG,
+    watching: [], events: [], ...over
+  };
+}
 
 /**
  * One queue item, archive-shaped (verification already summarised — the
@@ -379,6 +397,12 @@ async function renderRunsView(archiveRuns: OrchestratorArchiveRun[], liveRuns: O
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // task-18: the mode switch persists, so a case that clicks it would
+  // otherwise leak its choice into every case that runs after it.
+  localStorage.clear();
+  // Inert default for every case that does not care about the monitor: idle,
+  // nothing watched, no events.
+  mockWatchdog.mockResolvedValue(watchdogStatus());
   // A safe, inert default for every test in this file that does not care
   // about the detail pane's own fetch: RunDetail (Task 7) now mounts behind
   // whatever row is selected, and the default selection lands on an
@@ -1467,5 +1491,105 @@ describe('RunsView history paging (task-16)', () => {
 
     await waitFor(() => expect(mockPause).toHaveBeenCalledWith(LIVE_RUNS[0].project));
     await waitFor(() => expect(mockRuns.mock.calls.length).toBeGreaterThan(before));
+  });
+  // --- task-18: the Runs | Watchdog mode switch ------------------------------
+
+  it('renders the mode switch with Runs pressed by default', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByTestId('runs-mode')).toBeInTheDocument();
+    expect(screen.getByTestId('runs-mode-runs')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('runs-mode-watchdog')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('runs-range')).toBeInTheDocument();
+    expect(screen.getByLabelText('Project')).toBeInTheDocument();
+    expect(screen.getByTestId('runs-list')).toBeInTheDocument();
+  });
+
+  // The one place this control's condition differs from the range control's
+  // beside it: the sweeper has a phase to report whether or not this project
+  // has ever finished a run, so the switch has to escape the
+  // `merged.length > 0` gate the rest of the bar's tools sit behind.
+  it('renders the mode switch even for an empty payload, where the range control does not', async () => {
+    await renderRunsView([], []);
+
+    expect(screen.getByText('no runs yet')).toBeInTheDocument();
+    expect(screen.getByTestId('runs-mode')).toBeInTheDocument();
+    expect(screen.queryByTestId('runs-range')).not.toBeInTheDocument();
+  });
+
+  it('swaps the whole body for the monitor in Watchdog mode', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
+
+    expect(screen.getByTestId('runs-mode-watchdog')).toHaveAttribute('aria-pressed', 'true');
+    // Range and project scope run HISTORY; the monitor has none to scope.
+    expect(screen.queryByTestId('runs-range')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Project')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('runs-tiles')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('runs-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-slot')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('watchdog-state')).toBeInTheDocument();
+  });
+
+  it('keeps the selection across a trip through Watchdog mode', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`));
+    expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toHaveAttribute('aria-current', 'true');
+
+    await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
+    await screen.findByTestId('watchdog-state');
+    await userEvent.click(screen.getByTestId('runs-mode-runs'));
+
+    expect(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`)).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('opens in Watchdog mode when that is what was stored', async () => {
+    localStorage.setItem(RUNS_MODE_KEY, JSON.stringify('watchdog'));
+    // Not `renderRunsView`: that helper waits on `runs-list`, which is
+    // exactly what this mode does not render.
+    mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
+    mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [] } satisfies OrchestratorRunsPayload);
+    render(<RunsView />);
+
+    expect(await screen.findByTestId('watchdog-state')).toBeInTheDocument();
+    expect(screen.getByTestId('runs-mode-watchdog')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('runs-list')).not.toBeInTheDocument();
+  });
+
+  // The guard is on the READ, so what this pins is the rendered mode — not
+  // whether the bad value was rewritten on the way past.
+  it('clamps a stored value outside the union back to Runs', async () => {
+    localStorage.setItem(RUNS_MODE_KEY, JSON.stringify('banana'));
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByTestId('runs-mode-runs')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('runs-list')).toBeInTheDocument();
+  });
+
+  it('persists the chosen mode', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
+
+    await waitFor(() => {
+      expect(localStorage.getItem(RUNS_MODE_KEY)).toBe(JSON.stringify('watchdog'));
+    });
+  });
+
+  // The one link between the two modes: a row in the monitor IS a run in the
+  // list, so clicking it lands on that run's detail rather than leaving a
+  // person to find it again by hand.
+  it('lands on a run\'s detail when its monitor row is clicked', async () => {
+    mockWatchdog.mockResolvedValue(watchdogStatus({
+      phase: 'armed', watching: [RUN_LIVE.runId]
+    }));
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
+    await userEvent.click(await screen.findByTestId('watchdog-row'));
+
+    expect(screen.getByTestId('runs-mode-runs')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
   });
 });

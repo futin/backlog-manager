@@ -1,6 +1,6 @@
 import {
   formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage,
-  itemDoneClock, itemDurationMs, itemQueueWaitMs, runClockMs, runElapsedMs, runIsLive,
+  itemDoneClock, itemDurationMs, itemQueueWaitMs, lastReportedEntry, runClockMs, runElapsedMs, runIsLive,
   stepperDots, stepperStages, stepperTerminal
 } from '../client/src/lib/run-time';
 import { runWallMs } from '../client/src/lib/run-stats';
@@ -575,5 +575,76 @@ describe('stepperTerminal', () => {
   // of the two success stages it is choosing between.
   it('falls back to the run\'s effective mode for a failure exit too', () => {
     expect(stepperTerminal(queueItem('parked', { parked: at(0) }), 'branch')).toBe('branched');
+  });
+});
+
+/**
+ * `lastReportedEntry` moved here from `RunStrip.tsx` (task-18) the moment it
+ * had a second caller: `WatchdogMonitor` prints the same "what is this run
+ * actually working on" reading in its watched-run rows, and two surfaces
+ * answering that question from two copies of the rule is exactly the drift
+ * `projectLabel` and `POLL_MS` were already lifted out of this same file
+ * pair to avoid.
+ */
+function fullQueueItem(id: string, stage: RunStage): RunQueueItem {
+  return {
+    id,
+    title: `${id} title`,
+    stage,
+    sessionId: null,
+    worktree: null,
+    branch: null,
+    permissionMode: null,
+    fixLoops: 0,
+    stageAt: {},
+    verification: [],
+    questions: [],
+    note: null
+  };
+}
+
+describe('lastReportedEntry', () => {
+  it('names the one entry between the exits behind it and the pending tail ahead', () => {
+    const queue = [
+      fullQueueItem('a-1', 'merged'),
+      fullQueueItem('a-2', 'dispatched'),
+      fullQueueItem('a-3', 'pending')
+    ];
+    expect(lastReportedEntry(queue)?.id).toBe('a-2');
+  });
+
+  // The "last, not first" half of the rule, which is the half a naive
+  // `.find()` gets wrong: a queue that somehow holds two non-terminal,
+  // non-pending entries is reporting on the LATER one — queue order is
+  // dispatch order, so anything before it has already been left behind.
+  it('takes the LAST in-flight entry, not the first', () => {
+    const queue = [
+      fullQueueItem('a-1', 'merged'),
+      fullQueueItem('a-2', 'fixing'),
+      fullQueueItem('a-3', 'verifying'),
+      fullQueueItem('a-4', 'pending')
+    ];
+    expect(lastReportedEntry(queue)?.id).toBe('a-3');
+  });
+
+  it('reads null for a queue that is nothing but exits and a pending tail', () => {
+    const queue = [
+      fullQueueItem('a-1', 'merged'),
+      fullQueueItem('a-2', 'branched'),
+      fullQueueItem('a-3', 'pending'),
+      fullQueueItem('a-4', 'pending')
+    ];
+    expect(lastReportedEntry(queue)).toBeNull();
+  });
+
+  it('reads null for an empty queue', () => {
+    expect(lastReportedEntry([])).toBeNull();
+  });
+
+  // `parked` is one of the seven terminal exits, so a parked-then-pending
+  // queue has nothing in flight at all — the run let that item go.
+  it('reads null when the only non-pending entry is parked', () => {
+    const queue = [fullQueueItem('a-1', 'parked'), fullQueueItem('a-2', 'pending')];
+    expect(lastReportedEntry(queue)).toBeNull();
   });
 });

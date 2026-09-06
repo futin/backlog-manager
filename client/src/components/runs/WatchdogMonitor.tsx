@@ -1,0 +1,213 @@
+import { useNow } from '../../hooks/useNow';
+import { useWatchdog } from '../../hooks/useWatchdog';
+import { projectLabel } from '../../lib/project-label';
+import { formatClock, formatSpanCompact, lastReportedEntry } from '../../lib/run-time';
+import { isCrashed, stateLine, watchdogClause } from '../../lib/run-watchdog';
+import { WATCHDOG_EVENT_CAP } from '../../../../shared/types';
+import type { OrchestratorRunsPayload } from '../../../../shared/types';
+
+/**
+ * Runs › Watchdog (task-18, spec §3) — the sweeper's live surface: what
+ * phase it is in, which runs it is watching, and what it has actually done.
+ *
+ * It exists here rather than in Settings because of a real morning: with
+ * `run-20260905-113818` live and the watchdog armed on it, "where can I
+ * inspect the watchdog?" answered "Settings, bottom group" — a 5s-polling
+ * State row and a scrolling event list sitting on a preferences page nobody
+ * has open during a run, while the one surface a person DOES watch said
+ * nothing about the sweeper until a run had already crashed. The move also
+ * buys Settings a rule it should have had from the start: nothing there is
+ * live.
+ *
+ * Two payloads, joined here and nowhere else. `useWatchdog()` (live — this
+ * component is the reason that poll exists at all, and it mounts only in
+ * watchdog mode, so the poll now runs exactly while someone is looking at
+ * it) and the live runs array `RunsView` already holds, handed down as a
+ * prop rather than fetched again: switching modes must add no request.
+ *
+ * ROWS COME FROM THE RUNS PAYLOAD; `watching` only ANNOTATES. Two reasons,
+ * and the first is not hypothetical — `runs-view.test.tsx` already pins a
+ * case where two projects share a `runId`, because a run id is a timestamp
+ * and two projects starting a run in the same second collide. `watching`
+ * carries bare `runId`s while the runs payload is keyed `{project, runId}`,
+ * so a join on the id alone would either drop a row or double one. Second,
+ * the sweeper is armed over precisely the set of `running` runs
+ * (`watchdog.service.ts`), so the payload IS the watched set, one poll tick
+ * of skew aside. That skew is rendered rather than hidden, in both
+ * directions: a running run absent from `watching` says `· not yet
+ * watched`, and a watched id with no run behind it gets a placeholder row.
+ * A monitor that silently reconciled two disagreeing payloads would be
+ * lying about the one thing it exists to report.
+ *
+ * `projectLabel`, not a private basename. The Settings feed this replaces
+ * justified its own `projectBasename` as "what every project surface
+ * prints"; `projectLabel` (lib/project-label.ts) is that surface's actual
+ * implementation, and it was already lifted out of two components for
+ * exactly this reason once before.
+ *
+ * The click-through exists because a row here IS a run in the list one
+ * segment away: the monitor answers "which run is in trouble", and the
+ * immediate next question is "what was it doing", which the Runs detail
+ * pane already answers in full. `onSelectRun` switches the mode back and
+ * selects that run rather than this component growing a second, thinner
+ * copy of the detail pane.
+ *
+ * `WATCHDOG_EVENT_CAP` is read from `shared/types.ts` rather than typed as
+ * `50` in the hint: the constant's own comment says the list is sized to
+ * it, and a hint that names a different number than the server enforces is
+ * worse than no hint, because a reader uses it to decide whether a short
+ * feed means a quiet watchdog or a truncated one.
+ */
+export function WatchdogMonitor({ runs, onSelectRun }: {
+  runs: OrchestratorRunsPayload['runs'];
+  onSelectRun: (project: string, runId: string) => void;
+}) {
+  const { status, error } = useWatchdog();
+
+  // Every `running` run, fresh or crashed alike — a crashed run is exactly
+  // the one this surface most needs to draw, and `isCrashed` below is what
+  // tells the two apart in the verdict rather than here in the filter.
+  const running = runs.filter((r) => r.status === 'running');
+
+  // TWO readings here move with no new payload, and the clock has to be
+  // enabled for either of them — the same `enabled` bargain every other
+  // `useNow` caller makes, just with two conditions rather than one. 5s
+  // matches the watchdog poll's own cadence: a heartbeat age that stepped in
+  // minutes beside a state line stepping in seconds would read as two
+  // clocks.
+  //
+  // The rows are the obvious one: each prints a heartbeat age. The second is
+  // `stateLine`'s own `next check in Ns` countdown, and it is the one this
+  // gate originally missed (review finding, task-18). `armed` with NOTHING
+  // running in the payload is a state this component deliberately renders
+  // rather than hides — it is the one-poll-tick skew case, and the
+  // `watchdog-row-missing` placeholder lives in it too — so gating on rows
+  // alone froze that countdown at whatever it read on mount while the real
+  // next tick came and went. `status` is read before the early return below
+  // for exactly this: the phase is a reason to keep a clock even when there
+  // is not a single row to age.
+  const now = useNow(running.length > 0 || status?.phase === 'armed', 5_000);
+
+  // `useWatchdog` never throws — a failed GET lands in `error` and leaves
+  // `status` at `null`. There is nothing honest to render from that: this
+  // whole view reports on the watchdog, so a fallback that looked like a
+  // reading would tell someone the sweeper is idle when the truth is this
+  // tab could not reach the server.
+  if (status === null) {
+    return (
+      <div className="watchdog-monitor" data-testid="watchdog-monitor">
+        <div className="watchdog-state" data-testid="watchdog-state">
+          <span className="watchdog-hint">
+            Could not reach the watchdog{error ? ` — ${error}` : ''}. This view will fill
+            in once the API answers <code>GET /api/agents/watchdog</code> again.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const { config } = status;
+  const watching = new Set(status.watching);
+  // The other half of the skew: ids the sweeper claims to be watching that
+  // no `running` run in this payload accounts for.
+  const orphans = status.watching.filter(
+    (id) => !running.some((r) => r.runId === id)
+  );
+
+  return (
+    <div className="watchdog-monitor" data-testid="watchdog-monitor">
+      <div className="watchdog-state" data-testid="watchdog-state">
+        <span className="watchdog-state-line" data-testid="watchdog-state-line">
+          {stateLine(status, now)}
+        </span>
+        <span className="watchdog-config" data-testid="watchdog-config-line">
+          {`check every ${formatSpanCompact(config.tickMs)} · leave alone for ${formatSpanCompact(config.graceMs)} · give up after ${config.maxAttempts}`}
+        </span>
+        {/* Plain text, not a link: `SettingsView` has no section setter to
+            plumb through for one sentence, and the side rail is one click
+            away. The knobs are edited in exactly one place. */}
+        <span className="watchdog-hint">Configure in Settings › Orchestrator watchdog.</span>
+      </div>
+
+      {/* Omitted entirely while the sweeper is off — nothing is being
+          watched, and the state line has already said why. An empty-rows
+          line here would be a second answer to a question already settled
+          one line up. */}
+      {status.phase !== 'off' && (
+        <div className="watchdog-rows" data-testid="watchdog-rows">
+          {running.map((run) => {
+            const crashed = isCrashed(run);
+            const clause = crashed ? watchdogClause(run.watchdog, now) : '';
+            const reported = lastReportedEntry(run.queue);
+            const age = Math.max(0, now - Date.parse(run.updatedAt));
+            return (
+              <button
+                key={`${run.project} ${run.runId}`}
+                type="button"
+                data-testid="watchdog-row"
+                className={`watchdog-row ${crashed ? 'watchdog-row-crashed' : 'watchdog-row-ok'}`}
+                onClick={() => onSelectRun(run.project, run.runId)}
+              >
+                <span className="watchdog-row-project">{projectLabel(run.project)}</span>
+                <span className="watchdog-row-id">{run.runId}</span>
+                <span className="watchdog-row-item">
+                  {reported === null ? 'between items' : `${reported.id} · ${reported.stage}`}
+                </span>
+                <span className="watchdog-row-beat">
+                  {Number.isFinite(age) ? `heartbeat ${formatSpanCompact(age)} ago` : 'heartbeat unknown'}
+                </span>
+                {/* One span, so the separator can never survive an empty
+                    clause: `watchdogClause` returns `''` for a run the
+                    server has not annotated yet, and `crashed ·` with
+                    nothing after it would read as a truncated sentence. */}
+                <span className="watchdog-row-verdict" data-testid="watchdog-verdict">
+                  {!crashed ? 'ok' : clause === '' ? 'crashed' : `crashed · ${clause}`}
+                </span>
+                {!watching.has(run.runId) && (
+                  <span className="watchdog-row-skew">· not yet watched</span>
+                )}
+              </button>
+            );
+          })}
+
+          {/* Not a button: there is no run to select. */}
+          {orphans.map((id) => (
+            <div key={id} className="watchdog-row-missing" data-testid="watchdog-row-missing">
+              {`${id} — not in the runs payload`}
+            </div>
+          ))}
+
+          {running.length === 0 && orphans.length === 0 && (
+            <div className="watchdog-rows-empty" data-testid="watchdog-rows-empty">
+              {status.phase === 'idle' ? 'no running run' : 'nothing running in the runs payload yet'}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="watchdog-activity">
+        <span className="watchdog-activity-name">Activity</span>
+        <span className="watchdog-hint" data-testid="watchdog-events-hint">
+          Newest first — what the sweeper itself did (armed, spawned a resume, gave up),
+          not the run's own stage track. The last {WATCHDOG_EVENT_CAP} only, held in the
+          API process's memory: an API restart empties it.
+        </span>
+        {status.events.length === 0 ? (
+          <div className="watchdog-events watchdog-events-empty">nothing since the server started</div>
+        ) : (
+          <ul className="watchdog-events" data-testid="watchdog-events">
+            {status.events.map((event, i) => (
+              <li key={`${event.runId ?? 'none'}-${event.at}-${i}`}>
+                <time dateTime={event.at}>{formatClock(event.at) ?? '—:—'}</time>
+                {event.project !== null && (
+                  <span className="watchdog-event-project">{projectLabel(event.project)}</span>
+                )}
+                <span>{event.detail}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}

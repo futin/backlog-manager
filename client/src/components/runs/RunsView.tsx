@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
 import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, mergeModeLabel } from '../../lib/run-stage';
+import { MODE_BUTTON, RUNS_MODES, RUNS_MODE_KEY, isRunsMode } from '../../lib/runs-mode';
 import { aggregateRuns, dayKey, dayLabel, runStageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
 import { StageBars } from './StageBars';
+import { WatchdogMonitor } from './WatchdogMonitor';
 import type { RunRange } from '../../lib/run-range';
 import { resumeGate } from '../../../../shared/agent';
 import type {
@@ -95,6 +98,18 @@ import type {
  * the identical fix-round-2/3 reason: a live-backed run's still-open span
  * has to come from its fresh live queue, never a stale archive snapshot
  * frozen mid-run.
+ *
+ * task-18 gives the section two MODES, not one: `Runs` is everything
+ * described above, and `Watchdog` replaces the whole body below the bar with
+ * `WatchdogMonitor` — the sweeper's state, the runs it is watching, and its
+ * activity feed, all of which used to sit on the Settings page nobody has
+ * open while a run is going. The switch renders unconditionally (unlike
+ * every other tool in this bar, which waits on `merged.length > 0`: the
+ * sweeper has a phase to report whether or not this project has ever
+ * finished a run) and persists (unlike the range and the project filter,
+ * which deliberately do not — see `lib/runs-mode.ts` for that distinction in
+ * full). The monitor takes this component's OWN `liveRuns` array as a prop
+ * rather than fetching runs itself, so a mode switch adds no request.
  *
  * Emptying the range (or the range-and-project combination) does not empty
  * this whole section the way `merged.length === 0` does: the tiles, the
@@ -476,6 +491,13 @@ export default function RunsView() {
   // rather than each reaching for the hook themselves — `resumeGate` is the
   // single implementation, and the component stays free of a data source.
   const { status: agents } = useAgents();
+  // Persisted, unlike the two filters below it — see `lib/runs-mode.ts` for
+  // why a mode is section-like where a filter is not. Read back through
+  // `isRunsMode` because localStorage can hand back anything at all
+  // (an older build, a hand edit, a `JSON.parse` of a number), and the one
+  // outcome this section must never have is rendering neither surface.
+  const [storedMode, setStoredMode] = usePersistedState<string>(RUNS_MODE_KEY, 'runs');
+  const mode = isRunsMode(storedMode) ? storedMode : 'runs';
   const [projectFilter, setProjectFilter] = useState<string>('all');
   // Component state, not persisted — same as `projectFilter` immediately
   // above, and for the same reason: a saved range would silently reopen the
@@ -703,8 +725,31 @@ export default function RunsView() {
     <div className="board runs-board">
       <div className="board-bar">
         <div className="board-title">Runs</div>
-        {merged.length > 0 && (
-          <div className="board-tools">
+        <div className="board-tools">
+          {/* task-18's mode switch, and the one tool in this bar that sits
+              OUTSIDE the `merged.length > 0` condition wrapping the two
+              below it: those two scope run history, so with no history
+              there is nothing for them to do, while the watchdog has a
+              phase to report whether or not this project has ever finished
+              a run. Same `.runs-seg` idiom, same `role="group"` +
+              `aria-label` + per-button `aria-pressed` semantics as the
+              range control — see that control's own comment for why a
+              segmented button group and not a fifth `<select>`. */}
+          <div className="runs-seg" role="group" aria-label="View" data-testid="runs-mode">
+            {RUNS_MODES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                data-testid={`runs-mode-${m}`}
+                aria-pressed={m === mode}
+                onClick={() => setStoredMode(m)}
+              >
+                {MODE_BUTTON[m]}
+              </button>
+            ))}
+          </div>
+          {mode === 'runs' && merged.length > 0 && (
+          <>
             {/* The range control (Task 7) — see styles.css's own `.runs-seg`
                 comment for why this is a segmented button group and not a
                 fifth `<select>` beside the project one. `role="group"` +
@@ -735,11 +780,32 @@ export default function RunsView() {
               <option value="all">All projects</option>
               {projects.map((p) => <option key={p} value={p}>{projectLabel(p)}</option>)}
             </select>
-          </div>
-        )}
+          </>
+          )}
+        </div>
       </div>
 
-      {merged.length === 0 ? (
+      {mode === 'watchdog' ? (
+        // The whole body, replaced — not a panel wedged above the list. The
+        // two modes answer different questions ("what has this orchestrator
+        // ever done" vs "what is the sweeper doing right now"), and the
+        // alternative designs that kept both on screen at once each spent a
+        // permanent bar or a fake list row on the one a person was not
+        // asking. `liveRuns` is this component's own array, handed down
+        // rather than re-fetched.
+        <WatchdogMonitor
+          runs={liveRuns}
+          onSelectRun={(project, runId) => {
+            // Back to Runs, on that run's detail: a monitor row IS a run in
+            // the list. A key that names no row right now (a filtered-out or
+            // archive-less run) resolves through `selectedRow`'s existing
+            // lookup exactly as any other stale selection does — the mode
+            // still switches, and the pane falls back to the default row.
+            setStoredMode('runs');
+            setSelected({ project, runId });
+          }}
+        />
+      ) : merged.length === 0 ? (
         // Task 5's own final copy for the genuinely-empty case, verbatim —
         // see this file's own header comment for why this is not
         // placeholder text being replaced, only reached by a real check now.

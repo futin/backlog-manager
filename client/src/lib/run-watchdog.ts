@@ -1,10 +1,20 @@
 import { formatClock } from './run-time';
-import type { OrchestratorRun, RunWatchdog } from '../../../shared/types';
+import type { OrchestratorRun, RunWatchdog, WatchdogStatus } from '../../../shared/types';
 
 /**
- * run-watchdog.ts — the crashed strip's one source for two pure readings:
- * "is this run crashed at all", and "what is the watchdog doing about it,
- * in one sentence".
+ * run-watchdog.ts — every sentence the client can print about the watchdog,
+ * in one module: "is this run crashed at all" (`isCrashed`), "what is the
+ * watchdog doing about THIS run, in one sentence" (`watchdogClause`), and
+ * "what is the sweeper itself doing right now" (`stateLine`).
+ *
+ * Two surfaces read them, and that is why all three live together rather
+ * than beside whichever component happened to need one first: `RunStrip`
+ * (the board's crashed strip) reads the first two, and `WatchdogMonitor`
+ * (Runs › Watchdog, task-18) reads all three. `stateLine` in particular
+ * spent its first life as a private function inside the Settings watchdog
+ * group; when that group's live half moved to Runs it would otherwise have
+ * been a component importing a sentence out of another component, on a page
+ * that no longer prints it at all.
  *
  * Both exist because of `run-20260903-112622` (design doc's own "Why this
  * exists"): a run whose headless session quit believing it was waiting on a
@@ -21,8 +31,8 @@ import type { OrchestratorRun, RunWatchdog } from '../../../shared/types';
  * payload can state without guessing, the entire time.
  *
  * `isCrashed` is the one place the split that fixes this gets decided, so
- * `RunStrip`, `BoardView` and any later surface (a Settings watchdog group,
- * say) read the same verdict rather than each re-deriving
+ * `RunStrip`, `BoardView` and `WatchdogMonitor` read the same verdict
+ * rather than each re-deriving
  * `status === 'running' && !fresh` by hand and drifting apart the day one
  * of them forgets the `!fresh` half. A run that finished — however long
  * ago, whatever `status` it finished with — still renders nothing; that
@@ -101,4 +111,60 @@ export function watchdogClause(w: RunWatchdog | undefined, now: number = Date.no
       : `watchdog: attempt ${w.attempts}/${w.maxAttempts} spawned ${clock}`;
   }
   return 'watchdog: waiting for next check';
+}
+
+/**
+ * The monitor's state card first line — the sweeper's own phase in one
+ * sentence, as opposed to `watchdogClause` above, which describes what the
+ * sweeper is doing about ONE crashed run. Lives here, beside its two
+ * siblings, because all three are sentences the client prints about the
+ * watchdog and two surfaces printing the same fact must not be able to
+ * disagree about the wording (task-18; it was `WatchdogGroup.tsx`'s private
+ * function while Settings was the only place any of this rendered).
+ *
+ * Pure and exported so it can be unit-tested directly, independent of
+ * `useWatchdog`'s render timing (the `armed` countdown is the one reading
+ * that moves on its own, and pinning it through a full component render
+ * means fighting real wall-clock time or fake timers either way; this
+ * function lets the countdown math be pinned once, exactly, against an
+ * explicit `now`).
+ *
+ * The three phase branches are mutually exclusive by construction (each
+ * returns before the next runs), matching the same discipline
+ * `watchdogClause` above already uses for the crashed strip's own
+ * one-sentence summary.
+ *
+ * `· resume disabled` is appended to the `idle`/`armed` readings alone,
+ * never to `off` — the watchdog design's §6.4 calls these out as "either of
+ * the LAST two": an operator who just read `off — BM_AGENTS off` already
+ * knows nothing is watching at all, so appending a second clause about
+ * resuming being disabled would be restating a conclusion the reader already
+ * has, about a toggle (`config.enabled`) that is genuinely irrelevant while
+ * the sweeper cannot even tick.
+ */
+export function stateLine(status: WatchdogStatus, now: number = Date.now()): string {
+  const { phase, config } = status;
+
+  if (phase === 'off') {
+    // The server only ever sets `phase: 'off'` alongside a `reason`
+    // (`watchdog.service.ts`'s `offReason()` is the sweeper's only path to
+    // this phase, and it always names one of the two kill switches) — the
+    // `?? 'unknown'` fallback exists purely so a malformed payload degrades
+    // to a readable sentence instead of printing "off — undefined".
+    return `off — ${status.reason ?? 'unknown'}`;
+  }
+
+  const resumeDisabled = config.enabled ? '' : ' · resume disabled';
+
+  if (phase === 'idle') {
+    return `idle — no running run${resumeDisabled}`;
+  }
+
+  // phase === 'armed'. `nextTickAt` is an ISO stamp the server sets
+  // whenever it arms (`watchdog-state.service.ts`'s `setPhase`); a missing
+  // or unparsable one degrades to a 0s countdown rather than throwing or
+  // omitting the clause; the armed reading always names the tick.
+  const target = status.nextTickAt === null ? NaN : Date.parse(status.nextTickAt);
+  const seconds = Number.isFinite(target) ? Math.max(0, Math.round((target - now) / 1000)) : 0;
+  return `armed — watching ${status.watching.join(', ')}, next check in ${seconds}s${resumeDisabled}`;
 }

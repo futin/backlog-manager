@@ -1,12 +1,28 @@
 import { useWatchdog } from '../../hooks/useWatchdog';
-import { formatClock, formatSpanCompact } from '../../lib/run-time';
+import { formatSpanCompact } from '../../lib/run-time';
 import { SettingsGroup, SettingsRow } from './SettingsRow';
-import type { WatchdogStatus } from '../../../../shared/types';
 
 /**
- * The watchdog Settings group (design §6.4) — the last user-facing piece of
- * the orchestrator-watchdog feature: the knobs, and a look at what the
- * sweeper has actually been doing with them.
+ * The watchdog Settings group (design §6.4, trimmed by task-18) — the four
+ * knobs, and nothing else.
+ *
+ * It used to carry a live State row and an Activity feed as well, on the
+ * reasoning that the knobs went here so their readings should too. That was
+ * wrong in a way one live run made obvious: Settings is a page a person
+ * opens to change a preference and leaves, so a 5-second poll and a
+ * scrolling event list sat there unread for the whole of a run, while the
+ * board — the surface anyone actually watches — said nothing about the
+ * sweeper until a run had already crashed. Both moved to Runs › Watchdog
+ * (`WatchdogMonitor`), and what stays behind is the `Live view` row below,
+ * saying so.
+ *
+ * The rule that move establishes, and that this file is now the reference
+ * for: NOTHING IN SETTINGS IS LIVE. Every other group here is a preference —
+ * theme, density, default model, link base — read once and acted on. A row
+ * that says "next check in 42s" and moves is a monitor, not a setting, and
+ * it drags a poll into a page that otherwise has none. Hence
+ * `useWatchdog({ live: false })` below: this group renders no text that
+ * changes on a clock, so a poll here would redraw identical output forever.
  *
  * Title says "this server", deliberately, against "Display · this device"
  * and "Claude Agents · this machine" above it. Both of those really are
@@ -44,11 +60,12 @@ import type { WatchdogStatus } from '../../../../shared/types';
  *
  * Every save below posts the ONE field that changed
  * (`useWatchdog.save(patch)` → `POST /api/agents/watchdog/config`) and
- * redraws every row — including the State row — from that POST's own
- * response, never a follow-up GET (design §5.3; `useWatchdog`'s own comment
- * has the full reasoning). Rows are not gated on `phase`: a knob is worth
- * setting while nothing is running, so the three selects and the checkbox
- * render identically whether the sweeper is `off`, `idle` or `armed`.
+ * redraws every row from that POST's own response, never a follow-up GET
+ * (design §5.3; `useWatchdog`'s own comment has the full reasoning). Rows
+ * are not gated on `phase`: a knob is worth setting while nothing is
+ * running, so the three selects and the checkbox render identically whether
+ * the sweeper is `off`, `idle` or `armed` — and this group no longer reports
+ * which of those it is, so `phase` is now read here for nothing at all.
  */
 
 /**
@@ -74,72 +91,6 @@ export const GRACE_LADDER = [300_000, 600_000, 1_200_000, 1_800_000, 3_600_000] 
 export const ATTEMPT_LADDER = [1, 2, 3, 4, 5] as const;
 
 /**
- * The State row's one sentence — pure and exported so it can be unit-tested
- * directly, independent of `useWatchdog`'s render timing (the `armed`
- * countdown is the one reading that moves on its own, and pinning it
- * through a full component render means fighting real wall-clock time or
- * fake timers either way; this function lets the countdown math be pinned
- * once, exactly, against an explicit `now`).
- *
- * The three phase branches are mutually exclusive by construction (each
- * returns before the next runs), matching the same discipline
- * `lib/run-watchdog.ts`'s `watchdogClause` already uses for the crashed
- * strip's own one-sentence summary — two surfaces describing the same
- * sweeper state must not be able to disagree about which of several
- * plausible-sounding sentences applies.
- *
- * `· resume disabled` is appended to the `idle`/`armed` readings alone,
- * never to `off` — design §6.4 calls these out as "either of the LAST two":
- * an operator who just read `off — BM_AGENTS off` already knows nothing is
- * watching at all, so appending a second clause about resuming being
- * disabled would be restating a conclusion the reader already has, about a
- * toggle (`config.enabled`) that is genuinely irrelevant while the sweeper
- * cannot even tick.
- */
-export function stateLine(status: WatchdogStatus, now: number = Date.now()): string {
-  const { phase, config } = status;
-
-  if (phase === 'off') {
-    // The server only ever sets `phase: 'off'` alongside a `reason`
-    // (`watchdog.service.ts`'s `offReason()` is the sweeper's only path to
-    // this phase, and it always names one of the two kill switches) — the
-    // `?? 'unknown'` fallback exists purely so a malformed payload degrades
-    // to a readable sentence instead of printing "off — undefined".
-    return `off — ${status.reason ?? 'unknown'}`;
-  }
-
-  const resumeDisabled = config.enabled ? '' : ' · resume disabled';
-
-  if (phase === 'idle') {
-    return `idle — no running run${resumeDisabled}`;
-  }
-
-  // phase === 'armed'. `nextTickAt` is an ISO stamp the server sets
-  // whenever it arms (`watchdog-state.service.ts`'s `setPhase`); a missing
-  // or unparsable one degrades to a 0s countdown rather than throwing or
-  // omitting the clause; the armed reading always names the tick.
-  const target = status.nextTickAt === null ? NaN : Date.parse(status.nextTickAt);
-  const seconds = Number.isFinite(target) ? Math.max(0, Math.round((target - now) / 1000)) : 0;
-  return `armed — watching ${status.watching.join(', ')}, next check in ${seconds}s${resumeDisabled}`;
-}
-
-/**
- * The Activity feed's project column is a basename, matching every other
- * project-facing surface on this board (`RegistryProject.name` is already a
- * basename of the git root — see shared/types.ts) — `WatchdogEvent.project`
- * itself carries the absolute path (the same string `OrchestratorRun.project`
- * does), which is correct for the sweeper's own bookkeeping but far too long
- * for a one-line Activity row. A trailing slash is stripped first so a path
- * a caller built with `path.join(root, '')` does not read as an empty
- * basename.
- */
-function projectBasename(path: string): string {
-  const trimmed = path.replace(/\/+$/, '');
-  const idx = trimmed.lastIndexOf('/');
-  return idx === -1 ? trimmed : trimmed.slice(idx + 1);
-}
-
-/**
  * A ladder, with the CURRENT config value spliced in and the whole thing
  * numerically sorted — but only when that value is not already one of the
  * ladder's own options. This is the mechanism the whole "selects instead of
@@ -160,7 +111,12 @@ function ladderWithSelected(ladder: readonly number[], value: number): number[] 
 /** The watchdog's own Settings group. Mounted directly after `AgentsGroup`
  *  in `SettingsView.tsx`. */
 export function WatchdogGroup() {
-  const { status, error, save } = useWatchdog();
+  // `live: false` — see this file's header: with the State row gone,
+  // nothing here changes on a clock, so the armed 5s poll would buy a
+  // redraw nobody can see. The mount fetch and the focus refetch stay, and
+  // they are what this group actually needs: they are how it learns the
+  // config changed on another device.
+  const { status, error, save } = useWatchdog({ live: false });
 
   // `useWatchdog` never throws — a failed GET lands in `error` and leaves
   // `status` at its initial `null` (see that hook's own comment for why a
@@ -190,22 +146,27 @@ export function WatchdogGroup() {
 
   return (
     <SettingsGroup title="Orchestrator watchdog · this server">
-      <SettingsRow
-        name="State"
-        hint={
-          <>
+      {/* Not a `SettingsRow`: it has no control, and that is the point —
+          this group opens with one paragraph of orientation and then four
+          knobs. One row rather than two because both sentences answer the
+          same question a person arriving here has ("where does this live,
+          and where do I watch it work"). */}
+      <div className="set-row">
+        <div className="set-label">
+          <span className="set-name">Live view</span>
+          <span className="set-hint">
             These values live on the API host, in <code>~/.backlog-manager/settings/watchdog.json</code>
             {' '}— not this browser's storage. Every device that opens this board reads and
             writes that same one file, unlike the device-only groups above.
-          </>
-        }
-      >
-        <span>{stateLine(status)}</span>
-      </SettingsRow>
+            {' '}The sweeper's state, the runs it is watching and its activity are on
+            Runs › Watchdog.
+          </span>
+        </div>
+      </div>
 
       <SettingsRow
         name="Enabled"
-        hint="Your own switch (design's 'Disabled'), separate from the sweeper's phase above: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
+        hint="Your own switch (design's 'Disabled'), separate from the sweeper's own phase: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
       >
         <input
           type="checkbox"
@@ -259,35 +220,6 @@ export function WatchdogGroup() {
           ))}
         </select>
       </SettingsRow>
-
-      {/* Not a `SettingsRow`: a scrolling list of up to `WATCHDOG_EVENT_CAP`
-          rows does not fit the name-left/control-right split every other
-          row here uses (see `AgentsGroup`'s identical "Setting it up" panel
-          a few rows up in SettingsView.tsx for the same full-width idiom). */}
-      <div className="set-row">
-        <div className="set-label">
-          <span className="set-name">Activity</span>
-          <span className="set-hint">
-            Newest first — what the sweeper itself did (armed, spawned a resume, gave up),
-            not the run's own stage track.
-          </span>
-        </div>
-        {status.events.length === 0 ? (
-          <div className="watchdog-events watchdog-events-empty">nothing since the server started</div>
-        ) : (
-          <ul className="watchdog-events">
-            {status.events.map((event, i) => (
-              <li key={`${event.runId ?? 'none'}-${event.at}-${i}`}>
-                <time dateTime={event.at}>{formatClock(event.at) ?? '—:—'}</time>
-                {event.project !== null && (
-                  <span className="watchdog-event-project">{projectBasename(event.project)}</span>
-                )}
-                <span>{event.detail}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </SettingsGroup>
   );
 }

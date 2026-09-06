@@ -156,4 +156,78 @@ describe('useWatchdog', () => {
     expect(typeof result.current.error).toBe('string');
     expect((result.current.error as string).length).toBeGreaterThan(0);
   });
+  // --- task-18: the `live` option -------------------------------------------
+  //
+  // The armed-only poll exists for a countdown and a set of heartbeat ages
+  // that move on their own — `WatchdogMonitor`'s state card and rows. The
+  // Settings group that used to carry that countdown no longer renders
+  // anything that changes on a clock, so it passes `live: false` and the
+  // interval is never installed. Everything else about the hook is
+  // deliberately unchanged under the flag: these cases exist as much to pin
+  // what `live: false` must NOT switch off as what it must.
+
+  it('installs no poll while armed when live is false', async () => {
+    const fetchMock = stubFetch(status('armed'));
+    renderHook(() => useWatchdog({ live: false }));
+
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Two full poll periods, not one: an off-by-one in the guard (say, an
+    // interval installed and cleared on the next render) would still be
+    // caught by the first, but a poll that merely starts LATE would slip
+    // through a single-period assertion.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_POLL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_POLL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('still refetches on a window focus event when live is false', async () => {
+    const fetchMock = stubFetch(status('armed'));
+    renderHook(() => useWatchdog({ live: false }));
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('still saves, with no extra GET, when live is false', async () => {
+    const fetchMock = stubFetch(status('armed'));
+    const { result } = renderHook(() => useWatchdog({ live: false }));
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.save({ enabled: false });
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe('/api/agents/watchdog/config');
+    expect(JSON.parse(String(init.body))).toEqual({ enabled: false });
+  });
+
+  it('polls while armed when live is spelled out as true', async () => {
+    const fetchMock = stubFetch(status('armed'));
+    renderHook(() => useWatchdog({ live: true }));
+
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_POLL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

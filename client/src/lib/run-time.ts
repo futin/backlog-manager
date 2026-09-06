@@ -549,3 +549,37 @@ export function stepperDots(
     };
   });
 }
+
+/**
+ * The queue entry a crashed strip calls "last reported" — the LAST entry in
+ * queue order whose stage is neither one of the seven terminal exits
+ * (`isTerminalStage`, imported above) nor `pending`. Last, not first: queue
+ * order is dispatch order, so every entry BEFORE the one the run was
+ * actually working has already exited one way or another (merged, branched,
+ * parked, whatever), and every entry AFTER it is `pending` — untouched, with
+ * no more claim to being "what the run was doing" than a `pending` entry
+ * three slots further down the same queue. The one entry sitting between
+ * those two runs is the one this run's last heartbeat was actually
+ * reporting progress on.
+ *
+ * `pending` is excluded BY NAME, not merely by happening to be non-terminal
+ * — `RUN_CLAIMED_STAGES` (shared/types.ts) lists it as claimed, correctly,
+ * for `runClaimBlock`'s different question of "can a person hand-dispatch
+ * this". A queue can have every stage it actually visited already terminal,
+ * leaving only a tail of entries nothing has touched yet; a run frozen
+ * there was reporting nothing in progress at all, and `null` is what lets
+ * each caller say so in its own words (`RunStrip`'s crashed strip prints
+ * "all items at rest", `WatchdogMonitor`'s row prints "between items")
+ * instead of naming whichever untouched entry happens to sit first in that
+ * tail.
+ *
+ * task-18 lifted this out of `RunStrip.tsx` the moment the monitor became
+ * its second caller: the rule above is a genuine judgement about queue
+ * order, not a one-liner, and two surfaces answering "what is this run
+ * working on" from two copies of it is the drift this module already
+ * exists to prevent for every other run reading.
+ */
+export function lastReportedEntry(queue: readonly RunQueueItem[]): RunQueueItem | null {
+  const inFlight = queue.filter((q) => !isTerminalStage(q.stage) && q.stage !== 'pending');
+  return inFlight.length === 0 ? null : inFlight[inFlight.length - 1];
+}
