@@ -150,7 +150,8 @@ node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init
 | Stop the stack | `pnpm run docker:down` |
 | API only, on the host | `pnpm run dev` |
 | Client only, on the host | `pnpm run dev:web` |
-| Tests (jest) | `pnpm test` |
+| Tests (both runners) | `pnpm test` |
+| Tests, jest only | `pnpm run test:jest` |
 | Skill tests (node:test) | `pnpm run test:skills` |
 | Types | `pnpm run typecheck` |
 | Production build | `pnpm run build` |
@@ -235,8 +236,9 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
 ## Development
 
 ```bash
-pnpm test             # jest --runInBand
-pnpm run test:skills  # node --test, the skills' own unit tests
+pnpm test             # both runners: jest, then node --test
+pnpm run test:jest    # jest --runInBand alone
+pnpm run test:skills  # node --test alone, the skills' own unit tests
 pnpm run typecheck    # tsc --noEmit
 pnpm run build        # nest build + vite build
 ```
