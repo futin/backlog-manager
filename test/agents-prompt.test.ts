@@ -1,5 +1,5 @@
 import { readAgentsConfig } from '../server/src/agents/config.util';
-import { resumeSessionName } from '../server/src/agents/agents.service';
+import { dashboardError, resumeSessionName } from '../server/src/agents/agents.service';
 import { composePrompt, sessionName } from '../server/src/agents/prompt.util';
 import type { BacklogItem } from '../shared/types';
 
@@ -255,5 +255,41 @@ describe('resumeSessionName', () => {
       expect(name).toMatch(DASHBOARD_NAME_RE);
       expect(name).toHaveLength(DASHBOARD_NAME_CAP);
     }
+  });
+});
+
+/* bug-26. The three e2e suites prove the two seams answer 502 with a readable
+   `error`; these pin the wording rules themselves, one per branch, including
+   the fall-through — the branch no route can reach without a dashboard that
+   fails in a way none of the stubs above can stage. */
+describe('dashboardError', () => {
+  it('names the call and its budget for an abort, since the exception names neither', () => {
+    const timedOut = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    expect(dashboardError(timedOut, 'the dashboard spawn call', 10_000))
+      .toBe('the dashboard spawn call timed out after 10000ms');
+    // A caller-side abort reads the same to a reader: nothing came back.
+    expect(dashboardError(Object.assign(new Error('aborted'), { name: 'AbortError' }), 'x', 5))
+      .toBe('x timed out after 5ms');
+  });
+
+  it('reaches into .cause, where a connection failure keeps its only detail', () => {
+    const refused = Object.assign(new TypeError('fetch failed'), {
+      cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:4173' }
+    });
+    expect(dashboardError(refused, 'the dashboard project list', 15_000))
+      .toBe('the dashboard project list failed: ECONNREFUSED');
+    // No `code` — some causes carry only a message, and that is still more
+    // than the bare `fetch failed` the outer error offers.
+    const dns = Object.assign(new TypeError('fetch failed'), { cause: { message: 'getaddrinfo ENOTFOUND dash' } });
+    expect(dashboardError(dns, 'x', 1)).toBe('x failed: getaddrinfo ENOTFOUND dash');
+  });
+
+  it('leaves anything else exactly as message() reads it', () => {
+    // The shape `get()` throws for a non-ok answer: already a sentence, and
+    // re-wording it would only lose the status it carries.
+    expect(dashboardError(new Error('/api/management answered 500'), 'x', 1))
+      .toBe('/api/management answered 500');
+    expect(dashboardError('a bare string', 'x', 1)).toBe('a bare string');
+    expect(dashboardError(null, 'x', 1)).toBe('null');
   });
 });

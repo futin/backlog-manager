@@ -29,6 +29,16 @@ let otherPath: string;
 
 interface Sent { url: string; init?: RequestInit }
 
+/* The two shapes a rejected `fetch` actually arrives as, measured on Node 22
+   while grooming bug-26: a connection failure is a `TypeError` whose message
+   is the useless literal `fetch failed`, the detail living only in `.cause`;
+   the `AbortSignal.timeout` path is a `DOMException` naming no budget.
+   Duplicated per suite, exactly as the stub below them already is. */
+const CONN_REFUSED = Object.assign(new TypeError('fetch failed'), {
+  cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:4173' }
+});
+const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+
 /**
  * Same shape as agents-dispatch.test.ts's own stubDashboard — duplicated
  * rather than imported, matching this repo's existing convention of every
@@ -39,7 +49,7 @@ interface Sent { url: string; init?: RequestInit }
  * every call AgentsService.orchestrate can make, same as dispatch.
  */
 function stubDashboard(
-  spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true },
+  spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {},
   // The host's permission ceiling, as its /api/health reports it. A
   // parameter rather than the fixed 'acceptEdits' this suite used to hard-code
   // because the permission-mode cases below turn on the difference between a
@@ -48,12 +58,18 @@ function stubDashboard(
   ceiling: string = 'acceptEdits'
 ) {
   const sent: Sent[] = [];
+  const ok = spawn.ok ?? true;
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     sent.push({ url, init });
     if (url.endsWith('/api/spawn')) {
+      // `reject` fails the spawn call ALONE — health and /api/management
+      // still resolve. The suite's existing 502 case rejects every fetch, so
+      // the environment gate refuses on the health probe and spawn() is never
+      // entered; that is why bug-26's escaping rejection had no case here.
+      if ('reject' in spawn) return Promise.reject(spawn.reject);
       return Promise.resolve({
-        ok: spawn.ok, status: spawn.status ?? (spawn.ok ? 200 : 429),
+        ok, status: spawn.status ?? (ok ? 200 : 429),
         json: () => Promise.resolve(spawn.body ?? { sessionId: 'sess-1' })
       } as Response);
     }
@@ -274,6 +290,82 @@ describe('POST /api/agents/orchestrate', () => {
     expect(sent.some((u) => u.endsWith('/api/spawn'))).toBe(false);
     // Same fix-round-2 pin as the project-invisible case above: uncoded.
     expect(res.body.code).toBeUndefined();
+  });
+
+  // --- bug-26: the outbound call rejects after the gate has passed ---------
+  // The 502 case above rejects every fetch, /api/health included, so the
+  // environment gate refuses before spawn() is ever entered. These reach the
+  // seam itself: the path that answered a bare `{ statusCode: 500, message:
+  // 'Internal server error' }`, which the client degrades to
+  // `request failed (500)`. `statusCode` being absent is what pins "not the
+  // Nest default shape" — a status assertion alone would pass equally
+  // against a filter that only relabelled the number.
+
+  it('502s with the connection detail when the spawn fetch is refused', async () => {
+    stubDashboard({ reject: CONN_REFUSED });
+    const res = await post({ project: projectPath }).expect(502);
+    expect(res.body.error).toContain('ECONNREFUSED');
+    expect(res.body.statusCode).toBeUndefined();
+  });
+
+  it('502s naming the timeout budget when the spawn fetch times out', async () => {
+    stubDashboard({ reject: SPAWN_TIMED_OUT });
+    const res = await post({ project: projectPath }).expect(502);
+    expect(res.body.error).toContain('10000');
+    expect(res.body.error).toMatch(/timed out/);
+    // The DOMException's own wording names neither the call nor its budget,
+    // so relaying it verbatim would be the same silence wearing a 502.
+    expect(res.body.error).not.toContain('The operation was aborted');
+    expect(res.body.statusCode).toBeUndefined();
+  });
+
+  /* The second escaping seam, on /orchestrate alone: the three post-gate
+     `projectMap()` re-reads are line-for-line identical, so one case covers
+     the shape. The gate's own read populates the cache; the clock then moves
+     past PROJECT_TTL_MS and the re-read is a real call again — the exact
+     race the 409 directly below that line already exists for. When that call
+     FAILS we did not learn the project is invisible, we failed to ask, so
+     the answer is the 502 and not that 409. */
+  it('502s when the post-gate project re-read fails, not 500 and not the 409 beneath it', async () => {
+    const sent: string[] = [];
+    const base = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(base);
+    let managementCalls = 0;
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      sent.push(url);
+      if (url.endsWith('/api/management')) {
+        managementCalls += 1;
+        if (managementCalls > 1) return Promise.reject(CONN_REFUSED);
+        // The gate's read has landed. Push the clock past the TTL so the
+        // re-read below it is a fresh call rather than a cache hit.
+        now.mockReturnValue(base + 61_000);
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }]
+          })
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(
+          { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+        )
+      } as Response);
+    }) as jest.Mock;
+
+    try {
+      const res = await post({ project: projectPath }).expect(502);
+      expect(res.body.error).toContain('ECONNREFUSED');
+      expect(res.body.statusCode).toBeUndefined();
+      expect(managementCalls).toBe(2);
+      expect(sent.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+    } finally {
+      // Restored here rather than in afterEach: a failed assertion above
+      // must not leave a frozen clock behind for the next case.
+      now.mockRestore();
+    }
   });
 
   // --- Test case 5: a fresh run already exists -----------------------------
