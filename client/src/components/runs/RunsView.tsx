@@ -726,28 +726,6 @@ export default function RunsView() {
       <div className="board-bar">
         <div className="board-title">Runs</div>
         <div className="board-tools">
-          {/* task-18's mode switch, and the one tool in this bar that sits
-              OUTSIDE the `merged.length > 0` condition wrapping the two
-              below it: those two scope run history, so with no history
-              there is nothing for them to do, while the watchdog has a
-              phase to report whether or not this project has ever finished
-              a run. Same `.runs-seg` idiom, same `role="group"` +
-              `aria-label` + per-button `aria-pressed` semantics as the
-              range control — see that control's own comment for why a
-              segmented button group and not a fifth `<select>`. */}
-          <div className="runs-seg" role="group" aria-label="View" data-testid="runs-mode">
-            {RUNS_MODES.map((m) => (
-              <button
-                key={m}
-                type="button"
-                data-testid={`runs-mode-${m}`}
-                aria-pressed={m === mode}
-                onClick={() => setStoredMode(m)}
-              >
-                {MODE_BUTTON[m]}
-              </button>
-            ))}
-          </div>
           {mode === 'runs' && merged.length > 0 && (
           <>
             {/* The range control (Task 7) — see styles.css's own `.runs-seg`
@@ -780,8 +758,46 @@ export default function RunsView() {
               <option value="all">All projects</option>
               {projects.map((p) => <option key={p} value={p}>{projectLabel(p)}</option>)}
             </select>
+            {/* Inert, and inside this fragment on purpose: it appears exactly
+                when the filters do, so watchdog mode never shows an orphan
+                rule beside a lone switch. Its job is grouping — three
+                controls in one row, two of which scope history and one of
+                which picks the surface, should not read as one instrument. */}
+            <span className="board-tools-divider" aria-hidden="true" data-testid="runs-tools-divider" />
           </>
           )}
+          {/* task-18's mode switch, and the one tool in this bar that sits
+              OUTSIDE the `merged.length > 0` condition wrapping the two
+              above it: those two scope run history, so with no history
+              there is nothing for them to do, while the watchdog has a
+              phase to report whether or not this project has ever finished
+              a run. Same `.runs-seg` idiom, same `role="group"` +
+              `aria-label` + per-button `aria-pressed` semantics as the
+              range control — see that control's own comment for why a
+              segmented button group and not a fifth `<select>`.
+
+              task-26 made it the LAST child rather than the first, and that
+              order is load-bearing rather than taste: `.board-tools` is
+              right-anchored (`margin-left: auto`), so a first child slides
+              right by the width of whatever unmounts beside it — clicking
+              Watchdog unmounted the range control and the project select
+              and moved this switch out from under the pointer that had just
+              clicked it, then clicking Runs slid it back. Last, its right
+              edge is pinned by the bar and the two filters come and go on
+              its left. */}
+          <div className="runs-seg" role="group" aria-label="View" data-testid="runs-mode">
+            {RUNS_MODES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                data-testid={`runs-mode-${m}`}
+                aria-pressed={m === mode}
+                onClick={() => setStoredMode(m)}
+              >
+                {MODE_BUTTON[m]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

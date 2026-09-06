@@ -1600,4 +1600,54 @@ describe('RunsView history paging (task-16)', () => {
     expect(screen.getByTestId('runs-mode-runs')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
   });
+  // --- task-26: the switch is pinned to the far right of the bar -----------
+
+  // `.board-tools` is right-anchored (`margin-left: auto`), so its FIRST
+  // child slides right by the width of whatever unmounts beside it — which
+  // is exactly what the range control and the project select do when this
+  // switch is clicked, moving the switch out from under the pointer that
+  // just clicked it. Last child pins its right edge to the bar instead.
+  it('keeps the mode switch as the last tool in the bar in both modes', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    const tools = screen.getByTestId('runs-mode').parentElement as HTMLElement;
+
+    expect(tools.lastElementChild).toBe(screen.getByTestId('runs-mode'));
+    const order = Array.from(tools.children);
+    expect(order.indexOf(screen.getByTestId('runs-range')))
+      .toBeLessThan(order.indexOf(screen.getByLabelText('Project')));
+    expect(order.indexOf(screen.getByLabelText('Project')))
+      .toBeLessThan(order.indexOf(screen.getByTestId('runs-tools-divider')));
+    expect(order.indexOf(screen.getByTestId('runs-tools-divider')))
+      .toBeLessThan(order.indexOf(screen.getByTestId('runs-mode')));
+
+    await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
+    expect(tools.lastElementChild).toBe(screen.getByTestId('runs-mode'));
+    expect(tools.children.length).toBe(1);
+
+    await userEvent.click(screen.getByTestId('runs-mode-runs'));
+    const back = Array.from(tools.children);
+    expect(tools.lastElementChild).toBe(screen.getByTestId('runs-mode'));
+    expect(back.indexOf(screen.getByTestId('runs-range')))
+      .toBeLessThan(back.indexOf(screen.getByTestId('runs-mode')));
+  });
+
+  // The divider groups: two controls that scope history, one that picks the
+  // surface. It lives inside the filters' own fragment so watchdog mode
+  // never draws a rule beside a lone switch.
+  it('draws the divider only beside the filters', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(screen.getByTestId('runs-tools-divider')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
+
+    expect(screen.queryByTestId('runs-tools-divider')).not.toBeInTheDocument();
+  });
+
+  it('renders no divider for an empty payload', async () => {
+    await renderRunsView([], []);
+
+    expect(screen.getByTestId('runs-mode')).toBeInTheDocument();
+    expect(screen.queryByTestId('runs-range')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('runs-tools-divider')).not.toBeInTheDocument();
+  });
 });
