@@ -283,7 +283,7 @@ EXIT=0 WALL=6s
 $ tsc --noEmit
 ```
 
-### The +54% estimate is corrected downward
+### The +54% estimate corrected: absolute cost lower, ratio higher
 
 Measured here on a clean tree in this worktree, nothing else running:
 

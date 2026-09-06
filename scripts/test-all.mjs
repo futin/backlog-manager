@@ -15,8 +15,10 @@
 // Joining them under `test` rather than under a `backlog/verify.json` is
 // deliberate: verify.json would close the orchestrated-merge half and leave a
 // human typing `pnpm test` with the same false green, and the human half is
-// what the audit actually found. The cost is ~136s + ~74s ≈ 210s sequential,
-// +54% on every orchestrated item's verification step. Judged worth it.
+// what the audit actually found. The cost, measured on a clean tree
+// 2026-09-07: ~60s jest + ~59s node ≈ 143s sequential, against ~60s for jest
+// alone — roughly +83s on every orchestrated item's verification step, not
+// once per run. Judged worth it.
 //
 // This script has no test of its own, and that is a decision, not an
 // omission: `scripts/*.test.mjs` is inside `test:skills`'s own glob, so

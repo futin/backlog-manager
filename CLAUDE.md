@@ -640,9 +640,15 @@ happened.
   tooling that could regress past every automated gate this repo has and merge
   to `main`. `backlog/verify.json` was the rejected alternative: it closes the
   orchestrated-merge half and leaves a human's `pnpm test` false-green, and the
-  human half is what the 2026-09-06 audit found. The price is ~210s instead of
-  ~136s, +54% per orchestrated item, paid knowingly. The two named scripts stay
-  the single copy of what each runner runs — `test-all.mjs` delegates to them
+  human half is what the 2026-09-06 audit found. The price, measured on a
+  clean tree 2026-09-07: ~143s instead of jest's ~60s, so roughly +83s on
+  every orchestrated item's verification step, paid knowingly. (Grooming
+  predicted ~210s against a 136s jest baseline, i.e. +54%; both absolute
+  figures were taken on a loaded machine and came down, while the ratio went
+  the other way — +138%, because a free machine speeds jest up far more than
+  it speeds the node runner up. The absolute number is what a run actually
+  pays.) The two named scripts stay the single copy of what each runner runs
+  — `test-all.mjs` delegates to them
   and never re-spells `test:skills`'s glob pair, whose `scripts/*.test.mjs`
   half is the one most easily lost. Neither runner short-circuits the other,
   because a run with both broken has to report both. The script has no test of
