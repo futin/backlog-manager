@@ -426,6 +426,22 @@ interface Selection {
   runId: string;
 }
 
+/**
+ * How many history rows the list renders before `load more` (task-16), and
+ * how many each click of that control adds.
+ *
+ * Exported so the suite can assert the RELATION ("renders exactly
+ * RUNS_PAGE_SIZE rows") rather than pinning a bare 25 in two files that can
+ * then drift apart — the same reason MACHINE_STAGES is a named export rather
+ * than a list retyped at each call site.
+ *
+ * 25 is roughly a week and a half of history at the ~2–3 runs/day this
+ * machine's busiest project actually produces: enough that a first visit to
+ * `all` reads as a complete picture rather than a truncated one, short enough
+ * that the bounded box above scrolls a few times over rather than dozens.
+ */
+export const RUNS_PAGE_SIZE = 25;
+
 export default function RunsView() {
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
   const { runs: liveRuns } = useOrchestratorRuns();
@@ -436,6 +452,33 @@ export default function RunsView() {
   // default "all runs" view a fresh visit should show.
   const [range, setRange] = useState<RunRange>('all');
   const [selected, setSelected] = useState<Selection | null>(null);
+  // task-16's window over `history`. Component state and NOT persisted, for
+  // exactly the reason the two above already state for themselves: a saved
+  // window would silently reopen this section at whatever height someone
+  // last left it, so the same view would have two different heights
+  // depending on a decision made in a previous visit nobody remembers
+  // making.
+  const [windowSize, setWindowSize] = useState(RUNS_PAGE_SIZE);
+  // The scroll container `load more` hands focus back to when the click that
+  // exhausts the list unmounts the button under the pointer (see the control
+  // itself below).
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  // Both the range control and the project filter NARROW the corpus, so both
+  // reset the window to its first page. Carrying a raised window across a
+  // change would mean all -> today -> all leaves the list taller than a
+  // first visit to `all` ever did — the same view at two heights depending
+  // on the path taken to it.
+  //
+  // An effect keyed on the two values, deliberately not a changing `key` on
+  // the list that would remount it: a remount would also destroy `selected`,
+  // and a reset must leave a selection whose run is still in range alone
+  // (see `selectedRow` below — it is resolved against the UNWINDOWED
+  // `orderedRows` precisely so the pane keeps describing a run whose row the
+  // reset pushed below the window).
+  useEffect(() => {
+    setWindowSize(RUNS_PAGE_SIZE);
+  }, [range, projectFilter]);
 
   // I3's fix: the one signal that tells this view "run history just moved"
   // without adding a poll of its own — `useOrchestratorArchive`'s own doc
@@ -512,7 +555,35 @@ export default function RunsView() {
   // run" wording for the default selection below only makes sense read
   // against whatever the filter currently shows.
   const { pinned, history } = splitPinned(filtered);
-  const groups = groupByDay(history);
+  // task-16's window, and the ONE place it applies. Which lists are windowed
+  // and which deliberately are not is the whole rule, and it is the kind of
+  // thing fix rounds 2 and 3 in this file already went wrong on (a call site
+  // quietly reading a different source than its neighbours), so it is worth
+  // stating outright:
+  //
+  //   windowed  — `groupByDay`'s input, and nothing else. The list is a
+  //               window; every other reader wants the whole corpus.
+  //   NOT       — `pinned`. A run still going since three days ago must
+  //               render regardless of its own startedAt, which is the
+  //               entire reason `splitPinned` exists; paging that row away
+  //               is the exact failure that split was written to prevent.
+  //               The "one run per project" invariant caps this region at
+  //               one row per registered project, so it cannot grow the way
+  //               history can and leaves no hole in the bound.
+  //   NOT       — `orderedRows`/`selectedRow` (selection survives a reset
+  //               that pushes its row out of the window), `filtered` (the
+  //               aggregate tiles and the wide machine-time tile). A window
+  //               is a RENDERING decision and must not move a single number
+  //               in the tiles.
+  //
+  // The slice lands between `splitPinned` and `groupByDay` and nowhere else,
+  // which is what makes a boundary falling mid-day render correctly: window
+  // first, group second, so a partially-revealed day renders its own heading
+  // over exactly the rows revealed and the next `load more` extends that
+  // same group rather than emitting a second heading for the same key.
+  const windowed = history.slice(0, windowSize);
+  const hiddenCount = history.length - windowed.length;
+  const groups = groupByDay(windowed);
 
   // Reading order top to bottom: the pinned region first (regardless of its
   // own startedAt — see splitPinned's own comment for why), then history
@@ -594,7 +665,11 @@ export default function RunsView() {
   ));
 
   return (
-    <div className="board">
+    // `runs-board` (task-16) is the modifier that bounds this section to one
+    // viewport — see its rule in styles.css for why the height is derived
+    // from layout rather than a `calc(100vh - <chrome>px)` constant.
+    // BoardView and ArchiveView keep rendering a bare `.board`.
+    <div className="board runs-board">
       <div className="board-bar">
         <div className="board-title">Runs</div>
         {merged.length > 0 && (
@@ -749,7 +824,15 @@ export default function RunsView() {
           </div>
 
           <div className="runs-split">
-            <div className="runs-list" data-testid="runs-list">
+            {/* `tabIndex={-1}` earns its place twice over (task-16): this is
+                now a scrollable region, and a scrollable region needs a
+                programmatic focus target — both for the exhausting-click
+                handoff below and because a keyboard reader who scrolls it
+                needs somewhere for focus to be. It is -1, not 0: the row
+                buttons inside are what keep the region operable via Tab, so
+                adding it to the tab order would only insert an extra stop
+                before them. */}
+            <div className="runs-list" data-testid="runs-list" ref={listRef} tabIndex={-1}>
               {filtered.length === 0 ? (
                 // Task 7's own empty state — a DIFFERENT fact from "no runs
                 // yet" above (`merged.length === 0`), which stays reachable
@@ -789,6 +872,38 @@ export default function RunsView() {
                       <div className="runs-day-rows">{renderRows(group.rows)}</div>
                     </div>
                   ))}
+                  {/* task-16's `load more`, at the FOOT of the list and
+                      INSIDE the scroll container — it is the end of the
+                      list, not a fixture beside it, so it should arrive
+                      under the last row rather than sit permanently in view
+                      over a list it may not even apply to.
+                        The label states the remaining count rather than
+                      saying "more", so the button says what it will do — and
+                      it is also what tells a reader that a selection whose
+                      row sits below the window still has list underneath it
+                      (see `selectedRow`'s own note).
+                        The exhausting click is the case worth handling: it
+                      unmounts this button from under the pointer, which
+                      drops focus to <body> and strands a keyboard reader at
+                      the top of the document. Handing focus to the list
+                      container puts them at the region they were just
+                      reading. The check is `hiddenCount <= RUNS_PAGE_SIZE`,
+                      evaluated against the value this click is about to
+                      consume, not a re-read of state that has not updated
+                      yet. */}
+                  {hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      className="runs-load-more"
+                      data-testid="runs-load-more"
+                      onClick={() => {
+                        setWindowSize((n) => n + RUNS_PAGE_SIZE);
+                        if (hiddenCount <= RUNS_PAGE_SIZE) listRef.current?.focus();
+                      }}
+                    >
+                      load more ({hiddenCount} older)
+                    </button>
+                  )}
                 </>
               )}
             </div>

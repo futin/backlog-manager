@@ -6,9 +6,9 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns } from '../client/src/lib/agents';
-import RunsView from '../client/src/components/runs/RunsView';
+import RunsView, { RUNS_PAGE_SIZE } from '../client/src/components/runs/RunsView';
 import { RUN_RANGES } from '../client/src/lib/run-range';
-import { MACHINE_STAGES, dayLabel } from '../client/src/lib/run-stats';
+import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type {
   ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
   OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, VerificationSummary
@@ -1078,5 +1078,280 @@ describe('RunsView', () => {
     for (const entry of ARCHIVE_RUNS) {
       expect(screen.queryByTestId(`runs-row-mode-${entry.runId}`)).not.toBeInTheDocument();
     }
+  });
+});
+
+/**
+ * task-16: history is rendered as a WINDOW of the newest runs with a counted
+ * `load more` control at the foot of the list, so the initial render is a
+ * page rather than the whole corpus.
+ *
+ * The rule these cases exist to pin is not "a slice happens" but WHERE the
+ * slice happens and what it is deliberately not allowed to touch: it lands
+ * between `splitPinned` and `groupByDay`, so the pinned live region is never
+ * paged (case: "leaves the pinned live region outside the window") and a
+ * boundary falling mid-day extends one group rather than emitting a second
+ * heading for the same key (case: "renders a day split across the window
+ * boundary as one group"). Selection is resolved against the UNWINDOWED
+ * ordered list, which is what lets a window reset leave a pane describing a
+ * run whose row it just pushed out of view.
+ */
+describe('RunsView history paging (task-16)', () => {
+  const PAGED_PROJECT = '/abs/paged';
+  const OTHER_PROJECT = '/abs/other';
+
+  /**
+   * Timestamps are built two different ways below, deliberately.
+   *
+   * `noonDaysAgo` anchors to 12:00 LOCAL on a given past day, which is the
+   * only honest way to write a fixture whose assertions are about DAY
+   * GROUPING: `dayKey`/`dayLabel` bucket by local time, and a fixture built
+   * from bare "N hours ago" offsets silently changes shape depending on what
+   * time of day the suite happens to run at. Noon is far enough from either
+   * midnight that no DST shift can move a run into a neighbouring day.
+   *
+   * `minutesAgo` is for the cases that care about ROW COUNTS and range
+   * RESETS, not grouping. Note what those cases do NOT assume: nothing below
+   * depends on the intermediate range (`today`, `month`) actually containing
+   * these runs. The rule under test is that a range CHANGE resets the
+   * window, and the assertion is always taken back on `all` — which is what
+   * keeps these cases from turning flaky for a run that starts within an
+   * hour of a month boundary.
+   */
+  function noonDaysAgo(daysAgo: number, minutes = 0): string {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - daysAgo);
+    return new Date(d.getTime() + minutes * 60_000).toISOString();
+  }
+
+  function minutesAgo(minutes: number): string {
+    return new Date(Date.now() - minutes * 60_000).toISOString();
+  }
+
+  /** One archived, done run per timestamp, ids ordered so `runs-row-paged-000` is always the one at index 0 of the fixture as written. */
+  function pagedRuns(startedAts: readonly string[], project: string = PAGED_PROJECT): OrchestratorArchiveRun[] {
+    return startedAts.map((startedAt, i) => run({
+      runId: `paged-${project === PAGED_PROJECT ? '' : 'o-'}${String(i).padStart(3, '0')}`,
+      project,
+      status: 'done',
+      startedAt,
+      updatedAt: startedAt,
+      queue: [item(`p-${i}`, 'merged')]
+    }));
+  }
+
+  /** `count` runs, newest first, one minute apart — the plain "a lot of history" fixture. */
+  function minuteSeries(count: number, project: string = PAGED_PROJECT): OrchestratorArchiveRun[] {
+    return pagedRuns(Array.from({ length: count }, (_, i) => minutesAgo(i + 1)), project);
+  }
+
+  const historyRows = (container: HTMLElement): Element[] =>
+    Array.from(container.querySelectorAll('.runs-day:not([data-testid="runs-day-live"]) .runs-row'));
+
+  it('renders one page of history with a counted load-more control', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+    // The label states what the click will do, not merely "more" — and the
+    // count is what tells a reader with a selection below the window that
+    // there is still list underneath it.
+    expect(screen.getByTestId('runs-load-more')).toHaveTextContent('5 older');
+  });
+
+  it('reveals the rest and removes the control when the window is exhausted', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE + 5);
+    expect(screen.queryByTestId('runs-load-more')).not.toBeInTheDocument();
+  });
+
+  it('renders no load-more control at all when history fits in one page', async () => {
+    await renderRunsView(minuteSeries(3));
+    expect(screen.queryByTestId('runs-load-more')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The case §0.2 of the plan turns on: window FIRST, group SECOND. 24 runs
+   * on 24 distinct days fill all but one slot of the first page, so the
+   * 25th row is the newest of four runs sharing a much older day — the
+   * boundary falls inside that day. The wrong order (group, then window)
+   * would either reveal all four of that day's runs or emit a second
+   * heading for the same key on the next click.
+   */
+  it('renders a day split across the window boundary as one group that grows', async () => {
+    const distinctDays = Array.from({ length: RUNS_PAGE_SIZE - 1 }, (_, i) => noonDaysAgo(i + 1));
+    const boundaryDay = Array.from({ length: 4 }, (_, k) => noonDaysAgo(RUNS_PAGE_SIZE, -k));
+    const { container } = await renderRunsView(pagedRuns([...distinctDays, ...boundaryDay]));
+
+    const key = dayKey(boundaryDay[0]) as string;
+    expect(key).not.toBeNull();
+
+    const group = () => container.querySelectorAll(`[data-testid="runs-day-${key}"]`);
+    expect(group()).toHaveLength(1);
+    expect(group()[0].querySelectorAll('.runs-row')).toHaveLength(1);
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    // Still ONE element for that key — the next page extended the group it
+    // had already opened rather than starting a second one under the same
+    // heading.
+    expect(group()).toHaveLength(1);
+    expect(group()[0].querySelectorAll('.runs-row')).toHaveLength(4);
+  });
+
+  it('leaves the pinned live region outside the window', async () => {
+    const live = run({
+      runId: 'paged-live',
+      project: OTHER_PROJECT,
+      status: 'running',
+      startedAt: minutesAgo(5_000),
+      updatedAt: minutesAgo(0),
+      current: true,
+      queue: [item('pl-1', 'dispatched')]
+    });
+    const liveEntry: OrchestratorRunsPayload['runs'][number] = {
+      runId: live.runId,
+      project: live.project,
+      status: 'running',
+      startedAt: live.startedAt,
+      updatedAt: live.updatedAt,
+      maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
+      queue: [liveQueueItem('pl-1', 'dispatched')],
+      attention: [],
+      fresh: true,
+      pastRuns: 0
+    };
+
+    const { container } = await renderRunsView([live, ...minuteSeries(RUNS_PAGE_SIZE + 5)], [liveEntry]);
+
+    // The live run renders whole AND consumes no slot of the history
+    // window — a run still going since days ago is exactly the row
+    // `splitPinned` exists to keep visible, so paging it away would defeat
+    // that split.
+    expect(screen.getByTestId('runs-day-live').querySelectorAll('.runs-row')).toHaveLength(1);
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+  });
+
+  it('resets the window to one page when the range changes', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE + 5);
+
+    await userEvent.click(screen.getByTestId('runs-range-today'));
+    await userEvent.click(screen.getByTestId('runs-range-all'));
+
+    // Not "the same view at two heights depending on the path taken to it".
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+  });
+
+  it('resets the window to one page when the project filter changes', async () => {
+    const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE + 5);
+
+    const select = screen.getByRole('combobox', { name: 'Project' });
+    await userEvent.selectOptions(select, PAGED_PROJECT);
+    await userEvent.selectOptions(select, 'all');
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+  });
+
+  it('never disturbs the selection when load more only adds rows', async () => {
+    const runs = minuteSeries(RUNS_PAGE_SIZE + 5);
+    await renderRunsView(runs);
+
+    const chosen = runs[3];
+    await userEvent.click(screen.getByTestId(`runs-row-${chosen.runId}`));
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(screen.getByTestId(`runs-row-${chosen.runId}`)).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(chosen.runId);
+  });
+
+  /**
+   * The consequence §0.5 of the plan calls out by name and rules INTENDED: a
+   * reset can push the selected row below the window, and the pane must keep
+   * describing it anyway. The pane describes a RUN; the list is a WINDOW.
+   * The deliberately-rejected alternative — auto-growing the window until
+   * the selected row is included — would let a selection 400 rows deep
+   * silently re-inflate the list to 400 and defeat the paging entirely.
+   */
+  it('keeps a selection whose row a window reset pushed out of view', async () => {
+    const runs = minuteSeries(60);
+    const { container } = await renderRunsView(runs);
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+    const chosen = runs[30];
+    await userEvent.click(screen.getByTestId(`runs-row-${chosen.runId}`));
+
+    await userEvent.click(screen.getByTestId('runs-range-month'));
+    await userEvent.click(screen.getByTestId('runs-range-all'));
+
+    expect(historyRows(container)).toHaveLength(RUNS_PAGE_SIZE);
+    expect(screen.queryByTestId(`runs-row-${chosen.runId}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(chosen.runId);
+  });
+
+  /**
+   * The other half of the same rule, unchanged by this task: a selection
+   * that leaves the FILTER entirely (not merely the window) still falls back
+   * to the newest visible row. Windowing must not have quietly become a
+   * second way for `selectedRow` to resolve.
+   */
+  it('still falls back to the newest visible run when the selection leaves the filter', async () => {
+    const mine = minuteSeries(RUNS_PAGE_SIZE + 5);
+    const theirs = pagedRuns([minutesAgo(2), minutesAgo(3)], OTHER_PROJECT);
+    await renderRunsView([...mine, ...theirs]);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${mine[3].runId}`));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), OTHER_PROJECT);
+
+    expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(theirs[0].runId);
+  });
+
+  it('renders no load-more control in the range-empty state', async () => {
+    await renderRunsView(pagedRuns(Array.from({ length: RUNS_PAGE_SIZE + 5 }, (_, i) => noonDaysAgo(40 + i))));
+
+    await userEvent.click(screen.getByTestId('runs-range-today'));
+
+    expect(screen.getByTestId('runs-empty-range')).toBeInTheDocument();
+    expect(screen.queryByTestId('runs-load-more')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The exhausting click unmounts the button from under the pointer, which
+   * drops focus to <body> and strands a keyboard reader at the top of the
+   * document. Focus goes to the list container they were just reading.
+   */
+  it('hands focus to the list when the click that exhausts the window removes the button', async () => {
+    await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(document.activeElement).toBe(screen.getByTestId('runs-list'));
+  });
+
+  /**
+   * A window is a RENDERING decision. The aggregate tiles and the wide
+   * machine-time tile read the unwindowed `filtered` list, so no number on
+   * the page may move when the window does — the same class of mistake as
+   * this file's fix rounds 2 and 3 (a call site quietly reading a different
+   * source than its neighbours), which is why it is asserted rather than
+   * left to the comment that states it.
+   */
+  it('moves no aggregate number when the window grows', async () => {
+    await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
+
+    const before = screen.getByTestId('runs-tiles').textContent;
+    await userEvent.click(screen.getByTestId('runs-load-more'));
+
+    expect(screen.getByTestId('runs-tiles').textContent).toBe(before);
   });
 });

@@ -1434,6 +1434,21 @@ body {
    fourth section header/toolbar shaped exactly like the first one, not a
    new kind of thing. */
 
+/* task-16: the modifier that bounds this section — and only this section —
+   to one viewport. `.board` is already `display: flex; flex-direction:
+   column`, so giving it a definite height is the whole structural change:
+   the bar and the tiles take what they need, and .runs-split below claims
+   the remainder and scrolls inside it, so the range control and the project
+   select can no longer scroll away from a reader who is three weeks deep in
+   history. BoardView/ArchiveView render a bare `.board` and are untouched.
+   `100vh` is DIVIDED by --font-scale for the same reason .rail is (see its
+   comment near the top of this file — this is that idiom, not a second one):
+   .shell carries `zoom: var(--font-scale, 1)`, which leaves 100vh resolving
+   against the UNZOOMED viewport, so at 120% a plain 100vh box is drawn 20%
+   taller than the screen. The two --body-pad gutters come off because .main
+   pads the page above and below this box. */
+.runs-board { height: calc(100vh / var(--font-scale, 1) - var(--body-pad) * 2) }
+
 /* The range control (Task 7, design doc: "Range") — Today / This week /
    This month / All as a segmented button group sitting in `.board-tools`
    ahead of the project `<select>`, not a fifth `<select>` beside it. A
@@ -1567,10 +1582,49 @@ body {
    ledger table — keeps the room). `align-items: start` so a short list does
    not stretch to match a tall detail pane's height, which would leave a
    column of empty strip paper under the last day group for no reason. */
-.runs-split { display: grid; grid-template-columns: 200px 1fr; gap: var(--group-gap); align-items: start }
+.runs-split {
+  display: grid; grid-template-columns: 200px 1fr; gap: var(--group-gap); align-items: start;
+  /* task-16: the flex child of .runs-board that absorbs whatever height the
+     bar and the tiles above it did not take. `min-height: 0` is not
+     decoration — a flex item's default `min-height: auto` refuses to shrink
+     below its content, so without it this box simply grows to the full run
+     list and the whole bound below silently does nothing. Deriving the
+     remainder from layout (rather than `calc(100vh - <chrome>px)` on the
+     list itself) is what makes this correct at every breakpoint: the tiles
+     row is markedly taller in the 700–900px band, where .runs-tile-wide
+     peels onto its own full-width row, and no constant is right in both
+     bands. */
+  flex: 1; min-height: 0;
+}
 .runs-list { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
+/* task-16: the two halves of the split each scroll their own overflow rather
+   than growing the document. The cap is a PERCENTAGE of the grid area — with
+   .runs-board carrying a definite height, the implicit row stretches to it —
+   so `align-items: start` above still holds for a short list (it sizes to its
+   content and leaves no column of empty paper), and the cap only bites once
+   content actually exceeds the box.
+   `overscroll-behavior: contain` because a nested scroll box that chains its
+   scroll to the document at either end is worse than the unbounded page this
+   replaces: the page would lurch the moment the list bottomed out.
+   The `min-height` floor is the graceful degrade for a viewport so short (or
+   a --font-scale so large) that the bar and tiles alone exceed it — the boxes
+   keep a usable height and the PAGE scrolls again, rather than the list
+   collapsing to nothing. It supersedes .runs-detail's own old 160px floor,
+   which the 700px block below restores once none of this applies. */
+.runs-list, .runs-detail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; min-height: 240px }
 .runs-day { display: flex; flex-direction: column; gap: 6px }
+/* Sticky against .runs-list's own scroll — the same idiom, and the same
+   reasoning, as .archive-month (see its comment above): once a long list has
+   scrolled past a day's heading, that heading is the only thing left saying
+   where in history the reader is. Sticky works here because a sticky element
+   positions against its nearest SCROLLING ancestor (.runs-list) while
+   un-sticking at the end of its own containing block (.runs-day), which is
+   exactly the wanted behaviour for a group heading.
+   Opaque --board, not a mix or a transparency: rows scroll UNDER this, and
+   anything less shows a row's text through the heading meant to be labelling
+   it. */
 .runs-day-heading {
+  position: sticky; top: 0; z-index: 1; background: var(--board);
   font-family: var(--display); font-size: 9.5px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
 }
@@ -1625,12 +1679,33 @@ body {
 .runs-row-count { margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
 .runs-row-wall { font-family: var(--mono); font-size: 10px; color: var(--ink3); font-variant-numeric: tabular-nums }
 
+/* task-16's `load more`, sitting at the foot of the list INSIDE the scroll
+   box. Deliberately quieter than .runs-row — dashed rather than solid, no
+   paper fill — so it reads as the end of the list rather than as one more
+   run in it, which is the one thing a reader scanning rows must not mistake
+   it for. */
+.runs-load-more {
+  width: 100%; text-align: center; font-family: var(--mono); font-size: 10px; color: var(--ink3);
+  background: none; border: 1px dashed var(--hairline); border-radius: 2px;
+  padding: 7px 10px; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.runs-load-more:hover { color: var(--ink2); border-color: var(--hairline2) }
+.runs-load-more:focus-visible { outline: none; border-color: var(--cyan); color: var(--ink2) }
+/* The list container itself is focusable (tabIndex={-1}) only so the
+   exhausting `load more` click has somewhere to hand focus; it is not a
+   control, so it gets no focus ring of its own. */
+.runs-list:focus { outline: none }
+
 /* The detail pane. Task 7 replaces its contents; the paper-and-hairline
-   surface and the minimum height (so an empty/placeholder pane does not
-   collapse to a sliver beside a tall run list) are what this task owns. */
+   surface is what this task owns. Its own `min-height: 160px` (so an
+   empty/placeholder pane does not collapse to a sliver beside a tall run
+   list) moved to the shared bound rule above in task-16 — a second, LATER
+   declaration here would silently win over that 240px floor, which is
+   exactly the bug a leftover would be. The phone block below restates the
+   160px, since none of the bounding applies there. */
 .runs-detail {
   background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 12px; min-height: 160px; font-family: var(--mono); font-size: 11px; color: var(--ink3);
+  padding: 12px; font-family: var(--mono); font-size: 11px; color: var(--ink3);
 }
 
 /* The same 700px rail breakpoint the rest of the app switches on (see the
@@ -1639,6 +1714,17 @@ body {
    section alone. */
 @media (max-width: 700px) {
   .runs-split { grid-template-columns: 1fr }
+  /* task-16: and the whole one-viewport bound comes off with it. A scroll box
+     nested inside a scrolling page is worse than an unbounded page on a
+     phone — there is no fixed chrome left to preserve here, since the layout
+     is already one column and the tiles scroll away with everything else.
+     .runs-split's `flex: 1; min-height: 0` needs no undoing: with
+     .runs-board back to `height: auto` there is no remainder for it to
+     absorb, and a flex item that may shrink below its content is only
+     observable against a definite container height. */
+  .runs-board { height: auto }
+  .runs-list, .runs-detail { max-height: none; overflow: visible; min-height: auto }
+  .runs-detail { min-height: 160px }
 }
 
 /* ---------------------------------------------- run detail pane (Task 7)
