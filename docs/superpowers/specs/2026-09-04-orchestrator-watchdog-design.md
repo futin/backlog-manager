@@ -387,6 +387,12 @@ the run goes fresh again would all wait for a window focus.
 
 ### 6.4 Settings — "Orchestrator watchdog · this server"
 
+*Superseded on 2026-09-05 by* `2026-09-05-watchdog-monitor-design.md` *for
+the State row and the Activity feed, which now live on Runs › Watchdog
+(`WatchdogMonitor`); the group keeps the four knobs below, plus a `Live
+view` row pointing at them, and passes* `live: false` *so Settings installs
+no poll. The knobs paragraph stands.*
+
 A new `SettingsGroup` below "Claude Agents · this machine", fed by a
 `useWatchdog` hook (`GET /api/agents/watchdog` on mount and focus, plus a 5s
 poll while `phase === 'armed'` so "next check in 42s" moves). Title says

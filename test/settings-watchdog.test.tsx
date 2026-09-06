@@ -7,14 +7,15 @@ import '@testing-library/jest-dom';
 
 import SettingsView from '../client/src/components/settings/SettingsView';
 import {
-  ATTEMPT_LADDER, GRACE_LADDER, stateLine, TICK_LADDER
+  ATTEMPT_LADDER, GRACE_LADDER, TICK_LADDER
 } from '../client/src/components/settings/WatchdogGroup';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
-import { formatClock, formatSpanCompact } from '../client/src/lib/run-time';
+import { WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
+import { formatSpanCompact } from '../client/src/lib/run-time';
 import {
   DEFAULT_WATCHDOG_CONFIG, WATCHDOG_LIMITS
 } from '../shared/types';
-import type { AgentsStatus, WatchdogEvent, WatchdogStatus } from '../shared/types';
+import type { AgentsStatus, WatchdogStatus } from '../shared/types';
 
 /**
  * task-7-brief.md's own table, Step 1 — `WatchdogGroup` rendered the same
@@ -105,9 +106,9 @@ describe('WatchdogGroup', () => {
     jest.useRealTimers();
   });
 
-  // --- 1: idle, defaults — title, state row, and the "this server" hint ----
+  // --- 1: the group is knobs plus one orientation row, nothing live -------
 
-  it('renders the group titled, idle, and names the shared config file in its hint', async () => {
+  it('renders the group titled, names the shared config file, and points at Runs › Watchdog', async () => {
     stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
     renderView();
 
@@ -115,10 +116,9 @@ describe('WatchdogGroup', () => {
     // first synchronous paint regardless of whether `useWatchdog`'s mount
     // fetch has resolved yet (both the loaded state and the `status===null`
     // fallback render it), so asserting on the title first would pass
-    // before the fetch settles at all. The State row's text only exists
-    // once `status` has actually landed, so waiting on IT is what actually
-    // waits for the fetch.
-    expect(await screen.findByText('idle — no running run')).toBeInTheDocument();
+    // before the fetch settles at all. A knob only exists once `status` has
+    // actually landed, so waiting on ONE of them is what waits for the fetch.
+    expect(await screen.findByLabelText('Enabled')).toBeInTheDocument();
     expect(screen.getByText(GROUP_TITLE)).toBeInTheDocument();
 
     // The hint is read as running text — same pattern
@@ -127,73 +127,29 @@ describe('WatchdogGroup', () => {
     // content, not a search for a single leaf node).
     expect(screen.getByText(/~\/\.backlog-manager\/settings\/watchdog\.json/)).toBeInTheDocument();
     expect(screen.getByText(/every device/i)).toBeInTheDocument();
+
+    // task-18: the live half moved. What stays behind is one sentence saying
+    // where it went — and, crucially, NOTHING that changes on a clock.
+    expect(screen.getByText(/Runs › Watchdog/)).toBeInTheDocument();
+    expect(screen.queryByText(/^idle — /)).not.toBeInTheDocument();
+    expect(screen.queryByText('Activity')).not.toBeInTheDocument();
   });
 
   // --- 2: off, controls not gated on phase -----------------------------------
 
-  it('shows the off reason but still renders every control', async () => {
+  it('renders every control while the sweeper is off, and still says nothing about its phase', async () => {
     stubFetch({
       watchdog: watchdogStatus({ phase: 'off', reason: 'BM_AGENTS off', nextTickAt: null })
     });
     renderView();
 
-    expect(await screen.findByText('off — BM_AGENTS off')).toBeInTheDocument();
-    expect(screen.getByLabelText('Enabled')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Enabled')).toBeInTheDocument();
+    // The phase belongs to the monitor now — a knob is worth setting while
+    // the sweeper is off, but this group no longer reports that it is.
+    expect(screen.queryByText('off — BM_AGENTS off')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Check every')).toBeInTheDocument();
     expect(screen.getByLabelText('Leave a resumed run alone for')).toBeInTheDocument();
     expect(screen.getByLabelText('Give up after')).toBeInTheDocument();
-  });
-
-  // --- 3: armed, watching + next-tick countdown + resume-disabled suffix ----
-
-  it('reads watching run ids, the next-tick countdown, and the resume-disabled suffix', async () => {
-    const now = new Date('2026-09-05T12:00:00.000Z').getTime();
-    jest.useFakeTimers();
-    jest.setSystemTime(now);
-
-    stubFetch({
-      watchdog: watchdogStatus({
-        phase: 'armed',
-        nextTickAt: new Date(now + 42_000).toISOString(),
-        watching: ['run-a'],
-        config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false }
-      })
-    });
-    renderView();
-
-    // Flushes the mount-time fetch's microtask chain under fake timers —
-    // the identical idiom test/watchdog-hook.test.tsx's own `flush` uses,
-    // inlined here since this is the only case in this file that needs it.
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(0);
-    });
-
-    expect(screen.getByText('armed — watching run-a, next check in 42s · resume disabled'))
-      .toBeInTheDocument();
-  });
-
-  // Also exercises `stateLine` directly, pure, at the exact boundary the
-  // rendered case above only samples once — this is what actually pins the
-  // rounding and the suffix placement independent of React's render timing.
-  it('stateLine: idle/armed suffix and armed countdown, as a pure function', () => {
-    const now = Date.parse('2026-09-05T12:00:00.000Z');
-
-    expect(stateLine(watchdogStatus({ phase: 'idle' }), now)).toBe('idle — no running run');
-    expect(stateLine(
-      watchdogStatus({ phase: 'idle', config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false } }),
-      now
-    )).toBe('idle — no running run · resume disabled');
-
-    expect(stateLine(watchdogStatus({
-      phase: 'off', reason: 'BM_WATCHDOG off'
-    }), now)).toBe('off — BM_WATCHDOG off');
-
-    expect(stateLine(watchdogStatus({
-      phase: 'armed',
-      watching: ['run-a', 'run-b'],
-      nextTickAt: new Date(now + 42_000).toISOString(),
-      config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false }
-    }), now)).toBe('armed — watching run-a, run-b, next check in 42s · resume disabled');
   });
 
   // --- 4: every ladder value is inside its WATCHDOG_LIMITS clamp range ------
@@ -379,41 +335,6 @@ describe('WatchdogGroup', () => {
     expect(getsToWatchdog()).toBe(getsBeforeSave);
   });
 
-  // --- 9: Activity — three rows, newest-first order preserved --------------
-
-  it('renders three Activity rows in order, each with a clock, project basename and detail', async () => {
-    const events: WatchdogEvent[] = [
-      { at: '2026-09-05T09:59:00Z', project: '/abs/alpha', runId: 'run-a', kind: 'spawned', detail: 'resumed run-a (attempt 1/2)' },
-      { at: '2026-09-05T09:30:00Z', project: '/abs/beta', runId: null, kind: 'idle', detail: 'no running run — standing down' },
-      { at: '2026-09-05T09:00:00Z', project: '/abs/gamma', runId: null, kind: 'armed', detail: 'watching for crashed runs' }
-    ];
-    stubFetch({ watchdog: watchdogStatus({ events }) });
-    renderView();
-
-    const rows = await screen.findAllByRole('listitem');
-    expect(rows).toHaveLength(3);
-
-    const expectations: [string, string][] = [
-      [formatClock(events[0].at) ?? '', 'alpha'],
-      [formatClock(events[1].at) ?? '', 'beta'],
-      [formatClock(events[2].at) ?? '', 'gamma']
-    ];
-    rows.forEach((row, i) => {
-      expect(row).toHaveTextContent(expectations[i][0]);
-      expect(row).toHaveTextContent(expectations[i][1]);
-      expect(row).toHaveTextContent(events[i].detail);
-    });
-  });
-
-  // --- 10: empty Activity ------------------------------------------------------
-
-  it('shows the empty-history line when there are no events', async () => {
-    stubFetch({ watchdog: watchdogStatus({ events: [] }) });
-    renderView();
-
-    expect(await screen.findByText('nothing since the server started')).toBeInTheDocument();
-  });
-
   // --- 11: the GET rejects — a one-line notice, no thrown error --------------
 
   it('shows a one-line unavailable notice and renders no controls when the GET rejects', async () => {
@@ -433,5 +354,58 @@ describe('WatchdogGroup', () => {
     expect(screen.queryByLabelText('Leave a resumed run alone for')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Give up after')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Enabled')).not.toBeInTheDocument();
+  });
+  // --- task-18: nothing in Settings is live --------------------------------
+
+  it('never polls the watchdog from Settings, even while the sweeper is armed', async () => {
+    jest.useFakeTimers();
+    const fetchMock = stubFetch({
+      watchdog: watchdogStatus({
+        phase: 'armed',
+        nextTickAt: new Date(Date.now() + 42_000).toISOString(),
+        watching: ['run-a']
+      })
+    });
+    renderView();
+
+    // Settle the mount fetches without advancing any fake time — the same
+    // idiom test/watchdog-hook.test.tsx's own `flush` uses.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0);
+    });
+
+    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(
+      ([u]) => String(u).endsWith('/api/agents/watchdog')
+    ).length;
+    expect(getsToWatchdog()).toBe(1);
+
+    // `armed` is the exact phase that USED to install a 5s interval here.
+    // Two full periods, so a poll that merely starts late is still caught.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_POLL_MS * 2);
+    });
+
+    expect(getsToWatchdog()).toBe(1);
+  });
+
+  it('opens with the Live view pointer and then the four knobs, in that order', async () => {
+    stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
+    const { container } = render(
+      <SettingsProvider>
+        <SettingsView />
+      </SettingsProvider>
+    );
+    await screen.findByLabelText('Enabled');
+
+    // Scoped to this group alone: `SettingsView` renders several others
+    // above it, all of which use the same `.set-name` class.
+    const group = container.querySelector('[data-testid="settings-group-orchestrator-watchdog"]')
+      ?? Array.from(container.querySelectorAll('.set-group')).find(
+        (el) => el.textContent?.includes(GROUP_TITLE)
+      );
+    const names = Array.from(group?.querySelectorAll('.set-name') ?? []).map((el) => el.textContent);
+    expect(names).toEqual([
+      'Live view', 'Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after'
+    ]);
   });
 });

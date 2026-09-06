@@ -3,6 +3,10 @@ id: task-18
 title: Move the watchdog's live view from Settings into Runs behind a Runs / Watchdog mode switch
 created: 2026-09-05
 tags: ui, runs, watchdog
+updated: 2026-09-06T07:36:21Z
+started: 2026-09-06T07:15:24Z
+execute-elapsed: 1257
+execute-tokens: 218072
 ---
 
 ## Goal
@@ -96,3 +100,84 @@ Every case is spelled out per task in the plan; the suites it touches:
 - Nothing under `server/` or `shared/` changed.
 - `pnpm test`, `pnpm run typecheck`, `pnpm run build` all green; `CLAUDE.md` and the
   watchdog spec's §6.4 updated.
+
+## Outcome
+
+2026-09-06 — done. All six plan tasks executed in order on `backlog/task-18`
+(task-15 and task-16 had already merged into the base, so no rebase was
+needed before Task 4).
+
+What landed:
+
+- `stateLine` moved from `WatchdogGroup.tsx` into `client/src/lib/run-watchdog.ts`
+  beside `isCrashed`/`watchdogClause`; its eight cases now live in
+  `test/run-watchdog.test.ts` (two of them — a null and a past `nextTickAt`
+  both reading `0s` — were never pinned by the Settings suite at all).
+- `lastReportedEntry` moved from `RunStrip.tsx` into `client/src/lib/run-time.ts`,
+  widened to `readonly RunQueueItem[]`, with five cases in `test/run-time.test.ts`.
+  `RunStrip` imports it; `orchestrator-strip.test.tsx` unchanged and green.
+- `useWatchdog({ live })` — `live: false` installs no armed 5s interval and
+  changes nothing else (mount fetch, focus refetch, `save()`, error posture
+  all pinned identical under both settings).
+- `WatchdogMonitor` (`client/src/components/runs/WatchdogMonitor.tsx`): state
+  card (state line, read-only config line, `Configure in Settings › Orchestrator
+  watchdog.`), one row per `running` run with the skew rendered in both
+  directions (`· not yet watched`, and a non-button placeholder row for a
+  `watching` id with no run behind it), and the activity feed moved from
+  Settings. 16 cases in `test/watchdog-monitor.test.tsx`.
+- `client/src/lib/runs-mode.ts` + the `Runs | Watchdog` segmented control in
+  `RunsView.tsx`: renders unconditionally (outside `merged.length > 0`),
+  persisted under `backlog-manager.runs-mode` through `isRunsMode`, range and
+  project filter gated on runs mode, body switched, `onSelectRun` returning to
+  Runs on that run's detail. 3 guard cases + 8 view cases.
+- `WatchdogGroup` trimmed to a `Live view` orientation row plus the four
+  knobs; `useWatchdog({ live: false })`; State row, Activity block,
+  `projectBasename` and the `formatClock` import deleted. Its suite now pins
+  that Settings issues no watchdog GET beyond the mount one across two poll
+  periods, and that the row order is `Live view, Enabled, Check every, Leave a
+  resumed run alone for, Give up after`.
+- `.watchdog-*` CSS moved from the Settings block into the Runs block and
+  grown for the card and rows; single column under the existing 700px
+  breakpoint.
+- `CLAUDE.md` Layout and §6.4 of the watchdog design spec updated.
+
+Two small deviations from the plan, both mechanical: `renderRunsView` waits on
+`runs-list`, so the stored-`watchdog` case renders `<RunsView />` directly
+instead; and the `Enabled` knob's hint was reworded (it said "the sweeper's
+phase above", which is no longer above it) without naming `Runs › Watchdog` a
+second time, since two matches broke the pointer assertion.
+
+Nothing under `server/` or `shared/` changed — verified by
+`git status --porcelain -- server shared` returning zero lines. The monitor
+lands in the Runs chunk only, not the Settings chunk:
+
+```
+$ for f in client/dist/assets/RunsView-*.js client/dist/assets/SettingsView-*.js; do ... done
+RunsView-WPMP1z-1.js: watchdog-rows=1 Configure-in-Settings=1
+SettingsView-Ci7OiBA2.js: watchdog-rows=0 Configure-in-Settings=0
+```
+
+Verification:
+
+```
+$ pnpm test
+Test Suites: 75 passed, 75 total
+Tests:       1355 passed, 1355 total
+Snapshots:   0 total
+Time:        49.548 s
+Ran all test suites.
+
+$ pnpm run typecheck
+$ tsc --noEmit
+exit=0
+
+$ pnpm run build
+dist/assets/index-Bh7t_t16.js    340.28 kB │ gzip: 103.66 kB
+✓ built in 1.07s
+exit=0
+
+$ pnpm run test:skills
+# tests 381
+# pass 381
+# fail 0
+```

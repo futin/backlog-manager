@@ -1,5 +1,6 @@
-import { isCrashed, watchdogClause } from '../client/src/lib/run-watchdog';
-import type { RunWatchdog } from '../shared/types';
+import { isCrashed, stateLine, watchdogClause } from '../client/src/lib/run-watchdog';
+import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
+import type { RunWatchdog, WatchdogStatus } from '../shared/types';
 
 /**
  * A full `RunWatchdog`, overridden per case — the same "state everything a
@@ -103,5 +104,85 @@ describe('watchdogClause', () => {
     // toggle would not resume trying, since the CAP is what stopped it.
     expect(watchdogClause(watchdog({ enabled: false, attempts: 2, maxAttempts: 2, exhausted: true })))
       .toBe('watchdog: exhausted after 2 — resume by hand');
+  });
+});
+
+/**
+ * A full `WatchdogStatus`, defaults everywhere a case does not care — the
+ * same factory `test/settings-watchdog.test.tsx` carries, duplicated here
+ * rather than exported from there because these cases MOVED out of that
+ * suite (task-18 plan Task 1) and this file must not import from a
+ * component suite to keep them running.
+ */
+function watchdogStatus(over: Partial<WatchdogStatus> = {}): WatchdogStatus {
+  return {
+    phase: 'idle',
+    nextTickAt: null,
+    config: DEFAULT_WATCHDOG_CONFIG,
+    watching: [],
+    events: [],
+    ...over
+  };
+}
+
+/**
+ * `stateLine` moved here from `WatchdogGroup.tsx` (task-18): it is the third
+ * of the three watchdog sentences the client can print, and the Settings
+ * group that used to own it no longer renders any of them — `WatchdogMonitor`
+ * on Runs › Watchdog does. These cases came with it, verbatim in intent, and
+ * gained the two `nextTickAt` degradation cases the Settings suite never
+ * pinned.
+ */
+describe('stateLine', () => {
+  const now = Date.parse('2026-09-05T12:00:00.000Z');
+
+  it('names the off reason', () => {
+    expect(stateLine(watchdogStatus({ phase: 'off', reason: 'BM_WATCHDOG off' }), now))
+      .toBe('off — BM_WATCHDOG off');
+  });
+
+  it('degrades a reasonless off to "unknown" rather than printing undefined', () => {
+    expect(stateLine(watchdogStatus({ phase: 'off' }), now)).toBe('off — unknown');
+  });
+
+  it('reads idle with no suffix while resuming is enabled', () => {
+    expect(stateLine(watchdogStatus({ phase: 'idle' }), now)).toBe('idle — no running run');
+  });
+
+  it('appends the resume-disabled suffix to idle', () => {
+    expect(stateLine(
+      watchdogStatus({ phase: 'idle', config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false } }),
+      now
+    )).toBe('idle — no running run · resume disabled');
+  });
+
+  it('lists every watched run id and counts down to the next tick', () => {
+    expect(stateLine(watchdogStatus({
+      phase: 'armed',
+      watching: ['run-a', 'run-b'],
+      nextTickAt: new Date(now + 42_000).toISOString()
+    }), now)).toBe('armed — watching run-a, run-b, next check in 42s');
+  });
+
+  it('appends the resume-disabled suffix to armed too', () => {
+    expect(stateLine(watchdogStatus({
+      phase: 'armed',
+      watching: ['run-a', 'run-b'],
+      nextTickAt: new Date(now + 42_000).toISOString(),
+      config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false }
+    }), now)).toBe('armed — watching run-a, run-b, next check in 42s · resume disabled');
+  });
+
+  it('reads 0s rather than NaN when armed with no nextTickAt', () => {
+    expect(stateLine(watchdogStatus({ phase: 'armed', watching: ['run-a'], nextTickAt: null }), now))
+      .toBe('armed — watching run-a, next check in 0s');
+  });
+
+  it('clamps a nextTickAt already in the past to 0s, never a negative countdown', () => {
+    expect(stateLine(watchdogStatus({
+      phase: 'armed',
+      watching: ['run-a'],
+      nextTickAt: new Date(now - 5_000).toISOString()
+    }), now)).toBe('armed — watching run-a, next check in 0s');
   });
 });

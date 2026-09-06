@@ -96,13 +96,29 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   `lib/run-range.ts` and `lib/run-stats.ts`, both pure statistics
   libs, and `hooks/useOrchestratorArchive.ts`, which fetches on mount and
   window focus only — no polling interval, since history moves at run
-  boundaries, not on a live heartbeat), archive (`ArchiveView.tsx`: four columns —
+  boundaries, not on a live heartbeat. The whole section sits behind a
+  `Runs | Watchdog` mode switch (`lib/runs-mode.ts`, persisted under
+  `backlog-manager.runs-mode`, unknown value → Runs; it renders
+  unconditionally, ahead of the range control, because the sweeper has a
+  phase to report whether or not any run has ever finished, while range and
+  project filter render in runs mode alone). Watchdog mode replaces the whole
+  body with `WatchdogMonitor` — the sweeper's state line, its read-only
+  config, one row per `running` run in the live payload (rows from the runs
+  payload, `watching` only annotates, because two projects can share a
+  `runId`; the skew shows in both directions, `· not yet watched` and a
+  placeholder row), and the activity feed. It owns the one live
+  `useWatchdog()` and takes `RunsView`'s own live runs as a prop, so
+  switching modes adds no request; a row click switches back to Runs on that
+  run's detail), archive (`ArchiveView.tsx`: four columns —
   refactors/ideas/bugs/out-of-scope — grouped under sticky month subheaders
   keyed on `updated ?? created` (`lib/item-month.ts`), project filter and
   search only, no status or sort control; the same cards, drawer and launch
-  sheet the board uses, no run strip), Settings, and an Orchestrator
-  watchdog group (`WatchdogGroup.tsx`, server-side knobs and activity, via
-  `hooks/useWatchdog.ts`). Board and Archive share one
+  sheet the board uses, no run strip), and Settings, whose Orchestrator
+  watchdog group (`WatchdogGroup.tsx`) is the four server-side knobs and a
+  `Live view` pointer — nothing else. It calls
+  `hooks/useWatchdog.ts`'s `useWatchdog({ live: false })`, so it installs no
+  interval and shows nothing that moves on a clock; the live half is
+  Runs › Watchdog. Board and Archive share one
   persisted project filter, declared in `lib/view-keys.ts` rather than exported
   from either — they are separate lazy chunks, and an import between them would
   undo the split. Fed by `lib/agents.ts` (same-origin
@@ -115,6 +131,11 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   `noteResume`/`resuming`, which keep it polling a `paused` run for
   `RESUME_POLL_GRACE_MS` after a Resume click, since a paused run is neither
   fresh nor running and nothing else would ask again).
+  `stateLine` lives in `lib/run-watchdog.ts` beside `isCrashed`/`watchdogClause`
+  — the three sentences the client can print about the watchdog, in one
+  module, read by both `RunStrip` and `WatchdogMonitor`; `lastReportedEntry`
+  ("what is this run actually working on") lives in `lib/run-time.ts`, read
+  by those same two.
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
   `dispatchGate` — see Invariants), `theme.css` (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
