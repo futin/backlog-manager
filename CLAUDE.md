@@ -725,7 +725,16 @@ happened.
   "derive, never accept" rule dispatch already follows, applied to a route
   with no item file to derive anything from at all.
 - **The browser never talks to the dashboard.** Every call goes board → this
-  API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off.
+  API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off —
+  and **compose passes that one through as `${BM_AGENTS:-off}`, never as a
+  literal** (bug-25, pinned by `test/compose-env.test.ts`). A literal there
+  wins outright: the `environment:` block IS `process.env` in the container
+  and dotenv never overwrites a key already in it, so `BM_AGENTS: 'on'` made
+  the documented default unreachable from the documented Quick start —
+  dispatch buttons *and* the watchdog sweeper armed, from a `cp .env.example
+  .env`. `BM_AGENTS_URL` beside it stays a literal for the opposite reason:
+  it is stack topology (`host.docker.internal`), not a policy default, and a
+  passthrough would let a host-oriented `.env` break dispatch in the stack.
 - **A project the dashboard cannot see cannot be dispatched to.** Never
   derive a `dirName` from a path to route around this. The `dispatchGate`
   membership check is a raw string compare, deliberately not realpath.

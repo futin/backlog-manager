@@ -3,9 +3,12 @@ id: bug-25
 title: docker-compose hardcodes BM_AGENTS on, contradicting three docs and unturnoffable from .env
 created: 2026-09-06
 tags: docker, security, audit-2026-09-06
-updated: 2026-09-06T20:26:48Z
+updated: 2026-09-06T23:16:38Z
 groom-elapsed: 114
 groom-tokens: 16811
+started: 2026-09-06T23:09:06Z
+execute-elapsed: 452
+execute-tokens: 37156
 ---
 
 ## Symptom
@@ -182,3 +185,113 @@ stack normally holds — then tearing it down again, so a headless session provi
 browser would be fighting the operator for the ports rather than testing the defect. The
 `docker compose config` render above asserts the same fact directly, deterministically, and
 without starting a container.
+
+## Outcome
+
+2026-09-07 — Fixed as planned, all eight steps, no deviations.
+
+`docker-compose.yml:65` is now `BM_AGENTS: '${BM_AGENTS:-off}'`. The comment above it was
+split in two (Fix step 3): the "dispatch is off unless you turn it on" sentence sits over
+`BM_AGENTS` and now says *why* it is a passthrough — the `environment:` block is
+`process.env` in the container and dotenv never overwrites a key already there, so a
+literal wins outright — while the `host.docker.internal` explanation moved down over
+`BM_AGENTS_URL`, carrying step 2's ruling (it stays a literal because it is stack topology,
+not a policy default, and a passthrough would let a host-oriented `.env` break dispatch in
+the stack). No other compose entry changed (step 4), nothing was added for the variables
+compose does not set (step 5), and no documentation was edited (step 6) — README,
+`.env.example` and CLAUDE.md were already right, and this is what makes them true.
+
+Step 7: one clause added to CLAUDE.md's existing "**The browser never talks to the
+dashboard**" invariant, naming bug-25, the passthrough form and the test that pins it, plus
+the asymmetry with `BM_AGENTS_URL` so the next reader does not "fix" it.
+
+Step 8: `test/compose-env.test.ts`, new, three cases asserting the raw file text the way
+`test/vite-proxy.test.ts` and `test/csp.test.ts` already assert config files. Written
+first and watched fail against the unfixed file — two of the three red, on the exact edit
+`f7b343b5` made rather than merely on the absence of the new line:
+
+```
+ ● docker-compose BM_AGENTS › passes the host value through with the documented off default
+
+    - Array [
+    -   "${BM_AGENTS:-off}",
+    +   "on",
+      ]
+
+      41 |     expect(assignments('BM_AGENTS')).toEqual(['${BM_AGENTS:-off}']);
+
+ ● docker-compose BM_AGENTS › never assigns a value the server would read as enabled
+
+    Expected: false
+    Received: true
+
+      52 |       expect(readAgentsConfig({ BM_AGENTS: value }).enabled).toBe(false);
+
+Test Suites: 1 failed, 1 total
+Tests:       2 failed, 1 passed, 3 total
+```
+
+The enabling-value case is driven through `readAgentsConfig` itself rather than a
+hand-copied `on`/`1`/`true` list, so that vocabulary keeps exactly one copy. Green after
+the compose edit:
+
+```
+ PASS  test/compose-env.test.ts
+  docker-compose BM_AGENTS
+    ✓ passes the host value through with the documented off default (2 ms)
+    ✓ never assigns a value the server would read as enabled (1 ms)
+    ✓ keeps BM_AGENTS_URL a literal, because it is topology and not policy
+
+Tests:       3 passed, 3 total
+```
+
+### Verification
+
+`pnpm test` — both runners, as `scripts/test-all.mjs` requires:
+
+```
+1..411
+# tests 411
+# pass 411
+# fail 0
+# duration_ms 57133.121584
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+jest's own half, run again for the counts the summary above elides:
+
+```
+Test Suites: 78 passed, 78 total
+Tests:       1480 passed, 1480 total
+Snapshots:   0 total
+Time:        61.675 s
+```
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+typecheck exit: 0
+```
+
+The compose render, as a fresh checkout would see it — no container started, this machine's
+`.env` deliberately not read:
+
+```
+$ env -u BM_AGENTS docker compose --env-file /dev/null config | grep -i BM_AGENTS
+      BM_AGENTS: 'off'
+      BM_AGENTS_URL: http://host.docker.internal:4173
+
+$ BM_AGENTS=on docker compose --env-file /dev/null config | grep -i 'BM_AGENTS:'
+      BM_AGENTS: 'on'
+```
+
+Documented default restored, opt-in path intact, `BM_AGENTS_URL` unchanged. No browser
+check, for the reason the plan gives: reaching the browser-visible consequence means
+holding `:4322`/`:5177` against the operator's own stack, and the render above asserts the
+same fact directly.
