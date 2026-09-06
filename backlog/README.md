@@ -12,3 +12,4 @@ section has a fixed id prefix used when naming its items.
 | ideas         | idea   | open -> done  |
 | tasks         | task   | open -> done  |
 | out-of-scope  | oos    | flat          |
+<!-- orchestration smoke test: task-25 -->
