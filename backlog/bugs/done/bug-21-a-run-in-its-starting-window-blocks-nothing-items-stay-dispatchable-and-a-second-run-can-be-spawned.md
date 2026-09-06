@@ -2,9 +2,12 @@
 id: bug-21
 title: A run in its starting window blocks nothing: items stay dispatchable and a second run can be spawned
 created: 2026-09-05
-updated: 2026-09-06T08:34:50Z
+updated: 2026-09-06T17:26:32Z
 groom-elapsed: 138
 groom-tokens: 18128
+started: 2026-09-06T17:02:02Z
+execute-elapsed: 1470
+execute-tokens: 195572
 ---
 
 ## Symptom
@@ -327,3 +330,83 @@ scope"):
 
 Both symptoms are the gating half of the `starting` gap. The Runs view not
 showing a starting run at all is the visibility half, filed separately.
+
+## Outcome
+
+2026-09-06 — fixed as planned, all six steps, no deviation from the approved
+shape and no scope added. `starting` is now read by every gate that reads
+`runs`, and the crashed-project subtraction moved off the board into the
+service where all of them inherit it.
+
+What landed:
+
+1. **`StartingRunsService.expired()` gained rule 3** — an entry is dead while
+   any run for that project reads `status: 'running'`, fresh or crashed. Keyed
+   on that status exactly, so `paused`/`done`/`aborted`/`failed` (all archived
+   by `cmdInit`) still keep their placeholder. In `expired()`, so `sweep()`
+   deletes rather than merely hiding.
+2. **`BoardView`'s `startingRuns` filter deleted**, the strip mapping
+   `starting` directly. That orphaned `runningRuns`, whose only reader it was,
+   so that binding went too and its reasoning was folded into `stripRuns`'
+   comment — the `running`-versus-`paused` distinction it drew is exactly what
+   rule 3 is keyed on, and is recorded there.
+3. **`runClaimBlock(item, runs, starting)`** — third parameter required, no
+   default. Per-item wording first, the coarse project-wide clause second.
+4. **All four callers fed**: `BoardView`, `ArchiveView`, `plan`'s `blocked`,
+   dispatch's 409. The two server sites now destructure
+   `const { runs, starting } = this.orchestrator.runs()` instead of `.runs`.
+5. **Toolbar Orchestrate hides** on a starting entry (`orchestrateBusy`),
+   never disables — bug-16's `showOrchestrate` reasoning intact.
+6. **`POST /api/agents/orchestrate` refuses** a starting project with the same
+   `RUN_IN_PROGRESS_CODE`, beside the `activeRun` throw and so still before
+   `resolveIds`.
+
+`runHoldsItem` deliberately unchanged; the deferral is pinned by a test
+(`runHoldsItem.length === 2`) rather than left as prose.
+
+Two things the plan did not foresee, both handled without changing its shape:
+
+- Three existing `orchestrator-starting` cases and one `question-mode` case
+  broke on the new behaviour rather than on a defect. The three read rule 1
+  through the shared fixture, whose `status` is `running`, so rule 3 answered
+  before rule 1 could — each was re-scoped to a `done` run so it still
+  isolates rule 1. The `question-mode` case made three successive successful
+  spawns for one project inside one `it`, which is precisely what the new lock
+  forbids; split into three cases, each with its own app from `beforeEach`, all
+  assertions unchanged.
+- CLAUDE.md's `starting` invariant said the board renders the strip "only when
+  the project has no `running` run at all" and listed two eviction rules. Both
+  sentences were made false by this fix, so that invariant was rewritten (three
+  rules, no client filter) and a new one added for the gating contract.
+
+The browser check in Test cases was NOT run, deliberately. The stack on this
+machine is up in Docker on 4322/5177 serving `main`, not this worktree, so it
+would have exercised the unfixed code; and standing up a second API instance
+during a live orchestrator run arms a second watchdog, which spawns `--resume`
+sessions. The jsdom suites assert the same things that check does (strip
+present, every dispatch control `aria-disabled="true"` with the starting
+reason, toolbar Orchestrate absent from the document, and the per-item wording
+once the run file lands).
+
+Verification — every new test proven load-bearing first by neutering all four
+production changes and re-running the suite (8 suites, 15 tests red), then
+restored:
+
+    $ pnpm run typecheck
+    $ tsc --noEmit
+    (no output — clean)
+
+    $ pnpm test
+    Test Suites: 76 passed, 76 total
+    Tests:       1469 passed, 1469 total
+    Snapshots:   0 total
+    Time:        76.141 s
+
+    $ pnpm run test:skills
+    # tests 406
+    # pass 406
+    # fail 0
+
+    $ pnpm run build
+    dist/assets/index-BhbhSkiK.js   340.53 kB │ gzip: 103.73 kB
+    ✓ built in 1.29s

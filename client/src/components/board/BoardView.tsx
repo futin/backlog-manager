@@ -43,7 +43,7 @@ type SortKey = 'created' | 'name' | 'project';
  *  restate per consumer than to thread a shared export through for. `watchdog?`
  *  (orchestrator-watchdog design §4.1) joined the intersection alongside
  *  RunStrip.tsx's own copy — this file never reads it directly, but `openRun`
- *  and every entry in `runningRuns` below are typed off this alias, and both
+ *  and every entry in `stripRuns` below are typed off this alias, and both
  *  get handed straight to `RunStrip`, which does. */
 type RunPayload = OrchestratorRun & {
   fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog;
@@ -284,58 +284,45 @@ export default function BoardView() {
      orchestrator-watchdog (design §6.2): stays exactly this — freshness-based,
      feeding cards, badges and `runClaimBlock` alone — because a crashed run
      must not keep a card pinned to the top of its column or dead to dispatch
-     forever; only `RunStrip` itself needed a wider view, and `runningRuns`
+     forever; only `RunStrip` itself needed a wider view, and `stripRuns`
      just below is that second list, kept deliberately separate rather than
      widening this one. */
   const freshRuns = runs.filter((run) => run.fresh);
 
-  /* orchestrator-watchdog (design §6.1/§6.2): the strip's own list, wider than
-     `freshRuns` above on purpose. `RunStrip` now renders BOTH a live run
-     (`fresh: true`) and a crashed one (`fresh: false, status: 'running'`) —
-     `isCrashed`, lib/run-watchdog.ts — and returns null for anything else
-     (a run that is merely stale because it finished), so mapping this
-     board's strip row over every `status === 'running'` entry is safe: it
-     hands RunStrip both shapes it knows how to render and nothing it
-     doesn't. A second list rather than widening `freshRuns` itself, per
-     that constant's own comment just above — cards, badges and dispatch
-     claims must stay freshness-only, and folding this in here would make a
-     future reader of `freshRuns` have to re-derive which half of it is safe
-     to trust for THAT purpose. */
-  const runningRuns = runs.filter((run) => run.status === 'running');
+  /* orchestrator-watchdog (design §6.1/§6.2) + task-17: the strip's own list,
+     wider than `freshRuns` above on purpose. `RunStrip` renders a live run
+     (`fresh: true`), a crashed one (`fresh: false, status: 'running'` —
+     `isCrashed`, lib/run-watchdog.ts) and a `paused` one, and returns null
+     for anything else (a run that is merely stale because it finished), so
+     mapping this board's strip row over all three is safe: it hands RunStrip
+     the shapes it knows how to render and nothing it doesn't. A second list
+     rather than widening `freshRuns` itself, per that constant's own comment
+     just above — cards, badges and dispatch claims must stay freshness-only,
+     and folding this in here would make a future reader of `freshRuns` have
+     to re-derive which half of it is safe to trust for THAT purpose.
 
-  /* task-17: the strip's list, once more widened — `paused` is `RunStrip`'s
-     third rendering and belongs on the board exactly as a crashed run does.
-     A THIRD list rather than widening `runningRuns` itself, for the same
-     reason `runningRuns` is not `freshRuns`: `runningRuns` is also what
-     `startingRuns` below subtracts against, and that subtraction is
-     specifically about the `init` lock, which only a `running` run file
-     holds. A paused run is not that — `init` archives it like a done one —
-     so folding `paused` in there would suppress a legitimate starting
-     placeholder for a project whose previous run was paused. */
+     bug-21 collapsed what were two lists into this one. The other was
+     `runningRuns` — `status === 'running'` exactly, no `paused` — and it
+     existed ONLY as the thing the old client-side `startingRuns` filter
+     subtracted against, because that subtraction was about the `init` lock,
+     which only a `running` run file holds. That rule now lives in
+     `StartingRunsService.expired()` (see `starting` below), so the second
+     list has no reader left. The distinction it drew is not lost: rule 3 is
+     keyed on `status === 'running'` for exactly the reason recorded here —
+     `init` archives a paused run like a done one, so a paused project can
+     legitimately start a new run and must keep its placeholder. */
   const stripRuns = runs.filter((run) => run.status === 'running' || run.status === 'paused');
 
-  /* task-14: the projects this server has spawned a run for that have not
-     written a run file yet, minus any that ALREADY have a live strip on
-     screen. The second half is the whole point of this derivation — without
-     it the board can show two rows for one project.
-
-     The gate is "no `running` run at all for this project", fresh or
-     crashed, and NOT "no fresh run": `RunStrip` returns null only for
-     `!fresh && status !== 'running'`, and the row above maps `runningRuns`,
-     so a crashed run already renders a strip of its own.
-
-     That collision is reachable from the UI rather than theoretical. The
-     server's pre-spawn lock refuses only a FRESH run, so pressing
-     Orchestrate on a project whose last run crashed is allowed: the spawn
-     succeeds and the server marks the project. Worse, the spawned session's
-     own `init` refuses any run file that still says `running`, stale or
-     not, so no new run ever lands, the server's eviction rule 1 never
-     matches, and the entry survives the full RUN_STALE_MS — fifteen minutes
-     of a second card sitting next to the crashed strip claiming a run is
-     starting. This filter is what makes that case render exactly one row. */
-  const startingRuns = starting.filter(
-    (s) => !runningRuns.some((run) => run.project === s.project)
-  );
+  /* task-14's placeholders are read straight off `starting` now. This used
+     to be a filtered copy subtracting any project that already had a
+     `running` run file — bug-21 moved that rule into
+     `StartingRunsService.expired()` (its third eviction rule), where the
+     payload itself carries the guarantee and the four gates bug-21 added can
+     all inherit it. Keeping a client-side filter beside a server-side rule
+     that says the same thing would be the two-agreeing-expressions shape
+     this repo pins tests against everywhere else (`watchdogStoodDown`,
+     `isStale`) — and the crashed-run case that filter existed for is now
+     tested where the rule lives (test/orchestrator-starting.test.ts). */
 
   /* The id→queue-entry lookup, one map per fresh run, keyed by the run's own
      `project` — the registry's absolute path, the exact string
@@ -485,8 +472,22 @@ export default function BoardView() {
   const orchestrateGate = projectValue === ALL || agents === null
     ? null
     : projectDispatchGate(agents, projectValue);
-  const orchestrateHasFreshRun = freshRuns.some((run) => run.project === projectValue);
-  const showOrchestrate = orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateHasFreshRun;
+  /* bug-21 widened condition 4 to cover the window BEFORE that fresh run
+     exists. The server's own pre-spawn lock was blind for the same window,
+     so a second press returned 200 and spawned a second session; both
+     booted, and whichever reached `init` second exited `4` (lock held) and
+     died. That lock is now closed too (agents.service.ts) — this half is
+     what stops the board offering the click at all, rather than letting it
+     race a 409.
+
+     Folded into the SAME expression rather than added as a fifth condition:
+     "a run already owns this project's whole story on the board" is one
+     question, and the starting placeholder is one of the two rows that can
+     be telling that story. */
+  const orchestrateBusy =
+    freshRuns.some((run) => run.project === projectValue) ||
+    starting.some((s) => s.project === projectValue);
+  const showOrchestrate = orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateBusy;
   const orchestrateBlockedReason = orchestrateGate?.control === 'disabled' ? orchestrateGate.reason : null;
   // The registry's own display name, for the button's title and the sheet's
   // header — falls back to the raw path only in the unreachable case where
@@ -509,8 +510,16 @@ export default function BoardView() {
    * the live bar's rule (`ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES`), not this
    * one — `pending` and `preflight` block dispatch while showing no marker at
    * all.
+   *
+   * `starting` alongside it (bug-21): for the 1–5 minutes before `init` writes
+   * the run file, `runs` is empty for a project a run is booting into, and
+   * this gate read `runs` alone — so every card kept a live dispatch button
+   * for an item the pending run was about to claim in its own worktree. The
+   * block that produces is project-wide and deliberately coarse; see
+   * `runClaimBlock`'s own comment for why per-item is not available here at
+   * all.
    */
-  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs);
+  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
 
   // Looked up from the FULL `runs` list, not `freshRuns` above — the drawer
   // has to keep showing a run that just went stale (that is the entire
@@ -724,31 +733,32 @@ export default function BoardView() {
         </div>
       </div>
 
-      {/* One row per LIVE run (fresh or crashed — `runningRuns`, above),
+      {/* One row per LIVE run (fresh, crashed or paused — `stripRuns`, above),
           ahead of the warnings: a run actually in flight or freshly gone
           quiet is live, actionable information, where the warnings below
           are a standing fact about the registry that will still be true the
           next time this board loads.
 
           orchestrator-watchdog (design §6.1/§6.2) widened this from
-          `freshRuns` to `runningRuns`: `RunStrip` no longer merely "filters
+          `freshRuns` to the wider list: `RunStrip` no longer merely "filters
           its own staleness" (a fresh-or-null split) — it now renders a
           THIRD shape, the crashed strip, for exactly the runs `freshRuns`
           itself was built to exclude everywhere else on this page. Mapping
-          `runningRuns` here is still safe by the same "reuse rather than
+          `stripRuns` here is still safe by the same "reuse rather than
           protect" reasoning the old comment gave: `RunStrip` returns null
           for anything that is neither fresh nor crashed, so this never
           mounts a strip only to have it immediately render null — the set
           of things worth trying just grew from one shape to two. */}
-      {(stripRuns.length > 0 || startingRuns.length > 0) && (
+      {(stripRuns.length > 0 || starting.length > 0) && (
         <div className="run-strips">
           {/* task-14's placeholders first, above the live strips: a run
               nobody can see yet is the one thing on this stack a person is
               actively waiting on, and it stops being a placeholder the
-              moment its run file lands. `startingRuns` (above) already
-              excludes any project that has a strip below, so these two maps
-              can never both render a row for the same project. */}
-          {startingRuns.map((s) => (
+              moment its run file lands. The payload guarantees these two
+              maps can never both render a row for the same project — see
+              `starting`'s own note above, and rule 3 in
+              StartingRunsService.expired(). */}
+          {starting.map((s) => (
             <StartingStrip key={`starting:${s.project}`} starting={s} />
           ))}
           {stripRuns.map((run) => {

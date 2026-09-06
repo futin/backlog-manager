@@ -443,15 +443,56 @@ export function dispatchBlock(item: BacklogItem, status: AgentsStatus): string |
  * `runs` is the payload shape `GET /api/orchestrator/runs` answers with, which
  * is what both callers already hold: the board from `useOrchestratorRuns`, the
  * server from `OrchestratorService.runs()`.
+ *
+ * `starting` (bug-21) is the SECOND half of that same payload, and the reason
+ * this function takes two lists rather than one. A run is invisible to `runs`
+ * for the 1–5 minutes between the dashboard spawn and `orchestrate.mjs init`
+ * writing the first `run.json` (SKILL.md §2) — task-14 made that window
+ * visible as a strip, but every gate in the app still read `runs` alone, so
+ * for the whole window a person could hand-dispatch an item the pending run
+ * was about to claim, and the hand session would work it in the main tree
+ * while the run's own worktree worked it. That is precisely the double
+ * execution bug-4 and bug-12 each closed for the run-file case.
+ *
+ * **Third parameter, required, no `[]` default** — the same rule
+ * `isStale`/`leavesBoard` follow for `runs`, and for the same reason: the
+ * compile error at every call site is the mechanism that makes the next
+ * caller decide, where a default is what lets them silently reinherit this
+ * bug. All four callers (the board's `runBlockFor`, Archive's, the `plan`
+ * payload's `blocked`, and dispatch's own 409) were blind in the identical
+ * way, which is what a default would have made easy to repeat.
+ *
+ * **The starting clause is project-wide and deliberately coarse.** A
+ * `StartingRun` is `{ project, requestedAt }` and nothing else, so no block
+ * derived from it CAN be per-item — and the server could not name the items
+ * even if the placeholder carried the launch's `ids`, because which open bugs
+ * and tasks a run actually queues is `buildGatedQueue`'s verdict inside the
+ * spawned session, over `<base>`, minutes later. The asymmetry settles it: a
+ * wrong allow costs a duplicated execution, a wrong block costs a wait
+ * bounded by the run file landing (or `RUN_STALE_MS` at the very worst).
+ *
+ * Per-item first, coarse second. Once `StartingRunsService`'s third eviction
+ * rule lands the two are mutually exclusive — a project whose run file reads
+ * `running` has no placeholder — but if they ever are not, the wording naming
+ * the stage is the one that tells a reader where to look.
+ *
+ * Name unchanged: a starting run is a run, and the question this answers
+ * ("why does a run forbid dispatching this item") has not moved.
  */
 export function runClaimBlock(
   item: BacklogItem,
-  runs: OrchestratorRunsPayload['runs']
+  runs: OrchestratorRunsPayload['runs'],
+  starting: OrchestratorRunsPayload['starting']
 ): string | null {
   const claimed = runEntryAt(item, runs, RUN_CLAIMED_STAGES);
-  return claimed === null
-    ? null
-    : `an orchestrator run is working this item (${claimed.stage})`;
+  if (claimed !== null) return `an orchestrator run is working this item (${claimed.stage})`;
+  // The same absolute-registry-path compare `runEntryAt` documents — never a
+  // display name, never anything derived from `item.path`. Ids are only
+  // sequential within one project's store, so two checkouts can both hold
+  // `bug-1` and only the path tells them apart.
+  return starting.some((s) => s.project === item.projectPath)
+    ? 'an orchestrator run is starting for this project'
+    : null;
 }
 
 /**

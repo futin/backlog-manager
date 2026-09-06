@@ -9,7 +9,7 @@ import ArchiveView from '../client/src/components/archive/ArchiveView';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type {
   AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunQueueItem, RunStage
+  RunQueueItem, RunStage, StartingRun
 } from '../shared/types';
 
 /*
@@ -75,12 +75,17 @@ function runHolding(id: string, stage: RunStage, over: Partial<RunPayload> = {})
   return { ...fixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, ...over };
 }
 
-function stubItems(items: BacklogItem[], errors: string[] = [], runs: RunPayload[] = []) {
+function stubItems(
+  items: BacklogItem[], errors: string[] = [], runs: RunPayload[] = [],
+  // bug-21: the payload's second array, which Archive's dispatch block now
+  // reads too. Defaulted so every existing case is untouched.
+  starting: StartingRun[] = []
+) {
   const index: ItemsIndex = { items, errors };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+      : url.includes('/api/orchestrator/runs') ? ({ runs, starting } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects') ? PROJECTS : index;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
@@ -107,9 +112,10 @@ const ITEMS: BacklogItem[] = [
  * first paint.
  */
 async function renderArchive(
-  items: BacklogItem[] = ITEMS, errors: string[] = [], runs: RunPayload[] = []
+  items: BacklogItem[] = ITEMS, errors: string[] = [], runs: RunPayload[] = [],
+  starting: StartingRun[] = []
 ) {
-  stubItems(items, errors, runs);
+  stubItems(items, errors, runs, starting);
   render(<ArchiveView />);
   await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
 }
@@ -190,6 +196,34 @@ describe('ArchiveView', () => {
   it('keeps that same bug once the run holding it has gone stale', async () => {
     await renderArchive(ITEMS, [], [runHolding('bug-1', 'dispatched', { fresh: false })]);
     expect(within(column('Bugs')).getByText('stale bug')).toBeInTheDocument();
+  });
+
+  /* bug-21 — the fourth `runClaimBlock` caller, and not a theoretical one.
+     A long-untouched GROOMED open bug sits HERE precisely while no run holds
+     it (`leavesBoard` pulls it back to the Board the moment one does), so
+     during the starting window it is both rendered on this surface and about
+     to be queued — and its card here was dispatchable while the Board's
+     equivalent was not. That is the half-fixed state Archive's own
+     `runBlockFor` comment already records having been added to close, one
+     window earlier. */
+  it('disables a card\'s dispatch control while its project has a run starting', async () => {
+    await renderArchive(ITEMS, [], [], [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }]);
+
+    const card = within(column('Bugs')).getByText('stale bug').closest('.board-card') as HTMLElement;
+    const button = within(card).getByRole('button', { name: 'groom' });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAttribute('title', 'an orchestrator run is starting for this project');
+  });
+
+  /* The project match is the same absolute-registry-path compare the rest of
+     the block uses. Without this, a block applied to every card regardless
+     would still pass the case above — and `beta`'s bug is the one card here
+     that can tell the difference. */
+  it('leaves another project\'s card alone while one project is starting', async () => {
+    await renderArchive(ITEMS, [], [], [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }]);
+
+    const card = within(column('Bugs')).getByText('stale beta bug').closest('.board-card') as HTMLElement;
+    expect(within(card).getByRole('button', { name: 'groom' })).toHaveAttribute('aria-disabled', 'false');
   });
 
   it('renders no done item in any column, however old', async () => {

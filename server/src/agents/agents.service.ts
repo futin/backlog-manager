@@ -279,6 +279,11 @@ export class AgentsService {
     }
 
     const status = await this.status();
+    // One read, both halves. `OrchestratorService.runs()` has always returned
+    // `{ runs, starting }` from a single call, and destructuring it here
+    // rather than reaching for `.runs` inline is the whole of the server-side
+    // change bug-21 needed: no new wiring, no new injection, no second read.
+    const { runs, starting } = this.orchestrator.runs();
     return {
       action,
       prompt: composePrompt(item, action),
@@ -299,8 +304,14 @@ export class AgentsService {
       // its own project/id/freshness matching against the run payload — see
       // its doc comment for why that lookup lives in one place rather than
       // being re-derived on each side.
+      //
+      // bug-21: BOTH halves of the one `runs()` call, not `.runs` alone. A
+      // run is invisible to the run file for the 1–5 minutes before `init`
+      // writes it, and this is the field the launch sheet renders its refusal
+      // from — a sheet that offers a launch button for an item the dispatch
+      // route below is about to 409 is the half-fixed state.
       blocked: dispatchBlock(item, status)
-        ?? runClaimBlock(item, this.orchestrator.runs().runs)
+        ?? runClaimBlock(item, runs, starting)
         ?? undefined
     };
   }
@@ -361,7 +372,13 @@ export class AgentsService {
     // refusal apart from dispatch's other 409s programmatically. Deliberately
     // not 502 either — an orchestrator run is local state, with no upstream to
     // blame for it.
-    const claimed = runClaimBlock(item, this.orchestrator.runs().runs);
+    //
+    // bug-21: both halves of the one call, for the reason `plan` above gives
+    // — this is the layer that actually stops a double execution, so it is
+    // the one gate of the four that must not be blind for the window before
+    // `init` writes the run file.
+    const { runs, starting } = this.orchestrator.runs();
+    const claimed = runClaimBlock(item, runs, starting);
     if (claimed !== null) {
       throw new HttpException({ error: claimed }, 409);
     }
@@ -472,7 +489,16 @@ export class AgentsService {
     // writer (orchestrate.mjs, there; backlog.mjs, there), and every OTHER
     // path capable of triggering a write re-checks it rather than trusting
     // that every caller will always go through that writer.
-    const activeRun = this.orchestrator.runs().runs.find((r) => r.project === req.project && r.fresh);
+    //
+    // bug-21 widened this from `.runs` to both halves of the one call. The
+    // check above is blind for the 1–5 minutes before `init` writes anything
+    // — while THIS SAME PROCESS holds the record proving a run is on its way
+    // — so a second click returned 200 and spawned a second session; both
+    // booted, and whichever reached `init` second exited `4` (lock held) and
+    // died, having burned a session and told its user "never retry, go to
+    // `--resume`" for a run that never crashed.
+    const { runs, starting } = this.orchestrator.runs();
+    const activeRun = runs.find((r) => r.project === req.project && r.fresh);
     if (activeRun) {
       throw new HttpException(
         {
@@ -493,6 +519,31 @@ export class AgentsService {
           // exactly right for all three of them as-is.
           code: RUN_IN_PROGRESS_CODE
         },
+        409
+      );
+    }
+
+    /* The same lock, one window earlier (bug-21). Beside the `activeRun`
+       throw and therefore still BEFORE `resolveIds`, for the reason that
+       ordering comment gives: a stale tab whose selection has since been
+       archived must be told a run is in progress, not that `task-3` is not
+       open.
+
+       The SAME `code`, deliberately, not a second one. It is the same lock
+       the case above enforces, and `OrchestrateSheet` branches on that code
+       to `refresh()` + `onClose()` — exactly the right behaviour here, since
+       the sheet closes and hands the screen to the `StartingStrip` that is
+       already rendering. `RUN_IN_PROGRESS_CODE` stays the app's only coded
+       409; this is a second occasion for it, not a second code.
+
+       No `runId` to name, which is the one way this refusal reads
+       differently from the one above: a starting entry has a project and a
+       requestedAt and nothing else — there is no runId until `init` mints
+       one. That is also why the block it produces everywhere else is
+       project-wide rather than per-item (see `runClaimBlock`). */
+    if (starting.some((s) => s.project === req.project)) {
+      throw new HttpException(
+        { error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE },
         409
       );
     }

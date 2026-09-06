@@ -241,22 +241,34 @@ describe('POST /api/agents/orchestrate — questionMode', () => {
     expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate --merge-mode branch --question-mode decide');
   });
 
-  // The three shapes this endpoint could compose before task-19, asserted as
-  // exact strings. If any of them ever gains a trailing flag, this is what
-  // goes red — which is the whole reason `park` appends nothing rather than
-  // appending `--question-mode park`.
-  it('leaves every pre-task-19 prompt shape byte-identical', async () => {
-    const sent1 = stubDashboard();
+  /* The three shapes this endpoint could compose before task-19, asserted as
+     exact strings. If any of them ever gains a trailing flag, these are what
+     go red — which is the whole reason `park` appends nothing rather than
+     appending `--question-mode park`.
+
+     Three cases rather than the one they used to be, since bug-21: a
+     successful spawn now marks the project as starting, and the next POST
+     for that same project is refused by the new lock (409, coded) until the
+     run file lands or RUN_STALE_MS passes. Three successive spawns for one
+     project inside a single `it` is exactly what that lock exists to stop.
+     Each case gets its own app from `beforeEach`, and therefore its own
+     empty StartingRunsService; every assertion is unchanged. */
+  it('leaves the bare prompt byte-identical', async () => {
+    const sent = stubDashboard();
     await post({ project: projectPath }).expect(201);
-    expect(spawnedPrompt(sent1)).toBe('/backlog-orchestrate');
+    expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate');
+  });
 
-    const sent2 = stubDashboard();
+  it('leaves the ids-only prompt byte-identical', async () => {
+    const sent = stubDashboard();
     await post({ project: projectPath, ids: ['bug-1', 'bug-2'] }).expect(201);
-    expect(spawnedPrompt(sent2)).toBe('/backlog-orchestrate bug-1 bug-2');
+    expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate bug-1 bug-2');
+  });
 
-    const sent3 = stubDashboard();
+  it('leaves the merge-mode-only prompt byte-identical', async () => {
+    const sent = stubDashboard();
     await post({ project: projectPath, mergeMode: 'branch' }).expect(201);
-    expect(spawnedPrompt(sent3)).toBe('/backlog-orchestrate --merge-mode branch');
+    expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate --merge-mode branch');
   });
 
   // --- The lock still wins ------------------------------------------------
