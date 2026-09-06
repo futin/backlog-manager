@@ -58,11 +58,20 @@ services:
       # every start. Pinned on both sides, node_modules reads as up to date and
       # `pnpm run dev` starts straight away.
       PNPM_CONFIG_STORE_DIR: /pnpm/store
-      # Dispatch is off unless you turn it on. Inside the stack the dashboard
-      # is on the host, not on this container's loopback — hence
+      # Dispatch is off unless you turn it on. Passed through rather than set,
+      # so the documented default survives the documented Quick start: compose
+      # interpolates this from the host environment and from the .env beside
+      # this file — the same .env the container's own ConfigModule reads, and
+      # which a literal here would silently outrank, since dotenv never
+      # overwrites a key already in process.env (bug-25). `:-` so an empty
+      # BM_AGENTS= reads as off like an absent one.
+      BM_AGENTS: '${BM_AGENTS:-off}'
+      # A literal on purpose, and deliberately NOT a passthrough like the line
+      # above: this is stack topology, not a policy default. Inside the stack
+      # the dashboard is on the host, not on this container's loopback — hence
       # host.docker.internal rather than the 127.0.0.1 default that is right
-      # for `pnpm run dev` on the host.
-      BM_AGENTS: 'on'
+      # for `pnpm run dev` on the host. Passing it through would let a
+      # host-oriented .env line flow in and break dispatch in the container.
       BM_AGENTS_URL: 'http://host.docker.internal:4173'
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
