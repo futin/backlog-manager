@@ -65,10 +65,20 @@ const results = RUNNERS.map(({ name, script }) => {
 
 // The summary. Without it "reports both" is true but unfindable: a failure
 // that scrolled past 2,000 lines ago is a failure nobody acts on.
+//
+// STDERR, not stdout, and that is load-bearing — do not "tidy" it back.
+// `runVerifyCommand` (orchestrate.mjs) records a 20-line TAIL of
+// stdout-then-stderr, and jest writes its whole report to stderr. So anything
+// this script prints to stdout lands ABOVE all of jest's output in that
+// concatenation and never survives the tail: a skill-suite break would be
+// recorded as `ok: false` with evidence reading "1469 passed … Ran all test
+// suites.", handing the fix loop a red row whose own output says everything
+// passed. On stderr the summary lands after jest's report and is the last
+// thing in the tail, which is exactly where the verdict belongs.
 const failed = results.filter((r) => !r.ok)
-console.log(`\n${'─'.repeat(60)}`)
-for (const { name, ok } of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
-console.log(
+console.error(`\n${'─'.repeat(60)}`)
+for (const { name, ok } of results) console.error(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
+console.error(
   failed.length === 0
     ? `\npnpm test: both runners passed.`
     : `\npnpm test: FAILED in ${failed.map((r) => r.name).join(' and ')}.`,
