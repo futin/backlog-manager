@@ -3,9 +3,12 @@ id: bug-23
 title: One Escape press closes the launch sheet and the item drawer behind it
 created: 2026-09-06
 tags: ui, audit-2026-09-06
-updated: 2026-09-06T20:27:22Z
+updated: 2026-09-06T22:52:08Z
 groom-elapsed: 57
 groom-tokens: 9497
+started: 2026-09-06T22:39:31Z
+execute-elapsed: 757
+execute-tokens: 87331
 ---
 
 ## Symptom
@@ -140,3 +143,89 @@ In the browser (playwright MCP tools): open `http://localhost:5177`, click a gro
 card on the Board to open its drawer, click the drawer's dispatch button so the launch
 sheet opens over it, press Escape once, and confirm the launch sheet is gone while the item
 drawer is still on screen; press Escape again and confirm the drawer closes.
+
+## Outcome
+
+2026-09-06 — Fixed as planned. `client/src/hooks/useDialogEscape.ts` is new: a
+module-level LIFO stack of open dialogs and one `window` keydown listener,
+installed when the stack goes empty → one and removed when it returns to empty,
+calling only `stack[stack.length - 1]`'s `onClose`. The registration effect takes
+an empty dependency array and reads `onClose` through a ref rewritten on every
+render, and entries are removed by `indexOf` rather than `pop()` — both details
+the Fix called out. `ItemDrawer`, `LaunchSheet`, `RunDrawer` and
+`OrchestrateSheet` each dropped their own copy of the four-line effect and call
+`useDialogEscape(onClose)`; no `stopImmediatePropagation` anywhere, since there
+is one listener left to stop. `RunDrawer`'s and `OrchestrateSheet`'s header
+comments described the duplication as a deliberate choice and were rewritten to
+describe the hook instead. A CLAUDE.md invariant records the mount-order contract
+and the untrapped-focus case left deliberately out.
+
+`test/dialog-escape.test.tsx` is new: the four host cases (board single press,
+board second press, board with a host re-render forced in between via its own
+search box, and the same drawer-then-sheet sequence on Archive) and four
+hook-level cases (LIFO ranking, listener teardown proved by a press reaching
+nobody, removal by identity when a dialog below the top unmounts, and the latest
+`onClose` an entry rendered with being the one called).
+
+Red first, against the unfixed code — three of the four host cases failed on
+exactly the defect, the fourth passes either way because it only asserts the
+drawer eventually closes:
+
+```
+✕ closes only the sheet on the board, leaving the drawer behind it open (225 ms)
+✓ closes the drawer on the second press (54 ms)
+✕ still closes only the sheet after the host re-renders underneath it (203 ms)
+✕ closes only the sheet on Archive too (142 ms)
+
+● closes only the sheet on the board, leaving the drawer behind it open
+  TestingLibraryElementError: Unable to find an accessible element with the
+  role "dialog" and name "a task"
+Tests: 3 failed, 1 passed, 4 total
+```
+
+Green after the hook, and the whole suite with it:
+
+```
+$ npx jest test/dialog-escape.test.tsx --runInBand
+✓ closes only the sheet on the board, leaving the drawer behind it open (110 ms)
+✓ closes the drawer on the second press (59 ms)
+✓ still closes only the sheet after the host re-renders underneath it (71 ms)
+✓ closes only the sheet on Archive too (49 ms)
+✓ gives Escape to the last dialog mounted, then back to the one below it (8 ms)
+✓ leaves no window listener behind once the stack empties (2 ms)
+✓ removes the right entry when a dialog below the top unmounts (5 ms)
+✓ calls the latest onClose an entry was rendered with (14 ms)
+Tests: 8 passed, 8 total
+
+$ pnpm test
+# tests 411
+# pass 411
+# fail 0
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run test:jest
+Test Suites: 77 passed, 77 total
+Tests:       1477 passed, 1477 total
+
+$ pnpm run typecheck
+$ tsc --noEmit
+(no output, exit 0)
+
+$ pnpm run build
+✓ built in 1.63s
+```
+
+The four pre-existing single-dialog Escape cases stayed green, including
+`test/launch-sheet.test.tsx`'s "removes its Escape listener when it unmounts" —
+which still tests something real, since the listener is torn down with the last
+entry rather than installed permanently.
+
+Not done: the Fix's browser check (playwright against `http://localhost:5177`).
+This ran unattended in a worktree with no stack up, and a server already on 5177
+would be serving the main tree's code, so that check could only have proved
+something about code this branch does not contain. The two jsdom host cases
+drive the same click-click-Escape sequence through the real `BoardView`,
+`ArchiveView`, `ItemDrawer` and `LaunchSheet`.

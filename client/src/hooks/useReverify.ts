@@ -21,11 +21,13 @@ import type { AgentsStatus } from '../../../shared/types';
  * `projectDispatchGate(fresh, path)`) and have different sibling blocks, so
  * folding the gate in here would mean a config object per caller; the
  * drift-prone part is "ask once, mark busy, act on the fresh answer", which is
- * what lives here. Extracted rather than copied a second time because, unlike
- * the small idioms this repo does repeat on purpose (the three copies of the
- * Escape effect), this one is stateful and correctness-bearing: a copy that
- * acts on the stale render, or that drops the in-flight guard, looks right and
- * is wrong.
+ * what lives here. Extracted rather than copied a second time because this is
+ * stateful and correctness-bearing: a copy that acts on the stale render, or
+ * that drops the in-flight guard, looks right and is wrong. The Escape effect
+ * every dialog used to carry its own copy of is the same story one step later
+ * — four copies that each looked right, and bug-23 was the one press that
+ * closed two dialogs at once; it is now `hooks/useDialogEscape.ts`, one stack
+ * and one listener, for exactly the reason this hook exists.
  *
  * No failure branch, deliberately. The board's `reverify` is
  * `useAgents().reload`, which resolves to a flatly-off status rather than

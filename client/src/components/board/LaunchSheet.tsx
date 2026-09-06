@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { dispatchAgent, fetchAgentPlan, sessionUrl } from '../../lib/agents';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
+import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { useSettings } from '../../hooks/useSettings';
 import type { AgentPlan, BacklogItem, PermissionMode } from '../../../../shared/types';
 
@@ -58,13 +59,11 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
     };
   }, [item.path]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // One stack, one window listener, topmost dialog only — see
+  // hooks/useDialogEscape.ts. Replaced the four copies of this effect this app
+  // used to carry (bug-23: the sheet and the drawer it layers over both closed
+  // on one press).
+  useDialogEscape(onClose);
 
   const launch = (): void => {
     if (plan === null) return;
