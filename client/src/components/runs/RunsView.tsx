@@ -10,7 +10,9 @@ import { pickAuthority } from '../../lib/run-authority';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
 import { RUN_STATUS_GLYPH, mergeModeLabel, runStatusChip } from '../../lib/run-stage';
 import { MODE_BUTTON, RUNS_MODES, RUNS_MODE_KEY, isRunsMode } from '../../lib/runs-mode';
-import { aggregateRuns, dayKey, dayLabel, runStageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
+import {
+  aggregateRuns, dayKey, dayLabel, formatUsd, runStageTotals, runUsageTotals, runWallMs, sumStageTotals
+} from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
 import { StageBars } from './StageBars';
@@ -458,6 +460,16 @@ function RunRow({
   const { completed, total } = queueCounts(authority);
   const wall = runWallMs(authority, now);
   const modeLabel = mergeModeLabel(authority.mergeMode, authority.mergeModeEffective);
+  // task-27. Off `authority` like every other number on this row, for the
+  // same reason: a live-backed row must not print a total the pane beside it
+  // has already moved past. `null` for every run archived before the feature
+  // existed — those runs carry no `usage` key at all, and this row renders
+  // nothing extra for them rather than a `$0.00` that would read as a claim.
+  // Cost alone here, not cost AND turns: the row has one number's worth of
+  // room in this slot, and "what did it cost" is the question this list is
+  // scanned for. Turns are in the detail pane, per item and per run.
+  const usage = runUsageTotals(authority);
+  const cost = usage === null || usage.costUsd === null ? null : formatUsd(usage.costUsd);
 
   return (
     <button
@@ -498,7 +510,20 @@ function RunRow({
         )}
         <span className="runs-row-count">{completed}/{total}</span>
       </span>
-      {wall !== null && <span className="runs-row-wall">{formatSpanCompact(wall)}</span>}
+      {/* The row's foot line: wall time, and what the run cost. Either half
+          can be known without the other — a run with a corrupt `startedAt`
+          has no honest wall time and still has its transcripts' cost, and
+          every pre-task-27 run is the reverse — so this joins whichever
+          halves exist rather than gating the second on the first. The same
+          null-tolerant join `RunDetail`'s head and lead lines already use. */}
+      {(wall !== null || cost !== null) && (
+        <span className="runs-row-wall" data-testid={`runs-row-foot-${run.runId}`}>
+          {[
+            wall === null ? null : formatSpanCompact(wall),
+            cost
+          ].filter((part) => part !== null).join(' · ')}
+        </span>
+      )}
     </button>
   );
 }

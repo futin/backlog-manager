@@ -8,6 +8,7 @@ import { once } from 'node:events'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   RUN_STALE_MS, controlFilePath, controlHome, isZombieStatState, pauseRequestEffective, readPermissionDenials,
+  readSessionUsage,
 } from './orchestrate.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
@@ -4096,4 +4097,282 @@ test('the retry name differs from the dispatch name for the same item', () => {
   const [dispatch, retry] = dispatchNames()
   assert.notEqual(retry.name, dispatch.name)
   assert.ok(retry.name.startsWith(dispatch.name), `retry name no longer extends the dispatch name: ${retry.name}`)
+})
+
+// --- task-27: `usage`, the one writer of RunQueueItem.usage ---------------
+//
+// Every dispatched session's own `result` event already carries what the run
+// cost; nothing copied it anywhere, so "what did this run cost" meant parsing
+// 43MB of transcripts with a purpose-written script. These tests pin the copy.
+
+const STREAM_USAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage.jsonl')
+const STREAM_USAGE_FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-fix.jsonl')
+const STREAM_MALFORMED_THEN_USAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-malformed-then-usage.jsonl')
+const STREAM_USAGE_TWO_MODELS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-two-models.jsonl')
+
+// The command reads which dispatch a transcript belongs to out of its FILE
+// NAME, so every test here needs the fixture sitting under a name the real
+// logs directory would have produced. Copied into a throwaway directory per
+// call rather than renamed in place — the fixtures are shared and read-only.
+function transcriptAs(t, fixture, name) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-usage-'))
+  const file = path.join(dir, name)
+  fs.copyFileSync(fixture, file)
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  return file
+}
+
+function usageRun(t, id = 'task-5', title = 'Some task') {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, id, title)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  return { home, project }
+}
+
+function queueItem(home, project, id) {
+  return JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === id)
+}
+
+test('usage copies the result event onto the queue item and echoes the entry', (t) => {
+  const { home, project } = usageRun(t)
+  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', file)
+
+  assert.equal(out.status, 0, out.stderr)
+  const entries = queueItem(home, project, 'task-5').usage
+  assert.equal(entries.length, 1)
+  const [entry] = entries
+  // The exact key set, not a spot-check: this shape is written into an
+  // archive read months later, and a field silently dropped by a future edit
+  // is invisible in every other assertion here. `loop` is the twelfth field
+  // and is deliberately ABSENT on an `execute` entry — there is no loop to
+  // count — which is why this list has eleven names; the fix-loop test below
+  // is where the twelfth appears.
+  assert.deepEqual(Object.keys(entry).sort(), [
+    'cacheCreationTokens', 'cacheReadTokens', 'costUsd', 'durationMs', 'endedAt',
+    'inputTokens', 'kind', 'model', 'outputTokens', 'sessionId', 'turns',
+  ])
+  assert.equal(entry.kind, 'execute')
+  assert.equal(entry.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64')
+  assert.equal(entry.costUsd, 2.641441)
+  assert.equal(entry.turns, 34)
+  assert.equal(entry.inputTokens, 208)
+  assert.equal(entry.outputTokens, 52893)
+  assert.equal(entry.cacheReadTokens, 15_155_855)
+  assert.equal(entry.cacheCreationTokens, 204_362)
+  assert.equal(entry.durationMs, 812_345)
+  assert.equal(entry.model, 'claude-opus-5[1m]')
+  assert.ok(Date.parse(entry.endedAt) > 0, 'endedAt is a parseable stamp')
+  // The echo is what SKILL.md §5 reads back on the same Bash invocation.
+  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-5', usage: entry })
+})
+
+// The case the plan's own "idempotent by sessionId" rule would have got
+// wrong: `claude -p --resume` keeps the session id it was handed, so a fix
+// loop's transcript reports the SAME session as the first dispatch (verified
+// against this machine's task-22/task-22-fix-1 pair). Keying on the session
+// would have made this second call overwrite the first entry instead of
+// sitting beside it — identity is the transcript slot, `kind` + `loop`.
+test('a fix loop adds a second entry beside the first, same session id and all', (t) => {
+  const { home, project } = usageRun(t)
+  assert.equal(run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')).status, 0)
+  const first = queueItem(home, project, 'task-5').usage[0]
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_FIX, 'task-5-fix-1.jsonl'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const entries = queueItem(home, project, 'task-5').usage
+  assert.equal(entries.length, 2)
+  assert.deepEqual(entries[0], first, 'the execute entry was rewritten by the fix loop')
+  assert.equal(entries[1].kind, 'fix')
+  assert.equal(entries[1].loop, 1)
+  assert.equal(entries[1].costUsd, 1.612241)
+  assert.equal(entries[1].sessionId, entries[0].sessionId, 'the fixture pins the real shape: a resumed session keeps its id')
+})
+
+test('a retry transcript records its own kind and loop number', (t) => {
+  const { home, project } = usageRun(t)
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_FIX, 'task-5-retry-2.jsonl'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const [entry] = queueItem(home, project, 'task-5').usage
+  assert.equal(entry.kind, 'retry')
+  assert.equal(entry.loop, 2)
+})
+
+// recovery.md tells a resumed driver to re-run this for any transcript whose
+// entry is absent, and "absent" is a judgement it makes from a run file it
+// did not write. Running it over one already recorded has to be harmless.
+test('the same transcript twice leaves exactly one entry for that slot', (t) => {
+  const { home, project } = usageRun(t)
+  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')
+  assert.equal(run(project, home, 'usage', 'task-5', '--jsonl', file).status, 0)
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', file)
+
+  assert.equal(out.status, 0, out.stderr)
+  const entries = queueItem(home, project, 'task-5').usage
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].costUsd, 2.641441)
+})
+
+// A killed session. An absent entry is the honest record; a zero-valued one
+// would claim the session was free, which is the reading a cost rollup would
+// then print as fact.
+test('a transcript with no result event writes nothing, says so, and exits 0', (t) => {
+  const { home, project } = usageRun(t)
+  const file = transcriptAs(t, STREAM_NO_RESULT, 'task-5.jsonl')
+  const before = fs.readFileSync(runFile(home, project), 'utf8')
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', file)
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stderr, /task-5\.jsonl/)
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
+  assert.equal(queueItem(home, project, 'task-5').usage, undefined)
+})
+
+test('usage on an unreadable transcript exits 1 and writes nothing', (t) => {
+  const { home, project } = usageRun(t)
+  const before = fs.readFileSync(runFile(home, project), 'utf8')
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', path.join(project, 'task-5.jsonl'))
+
+  assert.equal(out.status, 1)
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
+})
+
+test('a line that is not JSON at all, ahead of the result event, is skipped rather than fatal', (t) => {
+  const { home, project } = usageRun(t)
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_MALFORMED_THEN_USAGE, 'task-5.jsonl'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(queueItem(home, project, 'task-5').usage[0].costUsd, 2.641441)
+})
+
+test('two models in one session join into one label, and the init event supplies a missing session id', (t) => {
+  const { home, project } = usageRun(t)
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_TWO_MODELS, 'task-5.jsonl'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const [entry] = queueItem(home, project, 'task-5').usage
+  assert.equal(entry.model, 'claude-opus-5[1m], claude-haiku-4-5-20251001')
+  assert.equal(entry.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64')
+})
+
+// The realistic way to name a file wrong is to hand this command ANOTHER
+// item's transcript, which a silent default to `execute` would file against
+// this item forever.
+test('a transcript whose name matches none of the three shapes exits 1 and names the shapes', (t) => {
+  const { home, project } = usageRun(t)
+  const before = fs.readFileSync(runFile(home, project), 'utf8')
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE, 'task-6.jsonl'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /task-5-fix-<n>\.jsonl/)
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
+})
+
+test('usage with no --jsonl exits 1 and prints the usage line', (t) => {
+  const { home, project } = usageRun(t)
+
+  const out = run(project, home, 'usage', 'task-5')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: orchestrate\.mjs usage/)
+})
+
+test('usage for an id that is not in this run\'s queue exits 1', (t) => {
+  const { home, project } = usageRun(t)
+
+  const out = run(project, home, 'usage', 'nope-9', '--jsonl', transcriptAs(t, STREAM_USAGE, 'nope-9.jsonl'))
+
+  assert.equal(out.status, 1)
+})
+
+// It writes the run file, so it is bound by the lease exactly as `stage` is —
+// unlike `denials`, which is deliberately run-independent because it writes
+// nothing at all.
+test('usage is refused with exit 7 when another session holds the driver lease', (t) => {
+  const { home, project } = orchFixture(t)
+  seedReadyTask(project, 'task-5', 'Some task')
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')
+  const before = fs.readFileSync(runFile(home, project), 'utf8')
+
+  const out = runAs('sess-b', project, home, 'usage', 'task-5', '--jsonl', file)
+
+  assert.equal(out.status, 7)
+  assert.match(out.stderr, /sess-a/)
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
+})
+
+// The structural half of task-27, and the same shape as the denials check
+// above for the same reason: the two paths that run a headless session are
+// step 5 and step 7's fix loop, and a call added to the first and forgotten
+// on the second loses exactly the number this feature exists to keep — a fix
+// loop is routinely the more expensive half of an item.
+test('every step that runs a headless session records what it cost', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const sections = new Map()
+  let current = null
+  for (const line of text.split('\n')) {
+    if (line.startsWith('## ')) {
+      current = line.slice(3).trim()
+      sections.set(current, [])
+    } else if (current !== null) {
+      sections.get(current).push(line)
+    }
+  }
+  for (const title of ['5. Inspect what the session left behind', '7. Review']) {
+    assert.ok(sections.has(title), `section not found (renamed?): ${title}`)
+    assert.ok(
+      sections.get(title).join('\n').includes('orchestrate.mjs" usage <id> --jsonl'),
+      `section "${title}" runs a headless session but never records what it cost`
+    )
+  }
+})
+
+// recovery.md, not SKILL.md: a resumed driver inherits a run file it did not
+// write, and the usage entries the crashed one never got to are the one piece
+// of a crashed run that decays on its own — the transcripts are pruned long
+// before the run history is.
+test('recovery.md tells a resumed driver to pick up the usage the crashed one missed', () => {
+  const text = fs.readFileSync(path.join(path.dirname(SKILL_MD), 'references', 'recovery.md'), 'utf8')
+  assert.ok(text.includes('orchestrate.mjs" usage <id> --jsonl'), 'recovery.md never re-runs `usage`')
+})
+
+// The reader on its own, the way readPermissionDenials is tested beside its
+// own command: these two cases are about the transcript, not about the run
+// file, and driving them through the CLI would make every assertion depend
+// on a run existing first.
+const STREAM_USAGE_TWO_RESULTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-two-results.jsonl')
+const STREAM_USAGE_NO_NUMBERS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-no-numbers.jsonl')
+
+test('readSessionUsage reads the LAST result event, so a resumed segment is not read as the whole session', () => {
+  // readPermissionDenials' own reason restated: a `--resume` can append a
+  // second result to the same transcript, and the first describes a segment
+  // that already ended.
+  const usage = readSessionUsage(STREAM_USAGE_TWO_RESULTS)
+  assert.equal(usage.costUsd, 9.5)
+  assert.equal(usage.turns, 40)
+})
+
+test('readSessionUsage returns null for a transcript with no result event, and holes for one with no numbers', () => {
+  // The two shapes cmdUsage branches on. `null` means "write nothing" —
+  // a killed session was not free. A result event whose fields a future CLI
+  // renamed still earns an entry, with `null` in every slot it could not
+  // fill: the session demonstrably ran, and a `0` would price it.
+  assert.equal(readSessionUsage(STREAM_NO_RESULT), null)
+
+  const holes = readSessionUsage(STREAM_USAGE_NO_NUMBERS)
+  assert.equal(holes.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64')
+  for (const field of ['costUsd', 'turns', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'durationMs', 'model']) {
+    assert.equal(holes[field], null, `${field} was filled with something rather than left a hole`)
+  }
 })

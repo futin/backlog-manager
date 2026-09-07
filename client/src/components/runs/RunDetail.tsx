@@ -4,7 +4,9 @@ import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
 import { mergeModeLabel, runStatusChip, stageChipClass, stageGlyph } from '../../lib/run-stage';
-import { itemStageSpans, runStageTotals, runWallMs } from '../../lib/run-stats';
+import {
+  formatTurns, formatUsd, itemStageSpans, itemUsageTotals, runStageTotals, runUsageTotals, runWallMs
+} from '../../lib/run-stats';
 import { isCrashed } from '../../lib/run-watchdog';
 import {
   formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive
@@ -16,7 +18,7 @@ import { RowTime } from '../board/RunRowTime';
 import { StageBars } from './StageBars';
 import { StageTrack } from './StageTrack';
 import type {
-  ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage
+  ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage
 } from '../../../../shared/types';
 
 /**
@@ -128,6 +130,15 @@ interface DetailRow {
   assumptions: { question: string; answer: string }[];
   verify: { cmd: string; ok: boolean; tail: string | null } | null;
   branch: string | null;
+  /** What every session dispatched for this item cost (task-27). Passed
+   *  through UNDEFAULTED at both mapping sites below — deliberately unlike
+   *  `assumptions`' `?? []` two lines up, and the difference is the whole
+   *  point: an absent key means this run predates the feature and the row
+   *  must render nothing, where `[]` would be indistinguishable from it and
+   *  invite a `$0.00`. `itemUsageTotals` collapses both to `null` for the
+   *  caller anyway, so nothing downstream has to remember the distinction —
+   *  it just must not be erased before that function sees it. */
+  usage?: RunSessionUsage[];
 }
 
 function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[] {
@@ -137,6 +148,7 @@ function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[] {
       id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
       fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
       assumptions: q.assumptions ?? [],
+      usage: q.usage,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: null }
     };
   });
@@ -149,6 +161,7 @@ function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
       id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
       fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
       assumptions: q.assumptions ?? [],
+      usage: q.usage,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: last.tail }
     };
   });
@@ -412,6 +425,14 @@ export function RunDetail(
   const crashed = live !== null && isCrashed(live);
   const lastHeartbeat = crashed && live !== null ? formatClock(live.updatedAt) : null;
 
+  // task-27. Off `source` — `authority` is the same object narrowed to
+  // `RunFields`, which names no queue — so this total comes from the same
+  // three-tier winner every other run-level reading in this head does,
+  // rather than from `rows`, which are mapped by a second application of
+  // that precedence for a TypeScript reason (see the file header). Both
+  // concrete queue-item shapes carry `usage`, so no narrowing is needed.
+  const runUsage = runUsageTotals(source);
+
   return (
     <>
       <div className="run-detail-head">
@@ -461,6 +482,25 @@ export function RunDetail(
             {[
               startedClock === null ? null : `started ${startedClock}`,
               wall === null ? null : `${formatSpanCompact(wall)} elapsed`
+            ].filter((part) => part !== null).join(' · ')}
+          </span>
+        )}
+        {/* task-27: what the whole run cost, summed off the per-transcript
+            entries `orchestrate.mjs usage` wrote. `runUsageTotals` returns
+            `null` for every run archived before that command existed, so
+            this renders nothing at all for them — never a `$0.00`, which is
+            the one reading this feature must not produce. Sits in the head
+            beside the elapsed reading rather than under the tiles because it
+            is the same register: a fact about this run as a whole, in the row
+            a reader's eye is already on. The `sessions` count rides along
+            once it exceeds the item count's floor of one per item — it is
+            what explains a total that looks high for the queue length. */}
+        {runUsage !== null && (
+          <span className="run-detail-time" data-testid="run-detail-usage">
+            {[
+              runUsage.costUsd === null ? null : formatUsd(runUsage.costUsd),
+              runUsage.turns === null ? null : formatTurns(runUsage.turns),
+              `${runUsage.sessions} session${runUsage.sessions === 1 ? '' : 's'}`
             ].filter((part) => part !== null).join(' · ')}
           </span>
         )}
@@ -679,6 +719,39 @@ export function RunDetail(
                   per-item `DetailRow`) carries no such field — an item
                   cannot say which mode the run around it is running. */}
               <StageTrack item={row} now={clock} live={runLive} mergeModeEffective={source.mergeModeEffective} />
+
+              {/* task-27: what this item's sessions cost, printed UNDER the
+                  track's own durations rather than folded into the head's
+                  `RowTime` reading. They are different quantities and the
+                  distinction is the point: `itemDurationMs` measures the
+                  item's wall time through the pipeline — review, verify and
+                  merge included, none of which is a dispatched session — while
+                  this is what the sessions themselves billed. Printing them in
+                  one slot would invite reading the dollar as a rate over the
+                  duration beside it.
+                    `null` for an item from a run archived before the feature,
+                  and for one skipped before dispatch (`ungroomed`,
+                  `needs-answers`) — those never had a session to cost
+                  anything, and a `$0.00` on them would be a claim rather than
+                  a blank. `sessions` prints only above one: every dispatched
+                  item has exactly one transcript, so "1 session" is noise,
+                  where "3 sessions" is the retry-and-fix-loop history that
+                  explains the number beside it. */}
+              {(() => {
+                const usage = itemUsageTotals(row);
+                if (usage === null) return null;
+                const parts = [
+                  usage.costUsd === null ? null : formatUsd(usage.costUsd),
+                  usage.turns === null ? null : formatTurns(usage.turns),
+                  usage.sessions === 1 ? null : `${usage.sessions} sessions`
+                ].filter((part) => part !== null);
+                if (parts.length === 0) return null;
+                return (
+                  <div className="run-detail-lead" data-testid={`run-detail-usage-${row.id}`}>
+                    {parts.join(' · ')}
+                  </div>
+                );
+              })()}
 
               {/* Beside the stage track, on the item row — the same placement
                   and the same reasoning as RunDrawer's own block: a decided

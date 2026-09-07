@@ -1,5 +1,7 @@
 import { isTerminalStage, itemDurationMs, runIsLive } from './run-time';
-import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
+import type {
+  OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage
+} from '../../../shared/types';
 
 /**
  * The statistics behind the Runs section's stat tiles (Task 6) and per-item
@@ -737,6 +739,106 @@ export function aggregateRuns(
     fixLoopsPerMerged,
     verifyPassRate
   };
+}
+
+/**
+ * What a run, or one item of it, cost — folded out of the per-transcript
+ * `RunSessionUsage` entries `orchestrate.mjs usage` writes (task-27).
+ *
+ * A rollup, not a store: the run file keeps one entry per dispatched session
+ * on purpose (`shared/types.ts` says why — "the fix loop cost more than the
+ * item did" is a question an early fold destroys), so summing is the
+ * reader's job and this is where the reader does it.
+ */
+export interface UsageTotals {
+  /** Summed `costUsd`, in whatever the CLI billed. `null` when no entry in scope carried one — see this file's own `null`-not-`0` convention. */
+  costUsd: number | null;
+  /** Summed `num_turns`, same rule. */
+  turns: number | null;
+  /** How many transcripts this total folds — an item's first session plus every retry and fix loop, so 1 is the ordinary case and 3 means it took two goes. */
+  sessions: number;
+}
+
+/**
+ * The fold itself, over however many entries the caller has in scope.
+ * `null` for an EMPTY list of entries, which is the distinction the whole
+ * feature turns on: a run archived before task-27 carries no `usage` key at
+ * all, and the Runs view must render nothing for it rather than `$0.00`.
+ *
+ * A per-FIELD `null` is a different and narrower thing: the entries exist,
+ * but every one of them left this particular number as a hole (a transcript
+ * from a future CLI that renamed the field). The caller then prints the
+ * halves it has and omits the one it doesn't, exactly as `RunDetail`'s own
+ * lead line already does for `queueWait`/`preflight`.
+ *
+ * A genuine `0` survives the fold — an entry whose `costUsd` really is `0`
+ * IS a measurement, the same reason `sumStageTotals` above keys its skip on
+ * `undefined` rather than on falsiness.
+ */
+function foldUsage(entries: readonly RunSessionUsage[]): UsageTotals | null {
+  if (entries.length === 0) return null;
+  let costUsd: number | null = null;
+  let turns: number | null = null;
+  for (const entry of entries) {
+    if (entry.costUsd !== null) costUsd = (costUsd ?? 0) + entry.costUsd;
+    if (entry.turns !== null) turns = (turns ?? 0) + entry.turns;
+  }
+  return { costUsd, turns, sessions: entries.length };
+}
+
+/**
+ * One item's total across every session dispatched for it. `null` when the
+ * item carries no `usage` key (an item from a run archived before task-27,
+ * or one skipped before dispatch — `ungroomed`/`needs-answers` items never
+ * had a session to cost anything).
+ */
+export function itemUsageTotals(item: Pick<RunQueueItem, 'usage'>): UsageTotals | null {
+  return foldUsage(item.usage ?? []);
+}
+
+/**
+ * One run's total across every item in its queue. `null` when NO item in
+ * the queue carries any entry — which is every run archived before task-27,
+ * and also a live run that has not finished inspecting its first item yet.
+ * A run with usage on one item and none on the rest reports the entries it
+ * has: a run in flight is exactly that shape for most of its life, and a
+ * partial total is the honest reading of it (the item count beside it on
+ * the same row is what says how far along it is).
+ *
+ * Takes the queue-carrying slice rather than a full run type, so the live
+ * `OrchestratorRun` and the archive's `OrchestratorArchiveRun` both satisfy
+ * it with no cast at the call site — the same reason `aggregateRuns` above
+ * names only the fields it reads.
+ */
+export function runUsageTotals(
+  run: { queue: readonly Pick<RunQueueItem, 'usage'>[] }
+): UsageTotals | null {
+  return foldUsage(run.queue.flatMap((item) => item.usage ?? []));
+}
+
+/**
+ * A cost, for a screen. Two decimals always, because these are dollars and
+ * a run that cost `$4.2` reads as a typo — and a sub-cent figure prints
+ * `<$0.01` rather than rounding to `$0.00`, which is the one output this
+ * whole feature is built to never show (an absent cost renders nothing at
+ * all; a `$0.00` would claim a session was free).
+ *
+ * An exact `0` is left as `$0.00` deliberately: that is a measurement the
+ * transcript actually reported, not a rounding artefact, and the honest
+ * thing to print for it is the number.
+ *
+ * No locale formatting, for `dayLabel`'s reason restated: two people looking
+ * at the same run should read the same string, and `toLocaleString` would
+ * give one of them `4,25 $`.
+ */
+export function formatUsd(cost: number): string {
+  if (cost > 0 && cost < 0.005) return '<$0.01';
+  return `$${cost.toFixed(2)}`;
+}
+
+/** `12 turns` / `1 turn` — the singular matters because a one-turn session is a real and diagnostic shape (a session that died on its first reply). */
+export function formatTurns(turns: number): string {
+  return `${turns} ${turns === 1 ? 'turn' : 'turns'}`;
 }
 
 /** Two-digit zero-padding — `item-age.ts`'s own tiny helper, re-written rather than imported for the same "not a shared primitive" reason `parseStamp` above is duplicated. */

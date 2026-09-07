@@ -183,6 +183,26 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   drawer entry that says nothing anyway. Then let the next run pick the item
   up from the top.
 
+**Then pick up the usage the crashed driver never recorded.** SKILL.md §5
+stamps what each dispatched session cost onto its queue item, and a run that
+died between a session finishing and that call landing has the number sitting
+in `logs/` with nothing pointing at it — and the logs are pruned long before
+the run history is. Compare `status --json`'s `usage` array on each item
+against the transcripts actually on disk, and run it for any that is missing:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
+```
+
+One entry per transcript — `<id>.jsonl`, each `<id>-retry-<n>.jsonl`, each
+`<id>-fix-<n>.jsonl` — and re-running it over one already recorded is
+harmless: an entry's identity is the transcript slot, so a second call
+replaces that slot rather than doubling it. Being unsure whether the crashed
+driver got to it is therefore not a reason to skip it. A transcript whose
+session was killed mid-flight has no result event, and that call writes
+nothing and exits `0` saying so; that is the honest record, not a failure to
+chase.
+
 ### `--abort`
 
 **Run `abort` first. Clear markers afterwards, and only for the items abort

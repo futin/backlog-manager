@@ -15,7 +15,8 @@ import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type {
   AgentsStatus, ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
-  OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, StartingRun, VerificationSummary,
+  OrchestratorRunsPayload, RunQueueItem, RunSessionUsage, RunStage, RunVerification, StartingRun,
+  VerificationSummary,
   WatchdogStatus
 } from '../shared/types';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
@@ -2113,5 +2114,83 @@ describe('RunsView · a starting run (task-21)', () => {
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), RUN_B.project);
 
     expect(screen.getByTestId('runs-empty-range')).toHaveTextContent('no runs in this range');
+  });
+});
+
+// --- task-27: what a run cost, on the row and in the pane -----------------
+describe('session usage', () => {
+  function usageEntry(over: Partial<RunSessionUsage> = {}): RunSessionUsage {
+    return {
+      sessionId: 'sess-1',
+      kind: 'execute',
+      costUsd: 2,
+      turns: 20,
+      inputTokens: 100,
+      outputTokens: 2000,
+      cacheReadTokens: 900_000,
+      cacheCreationTokens: 12_000,
+      durationMs: 60_000,
+      model: 'claude-opus-5[1m]',
+      endedAt: '2026-08-31T09:30:00.000Z',
+      ...over
+    };
+  }
+
+  /** Two items, three transcripts: $2 + $2 + $1.25 = $5.25, 20 + 20 + 8 = 48 turns. */
+  function runWithUsage(): OrchestratorArchiveRun {
+    const first = item('bug-1', 'merged');
+    const second = item('task-2', 'merged');
+    return run({
+      runId: 'run-20260831-140000',
+      project: '/abs/alpha',
+      status: 'done',
+      startedAt: '2026-08-31T14:00:00.000Z',
+      updatedAt: '2026-08-31T14:40:00.000Z',
+      queue: [
+        { ...first, usage: [usageEntry(), usageEntry({ kind: 'fix', loop: 1, costUsd: 2, turns: 20 })] },
+        { ...second, usage: [usageEntry({ costUsd: 1.25, turns: 8 })] }
+      ]
+    });
+  }
+
+  it('prints the run total on the list row, beside its wall time', async () => {
+    await renderRunsView([runWithUsage()]);
+
+    expect(screen.getByTestId('runs-row-foot-run-20260831-140000')).toHaveTextContent('40m · $5.25');
+  });
+
+  it('prints the run total, its turns and its session count in the detail pane head', async () => {
+    await renderRunsView([runWithUsage()]);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-20260831-140000'));
+
+    expect(await screen.findByTestId('run-detail-usage')).toHaveTextContent('$5.25 · 48 turns · 3 sessions');
+  });
+
+  it('prints each item\'s own total, with a session count only where there was more than one', async () => {
+    await renderRunsView([runWithUsage()]);
+
+    await userEvent.click(screen.getByTestId('runs-row-run-20260831-140000'));
+
+    // The item that took a fix loop says so; the one that did not stays quiet
+    // about a count of one, which every dispatched item has.
+    expect(await screen.findByTestId('run-detail-usage-bug-1')).toHaveTextContent('$4.00 · 40 turns · 2 sessions');
+    expect(screen.getByTestId('run-detail-usage-task-2')).toHaveTextContent('$1.25 · 8 turns');
+    expect(screen.getByTestId('run-detail-usage-task-2')).not.toHaveTextContent('session');
+  });
+
+  it('renders nothing at all for a run archived before usage was ever recorded', async () => {
+    // Every run already on disk when this shipped. The foot line still
+    // carries the wall time it always did — what must not appear anywhere is
+    // a `$0.00`, which would read as "this run was free" rather than "nobody
+    // measured it".
+    await renderRunsView([RUN_DONE_ALPHA]);
+
+    expect(screen.getByTestId(`runs-row-foot-${RUN_DONE_ALPHA.runId}`)).not.toHaveTextContent('$');
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_ALPHA.runId}`));
+
+    await screen.findByTestId('run-detail-items');
+    expect(screen.queryByTestId('run-detail-usage')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-testid^="run-detail-usage-"]')).toBeNull();
   });
 });
