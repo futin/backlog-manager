@@ -900,8 +900,9 @@ export interface OrchestratorRun {
  * `fresh` is the `RUN_STALE_MS` freshness check the server performs once so
  * every client doesn't re-implement it against its own clock, and
  * `pastRuns` is a count the client has no other way to obtain (it is a
- * directory listing on the server's filesystem, not a field the run file
- * carries about itself). `watchdog` (orchestrator-watchdog design, Task 2)
+ * count of the RUN FILES on the server's filesystem — `runs/*.json`, since
+ * task-31 put each archived run's sidecar directory in that same listing —
+ * not a field the run file carries about itself). `watchdog` (orchestrator-watchdog design, Task 2)
  * is optional for a reason distinct from `fresh`/`pastRuns` being mandatory:
  * every run this endpoint lists has a freshness fact and a history count
  * whether or not anyone is watching it, but a watchdog record only exists

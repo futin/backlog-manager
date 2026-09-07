@@ -108,7 +108,7 @@ environment and `.env.example` does not carry.
 | `BM_AGENTS_TOKEN` | empty | Sent as `Authorization: Bearer …` when the dashboard sets `ANSWER_TOKEN` |
 | `BM_WATCHDOG_FILE` | `~/.backlog-manager/settings/watchdog.json` | Where the server itself writes the run watchdog's own settings |
 | `BM_WATCHDOG` | on | `off` disables the run watchdog entirely — the operator's kill switch, separate from its Settings toggle |
-| `BM_ORCH_HOME` | `~/.backlog-manager/orchestrator/` | The orchestrator's run-state directory: `orchestrate.mjs` writes each run's `run.json` there and archives finished runs under `runs/`, and this server only ever reads it. Not in `.env.example` |
+| `BM_ORCH_HOME` | `~/.backlog-manager/orchestrator/` | The orchestrator's run-state directory: `orchestrate.mjs` writes each run's `run.json` there and archives each finished run under `runs/` — its run file as `runs/<runId>.json` and its sidecars (transcripts, reviewer reports, verify output) as the sibling directory `runs/<runId>/` — and this server only ever reads it. Not in `.env.example` |
 | `BM_ORCH_CONTROL_HOME` | `~/.backlog-manager/settings/orchestrator-control/` | Where this server writes a pause request, which a live run reads back at its dispatch gates — the one file travelling server to tool. Not in `.env.example` |
 
 A project outside `BM_PROJECT_ROOT` is invisible to the container and is

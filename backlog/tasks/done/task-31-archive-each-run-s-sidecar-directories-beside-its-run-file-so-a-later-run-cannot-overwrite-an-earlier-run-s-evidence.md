@@ -4,6 +4,10 @@ title: Archive each run's sidecar directories beside its run file, so a later ru
 created: 2026-09-07
 from: idea-8
 runner-fix: true
+updated: 2026-09-07T07:40:58Z
+started: 2026-09-07T05:51:17Z
+execute-elapsed: 6581
+execute-tokens: 157119
 ---
 
 ## Goal
@@ -276,3 +280,117 @@ asserting.
   child's pid file safe.
 - Case 13's browser check ran and showed the singular count, and every server process it
   started was killed by its recorded pid.
+
+## Outcome
+
+2026-09-07 — Implemented as planned, all three parts. `archivePath` is gone,
+replaced by the exported `archiveStem(archiveDir, runId)` (returns the bare
+stem; collision check on `<stem>.json` alone, so an interrupted archive
+repairs rather than splits) and the new `archiveSidecars(dir, destDir)`
+(denylist of `run.json` + `runs`, `destDir` created only when there is
+something to move, best-effort with a stderr warning per failure, an existing
+name skipped never overwritten). `cmdInit` moves sidecars first and renames
+`run.json` last, inside the existing `if (existing)` guard and still after
+`buildGatedQueue`. Server side, `archivedRunFiles(runsDir)` is the one
+implementation of "which entries under `runs/` are run files", read by both
+`countPastRuns` and `archive()`; `archivedRun()` is unchanged and carries a
+comment saying why. Prose landed in SKILL.md §2, `references/recovery.md`,
+a new CLAUDE.md Invariants bullet and a long-form `docs/invariants.md`
+section.
+
+Two things worth recording that the plan did not anticipate:
+
+- **Test cases 3 and 4 hit a real same-second runId collision.** Both drive
+  two full init/finish cycles, and `makeRunId` is second-precision, so the
+  two runs got the identical id and "run 2's archive" resolved to run 1's
+  directory. The tool is right (that is exactly what `archiveStem`'s `-2`
+  bump is for); the fixture was wrong. Both cases now wait out the second via
+  a `sleepPastRunIdSecond()` helper and assert `notEqual` on the two ids, so
+  they talk about two runs rather than one.
+- **The worktree had no `node_modules`**, so `pnpm test` failed with
+  `sh: jest: command not found` before any test ran. `pnpm install
+  --frozen-lockfile` fixed it; nothing in the change is responsible.
+
+Verification — `pnpm test` (both runners), `pnpm run typecheck`,
+`pnpm run build`, all on the final tree:
+
+```
+Test Suites: 80 passed, 80 total
+Tests:       1535 passed, 1535 total
+
+# tests 450
+# pass 450
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+exit=0
+```
+
+```
+$ pnpm run typecheck   ->  typecheck=0
+$ pnpm run build       ->  build=0   (✓ built in 1.26s)
+```
+
+Case 13, the browser check, ran for real. A scratch `BM_ORCH_HOME` under
+`mktemp -d` held one project keyed `encodeURIComponent('/tmp/task31-demo-project')`
+with a fresh `running` `run.json`, `runs/run-20260101-000000.json` and the
+sibling directory `runs/run-20260101-000000/logs/bug-1.jsonl`. Ports 4322 and
+5177 were already held by Docker on this machine, so the API ran on `PORT=4399`
+and Vite on `WEB_PORT=5199` — pids recorded at launch (`API_PID=83773`,
+`WEB_PID=83776`) and both, plus their two recorded children, killed by pid at
+the end; nothing was killed by pattern, and both ports were confirmed free
+afterwards. `GET /api/orchestrator/runs` returned `pastRuns: 1`, and clicking
+the run strip's row opened the drawer reading:
+
+```
+running · 1 past run
+```
+
+Singular, off a `runs/` holding one run file and one sidecar directory. Before
+the fix it reads `2 past runs`.
+
+Contract sweep: 6 sites updated (`docs/invariants.md`,
+`docs/superpowers/specs/2026-09-01-orchestration-archive-design.md`,
+`shared/types.ts`, `README.md`, `skills/backlog-orchestrate/tools/orchestrate.mjs`,
+`skills/backlog-orchestrate/tools/orchestrate.test.mjs`)
+
+The removed identifier was `archivePath` (2 stale pointers outside the diff,
+both repointed at `archiveStem`); the changed rule was "`pastRuns` is a plain
+directory-listing count over `runs/`", which is now a listing filtered to
+`.json` (4 sites restated). Two categories were deliberately left standing:
+the dated design records under `docs/superpowers/plans/` and
+`docs/superpowers/specs/*-design.md` that describe `pastRuns` as a dir-entry
+count (`2026-08-31-backlog-orchestrate.md:133,260`,
+`2026-09-01-orchestration-archive.md`, the archive design doc's body) — those
+are records of what was decided on their date, not live contracts, and the one
+edit made to that folder was a bare function-name pointer that would otherwise
+resolve to nothing; and this item file's own Plan section, which quotes
+`archivePath` because that is what the plan was written against.
+
+Red proof: 8 tests went red with the change reverted
+
+Run in three passes so each revert isolates one production change rather than
+masking the others:
+
+- Removing only the `archiveSidecars(...)` call from `cmdInit` (leaving
+  `archiveStem` in place): 5 red — sidecars move, invented sidecar names,
+  second run cannot overwrite, interrupted archive repaired, name collision
+  skipped.
+- Un-exporting `archiveStem`: 1 red — the `archiveStem` unit case, via
+  `SyntaxError: The requested module './orchestrate.mjs' does not provide an
+  export named 'archiveStem'`.
+- Reverting `archivedRunFiles`' `.json` filter to a bare `readdirSync`:
+  2 red — `pastRuns` counts run files only, and `archive()` ignores the
+  sidecar directory silently.
+
+Four of the twelve new cases cannot go red against the pre-change code and are
+guards rather than proofs, which is deliberate and stated here rather than
+left for a reviewer to notice: `runs/` and `run.json` are never swept, no
+sidecars means no empty directory, and a refused `init` (exit 4) moves
+nothing all pass trivially when nothing sweeps at all — they exist to fail if
+a future edit widens the denylist, litters an empty directory, or moves the
+archive outside the lock. The twelfth, `GET /api/orchestrator/archive/run`
+still resolving an archived run beside a same-named directory, passes today
+because `archivedRun()` correctly needed no change; the plan predicted exactly
+that, and the case pins the reasoning.

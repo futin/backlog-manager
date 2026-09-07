@@ -256,6 +256,51 @@ happened.
   the filesystem, 404 for every failure alike. Both stay as fresh-per-request
   and cache-nothing as `runs()` always has — the single-writer rule is
   unchanged; only the one reader's reach grew.
+- **A run's sidecars are archived beside its run file, under a name derived
+  from the archive path and stored nowhere.** `init` moves the superseded
+  run's `run.json` to `runs/<stem>.json` and everything else under `<dir>`
+  into `runs/<stem>/` — one stem, one `archiveStem`, two sibling artefacts,
+  which is what lets a reader find a run's evidence with no `sidecarDir`
+  field recording it (the same posture as "Groomed is derived"). Before this,
+  `<dir>/logs|reviews|verify|questions` were flat and keyed by ITEM id, so an
+  item dispatched in two runs kept only the second's transcript, reviewer
+  report and verify output; bug-2 here ran three times and task-9 in
+  claude-agents-dashboard twice, and only the last of each survives. What
+  moves is a **denylist of two** — `run.json` and `runs/` — never an
+  allowlist of the names known today: those directories are created by
+  DRIVERS following SKILL.md prose (`mkdir -p "<dir>/logs"`), so the set is
+  open by construction, `prompts/` already exists on one project because a
+  driver invented it, and bug-31 will document `prompts/<id>-fix-<n>.txt`
+  outright — an allowlist minted today would silently drop it, which is the
+  exact loss this closes. **Sidecars move first, `run.json` renames last**,
+  and that order is the design: a crash between them leaves the sidecars in
+  `runs/<stem>/` with `run.json` still flat and still `done`, so the next
+  `init` resolves the SAME stem (`archiveStem` checks `<stem>.json` alone,
+  deliberately not "either name is free"), merges what remains into the
+  directory already there and completes the rename — self-repairing, where
+  renaming the run file first and crashing would leave `existing === null`
+  and let the next run overwrite the very evidence it was preserving. A name
+  already present in the destination is skipped with a warning, never
+  overwritten. The whole move is **best-effort and never fails an `init`**:
+  the contract is that a bad call writes nothing and a good one ends with a
+  valid `run.json`, and trading a real run for a filing error is the wrong
+  way round. Moving a live child's `logs/<id>.pid` is safe for exactly one
+  reason — `init` refuses any `status: "running"` run with exit `4`, fresh or
+  stale, and `init` is the only command that archives anything, so by the
+  time a sweep can run there is no live child and no resume still owed those
+  paths. **Orphaned sidecars are a deliberate non-goal**: archiving happens
+  inside `if (existing)`, so with no run file there is no run to name and
+  those files can still be overwritten — inventing `runs/orphan-<newRunId>/`
+  would file evidence under a run id that never produced it. On the server
+  side this makes `runs/` a mixed listing for the first time, and
+  `archivedRunFiles` (`orchestrator.service.ts`) is the ONE implementation of
+  "which entries are run files", read by both `countPastRuns` and
+  `archive()` — two expressions that merely agree are two chances to
+  disagree, and here they would disagree as a doubled `pastRuns` count and an
+  EISDIR warning per archived run per request. `archivedRun()` needs no
+  filter: it probes the exact path `runs/<runId>.json`, which a sibling
+  directory cannot answer to. Long form:
+  [docs/invariants.md](docs/invariants.md).
 - **A board-started run is visible before its run file exists, from server
   memory that is never written to disk.** `GET /api/orchestrator/runs` can
   only see `run.json`, and `orchestrate.mjs init` writes it in SKILL.md §2 —

@@ -110,7 +110,16 @@ value of the marker is that the *remaining* queue is not executed by the
 broken version, and a crash is most likely at precisely the moment the runner
 is broken.
 
-Then start from what is actually on disk, not from what the run file hoped:
+Then start from what is actually on disk, not from what the run file hoped —
+and what is on disk is still exactly where the crashed session left it. `init`
+refuses any run whose status still reads `running`, fresh or stale, with exit
+`4`, and archiving a run's sidecars is something only `init` ever does. So no
+later run can sweep this run's `<dir>/logs`, `<dir>/reviews`, `<dir>/verify`
+or `<dir>/questions` into `<dir>/runs/<runId>/` while a resume is still owed
+one — the exit-`4` lock is what makes it safe for that sweep to move a live
+child's `logs/<id>.pid` or `verify/<id>.pid` at all, because by the time it
+can run, no live child exists. The flat paths below are the same paths the
+crashed session wrote to.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" reconcile

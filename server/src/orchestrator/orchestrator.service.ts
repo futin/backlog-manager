@@ -104,7 +104,7 @@ function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
 
 /**
  * `run-YYYYMMDD-HHMMSS`, optionally suffixed `-<n>` for a same-second
- * collision — the exact shape `archivePath` (orchestrate.mjs) mints, and
+ * collision — the exact shape `archiveStem` (orchestrate.mjs) mints, and
  * `archivedRun()` below's first guard. Tested before anything else touches
  * the filesystem: the threat this exists to name is traversal
  * (`../../etc/passwd`-shaped input), and the only way to be sure a
@@ -114,15 +114,39 @@ function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
  */
 const RUN_ID_RE = /^run-\d{8}-\d{6}(-\d+)?$/;
 
-/** Directory-entry count for one project's archived-runs folder, 0 when it
- *  doesn't exist yet (no run for this project has ever been superseded by a
- *  later `init` — see orchestrate.mjs's own archiving comment on cmdInit). */
-function countPastRuns(runsDir: string): number {
+/**
+ * Which entries under one project's `runs/` folder are actually RUN FILES —
+ * `[]` when the folder doesn't exist yet (no run for this project has ever
+ * been superseded by a later `init` — see orchestrate.mjs's own archiving
+ * comment on cmdInit).
+ *
+ * The `.json` filter is load-bearing, not defensive tidiness: since task-31,
+ * `init` archives a superseded run's SIDECAR directories (`logs/`,
+ * `reviews/`, `verify/`, `questions/`, and whatever else a driver invented)
+ * alongside its run file, as `runs/<stem>/` beside `runs/<stem>.json`. So
+ * `runs/` is a mixed listing, and every non-`.json` entry in it is one run's
+ * archived evidence — never a run of its own. Do not "simplify" this filter
+ * away: without it every archived run is counted twice by `countPastRuns`
+ * (the number RunDrawer prints as "<n> past runs") and read twice by
+ * `archive()`, whose second read hands a directory to `readFileSync` and
+ * logs an EISDIR warning per archived run per request.
+ *
+ * ONE implementation read by both callers, for the reason `isStale` and
+ * `leavesBoard` are one: two expressions that merely agree today are two
+ * chances to disagree later.
+ */
+function archivedRunFiles(runsDir: string): string[] {
   try {
-    return readdirSync(runsDir).length;
+    return readdirSync(runsDir).filter((name) => name.endsWith('.json'));
   } catch {
-    return 0;
+    return [];
   }
+}
+
+/** Run-file count for one project's archived-runs folder — `pastRuns` on the
+ *  live payload, and nothing more than `archivedRunFiles`' length. */
+function countPastRuns(runsDir: string): number {
+  return archivedRunFiles(runsDir).length;
 }
 
 /**
@@ -380,14 +404,10 @@ export class OrchestratorService {
       // runs/ — every run this project has archived, one file per
       // superseded run. A project with only ever one run has no runs/ dir
       // at all, which is exactly as unremarkable as countPastRuns treats
-      // it above: no warning, no entries, just an empty read.
-      let runFiles: string[];
-      try {
-        runFiles = readdirSync(join(dir, 'runs'));
-      } catch {
-        runFiles = [];
-      }
-      for (const file of runFiles) {
+      // it above: no warning, no entries, just an empty read. The listing
+      // also holds each archived run's sidecar DIRECTORY since task-31,
+      // which archivedRunFiles is what filters back out — see its comment.
+      for (const file of archivedRunFiles(join(dir, 'runs'))) {
         const archived = readOneRun(join(dir, 'runs', file), `runs/${file} for "${name}"`);
         if (archived) projectRuns.push(toArchiveEntry(archived, false));
       }
@@ -470,6 +490,10 @@ export class OrchestratorService {
     // falls through to run.json below. A corrupt or implausible file that
     // DOES exist under this name is still a real problem and still warns —
     // expectMiss only silences the "genuinely not there" ENOENT case.
+    // No task-31 filter needed here, unlike archive()/countPastRuns above:
+    // this probes the one exact path `runs/<runId>.json`, which a sibling
+    // sidecar directory named `<runId>` can never answer to, and RUN_ID_RE
+    // is unchanged.
     const archived = readOneRun(join(dir, 'runs', `${runId}.json`), `runs/${runId}.json for "${project}"`, true);
     if (archived) return archived;
 

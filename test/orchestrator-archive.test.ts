@@ -100,6 +100,16 @@ function writeArchived(orchHome: string, project: string, fileName: string, cont
 // once to catch and inspect) is safe: every case below is a read-only
 // lookup against files this suite wrote, with no state to mutate between
 // calls.
+// task-31: a run's sidecar directories are archived to `runs/<stem>/`,
+// beside — not inside — its `runs/<stem>.json`. That makes `runs/` a mixed
+// listing of files and directories for the first time, which both readers of
+// it (countPastRuns, archive()) have to stop counting blindly.
+function writeArchivedSidecar(orchHome: string, project: string, stem: string, rel: string, body: string): void {
+  const dir = join(projectDir(orchHome, project), 'runs', stem);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, rel), body);
+}
+
 function expectNotFound(fn: () => unknown): void {
   expect(fn).toThrow(HttpException);
   try {
@@ -220,6 +230,28 @@ describe('OrchestratorService.archive', () => {
     const result = service.archive();
     expect(result.runs).toHaveLength(1);
     expect(result.runs[0].current).toBe(false);
+  });
+
+  // task-31. The no-warning half is the whole point: handing a DIRECTORY to
+  // readOneRun makes readFileSync throw EISDIR, which it dutifully reports
+  // as "unreadable or not valid JSON, skipping" — once per archived run, per
+  // request, on a route the Runs view fetches on mount and on every window
+  // focus. The payload staying correct is necessary but not sufficient.
+  it('ignores a run\'s archived sidecar directory sitting beside its run file, silently', () => {
+    const project = '/abs/project-g';
+    const runId = 'run-20260901-090000';
+    writeCurrent(orchHome, makeRun({ project, runId: 'run-20260902-100000', status: 'running' }));
+    writeArchived(orchHome, project, `${runId}.json`, makeRun({ project, runId }));
+    writeArchivedSidecar(orchHome, project, runId, 'log.jsonl', '{"kind":"log"}');
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = service.archive();
+      expect(result.runs.map((r) => r.runId).sort()).toEqual(['run-20260901-090000', 'run-20260902-100000']);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 
@@ -409,5 +441,19 @@ describe('OrchestratorController.archivedRun', () => {
     expect(result?.mergeMode).toBe('merge');
     expect(result?.mergeModeEffective).toBe('merge');
     expect(result?.mergeModeNote).toBeNull();
+  });
+
+  // task-31: the detail endpoint needs no change and this case is what says
+  // so out loud. It probes the exact path `runs/<runId>.json`, which a
+  // sibling DIRECTORY named `<runId>` cannot answer to, so the archived
+  // run still resolves with its sidecars sitting right beside it.
+  it('still resolves an archived run whose sidecar directory shares its name', () => {
+    const project = '/abs/project-k';
+    const runId = 'run-20260901-150701';
+    writeArchived(orchHome, project, `${runId}.json`, makeRun({ project, runId }));
+    writeArchivedSidecar(orchHome, project, runId, 'log.jsonl', '{"kind":"log"}');
+
+    const result = controller.archivedRun(project, runId);
+    expect(result?.runId).toBe(runId);
   });
 });

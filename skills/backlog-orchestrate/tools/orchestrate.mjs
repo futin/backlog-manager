@@ -237,23 +237,104 @@ function runsArchiveDir(dir) {
   return path.join(dir, 'runs')
 }
 
-// Picks the archive path for a finished run, `<archiveDir>/<runId>.json`
-// unless that name is already taken — which makeRunId's second-precision
-// shape makes a real possibility, not a theoretical one: `finish` followed
-// immediately by `init` (a human clearing a done run and starting the next
-// one, or a test doing the same two calls back to back) can easily land two
-// runs' worth of archiving in the same wall-clock second. Falling through
-// to `-2`, `-3`, … on a collision means the second archive can never
-// silently overwrite the first and destroy a finished run's only surviving
-// record — the alternative, a bare renameSync straight to `<runId>.json`,
-// would make that data loss possible on nothing more exotic than a fast
-// human or a fast test.
-function archivePath(archiveDir, runId) {
-  let candidate = path.join(archiveDir, `${runId}.json`)
-  for (let suffix = 2; fs.existsSync(candidate); suffix++) {
-    candidate = path.join(archiveDir, `${runId}-${suffix}.json`)
+// Picks the archive STEM for a finished run — `<runId>` unless
+// `<archiveDir>/<runId>.json` is already taken, which makeRunId's
+// second-precision shape makes a real possibility, not a theoretical one:
+// `finish` followed immediately by `init` (a human clearing a done run and
+// starting the next one, or a test doing the same two calls back to back)
+// can easily land two runs' worth of archiving in the same wall-clock
+// second. Falling through to `-2`, `-3`, … on a collision means the second
+// archive can never silently overwrite the first and destroy a finished
+// run's only surviving record — the alternative, a bare renameSync straight
+// to `<runId>.json`, would make that data loss possible on nothing more
+// exotic than a fast human or a fast test.
+//
+// A STEM rather than a path because a finished run now has TWO archived
+// artefacts sharing one name: `<archiveDir>/<stem>.json` (the run file) and
+// `<archiveDir>/<stem>/` (that run's sidecar directories — see
+// archiveSidecars below). Both are minted from this one answer to "which
+// name is free"; deriving the directory by stripping `.json` off a returned
+// path at the call site would be a second, weaker copy of the same rule,
+// and the sibling-name convention is exactly what lets a reader find a
+// run's evidence without any field in the run file recording where it went.
+//
+// The collision check is on `<stem>.json` ALONE, deliberately not "either
+// `<stem>.json` or `<stem>/` is free". The only way to reach a free `.json`
+// beside an existing directory of that name is an archive interrupted
+// between its two moves (cmdInit moves the sidecars first, then renames
+// run.json) — and in that state REUSING the stem is the repair: the next
+// init merges whatever sidecars remain into the directory already there and
+// completes the rename. Widening the check would instead split one run's
+// evidence across `<stem>/` and `<stem>-2.json` permanently.
+export function archiveStem(archiveDir, runId) {
+  let stem = runId
+  for (let suffix = 2; fs.existsSync(path.join(archiveDir, `${stem}.json`)); suffix++) {
+    stem = `${runId}-${suffix}`
   }
-  return candidate
+  return stem
+}
+
+// Moves a finished run's SIDECAR artefacts out of the flat, project-scoped
+// state directory and into `destDir` (`runs/<stem>/`, the sibling of that
+// run's archived `<stem>.json`). Everything under `<dir>` moves EXCEPT two
+// names: `run.json`, which cmdInit renames itself moments later, and
+// `runs`, the archive folder this would otherwise bury inside its own
+// newest entry.
+//
+// A DENYLIST of two, not an allowlist of the five names known today
+// (`logs`, `reviews`, `verify`, `questions`, `prompts`). Those directories
+// are created by DRIVERS following SKILL.md prose (`mkdir -p
+// "<dir>/logs"`), never by this tool, so the set is open by construction —
+// `prompts/` exists on exactly one project on this machine because one
+// driver invented it unprompted. An allowlist minted today would silently
+// drop whatever the next prose edit names, which is precisely the evidence
+// loss this whole mechanism exists to close. `runs/` being off limits to
+// drivers is already SKILL.md §2's rule ("stay out of `<dir>/runs/`"), so
+// excluding it enforces an existing rule rather than inventing one.
+//
+// Best-effort throughout, and never fatal. `init`'s contract is that a bad
+// call writes nothing and a good call ends with a valid run.json; failing a
+// real run over evidence bookkeeping would trade the run for a filing
+// error. Every failure warns to stderr naming the entry and continues.
+function archiveSidecars(dir, destDir) {
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (err) {
+    process.stderr.write(`warning: could not read ${dir} to archive its sidecars: ${err.message}\n`)
+    return
+  }
+
+  const movable = entries.filter((entry) => entry.name !== 'run.json' && entry.name !== 'runs')
+  // Created only when there is something to put in it. An unconditional
+  // mkdir would leave an empty `runs/<stem>/` after every init, and an
+  // empty directory claims evidence exists where none does.
+  if (movable.length === 0) return
+  try {
+    fs.mkdirSync(destDir, { recursive: true })
+  } catch (err) {
+    process.stderr.write(`warning: could not create ${destDir} to archive sidecars: ${err.message}\n`)
+    return
+  }
+
+  for (const entry of movable) {
+    const target = path.join(destDir, entry.name)
+    // Reachable only through the interrupted-archive path (sidecars already
+    // moved, run.json not renamed yet, a live run since recreating the same
+    // name). renameSync onto an existing name is an error on some platforms
+    // and a silent replace of an empty directory on others; neither is a
+    // thing to do to archived evidence, so the newer copy is left flat and
+    // says so rather than being merged in over the top.
+    if (fs.existsSync(target)) {
+      process.stderr.write(`warning: ${target} already exists — leaving ${entry.name} where it is rather than overwriting archived evidence\n`)
+      continue
+    }
+    try {
+      fs.renameSync(path.join(dir, entry.name), target)
+    } catch (err) {
+      process.stderr.write(`warning: could not archive ${entry.name} into ${destDir}: ${err.message}\n`)
+    }
+  }
 }
 
 // Is `dir` the top of a LINKED GIT WORKTREE? Returns a
@@ -1480,7 +1561,7 @@ function cmdInit(argv) {
   // leaving the project with no run.json at all. The data wasn't lost (it
   // survived under runs/), but `status` would then wrongly report exit 3
   // ("no run exists"), and a fresh project's `init` would even leave behind
-  // a stray empty directory (see writeRunAtomic/archivePath below, both of
+  // a stray empty directory (see writeRunAtomic/archiveStem below, both of
   // which now create their own directories on demand instead of this
   // function pre-creating one). Validating first — today that means
   // buildGatedQueue throwing on an --ids entry this store doesn't have —
@@ -1576,17 +1657,31 @@ function cmdInit(argv) {
   }
 
   // A non-running existing run (done/aborted/failed) is archived rather
-  // than discarded: `runs/<runId>.json` is the only place a finished run's
-  // full history survives once run.json itself is about to be replaced,
-  // and `pastRuns` (the server payload, Task 8) is nothing more than a
-  // directory listing over exactly this folder. By the time execution
-  // reaches here, `queue` above has already been built and validated
-  // successfully — so this rename can never run only to be followed by a
-  // throw that leaves the project without any run.json at all.
+  // than discarded: `runs/<stem>.json` is the only place a finished run's
+  // full history survives once run.json itself is about to be replaced, and
+  // `runs/<stem>/` beside it is the only place that run's SIDECARS survive
+  // once the next run starts writing to the same flat paths. `pastRuns`
+  // (the server payload, Task 8) is a listing of this folder filtered to
+  // `.json` — the directory entries are one run's evidence, not runs of
+  // their own. By the time execution reaches here, `queue` above has
+  // already been built and validated successfully — so none of this can run
+  // only to be followed by a throw that leaves the project without any
+  // run.json at all.
   if (existing) {
     const archiveDir = runsArchiveDir(dir)
     fs.mkdirSync(archiveDir, { recursive: true })
-    fs.renameSync(file, archivePath(archiveDir, existing.runId))
+    const stem = archiveStem(archiveDir, existing.runId)
+    // Sidecars FIRST, run.json LAST, and the order is the design. A crash
+    // between the two leaves the sidecars under `runs/<stem>/` with
+    // run.json still flat and still `done` — so the next init resolves the
+    // SAME stem (archiveStem checks the .json, which is still free), merges
+    // whatever sidecars remain into the directory already there, and
+    // completes the rename. Self-repairing. The other order is not:
+    // renaming run.json first and crashing leaves `existing === null` next
+    // time, so this whole block never runs again and the sidecars are
+    // overwritten by the very run that was supposed to preserve them.
+    archiveSidecars(dir, path.join(archiveDir, stem))
+    fs.renameSync(file, path.join(archiveDir, `${stem}.json`))
   }
 
   const runId = makeRunId(stamp)
