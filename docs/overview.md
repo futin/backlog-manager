@@ -16,9 +16,16 @@ file, and each file that holds state has exactly one writer.
 | --- | --- |
 | [README.md](../README.md) | the human front door — what this is, quick start, the surfaces |
 | [CLAUDE.md](../CLAUDE.md) | the normative index: one line per rule, for anyone (or anything) working in this repo |
+| [subsystems/api.md](subsystems/api.md) | the Nest side: what each module owns, which reads are cached and which must never be |
+| [subsystems/board.md](subsystems/board.md) | the client: the four surfaces, and what the browser derives rather than fetches |
+| [subsystems/skills.md](subsystems/skills.md) | the five skills, their two single-writer CLIs, and the reviewer agent |
 | [subsystems/invariants.md](subsystems/invariants.md) | the rationale behind the rules whose "why" outruns one line — most encode a failure that already happened |
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes |
 | [workflows/publishing.md](workflows/publishing.md) | getting a skill edit out of the working tree and into the installed plugin |
+
+The three subsystem docs above carry no `verified:` baseline yet: their prose was moved
+out of README and CLAUDE.md rather than written from a code read, and a stamp claims
+someone did the latter. The checker reports them `unstamped` until that pass happens.
 
 Deliberately not tracked, and each for a stated reason in
 [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README),
@@ -42,7 +49,7 @@ That last row is the one exception to the direction of travel: everything else u
 `~/.backlog-manager` flows tool → server, and the pause request flows server → tool.
 The run file's own single-writer guarantee is untouched by it.
 
-### The API
+### The API — [full doc](subsystems/api.md)
 
 Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route under
 `/api`:
@@ -66,7 +73,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`static.ts` / `security.ts`** — the built client is served only if it was built, and
   the served build carries a CSP whose `script-src` pins the inline theme script by hash.
 
-### The client
+### The client — [full doc](subsystems/board.md)
 
 A React SPA, four sections behind a side rail
 ([`App.tsx`](../client/src/App.tsx)) and each one its own lazy chunk: Board, Runs,
@@ -77,7 +84,7 @@ Archive, how long an item's work took, what a run's cost was. Those derivations 
 about the same item; the ones the server needs too live in
 [`shared/`](../shared/agent.ts) beside the wire types.
 
-### The skills
+### The skills — [full doc](subsystems/skills.md)
 
 Five skills under `skills/`, two CLIs beneath them (`backlog.mjs`, the registry's only
 writer; `orchestrate.mjs`, the run file's only writer), and one agent under `agents/`
@@ -108,5 +115,5 @@ the disagreement itself is a bug worth fixing in the same sitting.
     - agents
     - docs/.docs-sync.yml
   kind: overview
-  verified: ca5a8f0245f8761408eb597d768115f3ff409c27
+  verified: 07169ebeb2df774c00d134b5bb926ce8d5762b9f
 -->
