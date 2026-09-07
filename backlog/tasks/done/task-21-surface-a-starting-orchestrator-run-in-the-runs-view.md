@@ -2,6 +2,10 @@
 id: task-21
 title: Surface a starting orchestrator run in the Runs view
 created: 2026-09-05
+updated: 2026-09-07T02:54:42Z
+started: 2026-09-07T01:57:13Z
+execute-elapsed: 3449
+execute-tokens: 135674
 ---
 
 ## Goal
@@ -116,3 +120,97 @@ This is the visibility half of the `starting` gap. The gating half — dispatch
 buttons, the Orchestrate control and the server's pre-spawn lock all staying
 open through the same window — is bug-21, and the two are independent: this
 task changes no gate and blocks nothing.
+
+## Outcome
+
+2026-09-07 — Done. `RunsView` reads `starting` off the payload it already
+polls and renders a `StartingRow` per entry in its own `.runs-day` group
+above the pinned live region, so a run started from the Board is visible in
+Runs from the moment the spawn resolves rather than 1–5 minutes later when
+`init` writes `run.json`.
+
+What landed:
+
+- `client/src/components/runs/RunsView.tsx` — `starting` destructured from
+  `useOrchestratorRuns()`; a `StartingRow` component (project label, the word
+  `starting`, `elapsedSince(requestedAt)`, a `<div>` with no focusable child);
+  `startingRows`, the project-filtered list; the region rendered above the
+  pinned `live` group and outside the `filtered.length === 0` ternary; both
+  empty states (`no runs yet`, `no runs in this range`) suppressed while a
+  placeholder shows.
+- `client/src/styles.css` — `.runs-row-starting` (dashed, `cursor: default`,
+  plus the `:hover` override the base rule's higher specificity requires),
+  `.runs-status-starting`, `.runs-row-starting-age`.
+- `test/runs-view.test.tsx` — `renderRunsView` gained an optional third
+  `starting` argument (defaulted, so every existing call site is unchanged)
+  and a new `RunsView · a starting run (task-21)` describe with 11 cases.
+- `CLAUDE.md` — the Runs entry in Layout now records the group and its rules.
+
+**One deliberate deviation from the plan, in step 2.** The plan asked for
+BoardView's client-side collision filter (drop an entry whose project already
+has a `running` run, fresh or crashed) to be hoisted into `lib/` and shared.
+That filter no longer exists to hoist: bug-21 merged after this item was
+groomed, moved the rule server-side into `StartingRunsService.expired()` as
+its third eviction rule, and deleted the board's copy — CLAUDE.md now carries
+"the board maps `StartingStrip` straight over `starting`, with **no
+client-side filter**" as an invariant, on the grounds that a client
+expression merely agreeing with the server rule is the two-agreeing-
+expressions shape (`watchdogStoodDown`, `isStale`) this repo pins tests
+against. Re-introducing it in a second view would have been that shape twice
+over, so `RunsView` reads `starting` straight too, and the plan's five unit
+cases for the hoisted predicate are covered where the rule actually lives
+(`test/orchestrator-starting.test.ts`). The plan's component case "same
+payload plus a `running` run for that project → exactly one row" was dropped
+for the same reason: that payload is one the server does not emit, and
+asserting the client drops it would install the second expression. Both
+decisions are stated at length in the code and in the new suite's own
+docblock. Every other plan item and test case is implemented as written.
+
+A second, smaller judgement call: with `merged.length === 0` and a
+placeholder present, the view falls through to its normal layout — zeroed
+tiles, the starting row alone in the list, an empty detail pane — rather than
+gaining a third starting-only branch. Every one of those readings is true
+(this project has run nothing yet), and a separate branch would give the same
+section two layouts depending on whether any history existed. The empty
+detail pane is what the plan's step 4 asks for.
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+(clean, no output)
+
+$ pnpm test
+Test Suites: 79 passed, 79 total
+Tests:       1510 passed, 1510 total
+# tests 415
+# pass 415
+# fail 0
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.46s
+dist/assets/BoardView-idvepSEe.js    69.12 kB │ gzip:  9.50 kB
+dist/assets/RunsView-BKkKPRWW.js     73.97 kB │ gzip: 10.47 kB
+```
+
+The two chunk names above are part of the proof, not decoration: Board and
+Runs are still separate lazy chunks, which is what "neither view imports the
+other" means at build time.
+
+**One flake observed, reported rather than hidden.** During verification the
+full jest run failed twice out of roughly nine consecutive runs on
+`test/agents-origin-guard.test.ts › 403s a urlencoded POST to dispatch
+without any outbound call` — `expected 403 "Forbidden", got 400 "Bad
+Request"`. It was then chased deliberately: 11 consecutive green runs on the
+tree with this branch's changes reverted, and 12 more consecutive green runs
+with them restored and the assertion instrumented to print the response body
+on failure — it never reproduced again, so no body was captured. This diff
+touches no server, `shared/` or hook code at all (client component, CSS, one
+client test file, CLAUDE.md), and `OriginGuard.canActivate` is a pure
+function of the `content-type` header, so a 400 there means the request was
+rejected by the body parser before the guard ever ran — a shared-process
+artifact of `jest --runInBand`, not something this change can reach. Flagging
+it as a latent test-infrastructure flake worth its own bug rather than
+claiming it does not exist.

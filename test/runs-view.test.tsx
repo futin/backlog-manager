@@ -15,7 +15,8 @@ import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type {
   AgentsStatus, ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
-  OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, VerificationSummary, WatchdogStatus
+  OrchestratorRunsPayload, RunQueueItem, RunStage, RunVerification, StartingRun, VerificationSummary,
+  WatchdogStatus
 } from '../shared/types';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 
@@ -386,11 +387,20 @@ const RUN_B = run({
   ]
 });
 
-async function renderRunsView(archiveRuns: OrchestratorArchiveRun[], liveRuns: OrchestratorRunsPayload['runs'] = []): Promise<RenderResult> {
+/** task-21 added the third parameter. It defaults to `[]` so every existing
+ *  call site keeps meaning exactly what it meant, and the settle condition
+ *  below takes it into account for the reason the case list at the foot of
+ *  this file exists: a payload with a starting entry and nothing else no
+ *  longer renders "no runs yet", so waiting for that string would hang. */
+async function renderRunsView(
+  archiveRuns: OrchestratorArchiveRun[],
+  liveRuns: OrchestratorRunsPayload['runs'] = [],
+  starting: OrchestratorRunsPayload['starting'] = []
+): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
-  mockRuns.mockResolvedValue({ runs: liveRuns, starting: [] } satisfies OrchestratorRunsPayload);
+  mockRuns.mockResolvedValue({ runs: liveRuns, starting } satisfies OrchestratorRunsPayload);
   const result = render(<RunsView />);
-  if (archiveRuns.length === 0 && liveRuns.length === 0) {
+  if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0) {
     await screen.findByText('no runs yet');
   } else {
     await screen.findByTestId('runs-list');
@@ -1899,5 +1909,209 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
 
     expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('1 running');
     expect(screen.getByTestId('runs-tile-runs')).not.toHaveTextContent('crashed');
+  });
+});
+
+/**
+ * task-21 — the starting placeholder in the Runs view.
+ *
+ * A run started from the Board is visible on the Board's own strip within a
+ * second (task-14) and invisible here for the 1–5 minutes it takes the spawned
+ * session to boot, read SKILL.md and reach `orchestrate.mjs init`. Runs is the
+ * surface a person actually watches a run from, so pressing Orchestrate and
+ * switching to it showed either "no runs yet" (a project's first run) or the
+ * PREVIOUS run sitting at the top of history — both of which read as "the click
+ * did nothing", which is the exact failure task-14 exists to close, on the one
+ * surface it did not cover.
+ *
+ * What these cases pin is as much what the row is NOT as what it is. It is a
+ * feedback row, not a run: no runId, no queue, no stages, no history — so it
+ * stays out of `orderedRows`, out of the selection, out of every aggregate and
+ * out of the project select's options, and it moves no number anywhere on this
+ * page.
+ *
+ * **No collision case here, deliberately.** The plan for this task asked for a
+ * shared predicate dropping an entry whose project already has a `running` run
+ * (fresh or crashed), hoisted out of `BoardView` into `lib/`. That predicate no
+ * longer exists to hoist: bug-21 moved the rule server-side into
+ * `StartingRunsService.expired()` (its third eviction rule, tested in
+ * test/orchestrator-starting.test.ts) and deleted the board's client-side copy,
+ * and CLAUDE.md now records "the board maps `StartingStrip` straight over
+ * `starting`, with no client-side filter" as an invariant. Re-introducing that
+ * expression here — in a second view — would be the two-agreeing-expressions
+ * shape this repo pins tests against everywhere else (`watchdogStoodDown`,
+ * `isStale`), so `RunsView` reads `starting` straight too and the guarantee is
+ * tested once, where the rule lives.
+ */
+describe('RunsView · a starting run (task-21)', () => {
+  /** 2m05s ago, not 2m00s: `elapsedSince` floors, so a fixture built exactly on
+   *  the boundary would print `1m` whenever the few milliseconds between this
+   *  expression and RunsView's own `Date.now()` pushed it over. */
+  const startingAt = (): string => new Date(Date.now() - 125_000).toISOString();
+
+  const STARTING_ALPHA: StartingRun = { project: '/abs/alpha', requestedAt: startingAt() };
+
+  it('renders a starting row instead of the "no runs yet" empty state', async () => {
+    // The case the whole task exists for: a project's FIRST run, in the window
+    // before `run.json` exists. Empty archive, empty live payload, one entry.
+    await renderRunsView([], [], [STARTING_ALPHA]);
+
+    const row = screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`);
+    expect(row).toHaveTextContent('starting');
+    expect(row).toHaveTextContent('alpha');
+    expect(row).toHaveTextContent('2m');
+
+    expect(screen.queryByText('no runs yet')).not.toBeInTheDocument();
+    // The range-empty note is suppressed on the same rule: an empty state
+    // describes a list with nothing in it, and this list has a row.
+    expect(screen.queryByTestId('runs-empty-range')).not.toBeInTheDocument();
+
+    // Nothing that would require a run file: no completed/queued count, no
+    // wall time, no stage. Those all come off `run.json`, and the entire point
+    // of this row is the window in which that file does not exist.
+    expect(row).not.toHaveTextContent('0/0');
+    expect(row.querySelector('.runs-row-count')).toBeNull();
+    expect(row.querySelector('.runs-row-wall')).toBeNull();
+
+    // And no detail pane: `RunDetail` is keyed on project + runId, and there is
+    // no runId to give it. An empty pane beats a pane inventing a run.
+    expect(screen.getByTestId('run-detail-slot')).toBeEmptyDOMElement();
+  });
+
+  it('is not a button and does not become or change the selection', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS, [STARTING_ALPHA]);
+
+    const row = screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`);
+    expect(row.tagName).toBe('DIV');
+    // Not merely "no handler": nothing focusable, so a keyboard reader never
+    // lands on a stop that does nothing when they activate it.
+    expect(row.closest('button')).toBeNull();
+    expect(row.querySelector('button')).toBeNull();
+
+    // The default selection is the pinned live run (fix round 1's own rule),
+    // and clicking the placeholder must leave it exactly there.
+    const detailBefore = screen.getByTestId('run-detail-slot').textContent;
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
+
+    await userEvent.click(row);
+
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('run-detail-slot').textContent).toBe(detailBefore);
+  });
+
+  it('renders above the pinned live region, in its own group', async () => {
+    // Reading order is the claim: starting, then fresh live runs, then history
+    // newest day first. A starting run is the most recent thing that happened
+    // by construction, so it cannot sit under a day heading.
+    const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS, [STARTING_ALPHA]);
+
+    const groupIds = Array.from(container.querySelectorAll('.runs-day'))
+      .map((el) => el.getAttribute('data-testid'));
+    expect(groupIds[0]).toBe('runs-day-starting');
+    expect(groupIds[1]).toBe('runs-day-live');
+
+    expect(screen.getByTestId('runs-day-starting')).toHaveTextContent('starting');
+  });
+
+  it('is hidden by the project filter and restored by widening it back', async () => {
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), RUN_A.project);
+    expect(screen.queryByTestId(`runs-starting-${STARTING_ALPHA.project}`)).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), 'all');
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+  });
+
+  it('adds no option to the project select', async () => {
+    // `projects` derives from `merged` alone. A placeholder project has no run
+    // to filter TO, so offering it would produce a filter that hides
+    // everything including the row that put the option there.
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+
+    const optionValues = Array.from(
+      screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')
+    ).map((o) => o.getAttribute('value'));
+    expect(optionValues).toEqual(['all', RUN_A.project, RUN_B.project]);
+  });
+
+  it('renders in every one of the four ranges', async () => {
+    // `inRange` reads `startedAt` and a starting entry has only `requestedAt`,
+    // so the range control deliberately does not scope these rows — which is
+    // correct rather than an exemption: every window this view offers ends at
+    // now, so an entry marked seconds ago is inside all four by construction.
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+
+    for (const r of RUN_RANGES) {
+      await userEvent.click(screen.getByTestId(`runs-range-${r}`));
+      expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+    }
+  });
+
+  it('moves no number in the aggregate tiles', async () => {
+    // Two renders of the SAME archive and live payload, differing only in
+    // whether a starting entry rides along. Every tile — including the wide
+    // machine-time one — has to read identically, because a placeholder
+    // contributes no run, no queue and no stage span to sum.
+    const tileText = (): string[] => Array.from(
+      document.querySelectorAll('[data-testid^="runs-tile-"]')
+    ).map((el) => `${el.getAttribute('data-testid')}=${el.textContent}`);
+
+    // RUN_A/RUN_B are both `done`, so every span these tiles sum is closed and
+    // two renders taken milliseconds apart cannot disagree.
+    const first = await renderRunsView([RUN_A, RUN_B], []);
+    const without = tileText();
+    first.unmount();
+
+    await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
+    expect(tileText()).toEqual(without);
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+  });
+
+  it('renders one row per starting project', async () => {
+    // Two projects can be booting at once — the server's map is keyed by
+    // project, and nothing serialises two different projects' spawns.
+    const beta: StartingRun = { project: '/abs/beta', requestedAt: startingAt() };
+    await renderRunsView([], [], [STARTING_ALPHA, beta]);
+
+    expect(screen.getByTestId(`runs-starting-${STARTING_ALPHA.project}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`runs-starting-${beta.project}`)).toBeInTheDocument();
+  });
+
+  it('prints an em dash for an unparseable requestedAt rather than NaN', async () => {
+    await renderRunsView([], [], [{ project: '/abs/alpha', requestedAt: 'not-a-date' }]);
+
+    const row = screen.getByTestId('runs-starting-/abs/alpha');
+    expect(row).toHaveTextContent('—');
+    expect(row).not.toHaveTextContent('NaN');
+  });
+
+  it('renders exactly as before when the payload omits `starting` entirely', async () => {
+    // An older server. `isOrchestratorRunsPayload` accepts the field absent and
+    // `useOrchestratorRuns` defaults it to `[]`, so this view may never assume
+    // it is present — the cast is what the wire can actually hand back, which
+    // the compile-time type deliberately does not model.
+    mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
+    mockRuns.mockResolvedValue({ runs: LIVE_RUNS } as unknown as OrchestratorRunsPayload);
+
+    render(<RunsView />);
+    await screen.findByTestId('runs-list');
+
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`)).toBeInTheDocument();
+    expect(screen.queryByTestId('runs-day-starting')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-testid^="runs-starting-"]')).toBeNull();
+  });
+
+  it('keeps the range-empty note when a filter empties the list and nothing is starting', async () => {
+    // The companion to the first case: the note is suppressed BY the row, not
+    // deleted. Same fixture, no starting entry.
+    await renderRunsView([RUN_A, RUN_B], []);
+
+    await userEvent.click(screen.getByTestId('runs-range-today'));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), RUN_B.project);
+
+    expect(screen.getByTestId('runs-empty-range')).toHaveTextContent('no runs in this range');
   });
 });

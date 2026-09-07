@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
+import { elapsedSince } from '../../lib/item-age';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
@@ -17,7 +18,7 @@ import { WatchdogMonitor } from './WatchdogMonitor';
 import type { RunRange } from '../../lib/run-range';
 import { resumeGate } from '../../../../shared/agent';
 import type {
-  OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RunStage
+  OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RunStage, StartingRun
 } from '../../../../shared/types';
 
 /**
@@ -502,6 +503,58 @@ function RunRow({
   );
 }
 
+/**
+ * task-21's placeholder row: a run this server spawned whose `run.json` does
+ * not exist yet. `StartingStrip`'s counterpart on this surface, and
+ * deliberately a separate component rather than that one reused — a strip is
+ * the board's own shape (its own frame, its own progress bar slot, its own
+ * `.run-strips` stack), and mounting it inside `.runs-list` would put one
+ * row in this list wearing a different layout from every other row in it.
+ * What the two DO share is the fact they print and the ladder they print it
+ * with: project, the word "starting", and `elapsedSince` — the same
+ * formatter, already in `lib/`, so "now"/"2m" means the same thing on both
+ * surfaces.
+ *
+ * Everything `RunRow` above prints comes off a run file, and the whole point
+ * of this row is the 1–5 minutes in which that file does not exist: no
+ * status chip off `runStatusChip`, no `completed/total`, no wall time. The
+ * two facts that DO exist — which project was asked, and how long ago — are
+ * the only two it carries, for the reason `StartingStrip`'s own comment
+ * gives at length: a 0/0 count or an empty stage would be a claim about a
+ * queue nothing has computed yet.
+ *
+ * A `<div>`, not the `<button>` `RunRow` is. There is no run to select:
+ * `RunDetail` is keyed on project + runId and this row has no runId to give
+ * it, so making it focusable would put a stop in the tab order that does
+ * nothing when a keyboard reader reaches it. That is also why it takes no
+ * `isSelected`/`onSelect` — it is outside `orderedRows` entirely, and
+ * nothing about the selection can name it.
+ */
+function StartingRow({ starting, now }: { starting: StartingRun; now: number }): JSX.Element {
+  // `null` — an unparseable or future `requestedAt` — prints an em dash
+  // rather than `NaNm`, matching `StartingStrip`'s own `age ?? '—'` and the
+  // `wall !== null` guard `RunRow` uses one component up.
+  const age = elapsedSince(starting.requestedAt, now);
+
+  return (
+    <div className="runs-row runs-row-starting" data-testid={`runs-starting-${starting.project}`}>
+      <span className="runs-row-head">
+        <span className="runs-status runs-status-starting">
+          {/* Hollow, never `RUN_STATUS_GLYPH.running`'s filled `●`: that
+              glyph means "this run is reporting a heartbeat right now", and
+              this one has not reported anything at all yet. aria-hidden for
+              the same reason every other chip glyph in this file is — the
+              word beside it is the accessible answer. */}
+          <span aria-hidden="true">○</span>
+          starting
+        </span>
+        <span className="runs-row-project">{projectLabel(starting.project)}</span>
+        <span className="runs-row-starting-age">{age ?? '—'}</span>
+      </span>
+    </div>
+  );
+}
+
 /** Which run is selected — `project` disambiguates a `runId` that, in principle, could collide across two different projects' state directories (the id is a second-precision timestamp, not a global counter). */
 interface Selection {
   project: string;
@@ -526,7 +579,19 @@ export const RUNS_PAGE_SIZE = 25;
 
 export default function RunsView() {
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
-  const { runs: liveRuns, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  // task-21: `starting` rides the same payload and the same poll `liveRuns`
+  // does — the hook already ORs `starting.length > 0` into its own "keep
+  // polling" predicate, so reading it here adds no request. It is taken
+  // straight, with NO client-side collision filter beside it: the rule that
+  // a project with a `running` run file (fresh or crashed) carries no
+  // starting entry at all lives in `StartingRunsService.expired()` on the
+  // server (bug-21's third eviction rule, tested in
+  // test/orchestrator-starting.test.ts), which is exactly why BoardView
+  // deleted the filter it used to have. Restating that rule here would be a
+  // second expression agreeing with the first — the shape `watchdogStoodDown`
+  // and `isStale` are each one function to avoid, and the one this repo has
+  // already been bitten by twice.
+  const { runs: liveRuns, starting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
   // task-17: the environment half of the resume gate, the same answer the
   // board derives for its own strips. Read here rather than inside
   // `RunControls` so the two hosts keep handing the component one prop
@@ -644,6 +709,22 @@ export default function RunsView() {
   // always narrowed `merged` before this task existed.
   const inScope = merged.filter((m) => inRange(m.run.startedAt, range, now));
   const filtered = projectFilter === 'all' ? inScope : inScope.filter((m) => m.run.project === projectFilter);
+  // The project filter applies to the placeholder rows; the RANGE control
+  // deliberately does not. `inRange` reads `startedAt` and only `startedAt`
+  // (lib/run-range.ts's own header states why no other field is a legitimate
+  // window key), a starting entry has no `startedAt` at all — it has
+  // `requestedAt`, the moment THIS process was asked — and every one of the
+  // four windows this view offers ends at now, so an entry marked seconds
+  // ago is inside all four by construction. Rendering it regardless of range
+  // is therefore not an exemption from the range rule, it is that rule's own
+  // answer, reached without teaching `inRange` a second date field it would
+  // then have to justify.
+  //
+  // Note this filters `starting`, never `merged`/`filtered`: a placeholder is
+  // not a run, so it stays out of `orderedRows`, out of `selectedRow`, out of
+  // `aggregateRuns`/`sumStageTotals` and out of the `projects` option list
+  // below. A window that showed a number for it would be inventing one.
+  const startingRows = projectFilter === 'all' ? starting : starting.filter((s) => s.project === projectFilter);
   // Pinning is computed AFTER filtering, not before: a project filter that
   // hides the only fresh run in scope must not leave a phantom "live" group
   // heading over an empty rows list, and the design's own "newest VISIBLE
@@ -863,10 +944,26 @@ export default function RunsView() {
             setSelected({ project, runId });
           }}
         />
-      ) : merged.length === 0 ? (
+      ) : merged.length === 0 && startingRows.length === 0 ? (
         // Task 5's own final copy for the genuinely-empty case, verbatim —
         // see this file's own header comment for why this is not
         // placeholder text being replaced, only reached by a real check now.
+        //
+        // task-21 added the second half of the condition, and it is the whole
+        // point of that task: a project's FIRST run, in the 1–5 minutes before
+        // `init` writes `run.json`, has an empty archive and an empty live
+        // payload, so this string was what someone saw right after pressing
+        // Orchestrate — "the click did nothing", stated by the one surface a
+        // run is meant to be watched from.
+        //
+        // The consequence of falling through with `merged.length === 0` is
+        // deliberate rather than tolerated: the tiles below render zeros and
+        // dashes, the list renders the starting row alone, and the detail pane
+        // renders nothing. Every one of those is true. A separate
+        // starting-only branch was the alternative and was rejected — it would
+        // give the same view two different layouts depending on whether any
+        // history existed, and the zeros are not a lie: this project has run
+        // nothing yet, which is exactly why the row above them says starting.
         <p className="board-note">no runs yet</p>
       ) : (
         <>
@@ -988,6 +1085,34 @@ export default function RunsView() {
                 adding it to the tab order would only insert an extra stop
                 before them. */}
             <div className="runs-list" data-testid="runs-list" ref={listRef} tabIndex={-1}>
+              {/* task-21's placeholders, ABOVE the pinned live region and
+                  therefore above everything: a run nobody can see yet is the
+                  most recent thing that happened by construction, and it is
+                  the one row on this list a person is actively waiting on.
+                  Reading order is starting, then fresh live runs, then history
+                  newest day first.
+
+                  It reuses the `.runs-day` / `.runs-day-heading` /
+                  `.runs-day-rows` chrome the pinned `live` region and every
+                  calendar group already use, for that region's own stated
+                  reason: the heading is what tells a reader this group is not
+                  a day, and a second visual language for "here is a region"
+                  would make three shapes out of one.
+
+                  Outside the `filtered.length === 0` ternary below, not inside
+                  either of its branches — the placeholder has to render
+                  whether or not the current range/project combination left any
+                  RUNS in scope, and those are two independent facts. */}
+              {startingRows.length > 0 && (
+                <div className="runs-day" data-testid="runs-day-starting">
+                  <div className="runs-day-heading">starting</div>
+                  <div className="runs-day-rows">
+                    {startingRows.map((s) => (
+                      <StartingRow key={`starting:${s.project}`} starting={s} now={now} />
+                    ))}
+                  </div>
+                </div>
+              )}
               {filtered.length === 0 ? (
                 // Task 7's own empty state — a DIFFERENT fact from "no runs
                 // yet" above (`merged.length === 0`), which stays reachable
@@ -1001,7 +1126,15 @@ export default function RunsView() {
                 // empty here regardless — this note exists for the READER,
                 // not because the markup below would otherwise render
                 // something wrong.
-                <div className="drawer-empty" data-testid="runs-empty-range">no runs in this range</div>
+                // task-21: suppressed while a placeholder is showing, the
+                // same rule "no runs yet" above follows and for the same
+                // reason — an empty state describes a list with nothing in it,
+                // and this list has a row. The two notes stay separate
+                // conditions rather than one, because they answer different
+                // questions and the starting row can coexist with either.
+                startingRows.length > 0 ? null : (
+                  <div className="drawer-empty" data-testid="runs-empty-range">no runs in this range</div>
+                )
               ) : (
                 <>
                   {/* The pinned region: reuses the exact `.runs-day`/
@@ -1069,13 +1202,16 @@ export default function RunsView() {
                 layout grid (.runs-split) that sizes it, the same reason
                 .runs-list's rows live in this file rather than a component
                 of their own.
-                  `selectedRow` is typed `MergedRun | undefined` only
-                because TypeScript cannot see across the `merged.length ===
-                0` branch above that guards this whole block: by the time
-                render reaches here there is always at least one row, and
-                `orderedRows[0]` (this variable's own fallback) is never
-                actually empty. The guard below is defensive typing, not a
-                real empty-selection case this pane has to design for.
+                  `selectedRow` is typed `MergedRun | undefined`, and
+                since task-21 the guard below is a REAL case rather than the
+                defensive typing it used to be. The branch above no longer
+                reads `merged.length === 0` alone: a project whose only entry
+                is a starting placeholder reaches this pane with `orderedRows`
+                genuinely empty, so `orderedRows[0]` is `undefined` and this
+                slot renders nothing at all. That is the designed outcome —
+                `RunDetail` is keyed on project + runId and a placeholder has
+                no runId to give it, so an empty pane beside a starting row is
+                strictly better than a pane inventing a run to describe.
                   `selectedRow.live` (fix round 2) — not a fresh lookup into
                 `liveRuns` — is where the LIVE object comes from: `mergeRuns`
                 already did the project-AND-runId-matched lookup once, when

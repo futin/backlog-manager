@@ -89,7 +89,16 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   wide tile together, a project filter, a day-grouped run list with fresh
   live runs pinned above history (a live row whose run has been asked to
   pause carries a `pausing` badge, and the detail pane's head hosts the same
-  `RunControls` the board's drawer does), and a persistent detail pane carrying
+  `RunControls` the board's drawer does), a `starting` placeholder group
+  above that pinned region (task-21 — `StartingRow`, project + `starting` +
+  `elapsedSince`, a `<div>` and not a row button, read straight off the
+  payload with no client-side collision filter for the reason the Board has
+  none; it is outside `orderedRows`, the selection, both aggregates and the
+  project select's options, the project filter applies to it and the range
+  control deliberately does not — `inRange` keys on `startedAt` and a
+  placeholder has only `requestedAt` — and it suppresses both empty states,
+  which is what makes a project's first run visible before `run.json`
+  exists), and a persistent detail pane carrying
   that same per-run "machine time by stage" rollup plus a full-width
   seven-node `StageTrack` per item with durations printed under each node.
   The whole section is bounded to one viewport on the wide layout
