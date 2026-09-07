@@ -3,9 +3,12 @@ id: bug-30
 title: backlog-groom stamps its start marker after investigating, leaving the item unlocked and under-billed
 created: 2026-09-06
 tags: skills, backlog-groom
-updated: 2026-09-06T20:47:08Z
+updated: 2026-09-07T01:40:19Z
 groom-elapsed: 313
 groom-tokens: 30988
+started: 2026-09-07T00:32:23Z
+execute-elapsed: 4076
+execute-tokens: 121158
 ---
 
 ## Symptom
@@ -167,3 +170,86 @@ pnpm test
 - The live directed-groom check above has been run against a plugin synced from the
   pushed HEAD, not the working tree — editing `skills/` changes nothing in an installed
   plugin, so a check run before `pnpm run plugin:sync` proves nothing.
+
+## Outcome
+
+2026-09-07 — Fixed as specified: three prose edits inside `### Mark it in progress` in
+`skills/backlog-groom/SKILL.md`, and nothing else. `start <id> --as groom` stays exactly
+where it sat, the "Only once both are confirmed" gate is unchanged and still precedes it,
+and neither `backlog.mjs` nor `backlog-execute/SKILL.md` was touched — both were named in
+`## Fix` as deliberately out of scope.
+
+1. A new paragraph immediately after the confirmation sentence names the directed groom as
+   its own branch: a prompt that already named the item and the verdict *is* the
+   confirmation, so `start` runs as the very next command after `show`, before any
+   investigation. It states outright that the gate is about consent, never sequence — the
+   misreading `## Cause` identified.
+2. The "Not any earlier" paragraph now argues both directions. It keeps its existing
+   too-early half verbatim ("might still end in 'let's not'") and gains the symmetric
+   too-late half: the item stays unlocked for a second groom or a `backlog-execute` to
+   claim, and `groom-elapsed:`/`groom-tokens:` bill from `started:` into counters that are
+   permanent, accumulating and unrepairable. It calls out the `## Cause`/`## Fix` verdict
+   as where too-late bites hardest, since there the investigation *is* the work.
+3. The paragraph ends on the invariant: "Nothing sits between `show` and `start` but the
+   verdict decision itself."
+
+Pinned by four cases appended to `skills/backlog/tools/backlog.test.mjs` — the suite of
+`start`/`stop`, the single writer of the counters this prose governs, and the only
+node-runner home available, since `backlog-groom` publishes no tool of its own. They read
+the `### Mark it in progress` section alone (a needle that drifted into a later section
+would still pass a whole-file search while reaching a session *after* the stamp it was
+meant to precede), with whitespace collapsed so a re-wrap of hard-wrapped prose cannot
+fail them. Three pin the new text — the directed case, both directions of the cost, the
+invariant verbatim — and the fourth pins that the consent gate is still there and still
+ahead of the command, because the fix is additive and a test over the new text alone would
+pass a rewrite that dropped the old rule.
+
+Red/green verified rather than assumed: with `SKILL.md` reverted to `HEAD` the three new
+cases fail and the fourth passes (it pins pre-existing text); restored, all four pass.
+
+```
+$ node --test skills/backlog/tools/backlog.test.mjs   # SKILL.md reverted to HEAD
+not ok 198 - backlog-groom names the directed-prompt case and stamps before investigating
+not ok 199 - backlog-groom argues both directions of the stamp, not just too-early
+not ok 200 - backlog-groom carries the show-to-start invariant verbatim
+# pass 198
+# fail 3
+```
+
+`pnpm run test:skills`:
+
+```
+1..415
+# tests 415
+# suites 0
+# pass 415
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 57396.649667
+```
+
+`pnpm test` (both runners; this worktree had no `node_modules`, so `pnpm install
+--frozen-lockfile` ran first — jest exited `sh: jest: command not found` until it did,
+which is the worktree's state and not this change):
+
+```
+Test Suites: 79 passed, 79 total
+Tests:       1499 passed, 1499 total
+# tests 415
+# pass 415
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
+
+**Not done: the live directed-groom check.** `## Done when` requires it against a plugin
+synced from the pushed HEAD, and this session ran under `backlog-orchestrate`, which never
+commits, pushes or runs `pnpm run plugin:sync` from inside an item's session. Until that
+sync runs, an installed `backlog-groom` still carries the old prose. The check is
+unchanged and still worth running once: start a directed groom on a fresh item, and from a
+second shell, while it is still investigating, confirm `backlog.mjs show <id>` already
+carries `started:` and that a second `start <id> --as groom` refuses with "already in
+progress".

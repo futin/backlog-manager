@@ -2780,3 +2780,101 @@ test('CLI stop with no CLAUDE_CODE_SESSION_ID still exits 0, writes no token key
   assert.equal('groom-tokens' in data, false)
   assert.match(data['groom-elapsed'], /^\d+$/)
 })
+
+// --- bug-30: the prose that decides WHEN `start` is called -----------------
+// `start`/`stop` are the single writer of `started:`, `groom-elapsed:` and
+// `groom-tokens:`, and every case above tests what they write once called.
+// What they cannot test from inside the tool is *when* a caller calls them,
+// which is the one thing that decides whether those counters are true: `start`
+// cannot know how long a session ran before it, and `stop` bills the interval
+// it is handed. So the rule lives in `backlog-groom`'s prose, and that prose
+// is pinned here — beside the counters it governs — rather than in a suite of
+// its own, because backlog-groom publishes no tool to hang one off.
+//
+// The failure: SKILL.md gated the stamp on "Only once both are confirmed — the
+// item and the verdict", which a directed prompt ("groom bug-23, fill in Cause
+// and Fix, leave it in bugs/open/") satisfies on turn one — but the prose read
+// as a *sequence* ("once you have worked out the verdict"), so a session
+// investigated first and stamped minutes later. Two costs: the item is
+// unlocked for that whole window (`start`'s "already in progress" refusal is
+// the only mutex an item has), and both counters bill only the cheapest minute
+// of the session, permanently, since nothing ever resets them. Grooming bug-23
+// on 2026-09-06 left `groom-elapsed: 57` on a groom several times that.
+const GROOM_SKILL_MD = fileURLToPath(new URL('../../backlog-groom/SKILL.md', import.meta.url))
+
+// The whole point is the ORDER of instructions inside one section, so every
+// case below reads that section alone. A needle that drifted out of it into,
+// say, the "already in progress" section would still be in the file and would
+// still pass a whole-file search, while a session reading top-to-bottom would
+// meet it after the stamp it was supposed to precede.
+// Returned with every run of whitespace collapsed to one space, because this
+// file is hard-wrapped prose: the phrases below are sentence fragments, and a
+// re-wrap that pushed one across a line break would fail every case here while
+// changing nothing a session reads. The needles are what the section SAYS, not
+// how it is laid out.
+const markInProgressSection = () => {
+  const text = fs.readFileSync(GROOM_SKILL_MD, 'utf8')
+  const at = text.indexOf('### Mark it in progress')
+  assert.notEqual(at, -1, 'backlog-groom/SKILL.md no longer has a "### Mark it in progress" section')
+  const rest = text.slice(at)
+  const end = rest.slice(1).search(/\n#{2,4} /)
+  const section = end === -1 ? rest : rest.slice(0, end + 1)
+  return section.replace(/\s+/g, ' ')
+}
+
+test('backlog-groom names the directed-prompt case and stamps before investigating', () => {
+  // One assertion per rule, each naming the rule rather than the string, so a
+  // failure says which half of the fix was lost instead of "substring not
+  // found". The directed groom is the common case and had no sentence of its
+  // own anywhere in the document.
+  const section = markInProgressSection()
+  const RULES = [
+    ['already named the item and the verdict', 'a directed prompt IS the confirmation'],
+    ['before any investigation', 'in that case `start` runs as the very next command'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `backlog-groom/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+})
+
+test('backlog-groom argues both directions of the stamp, not just too-early', () => {
+  // A paragraph that argues one direction reads as the only direction there is
+  // a cost in — which is exactly how the too-late failure survived a rule that
+  // technically already forbade it.
+  const section = markInProgressSection()
+  assert.ok(
+    section.includes("let's not"),
+    'backlog-groom/SKILL.md dropped the too-early cost (stamping ahead of consent)',
+  )
+  const RULES = [
+    ['unlocked', 'stamping late leaves the item unlocked for a second session to claim'],
+    ['groom-tokens', 'stamping late under-bills the counters'],
+    ['permanent', 'and does so permanently, because nothing ever resets them'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `backlog-groom/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+})
+
+test('backlog-groom carries the show-to-start invariant verbatim', () => {
+  // The sentence a session applies to a case nobody enumerated. Pinned as a
+  // whole sentence rather than by keyword: its value is that it is total, and
+  // a paraphrase that admits one exception is how it stops being.
+  const section = markInProgressSection()
+  assert.ok(
+    section.includes('Nothing sits between `show` and `start` but the verdict decision itself.'),
+    'backlog-groom/SKILL.md lost the invariant tying `show` directly to `start`',
+  )
+})
+
+test('backlog-groom still gates the stamp on confirmation, and the gate still precedes the command', () => {
+  // The fix is additive. A test that checked only the new text would pass a
+  // rewrite that dropped the consent rule — trading this bug for the
+  // stamp-before-consent one the current order exists to prevent.
+  const section = markInProgressSection()
+  const gate = section.indexOf('Only once both are confirmed')
+  const command = section.indexOf('start <id> --as groom')
+  assert.notEqual(gate, -1, 'backlog-groom/SKILL.md lost the "Only once both are confirmed" gate')
+  assert.notEqual(command, -1, 'backlog-groom/SKILL.md lost the `start <id> --as groom` command')
+  assert.ok(gate < command, 'the confirmation gate no longer precedes the `start` command')
+})
