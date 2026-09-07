@@ -47,7 +47,8 @@ is semantic where a section exists and verbatim where none does (approved 2026-0
   breaks added, bold lead unbolded; one relative reference adjusted and recorded).
 - For the ~30 bullets with an existing section, the sentences whose facts the section
   lacks are woven in verbatim; the rest are recorded in a ledger, keyed
-  `bullet.sentence`, naming the covering line.
+  `bullet.sentence`, naming the section that states it (151 entries; the audit that
+  ranked each sentence's long-word overlap with its section found no gap).
 
 Two mechanical guards, run by a throwaway scratchpad script that is not committed:
 
@@ -131,9 +132,13 @@ Two mechanical guards, run by a throwaway scratchpad script that is not committe
 | 54 | queue wait is not work | 9 | 2 | existing |
 | 55 | session cost per transcript, identity is the file name (task-27) | 26 | 3 | NEW `## A session's cost is recorded per transcript` |
 
-Totals: Invariants 990 → ~160 lines; CLAUDE.md ~1098 → ~270 lines (~22 KB, ≈5k tokens);
-invariants.md 2079 → ~2400 lines, nine new sections. The docs' <200-line target is not
-reachable without cutting Layout/Conventions too, which is not proposed.
+Estimated: Invariants 990 → ~160 lines; CLAUDE.md ~1098 → ~270 lines. **Actual (commits
+df008f8 and the cut that follows it):** Invariants 990 → 374 lines; CLAUDE.md 1098 → 482
+lines, 77 KB → 33 KB; invariants.md 2079 → 2560 lines, nine new sections. The gap to the
+estimate is the decision to keep every prohibition and one anchored link line per entry
+rather than cut closer to the bone — the right side to err on for a file whose readers are
+unattended sessions. The docs' <200-line target is not reachable without cutting
+Layout/Conventions too, which is not proposed.
 
 ## Steps and verification
 
