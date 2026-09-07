@@ -648,7 +648,17 @@ happened.
   after a reinstall that still comes up short, naming that settings key.
 - **Both processes bind `127.0.0.1` by default; loopback is the access
   control** (nothing has auth). `BM_BIND` is the single knob; compose sets
-  `0.0.0.0` because there the loopback *publish* is the boundary.
+  `0.0.0.0` because there the loopback *publish* is the boundary. **Both
+  halves are pinned**, and asymmetrically for a reason: the dev server's bind
+  is an ordinary import (`test/vite-proxy.test.ts`), while the API
+  entrypoint's is read out of `server/src/main.ts`'s SOURCE
+  (`test/server-bind.test.ts`) because `main.ts` calls `bootstrap()` at top
+  level with no `require.main` guard, so importing it opens a real socket. The
+  source test resolves the `.listen(...)` arguments through the consts they
+  name and evaluates them against a fabricated `process.env`, so it asserts
+  what the expression computes rather than that a `127.0.0.1` string appears
+  somewhere — and a bare `app.listen(PORT)`, the refactor that silently binds
+  the wildcard, fails it on the argument count.
 - **The served build carries a CSP (`server/src/security.ts`); dev does
   not.** `script-src` pins the pre-paint theme script's sha256 — edit that
   script and `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
