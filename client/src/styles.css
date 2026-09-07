@@ -1252,6 +1252,28 @@ body {
 .orchestrate-preview-action.groom { color: var(--mustard) }
 .orchestrate-preview-action.execute { color: var(--cyan) }
 
+/* The uncommitted flag (task-32) — a row the run will not be able to see at
+   `main`. Amber, this app's established "a person needs to look at this"
+   tone (`.run-strip-attention`, `.board-card-live`, `.board-warn`), rather
+   than red: nothing is broken and the launch is not blocked, the run will
+   simply spend a gate verdict and move on.
+
+   Bordered where `.orchestrate-preview-action` beside it is bare text, so the
+   two do not read as one two-word label — they answer different questions
+   (what the run would DO with this row, and whether it can see it) and sit
+   adjacent on the same line. The background mixes over `--steel`, the row's
+   own fill rather than the sheet's `--strip`, so the chip stays a tint of the
+   surface it is actually on in all five palettes; `color-mix` against a theme
+   variable is what keeps this readable on `--daylight`, where a literal
+   colour picked against a dark palette would not be. */
+.orchestrate-preview-flag {
+  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em; padding: 0 4px; border-radius: 2px;
+  color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--amber) 12%, var(--steel));
+}
+
 /* The three-step chrome (task-20; design §7). A monospace kicker row rather
    than a progress bar or numbered circles: this app's other "where am I"
    affordance is `.sheet-kicker`, and matching it keeps the sheet reading as

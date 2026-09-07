@@ -220,7 +220,11 @@ skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/
   registered project, with open-item counts and a `missing` flag for a
   project whose `backlog/` disappeared), `GET /api/items/body?path=` (one
   item's Markdown body, resolved through an allowlist built from the
-  registry — a path outside every registered project's `backlog/` 404s).
+  registry — a path outside every registered project's `backlog/` 404s), and
+  `GET /api/items/uncommitted?project=` (which of one project's item files
+  differ from `main`, so the Orchestrate sheet can flag the rows a run will
+  not be able to see — `{ paths, known }`, `known: false` for every git
+  failure alike, 404 for an unregistered project, and nothing cached).
 - `server/src/registry/` — read-only view of the registry file, re-read on
   every request so a capture made mid-session shows up on the next fetch.
 - `server/src/agents/` — the one module that calls anything outbound, and

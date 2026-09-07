@@ -1876,3 +1876,143 @@ drawer, the Runs pane, and any surface built after them are guaranteed to
 agree with each other, the same guarantee `RowTime`'s move out of the run
 drawer and into a shared component exists to make structural rather than
 coincidental.
+
+## The Orchestrate sheet's uncommitted flag is read from git per request and memoised nowhere
+
+`GET /api/items/uncommitted` (`server/src/items/uncommitted.util.ts`,
+`ItemsService.uncommitted`, `ItemsController.uncommitted`) answers which of
+one project's item files a board-started orchestrator run would not be able
+to see, and the Orchestrate sheet's step 1 renders that as a chip, a count in
+the run's own words and a `deselect uncommitted (N)` button. This section is
+the "why" behind five decisions in it, four of which a later reader has a
+visible, plausible reason to reverse.
+
+### The gap it closes
+
+The sheet's queue preview is a pure derivation over the board's own item
+scan, which reads the **working tree**. The run that follows gates every item
+at `<base>` — `BASE_REF_DEFAULT` in `orchestrate.mjs`, i.e. `main`, and the
+board never passes `--base`, so `main` is the ref for every board-started run
+there will ever be. Those two readings disagree in exactly one situation: an
+item groomed on disk and not committed. The sheet then previews a ready bug,
+`buildGatedQueue` reports `not committed on main — the worktree this run
+creates from main would not contain <path>`, and the item is skipped — after
+the person has walked away from a multi-hour unattended operation. The
+2026-09-06 cross-run sweep counted five such skips across three projects
+(bug-12 twice in backlog-manager, bug-13 and bug-7 in
+claude-agents-dashboard, bug-16 in ixray). task-29 closes the other half of
+this at groom time, said by the skill that creates the state; this one is for
+the person who groomed yesterday and is launching today.
+
+### 1. No memo — and specifically not the one in the next file over
+
+`lastCommitDates` (`git-dates.util.ts`) sits beside this, does an
+almost-identical thing (spawn git, read something about `backlog/`), and is
+memoised. Copying that memo here would be wrong in the worst available way:
+its key is the mtimes of `.git/index` and `.git/logs/HEAD` — the files git
+rewrites whenever the answer to *its* question, "when was this file last
+committed", can change. Editing an item file in the working tree, which is
+the precise event this module exists to report, moves **neither** of them. A
+memo on that key would therefore answer "clean" forever after its first hit,
+reintroducing the exact false negative the feature was built to remove, and
+it would do so silently — the sheet would simply stop flagging, which looks
+identical to a project with nothing to flag.
+
+The cost is affordable without one. Measured 2026-09-07 across the five
+projects in this machine's registry, both spawns together took 50–270ms per
+project — and unlike `lastCommitDates`, which runs for **every** registered
+project on both `/api/items` and `/api/projects` (the two the board fetches
+on mount and on every window focus), this runs for **one** project **once per
+sheet open**. That asymmetry is the whole reason one of these two functions
+needs a cache and the other must not have one. The client half enforces the
+cadence too: the effect is keyed on `[project]` alone, so walking the three
+steps or flipping a picker re-asks nothing.
+
+### 2. `main`, not `HEAD`
+
+`git status --porcelain` is the obvious implementation and the wrong one. It
+compares against `HEAD`, which is the right ref only while the main tree
+happens to be sitting on `main` — and an item committed on a branch that
+`main` does not contain is *precisely* one of the cases that gets skipped,
+which `status` reports as a perfectly clean tree. `test/uncommitted.test.ts`
+case 4 asserts both halves of that: the util reports the file, and
+`status --porcelain` prints nothing.
+
+Diffing against `main` also covers the sibling case `buildGatedQueue`'s own
+comment describes without a second question. An item committed while
+ungroomed and groomed only in the working copy *is* present at `main`, so it
+never earns the "not committed" verdict — the run gates the stale bytes and
+reports plain `ungroomed`. It differs from `main`, so this flags it, and the
+chip's wording ("the run reads them at main") is true of both.
+
+### 3. Two git reads, and the asymmetry between them
+
+`git diff --name-only --no-renames main -- backlog` finds tracked files whose
+working-tree content differs from `main`. It cannot find a file git has never
+tracked — and a brand-new, never-committed item file is exactly that, which
+is the single most common shape of this failure. `git ls-files --others
+--exclude-standard -- backlog` is the second read, and it is not belt and
+braces: verified 2026-09-07 against this machine's `ixray`, the diff printed
+nothing and `ls-files --others` printed
+`backlog/bugs/open/bug-16-….md`, one of the five items the sweep had
+recorded as skipped. Case 3 in the suite asserts the util's answer **and**
+that the diff-only answer is empty, so a later "simplification" down to one
+spawn cannot leave the case green.
+
+A failure of *either* read fails the whole question (`known: false`).
+Reporting the half that worked would be a confident, incomplete statement of
+fact about someone's repository, which is the one thing this render must
+never be.
+
+### 4. Both preconditions mirror `blobReaderAt`, and `known: false` is why
+
+The util refuses to answer when the project path is not the repo toplevel, or
+when `main` does not resolve to a commit. Those are not arbitrary safety
+rails — they are `blobReaderAt`'s own two preconditions (`orchestrate.mjs`),
+and at that seam the tool has **no blob view at all** and gates the working
+copy instead. So there is no divergence to warn about, and a chip there would
+be a false positive against a run that is going to read exactly the bytes the
+board is showing.
+
+`known` is a separate field rather than an empty list because the client has
+to tell "nothing to flag" from "no idea", and only one of those two may ever
+become a rendered assertion. It is also why `fetchUncommitted`
+(`client/src/lib/agents.ts`) shape-guards the body and **throws** on a
+malformed 200 rather than passing it through: `known` cannot carry that load
+on its own, since `undefined` is falsy and a body missing `paths` would
+happen to suppress the chip today while silently asserting the opposite the
+day someone writes the render guard as `known !== false`. Guard, throw,
+`.catch` — one path for "no answer", the same posture the merge-check hint
+already takes.
+
+### 5. The default selection is not changed, and that is the feature
+
+The original idea asked for uncommitted rows to be excluded from the default
+selection. That is refused. `selected === null` in `OrchestrateSheet` is the
+difference between two different INSTRUCTIONS — "drain the queue" and "run
+exactly these ids" — and auto-exclusion would force an explicit `ids` list
+into every launch that has one flagged row. Two costs follow. The queue
+snapshot freezes: an item committed while the sheet sat open would be dropped
+from a run the person believes is draining everything. And the board would be
+overruling the orchestrator's own gate on the strength of a preview that says
+outright it is not authoritative — the same reasoning `emptySelection`'s
+comment already gives for not refusing an empty queue.
+
+It also buys almost nothing. The run skips a flagged item at the cost of one
+gate verdict: no dispatch, no worktree, no session. What the person actually
+lacked was the information, so they get the chip, the run's own verdict string
+verbatim, and a `deselect uncommitted (N)` button that narrows the selection
+the same way unticking the rows by hand does. The person's act, not the
+sheet's. `test/orchestrate-uncommitted.test.tsx` case 18 pins it as an
+assertion about the ABSENT `ids` key, not about its value.
+
+### What deliberately does not read this
+
+It is a launch-time fact about a ref, not a lifecycle state. `isStale`,
+`leavesBoard`, `lastTouched`, `deriveGroomed` and `runClaimBlock` are all
+untouched; no Board card renders it; it reaches no persisted setting and no
+run file. A chip on every card would also fire during ordinary grooming, when
+"you have not committed this yet" is not news — the sheet is the one place
+where not knowing costs a run slot. Step 2 of the sheet carries no chip
+either, and that is a decision rather than an omission: the flag is a step 1
+fact about membership, and step 1 is where the control that acts on it lives.

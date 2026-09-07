@@ -3,6 +3,10 @@ id: task-32
 title: Flag uncommitted items in the Orchestrate sheet's queue preview before a run skips them
 created: 2026-09-07
 from: idea-9
+updated: 2026-09-07T08:54:59Z
+started: 2026-09-07T08:10:53Z
+execute-elapsed: 2646
+execute-tokens: 224718
 ---
 
 ## Goal
@@ -321,3 +325,105 @@ below depends on `main` being genuinely absent.
   and the no-memo rule.
 - The next cross-run sweep can attribute any remaining "not committed on main" verdict to
   a run started outside the board, not to a launch surface that failed to say so.
+
+## Outcome
+
+2026-09-07 — done as planned. `GET /api/items/uncommitted` answers `{ paths, known }`
+from two git reads against `main`, memoised nowhere; the Orchestrate sheet's step 1
+chips the flagged rows, states the count in the run's own words and offers
+`deselect uncommitted (N)`; no default selection changed and an untouched sheet still
+posts no `ids`.
+
+Files: `server/src/items/uncommitted.util.ts` (new), `items.service.ts`,
+`items.controller.ts`, `client/src/lib/agents.ts`,
+`client/src/components/board/OrchestrateSheet.tsx`, `client/src/styles.css`,
+`test/uncommitted.test.ts` (new), `test/orchestrate-uncommitted.test.tsx` (new),
+`test/orchestrator-start-ui.test.tsx` (stubs), CLAUDE.md, docs/invariants.md, README.md.
+
+All five Decisions implemented as written; no course changed. Three departures from the
+plan's letter, none from its intent:
+
+1. **Plan case 7 (no `main` ref) is an outcome pin, not a red proof of the
+   `rev-parse --verify main` precondition.** With that precondition deleted, `diff main`
+   and `ls-files` both fail against a repo with no `main`, the util's own "either read
+   failed" clause catches it, and the case stays green. The precondition still earns its
+   place (it mirrors `blobReaderAt`'s own seam, and costs one cheap spawn instead of two
+   doomed ones), but neither reason is observable from outside. Said so in the test.
+2. **Plan case 6's fixture was strengthened.** As specified — a subdirectory with an
+   uncommitted item and no commits at all — it passed with the toplevel check removed,
+   for the wrong reason (no `main`, so both reads failed anyway). It now commits an
+   anchor on `main` first, so the naive implementation really does report a path and the
+   check is what turns that into `known: false`.
+3. **Plan case 13's spy moved from `realpathSync` to `execFileSync`, and plan case 23
+   gained a sibling.** `uncommittedItemPaths` spawns FIRST and only calls `realpathSync`
+   on that spawn's success, so a realpath spy stayed green with the registry gate moved
+   after the util — while the server shelled out to git about an arbitrary
+   caller-supplied path. Same shape for the shape guard: a 200 with no `paths` key is
+   also absorbed by the render's own `known === true` gate, so case 23 pins the outcome
+   and new **case 23b** (`paths: 5`, which reaches `new Set(...)` and throws) is the
+   guard's actual red proof.
+
+Deliberately not done: **the browser check (plan case 27)**, and not because it does not
+matter. It needs the API on 4322 and Vite on 5177 — both almost certainly held by the
+live app that started this very run, since a board click is what spawns an orchestrator
+session — and it needs a throwaway project registered into the real
+`~/.backlog-manager/registry.json`, i.e. a write to shared machine state that this
+user's live board would render mid-run, with a teardown whose failure mode is precisely
+bug-17's phantom entry. In an unattended session with nobody to confirm either, that
+trade is wrong. What it would have covered beyond the suites: the visual layer alone —
+the route itself is exercised over real HTTP against a real git repo by cases 12-14, and
+the chip/note/button by 16-24. In its place: `.orchestrate-preview-flag` was verified
+present in the built CSS (`client/dist/assets/index-*.css`) and to reference only
+`--mono`/`--amber`/`--hairline`/`--steel`, all four of which `shared/theme.css` defines
+in all five palettes.
+
+One neighbouring site left standing on purpose: `skills/backlog-groom/SKILL.md`'s "This
+skill is what creates the uncommitted state, so it is the only place the sentence can be
+said at the moment it becomes true." Still true as written — this task is the other half,
+said later to a different reader — so it was not edited.
+
+### Verification
+
+`pnpm test` (both runners), `pnpm run typecheck` and `pnpm run build`, on the final tree:
+
+```
+Test Suites: 82 passed, 82 total
+Tests:       1564 passed, 1564 total
+
+# tests 450
+# pass 450
+# fail 0
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+
+$ tsc --noEmit
+(no output)
+
+vite v5.4.21 building for production...
+✓ built in 1.26s
+```
+
+One earlier `jest` invocation reported `1 failed, 1562 passed` — `bug-33` exactly (a
+lone supertest failure that does not reproduce); the same command passed on the next two
+runs and `pnpm test` passed every time. Not caused by this diff, which touches no
+server code the failing shape involves.
+
+Contract sweep: 2 sites updated (client/src/components/board/OrchestrateSheet.tsx's
+header claim that merge-check was "the one genuine exception" to "never a fetch";
+test/orchestrator-start-ui.test.tsx, whose `stub`/`stubOrchestrate` catch-alls answered
+the new endpoint with `/api/items`' shape and whose branch-mode case asserted
+`not.toHaveBeenCalled()` on fetch outright)
+Red proof: 13 production reverts run one at a time, each against the one suite it
+affects: dropping `ls-files --others` reddened case 3 with 1/2/4 green; the toplevel
+check → 6; `core.quotePath=false` → 9; `UNCOMMITTED_BASE_REF` → 'master' → 26 (+10);
+a `lastCommitDates`-style memo → 10; the `-- backlog` pathspec → 11; the registry gate
+moved after the util → 13; the blank-project 400 → 14; the `known` gate → 21; the shape
+guard → 23b; the row chip → 16; the step 1 note → 17; the deselect button → 19/19b/20;
+auto-excluding flagged rows by default → 18; `[project, mergeMode, step]` deps → 24;
+the silent `.catch` → 22/23/23b; unscoping `uncommittedIds` from the queue → the
+non-queued-path case. Every added test has a proof except case 7 (see departure 1) and
+case 23 (see departure 3).

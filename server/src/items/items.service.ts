@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
 import { buildAllowlist, resolveAllowed } from './allow.util';
 import { parseFrontmatter } from './parse.util';
 import { scanProject } from './scan.util';
+import { uncommittedItemPaths, type UncommittedItems } from './uncommitted.util';
 import type { ItemsIndex, ProjectSummary, SectionCounts } from '../../../shared/types';
 
 /**
@@ -52,6 +53,29 @@ export class ItemsService {
       }
       return { name: project.name, path: project.path, createdAt: project.createdAt, missing, counts };
     });
+  }
+
+  /**
+   * GET /api/items/uncommitted's whole implementation (task-32) — which of
+   * this project's item files a board-started run would not find at `main`.
+   *
+   * Registry-gated exactly like `AgentsService.mergeCheck`: a RAW STRING
+   * compare against the registry's own `path` field, deliberately not
+   * `samePath`'s realpath compare, matching the "deliberately not realpath"
+   * rule CLAUDE.md pins on `dispatchGate`'s membership check. That choice is
+   * load-bearing rather than merely mirrored: `realpathSync`-ing an
+   * unregistered path before comparing it would itself BE the filesystem
+   * touch `test/uncommitted.test.ts`'s unregistered case proves never
+   * happens, and "gate first" is a stronger guarantee than "eventually
+   * degrades to known: false".
+   *
+   * No cache, per `uncommitted.util.ts`'s own header: the whole point of this
+   * read is an event — an edit in the working tree — that no cheap key moves.
+   */
+  uncommitted(project: string): UncommittedItems {
+    const entry = this.registry.load().projects.find((p) => p.path === project);
+    if (entry === undefined) throw new HttpException({ error: 'not found' }, 404);
+    return uncommittedItemPaths(entry.path);
   }
 
   /**

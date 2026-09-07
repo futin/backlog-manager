@@ -30,7 +30,9 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 ## Layout
 
 - `server/src/` — Nest: `health/`, `items/` (`/api/items`, `/api/projects`,
-  `/api/items/body`), `agents/` (the one outbound-calling module — status,
+  `/api/items/body`, `/api/items/uncommitted` — which of one project's item
+  files differ from `main`, `uncommitted.util.ts`, read per request and never
+  memoised, see Invariants), `agents/` (the one outbound-calling module — status,
   plan, dispatch, orchestrate, resume, pause, and the run watchdog
   (`watchdog.service.ts`, armed only while some `run.json` says running),
   plus the local read-only `merge-check`), `orchestrator/`
@@ -60,7 +62,13 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   a toolbar Orchestrate control opening `OrchestrateSheet` — three steps
   (items / order / modes), with Start on the last one alone so it never sits
   under a scroll region whose length is the project's queue. Step 1 previews
-  the queue and selects a subset of it; step 2 hand-orders that selection
+  the queue and selects a subset of it, flagging with an `uncommitted` chip
+  every row a run would not find at `main`, stating the count in the run's own
+  words (`not committed on main`) and offering `deselect uncommitted (N)` —
+  fed once per sheet open by `GET /api/items/uncommitted`, rendering nothing
+  at all on `known: false` or a failed/malformed answer, and deliberately
+  changing no default: an untouched sheet still posts no `ids` (task-32, see
+  Invariants); step 2 hand-orders that selection
   with ↑/↓ and a reset (`order: string[] | null`, `null` meaning queue order,
   reconciled against the live queue every render, never stored resolved);
   step 3 holds all five pickers — permission mode, model, effort, merge mode,
@@ -467,6 +475,50 @@ happened.
   present there is no key that can move and it recomputes instead. It exists
   because the call costs 84–396ms per project and `scanProject` runs on both
   `/api/items` and `/api/projects`.
+
+- **The Orchestrate sheet's `uncommitted` flag is read from git per request,
+  memoised nowhere, and must never join the memo one file over.** A run gates
+  every item at `main` (`BASE_REF_DEFAULT`, `orchestrate.mjs`; the board never
+  passes `--base`, so that is the ref for every board-started run there will
+  ever be) while the board's own scan reads the working tree, and the two
+  disagree exactly when someone groomed an item and did not commit it — five
+  items were skipped that way across three projects in the 2026-09-06 sweep,
+  each after the person had walked away. `uncommittedItemPaths`
+  (`server/src/items/uncommitted.util.ts`) is the one implementation, behind
+  `GET /api/items/uncommitted`. Four things a later reader must not re-decide.
+  **No memo, and specifically not `lastCommitDates`' one**: that memo is keyed
+  on the mtimes of `index` and `logs/HEAD`, and an edit in the working tree —
+  the exact event this reports — moves NEITHER, so the same key would answer
+  "clean" forever after its first hit and reintroduce the false negative the
+  feature removes. The neighbouring optimisation being visible, adjacent and
+  apparently identical is why this is written down. **The question is
+  "differs from `main`", never "differs from `HEAD`"**: `git status
+  --porcelain` reads a tree clean whenever the item is committed on a branch
+  `main` does not contain, which is one of the very cases that gets skipped.
+  **Two git reads, not one** — `diff --name-only main -- backlog` for tracked
+  files plus `ls-files --others --exclude-standard -- backlog` for never-tracked
+  ones, because `diff` cannot see an untracked file and a brand-new item file
+  is untracked; pinned by a case that also asserts the diff-only answer is
+  empty. **A sibling endpoint, not a `BacklogItem` field**, for
+  `merge-check`'s reason: a field would put an un-memoisable git read inside
+  `scanProject`, which runs for every registered project on both `/api/items`
+  and `/api/projects`. Both preconditions mirror `blobReaderAt`'s own — not
+  the repo toplevel, or no `main` — and answer `known: false`, because at that
+  seam the tool has no blob view either and gates the working copy, so there
+  is no divergence to warn about. `known` gates the render: an absent answer
+  must never read as "nothing is uncommitted", which is also why
+  `fetchUncommitted` shape-guards and throws rather than letting a malformed
+  200 through. **Nothing derived reads it** — `isStale`, `leavesBoard`,
+  `lastTouched`, `deriveGroomed`, `runClaimBlock` are untouched, no Board card
+  renders it, and it reaches no setting and no run file. **And it changes no
+  default**: flagged rows stay selected and an untouched sheet still posts no
+  `ids`, since `selected === null` is the difference between "drain the queue"
+  and "run exactly these ids" — auto-excluding them would freeze the queue
+  snapshot and have the board overrule the orchestrator's own gate on the
+  strength of a preview that says outright it is not authoritative. The
+  person gets a chip, the run's own words and a `deselect uncommitted (N)`
+  button instead. Long form:
+  [docs/invariants.md](docs/invariants.md).
 
 - **`refactors/` is a peer section, not a facet on ideas**: ideas are new,
   refactors are existing things that should be improved. Prefix `ref` (short

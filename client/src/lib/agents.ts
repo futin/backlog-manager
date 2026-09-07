@@ -467,6 +467,61 @@ export async function fetchMergeCheck(project: string): Promise<MergeCheckResult
 }
 
 /**
+ * Body of `GET /api/items/uncommitted` (task-32) — which of a project's item
+ * files a board-started orchestrator run would NOT find at `main`, so the
+ * Orchestrate sheet can flag the rows that run is going to skip.
+ *
+ * Declared here rather than promoted into shared/types.ts, the same call
+ * `MergeCheckResult` above already makes and for the same reason: promotion
+ * waits for a second consumer, and there is exactly one — the sheet.
+ *
+ * The endpoint is not under `/api/agents`, and this module is still the right
+ * home: it is the board's same-origin fetch layer, it owns `unwrap`/`ApiError`,
+ * and it already holds this same sheet's other on-open read.
+ */
+export interface UncommittedItems {
+  /** Absolute item-file paths, comparable to `BacklogItem.path` verbatim —
+   *  the server builds them from the registry's own project path with the
+   *  same construction `scanProject` uses, so neither side calls realpath. */
+  paths: string[];
+  /** False whenever the server could not make the read at all: no git, not a
+   *  repo, the project is not the repo toplevel, no `main` ref. The sheet
+   *  renders nothing in that case — see the guard below. */
+  known: boolean;
+}
+
+/**
+ * Shape-guarded for the identical reason `isMergeCheckResult` is, restated in
+ * this field's terms: the answer feeds a render that asserts a FACT about
+ * someone's repository, and a 200 whose body lacks `paths` — a wrong endpoint
+ * answering the URL pattern, a future rename, or a test stub with a stale
+ * catch-all shape — must read as "no answer", never as "nothing is
+ * uncommitted". `known` cannot carry that load on its own: `undefined` is
+ * falsy, so a malformed body would happen to suppress the chip today and
+ * silently start asserting the opposite the day the guard is `known !== false`
+ * instead. So the guard throws and the caller's `.catch` stays the single
+ * place a missing answer is handled.
+ */
+function isUncommittedItems(data: unknown): data is UncommittedItems {
+  return (
+    typeof data === 'object' && data !== null &&
+    Array.isArray((data as UncommittedItems).paths) &&
+    (data as UncommittedItems).paths.every((p) => typeof p === 'string') &&
+    typeof (data as UncommittedItems).known === 'boolean'
+  );
+}
+
+export async function fetchUncommitted(project: string): Promise<UncommittedItems> {
+  const data = await unwrap<UncommittedItems>(
+    await fetch(`/api/items/uncommitted?project=${encodeURIComponent(project)}`)
+  );
+  if (!isUncommittedItems(data)) {
+    throw new Error('malformed /api/items/uncommitted response');
+  }
+  return data;
+}
+
+/**
  * Same "lies quietly" reasoning as `isAgentsStatus`/`isOrchestratorRunsPayload`
  * above, applied to `WatchdogStatus` (Task 5): it lands in `useWatchdog`'s
  * own hook state, kept live across a mount, every window focus, and a poll
