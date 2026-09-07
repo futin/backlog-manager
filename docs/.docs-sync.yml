@@ -1,0 +1,23 @@
+# docs/.docs-sync.yml — layout contract. Written by /docs-sync bootstrap after
+# user sign-off; every later run reads and obeys it. Edit only via bootstrap.
+docs-sync-plan: 1
+layout: standard-1
+docs:
+  - path: README.md
+    kind: readme
+  - path: CLAUDE.md
+    kind: index
+  - path: docs/subsystems/invariants.md
+    kind: subsystem
+    note: Invariant rationale
+out-of-scope:
+  - path: backlog/
+    reason: the backlog store itself — item files are skill-written records, and the store README documents the store beside the items it describes
+  - path: docs/superpowers/
+    reason: records of a moment — specs, plans and decision logs
+  - path: audits/
+    reason: records of a moment — dated audit findings
+  - path: skills/
+    reason: the plugin's publish surface — skill prose, references and fixtures are product source, not reference docs
+  - path: agents/
+    reason: the plugin's publish surface — the reviewer agent definition is product source, not a reference doc
