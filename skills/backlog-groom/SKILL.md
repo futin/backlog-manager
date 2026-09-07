@@ -7,7 +7,8 @@ description: >
   plan idea 3, plan ref 2, reject task 5, say this is out of scope, or make this
   executable. It only ever edits and moves existing
   items — filing a new one is backlog-capture's job, and doing the actual work once it's
-  groomed is backlog-execute's. Trigger: /backlog-groom
+  groomed is backlog-execute's, and it never commits: a groom lands on disk only, so the
+  item has to be committed before an orchestrator run can read it. Trigger: /backlog-groom
 trigger: /backlog-groom
 ---
 
@@ -18,6 +19,12 @@ Groom gives one open item a verdict: **promote** it, **plan its fix** in place, 
 the actual work — that's `backlog-execute`. Every verdict below ends with a file that's
 either fully rewritten or left fully alone; there's no half-done state this skill leaves
 behind on purpose.
+
+It also never commits — no skill but `backlog-orchestrate` touches git history at all —
+so a groom lands **on disk only**, and an orchestrator run reads each item at the commit
+its worktree is created from rather than off the working tree. An executable item that
+was never committed is therefore invisible to a run, which is why the two verdicts that
+produce one end by saying so out loud (see "Groomed on disk only" below).
 
 ## Pick an item
 
@@ -291,6 +298,8 @@ called out in the steps themselves — there is exactly one such place, step 1's
    ```bash
    node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move idea-N done
    ```
+8. Print the **Groomed on disk only** line (below), naming the *new task's* path from
+   step 3 — not the idea's. The task is what a run would pick up; the idea is done.
 
 If you're resuming this after an interruption, `show` the idea first and check whether a
 task carrying `from: idea-N` already exists before creating a second one.
@@ -329,10 +338,13 @@ task carrying `from: idea-N` already exists before creating a second one.
    Skip this only if you are working over another session's live marker at the user's
    explicit request — see "Already in progress" above; that marker belongs to another
    session, not this one. A stale stamp you re-took is your own, so this line runs.
+4. Print the **Groomed on disk only** line (below), naming the bug's own path — the one
+   `show` printed; it hasn't moved.
 
 That's the entire verdict. It's the one that never calls `move`, so `stop` is simply its
-last step rather than something to place before a move — the bug stays in `bugs/open/`,
-now groomed, until `backlog-execute` finishes it and archives it to `bugs/done/`.
+last command rather than something to place before a move — the bug stays in
+`bugs/open/`, now groomed, until `backlog-execute` finishes it and archives it to
+`bugs/done/`.
 
 ### Reject — out of scope, open items only
 
@@ -394,6 +406,34 @@ the item exactly where it was; a moved file with a half-written body is the one 
 re-running this skill cannot repair. This applies to promote's idea and to every
 rejection — plan-the-fix never calls `move` at all, so it doesn't arise there.
 
+## Groomed on disk only
+
+A groom that leaves an item executable ends by printing this line, verbatim, with
+`<path>` replaced by the real path of the item a run would pick up:
+
+> Groomed on disk only. A run reads `<path>` at the commit it starts from, so commit it
+> before `/backlog-orchestrate` — uncommitted, the gate skips it as ungroomed.
+
+Print the path rather than describing it: that's what lets a `git add` be pasted
+straight off the line.
+
+Why a fixed line and not a judgement call: `backlog-orchestrate`'s gate reads each
+candidate's content **at the ref its worktree is created from**, never off the working
+tree, because those are the only bytes a dispatched session will ever see. An item
+groomed a minute ago and not committed therefore arrives at that gate as ungroomed and
+is skipped — `not committed on main — the worktree this run creates from main would not
+contain backlog/…`. That verdict fired five times across three projects in the
+2026-09-06 sweep, and each one cost a run slot and a person a second trip. This skill is
+what creates the uncommitted state, so it is the only place the sentence can be said at
+the moment it becomes true. It stops there: the commit is the user's own act, since no
+skill but `backlog-orchestrate` touches git history, and `backlog.mjs` has no notion of
+whether a file is committed — giving it one would make the registry's writer a git
+reader for a message this file can print by itself.
+
+**Not printed for a rejection, and not for an idea or refactor left as one.** A rejected
+item is closed and an un-promoted idea is not a candidate, so no run would pick either
+one up and committing it changes nothing about that.
+
 ## If the session ends without a verdict
 
 If the user walks away mid-groom — no verdict given yet, or one chosen but the steps
@@ -426,6 +466,7 @@ and everything here holds for it in full.
 
 ## Next
 
-A promoted idea or a fixed-in-place bug is ready for **`backlog-execute`**. A rejected
+A promoted idea or a fixed-in-place bug is ready for **`backlog-execute`** — and, once
+committed, for **`backlog-orchestrate`** too. A rejected
 item is closed — nothing further happens to it. Either way, `/backlog` shows the updated
 board.

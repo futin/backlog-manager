@@ -2982,3 +2982,116 @@ test('backlog-reviewer reads both lines and calls a missing pair Important', () 
     'backlog-reviewer.md no longer treats a missing pair as an Important finding',
   )
 })
+
+// --- backlog-groom's closing "on disk only" line -----------------------------
+//
+// The seam: `backlog-orchestrate`'s gate reads each candidate at the ref its
+// worktree is created from, so an item groomed in the working tree and never
+// committed reaches the gate as ungroomed and is skipped with "not committed on
+// main". That verdict fired five times across three projects in the 2026-09-06
+// sweep (bug-12 twice here, bug-13 in claude-agents-dashboard, bug-16 in ixray,
+// bug-7 in the dashboard), each one a spent run slot and a second trip for a
+// person. `backlog-groom` is the skill that creates the uncommitted state, the
+// commit is the user's own act — no skill but orchestrate touches git history —
+// and `backlog.mjs` has no notion of whether a file is committed, so the whole
+// fix is one sentence said where the state is made.
+//
+// Pinned here for the reason the two prose blocks above are: no compiler and no
+// other test reads these files, and this rule is two skills agreeing on one
+// literal sentence. Read, never imported.
+const ORCHESTRATE_SKILL_MD = fileURLToPath(new URL('../../backlog-orchestrate/SKILL.md', import.meta.url))
+
+// The line is printed, so it is quoted in SKILL.md as a blockquote and hard
+// wrapped across three source lines. Strip the `>` markers before collapsing
+// whitespace: the needle is what a session prints, and neither the marker nor
+// the wrap column is part of that.
+const flatQuoted = (file) =>
+  fs.readFileSync(file, 'utf8').replace(/^[ \t]*>[ \t]?/gm, '').replace(/\s+/g, ' ')
+
+const ON_DISK_LINE =
+  'Groomed on disk only. A run reads `<path>` at the commit it starts from, ' +
+  'so commit it before `/backlog-orchestrate` — uncommitted, the gate skips it as ungroomed.'
+
+// Same shape as markInProgressSection, generalised: these cases care which
+// section a phrase is in, because "the rejection path does not carry it" is a
+// statement about one section and would pass trivially against the whole file.
+const groomSectionText = (heading) => {
+  const text = fs.readFileSync(GROOM_SKILL_MD, 'utf8')
+  const at = text.indexOf(heading)
+  assert.notEqual(at, -1, `backlog-groom/SKILL.md no longer has a "${heading}" section`)
+  const rest = text.slice(at)
+  const end = rest.slice(1).search(/\n#{2,4} /)
+  return (end === -1 ? rest : rest.slice(0, end + 1)).replace(/\s+/g, ' ')
+}
+
+test('backlog-groom carries the on-disk-only line verbatim, path placeholder and all', () => {
+  // The placeholder is half the point: the line names the path groom just
+  // wrote, so a `git add` can be pasted off it. A line that dropped `<path>`
+  // would still read as advice and would no longer be actionable.
+  const text = flatQuoted(GROOM_SKILL_MD)
+  assert.ok(
+    text.includes(ON_DISK_LINE),
+    'backlog-groom/SKILL.md lost the verbatim "Groomed on disk only" line',
+  )
+})
+
+test('both executable verdicts end by pointing at that line', () => {
+  // Promote and plan-the-fix are the two verdicts that leave something a run
+  // would pick up. The line lives in one place; each verdict's last step has to
+  // send a session there, or a session reading only its own verdict never
+  // reaches it.
+  for (const heading of ['### Promote — an idea or a refactor becomes a task', '### Plan the fix — bug stays a bug']) {
+    assert.ok(
+      groomSectionText(heading).includes('Groomed on disk only'),
+      `backlog-groom/SKILL.md's "${heading}" no longer ends by printing the on-disk-only line`,
+    )
+  }
+})
+
+test('the rejection and no-verdict paths do not carry it', () => {
+  // A rejected item is closed and an idea left as an idea is not a candidate:
+  // no run would pick either up, so committing changes nothing about them and
+  // the line would be noise attached to the wrong state.
+  for (const heading of ['### Reject — out of scope, open items only', '## If the session ends without a verdict']) {
+    assert.ok(
+      !groomSectionText(heading).includes('Groomed on disk only'),
+      `backlog-groom/SKILL.md's "${heading}" should not print the on-disk-only line`,
+    )
+  }
+})
+
+test('backlog-groom states which grooms do not print the line', () => {
+  // Stated as a rule rather than left to the two absences above, because a
+  // session decides per groom and cannot see what other sections omit.
+  const text = flatQuoted(GROOM_SKILL_MD)
+  assert.ok(
+    /Not printed for a rejection/.test(text),
+    'backlog-groom/SKILL.md no longer says which grooms leave the line out',
+  )
+})
+
+test('backlog-groom says the boundary in its own description of what it does not do', () => {
+  // Front matter and the opening paragraph are what a reader meets before
+  // running the skill; the boundary belongs there too, not only in the step
+  // that prints it.
+  const text = flatQuoted(GROOM_SKILL_MD)
+  const head = text.slice(0, text.indexOf('## Pick an item'))
+  assert.ok(
+    /on disk only/.test(head),
+    'backlog-groom/SKILL.md no longer names the on-disk-only boundary up front',
+  )
+})
+
+test('backlog-orchestrate points its "not committed" verdict back at groom line', () => {
+  // The two skills describe one seam, and the whole value of the line is that
+  // the person reading either file meets the same words.
+  const text = flatQuoted(ORCHESTRATE_SKILL_MD)
+  assert.ok(
+    text.includes('not committed on main'),
+    'backlog-orchestrate/SKILL.md no longer explains the "not committed on main" verdict',
+  )
+  assert.ok(
+    /Groomed on disk only/.test(text),
+    'backlog-orchestrate/SKILL.md no longer points at backlog-groom\'s "Groomed on disk only" line',
+  )
+})
