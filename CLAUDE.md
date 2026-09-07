@@ -1,9 +1,11 @@
 # backlog-manager
 
-Claude Code plugin repo: five backlog skills — `backlog`, `backlog-capture`,
+Claude Code plugin repo: six backlog skills — `backlog`, `backlog-capture`,
 `backlog-groom`, `backlog-execute`, `backlog-orchestrate` (drains a
 project's groomed queue, one item per git worktree, each reviewed and
-verified before it merges) — plus a local NestJS + React app that shows
+verified before it merges), `backlog-retro` (sweeps every orchestrator run
+on the machine into a report, a pick-list of items and a record the next
+sweep is measured against) — plus a local NestJS + React app that shows
 every registered project's backlog on one kanban-by-type board. No
 database: the registry file and each project's `backlog/` directory are the
 data.
@@ -49,11 +51,16 @@ reasoning behind the rules in the next section lives in
   `dispatchGate` and the run/watchdog predicates both sides must agree on),
   `theme.css` (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
-  `skills/backlog-execute/`, `skills/backlog-orchestrate/` — the skills this
-  repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only
-  writer; `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's
-  only writer. **Start orchestrator runs from the board, not by typing the
-  trigger into a terminal.**
+  `skills/backlog-execute/`, `skills/backlog-orchestrate/`,
+  `skills/backlog-retro/` — the skills this repo publishes.
+  `skills/backlog/tools/backlog.mjs` is the registry's only writer;
+  `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only
+  writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state
+  directory and, by recorded lease id, each run's driver transcript, and owns
+  `~/.backlog-manager/retro/`
+  ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)).
+  **Start orchestrator runs from the board, not by typing the trigger into a
+  terminal.**
   → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this
   root-level directory by Claude Code's own convention. Currently one:
@@ -95,6 +102,15 @@ happened.
   `GET /api/orchestrator/archive` and `GET /api/orchestrator/archive/run`
   included.
   Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrators-run-file-has-exactly-one-writer-one-reader--the-same-relationship-the-registry-has)
+- **`~/.backlog-manager/retro/` has exactly one writer, `retro.mjs record`,
+  and `backlog-retro` never writes under the run-state directory** — the
+  same relationship `registry.json` and `run.json` each have with their
+  writer, stated for the third directory under `~/.backlog-manager` a tool
+  owns. A record is evidence, so `record` refuses to overwrite one (exit
+  `2`): the fix for a wrong record is the next sweep, never an edit. `sweep`
+  opens the retro home read-only, for deltas, and opens nothing else outside
+  the run-state home but a run's driver transcript by recorded session id.
+  Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
 - **A run's sidecars are archived beside its run file, under a name derived
   from the archive path and stored nowhere.** One `archiveStem` names both
   `runs/<stem>.json` and `runs/<stem>/`; there is no `sidecarDir` field. The
@@ -462,7 +478,12 @@ happened.
   agreeing on one sentence and a suite that reads only one half cannot catch
   them drifting apart; the reviewer/execute pair is the same shape. They read
   the other file, never import it — the "one skill's `tools/` may never import
-  another's" rule is untouched.
+  another's" rule is untouched. `backlog-retro` splits its suite in two —
+  `retro.test.mjs` (the CLI, spawned as a child process) and
+  `retro-lib.test.mjs` (the modules under `tools/lib/`) — and BOTH sit at the
+  `tools/` level on purpose: `test:skills`'s only glob is
+  `skills/*/tools/*.test.mjs`, so a file under `tools/lib/` would never be
+  run, which is the same as not existing.
 
 <!-- docs-sync:
   sources:
