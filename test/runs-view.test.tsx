@@ -586,15 +586,19 @@ describe('RunsView', () => {
 
   // Final-review wave, Important 1: the SAME "does not pin or accent..."
   // (I4) scenario above — RUN_LIVE's own live-payload entry gone stale
-  // (`fresh: false`), so `pickAuthority` falls back to RUN_LIVE's ARCHIVE
-  // record — but read through the WIDE tile this time, not the row. That
-  // fallback is what a whole-branch review found this suite could reach
-  // without ever actually exercising `runStageTotals`' open-span arithmetic,
-  // because RUN_LIVE's own archive-shaped `a-2` used to carry no `stageAt`
-  // at all (`item()`'s own inert default) — see that fixture's own comment,
-  // above, for the fix. With a real `reviewing` arrival now on it, this
-  // fallback lands on a genuinely live item in a MACHINE_STAGES stage for
-  // the first time.
+  // (`fresh: false`) — but read through the WIDE tile this time, not the row.
+  // What this case exists to pin is `runStageTotals`' open-span arithmetic
+  // against a DEAD heartbeat: an item still sitting in a MACHINE_STAGES stage
+  // must have its open span frozen at the run's last heartbeat rather than
+  // credited all the way to `Date.now()`.
+  //
+  // bug-29 moved WHICH object supplies that open span, and the fixture had to
+  // follow it. A stale live entry is now the row's data authority (it is
+  // still arriving every 5s; the archive snapshot beside it is not), so the
+  // open `reviewing` arrival that used to live on RUN_LIVE's ARCHIVE-shaped
+  // `a-2` is stated on the stale LIVE queue here instead. The stamps, the
+  // arithmetic and the assertion are unchanged — only the source of the
+  // queue moved, which is exactly what the fix changed.
   //
   // RUN_LIVE's own `updatedAt` (2026-08-31T12:05, unchanged from every other
   // test in this file) is a fixed past date no real run of this suite can
@@ -609,8 +613,18 @@ describe('RunsView', () => {
   // at all, which is exactly the "passes by accident" gap this case closes:
   // nobody could have written a deterministic assertion against the OLD
   // formula for a fixed-past fixture like this one.
-  it("freezes the wide tile's open span at a stale archived run's last heartbeat, not real time", async () => {
-    const staleLive: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
+  it("freezes the wide tile's open span at a stale run's last heartbeat, not real time", async () => {
+    const staleLive: OrchestratorRunsPayload['runs'] = [{
+      ...LIVE_RUNS[0],
+      fresh: false,
+      queue: [
+        liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
+        liveQueueItem('a-2', 'reviewing', {
+          fixLoops: 2,
+          stageAt: { pending: '2026-08-25T09:00:00.000Z', reviewing: '2026-08-25T12:05:00.000Z' }
+        })
+      ]
+    }];
 
     await renderRunsView(ARCHIVE_RUNS, staleLive);
 
@@ -688,12 +702,20 @@ describe('RunsView', () => {
 
   // I4: `LIVE_RUNS` (used by every test above) has exactly one entry and it
   // is always `fresh: true` — no fixture anywhere before this test supplied
-  // the ONE case `mergeRuns`' `.filter((r) => r.fresh)` gate exists to
-  // reject: a run that IS in the live payload (the board has heard from it)
-  // but is NOT fresh (its heartbeat has gone stale — RUN_STALE_MS). Without
-  // this test, deleting that `.filter` leaves every other test in this file
-  // green: the row would still gain the live class and get pinned, since
-  // nothing before this exercised the `fresh: false` branch at all.
+  // the ONE case `mergeRuns`' freshness gate exists to reject: a run that IS
+  // in the live payload (the board has heard from it) but is NOT fresh (its
+  // heartbeat has gone stale — RUN_STALE_MS). Without this test, deleting
+  // that gate leaves every other test in this file green: the row would
+  // still gain the live class and get pinned, since nothing before this
+  // exercised the `fresh: false` branch at all.
+  //
+  // bug-29 moved the gate from `MergedRun.live` (the DATA authority, which no
+  // longer filters on freshness at all) down onto `MergedRun.isLive` (the
+  // PRESENTATION gate, which still does). This case is unchanged by that and
+  // deliberately so: pinning and the live accent are exactly what must NOT
+  // follow a stale run, and `splitPinned`'s own comment already commits to
+  // why — a `running` run with a silent heartbeat is a crashed process, and
+  // pinning it would present a guess as a fact.
   it('does not pin or accent a run whose live-payload entry has gone stale (fresh: false)', async () => {
     const staleLive: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
 
@@ -1649,5 +1671,233 @@ describe('RunsView history paging (task-16)', () => {
     expect(screen.getByTestId('runs-mode')).toBeInTheDocument();
     expect(screen.queryByTestId('runs-range')).not.toBeInTheDocument();
     expect(screen.queryByTestId('runs-tools-divider')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * bug-29 — a `running` run whose heartbeat has gone stale.
+ *
+ * `mergeRuns` used to build its live map from `liveRuns.filter((r) => r.fresh)`,
+ * so a run that is still `status: "running"` but has not stamped a heartbeat
+ * inside `RUN_STALE_MS` got `live: null` and the whole row — and the detail
+ * pane behind it — fell back to `useOrchestratorArchive`, which by design
+ * carries no poll at all. The 5s live poll kept arriving (`useOrchestratorRuns`'
+ * own `anyLive` deliberately keeps polling for `status === 'running'` whether
+ * fresh or not) and kept being thrown away, so the stage readout froze until a
+ * reload or a window focus. That state is not exotic: 57 gaps of over 15
+ * minutes between consecutive stage stamps were counted across this machine's
+ * archived run files, the worst two 249 and 206 minutes, both
+ * `reviewing -> fixing`.
+ *
+ * The split these cases pin: `MergedRun.live` is the DATA authority and is now
+ * "this run's live entry, if the payload has one at all"; `MergedRun.isLive` is
+ * the PRESENTATION gate and stays `fresh`. So a stale-but-running run's numbers
+ * move, and it still does not get pinned, accented, or described as something
+ * anyone is still hearing from — it is described as `crashed`, in the Board
+ * strip's own word, off the Board strip's own `isCrashed`.
+ */
+describe('RunsView · a running run whose heartbeat has gone stale', () => {
+  /** RUN_LIVE's own live entry, heartbeat stale. Its queue is deliberately
+   *  AHEAD of RUN_LIVE's archive snapshot (both items merged, where the
+   *  archive still has `a-2` at `reviewing`) — see `LIVE_RUNS`' own comment —
+   *  so any row or tile that regressed to reading the archive prints a
+   *  different, hand-checkable number. */
+  const STALE_LIVE: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
+
+  it('keeps the stale live entry as the row\'s data authority instead of falling back to the archive', async () => {
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    // 2/2 is the LIVE queue (a-1 and a-2 both merged); the archive snapshot
+    // beside it still says 1/2. Pre-fix this row read the archive.
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-row-count')?.textContent)
+      .toBe('2/2');
+  });
+
+  it('freezes the row wall time at the stale live entry\'s own last heartbeat', async () => {
+    // The live entry is ahead of the archive on `updatedAt` too, so this
+    // number can only come from the live entry — and it must stay frozen
+    // there rather than climbing toward the real `Date.now()`, which is
+    // months past this fixture on every day this suite ever runs.
+    const archiveEntry = run({
+      runId: 'run-20260901-090000',
+      project: '/abs/delta',
+      status: 'running',
+      startedAt: '2026-09-01T09:00:00.000Z',
+      updatedAt: '2026-09-01T09:05:00.000Z',
+      current: true,
+      queue: [item('d-1', 'reviewing')]
+    });
+    const staleLive: OrchestratorRunsPayload['runs'] = [{
+      runId: archiveEntry.runId,
+      project: archiveEntry.project,
+      status: 'running',
+      startedAt: archiveEntry.startedAt,
+      updatedAt: '2026-09-01T09:42:00.000Z',
+      maxItems: null,
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      questionMode: 'park',
+      mergeModeNote: null,
+      queue: [liveQueueItem('d-1', 'reviewing')],
+      attention: [],
+      fresh: false,
+      pastRuns: 0,
+      pauseRequested: false
+    }];
+
+    await renderRunsView([archiveEntry], staleLive);
+
+    expect(screen.getByTestId(`runs-row-${archiveEntry.runId}`).querySelector('.runs-row-wall')?.textContent)
+      .toBe('42m');
+  });
+
+  it('advances the detail pane\'s stage readout on every live poll, with no archive refetch', async () => {
+    // The whole bug, end to end. Pre-fix the pane sat on `inspecting`
+    // through four polls that each reported something different, because
+    // `live` was `null` and `RunDetail`'s one-shot `fetchArchivedRun`
+    // fallback had already landed and stood still.
+    jest.useFakeTimers();
+    try {
+      const archiveEntry = run({
+        runId: 'run-20260901-100000',
+        project: '/abs/epsilon',
+        status: 'running',
+        startedAt: '2026-09-01T10:00:00.000Z',
+        updatedAt: '2026-09-01T10:01:00.000Z',
+        current: true,
+        queue: [item('e-1', 'inspecting')]
+      });
+      const staleAt = (stage: RunStage): OrchestratorRunsPayload => ({
+        runs: [{
+          runId: archiveEntry.runId,
+          project: archiveEntry.project,
+          status: 'running',
+          startedAt: archiveEntry.startedAt,
+          updatedAt: '2026-09-01T10:01:00.000Z',
+          maxItems: null,
+          mergeMode: 'merge',
+          mergeModeEffective: 'merge',
+          questionMode: 'park',
+          mergeModeNote: null,
+          queue: [liveQueueItem('e-1', stage)],
+          attention: [],
+          fresh: false,
+          pastRuns: 0,
+          pauseRequested: false
+        }],
+        starting: []
+      });
+
+      mockArchive.mockResolvedValue({ runs: [archiveEntry] } satisfies OrchestratorArchivePayload);
+      mockRuns.mockResolvedValue(staleAt('inspecting'));
+
+      render(<RunsView />);
+      await act(async () => { await jest.advanceTimersByTimeAsync(0); });
+
+      // Read off the item HEAD's own stage chip, not the whole row: the
+      // seven-node `StageTrack` below it prints every stage name on every
+      // render by construction, so a whole-row assertion would match
+      // `inspecting` forever no matter what the item's actual stage is.
+      const stageChip = (): string => screen.getByTestId('run-detail-item-e-1')
+        .querySelector('.run-drawer-item-head')?.textContent ?? '';
+
+      expect(stageChip()).toContain('inspecting');
+
+      // The next 5s poll reports the run has moved on. `useOrchestratorRuns`
+      // keeps polling a `running` run whether or not it is fresh, so this
+      // tick fires without any focus event or remount.
+      mockRuns.mockResolvedValue(staleAt('merging'));
+      await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+
+      expect(stageChip()).toContain('merging');
+      expect(stageChip()).not.toContain('inspecting');
+      // Nothing here came from the archive: `RunDetail` stands down from its
+      // one-shot fetch the moment a live entry exists, stale or not.
+      expect(mockFetchArchivedRun).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('reads crashed on both status badges — the list row and the detail head', async () => {
+    // Both in one case on purpose: these are the two sites that print the
+    // status word, and a test covering one would pass on a half-applied fix.
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-status')?.textContent)
+      .toContain('crashed');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent)
+      .toContain('crashed');
+  });
+
+  it('reads running on both status badges while the live entry is fresh', async () => {
+    // The pair that fails if the substitution is keyed on `status` alone
+    // rather than on `isCrashed`.
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    const row = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
+    expect(row.querySelector('.runs-status')?.textContent).toContain('running');
+    expect(row.querySelector('.runs-status')?.textContent).not.toContain('crashed');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent)
+      .toContain('running');
+  });
+
+  it('leaves an archive-only row\'s recorded running status alone on both badges', async () => {
+    // A run whose file is gone or superseded: it appears in the archive at
+    // `status: "running"` and in no live payload at all. There is no
+    // heartbeat here to judge, so nothing may reclassify it — the case that
+    // fails if the derivation is taken from `authority` rather than from the
+    // live entry.
+    const orphan = run({
+      runId: 'run-20260901-110000',
+      project: '/abs/zeta',
+      status: 'running',
+      startedAt: '2026-09-01T11:00:00.000Z',
+      updatedAt: '2026-09-01T11:20:00.000Z',
+      queue: [item('z-1', 'reviewing')]
+    });
+
+    await renderRunsView([orphan], []);
+
+    expect(screen.getByTestId(`runs-row-${orphan.runId}`).querySelector('.runs-status')?.textContent)
+      .toContain('running');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent)
+      .toContain('running');
+  });
+
+  it('drops the active and queued chips for a stale live entry and marks the pane crashed', async () => {
+    // The two chips count what the run is doing THIS INSTANT, which a stale
+    // entry cannot claim — so they move from `live !== null` to
+    // `live.fresh === true`, and the pane says outright that what it is
+    // showing is last-reported.
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+
+    expect(screen.queryByTestId('run-detail-chip-active')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-chip-queued')).not.toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-crashed')).toBeInTheDocument();
+  });
+
+  it('keeps the active and queued chips, and no crashed marker, while the live entry is fresh', async () => {
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+
+    expect(screen.getByTestId('run-detail-chip-active')).toBeInTheDocument();
+    expect(screen.getByTestId('run-detail-chip-queued')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-detail-crashed')).not.toBeInTheDocument();
+  });
+
+  it('still counts a stale running run under `running` in the aggregate tile', async () => {
+    // Step 3's stated out-of-scope, pinned so a later reader does not
+    // "finish the job" at RunsView's `byStatus` substat: that is a tally over
+    // the archived corpus, not a claim about any run right now, and
+    // re-bucketing history behind a freshness flag would make the tile
+    // disagree with the archive it summarises.
+    await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
+
+    expect(screen.getByTestId('runs-tile-runs')).toHaveTextContent('1 running');
+    expect(screen.getByTestId('runs-tile-runs')).not.toHaveTextContent('crashed');
   });
 });

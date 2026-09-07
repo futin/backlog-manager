@@ -194,11 +194,15 @@ export function itemStageSpans(item: Pick<RunQueueItem, 'stageAt'>): StageSpan[]
  * `status: "running"` FOREVER. `orchestrate.mjs init` refuses to overwrite
  * one, fresh or stale — recovery is `--resume`/`--abort` only, this repo's
  * own "One run per project, checked twice" invariant — and `GET
- * /api/orchestrator/archive` serves that frozen file verbatim, while the
- * live poll's merge drops it (a stale entry is never `fresh`, so
- * `pickAuthority` never picks it as a live winner). So the archive path
- * hands this function `running` runs of arbitrarily old heartbeat, and
- * `status` alone never says which. Gating on `status` alone was bug-14:
+ * /api/orchestrator/archive` serves that frozen file verbatim. Since bug-29
+ * the live poll's merge hands it over too — `RunsView` no longer drops a
+ * stale entry, because a `running` run in a long review or merge step is
+ * still recording real stage stamps and the 5s poll is still delivering
+ * them, so `pickAuthority` now picks a stale entry as its live winner on
+ * purpose. Both paths therefore hand this function `running` runs of
+ * arbitrarily old heartbeat, and `status` alone never says which — which is
+ * why the check below reads the stamps rather than trusting either caller
+ * to have pre-filtered. Gating on `status` alone was bug-14:
  * a crashed run's wall time grew by a second every second, indefinitely,
  * printed as "how long this run has taken" — three days after the crash it
  * read three days.
@@ -380,15 +384,21 @@ export type StageTotals = Partial<Record<RunStage, number>>;
  * twice" invariant) — so `status` alone cannot tell a run still genuinely
  * being worked apart from one whose process died hours or days ago and
  * simply never got the chance to write anything else. `GET
- * /api/orchestrator/archive` serves that frozen file verbatim, and the live
- * poll's own merge drops it (a stale entry is never `fresh`, so
- * `pickAuthority` never picks it as a live winner) — so the archive path
- * was still handing this function a `running` run of arbitrarily old
- * heartbeat, and crediting its frozen item `now - stamp` forever: the exact
- * unbounded-growth failure the `status` gate above exists to prevent,
- * reached through the one door that gate left open, both to this run's own
- * rollup and — via `sumStageTotals` — to the wide tile summing every run in
- * scope.
+ * /api/orchestrator/archive` serves that frozen file verbatim, so the
+ * archive path was still handing this function a `running` run of
+ * arbitrarily old heartbeat, and crediting its frozen item `now - stamp`
+ * forever: the exact unbounded-growth failure the `status` gate above exists
+ * to prevent, reached through the one door that gate left open, both to this
+ * run's own rollup and — via `sumStageTotals` — to the wide tile summing
+ * every run in scope.
+ *
+ * At the time, the LIVE path could not reach that door: `RunsView`'s merge
+ * dropped any un-fresh entry, so `pickAuthority` could never pick one as a
+ * live winner. bug-29 removed that filter — a stale-but-arriving live entry
+ * is now exactly what this function receives for a run in a long review or
+ * merge step — which changes nothing about the fix below and everything
+ * about how load-bearing it is: the door this gate closes is now the main
+ * one, not a side entrance through the archive.
  *
  * The fix mirrors `runElapsedMs` (run-time.ts), which already forks on
  * exactly this distinction for the live board: `now − startedAt` while
@@ -630,7 +640,7 @@ export interface RunAggregates {
  * inches away on the same screen. `RunsView` now maps every run in scope
  * through that same `pickAuthority` call before handing the list here, so
  * this function has to accept whichever of the two concrete shapes
- * (`OrchestratorArchiveRun` or a fresh live `OrchestratorRun`) that
+ * (`OrchestratorArchiveRun` or a live `OrchestratorRun`) that
  * produces — a fixed `OrchestratorArchiveRun` parameter would force a cast
  * at the call site, exactly the kind of "trust me" seam a future edit could
  * silently get wrong again. The shape below names only the fields this

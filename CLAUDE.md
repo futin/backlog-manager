@@ -918,7 +918,27 @@ happened.
   watchdog's own verdict (`lib/run-watchdog.ts`'s `watchdogClause`). Badges,
   card run bars and `runClaimBlock` stay freshness-based — a crashed run
   does not stop being a live claim on its item just because the board now
-  says so out loud.
+  says so out loud. **The Runs view says the same thing off the same
+  payload** (bug-29): `mergeRuns` no longer filters the live map on `fresh`,
+  so `MergedRun.live` is the DATA authority ("does the payload have an entry
+  at all") while `MergedRun.isLive` stays the PRESENTATION gate ("`fresh`") —
+  pinning and the `runs-row-live` accent still follow freshness and nothing
+  else does. It had to be split because the two fields answer different
+  questions: `status` says whether the run is over, `fresh` says whether the
+  heartbeat is recent, and review or merge routinely outlast `RUN_STALE_MS`
+  (57 gaps over 15 minutes across this machine's archived runs, worst two 249
+  and 206 minutes). Gating the data on `fresh` handed those windows to
+  `useOrchestratorArchive`, which by design never polls, while the 5s live
+  poll kept arriving and being discarded — so the one surface built to watch
+  a run happen froze until a reload. Both status badges (`RunsView`'s row,
+  `RunDetail`'s head) read `crashed` through `runStatusChip`
+  (`lib/run-stage.ts`), the one implementation of that substitution, derived
+  from the live entry and never from `authority` — an archive record carries
+  no `fresh` field and must keep printing its recorded status. `crashed` is
+  **not** a sixth `RunStatus`: `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` stay
+  exhaustive over the five wire statuses, and the aggregate tile's `byStatus`
+  substat still counts a crashed run under `running`, because that is a tally
+  over the archived corpus rather than a claim about any run right now.
 - **The watchdog is armed only while some `run.json` says `running`.** No
   standing interval — a `setTimeout` chain exists only while at least one
   run is `running`, fresh or crashed alike, and disarms itself the tick it

@@ -3,8 +3,9 @@ import { Fragment, useEffect, useState } from 'react';
 import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
+import { mergeModeLabel, runStatusChip, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { itemStageSpans, runStageTotals, runWallMs } from '../../lib/run-stats';
-import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { isCrashed } from '../../lib/run-watchdog';
 import {
   formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive
 } from '../../lib/run-time';
@@ -58,12 +59,18 @@ import type {
  * view: the full run file this pane fetches on demand for an ARCHIVED
  * selection, which lands strictly after `summary` was read and is therefore
  * at least as fresh — and which is the ONLY thing that can ever correct a
- * run that just stopped being live: a fix round found that the moment a
- * live run finishes, `live` goes `null` on the very next render (the
- * server's `fresh` flag flips), and falling back to `summary` at that exact
- * point reproduced a stale "running" header with an ever-growing elapsed
- * time and item rows frozen at their last-known live stage — while the
- * fetch this pane had *already issued* for that same transition sat unused.
+ * run whose live entry has gone away: a fix round found that when `live`
+ * turns `null` for a still-selected run, falling back to `summary` at that
+ * exact point reproduced a stale "running" header with an ever-growing
+ * elapsed time and item rows frozen at their last-known live stage — while
+ * the fetch this pane had *already issued* for that same transition sat
+ * unused. (That fix round attributed the transition to the server's `fresh`
+ * flag flipping as a run finished. It no longer is, and never needed to be:
+ * bug-29 took freshness out of `live`'s existence entirely, so an entry now
+ * disappears only when that run's `run.json` stops being its project's
+ * current file — which `init` does when it archives one run before starting
+ * the next. The defect, the fetch and this fallback are all unchanged; only
+ * the sentence naming the trigger was wrong.)
  *
  * `pickAuthority` (`lib/run-authority.ts`) is the fix, and its own doc
  * comment is the one place this three-tier precedence is written down —
@@ -226,19 +233,26 @@ export function RunDetail(
   // credits to whichever stage that item is sitting in right now (see that
   // function's own "OPEN span" paragraph). The 5s live poll alone would
   // make all three jump in five-second steps instead of ticking smoothly.
-  // Gated on `live !== null`, exactly like `StageTrack`'s own reduced-
-  // motion sweep: an ARCHIVED selection has nothing left to tick — every
-  // stamp it can ever have is already written — so `useNow(false, ...)`
-  // installs no interval at all and this render stays a pure function of
-  // its props, matching every other archived-row reading on this pane.
-  const now = useNow(live !== null, 1_000);
+  // Gated on `live?.fresh === true`, not on `live !== null`: an ARCHIVED
+  // selection has nothing left to tick — every stamp it can ever have is
+  // already written — so `useNow(false, ...)` installs no interval at all and
+  // this render stays a pure function of its props, matching every other
+  // archived-row reading on this pane. bug-29 narrowed the gate from presence
+  // to freshness for COST rather than correctness: a stale live entry now
+  // exists where it used to be `null`, and every clock on this pane already
+  // freezes itself on a dead heartbeat (`runWallMs`, `runStageTotals`,
+  // `runClockMs`, all through `runIsLive`), so a 1s interval on a crashed run
+  // would only repaint numbers that cannot move.
+  const now = useNow(live?.fresh === true, 1_000);
 
   // The file header's "Data source" section names the rule; `pickAuthority`
   // (lib/run-authority.ts) is its one implementation. `live` wins whenever
-  // it exists (freshest, by construction); otherwise the just-landed
-  // `fetchedRun` wins; `summary` is the fallback until either shows up —
-  // and critically, that fallback is no longer permanent once `live` goes
-  // `null` (a run finishing), because `fetchedRun` is already in flight for
+  // it exists (freshest, by construction — a per-request read of `run.json`
+  // arriving every 5s, whether or not that file's heartbeat is recent);
+  // otherwise the just-landed `fetchedRun` wins; `summary` is the fallback
+  // until either shows up — and critically, that fallback is no longer
+  // permanent once `live` goes `null` (this run's file stopped being its
+  // project's current one), because `fetchedRun` is already in flight for
   // exactly that transition (see the effect above) and replaces `summary`
   // itself, not merely one field on it, the moment it lands.
   //
@@ -278,8 +292,8 @@ export function RunDetail(
   // this clamped clock: it derives its own freshness internally, and handing
   // it a pre-clamped instant would make that check trivially true — reaching
   // the right number by accident rather than by rule. Same for `useNow`'s own
-  // `live !== null` gate above, which governs whether an interval exists at
-  // all, not what any reading measures against.
+  // `live?.fresh === true` gate above, which governs whether an interval
+  // exists at all, not what any reading measures against.
   const runLive = runIsLive(source, now);
   const clock = runClockMs(source, now);
 
@@ -337,8 +351,15 @@ export function RunDetail(
   // re-derivation of the same list — the exact import the brief's own
   // interfaces section names, and the one RunDrawer.tsx already reuses for
   // its equivalent "active" chip.
-  const active = live !== null ? live.queue.filter((q) => ACTIVE_RUN_STAGES.includes(q.stage)).length : 0;
-  const queued = live !== null ? live.queue.filter((q) => q.stage === 'pending').length : 0;
+  // bug-29: `live.fresh === true`, not `live !== null`. These two count what
+  // the run is doing THIS INSTANT, which a stale entry cannot claim — its
+  // queue is the last thing the run reported, however long ago. Every OTHER
+  // `live !== null` site in this file is correct on presence alone: the rows
+  // source below is the fix itself, and the one-shot fetch above is right to
+  // stand down once a live entry exists, stale or not.
+  const liveFresh = live !== null && live.fresh;
+  const active = liveFresh ? live.queue.filter((q) => ACTIVE_RUN_STAGES.includes(q.stage)).length : 0;
+  const queued = liveFresh ? live.queue.filter((q) => q.stage === 'pending').length : 0;
 
   const startedClock = formatClock(authority.startedAt);
   const wall = runWallMs(authority, now);
@@ -371,13 +392,40 @@ export function RunDetail(
   // either — only a genuinely downgraded one earns the second line.
   const modeNote = source.mergeMode === source.mergeModeEffective ? null : source.mergeModeNote;
 
+  // bug-29's two halves of "say it is last-reported, do not imply it is
+  // current". The badge is the loud one — a run whose heartbeat died 46
+  // minutes ago used to render the word `running`, in the live cyan, beside a
+  // `34m elapsed` that `runWallMs` had already correctly frozen, while the
+  // Board strip one click away said `crashed` off the same payload
+  // (`run-20260906-185312`). The note below it is the quiet one: this pane's
+  // stages now MOVE for such a run, and a readout that moves must not read as
+  // a process anybody is still hearing from.
+  const statusChip = runStatusChip(authority.status, live);
+  // The last heartbeat as a CLOCK TIME, deliberately not the strip's own
+  // "no heartbeat for 46m" age: an age has to tick, and this pane installs no
+  // interval for a crashed run (see `useNow`'s gate above — every other
+  // reading here freezes itself on a dead heartbeat, and adding one that does
+  // not would take that saving straight back). A fixed stamp is a fact that
+  // never goes stale, and the Board strip is one click away for the age.
+  // Read off `live`, never `authority`: an archive record carries no `fresh`
+  // field, so it has no heartbeat to be judged crashed on.
+  const crashed = live !== null && isCrashed(live);
+  const lastHeartbeat = crashed && live !== null ? formatClock(live.updatedAt) : null;
+
   return (
     <>
       <div className="run-detail-head">
         <span className="run-detail-id">{summary.runId}</span>
-        <span className={`runs-status ${RUN_STATUS_CLASS[authority.status]}`}>
-          <span aria-hidden="true">{RUN_STATUS_GLYPH[authority.status]}</span>
-          {authority.status}
+        {/* bug-29: `runStatusChip` (lib/run-stage.ts), the one place the
+            `running` + dead-heartbeat -> `crashed` substitution is decided,
+            shared with RunsView's list row so the two badges on one screen
+            cannot disagree. Derived from `live`, never from `authority` —
+            `authority` may be an archive record, which carries no `fresh`
+            field, and a run with no heartbeat to judge must keep printing
+            its recorded status. */}
+        <span className={`runs-status ${statusChip.className}`}>
+          <span aria-hidden="true">{statusChip.glyph}</span>
+          {statusChip.label}
         </span>
         {modeLabel !== null && (
           <span className="run-mode-badge" data-testid="run-detail-mode">{modeLabel}</span>
@@ -418,6 +466,26 @@ export function RunDetail(
         )}
       </div>
 
+      {crashed && (
+        // Placed directly under the head, above the mode note and the chips,
+        // for the reason the mode note gives for its own placement: a reader
+        // who skims past this line goes on to read every stage below it as
+        // current. That qualifier is what earns the fix: this pane's stages
+        // now MOVE for a crashed run (bug-29), where before they were frozen,
+        // and a readout that moves must not read as a process anybody is
+        // still hearing from. The strip does not need the same sentence — it
+        // prints one stage, this pane prints a whole queue of them.
+        <div className="run-detail-crashed" data-testid="run-detail-crashed">
+          {/* Null-tolerant, matching `run-detail-time`'s own join right above:
+              a run whose `updatedAt` will not parse is exactly the run the
+              server already reads as un-fresh, so it reaches this line with
+              no stamp to print — and the qualifier is the load-bearing half
+              anyway. */}
+          {lastHeartbeat === null ? 'heartbeat stopped' : `last heartbeat ${lastHeartbeat}`}
+          {' · every stage below is last reported, not current'}
+        </div>
+      )}
+
       {modeNote !== null && (
         // Verbatim, not paraphrased — matching RunDrawer.tsx's own rule for
         // `RunAttention`'s `detail` prose: the exact reason a person carries
@@ -457,8 +525,10 @@ export function RunDetail(
         {/* Active/queued only ever mean something for a run this board is
             still hearing from — a finished run is zero of both "by
             construction" (design doc's own wording), and printing two more
-            zero chips on every archived row would be noise, not information. */}
-        {live !== null && (
+            zero chips on every archived row would be noise, not information.
+            A CRASHED run is the same case (bug-29): its heartbeat is gone, so
+            "active right now" is a claim this pane cannot make for it. */}
+        {liveFresh && (
           <>
             <span className="run-drawer-chip" data-testid="run-detail-chip-active">
               <span className="run-drawer-chip-num">{active}</span> active

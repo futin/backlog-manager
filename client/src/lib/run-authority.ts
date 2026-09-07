@@ -17,17 +17,33 @@
  * order of freshness:
  *
  * 1. `live` — this run's entry from `useOrchestratorRuns`' 5s poll, present
- *    only while the server's own `fresh` check (`RUN_STALE_MS`) says the
- *    orchestrator process is still being heard from right now. The
- *    freshest thing either component can ever hold, by construction.
+ *    whenever the payload carries one at all: the endpoint re-reads each
+ *    project's `run.json` per request, so an entry exists for as long as
+ *    that file is the project's current run, whatever its status and
+ *    however long ago it last stamped a heartbeat. Still the freshest thing
+ *    either component can ever hold, by construction — it is a per-request
+ *    read of the file itself, arriving every five seconds.
+ *
+ *    This tier used to be documented (and built) as "present only while the
+ *    server's `fresh` check says the process is still being heard from",
+ *    which is what bug-29 removed: freshness is a separate field on the
+ *    entry, and a `running` run in a long review or merge step routinely
+ *    goes un-fresh while its file goes right on recording real stage
+ *    stamps. Both callers now pass a possibly-stale entry here on purpose —
+ *    `live` is the DATA authority ("what does the newest read of the file
+ *    say"), and whether anyone is still hearing from the process is a
+ *    separate, presentation-side question (`fresh`, `isCrashed`) that no
+ *    caller of this function asks it to answer.
  * 2. `fetched` — a full run file `RunDetail` fetched on demand
  *    (`fetchArchivedRun`) for the currently-selected run. It lands strictly
  *    *after* whatever `useOrchestratorArchive` last held (it is a fetch
  *    triggered by that selection, always initiated later), so whenever it
  *    exists it is at least as fresh as the archive snapshot below — and it
- *    is the one thing that can ever correct a run that just stopped being
- *    live: `live` is gone by definition the moment a run finishes, but a
- *    freshly re-read run file still tells the truth about it.
+ *    is the one thing that can ever correct a run whose live entry has gone
+ *    away: an entry disappears once that run's `run.json` is no longer the
+ *    project's current file (`init` archives it into `runs/` before writing
+ *    the next run's), and a freshly re-read run file still tells the truth
+ *    about it.
  * 3. `archive` (the fallback) — `useOrchestratorArchive`'s own snapshot,
  *    fetched only on mount and window focus (see that hook's own doc
  *    comment for why it carries no poll of its own). This can be minutes
