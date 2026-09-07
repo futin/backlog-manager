@@ -29,187 +29,43 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 
 ## Layout
 
-- `server/src/` — Nest: `health/`, `items/` (`/api/items`, `/api/projects`,
-  `/api/items/body`, `/api/items/uncommitted` — which of one project's item
-  files differ from `main`, `uncommitted.util.ts`, read per request and never
-  memoised, see Invariants), `agents/` (the one outbound-calling module — status,
-  plan, dispatch, orchestrate, resume, pause, and the run watchdog
-  (`watchdog.service.ts`, armed only while some `run.json` says running),
-  plus the local read-only `merge-check`), `orchestrator/`
-  (`GET /api/orchestrator/runs` for the live board strip, plus
-  `GET /api/orchestrator/archive` and `GET /api/orchestrator/archive/run`
-  for run history — all three a read-only view of the run-state directory,
-  current run and archived `runs/` alike — see Invariants; plus
-  `watchdog-state.service.ts`, the in-memory record of what the watchdog
-  did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs
-  only, `starting-runs.service.ts`, the in-memory record of a spawn this
-  server itself requested, surfaced as the payload's separate `starting`
-  array so a board-started run is visible before `init` writes a run file —
-  see Invariants — `watchdog-config.util.ts`, the first file the server
-  writes, and `pause-control.util.ts`, the second: the pause request
-  `orchestrate.mjs` reads back at its two dispatch gates, the one file in
-  this system travelling server → tool, see Invariants),
-  `registry/` (read-only view of the registry file), `static.ts` (serves
-  `client/dist` only when built).
-- `client/src/` — React SPA: side rail (Board / Runs / Archive / Settings —
-  `SECTIONS` in `SideRail.tsx` is the one runtime list of them, and
-  `resolveSection` in `App.tsx` maps a stored value that names no tab, the
-  legacy `'projects'` included, onto Board), board (four
-  fixed columns — refactors/ideas/bugs/tasks; out-of-scope has no Board
-  column at all and belongs to Archive; stale items leave it too, see
-  Invariants — card drawer,
-  dispatch control opening a launch sheet onto `../claude-agents-dashboard`,
-  a toolbar Orchestrate control opening `OrchestrateSheet` — three steps
-  (items / order / modes), with Start on the last one alone so it never sits
-  under a scroll region whose length is the project's queue. Step 1 previews
-  the queue and selects a subset of it, flagging with an `uncommitted` chip
-  every row whose file on disk is not the file at `main`, and splitting the
-  two fates that has — absent from `main` is skipped in the run's own words
-  (`not committed on main`), present-but-stale is gated and run on `main`'s
-  bytes — plus a `deselect uncommitted (N)` control —
-  fed once per sheet open by `GET /api/items/uncommitted`, rendering nothing
-  at all on `known: false` or a failed/malformed answer, and deliberately
-  changing no default: an untouched sheet still posts no `ids` (task-32, see
-  Invariants); step 2 hand-orders that selection
-  with ↑/↓ and a reset (`order: string[] | null`, `null` meaning queue order,
-  reconciled against the live queue every render, never stored resolved);
-  step 3 holds all five pickers — permission mode, model, effort, merge mode,
-  question mode, the last two seeded from Settings — plus, in merge mode, a
-  setup hint fed by `GET /api/agents/merge-check`. `ids` rides along for
-  `narrowed || order !== null`: a strict subset **or** a hand order, since
-  choosing an order is choosing a membership, so an untouched sheet still
-  starts a whole-queue run and an arranged one is pinned to exactly what it
-  arranged (step 2 says so on screen, next to a note that a `runner-fix:`
-  item may still hoist above the chosen order and that this screen cannot
-  tell which). No server, tool or wire change: `--ids` is already run in the
-  order given by both `resolveIds` and `buildGatedQueue`. And a run strip
-  above the columns — `RunStrip`/`RunDrawer` — showing every project's
-  orchestrator runs; a crashed run — `running`, heartbeat stale — renders
-  as crashed with the watchdog's verdict and, when the watchdog is
-  exhausted or off, a Resume control, a `paused` run renders a third strip
-  with its own Resume (no watchdog clause — see Invariants), and a fresh run
-  that has been asked to pause gains a `pausing · finishes <id>` chip; the
-  drawer's head hosts `components/RunControls.tsx`, the one
-  Pause / Cancel / Resume component both this surface and the Runs view's
-  detail pane use — top-level, like `lib/view-keys.ts`, because the two
-  hosts are separate lazy chunks), Runs (`RunsView` — aggregate stat tiles including a
-  wide "machine time by stage" tile, a Today / This week / This month / All
-  range control (calendar-aligned, local-time windows on a run's
-  `startedAt`, `lib/run-range.ts`) that scopes the tiles, the list and the
-  wide tile together, a project filter, a day-grouped run list with fresh
-  live runs pinned above history (a live row whose run has been asked to
-  pause carries a `pausing` badge, and the detail pane's head hosts the same
-  `RunControls` the board's drawer does), a `starting` placeholder group
-  above that pinned region (task-21 — `StartingRow`, project + `starting` +
-  `elapsedSince`, a `<div>` and not a row button, read straight off the
-  payload with no client-side collision filter for the reason the Board has
-  none; it is outside `orderedRows`, the selection, both aggregates and the
-  project select's options, the project filter applies to it and the range
-  control deliberately does not — `inRange` keys on `startedAt` and a
-  placeholder has only `requestedAt` — and it suppresses both empty states,
-  which is what makes a project's first run visible before `run.json`
-  exists), and a persistent detail pane carrying
-  that same per-run "machine time by stage" rollup plus a full-width
-  seven-node `StageTrack` per item with durations printed under each node.
-  Cost rides both surfaces (task-27): the run total joins the row's foot line
-  beside its wall time, the pane's head adds cost · turns · sessions, and each
-  item gets its own line under its track — all of it from
-  `runUsageTotals`/`itemUsageTotals`, and all of it absent rather than zeroed
-  for a run that predates the recording (see Invariants).
-  The whole section is bounded to one viewport on the wide layout
-  (`.runs-board`, a definite `100vh / var(--font-scale)` height so the bar,
-  the tiles and the two controls stay put) with the list and the pane each
-  scrolling their own overflow inside it, sticky day headings, and history
-  windowed to `RUNS_PAGE_SIZE` rows behind a counted `load more` at the foot
-  of the list — a render decision over a corpus the client already holds
-  whole, exactly as `staleDays` is: the endpoint and the hook are untouched.
-  The window is sliced between `splitPinned` and `groupByDay` and nowhere
-  else, so the pinned live region is never paged and a boundary falling
-  mid-day extends one group rather than opening a second; selection, the
-  tiles and the wide tile all read the unwindowed lists, so a window moves no
-  number and a range/project change resets it without blanking a pane whose
-  run is still in range. Below 700px none of the bounding applies. Fed by
-  `lib/run-range.ts` and `lib/run-stats.ts`, both pure statistics
-  libs, and `hooks/useOrchestratorArchive.ts`, which fetches on mount and
-  window focus only — no polling interval, since history moves at run
-  boundaries, not on a live heartbeat. The whole section sits behind a
-  `Runs | Watchdog` mode switch (`lib/runs-mode.ts`, persisted under
-  `backlog-manager.runs-mode`, unknown value → Runs; it renders
-  unconditionally, last in the bar — after the range control, the project
-  select and a hairline divider, so its right edge stays put when those two
-  unmount in watchdog mode — because the sweeper has a phase to report
-  whether or not any run has ever finished, while range and project filter
-  render in runs mode alone). Watchdog mode replaces the whole body with
-  `WatchdogMonitor` — three tiles (the sweeper's phase with `stateLine` and a
-  depleting sweep meter, the watched count, the read-only policy), one card
-  per `running` run in the live payload with a heartbeat freshness meter
-  against `RUN_STALE_MS` (`freshnessFraction`, `lib/run-time.ts`) and, on a
-  crashed card, attempt pips, the strip's own `watchdogClause` verbatim and
-  the grace remaining (`sweepFraction`/`graceRemainingMs`,
-  `lib/run-watchdog.ts`, beside the
-  `WATCHDOG_KIND_GLYPH`/`WATCHDOG_KIND_TONE` records the activity badges
-  read) — cards from the runs payload, `watching` only annotates, because two
-  projects can share a `runId`; the skew shows in both directions, `· not yet
-  watched` and a placeholder row — and the activity feed as a kind-badged
-  table that takes the section's remaining viewport height. It owns the one live
-  `useWatchdog()` and takes `RunsView`'s own live runs as a prop, so
-  switching modes adds no request; a row click switches back to Runs on that
-  run's detail), archive (`ArchiveView.tsx`: four columns —
-  refactors/ideas/bugs/out-of-scope — grouped under sticky month subheaders
-  keyed on `updated ?? created` (`lib/item-month.ts`), project filter and
-  search only, no status or sort control; the same cards, drawer and launch
-  sheet the board uses, no run strip), and Settings, whose `Orchestrator ·
-  this device` group is the two run-scoped defaults the Orchestrate sheet
-  seeds from (`Default merge mode`, which moved out of the Claude Agents group
-  in task-19, and `Default question mode`), and whose Orchestrator
-  watchdog group (`WatchdogGroup.tsx`) is the four server-side knobs and a
-  `Live view` pointer — nothing else. It calls
-  `hooks/useWatchdog.ts`'s `useWatchdog({ live: false })`, so it installs no
-  interval and shows nothing that moves on a clock; the live half is
-  Runs › Watchdog. Board and Archive share one
-  persisted project filter, declared in `lib/view-keys.ts` rather than exported
-  from either — they are separate lazy chunks, and an import between them would
-  undo the split. Fed by `lib/agents.ts` (same-origin
-  fetches), `hooks/useAgents.ts` (status poll on mount and window focus, plus
-  the one re-ask a click against a project-visibility block provokes — see
-  Invariants),
-  and `hooks/useOrchestratorRuns.ts` (same cadence, plus a 5s poll while any
-  run is fresh or still `running`, or any `starting` entry is present — a
-  crashed run and an unstarted one both keep the strip polling — plus
-  `noteResume`/`resuming`, which keep it polling a `paused` run for
-  `RESUME_POLL_GRACE_MS` after a Resume click, since a paused run is neither
-  fresh nor running and nothing else would ask again).
-  `stateLine` lives in `lib/run-watchdog.ts` beside `isCrashed`/`watchdogClause`
-  — the three sentences the client can print about the watchdog, in one
-  module, read by both `RunStrip` and `WatchdogMonitor`; `lastReportedEntry`
-  ("what is this run actually working on") lives in `lib/run-time.ts`, read
-  by those same two.
+One line per seam. The mechanism lives in the subsystem docs linked below; the
+reasoning behind the rules in the next section lives in
+[docs/subsystems/invariants.md](docs/subsystems/invariants.md). The doc map is
+[docs/overview.md](docs/overview.md).
+
+- `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items,
+  projects, item bodies, `uncommitted`), `agents/` (the one outbound-calling
+  module, plus the run watchdog), `orchestrator/` (a read-only view of the
+  run-state directory, plus the in-memory watchdog and starting-run records and
+  the two files the server does write), `registry/`, `static.ts` (serves
+  `client/dist` only when built), `security.ts`.
+  → [docs/subsystems/api.md](docs/subsystems/api.md)
+- `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs,
+  Archive, Settings), a run strip above the board's columns, and the
+  three-step Orchestrate sheet. Every derivation has one home in `lib/`.
+  → [docs/subsystems/board.md](docs/subsystems/board.md)
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
-  `dispatchGate` — see Invariants), `theme.css` (five theme palettes).
+  `dispatchGate` and the run/watchdog predicates both sides must agree on),
+  `theme.css` (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`,
   `skills/backlog-execute/`, `skills/backlog-orchestrate/` — the skills this
-  repo publishes. `skills/backlog/tools/backlog.mjs` is the CLI every skill
-  calls and the registry's only writer;
-  `skills/backlog-orchestrate/tools/orchestrate.mjs` is
-  `backlog-orchestrate`'s own CLI and the run file's only writer (see
-  Invariants). `skills/backlog-orchestrate/references/` holds the two parts
-  its SKILL.md deliberately does **not** carry inline, because a run re-reads
-  its whole body on every one of its several hundred turns: `recovery.md` (all
-  of `--resume`/`--abort`, read in full before either) and `rationale.md` (the
-  measurements behind the rules). **Start orchestrator runs from the board,
-  not by typing the trigger into a terminal** — the board spawns `claude -p`,
-  and headless sessions were measured flooring ~50k against an interactive
-  session's ~68k.
+  repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only
+  writer; `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's
+  only writer. **Start orchestrator runs from the board, not by typing the
+  trigger into a terminal.**
+  → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this
-  root-level directory by Claude Code's own convention (no
-  `.claude-plugin/plugin.json` declaration needed). Currently one:
-  `backlog-reviewer.md`, the read-only reviewer `backlog-orchestrate`
-  dispatches before every merge. Published only because `PUBLISHED_PATHS`
-  (`scripts/sync-plugin.mjs`) now names it alongside `skills/` — see
-  Invariants.
+  root-level directory by Claude Code's own convention. Currently one:
+  `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before
+  every merge.
 - `backlog/` — this repo's own backlog, self-registered like any project.
-- `scripts/sync-plugin.mjs` — reinstalls the plugin from the pushed HEAD.
-- `docs/superpowers/` — design spec and implementation plan.
+- `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD,
+  → [docs/workflows/publishing.md](docs/workflows/publishing.md)) and
+  `test-all.mjs` (`pnpm test`,
+  → [docs/workflows/development.md](docs/workflows/development.md)).
+- `docs/` — the reference docs; `docs/superpowers/` holds the design spec and
+  implementation plans this repo was built from.
 
 ## Invariants
 

@@ -33,6 +33,12 @@ render live runs, run history, and the watchdog that resumes a crashed run.
   own server-side settings; every item on screen is rendered from what is
   already on disk.
 
+**Docs.** [`docs/overview.md`](docs/overview.md) is the map and the one place that
+lists them all: the architecture in brief, the rationale behind the rules
+([`docs/subsystems/invariants.md`](docs/subsystems/invariants.md)), and the two
+procedures — [running the app](docs/workflows/development.md) and
+[publishing a skill edit](docs/workflows/publishing.md).
+
 ## The store format
 
 Every registered project's backlog lives at `<project>/backlog/`, one
@@ -214,131 +220,28 @@ skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/
                                                               orchestrator/runs/
 ```
 
-- `server/src/health/` — `GET /api/health`, a plain liveness check.
-- `server/src/items/` — `GET /api/items` (the whole index, every registered
-  project scanned fresh on each request), `GET /api/projects` (one row per
-  registered project, with open-item counts and a `missing` flag for a
-  project whose `backlog/` disappeared), `GET /api/items/body?path=` (one
-  item's Markdown body, resolved through an allowlist built from the
-  registry — a path outside every registered project's `backlog/` 404s), and
-  `GET /api/items/uncommitted?project=` (which of one project's item files
-  differ from `main`, so the Orchestrate sheet can flag the rows whose bytes
-  on disk are not the bytes a run will read — `{ paths, known }`,
-  `known: false` for every git failure alike, 404 for an unregistered
-  project, and nothing cached).
-- `server/src/registry/` — read-only view of the registry file, re-read on
-  every request so a capture made mid-session shows up on the next fetch.
-- `server/src/agents/` — the one module that calls anything outbound, and
-  every POST in it is guarded by content-type and origin: `GET
-  /api/agents/status` (whether dispatch is on and whether
-  `../claude-agents-dashboard` answered), `POST /api/agents/plan` (this item's
-  next step, derived from the file, plus a composed default prompt), `POST
-  /api/agents/dispatch` (spawns the session in that dashboard), `POST
-  /api/agents/orchestrate` (spawns a headless `/backlog-orchestrate` run for
-  one project — the prompt is composed server-side, so a caller can influence
-  which items and which modes and nothing else), `POST /api/agents/resume`
-  (re-spawns a run that crashed or was paused), `POST /api/agents/pause`
-  (writes the pause request a live run reads back at its dispatch gates), `GET
-  /api/agents/watchdog` and `POST /api/agents/watchdog/config` (the run
-  watchdog's live state, read out of this process's own memory and the settings
-  file it owns, plus the four server-side knobs behind it — this server's only
-  write outside a run's pause file), and `GET /api/agents/merge-check` (a
-  local, read-only look at whether a project's main tree is in a state that can
-  receive a merge).
+Four seams, one doc each:
 
-  `BM_AGENTS` off turns away `dispatch`, `orchestrate` and `resume` — the three
-  that spawn something. `status` exists to report that gate, so it answers
-  either way, and `pause`, `watchdog`, `watchdog/config` and `merge-check`
-  never call the dashboard at all: two read this process's own state, one
-  writes its own settings file, one looks at local git. `pause` being
-  independent of the switch is deliberate rather than incidental — a pause is a
-  fact on this machine's own disk about a run that is already going, so gating
-  it would mean a run started while dispatch was on could never be stopped
-  after somebody turned it off.
-- `server/src/orchestrator/` — a read-only view of the orchestrator's
-  run-state directory: `GET /api/orchestrator/runs` (every project's current
-  `run.json`, re-read fresh on every request, which is what lets the board
-  watch a run's heartbeat live — plus the runs this server has itself just
-  asked for and whose run file does not exist yet), `GET
-  /api/orchestrator/archive` (every run a project has ever produced, current
-  and archived alike) and `GET /api/orchestrator/archive/run` (one run file
-  verbatim, gated by an id pattern and an allowlist built the same way item
-  bodies are). `orchestrate.mjs` is that directory's only writer; this module
-  never writes it and never caches it.
-- `client/src/` — a side rail (Board / Runs / Archive / Settings, a plain
-  section switch),
-  the board (toolbar with search plus project/status/sort selects, four fixed
-  columns, a click-to-open drawer rendering the item's Markdown body, a
-  dispatch button — on the card and again in the drawer — that opens a
-  launch sheet onto `../claude-agents-dashboard`, an Orchestrate control that
-  opens a three-step sheet for starting a run over the filtered project's
-  queue — pick the items, hand-order them, then choose permission mode, model,
-  effort, merge mode and question mode — and, above the columns, a strip
-  carrying every project's live runs, a crashed one included, with
-  Pause / Cancel / Resume in its drawer), Runs (aggregate stat tiles including
-  machine time by stage, a Today / week / month / all range control, a project
-  filter, a day-grouped run history with live runs pinned above it, and a
-  detail pane with a seven-node stage track and per-stage timings for every
-  item in the run — plus a Watchdog mode that replaces the whole body with the
-  sweeper's own live state: its phase, the runs it is watching, each one's
-  heartbeat freshness, and an activity feed), Archive, and Settings (five
-  themes, density, text scale, landing section, the staleness window and the
-  two orchestrator run defaults — all per-device, in `localStorage`, never sent
-  to the server — plus a Claude Agents group reporting that dashboard's status,
-  and an Orchestrator watchdog group, the one place Settings does write to the
-  server: four knobs that live in `settings/watchdog.json` beside the registry
-  rather than in this browser).
+- [**The API**](docs/subsystems/api.md) — Nest, every route under `/api`. Reads the
+  registry, each project's store and the orchestrator's run state; the only thing here
+  that can spawn a session, and only when `BM_AGENTS` says so.
+- [**The board**](docs/subsystems/board.md) — the React SPA: four lazy sections behind a
+  side rail, with most of what you see derived in the browser from whole corpora.
+- [**The skills**](docs/subsystems/skills.md) — the five published skills, their two
+  single-writer CLIs, and the reviewer agent the orchestrator dispatches before a merge.
+- [**Invariant rationale**](docs/subsystems/invariants.md) — the rules all three are held
+  to, and the failure each one encodes.
 
-  The Board shows what is live: an open refactor, idea or bug nobody has
-  touched inside the staleness window (30 days by default, `Settings → Board →
-  Archive after`) leaves it for Archive on its own. "Touched" is the `updated:`
-  stamp every `start`/`stop` writes, falling back to the last commit that
-  touched the item file, and to `created` only when git can answer neither —
-  that middle rung is there because a groom session which edits an item through
-  the editor rather than through the CLI leaves the frontmatter silent.
-  **So the first load after upgrading moves genuinely old, never-touched items
-  off the Board.** Nothing is lost: grooming one refreshes the stamp and it is
-  back at the next load. Two things outrank the arithmetic outright — an item a
-  skill session is working right now, and an item a live orchestrator run has
-  claimed — because neither is neglected, whatever its own stamps say: a run
-  writes `started:` inside its own worktree, so the copy the board renders
-  stays silent for the whole run. Tasks are the exception and never
-  leave — a task rotting for six weeks is a fact to look at, so it keeps its
-  column and gains a `stale` marker instead.
+[`docs/overview.md`](docs/overview.md) is the map, and the one place that lists every doc.
 
-  Archive is where those land, in four columns of its own — refactoring, ideas,
-  bugs, out of scope — grouped under sticky month subheaders, newest month
-  first. It carries a project filter and a search box and nothing else: its
-  contents are defined by staleness and rejection, not by status, so a status
-  filter there would either do nothing or contradict the surface. Nothing in it
-  is finished, and both halves come back by their own route — a stale item by
-  dispatching a **groom**, which refreshes `updated:` and puts it back on the
-  Board at the next load; a rejected one by dispatching a **capture**, which
-  files a *new* item citing `from: <id>` and leaves the original rejected on
-  the record. (That id keeps whatever prefix it always had — a rejection moves
-  a file, it never renames one, so most rejected items are still `bug-N` or
-  `task-N`.) As everywhere else, the board writes no item file; the spawned
-  session does.
-- `shared/` — `types.ts` (registry, API and run shapes, defined once and
-  imported by both sides), `agent.ts` (the derivations both sides have to agree
-  on: `deriveAction` and `dispatchGate` — what a dispatch click does and
-  whether it may happen, imported by the board to label a button and by the
-  server to validate the request, so a button can never promise what the API
-  refuses — alongside the run-claim and watchdog predicates the board and the
-  sweeper must not each re-implement) and `theme.css` (the five theme palettes
-  as CSS custom properties).
-- `skills/` — the five published skills; this is the plugin's skill root.
-  `skills/backlog/tools/backlog.mjs` is the CLI every skill calls and the
-  registry's only writer; `skills/backlog-orchestrate/tools/orchestrate.mjs` is
-  the orchestrator's own CLI and the run file's only writer.
-- `agents/` — the plugin's own agents, one file each, discovered from this
-  root-level directory by Claude Code's own convention. Currently one:
-  `backlog-reviewer.md`, the read-only reviewer `/backlog-orchestrate`
-  dispatches before every merge.
-- `backlog/` — this repo's own file-based backlog, self-registered like any
-  other project (see `backlog/README.md`).
-- `docs/superpowers/` — the design spec and implementation plan this repo was
-  built from.
+One behaviour worth knowing before it surprises you: an open refactor, idea or bug nobody
+has touched inside the staleness window (30 days by default, `Settings → Board → Archive
+after`) leaves the Board for Archive on its own — so the first load after upgrading moves
+genuinely old, never-touched items across. Nothing is lost: grooming one puts it back at
+the next load, and a task never leaves at all. How "touched" is decided, and the two
+things that outrank it, are in
+[the board doc](docs/subsystems/board.md#what-leaves-the-board).
+
 
 ## Development
 
@@ -353,17 +256,21 @@ pnpm run build        # nest build + vite build
 Tests are flat in `test/`. Component suites opt into jsdom with a
 `@jest-environment jsdom` docblock; everything else runs in node.
 
+Ports, binds, what the container mounts and the failure modes each of those has
+are in [`docs/workflows/development.md`](docs/workflows/development.md).
+
 ## Repo layout
 
 | Path | Contents |
 |---|---|
-| `skills/` | The five published skills — this is the plugin's skill root |
-| `agents/` | The plugin's own agents; today just the orchestrator's reviewer |
-| `server/` | Nest API: items, projects, item bodies, the registry reader, the agents module and the orchestrator's run reader |
-| `client/` | React SPA: side rail, board, run strip, runs, archive, settings |
-| `shared/` | Types, the dispatch derivation (`agent.ts`) and theme tokens shared by both |
+| `skills/` | The five published skills — the plugin's skill root ([doc](docs/subsystems/skills.md)) |
+| `agents/` | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md)) |
+| `server/` | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader ([doc](docs/subsystems/api.md)) |
+| `client/` | React SPA — side rail, board, run strip, runs, archive, settings ([doc](docs/subsystems/board.md)) |
+| `shared/` | Types, the derivations both sides must agree on (`agent.ts`), theme tokens |
 | `backlog/` | This repo's own file-based backlog |
-| `docs/superpowers/` | Design spec and implementation plan |
+| `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)) and `test-all.mjs` ([doc](docs/workflows/development.md)) |
+| `docs/` | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans |
 
 ## Screenshot
 
