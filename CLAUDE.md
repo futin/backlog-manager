@@ -213,7 +213,7 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 
 ## Invariants
 
-Full rationale for the longer ones: [docs/invariants.md](docs/invariants.md).
+Full rationale for the longer ones: [docs/subsystems/invariants.md](docs/subsystems/invariants.md).
 Read it before changing any of these — most encode a failure that already
 happened.
 
@@ -310,7 +310,7 @@ happened.
   EISDIR warning per archived run per request. `archivedRun()` needs no
   filter: it probes the exact path `runs/<runId>.json`, which a sibling
   directory cannot answer to. Long form:
-  [docs/invariants.md](docs/invariants.md).
+  [docs/subsystems/invariants.md](docs/subsystems/invariants.md).
 - **A board-started run is visible before its run file exists, from server
   memory that is never written to disk.** `GET /api/orchestrator/runs` can
   only see `run.json`, and `orchestrate.mjs init` writes it in SKILL.md §2 —
@@ -527,7 +527,7 @@ happened.
   strength of a preview that says outright it is not authoritative. The
   person gets a chip, the run's own words and a `deselect uncommitted (N)`
   button instead. Long form:
-  [docs/invariants.md](docs/invariants.md).
+  [docs/subsystems/invariants.md](docs/subsystems/invariants.md).
 
 - **`refactors/` is a peer section, not a facet on ideas**: ideas are new,
   refactors are existing things that should be improved. Prefix `ref` (short
@@ -966,7 +966,7 @@ happened.
   `resumeGate`; Resume for a **crashed** run stays on the strip alone, behind
   `watchdogStoodDown`, because only that case has automation to race.
   `noteResume` keeps the poll alive for `RESUME_POLL_GRACE_MS` after a click.
-  Long form: [docs/invariants.md](docs/invariants.md).
+  Long form: [docs/subsystems/invariants.md](docs/subsystems/invariants.md).
 - **A resume is serialized at three layers, and only the third one can
   refuse a resume this app never asked for** (bug-19). `--resume` is not a
   command: it is a prose flow in `references/recovery.md` carried out with

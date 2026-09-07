@@ -623,7 +623,7 @@ export function RunDetail(props: {
   view; `orchestrator/` module route list; invariant bullet — the
   run-state reader now covers `runs/` and the archive endpoints, one
   writer/one reader unchanged)
-- Modify: `docs/invariants.md` (same wording extension where the run-file
+- Modify: `docs/subsystems/invariants.md` (same wording extension where the run-file
   invariant is elaborated)
 
 **Interfaces:** none — prose only, argued from the spec.

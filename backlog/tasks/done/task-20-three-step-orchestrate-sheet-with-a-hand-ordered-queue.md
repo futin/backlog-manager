@@ -150,7 +150,7 @@ Both plan stages landed test-first, in order:
   that deliberately does not claim to know which item hoists.
 
 Docs kept true rather than left to drift: CLAUDE.md's Layout entry for the
-sheet and `docs/invariants.md`'s "`--ids` is hoisted too" bullet both asserted
+sheet and `docs/subsystems/invariants.md`'s "`--ids` is hoisted too" bullet both asserted
 things this task changes (the `ids` condition; "nobody chose the order it
 arrives in"). Both were amended — the hoist rule itself is unchanged, its
 justification just moves onto what the hoist is *for*.

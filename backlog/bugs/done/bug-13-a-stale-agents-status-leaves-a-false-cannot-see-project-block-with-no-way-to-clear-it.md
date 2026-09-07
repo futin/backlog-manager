@@ -138,7 +138,7 @@ What changed:
   direction only, and that a re-ask inside the same minute can still be
   answered from that cache. The bound is deliberate and unchanged: the fix
   removes the *unrecoverable* state, not the cache.
-- `CLAUDE.md` and `docs/invariants.md` — the dispatch-block invariant now says
+- `CLAUDE.md` and `docs/subsystems/invariants.md` — the dispatch-block invariant now says
   which one of the three lets a click through, and why the other two must not.
 
 Tests, all written before the code and watched fail:

@@ -671,7 +671,7 @@ const CLAIM_USAGE = 'usage: orchestrate.mjs claim'
 // taken it over", which was false — and `init` then refused the project with
 // exit `4` forever, since it refuses any `running` run file fresh or stale.
 // That is the lease becoming the thing that strands a run, which
-// docs/invariants.md names as the one outcome it must never produce.
+// docs/subsystems/invariants.md names as the one outcome it must never produce.
 //
 // It lives in the TOOL rather than in an extra `claim` step in
 // references/recovery.md's `--abort` section, for the reason SKILL.md's own

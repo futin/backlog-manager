@@ -276,10 +276,10 @@ that state the same rule were not. Both now match the code:
   disables it". Now "the per-item ones disable it", naming both (project
   visibility via `dispatchGate`, the run claim via `runClaimBlock`) and the
   order `DispatchButton` reads them in.
-- `docs/invariants.md:408` — "This is the one block that leaves a control on
+- `docs/subsystems/invariants.md:408` — "This is the one block that leaves a control on
   screen" → "one of the two blocks that leave a control on screen", pointing at
   the other.
-- `docs/invariants.md` heading — "…; per-item disables it" → "…; per-item ones
+- `docs/subsystems/invariants.md` heading — "…; per-item disables it" → "…; per-item ones
   disable it", and its closing line ("The project-visibility block is the
   opposite case and keeps its button") is replaced by a two-item list of the
   per-item blocks: what `RUN_CLAIMED_STAGES` is and why `pending`/`preflight`

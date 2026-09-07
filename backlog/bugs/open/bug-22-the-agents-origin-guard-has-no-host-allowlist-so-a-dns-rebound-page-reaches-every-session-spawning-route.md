@@ -50,7 +50,7 @@ ceiling: a Claude Code session with file-write permission in another repo on thi
 - `server/src/agents/agents.controller.ts:82` — forwards `body.prompt` verbatim into
   `AgentsService.dispatch` → `POST /api/spawn`, `permissionMode` clamped only to the
   dashboard ceiling
-- `docs/invariants.md:1185-1206` and the guard's own header comment — the documented
+- `docs/subsystems/invariants.md:1185-1206` and the guard's own header comment — the documented
   threat model, which names hidden cross-origin form POSTs and `Origin: null` only
 
 ## Cause
@@ -71,5 +71,5 @@ plus whatever tailnet name is deliberately served, presumably an env knob alongs
 `BM_BIND`), rejecting anything else before the origin comparison runs. Whether that lives
 in `SameOriginPostGuard` (agents routes only, matching today's blast radius) or as global
 middleware (every route, including the item-body allowlist and the orchestrator reader) is
-the open design call, and it decides whether `docs/invariants.md`'s "loopback is the access
+the open design call, and it decides whether `docs/subsystems/invariants.md`'s "loopback is the access
 control" invariant needs restating.

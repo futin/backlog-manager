@@ -124,7 +124,7 @@ ladder either: per the docs it auto-approves file edits plus a fixed list (`mkdi
 `touch`, `rm`, `rmdir`, `mv`, `cp`, `sed`), and arbitrary `pnpm test` or `git` still
 prompt. `auto` is the lowest rung that clears the real workload.
 
-**The repo already decided this, one seam over.** `docs/invariants.md:445-456` defaults
+**The repo already decided this, one seam over.** `docs/subsystems/invariants.md:445-456` defaults
 *dispatch's* unattended sessions to `auto` and keeps `bypassPermissions` a per-launch
 choice, because "asking for the most a host allows by default is how a convenience
 becomes an incident." Orchestrate's hard-coded flag is that sentence's counterexample,
@@ -176,7 +176,7 @@ the gap that blocked it and turned the third "worth settling" bullet into a requ
    `auto` denied one, an upload of a local file to an external host — and the caveat that
    the boundary is a classifier's judgment rather than a fixed list.
 
-3. **Fix the same premise at `docs/invariants.md:451`**, which says a lower rung means "a
+3. **Fix the same premise at `docs/subsystems/invariants.md:451`**, which says a lower rung means "a
    session that stops on its first unapprovable tool call and silently does nothing."
    Half right is worse than wrong here: it does not stop, and it does not do nothing — it
    continues, and improvises around the refusal. That is the failure mode worth naming in
@@ -250,7 +250,7 @@ What changed:
    reads and improvises around, run still exits `0` and reports success, the
    only trace is `permission_denials`) take its place, with the eleven-of-twelve
    number and the "classifier judgment, not a fixed list" caveat.
-3. `docs/invariants.md` — the "stops on its first unapprovable tool call and
+3. `docs/subsystems/invariants.md` — the "stops on its first unapprovable tool call and
    silently does nothing" claim is replaced with what actually happens, framed
    as why half right was worse than wrong here, plus a paragraph tying
    orchestrate's dispatch to the same ladder default.

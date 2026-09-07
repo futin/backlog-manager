@@ -264,4 +264,4 @@ layer was genuinely untouched.
 - `CLAUDE.md`'s `client/src/` layout line: `OrchestrateSheet` now selects a
   subset, not just previews.
 - `ORCHESTRATE_PROMPT`'s own doc comment (§4.3).
-- `docs/invariants.md` if it carries the long-form version of the prompt rule.
+- `docs/subsystems/invariants.md` if it carries the long-form version of the prompt rule.

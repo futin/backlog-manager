@@ -1,6 +1,6 @@
 # Invariant rationale
 
-The rules live in [CLAUDE.md](../CLAUDE.md); this file keeps the full
+The rules live in [CLAUDE.md](../../CLAUDE.md); this file keeps the full
 reasoning behind the ones whose "why" runs longer than the rule. Most of
 these encode a failure that already happened or an attack that was closed
 deliberately — read the relevant section before changing one.
@@ -2074,5 +2074,6 @@ fact about membership, and step 1 is where the control that acts on it lives.
     - scripts
     - test
     - docker-compose.yml
+  kind: subsystem
   verified: 7fbe46a55b8865df29375e8f46ab32022a7b90ab
 -->

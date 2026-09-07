@@ -56,7 +56,7 @@ blocks are shapes, not text to transcribe.
 9. Skill prose — `SKILL.md` exit `6` row, the §3/§4 reactions, a §10
    "Pausing" step; `recovery.md` runs `unpause` on a paused run and names
    the `preflight`-stage leftover as "re-enter at dispatch".
-10. Docs — `CLAUDE.md` layout + invariant, `docs/invariants.md` section,
+10. Docs — `CLAUDE.md` layout + invariant, `docs/subsystems/invariants.md` section,
     the amended `settings/` sentence in `watchdog-config.util.ts`; final
     `pnpm test`, `pnpm run test:skills`, `pnpm run typecheck`, `pnpm run
     build`.

@@ -58,7 +58,7 @@ client/src/components/board/ItemCard.tsx          (modify — run-stage badge)
 client/src/components/board/LaunchSheet.tsx       (modify or sibling variant — orchestrate sheet)
 test/orchestrator-*.test.ts(x)                    (new — server + client suites)
 test/fixtures/orchestrator-run.json               (new — THE contract fixture, shared by jest and node suites)
-CLAUDE.md, docs/invariants.md                     (modify — new invariants, Task 14)
+CLAUDE.md, docs/subsystems/invariants.md                     (modify — new invariants, Task 14)
 ```
 
 ---
@@ -384,7 +384,7 @@ The SKILL body must cover, in this order, each with the actual commands inline t
 ### Task 14: E2E on this repo, invariants, docs
 
 **Files:**
-- Modify: `CLAUDE.md` (Invariants), `docs/invariants.md` (rationale entries), plugin README if the skills table lives there
+- Modify: `CLAUDE.md` (Invariants), `docs/subsystems/invariants.md` (rationale entries), plugin README if the skills table lives there
 - No product code except what E2E shakes out.
 
 **Interfaces:** consumes everything; produces the recorded proof.
@@ -396,7 +396,7 @@ The SKILL body must cover, in this order, each with the actual commands inline t
 - [ ] **Step 4: Kill/resume drill** — start a second scratch run, `kill` the child mid-execute, confirm the strip goes stale at 15m (or temporarily drop `RUN_STALE_MS` via a test build — do not ship the change), `--resume`, confirm `reconcile`'s suggestion path ran `backlog.mjs stop` (one billing, not two) and the item completed.
 - [ ] **Step 5: `--abort` drill** — no worktrees, no branches, no markers left; run marked aborted.
 - [ ] **Step 6: UI walkthrough** — `pnpm run dev` + `dev:web`, watch a scratch run live: strip, badges, drawer, needs-answers surfacing, toolbar lock (409 on double-start).
-- [ ] **Step 7: Write the invariants** (from the spec's "Invariants this adds": run-file single writer/reader; orchestrate as the only committing/merging skill, merge commits only; the per-project lock enforced twice; the server-side constant prompt) into `CLAUDE.md` + rationale into `docs/invariants.md`.
+- [ ] **Step 7: Write the invariants** (from the spec's "Invariants this adds": run-file single writer/reader; orchestrate as the only committing/merging skill, merge commits only; the per-project lock enforced twice; the server-side constant prompt) into `CLAUDE.md` + rationale into `docs/subsystems/invariants.md`.
 - [ ] **Step 8: Commit** docs; record E2E outputs in the commit body.
 
 ---

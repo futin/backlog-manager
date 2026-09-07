@@ -218,7 +218,7 @@ Name the exact key spelling in both places.
 ### 8. Invariants
 
 Add the rule to `CLAUDE.md`'s Invariants list (one entry, in that file's voice, ~5 lines)
-and the longer rationale to `docs/invariants.md`, following whatever structure that file
+and the longer rationale to `docs/subsystems/invariants.md`, following whatever structure that file
 already uses. The two load-bearing halves are the ones a future reader will otherwise
 undo: the marker is read **at `<base>`, not off the working copy**, and the hoist applies
 to **`--ids` as well**, because the board's ids are a selection rather than an ordering.
@@ -309,7 +309,7 @@ CLI stdout or a `run.json` the node suite reads directly.
    over.
 6. `skills/backlog-groom/SKILL.md` names the exact key in both the Promote and the
    Plan-the-fix verdicts.
-7. `CLAUDE.md` and `docs/invariants.md` carry the new invariant.
+7. `CLAUDE.md` and `docs/subsystems/invariants.md` carry the new invariant.
 8. Noted, not run: none of the skill edits change any real run until this repo's HEAD is
    pushed and `pnpm run plugin:sync` succeeds — `plugin:sync` refuses a dirty or unpushed
    tree, so it cannot be part of an orchestrated run's own verification.
@@ -335,7 +335,7 @@ or shared type moved.
 entry, still inert for the next run until push + `plugin:sync`).
 `references/recovery.md`'s `--resume` procedure re-derives that switch from the note
 before the first item is taken over. `backlog-groom`'s SKILL.md asks for the exact key in
-both the Promote and the Plan-the-fix verdicts. `CLAUDE.md` and `docs/invariants.md`
+both the Promote and the Plan-the-fix verdicts. `CLAUDE.md` and `docs/subsystems/invariants.md`
 carry the invariant.
 
 Twelve new cases in `skills/backlog-orchestrate/tools/orchestrate.test.mjs`. Red-green

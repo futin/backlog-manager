@@ -193,7 +193,7 @@ colours).
 
 - **CLAUDE.md Invariants**: a new entry for "the sheet's uncommitted flag is read from
   git per request and is never memoised", carrying Decisions 1, 2 and 4 in short form,
-  plus the long version in `docs/invariants.md`. Decision 1 is the one that has to be
+  plus the long version in `docs/subsystems/invariants.md`. Decision 1 is the one that has to be
   written down: the neighbouring memo is a visible, apparently-identical optimisation
   whose key is exactly wrong for this question.
 - **CLAUDE.md Layout**: `GET /api/items/uncommitted` on the `items/` line, and the sheet's
@@ -321,7 +321,7 @@ below depends on `main` being genuinely absent.
 - Nothing derived — `isStale`, `leavesBoard`, `lastTouched`, `deriveGroomed`,
   `runClaimBlock` — reads the new flag, and no Board card renders it.
 - `pnpm test`, `pnpm run typecheck` and `pnpm run build` all green.
-- CLAUDE.md (Invariants + Layout), `docs/invariants.md` and README describe the endpoint
+- CLAUDE.md (Invariants + Layout), `docs/subsystems/invariants.md` and README describe the endpoint
   and the no-memo rule.
 - The next cross-run sweep can attribute any remaining "not committed on main" verdict to
   a run started outside the board, not to a launch surface that failed to say so.
@@ -338,7 +338,7 @@ Files: `server/src/items/uncommitted.util.ts` (new), `items.service.ts`,
 `items.controller.ts`, `client/src/lib/agents.ts`,
 `client/src/components/board/OrchestrateSheet.tsx`, `client/src/styles.css`,
 `test/uncommitted.test.ts` (new), `test/orchestrate-uncommitted.test.tsx` (new),
-`test/orchestrator-start-ui.test.tsx` (stubs), CLAUDE.md, docs/invariants.md, README.md.
+`test/orchestrator-start-ui.test.tsx` (stubs), CLAUDE.md, docs/subsystems/invariants.md, README.md.
 
 All five Decisions implemented as written; no course changed. Three departures from the
 plan's letter, none from its intent:
@@ -467,7 +467,7 @@ Five sites carried the same over-claim, three more than the reviewer listed:
 - `CLAUDE.md:66` (Layout) and the Invariants entry, which now states outright that the
   predicate is broader than one verdict and that **any surface stating a consequence
   must split it**.
-- `docs/invariants.md` — the "exactly one situation" sentence, section 2's stale
+- `docs/subsystems/invariants.md` — the "exactly one situation" sentence, section 2's stale
   cross-reference to the old note wording, and a new section, *One question, two fates*,
   carrying both fates, why this is the predictable mistake (only the narrow shape has a
   quotable verdict string, and quoting the run is one of the feature's goals), and the
@@ -487,7 +487,7 @@ the chip, the `deselect uncommitted (N)` button, the endpoint and the docs beats
 precision now that the note directly above the rows defines the term in its first
 clause. A chip reading `differs from main` would be more accurate about one row while
 leaving the button and the endpoint speaking a different language from it. Recorded in
-the chip's own comment and in `docs/invariants.md` so the next reader sees a decision
+the chip's own comment and in `docs/subsystems/invariants.md` so the next reader sees a decision
 rather than an oversight.
 
 Tests: case 17's count assertion loosened to `2 items` (the plural form moved), the
@@ -521,7 +521,7 @@ $ tsc --noEmit
 ```
 
 Contract sweep: 5 sites updated (OrchestrateSheet.tsx note + two comments, CLAUDE.md
-Layout + Invariants, docs/invariants.md ×3 incl. a new section,
+Layout + Invariants, docs/subsystems/invariants.md ×3 incl. a new section,
 server/src/items/uncommitted.util.ts header, README.md) — every place that stated the
 flag's consequence as a single fate.
 Red proof: 1 test (case 17b) went red with the old wording restored; the plural case
@@ -539,7 +539,7 @@ not name. All six fixed.** Both halves of the finding are conceded outright:
   stated a consequence ("the rows the run will skip") and did not split it, one file
   away from a CLAUDE.md rule reading "any surface stating a consequence must split it".
   A rule whose first counter-example ships inside the commit that writes the rule is the
-  failure `docs/invariants.md` exists to prevent.
+  failure `docs/subsystems/invariants.md` exists to prevent.
 - **The round-1 `Contract sweep:` line was false.** It claimed "every place that stated
   the flag's consequence as a single fate" on the strength of five sites found by
   reading, and a reader trusting it would not have looked again. The lesson is the one
@@ -566,7 +566,7 @@ run`. Six sites on this feature's path, of which the review cited four:
 
 Every remaining grep hit is now either an explicit negation of the wrong wording
 ("deliberately not…", "never…", "Not 'the rows that run is going to skip'"), a
-deliberate quote of the old note as history (`docs/invariants.md`'s two-fates section,
+deliberate quote of the old note as history (`docs/subsystems/invariants.md`'s two-fates section,
 case 17b's own comment, and case 17b's negative assertion), or unrelated to this feature
 (the dashboard's "cannot see this project" family, `diff` cannot see an untracked file).
 

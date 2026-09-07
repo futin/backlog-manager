@@ -37,7 +37,7 @@ export class ItemsController {
    * that any surface stating a consequence split it. A docstring on the
    * transport is the wrong place to restate a two-branch rule that will drift
    * from the one copy of it, so this points at `uncommitted.util.ts`'s header
-   * and docs/invariants.md's "One question, two fates" instead. (Review
+   * and docs/subsystems/invariants.md's "One question, two fates" instead. (Review
    * round 2: this comment was the rule's own first counter-example, shipped
    * in the commit that wrote the rule.)
    *

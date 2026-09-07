@@ -183,7 +183,7 @@ exact path `runs/<runId>.json`, which a directory named `<runId>` cannot answer 
   bug-31 as the reason it is not an allowlist; the sidecars-then-run.json ordering and the
   interrupted-archive repair it buys; the exit-`4` lock as what makes moving a live child's
   pid file safe; that the move is best-effort and never fails an `init`; and the orphaned-
-  sidecar non-goal. Consider a longer-form entry in `docs/invariants.md` if the bullet runs
+  sidecar non-goal. Consider a longer-form entry in `docs/subsystems/invariants.md` if the bullet runs
   past the length of its neighbours.
 
 ## Test cases
@@ -295,7 +295,7 @@ name skipped never overwritten). `cmdInit` moves sidecars first and renames
 implementation of "which entries under `runs/` are run files", read by both
 `countPastRuns` and `archive()`; `archivedRun()` is unchanged and carries a
 comment saying why. Prose landed in SKILL.md §2, `references/recovery.md`,
-a new CLAUDE.md Invariants bullet and a long-form `docs/invariants.md`
+a new CLAUDE.md Invariants bullet and a long-form `docs/subsystems/invariants.md`
 section.
 
 Two things worth recording that the plan did not anticipate:
@@ -350,7 +350,7 @@ running · 1 past run
 Singular, off a `runs/` holding one run file and one sidecar directory. Before
 the fix it reads `2 past runs`.
 
-Contract sweep: 6 sites updated (`docs/invariants.md`,
+Contract sweep: 6 sites updated (`docs/subsystems/invariants.md`,
 `docs/superpowers/specs/2026-09-01-orchestration-archive-design.md`,
 `shared/types.ts`, `README.md`, `skills/backlog-orchestrate/tools/orchestrate.mjs`,
 `skills/backlog-orchestrate/tools/orchestrate.test.mjs`)

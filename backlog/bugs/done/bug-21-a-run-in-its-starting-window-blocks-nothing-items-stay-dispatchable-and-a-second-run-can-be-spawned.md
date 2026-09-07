@@ -516,7 +516,7 @@ instruction, and re-grepped afterwards to prove none survives:
   the strip world is right for both (Minor 2, which the review listed as
   defensible and not required — corrected anyway, since this pass exists to
   leave no site that could become the fourth).
-- `docs/invariants.md` — two sites: the `ids` 409 rationale, and the "One run
+- `docs/subsystems/invariants.md` — two sites: the `ids` 409 rationale, and the "One run
   per project" long form's "the only one `orchestrate()` throws that carries a
   `code`".
 - Five test suites — `orchestrator-start`, `orchestrator-start-ui`,

@@ -74,7 +74,7 @@ as "look here first", not as coordinates.
 | `skills/backlog-orchestrate/tools/orchestrate.test.mjs` | Cases for all of the above. |
 | `skills/backlog-orchestrate/SKILL.md` | §2 probe, §9 branch path, denial degrade, mode-aware finish summary. |
 | `skills/backlog-orchestrate/references/rationale.md` | The three-run measurement. |
-| `CLAUDE.md`, `docs/invariants.md` | The new invariants. |
+| `CLAUDE.md`, `docs/subsystems/invariants.md` | The new invariants. |
 
 ---
 
@@ -525,7 +525,7 @@ Prose, and the part with no test harness. It is last because everything it instr
 **Files:**
 - Modify: `skills/backlog-orchestrate/SKILL.md` (§2 "Start the run" ~180, §9 "Merge" ~892-1062, §10 finish summary ~1063)
 - Modify: `skills/backlog-orchestrate/references/rationale.md`
-- Modify: `CLAUDE.md`, `docs/invariants.md`
+- Modify: `CLAUDE.md`, `docs/subsystems/invariants.md`
 
 - [ ] **Step 1: §2 — pass the flag and run the probe**
 
@@ -567,7 +567,7 @@ Under branch mode, list the branches in merge order with the literal `git merge 
 
 Add the three-run measurement from the spec's opening table, with the exact denial text and the note that the dashboard's `.claude/settings.json` postdates the failure. This is the file that exists so a future session can argue with a rule from evidence rather than from memory.
 
-- [ ] **Step 6: `CLAUDE.md` and `docs/invariants.md`**
+- [ ] **Step 6: `CLAUDE.md` and `docs/subsystems/invariants.md`**
 
 New invariants, in the register of the existing ones:
 
@@ -585,7 +585,7 @@ Correct the existing `AgentAction`/stage prose anywhere it says `merged` is the 
 Then a real end-to-end run of one small item in branch mode, started **from the board** and not by typing the trigger into a terminal — a headless session was measured flooring ~50k against an interactive one's ~68k, and this run is the first exercise of the whole path.
 
 ```bash
-git add skills/backlog-orchestrate/SKILL.md skills/backlog-orchestrate/references/rationale.md CLAUDE.md docs/invariants.md
+git add skills/backlog-orchestrate/SKILL.md skills/backlog-orchestrate/references/rationale.md CLAUDE.md docs/subsystems/invariants.md
 git commit -m "docs(orchestrate): merge mode, the preflight probe and the denial degrade"
 ```
 

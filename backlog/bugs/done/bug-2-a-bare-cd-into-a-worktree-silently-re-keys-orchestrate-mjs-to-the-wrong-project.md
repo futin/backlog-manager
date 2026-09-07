@@ -181,7 +181,7 @@ so explicitly. They become wrong the moment the code lands.
   the run under the worktree's path instead of erroring — the run would appear to vanish,
   not crash loudly." After the fix it does crash loudly; the invariant survives as a
   contract, but its stated reason inverts.
-- `docs/invariants.md:78`, the long-form version of the same, plus the
+- `docs/subsystems/invariants.md:78`, the long-form version of the same, plus the
   `resolveProjectRoot` header comment in `orchestrate.mjs` (~40 lines, currently
   asserting "this walk would NOT error"). That comment is the single most wrong artefact
   after the change and should be rewritten, not patched.
@@ -252,6 +252,6 @@ Prose moved with the code, all three places the bug named: SKILL.md's "Where
 commands run" section (the "a loud failure would be safer" line is gone, the
 rule is widened from the two prescribed `cd` sites to *this session's cwd,
 whatever put it elsewhere*, and the exit-code table's `1` row names the new
-refusal), the `CLAUDE.md` invariant, and `docs/invariants.md`'s long-form
+refusal), the `CLAUDE.md` invariant, and `docs/subsystems/invariants.md`'s long-form
 version. The ~40-line `resolveProjectRoot` header comment asserting "this
 walk would NOT error" was rewritten rather than patched.

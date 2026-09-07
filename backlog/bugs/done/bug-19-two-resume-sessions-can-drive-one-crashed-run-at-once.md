@@ -439,7 +439,7 @@ rather than `heartbeat` (same position, same purpose), with "another session
 has taken this run over — stop immediately, write nothing, exit" stated in as
 many words for both `claim` and any later refusal; `SKILL.md`'s exit-code
 table gains `7` and its §"`--resume` and `--abort`" pointer follows; CLAUDE.md
-gains the invariant and `docs/invariants.md` the long form.
+gains the invariant and `docs/subsystems/invariants.md` the long form.
 
 ### Verification
 
@@ -532,7 +532,7 @@ label in it, which is a visual check for a human at a keyboard.
 ### Review round 1 — three findings, all fixed
 
 The reviewer found that the lease, added to close the bug, had itself become
-able to strand a run — the exact outcome `docs/invariants.md` says it must
+able to strand a run — the exact outcome `docs/subsystems/invariants.md` says it must
 never produce. All three are fixed with the rule in the tool rather than in
 prose, because `references/recovery.md` is read once by a session that then
 takes several hundred turns and a step it skips is a brick.

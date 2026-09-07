@@ -113,7 +113,7 @@ the merge.
 | `client/src/styles.css` | `.runs-status-paused`, `.run-strip-pausing`, `.run-strip-paused`, `.run-controls*` |
 | `skills/backlog-orchestrate/SKILL.md`, `references/recovery.md` | exit `6`, Pausing step, `unpause` on resume, preflight-leftover rule |
 | `test/helpers/env.ts` | defaults `BM_ORCH_CONTROL_HOME` to a temp dir for every suite |
-| `CLAUDE.md`, `docs/invariants.md`, `watchdog-config.util.ts` header | the new invariant, the amended sentence |
+| `CLAUDE.md`, `docs/subsystems/invariants.md`, `watchdog-config.util.ts` header | the new invariant, the amended sentence |
 
 ---
 
@@ -742,7 +742,7 @@ every mention lists `paused`.
 
 **Files:**
 - Modify: `server/src/orchestrator/watchdog-config.util.ts:14-16` (the sentence "a directory neither `backlog.mjs` nor `orchestrate.mjs` ever reads")
-- Modify: `docs/invariants.md` — new `## A pause request is a file the server writes and the tool reads` after the run-file section (insert before `:69`), and a sentence in "The settings-file exception" (`:1249-1266`)
+- Modify: `docs/subsystems/invariants.md` — new `## A pause request is a file the server writes and the tool reads` after the run-file section (insert before `:69`), and a sentence in "The settings-file exception" (`:1249-1266`)
 - Modify: `CLAUDE.md` — Layout (`agents/` list `:32-35` gains `pause`; `orchestrator/` list `:35-42` gains `pause-control.util.ts`, "the second file the server writes"; client bullets: `RunControls.tsx`, the strip's pausing chip and paused strip, `useOrchestratorRuns`'s `noteResume` at `:85`); Invariants: one new bullet after "One run per project, checked twice"
 
 - [ ] **Step 1: `watchdog-config.util.ts` header** — "… a directory neither
@@ -751,7 +751,7 @@ every mention lists `paused`.
   (`pause-control.util.ts`), which `orchestrate.mjs` reads at its two
   dispatch gates. Still the server's to write."
 
-- [ ] **Step 2: `docs/invariants.md`** — the new section carries, in this
+- [ ] **Step 2: `docs/subsystems/invariants.md`** — the new section carries, in this
   order and in this repo's register (the failure or reasoning behind each
   rule): where the file lives and why `settings/` (mount; a directory
   elsewhere would be unwritable in compose or need a second mount); the
@@ -779,7 +779,7 @@ every mention lists `paused`.
   `init` archives `paused` like `done`; Resume for `paused` on both
   surfaces, crashed on the strip alone; `noteResume` keeps the poll alive
   for `RESUME_POLL_GRACE_MS` after a click. Pointer to
-  `docs/invariants.md` for the long form.
+  `docs/subsystems/invariants.md` for the long form.
 
 - [ ] **Step 4: Final verification**
 

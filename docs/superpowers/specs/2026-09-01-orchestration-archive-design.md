@@ -68,7 +68,7 @@ extended in wording: `orchestrate.mjs` is the only writer of the whole
 run-state directory; `server/src/orchestrator/` is its only reader and
 now reads `runs/` as well as `run.json`, still fresh on every request,
 still never writing or caching. CLAUDE.md's invariant bullet and
-`docs/invariants.md` get that wording.
+`docs/subsystems/invariants.md` get that wording.
 
 ## Server
 
@@ -240,4 +240,4 @@ Flat in `test/`, jest, per house style. Cases, not literal code:
 - CLAUDE.md: layout bullet (side rail + new section, orchestrator
   module's two extra routes), invariant bullet wording (reader covers
   `runs/`).
-- `docs/invariants.md`: same wording extension.
+- `docs/subsystems/invariants.md`: same wording extension.

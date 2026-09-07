@@ -78,7 +78,7 @@ Four decisions were settled with the user before this plan was written:
 | `skills/backlog-groom/SKILL.md` | modify | Gains the start/stop lifecycle around every verdict. |
 | `skills/backlog/SKILL.md` | modify (~line 47–51) | The `»` marker's prose names groom as well as execute. |
 | `shared/types.ts` | modify (~line 32–46) | `BacklogItem.started`'s doc comment names both writers. |
-| `CLAUDE.md`, `docs/invariants.md` | modify | The `started:` invariant records the widened caller set and that `'started'` is a filter, never an `ItemStatus`. |
+| `CLAUDE.md`, `docs/subsystems/invariants.md` | modify | The `started:` invariant records the widened caller set and that `'started'` is a filter, never an `ItemStatus`. |
 
 Tasks 1–3 (board) and Tasks 4–5 (skills) are independent of each other; Task 6 depends on all
 of them. Task 2 and Task 3 both depend on Task 1.
@@ -417,7 +417,7 @@ git commit -m "feat(groom): hold an in-progress marker for the groom session"
 **Files:**
 - Modify: `shared/types.ts` (`BacklogItem.started` doc comment, ~lines 32–46)
 - Modify: `CLAUDE.md` (the `started:` invariant bullet)
-- Modify: `docs/invariants.md` (§ "`started:` is the one lifecycle key in frontmatter, and it
+- Modify: `docs/subsystems/invariants.md` (§ "`started:` is the one lifecycle key in frontmatter, and it
   is not a status")
 - Test: none; `pnpm test && pnpm run test:skills && pnpm run typecheck` is the gate.
 
@@ -427,7 +427,7 @@ git commit -m "feat(groom): hold an in-progress marker for the groom session"
    until the item is archived, groom holds it only for the length of a groom session. The
    `types.ts` comment currently says "when the item was picked up"; that is still true, but it
    should now say what *picked up* covers.
-2. Ideas can carry a stamp. The `types.ts` comment and `docs/invariants.md` should both say so,
+2. Ideas can carry a stamp. The `types.ts` comment and `docs/subsystems/invariants.md` should both say so,
    because "an idea has nothing to execute" was the stated reason it could not.
 3. `'started'` is a **filter value in the client**, never an `ItemStatus`. `shared/types.ts:22`
    already says "In progress is deliberately NOT a member here" — extend that sentence to also
@@ -441,7 +441,7 @@ the fact that "is this in progress" is answered in the client. Only the caller s
 - [ ] **Step 1: Update all three, in one pass**
 
 Keep each edit local — this is not a rewrite of the invariant, it is three facts moving.
-`CLAUDE.md`'s bullet is a summary that points at `docs/invariants.md` for the rationale; keep
+`CLAUDE.md`'s bullet is a summary that points at `docs/subsystems/invariants.md` for the rationale; keep
 that split (see commit `03497d9`, which created it deliberately).
 
 - [ ] **Step 2: Full verification**
@@ -452,7 +452,7 @@ Expected: all PASS. Report the actual output; do not claim green without it.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add shared/types.ts CLAUDE.md docs/invariants.md
+git add shared/types.ts CLAUDE.md docs/subsystems/invariants.md
 git commit -m "docs: record that grooming also holds the started marker"
 ```
 

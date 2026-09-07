@@ -77,7 +77,7 @@ says so on purpose. It takes `spawnMaxPermission` alone rather than the whole
 `dispatchGate`'s checks a second time client-side; it calls `fetchMergeCheck` on
 open and nothing else. `LaunchSheet` by contrast calls `fetchAgentPlan` on mount
 (`LaunchSheet.tsx:46`), which is exactly the server-side re-derivation
-docs/invariants.md leans on when it says a stale *enable* self-corrects. So the
+docs/subsystems/invariants.md leans on when it says a stale *enable* self-corrects. So the
 asymmetry that made bug-13 "unrecoverable" is one step sharper here: this sheet's
 only server re-check is at **Start**, where the same `projectDispatchGate` runs
 server-side and comes back as an *uncoded* 409 the sheet renders as an error and
@@ -174,7 +174,7 @@ move with the code:
 - `CLAUDE.md` (~line 467): "Exactly one of the three lets the click through"
   describes `DispatchButton`; extend the paragraph to say the toolbar Orchestrate
   control re-asks on the same block, by the same hook.
-- `docs/invariants.md` (~line 839): the "One of the three lets the click through
+- `docs/subsystems/invariants.md` (~line 839): the "One of the three lets the click through
   anyway" section. Add the toolbar, and correct the sentence claiming a stale
   *enable* is corrected by the sheet's `plan()` — true of `LaunchSheet`, false of
   `OrchestrateSheet`, which re-checks only at Start and only as an uncoded 409.
@@ -241,7 +241,7 @@ What landed, against the five numbered steps of the Fix:
    needed here.
 4. `client/src/styles.css` — `.board-orchestrate[aria-busy='true']` added after
    the `[aria-disabled='true']` rule, same specificity, so the busy look wins.
-5. `CLAUDE.md` and `docs/invariants.md` both extended; the invariants sentence
+5. `CLAUDE.md` and `docs/subsystems/invariants.md` both extended; the invariants sentence
    claiming a stale *enable* self-corrects is now scoped to `LaunchSheet`, since
    `OrchestrateSheet` re-checks only at Start and only as an uncoded 409.
 

@@ -14,7 +14,7 @@ plan turns out to be silent, wrong, or self-contradictory.** Twenty-four
 such decisions were taken here. Each was made without asking, because a
 plan that stops on every ambiguity costs a day and buys nothing.
 
-The spec and the plan say what was *intended*. `CLAUDE.md`, `docs/invariants.md`
+The spec and the plan say what was *intended*. `CLAUDE.md`, `docs/subsystems/invariants.md`
 and the code comments say what the system *is*. Neither says where those two
 diverged, or why. That is what this file is for. Six of these rulings already
 have their reasoning committed somewhere durable; the rest had their *effect*

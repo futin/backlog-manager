@@ -120,7 +120,7 @@ change do what the item said it would, correctly."
    hunches belong in the report's Minor section, not in a `fix` verdict.
 2. **The repo's own invariants.** Read `<worktree>/CLAUDE.md` and work
    through its **Invariants** section against the diff; follow it into
-   `docs/invariants.md` when an entry points there. These encode failures
+   `docs/subsystems/invariants.md` when an entry points there. These encode failures
    that already happened in this repo, which makes breaking one a Critical
    finding by default even when the code "works" — a single-writer rule, a
    derived-never-stored rule, or a "never do X" that this diff quietly does.

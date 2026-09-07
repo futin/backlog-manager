@@ -299,7 +299,7 @@ compact form, where a 5s cadence is already the right one.
   `.run-detail-seg`, `.run-detail-caption` and the six `.run-seg-*`
   tone classes (nothing else reads them).
 - Docs: CLAUDE.md layout bullet for Runs; a new invariant bullet in
-  CLAUDE.md and section in `docs/invariants.md` — **queue wait is not
+  CLAUDE.md and section in `docs/subsystems/invariants.md` — **queue wait is not
   work**: `itemDurationMs` is the one implementation of an item's
   duration, read by drawer, pane and tiles alike, and machine time
   excludes `pending`; the bug-7 161m/25m measurement is the reason.

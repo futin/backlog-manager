@@ -68,7 +68,7 @@ claude plugin install  backlog-manager@backlog-manager-marketplace -y
   check at line 153 and quotes in its own blocker message at line 87. The two
   lines disagree about what the publish surface is, and only the digest is
   wrong.
-- `CLAUDE.md:207-215` and `docs/invariants.md:135-145` — both record that an
+- `CLAUDE.md:207-215` and `docs/subsystems/invariants.md:135-145` — both record that an
   install carries only what `PUBLISHED_PATHS` and `sparsePaths` *both* name,
   and that the repo controls only the first. Neither records that the sync
   cannot act on a change to the second, which is what makes the invariant hard
@@ -141,7 +141,7 @@ The install is currently ahead of the clone — it has `agents/`, the clone does
 not — so the next reinstall through any route drops the agent again until the
 declaration is fixed.
 
-What this means for the invariant: `CLAUDE.md` and `docs/invariants.md` both
+What this means for the invariant: `CLAUDE.md` and `docs/subsystems/invariants.md` both
 point at `known_marketplaces.json` as "the marketplace's own `sparsePaths`
 (machine-local)". That file is the cache, not the control. The lever is
 `extraKnownMarketplaces` in `settings.json`, and once `agents` is declared
@@ -220,7 +220,7 @@ cases, which stay as they are:
   and empty for absent settings or an absent marketplace entry.
 
 **Docs.** `CLAUDE.md`'s "`agents/` is part of the plugin's publish surface"
-invariant and `docs/invariants.md:135-145` both name
+invariant and `docs/subsystems/invariants.md:135-145` both name
 `known_marketplaces.json` as the machine-local half. Correct both: the
 declaration is `extraKnownMarketplaces` in `~/.claude/settings.json`, the
 cache is `known_marketplaces.json` and is reconciled from it on session start,
@@ -267,7 +267,7 @@ machine-local state, as the Fix decided.
 - A read-only pre-flight `missingSparsePaths(settings, marketplace)` warning
   runs before the uninstall, warn-never-refuse, and cannot abort in the window
   between the uninstall and the install.
-- `CLAUDE.md`'s publish-surface invariant, `docs/invariants.md`'s `agents/`
+- `CLAUDE.md`'s publish-surface invariant, `docs/subsystems/invariants.md`'s `agents/`
   section and the stale `PUBLISHED_PATHS` comment in the script itself all named
   `known_marketplaces.json` as the machine-local lever. All three now name
   `extraKnownMarketplaces` in `settings.json` and record the cache relationship,

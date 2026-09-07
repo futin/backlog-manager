@@ -17,7 +17,7 @@ this machine (27 first passes, 2 second passes, four projects) and classified th
 
 | Finding class | Count | Examples |
 |---|---|---|
-| another statement of the old contract left standing | 14 | CLAUDE.md:227 and docs/invariants.md:408 (bug-4), CLAUDE.md:522 (task-20), a JSDoc on `RUN_IN_PROGRESS_CODE` (bug-21, twice), README:12 (task-4), docker-compose `MAX_SESSIONS=10` (dashboard bug-4), docs/overview.md (dashboard task-11) |
+| another statement of the old contract left standing | 14 | CLAUDE.md:227 and docs/subsystems/invariants.md:408 (bug-4), CLAUDE.md:522 (task-20), a JSDoc on `RUN_IN_PROGRESS_CODE` (bug-21, twice), README:12 (task-4), docker-compose `MAX_SESSIONS=10` (dashboard bug-4), docs/overview.md (dashboard task-11) |
 | a new test that still passes with the change reverted | 5 | styles.css rule invisible to the suite (bug-16), a conditional `TZ` pin (task-15), a dedupe test that cannot tell pre- from post-slice (dashboard bug-15), `bookingDate` never pinned (finance task-4) |
 | a genuine defect | 8 | pause cleared on watchdog resume (task-17), a NUL byte in a source file (task-18), the lease bricking `--abort` (bug-19) |
 | other | 2 | |

@@ -80,7 +80,7 @@ as "look here first", not as coordinates. Size targets in this plan are soft.
 | `test/orchestrator-strip.test.tsx`, `test/orchestrator-hook.test.tsx`, `test/orchestrator-runs.test.ts` | Existing expectations that change. |
 | `docker-compose.yml`, `.env.example`, `README.md` | The read-write `settings/` mount; `BM_WATCHDOG_FILE`, `BM_WATCHDOG`. |
 | `skills/backlog-orchestrate/references/recovery.md`, `skills/backlog-orchestrate/SKILL.md` | Heartbeat first on `--resume`; one sentence on unattended entry. |
-| `CLAUDE.md`, `docs/invariants.md` | Layout bullets; four new invariants, one amended. |
+| `CLAUDE.md`, `docs/subsystems/invariants.md` | Layout bullets; four new invariants, one amended. |
 
 ---
 
@@ -561,11 +561,11 @@ git commit -m "docs(orchestrate): heartbeat before reconcile on --resume"
 
 **Files:**
 - Modify: `CLAUDE.md` (Layout ~31-33 and ~58-70; Invariants — new bullets after "One run per project, checked twice", amend ~403)
-- Modify: `docs/invariants.md` (new section before "Queue wait is not work", ~749)
+- Modify: `docs/subsystems/invariants.md` (new section before "Queue wait is not work", ~749)
 
 - [ ] **Step 1: `CLAUDE.md` Layout.** `agents/` bullet: "status, plan, dispatch, orchestrate, resume, and the run watchdog (`watchdog.service.ts`, armed only while some run.json says running)". `orchestrator/` bullet: add "`watchdog-state.service.ts` — the in-memory record of what the watchdog did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs only — and `watchdog-config.util.ts`, the one file the server writes". Client bullet: after the run strip description, "a crashed run (running, heartbeat stale) renders as crashed with the watchdog's verdict and, when the watchdog is exhausted or off, a Resume control"; Settings gains "and an Orchestrator watchdog group (`WatchdogGroup.tsx`, server-side knobs and activity, via `hooks/useWatchdog.ts`)".
 
-- [ ] **Step 2: `CLAUDE.md` Invariants.** Add, each in the existing register, with the "why" in one or two sentences and a pointer to `docs/invariants.md`:
+- [ ] **Step 2: `CLAUDE.md` Invariants.** Add, each in the existing register, with the "why" in one or two sentences and a pointer to `docs/subsystems/invariants.md`:
   - **The watchdog spawns; it never writes the run file.** `runs()` stays the one reader; attempt state is in-memory and lost on restart on purpose; `settings/watchdog.json` is the server's one write, its own single writer, under its own read-write mount.
   - **A crashed run renders as crashed, never as nothing.** Supersedes the strip's silence rule; the strip states heartbeat age, *last reported* stage and the watchdog's verdict — facts, not guesses. Badges, card bars and `runClaimBlock` stay freshness-based.
   - **The watchdog is armed only while some `run.json` says `running`.** Arms on the reads the board already makes, on spawn success, and on a boot scan; a terminal-started run with the board closed is never watched.
@@ -573,14 +573,14 @@ git commit -m "docs(orchestrate): heartbeat before reconcile on --resume"
   - **Any spawn attempt starts the grace clock; only a success counts against the cap.**
   - Amend ~403: "**Every agents POST is guarded by content-type and origin**" (dispatch, orchestrate, resume, watchdog/config).
 
-- [ ] **Step 3: `docs/invariants.md`.** New section `## The watchdog spawns; it never writes the run file` carrying the incident table from the spec's "Why this exists", the armed/idle/off model, the grace rule, the in-memory decision and its restart cost, the settings-file exception and why it is a directory mount, and the declined prevention layer named as declined. Reference the spec file.
+- [ ] **Step 3: `docs/subsystems/invariants.md`.** New section `## The watchdog spawns; it never writes the run file` carrying the incident table from the spec's "Why this exists", the armed/idle/off model, the grace rule, the in-memory decision and its restart cost, the settings-file exception and why it is a directory mount, and the declined prevention layer named as declined. Reference the spec file.
 
 - [ ] **Step 4: Final gate** — `pnpm test && pnpm run typecheck && pnpm run build`. All three green before the commit.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add CLAUDE.md docs/invariants.md
+git add CLAUDE.md docs/subsystems/invariants.md
 git commit -m "docs: watchdog invariants — spawns never writes, crashed never silent"
 ```
 

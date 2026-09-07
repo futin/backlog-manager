@@ -86,7 +86,7 @@ this plan only tells you where each one lands.
 | `client/src/components/runs/RunDetail.tsx` | Composes rollup + item cards (RowTime, lead line, StageTrack); ticks via `useNow`. |
 | `client/src/components/runs/RunsView.tsx` | Range state + control, range filter, wide tile, `avg item work` relabel, range-empty note. |
 | `client/src/styles.css` | New `.runs-seg*`, `.runs-tile-wide`/`.runs-tile-head`, `.run-bars*`, `.run-track*`, `.run-detail-lead`/`-sub`/`-rollup`; deletes `.run-detail-stagebar`, `.run-detail-seg`, `.run-detail-caption`, `.run-seg-*`. |
-| `CLAUDE.md`, `docs/invariants.md` | Layout bullet update; new invariant "queue wait is not work". |
+| `CLAUDE.md`, `docs/subsystems/invariants.md` | Layout bullet update; new invariant "queue wait is not work". |
 
 ---
 
@@ -673,7 +673,7 @@ Changes:
 
 **Files:**
 - Modify: `CLAUDE.md` (Layout bullet for Runs; new Invariants bullet)
-- Modify: `docs/invariants.md` (new section)
+- Modify: `docs/subsystems/invariants.md` (new section)
 - Verify: `client/src/styles.css` has no orphaned rules from the old bar
 
 Docs content:
@@ -693,7 +693,7 @@ Docs content:
   last: real run `run-20260901-112815` read bug-7 as 161m in the pane and
   25m in the drawer — the difference was the four items ahead of it in
   the queue. `MACHINE_STAGES` is the closed list of what counts.
-- `docs/invariants.md`: a section with the same title, the measurement,
+- `docs/subsystems/invariants.md`: a section with the same title, the measurement,
   the two functions by path, and the rule that a new duration-reading
   surface imports `itemDurationMs` rather than subtracting stamps itself.
 

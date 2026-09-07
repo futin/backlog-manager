@@ -355,7 +355,7 @@ pnpm test && pnpm run typecheck
 ### Task 6: skills, invariants, and the publishing step
 
 **Files:**
-- Modify: `skills/backlog-groom/SKILL.md` (lines 75, 144, 145, 211, 239, 284, 316), `skills/backlog-execute/SKILL.md`, `CLAUDE.md`, `docs/invariants.md`
+- Modify: `skills/backlog-groom/SKILL.md` (lines 75, 144, 145, 211, 239, 284, 316), `skills/backlog-execute/SKILL.md`, `CLAUDE.md`, `docs/subsystems/invariants.md`
 
 **Interfaces:**
 - Consumes: the `--as` flag from Task 2.
@@ -363,7 +363,7 @@ pnpm test && pnpm run typecheck
 
 **Prose changes:** every `start <id>` in `backlog-groom` becomes `start <id> --as groom`; every one in `backlog-execute` becomes `--as execute`. `stop <id>` is unchanged everywhere — it takes no flag. Check both files for `start` in running prose as well as in fenced commands; a command block updated while the sentence above it still describes the old form is worse than neither.
 
-**Invariant text.** `CLAUDE.md` currently says **"`started:` is the one lifecycle key allowed in frontmatter, and it is not a status"**. That is no longer true as written. Rewrite it, and the matching passage in `docs/invariants.md`, to cover the new keys: `started:` and `phase:` exist only while work is live and are removed together; `updated:` is stamped by every `start`/`stop`; `groom-elapsed:` and `execute-elapsed:` accumulate and are permanent. The `status:` ban is unaffected and should be restated as still standing.
+**Invariant text.** `CLAUDE.md` currently says **"`started:` is the one lifecycle key allowed in frontmatter, and it is not a status"**. That is no longer true as written. Rewrite it, and the matching passage in `docs/subsystems/invariants.md`, to cover the new keys: `started:` and `phase:` exist only while work is live and are removed together; `updated:` is stamped by every `start`/`stop`; `groom-elapsed:` and `execute-elapsed:` accumulate and are permanent. The `status:` ban is unaffected and should be restated as still standing.
 
 - [ ] **Step 1: Update the two SKILL.md files**
 
@@ -375,7 +375,7 @@ grep -rn "backlog.mjs start" skills/
 
 Expect every hit to carry an `--as` flag.
 
-- [ ] **Step 3: Update CLAUDE.md and docs/invariants.md**
+- [ ] **Step 3: Update CLAUDE.md and docs/subsystems/invariants.md**
 
 - [ ] **Step 4: Full green before publishing**
 

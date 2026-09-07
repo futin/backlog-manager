@@ -818,7 +818,7 @@ export function moveItem(backlog, id, dest) {
 // holds without exception again, and the archived item still records
 // *when* the work began even though `updated:` now sits right next to it as
 // the moment it ended. See the paragraph beginning "Two skills call
-// `start`/`stop`" in docs/invariants.md for the full reasoning.
+// `start`/`stop`" in docs/subsystems/invariants.md for the full reasoning.
 //
 // The fourth parameter exists so a caller — real or test — can pin the exact
 // value written, mirroring startItem's own third parameter. startItem and

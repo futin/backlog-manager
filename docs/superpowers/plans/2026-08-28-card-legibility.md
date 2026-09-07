@@ -42,7 +42,7 @@ Five layers, in dependency order:
   formatter, both pure, both injected with `now`.
 - **The card and drawer** — design B, plus the short created date.
 - **The docs** — the `started: YYYY-MM-DD` invariant in `CLAUDE.md`,
-  `docs/invariants.md`, and the two SKILL.md mentions.
+  `docs/subsystems/invariants.md`, and the two SKILL.md mentions.
 
 Out of scope: any change to how items are fetched, to the dispatch tab, to the
 four columns, or to `created` on disk (it stays `YYYY-MM-DD`).
@@ -344,7 +344,7 @@ timestamp case.
   still valid on disk) and keep every other clause word-for-word — the
   `status:` ban, the round-trip requirement, and "in progress is decided in the
   client" are all untouched by this change.
-- `docs/invariants.md`: the same edit in the long-form entry, plus a sentence on
+- `docs/subsystems/invariants.md`: the same edit in the long-form entry, plus a sentence on
   why the timestamp: minutes and hours are the useful resolution for a session
   someone started this morning, and a date cannot carry them.
 - `skills/backlog/SKILL.md` line ~50 and `skills/backlog-execute/SKILL.md`

@@ -270,7 +270,7 @@ invariant.
   becomes four counters, two per activity, and the bullet should name the cache-
   read exclusion and the whole-session-window caveat as the two things a future
   reader must not re-decide.
-- Same treatment in `docs/invariants.md`, in the paragraph beginning "Two skills
+- Same treatment in `docs/subsystems/invariants.md`, in the paragraph beginning "Two skills
   call `start`/`stop`".
 - Grep `groom-elapsed` across `skills/` and `docs/` and update **every** place
   that enumerates the two counters — including the `start`/`stop` doc block
@@ -415,7 +415,7 @@ idea-3's, and its browser check belongs there.
   item's `## Outcome` if it works, and as a new bug citing this task if the
   stderr note from plan step 4 fires instead. Do not close this task on the
   headless evidence alone.
-- The counters are documented in `CLAUDE.md`, `docs/invariants.md` and
+- The counters are documented in `CLAUDE.md`, `docs/subsystems/invariants.md` and
   `shared/types.ts`, and no enumeration anywhere still claims there are two.
 - No `hooks/` directory, and `PUBLISHED_PATHS` unchanged.
 
@@ -490,7 +490,7 @@ should not be closed on headless evidence alone.
 
 **Docs.** The counter enumeration was updated in `CLAUDE.md` (four counters, two
 per activity, plus the two facts a later reader must not re-decide),
-`docs/invariants.md` (a new run of paragraphs covering the transcript
+`docs/subsystems/invariants.md` (a new run of paragraphs covering the transcript
 resolution, the three counting rules with their measurements, the attribution
 caveat and the no-key-for-null rule), `shared/types.ts`, the README `init`
 writes, `skills/backlog-execute/SKILL.md`, `skills/backlog-groom/SKILL.md` and
