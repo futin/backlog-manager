@@ -19,9 +19,10 @@ may also carry `kind: chore` or `kind: debt` in its frontmatter, saying which
 of the two it is; any other value is preserved but means nothing to the board.
 
 An item's status is the directory it lives in, never a frontmatter key. The one
-exception is not a status: a `started: YYYY-MM-DD` line means someone is working
-that item right now. It is still an open item in `<section>/open/`; the date only
-says when it was picked up. Set it with `start <id>`, clear it with `stop <id>`.
+exception is not a status: a `started:` line — a second-precision UTC timestamp
+like `2026-08-28T14:03:07Z` — means someone is working that item right now. It
+is still an open item in `<section>/open/`; the stamp only says when it was
+picked up. Set it with `start <id>`, clear it with `stop <id>`.
 Archiving keeps it, so a done item records when the work began. `start --as
 groom` or `--as execute` also writes a `phase:` line alongside `started:`,
 naming which of the two `stop` bills the elapsed time to. `stop` always
