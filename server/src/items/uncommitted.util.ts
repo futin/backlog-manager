@@ -3,18 +3,32 @@ import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * uncommitted.util.ts — which item files the working tree holds that a
- * board-started orchestrator run would NOT be able to see.
+ * uncommitted.util.ts — which item files the working tree holds in a state a
+ * board-started orchestrator run will not read.
  *
  * A run gates every item at `<base>` (`BASE_REF_DEFAULT` in
  * `skills/backlog-orchestrate/tools/orchestrate.mjs`, and the board never
  * passes `--base`, so `main` is the ref for every board-started run there
  * will ever be), while the board's own item scan reads the WORKING TREE. The
- * two disagree exactly when someone groomed an item and did not commit it,
- * and then the sheet previews a ready bug, the run reports `not committed on
- * main — the worktree this run creates from main would not contain <path>`,
- * and the item is skipped after the person has walked away. This read is what
- * lets the Orchestrate sheet say so BEFORE the run starts (task-32).
+ * two disagree whenever the file on disk is not the file at `main`, which
+ * covers two shapes with two different fates — and the difference matters,
+ * because the sheet has to state a consequence and only one of these is a
+ * skip (review round 1 caught the note claiming both were):
+ *
+ *   - **absent from `main`** (`readBlob(relPath) === null` in
+ *     `buildGatedQueue`): the run refuses it with `not committed on main —
+ *     the worktree this run creates from main would not contain <path>` and
+ *     moves on. This is the shape the 2026-09-06 sweep counted five of, each
+ *     costing a run slot after the person had walked away.
+ *   - **present at `main` but edited since**: the run gates and then EXECUTES
+ *     main's bytes. It may read `ungroomed` there, or it may simply run the
+ *     older plan — either way the work the person just wrote is not the work
+ *     that happens, and no verdict in the run file says so.
+ *
+ * Both are worth knowing before a multi-hour unattended operation starts,
+ * which is why the predicate is the broad one (Decision 2 below) and the
+ * sheet's note carries both fates rather than one. Catching them with one
+ * question is the point (task-32).
  *
  * Two decisions a later reader will otherwise "fix", both deliberate:
  *

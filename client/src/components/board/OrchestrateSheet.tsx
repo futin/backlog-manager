@@ -686,26 +686,47 @@ export function OrchestrateSheet(
                 )}
               </div>
 
-              {/* The uncommitted warning (task-32), quoting the run's own
-                  verdict string verbatim — `not committed on main` is exactly
-                  what `buildGatedQueue` writes into the run file's reasons, so
-                  the two surfaces say one thing and a person who sees the
-                  skip afterwards can match it to what they were told here.
+              {/* The uncommitted warning (task-32). Says the ONE fact that is
+                  true of every flagged row — the run reads main's copy, not
+                  the file on disk — and then splits the consequence, because
+                  the flag is deliberately broader than any single gate
+                  verdict and review round 1 caught this note claiming
+                  otherwise.
+
+                  `uncommittedItemPaths` flags any item file whose working
+                  tree differs from main. `buildGatedQueue`'s
+                  `not committed on ${base}` reason fires on the strictly
+                  narrower `readBlob(relPath) === null`, i.e. the path is
+                  ABSENT from main. A row that is present at main, groomed
+                  there, and merely edited since is flagged here and gated
+                  `ready` by the run — which then executes MAIN'S bytes,
+                  so a plan written after the last commit is not the plan that
+                  runs. That is worth saying and worth a deselect control; it
+                  is not worth saying it will be skipped, because it will not
+                  be. (Any working-tree touch reaches it, `backlog.mjs start
+                  --as groom`'s own `updated:` stamp included.)
+
+                  The verdict string stays on screen VERBATIM —
+                  `not committed on main` is what the run writes into the run
+                  file's reasons, so a person who finds the skip afterwards can
+                  match it up — but demoted to the case it actually describes.
                   `Groomed on disk only` is task-29's wording, said by the
-                  groom skill at the moment the state is created; using both
-                  phrases rather than picking one is deliberate — they are two
-                  different sentences to two different readers at two
-                  different times.
+                  groom skill at the moment the state is created; both phrases
+                  earn their place, as two sentences to two readers at two
+                  times.
 
                   Its own note rather than another clause on the preview
                   disclaimer above: that one says the run may re-gate an item
                   to a different VERDICT, which is not the same claim as "the
-                  run cannot see these files at all". */}
+                  bytes the run gates are not the bytes on this screen". */}
               {uncommittedIds.length > 0 && (
                 <div className="sheet-note" data-testid="orchestrate-uncommitted-note">
-                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item is' : 'items are'} groomed
-                  on disk only: the run reads them at main, so its gate will report
-                  "not committed on main" and skip them.
+                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item' : 'items'} groomed on disk
+                  only — {uncommittedIds.length === 1 ? 'it differs' : 'they differ'} from main, and the
+                  run reads main's copy rather than the file here. One missing from main
+                  altogether is skipped ("not committed on main"); one that is merely
+                  stale there is gated and run on main's bytes, so a plan written since
+                  the last commit is not the plan that runs.
                 </div>
               )}
 
@@ -782,13 +803,25 @@ export function OrchestrateSheet(
                           <span className={`orchestrate-preview-action ${action}`}>{actionLabel(item, action)}</span>
                           {/* Beside the action label, not instead of it: the
                               two say different things — what the run would DO
-                              with this item, and whether it can see it at all
-                              — and the run really will queue this row, gate it
-                              and report it, which is why the checkbox stays
-                              enabled and the row stays in the list. Same
-                              reasoning the file already gives for never
-                              disabling an ungroomed row: this screen has no
-                              authority to decide otherwise. */}
+                              with this item, and whether the bytes it will do
+                              that to are the ones on this screen — and the run
+                              really will queue this row, gate it and report
+                              it, which is why the checkbox stays enabled and
+                              the row stays in the list. Same reasoning the
+                              file already gives for never disabling an
+                              ungroomed row: this screen has no authority to
+                              decide otherwise.
+
+                              The word stays `uncommitted` rather than
+                              narrowing to "differs from main" (review round 1,
+                              Minor): one vocabulary across the chip, the
+                              `deselect uncommitted (N)` button, the endpoint
+                              and the docs is worth more here than per-row
+                              precision the note directly above already
+                              supplies — it now opens by defining exactly what
+                              the chip means, and a row whose CHANGES are the
+                              uncommitted part is covered by that sentence
+                              rather than left to the chip to say alone. */}
                           {uncommittedPaths.has(item.path) && (
                             <span className="orchestrate-preview-flag">uncommitted</span>
                           )}

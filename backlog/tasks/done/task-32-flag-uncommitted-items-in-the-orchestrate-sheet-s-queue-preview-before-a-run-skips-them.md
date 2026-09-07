@@ -427,3 +427,102 @@ auto-excluding flagged rows by default → 18; `[project, mergeMode, step]` deps
 the silent `.catch` → 22/23/23b; unscoping `uncommittedIds` from the queue → the
 non-queued-path case. Every added test has a proof except case 7 (see departure 1) and
 case 23 (see departure 3).
+
+## Review round 1
+
+Verdict: fix. Report:
+`~/.backlog-manager/orchestrator/…/reviews/task-32-1.md`.
+
+**Important — the step 1 note claimed a verdict the gate produces for only half the
+flagged rows. Fixed.** The reviewer is right, and the reproduction is exact:
+`uncommittedItemPaths` flags any working-tree difference from `main`, while
+`buildGatedQueue`'s `not committed on main` reason fires only on `readBlob(relPath) ===
+null` — a path ABSENT from `main` (confirmed at `orchestrate.mjs:1249-1265`: a present
+blob goes to `parseItemForGate(committed)` and can gate `ready`). So a row committed and
+groomed at `main` and edited since was told it would be skipped, when in fact the run
+queues it, dispatches it and executes **main's** bytes. Worse than a wrong sentence: the
+`deselect uncommitted (N)` button sits beside it, so the note invited dropping an item
+that would have run. Trigger is ordinary — any working-tree touch of a groomed,
+committed item, including `backlog.mjs start --as groom`'s own `updated:` stamp.
+
+The plan contradicted itself here (Decision 2 says a present item never earns that
+reason; section 5 then dictated a note claiming it for every row) and the diff shipped
+the wrong half. Fixed as a wording change, not a redesign — the broad predicate is
+Decision 2's and stays.
+
+The note now leads with the fact true of every flagged row and splits the fates:
+
+> N items groomed on disk only — they differ from main, and the run reads main's copy
+> rather than the file here. One missing from main altogether is skipped ("not committed
+> on main"); one that is merely stale there is gated and run on main's bytes, so a plan
+> written since the last commit is not the plan that runs.
+
+The shared verbatim string is still on screen, demoted to the case it describes.
+
+Five sites carried the same over-claim, three more than the reviewer listed:
+
+- `client/src/components/board/OrchestrateSheet.tsx` — the note, its comment, and the
+  chip's comment ("whether it can see it at all" → whether the bytes the run acts on are
+  the ones on screen).
+- `CLAUDE.md:66` (Layout) and the Invariants entry, which now states outright that the
+  predicate is broader than one verdict and that **any surface stating a consequence
+  must split it**.
+- `docs/invariants.md` — the "exactly one situation" sentence, section 2's stale
+  cross-reference to the old note wording, and a new section, *One question, two fates*,
+  carrying both fates, why this is the predictable mistake (only the narrow shape has a
+  quotable verdict string, and quoting the run is one of the feature's goals), and the
+  chip-word decision below.
+- `server/src/items/uncommitted.util.ts`'s header, which asserted the same single fate
+  in the first paragraph a later reader meets.
+- `README.md` — "flag the rows a run will not be able to see" → whose bytes on disk are
+  not the bytes a run reads.
+
+**Minor 1 — button counts `uncommittedSelected`, not `uncommittedIds`. Kept, and now
+declared.** The reviewer's read is right on both counts: the behaviour is better (press
+it once and the control retires instead of claiming work it has done) and it was missing
+from the departures list, which is the actual defect. It is departure 4.
+
+**Minor 2 — the chip word. Kept as `uncommitted`, deliberately.** One vocabulary across
+the chip, the `deselect uncommitted (N)` button, the endpoint and the docs beats per-row
+precision now that the note directly above the rows defines the term in its first
+clause. A chip reading `differs from main` would be more accurate about one row while
+leaving the button and the endpoint speaking a different language from it. Recorded in
+the chip's own comment and in `docs/invariants.md` so the next reader sees a decision
+rather than an oversight.
+
+Tests: case 17's count assertion loosened to `2 items` (the plural form moved), the
+singular/plural sibling rewritten, and **case 17b added** — three separate assertions
+(the shared fact, the absent case's verdict scoped to it, the present-but-stale case's
+different fate) plus a negative on `and skip them`, so the next rewording cannot quietly
+lose one. Split into three rather than one string match for that reason. Case 18's
+absent-`ids` assertion untouched and still green.
+
+Red proof for the fix: restoring the old note sentence verbatim reddens case 17b and the
+plural case, 13 others green. Re-ran after restoring: 15/15.
+
+### Verification (round 1 fix)
+
+```
+Test Suites: 82 passed, 82 total
+Tests:       1565 passed, 1565 total
+
+# tests 450
+# pass 450
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ tsc --noEmit
+(no output)
+
+✓ built in 1.33s
+```
+
+Contract sweep: 5 sites updated (OrchestrateSheet.tsx note + two comments, CLAUDE.md
+Layout + Invariants, docs/invariants.md ×3 incl. a new section,
+server/src/items/uncommitted.util.ts header, README.md) — every place that stated the
+flag's consequence as a single fate.
+Red proof: 1 test (case 17b) went red with the old wording restored; the plural case
+went red with it, and the other 13 stayed green.

@@ -1893,16 +1893,57 @@ The sheet's queue preview is a pure derivation over the board's own item
 scan, which reads the **working tree**. The run that follows gates every item
 at `<base>` — `BASE_REF_DEFAULT` in `orchestrate.mjs`, i.e. `main`, and the
 board never passes `--base`, so `main` is the ref for every board-started run
-there will ever be. Those two readings disagree in exactly one situation: an
-item groomed on disk and not committed. The sheet then previews a ready bug,
-`buildGatedQueue` reports `not committed on main — the worktree this run
-creates from main would not contain <path>`, and the item is skipped — after
-the person has walked away from a multi-hour unattended operation. The
-2026-09-06 cross-run sweep counted five such skips across three projects
-(bug-12 twice in backlog-manager, bug-13 and bug-7 in
-claude-agents-dashboard, bug-16 in ixray). task-29 closes the other half of
-this at groom time, said by the skill that creates the state; this one is for
-the person who groomed yesterday and is launching today.
+there will ever be. Those two readings disagree whenever the file on disk is
+not the file at `main` — which is broader than one situation, and the breadth
+is deliberate (see "one question, two fates" below). In the shape that
+prompted the task, the sheet previews a ready bug, `buildGatedQueue` reports
+`not committed on main — the worktree this run creates from main would not
+contain <path>`, and the item is skipped — after the person has walked away
+from a multi-hour unattended operation. The 2026-09-06 cross-run sweep
+counted five such skips across three projects (bug-12 twice in
+backlog-manager, bug-13 and bug-7 in claude-agents-dashboard, bug-16 in
+ixray). task-29 closes the other half of this at groom time, said by the
+skill that creates the state; this one is for the person who groomed
+yesterday and is launching today.
+
+### One question, two fates — and why the sheet has to say both
+
+The predicate is "does the working copy differ from `main`". The run's
+`not committed on main` verdict is strictly narrower:
+`readBlob(relPath) === null` in `buildGatedQueue`, i.e. the path is **absent**
+from `main`. So a flagged row has one of two futures, and they are not the
+same news:
+
+- **Absent from `main`.** The run refuses it with that verdict and moves on.
+  One gate verdict spent, no dispatch, no worktree; the cost is the run slot
+  and a second trip for whoever queued it.
+- **Present at `main`, edited since.** The run gates `main`'s copy and then
+  **executes `main`'s bytes**. It may read `ungroomed` there — the sibling
+  case `buildGatedQueue`'s own comment describes, an item committed while
+  ungroomed and groomed only on disk — or it may gate `ready` and simply run
+  the OLDER plan. Either way the work the person just wrote is not the work
+  that happens, and no verdict in the run file records that, which arguably
+  makes this the worse of the two.
+
+Review round 1 of task-32 caught the sheet's note asserting the first fate of
+both rows ("its gate will report 'not committed on main' and skip them"),
+which is false for the second and reachable by any working-tree touch of an
+already-groomed, already-committed item — `backlog.mjs start --as groom`'s own
+`updated:` stamp included. It is the predictable mistake, because only the
+narrow shape has a quotable verdict string, and quoting the run verbatim is
+one of the feature's own goals. **Any surface that states a consequence of
+this flag must split it**, and the resolution is what the note does now: lead
+with the fact true of every flagged row (the run reads `main`'s copy, not the
+file on screen), then name both fates, keeping the literal `not committed on
+main` on screen but attached to the case it describes.
+
+The chip word stays the single term `uncommitted` across the chip, the
+`deselect uncommitted (N)` button, the endpoint and these docs, even though a
+tracked-and-modified row is one whose *changes* are uncommitted rather than
+the item. One vocabulary beats per-row precision here because the note
+directly above the rows now defines the term outright; a chip reading
+`differs from main` would be more precise about one row and would leave the
+button and the endpoint speaking a different language from it.
 
 ### 1. No memo — and specifically not the one in the next file over
 
@@ -1942,8 +1983,14 @@ Diffing against `main` also covers the sibling case `buildGatedQueue`'s own
 comment describes without a second question. An item committed while
 ungroomed and groomed only in the working copy *is* present at `main`, so it
 never earns the "not committed" verdict — the run gates the stale bytes and
-reports plain `ungroomed`. It differs from `main`, so this flags it, and the
-chip's wording ("the run reads them at main") is true of both.
+reports plain `ungroomed`. It differs from `main`, so this flags it. Note
+that this paragraph and the sheet's own note are the two halves review round 1
+found contradicting each other: the plan said here that a present item never
+earns the "not committed" reason, and then wrote a note claiming exactly that
+reason for every flagged row. The sentence that is true of all of them is the
+one the note now leads with — the run reads `main`'s copy rather than the
+file on screen — and the fates are split after it (see "One question, two
+fates" above).
 
 ### 3. Two git reads, and the asymmetry between them
 

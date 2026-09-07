@@ -172,14 +172,49 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     // reasons — the whole point of this note is that the two surfaces say one
     // thing, so a person who finds the skip afterwards can match it up.
     expect(note).toHaveTextContent('not committed on main');
-    expect(note).toHaveTextContent('2 items are');
+    expect(note).toHaveTextContent('2 items');
     expect(note).toHaveTextContent('groomed on disk only');
   });
 
-  it('says "item is" for one row and "items are" for two', async () => {
+  /**
+   * Review round 1 (Important). The note used to read "the run reads them at
+   * main, so its gate will report 'not committed on main' and skip them",
+   * which is false for a flagged row that IS present at main and merely
+   * edited since: `uncommittedItemPaths` flags any working-tree difference,
+   * while the run's verdict fires only on `readBlob(relPath) === null` — an
+   * absent path. A present-but-stale row is gated `ready` on main's bytes and
+   * RUNS, so telling someone it will be skipped both misstates the run and
+   * invites them to press `deselect uncommitted` on an item that was going to
+   * work.
+   *
+   * Asserted as three separate claims rather than one string match, so the
+   * next rewording cannot lose one of them quietly: the fact true of every
+   * flagged row, the absent case's own verdict, and the present-but-stale
+   * case's different fate. The old sentence fails the third outright and the
+   * first as well — it never said which copy the run reads, only what the
+   * gate would report.
+   */
+  it('case 17b: the note states the shared fact and splits the two fates, claiming no blanket skip', async () => {
+    stub({ paths: [TASK_2.path], known: true });
+    renderSheet();
+    const note = await screen.findByTestId('orchestrate-uncommitted-note');
+
+    // 1. True of every flagged row, absent or stale alike.
+    expect(note).toHaveTextContent(/run reads main's copy rather than the file here/);
+    // 2. The absent case, in the run's own words, scoped to it.
+    expect(note).toHaveTextContent(/One missing from main altogether is skipped \("not committed on main"\)/);
+    // 3. The present-but-stale case, which is not a skip at all.
+    expect(note).toHaveTextContent(/merely\s+stale there is gated and run on main's bytes/);
+    // And no blanket claim about the whole set being skipped.
+    expect(note.textContent ?? '').not.toMatch(/and skip them/);
+  });
+
+  it('says "item" for one row and "items" for two', async () => {
     stub({ paths: [BUG_1.path], known: true });
     renderSheet();
-    expect(await screen.findByTestId('orchestrate-uncommitted-note')).toHaveTextContent('1 item is');
+    const note = await screen.findByTestId('orchestrate-uncommitted-note');
+    expect(note).toHaveTextContent('1 item groomed on disk only');
+    expect(note).toHaveTextContent('it differs from main');
   });
 
   // --- case 18 ----------------------------------------------------------

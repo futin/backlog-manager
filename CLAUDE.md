@@ -63,8 +63,10 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   (items / order / modes), with Start on the last one alone so it never sits
   under a scroll region whose length is the project's queue. Step 1 previews
   the queue and selects a subset of it, flagging with an `uncommitted` chip
-  every row a run would not find at `main`, stating the count in the run's own
-  words (`not committed on main`) and offering `deselect uncommitted (N)` —
+  every row whose file on disk is not the file at `main`, and splitting the
+  two fates that has — absent from `main` is skipped in the run's own words
+  (`not committed on main`), present-but-stale is gated and run on `main`'s
+  bytes — plus a `deselect uncommitted (N)` control —
   fed once per sheet open by `GET /api/items/uncommitted`, rendering nothing
   at all on `known: false` or a failed/malformed answer, and deliberately
   changing no default: an untouched sheet still posts no `ids` (task-32, see
@@ -481,9 +483,16 @@ happened.
   every item at `main` (`BASE_REF_DEFAULT`, `orchestrate.mjs`; the board never
   passes `--base`, so that is the ref for every board-started run there will
   ever be) while the board's own scan reads the working tree, and the two
-  disagree exactly when someone groomed an item and did not commit it — five
-  items were skipped that way across three projects in the 2026-09-06 sweep,
-  each after the person had walked away. `uncommittedItemPaths`
+  disagree whenever the file on disk is not the file at `main`. **That is
+  broader than one gate verdict, deliberately, and any surface stating a
+  consequence must split it**: absent from `main` is refused with `not
+  committed on main` and skipped — five items went that way across three
+  projects in the 2026-09-06 sweep, each after the person had walked away —
+  while present-but-edited is gated AND EXECUTED on `main`'s bytes, so the
+  plan just written is not the plan that runs and no run-file verdict says so.
+  The sheet's note said "skip them" of both for one review round; it is the
+  predictable mistake here, since the narrow shape is the one that has a
+  quotable verdict string. `uncommittedItemPaths`
   (`server/src/items/uncommitted.util.ts`) is the one implementation, behind
   `GET /api/items/uncommitted`. Four things a later reader must not re-decide.
   **No memo, and specifically not `lastCommitDates`' one**: that memo is keyed
