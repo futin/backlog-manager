@@ -135,10 +135,10 @@ runs the skills, which remain the only writers.
 
 The board's Orchestrate control goes out the same way and through the same
 switch: with `BM_AGENTS` off there is nothing to spawn a run with. Pausing or
-cancelling a live run is the deliberate exception — a pause is a fact on this
-machine's own disk and calls nothing outbound, so it keeps working after that
-switch is turned off, which is what stops a run started while agents were on
-from becoming unstoppable.
+cancelling a live run is deliberately not gated on it — a pause is a fact on
+this machine's own disk and calls nothing outbound, so it keeps working after
+that switch is turned off, which is what stops a run started while agents were
+on from becoming unstoppable.
 
 ## Install the skills
 
@@ -233,13 +233,23 @@ skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/
   one project — the prompt is composed server-side, so a caller can influence
   which items and which modes and nothing else), `POST /api/agents/resume`
   (re-spawns a run that crashed or was paused), `POST /api/agents/pause`
-  (writes the pause request a live run reads back at its dispatch gates; the
-  one route here that is independent of `BM_AGENTS` and makes no outbound
-  call), `GET /api/agents/watchdog` and `POST /api/agents/watchdog/config` (the
-  run watchdog's live state, and the four server-side knobs behind it — this
-  server's only write outside a run's pause file), and `GET
-  /api/agents/merge-check` (a local, read-only look at whether a project's main
-  tree is in a state that can receive a merge).
+  (writes the pause request a live run reads back at its dispatch gates), `GET
+  /api/agents/watchdog` and `POST /api/agents/watchdog/config` (the run
+  watchdog's live state, read out of this process's own memory and the settings
+  file it owns, plus the four server-side knobs behind it — this server's only
+  write outside a run's pause file), and `GET /api/agents/merge-check` (a
+  local, read-only look at whether a project's main tree is in a state that can
+  receive a merge).
+
+  `BM_AGENTS` off turns away `dispatch`, `orchestrate` and `resume` — the three
+  that spawn something. `status` exists to report that gate, so it answers
+  either way, and `pause`, `watchdog`, `watchdog/config` and `merge-check`
+  never call the dashboard at all: two read this process's own state, one
+  writes its own settings file, one looks at local git. `pause` being
+  independent of the switch is deliberate rather than incidental — a pause is a
+  fact on this machine's own disk about a run that is already going, so gating
+  it would mean a run started while dispatch was on could never be stopped
+  after somebody turned it off.
 - `server/src/orchestrator/` — a read-only view of the orchestrator's
   run-state directory: `GET /api/orchestrator/runs` (every project's current
   `run.json`, re-read fresh on every request, which is what lets the board

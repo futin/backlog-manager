@@ -182,3 +182,51 @@ $ pnpm run build
 $ grep -ci orchestr README.md
 27
 ```
+
+### Review follow-up, 2026-09-07
+
+One Important finding from `backlog-reviewer`, fixed. The `server/src/agents/`
+bullet called `POST /api/agents/pause` "the one route here that is independent
+of `BM_AGENTS` and makes no outbound call". False as written: `GET
+/api/agents/watchdog` (in-memory plus the settings file this process owns) and
+`GET /api/agents/merge-check` (`agents.service.ts:1347` — a registry lookup and
+`checkMergeCoverage`, local git only) are ungated and outbound-free too, and
+the same sentence already described merge-check as local and read-only, so the
+bullet contradicted itself.
+
+Checked against the code rather than reasoned about: `status.enabled` is thrown
+on in `orchestrate` (`:426`) and `resume` (`:717`) and turned into a 409/502
+reason by `dispatch` (`:359`); `plan` returns a `blocked` string instead of
+throwing; `pause`, `watchdog`, `watchdog/config` and `merge-check` never
+consult it. The claim is now a paragraph of its own after the route list:
+`BM_AGENTS` off turns away the three routes that spawn something, `status`
+exists to report the gate so it answers either way, and the other four never
+call the dashboard at all — with pause's independence stated as deliberate,
+which is what `agents.service.ts:959` says and what the CLAUDE.md invariant
+says.
+
+The `pause` parenthetical lost its duplicate copy of that rationale, and the
+Dispatching-to-Claude paragraph's "Pausing … is the deliberate exception"
+became "is deliberately not gated on it" — same superlative, one section
+earlier, and it would have gone stale the same way.
+
+Re-verified after the fix:
+
+```
+$ python3 (route cross-check)
+routes declared: 16  missing from README Architecture: 0 []
+
+$ grep -ci orchestr README.md
+28
+
+$ grep -c 'one route here\|the deliberate exception' README.md
+0
+
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm test
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
