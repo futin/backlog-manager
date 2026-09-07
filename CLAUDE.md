@@ -1223,3 +1223,20 @@ happened.
   them drifting apart; the reviewer/execute pair is the same shape. They read
   the other file, never import it — the "one skill's `tools/` may never import
   another's" rule is untouched.
+
+<!-- docs-sync:
+  sources:
+    - server/src
+    - client/src
+    - shared
+    - skills
+    - agents
+    - scripts
+    - test
+    - package.json
+    - docker-compose.yml
+    - vite.config.ts
+    - pnpm-workspace.yaml
+  kind: index
+  verified: 60ee0a05629a805d4a9276de01b4546bc5e01178
+-->

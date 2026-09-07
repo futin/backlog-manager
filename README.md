@@ -370,3 +370,21 @@ Tests are flat in `test/`. Component suites opt into jsdom with a
 _Not yet captured — open `http://localhost:5177` after `pnpm run docker:up`
 (or `pnpm run dev` plus `pnpm run dev:web`) once the board has real items on
 it, and drop the image at `docs/board.png`._
+
+<!-- docs-sync:
+  sources:
+    - server/src
+    - client/src
+    - shared
+    - skills
+    - agents
+    - scripts
+    - package.json
+    - docker-compose.yml
+    - Dockerfile
+    - vite.config.ts
+    - .env.example
+    - pnpm-workspace.yaml
+  kind: readme
+  verified: 60ee0a05629a805d4a9276de01b4546bc5e01178
+-->
