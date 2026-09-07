@@ -3,6 +3,9 @@
 docs-sync-plan: 1
 layout: standard-1
 docs:
+  - path: docs/overview.md
+    kind: overview
+    note: backlog-manager
   - path: README.md
     kind: readme
   - path: CLAUDE.md
