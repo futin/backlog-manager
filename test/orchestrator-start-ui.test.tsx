@@ -117,6 +117,17 @@ describe('toolbar Orchestrate button', () => {
       const payload: unknown = url.includes('/api/agents/status') ? AGENTS
         : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/agents/merge-check') ? { covered: true, source: null }
+        // task-32: the sheet fires this on mount, unconditionally (unlike
+        // merge-check, no mode gates it). Its own branch rather than the
+        // `/api/items` catch-all below for exactly the reason merge-check's
+        // exists — that shape has no `paths`, so `fetchUncommitted`'s guard
+        // would reject it, which happens to render the same "no chip" as this
+        // does but for the wrong reason, and this stub's job is to describe
+        // what each real endpoint answers. `known: true` with an empty list is
+        // the clean-tree answer: nothing flagged, so no test in this block
+        // gets a surprise DOM node. Note the ORDER — `/api/items/uncommitted`
+        // also contains `/api/items`, so this branch has to precede it.
+        : url.includes('/api/items/uncommitted') ? { paths: [], known: true }
         : url.includes('/api/agents/plan') ? {
           action: 'execute', prompt: 'do it', project: 'alpha',
           allowedModes: ['plan', 'acceptEdits'], defaultMode: 'acceptEdits'
@@ -508,6 +519,19 @@ describe('OrchestrateSheet', () => {
         return mergeCheck === 'fail'
           ? Promise.reject(new Error('network down'))
           : Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(mergeCheck) } as Response);
+      }
+      // task-32's on-mount read, answered and kept OUT of `calls` for the
+      // identical reason merge-check is: `calls` records the one request most
+      // of these tests care about (the launch itself), and a second row in it
+      // would fail every `toHaveLength(1)`/`toEqual` assertion that predates
+      // this feature and has nothing to do with it. A clean tree, so no chip,
+      // no note and no fourth button leaks into an unrelated text assertion —
+      // test/orchestrate-uncommitted.test.tsx is where the flag itself is
+      // exercised.
+      if (url.includes('/api/items/uncommitted')) {
+        return Promise.resolve({
+          ok: true, status: 200, json: () => Promise.resolve({ paths: [], known: true })
+        } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       return Promise.resolve({ ok: res.ok, status: res.status, json: () => Promise.resolve(res.body) } as Response);
@@ -1108,7 +1132,17 @@ describe('OrchestrateSheet', () => {
     // navigation changes `mergeMode`.
     await toModes();
 
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Asserted per URL rather than as `not.toHaveBeenCalled()` (task-32):
+    // the sheet now also reads `/api/items/uncommitted` on mount, and that
+    // one is deliberately NOT gated on any mode — its answer is about
+    // someone's working tree, which branch mode does not change. Naming the
+    // endpoint keeps this case's claim exactly what it always was, and the
+    // second assertion is stronger than the old blanket one: it pins that
+    // this sheet fires precisely one request in branch mode, so a future
+    // third fetch has to come here and be accounted for.
+    const urls = fetchSpy.mock.calls.map(([input]) => String(input));
+    expect(urls.filter((url) => url.includes('/api/agents/merge-check'))).toEqual([]);
+    expect(urls.filter((url) => !url.includes('/api/items/uncommitted'))).toEqual([]);
     expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
   });
 
@@ -1131,6 +1165,14 @@ describe('OrchestrateSheet', () => {
       const url = String(input);
       if (url.includes('/api/agents/merge-check')) {
         return new Promise<Response>((_resolve, rej) => { reject = rej; });
+      }
+      // task-32's own on-mount read, answered clean and kept out of `calls`
+      // for `stubOrchestrate`'s reason: `calls` is this case's evidence that
+      // exactly one launch went out, and this is not it.
+      if (url.includes('/api/items/uncommitted')) {
+        return Promise.resolve({
+          ok: true, status: 200, json: () => Promise.resolve({ paths: [], known: true })
+        } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       return Promise.resolve({

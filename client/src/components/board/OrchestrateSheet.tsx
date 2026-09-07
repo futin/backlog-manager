@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 
-import { ApiError, fetchMergeCheck, startOrchestrate, type MergeCheckResult } from '../../lib/agents';
+import {
+  ApiError, fetchMergeCheck, fetchUncommitted, startOrchestrate,
+  type MergeCheckResult, type UncommittedItems
+} from '../../lib/agents';
 import {
   EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction
 } from '../../../../shared/agent';
@@ -79,11 +82,15 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
  *     orchestrator tool's own gate (orchestrate.mjs) is the only truth, and
  *     the run re-gates itself when it starts. So this component's "preview"
  *     is a pure derivation over props BoardView already had in hand (see
- *     `queue` below), never a fetch. Task 8 later added the one genuine
- *     exception — a `GET /api/agents/merge-check` effect behind the
- *     merge-mode picker — and it is deliberately built so a failure can
- *     never gate anything: unlike a blocked LaunchSheet, this sheet stays
- *     fully usable whether or not that request ever comes back.
+ *     `queue` below), never a fetch. Task 8 added the first exception — a
+ *     `GET /api/agents/merge-check` effect behind the merge-mode picker —
+ *     and task-32 the second, a `GET /api/items/uncommitted` effect behind
+ *     the queue preview's `uncommitted` chip. Neither one is a gate, which is
+ *     the property that keeps them exceptions rather than a reversal: both
+ *     are deliberately built so a failure renders nothing at all, and unlike
+ *     a blocked LaunchSheet this sheet stays fully usable whether or not
+ *     either request ever comes back. The queue itself is still a derivation
+ *     over props and no fetch has any say in what it lists.
  *   - LaunchSheet's whole body is built around one editable `prompt`
  *     textarea for one item. Orchestrate has no prompt field, full stop —
  *     the server owns a constant one (`ORCHESTRATE_PROMPT`,
@@ -213,6 +220,19 @@ export function OrchestrateSheet(
    * for exactly when this is fetched.
    */
   const [mergeCoverage, setMergeCoverage] = useState<MergeCheckResult | null>(null);
+  /**
+   * Which of this project's item files differ from `main` (task-32) — the
+   * rows whose bytes on disk are not the bytes the run will act on, which is
+   * broader than "the rows it cannot see" and is the whole reason the note
+   * below states two fates rather than one. `null` covers the same three
+   * states `mergeCoverage`'s
+   * does — not asked, in flight, request failed — and all three render
+   * nothing: this is a warning, not a gate, and no failure of it may cost
+   * anyone a launch. `known: false` (the server could not make the read)
+   * renders nothing either; see `uncommittedPaths` below for why that is a
+   * separate condition rather than an empty list.
+   */
+  const [uncommitted, setUncommitted] = useState<UncommittedItems | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -307,6 +327,42 @@ export function OrchestrateSheet(
   }, [mergeMode, project]);
 
   /**
+   * The uncommitted flag's data source (task-32) — `GET
+   * /api/items/uncommitted`, the same shape the merge-check effect above
+   * takes, `alive` guard and silent `.catch` included, and restated here
+   * rather than factored out for the reason this file's header already gives
+   * about small idioms.
+   *
+   * Keyed on `[project]` ONLY, and that is the whole cadence: once per sheet
+   * open, never again when a mode is picked or a step is walked. Unlike
+   * merge-check — which is legitimately re-asked because `mergeMode` decides
+   * whether the question applies at all — nothing on this sheet can change
+   * the answer, since the answer is about someone's working tree and this
+   * screen has no writers. Two spawns of git per sheet open is the budget
+   * this feature was accepted at (see uncommitted.util.ts on why it is not
+   * memoised server-side); making it per-step would multiply that by however
+   * many times someone walks back and forth.
+   *
+   * The `.catch` is silent for the merge-check hint's reason exactly: this
+   * exists to stop a run wasting a slot, not to gate one, and a network
+   * hiccup here must cost nothing more than a warning that never shows up.
+   * `error`/`busy` stay `start`'s own state, untouched.
+   */
+  useEffect(() => {
+    let alive = true;
+    fetchUncommitted(project)
+      .then((result) => {
+        if (alive) setUncommitted(result);
+      })
+      .catch(() => {
+        if (alive) setUncommitted(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [project]);
+
+  /**
    * The queue preview — deliberately client-side and deliberately only an
    * approximation, per brief context point 6: there is no server endpoint
    * that runs the orchestrator's real gate against a whole project (adding
@@ -383,6 +439,68 @@ export function OrchestrateSheet(
    *  there would be the board overruling the orchestrator's own gate on the
    *  strength of a preview that says outright it is not authoritative. */
   const emptySelection = queueIds.length > 0 && selectedIds.length === 0;
+
+  /**
+   * The rows whose file on disk is not the file a board-started run will read
+   * (task-32) — never "the rows it cannot see", since a row present at `main`
+   * and edited since is one the run finds, gates and executes, just not from
+   * these bytes. What follows from that is the note's business, and it splits
+   * it; this derivation only decides membership.
+   *
+   * `known` gates the whole derivation rather than being a decorative field:
+   * `{ paths: [], known: false }` means the server could not make the read at
+   * all — no git, the project is not the repo toplevel, no `main` ref — and an
+   * absent answer must never render as "nothing is uncommitted", since the
+   * chip below is a statement of fact about someone's repository. An empty set
+   * is therefore the answer to both "nothing to flag" and "no idea", which is
+   * exactly right: neither one flags anything.
+   *
+   * Matched on `item.path`, never on an id parsed out of a filename. The
+   * server's `id` comes from frontmatter while its path comes from the
+   * directory walk, so deriving one from the other would be a SECOND identity
+   * rule for the two sides to drift apart on — and the server already builds
+   * these strings with the same construction `scanProject` uses for
+   * `BacklogItem.path`, so a plain `Set.has` compares equal with no realpath
+   * on either side.
+   *
+   * Ids, not paths, come out the far end: the selection, the order and the
+   * request all speak in ids (see `selected` above), and `deselectUncommitted`
+   * below has to hand `setSelected` the same currency `toggle` does.
+   */
+  const uncommittedPaths = new Set(uncommitted?.known === true ? uncommitted.paths : []);
+  const uncommittedIds = queue
+    .filter(({ item }) => uncommittedPaths.has(item.path))
+    .map(({ item }) => item.id);
+  /** Only the flagged rows that are still ticked — the control's own count,
+   *  so pressing it once disables it rather than leaving a button that claims
+   *  there is still something to deselect. */
+  const uncommittedSelected = uncommittedIds.filter(isSelected);
+
+  /**
+   * Narrow the selection to the committed rows — the person's act, not the
+   * sheet's (Decision 5).
+   *
+   * The default selection is deliberately NOT changed by this feature:
+   * `selected === null` is the difference between "drain the queue" and "run
+   * exactly these ids", and auto-excluding flagged rows would force an
+   * explicit `ids` list into every launch — freezing the queue snapshot for a
+   * run the person believes is draining everything, and having this screen
+   * overrule the orchestrator's own gate on the strength of a preview that
+   * says outright it is not authoritative. It also buys almost nothing: the
+   * run skips these items at the cost of one gate verdict, with no dispatch
+   * and no worktree.
+   *
+   * `prev ?? queueIds` is `toggle`'s own first step, for its own reason: "the
+   * whole queue" has to become an explicit set before anything can be removed
+   * from it, because that is what the sheet has been showing since it opened.
+   */
+  const deselectUncommitted = (): void => {
+    setSelected((prev) => {
+      const next = new Set(prev ?? queueIds);
+      for (const id of uncommittedIds) next.delete(id);
+      return next;
+    });
+  };
 
   /** Step 2's rows, and the lookup they render from. Keyed by id because
    *  that is what the order and the request both speak in; the row itself
@@ -575,6 +693,57 @@ export function OrchestrateSheet(
                 )}
               </div>
 
+              {/* The uncommitted warning (task-32). Says the ONE fact that is
+                  true of every flagged row — the run reads main's copy, not
+                  the file on disk — and then splits the consequence, because
+                  the flag is deliberately broader than any single gate
+                  verdict and review round 1 caught this note claiming
+                  otherwise.
+
+                  `uncommittedItemPaths` flags any item file whose working
+                  tree differs from main. `buildGatedQueue`'s
+                  `not committed on ${base}` reason fires on the strictly
+                  narrower `readBlob(relPath) === null`, i.e. the path is
+                  ABSENT from main. A row that is present at main, groomed
+                  there, and merely edited since is flagged here and gated
+                  `ready` by the run — which then executes MAIN'S bytes,
+                  so a plan written after the last commit is not the plan that
+                  runs. That is worth saying and worth a deselect control; it
+                  is not worth saying it will be skipped, because it will not
+                  be. (Any working-tree touch reaches it, `backlog.mjs start
+                  --as groom`'s own `updated:` stamp included.)
+
+                  The verdict string stays on screen VERBATIM —
+                  `not committed on main` is what the run writes into the run
+                  file's reasons, so a person who finds the skip afterwards can
+                  match it up — but demoted to the case it actually describes.
+                  `Groomed on disk only` is task-29's wording, said by the
+                  groom skill at the moment the state is created; both phrases
+                  earn their place, as two sentences to two readers at two
+                  times. It is offered as the NAME of the usual case rather
+                  than asserted of all N rows (review round 2, Minor): the
+                  queue preview deliberately lists ungroomed bugs and tasks
+                  too — see `queue` above — so a flagged-and-ungroomed row
+                  exists and "groomed on disk only" is false of it. Keeping the
+                  shared phrase and scoping it costs one parenthesis; dropping
+                  it would cost the one link between this screen's words and
+                  the groom skill's.
+
+                  Its own note rather than another clause on the preview
+                  disclaimer above: that one says the run may re-gate an item
+                  to a different VERDICT, which is not the same claim as "the
+                  bytes the run gates are not the bytes on this screen". */}
+              {uncommittedIds.length > 0 && (
+                <div className="sheet-note" data-testid="orchestrate-uncommitted-note">
+                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item differs' : 'items differ'} from
+                  main — the run reads main's copy rather than the file here ("groomed on
+                  disk only", in the usual case). One missing from main altogether is
+                  skipped ("not committed on main"); one present but stale there is gated
+                  and run on main's bytes, so a plan written since the last commit is not
+                  the plan that runs.
+                </div>
+              )}
+
               {queue.length === 0 ? (
                 <div className="drawer-empty">nothing groomed and open in this project</div>
               ) : (
@@ -605,6 +774,23 @@ export function OrchestrateSheet(
                     >
                       select none
                     </button>
+                    {/* Rendered only when there is something to deselect, the
+                        same way the note above is: a permanently-disabled
+                        fourth button would put a question ("what does that
+                        mean?") on every launch screen in every project that
+                        has no such rows, which is most of them most of the
+                        time. The count is the still-SELECTED flagged rows, so
+                        pressing it once retires the control rather than
+                        leaving it claiming work it has already done. */}
+                    {uncommittedSelected.length > 0 && (
+                      <button
+                        type="button"
+                        className="drawer-close"
+                        onClick={deselectUncommitted}
+                      >
+                        deselect uncommitted ({uncommittedSelected.length})
+                      </button>
+                    )}
                   </div>
 
                   <div className="run-drawer-queue" data-testid="orchestrate-queue">
@@ -629,6 +815,30 @@ export function OrchestrateSheet(
                           <span className="run-drawer-item-id">{item.id}</span>
                           <span className="run-drawer-item-title">{item.title}</span>
                           <span className={`orchestrate-preview-action ${action}`}>{actionLabel(item, action)}</span>
+                          {/* Beside the action label, not instead of it: the
+                              two say different things — what the run would DO
+                              with this item, and whether the bytes it will do
+                              that to are the ones on this screen — and the run
+                              really will queue this row, gate it and report
+                              it, which is why the checkbox stays enabled and
+                              the row stays in the list. Same reasoning the
+                              file already gives for never disabling an
+                              ungroomed row: this screen has no authority to
+                              decide otherwise.
+
+                              The word stays `uncommitted` rather than
+                              narrowing to "differs from main" (review round 1,
+                              Minor): one vocabulary across the chip, the
+                              `deselect uncommitted (N)` button, the endpoint
+                              and the docs is worth more here than per-row
+                              precision the note directly above already
+                              supplies — it now opens by defining exactly what
+                              the chip means, and a row whose CHANGES are the
+                              uncommitted part is covered by that sentence
+                              rather than left to the chip to say alone. */}
+                          {uncommittedPaths.has(item.path) && (
+                            <span className="orchestrate-preview-flag">uncommitted</span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -683,6 +893,13 @@ export function OrchestrateSheet(
                 </button>
               </div>
 
+              {/* No `uncommitted` chip on these rows, and that is a decision
+                  rather than an omission (task-32): the flag is a step 1 fact
+                  about membership — "should this be in the run at all" — and
+                  step 1 is where the control that acts on it lives. This step
+                  answers a different question, in what order, and repeating
+                  the chip here would invite acting on it from a screen that
+                  has no checkbox to act with. */}
               <div className="run-drawer-queue" data-testid="orchestrate-order">
                 {arranged.map((id, i) => {
                   const item = byId.get(id);

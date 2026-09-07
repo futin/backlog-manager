@@ -3,6 +3,10 @@ id: task-32
 title: Flag uncommitted items in the Orchestrate sheet's queue preview before a run skips them
 created: 2026-09-07
 from: idea-9
+updated: 2026-09-07T08:54:59Z
+started: 2026-09-07T08:10:53Z
+execute-elapsed: 2646
+execute-tokens: 224718
 ---
 
 ## Goal
@@ -321,3 +325,319 @@ below depends on `main` being genuinely absent.
   and the no-memo rule.
 - The next cross-run sweep can attribute any remaining "not committed on main" verdict to
   a run started outside the board, not to a launch surface that failed to say so.
+
+## Outcome
+
+2026-09-07 — done as planned. `GET /api/items/uncommitted` answers `{ paths, known }`
+from two git reads against `main`, memoised nowhere; the Orchestrate sheet's step 1
+chips the flagged rows, states the count in the run's own words and offers
+`deselect uncommitted (N)`; no default selection changed and an untouched sheet still
+posts no `ids`.
+
+Files: `server/src/items/uncommitted.util.ts` (new), `items.service.ts`,
+`items.controller.ts`, `client/src/lib/agents.ts`,
+`client/src/components/board/OrchestrateSheet.tsx`, `client/src/styles.css`,
+`test/uncommitted.test.ts` (new), `test/orchestrate-uncommitted.test.tsx` (new),
+`test/orchestrator-start-ui.test.tsx` (stubs), CLAUDE.md, docs/invariants.md, README.md.
+
+All five Decisions implemented as written; no course changed. Three departures from the
+plan's letter, none from its intent:
+
+1. **Plan case 7 (no `main` ref) is an outcome pin, not a red proof of the
+   `rev-parse --verify main` precondition.** With that precondition deleted, `diff main`
+   and `ls-files` both fail against a repo with no `main`, the util's own "either read
+   failed" clause catches it, and the case stays green. The precondition still earns its
+   place (it mirrors `blobReaderAt`'s own seam, and costs one cheap spawn instead of two
+   doomed ones), but neither reason is observable from outside. Said so in the test.
+2. **Plan case 6's fixture was strengthened.** As specified — a subdirectory with an
+   uncommitted item and no commits at all — it passed with the toplevel check removed,
+   for the wrong reason (no `main`, so both reads failed anyway). It now commits an
+   anchor on `main` first, so the naive implementation really does report a path and the
+   check is what turns that into `known: false`.
+3. **Plan case 13's spy moved from `realpathSync` to `execFileSync`, and plan case 23
+   gained a sibling.** `uncommittedItemPaths` spawns FIRST and only calls `realpathSync`
+   on that spawn's success, so a realpath spy stayed green with the registry gate moved
+   after the util — while the server shelled out to git about an arbitrary
+   caller-supplied path. Same shape for the shape guard: a 200 with no `paths` key is
+   also absorbed by the render's own `known === true` gate, so case 23 pins the outcome
+   and new **case 23b** (`paths: 5`, which reaches `new Set(...)` and throws) is the
+   guard's actual red proof.
+
+Deliberately not done: **the browser check (plan case 27)**, and not because it does not
+matter. It needs the API on 4322 and Vite on 5177 — both almost certainly held by the
+live app that started this very run, since a board click is what spawns an orchestrator
+session — and it needs a throwaway project registered into the real
+`~/.backlog-manager/registry.json`, i.e. a write to shared machine state that this
+user's live board would render mid-run, with a teardown whose failure mode is precisely
+bug-17's phantom entry. In an unattended session with nobody to confirm either, that
+trade is wrong. What it would have covered beyond the suites: the visual layer alone —
+the route itself is exercised over real HTTP against a real git repo by cases 12-14, and
+the chip/note/button by 16-24. In its place: `.orchestrate-preview-flag` was verified
+present in the built CSS (`client/dist/assets/index-*.css`) and to reference only
+`--mono`/`--amber`/`--hairline`/`--steel`, all four of which `shared/theme.css` defines
+in all five palettes.
+
+One neighbouring site left standing on purpose: `skills/backlog-groom/SKILL.md`'s "This
+skill is what creates the uncommitted state, so it is the only place the sentence can be
+said at the moment it becomes true." Still true as written — this task is the other half,
+said later to a different reader — so it was not edited.
+
+### Verification
+
+`pnpm test` (both runners), `pnpm run typecheck` and `pnpm run build`, on the final tree:
+
+```
+Test Suites: 82 passed, 82 total
+Tests:       1564 passed, 1564 total
+
+# tests 450
+# pass 450
+# fail 0
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+
+$ tsc --noEmit
+(no output)
+
+vite v5.4.21 building for production...
+✓ built in 1.26s
+```
+
+One earlier `jest` invocation reported `1 failed, 1562 passed` — `bug-33` exactly (a
+lone supertest failure that does not reproduce); the same command passed on the next two
+runs and `pnpm test` passed every time. Not caused by this diff, which touches no
+server code the failing shape involves.
+
+Contract sweep: 2 sites updated (client/src/components/board/OrchestrateSheet.tsx's
+header claim that merge-check was "the one genuine exception" to "never a fetch";
+test/orchestrator-start-ui.test.tsx, whose `stub`/`stubOrchestrate` catch-alls answered
+the new endpoint with `/api/items`' shape and whose branch-mode case asserted
+`not.toHaveBeenCalled()` on fetch outright)
+Red proof: 13 production reverts run one at a time, each against the one suite it
+affects: dropping `ls-files --others` reddened case 3 with 1/2/4 green; the toplevel
+check → 6; `core.quotePath=false` → 9; `UNCOMMITTED_BASE_REF` → 'master' → 26 (+10);
+a `lastCommitDates`-style memo → 10; the `-- backlog` pathspec → 11; the registry gate
+moved after the util → 13; the blank-project 400 → 14; the `known` gate → 21; the shape
+guard → 23b; the row chip → 16; the step 1 note → 17; the deselect button → 19/19b/20;
+auto-excluding flagged rows by default → 18; `[project, mergeMode, step]` deps → 24;
+the silent `.catch` → 22/23/23b; unscoping `uncommittedIds` from the queue → the
+non-queued-path case. Every added test has a proof except case 7 (see departure 1) and
+case 23 (see departure 3).
+
+## Review round 1
+
+Verdict: fix. Report:
+`~/.backlog-manager/orchestrator/…/reviews/task-32-1.md`.
+
+**Important — the step 1 note claimed a verdict the gate produces for only half the
+flagged rows. Fixed.** The reviewer is right, and the reproduction is exact:
+`uncommittedItemPaths` flags any working-tree difference from `main`, while
+`buildGatedQueue`'s `not committed on main` reason fires only on `readBlob(relPath) ===
+null` — a path ABSENT from `main` (confirmed at `orchestrate.mjs:1249-1265`: a present
+blob goes to `parseItemForGate(committed)` and can gate `ready`). So a row committed and
+groomed at `main` and edited since was told it would be skipped, when in fact the run
+queues it, dispatches it and executes **main's** bytes. Worse than a wrong sentence: the
+`deselect uncommitted (N)` button sits beside it, so the note invited dropping an item
+that would have run. Trigger is ordinary — any working-tree touch of a groomed,
+committed item, including `backlog.mjs start --as groom`'s own `updated:` stamp.
+
+The plan contradicted itself here (Decision 2 says a present item never earns that
+reason; section 5 then dictated a note claiming it for every row) and the diff shipped
+the wrong half. Fixed as a wording change, not a redesign — the broad predicate is
+Decision 2's and stays.
+
+The note now leads with the fact true of every flagged row and splits the fates:
+
+> N items groomed on disk only — they differ from main, and the run reads main's copy
+> rather than the file here. One missing from main altogether is skipped ("not committed
+> on main"); one that is merely stale there is gated and run on main's bytes, so a plan
+> written since the last commit is not the plan that runs.
+
+The shared verbatim string is still on screen, demoted to the case it describes.
+
+Five sites carried the same over-claim, three more than the reviewer listed:
+
+- `client/src/components/board/OrchestrateSheet.tsx` — the note, its comment, and the
+  chip's comment ("whether it can see it at all" → whether the bytes the run acts on are
+  the ones on screen).
+- `CLAUDE.md:66` (Layout) and the Invariants entry, which now states outright that the
+  predicate is broader than one verdict and that **any surface stating a consequence
+  must split it**.
+- `docs/invariants.md` — the "exactly one situation" sentence, section 2's stale
+  cross-reference to the old note wording, and a new section, *One question, two fates*,
+  carrying both fates, why this is the predictable mistake (only the narrow shape has a
+  quotable verdict string, and quoting the run is one of the feature's goals), and the
+  chip-word decision below.
+- `server/src/items/uncommitted.util.ts`'s header, which asserted the same single fate
+  in the first paragraph a later reader meets.
+- `README.md` — "flag the rows a run will not be able to see" → whose bytes on disk are
+  not the bytes a run reads.
+
+**Minor 1 — button counts `uncommittedSelected`, not `uncommittedIds`. Kept, and now
+declared.** The reviewer's read is right on both counts: the behaviour is better (press
+it once and the control retires instead of claiming work it has done) and it was missing
+from the departures list, which is the actual defect. It is departure 4.
+
+**Minor 2 — the chip word. Kept as `uncommitted`, deliberately.** One vocabulary across
+the chip, the `deselect uncommitted (N)` button, the endpoint and the docs beats per-row
+precision now that the note directly above the rows defines the term in its first
+clause. A chip reading `differs from main` would be more accurate about one row while
+leaving the button and the endpoint speaking a different language from it. Recorded in
+the chip's own comment and in `docs/invariants.md` so the next reader sees a decision
+rather than an oversight.
+
+Tests: case 17's count assertion loosened to `2 items` (the plural form moved), the
+singular/plural sibling rewritten, and **case 17b added** — three separate assertions
+(the shared fact, the absent case's verdict scoped to it, the present-but-stale case's
+different fate) plus a negative on `and skip them`, so the next rewording cannot quietly
+lose one. Split into three rather than one string match for that reason. Case 18's
+absent-`ids` assertion untouched and still green.
+
+Red proof for the fix: restoring the old note sentence verbatim reddens case 17b and the
+plural case, 13 others green. Re-ran after restoring: 15/15.
+
+### Verification (round 1 fix)
+
+```
+Test Suites: 82 passed, 82 total
+Tests:       1565 passed, 1565 total
+
+# tests 450
+# pass 450
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ tsc --noEmit
+(no output)
+
+✓ built in 1.33s
+```
+
+Contract sweep: 5 sites updated (OrchestrateSheet.tsx note + two comments, CLAUDE.md
+Layout + Invariants, docs/invariants.md ×3 incl. a new section,
+server/src/items/uncommitted.util.ts header, README.md) — every place that stated the
+flag's consequence as a single fate.
+Red proof: 1 test (case 17b) went red with the old wording restored; the plural case
+went red with it, and the other 13 stayed green.
+
+## Review round 2
+
+Verdict: fix. Report:
+`~/.backlog-manager/orchestrator/…/reviews/task-32-2.md`.
+
+**Important — the narrow fate survived on four cited sites, and two more the review did
+not name. All six fixed.** Both halves of the finding are conceded outright:
+
+- The diff violated an invariant it added in the same commit. `items.controller.ts`
+  stated a consequence ("the rows the run will skip") and did not split it, one file
+  away from a CLAUDE.md rule reading "any surface stating a consequence must split it".
+  A rule whose first counter-example ships inside the commit that writes the rule is the
+  failure `docs/invariants.md` exists to prevent.
+- **The round-1 `Contract sweep:` line was false.** It claimed "every place that stated
+  the flag's consequence as a single fate" on the strength of five sites found by
+  reading, and a reader trusting it would not have looked again. The lesson is the one
+  the reviewer states: grep for the residue of the wording, then check every hit on the
+  feature's path — do not sweep by recall.
+
+Swept this time with `grep -rniE "not be able to see|would not find|will skip|cannot
+see|and skip them|not find at"` over `server/src client/src shared test docs CLAUDE.md
+README.md skills`, then a second pass on `skip them|flag the rows|rows the run|rows a
+run`. Six sites on this feature's path, of which the review cited four:
+
+1. `server/src/items/items.controller.ts` — the docstring. Now states no consequence at
+   all and points at the util header and *One question, two fates*: a two-branch rule
+   restated on the transport layer is a copy that will drift from the one that matters.
+2. `server/src/items/items.service.ts` — "would not find at `main`" → differ from
+   `main`, with the narrow phrasing named and refused inline.
+3. `client/src/components/board/OrchestrateSheet.tsx:224` — the state comment.
+4. `client/src/components/board/OrchestrateSheet.tsx:441` — the derivation comment.
+5. **`client/src/lib/agents.ts`** — not cited: "would NOT find at `main`, so the sheet
+   can flag the rows that run is going to skip". The `skip` claim, on the client's own
+   fetch layer.
+6. **`client/src/styles.css`** — not cited: "a row the run will not be able to see at
+   `main`", on the chip's own rule.
+
+Every remaining grep hit is now either an explicit negation of the wrong wording
+("deliberately not…", "never…", "Not 'the rows that run is going to skip'"), a
+deliberate quote of the old note as history (`docs/invariants.md`'s two-fates section,
+case 17b's own comment, and case 17b's negative assertion), or unrelated to this feature
+(the dashboard's "cannot see this project" family, `diff` cannot see an untracked file).
+
+**Minor 1 — the last blanket claim. Fixed rather than left.** The note opened `N items
+groomed on disk only` while `queue` deliberately previews ungroomed bugs and tasks, so a
+flagged-and-ungroomed row was called groomed — a blanket claim inside a sentence whose
+whole point is not making blanket claims. The count sentence now leads with the fact
+that is true of every flagged row and keeps task-29's shared phrase as the *name of the
+usual case*:
+
+> N items differ from main — the run reads main's copy rather than the file here
+> ("groomed on disk only", in the usual case). One missing from main altogether is
+> skipped ("not committed on main"); one present but stale there is gated and run on
+> main's bytes, so a plan written since the last commit is not the plan that runs.
+
+Scoping it costs one parenthesis; dropping the phrase would cost this screen's only link
+to the groom skill's own wording. Pinned by new **case 17c**, whose fixture is the case
+that made it false (one flagged row, `groomed: false`, still previewed and labelled
+`groom`): it asserts the count sentence, that `1 item groomed on disk only` does NOT
+appear, and that the phrase survives only as the parenthetical.
+
+**Minor 2 — agreed, filed, not implemented.** The server really does know each row's
+fate and discards it: `diff --name-only main` means present-at-main-and-edited,
+`ls-files --others` means never tracked, and `uncommittedItemPaths`' union merges them.
+Filed as **idea-10** in this worktree, `from: task-32` — including the wrinkle the
+Minor's own framing misses, that "which read found it" is not the same question as "does
+`main` hold this path": a file tracked on a branch `main` does not contain is reported by
+`diff` and is still absent from `main`, which is the case Decision 2 exists for. So the
+fate is a third git question, not a partition of the two already asked. The endpoint's
+shape is unchanged in this loop, as instructed.
+
+**Tool anomaly found while filing it, and worth someone's attention:** in this
+environment `node skills/backlog/tools/backlog.mjs new <section> "<title>"` prints the
+new item's path and frontmatter, exits `0`, and **creates no file**. Reproduced three
+times here and once in a throwaway `git init` + `backlog.mjs init` store under `/tmp`,
+where `init` itself wrote `backlog/README.md` correctly and the subsequent `new` wrote
+nothing. It also minted `idea-10` on all four attempts, so nothing was persisted between
+them. If that reproduces outside this sandbox, `/backlog-capture` files nothing while
+reporting success, which is worth a bug of its own — this session cannot file it, for
+the same reason. idea-10's file was therefore written by hand, matching the filename and
+frontmatter the tool printed; the registry needed no change (this project is already
+registered, and `new`'s only other job is the id, which was free).
+
+### Verification (round 2 fix)
+
+```
+Test Suites: 82 passed, 82 total
+Tests:       1566 passed, 1566 total
+
+# tests 450
+# pass 450
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ tsc --noEmit
+(no output)
+
+✓ built in 1.29s
+```
+
+Contract sweep: 6 sites updated (server/src/items/items.controller.ts,
+server/src/items/items.service.ts, client/src/lib/agents.ts,
+client/src/components/board/OrchestrateSheet.tsx ×2 comments,
+client/src/styles.css) — found by grepping four spellings of the wrong wording over the
+whole worktree and checking every hit on this feature's path, rather than by recall.
+Two of the six were outside the review's own list.
+Red proof: 1 test (case 17c) added for Minor 1 and proven — restoring the old
+`N items groomed on disk only` opening reddens 17c plus case 17 and the plural case, 13
+others green. The six Important sites are comment-only and carry no test by nature; the
+grep re-run above is their check, and case 17b (round 1) already pins the rendered
+sentence they were describing.
