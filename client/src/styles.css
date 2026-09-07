@@ -1971,6 +1971,33 @@ body {
 .runs-row-count { margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
 .runs-row-wall { font-family: var(--mono); font-size: 10px; color: var(--ink3); font-variant-numeric: tabular-nums }
 
+/* task-21's placeholder row (StartingRow, RunsView.tsx) — a run this server
+   spawned whose run.json has not been written yet, in the runs LIST rather
+   than the board's strip stack. Dashed border and `cursor: default` say the
+   same two things `.run-strip-starting` says on the board, in the same two
+   languages: the row is provisional, and there is nothing here to click (no
+   run file means no runId, and no runId means no detail pane to open).
+   The `:hover` rule is not a duplicate of the base one — `.runs-row:hover`
+   outranks a single class on specificity, so without this the row would
+   still light up under the pointer, which is a response to an interaction it
+   does not actually have. */
+.runs-row-starting { border-style: dashed; cursor: default }
+.runs-row-starting:hover { border-color: var(--hairline) }
+/* Quiet ink, never `.runs-status-live`'s cyan: cyan means "heartbeating right
+   now" everywhere in this app and this run has not reported anything at all
+   yet. Not amber either — starting is the most ordinary thing a run can be
+   doing, not a state anyone needs to look at. Same reasoning, same token, as
+   `.run-strip-starting-label`. */
+.runs-status-starting { color: var(--ink2) }
+/* `.runs-row-wall`'s treatment in `.runs-row-count`'s SLOT: the age is the
+   only number this row has, so it takes the right-hand column every other row
+   puts a number in rather than trailing the project name and leaving that
+   column empty. */
+.runs-row-starting-age {
+  margin-left: auto; font-family: var(--mono); font-size: 10px;
+  color: var(--ink3); font-variant-numeric: tabular-nums;
+}
+
 /* task-16's `load more`, sitting at the foot of the list INSIDE the scroll
    box. Deliberately quieter than .runs-row — dashed rather than solid, no
    paper fill — so it reads as the end of the list rather than as one more
