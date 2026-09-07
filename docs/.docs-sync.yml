@@ -19,6 +19,15 @@ docs:
   - path: docs/workflows/publishing.md
     kind: workflow
     note: Publishing a change to the skills
+  - path: docs/subsystems/api.md
+    kind: subsystem
+    note: The API
+  - path: docs/subsystems/board.md
+    kind: subsystem
+    note: The board (client)
+  - path: docs/subsystems/skills.md
+    kind: subsystem
+    note: The skills
 out-of-scope:
   - path: backlog/
     reason: the backlog store itself — item files are skill-written records, and the store README documents the store beside the items it describes
