@@ -3,6 +3,10 @@ id: task-24
 title: "Bring README back in line with the shipped app: five skills, the full HTTP surface, four rail tabs, refactors"
 created: 2026-09-06
 tags: docs, audit-2026-09-06
+updated: 2026-09-07T03:40:19Z
+started: 2026-09-07T03:26:52Z
+execute-elapsed: 807
+execute-tokens: 78664
 ---
 
 ## Goal
@@ -83,3 +87,98 @@ pnpm run typecheck
 - All four drifts closed and each verified by the grep named above, with results in the
   outcome.
 - The three Minor items are either fixed or explicitly listed as deferred.
+
+## Outcome
+
+2026-09-07 — all four drifts closed in one pass over `README.md`, plus all three
+Minor items. `.claude-plugin/plugin.json` was the only file touched outside the
+README.
+
+**1. The fifth skill.** Opening paragraph now reads "five backlog skills" and
+names `/backlog-orchestrate`; a new paragraph after the columns sentence says
+what it does (per-item worktree, headless `/backlog-execute`, commit → review →
+verify → merge, branch mode leaving `main` untouched, `run.json` outside the
+repo). The Install section lists all five plus the `backlog-reviewer` agent, and
+the Architecture `skills/` bullet reads "the five published skills" and names
+both single-writer CLIs. An `agents/` bullet and an `agents/` row in the repo
+layout table were added beside it, since the reviewer only exists post-install
+because `PUBLISHED_PATHS` names that directory.
+
+**2. The HTTP surface.** The `server/src/agents/` bullet now enumerates all nine
+of its routes and a new `server/src/orchestrator/` bullet the three read-only
+run-state ones. Cross-checked mechanically rather than by eye: a script parses
+every `@Controller`/`@Get`/`@Post` decorator under `server/src` and asserts each
+resulting `VERB /api/...` string appears in the Architecture section with
+whitespace collapsed —
+
+```
+routes declared: 16  missing from README Architecture: 0 []
+```
+
+The ASCII diagram gained the orchestrator half (`backlog-orchestrate` →
+`orchestrate.mjs` → `~/.backlog-manager/orchestrator/`, with the server's edge
+to it marked read-only).
+
+**3. The side rail.** Now "Board / Runs / Archive / Settings", matching
+`SideRail.tsx`'s four `TABS` ids (`board`, `runs`, `archive`, `settings`, read
+back out of the file to confirm), and Runs is described: stat tiles, the range
+control, the day-grouped history, the stage-track detail pane, and Watchdog
+mode. Board's bullet also gained the Orchestrate control and the run strip,
+which were undocumented for the same reason.
+
+**4. The store-format table.** `| refactors | ref | open -> done |` added
+between tasks and out-of-scope, matching `SECTIONS` in `backlog.mjs:30`, so the
+table no longer contradicts `README.md:13`'s four columns. A closing sentence
+was added saying ideas and refactors are the two sections nothing executes —
+each waits to be promoted into a task.
+
+**The three Minor items: all three fixed, none deferred.**
+
+- The Settings claim is now scoped: the per-device list ends "never sent to the
+  server", then names the Orchestrator watchdog group as "the one place Settings
+  does write to the server: four knobs that live in `settings/watchdog.json`".
+- `Everything lives in .env` reworded to except the last two rows, and
+  `BM_ORCH_HOME` and `BM_ORCH_CONTROL_HOME` added to the Configuration table
+  with "Not in `.env.example`" stated on each. Those two are the whole gap:
+  `grep -rhoE 'BM_[A-Z_]+' server/src` returns nine keys, and those are the two
+  `.env.example` does not carry.
+- `.claude-plugin/plugin.json:3` now advertises "(capture, groom, execute,
+  orchestrate, board)". `.claude-plugin/marketplace.json` was left alone — its
+  description carries no skill list to be missing from.
+
+Three claims outside the four drifts but inside the paragraphs they live in were
+corrected, because CLAUDE.md contradicted them: the staleness prose named two
+rungs of the three-rung `updated ?? lastCommit ?? created` precedence and no
+longer does (and now states that an in-progress item and one a live run holds
+both outrank the arithmetic); "the board writes nothing" became "writes no item
+file" in two places, since the board does write watchdog config and a pause
+request; and the `shared/agent.ts` bullet no longer reads as an exhaustive list
+of two functions. Deriving any of these counts at build time stayed out of
+scope, as the plan directed.
+
+Verification. `pnpm run typecheck` is the item's own gate and is clean; the full
+suite was run because a docs change still has to leave both runners green:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm test
+Test Suites: 80 passed, 80 total
+Tests:       1516 passed, 1516 total
+Time:        53.237 s
+# tests 415
+# pass 415
+# fail 0
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.45s
+
+$ grep -ci orchestr README.md
+27
+```

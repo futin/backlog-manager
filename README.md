@@ -1,9 +1,10 @@
 # backlog-manager
 
-A Claude Code plugin that homes four backlog skills — `/backlog`,
-`/backlog-capture`, `/backlog-groom`, `/backlog-execute` — plus a small local
-web app that collects every registered project's backlog, across every repo
-the skills have touched, into one kanban-by-type board.
+A Claude Code plugin that homes five backlog skills — `/backlog`,
+`/backlog-capture`, `/backlog-groom`, `/backlog-execute`,
+`/backlog-orchestrate` — plus a small local web app that collects every
+registered project's backlog, across every repo the skills have touched, into
+one kanban-by-type board.
 
 The skills write items into whatever project they were run in, one Markdown
 file per item under that project's own `backlog/`. Every `init` or `new` call
@@ -13,11 +14,24 @@ four fixed columns — refactoring, ideas, bugs, tasks. Items that were decided
 against are not on the board at all: out-of-scope is a record rather than
 queue work, and it lives in Archive.
 
+`/backlog-orchestrate` is the largest of the five and the only one that touches
+git. Told to drain a project's groomed queue, it works every ready bug and task
+one at a time — each in its own git worktree and its own headless
+`/backlog-execute` session — then commits that item, has it reviewed and
+verified, and merges it to `main` before the next one starts. Told to leave
+branches instead, it stops at a reviewed `backlog/<id>` branch per item and
+never touches `main` at all. A run's state lives in a `run.json` outside the
+repo, under `~/.backlog-manager/orchestrator/`; the app reads that file to
+render live runs, run history, and the watchdog that resumes a crashed run.
+
 - **No auth, no database.** The registry file and each project's `backlog/`
   directory ARE the data; there is nothing here to log into.
-- **Read-only board.** Filing, grooming, and moving items all happen through
-  the skills — at the CLI or inside Claude Code. The board only ever renders
-  what is already on disk.
+- **The app writes no item files.** Filing, grooming, executing and moving
+  items all happen through the skills — at the CLI, inside Claude Code, or in a
+  session the board itself spawned. What the board can do is start that work (a
+  dispatch, or an orchestrator run), pause a run, and save the run watchdog's
+  own server-side settings; every item on screen is rendered from what is
+  already on disk.
 
 ## The store format
 
@@ -29,11 +43,15 @@ Markdown file per item, one directory per section:
 | bugs          | bug    | open -> done  |
 | ideas         | idea   | open -> done  |
 | tasks         | task   | open -> done  |
+| refactors     | ref    | open -> done  |
 | out-of-scope  | oos    | flat          |
 
 An item's status is the directory it lives in (`open/` vs `done/`), never a
 frontmatter field. `out-of-scope/` has no `open/done` split — an item lands
-there once and stays; rejection is terminal.
+there once and stays; rejection is terminal. Ideas and refactors are the two
+sections nothing executes directly: what each waits for is to be *promoted*
+into a task, which is `/backlog-groom`'s job — an idea is something new, a
+refactor an existing thing that should be improved.
 
 ## Requirements
 
@@ -74,7 +92,9 @@ No database to start first.
 
 ### Configuration
 
-Everything lives in `.env`; `.env.example` documents each key.
+Everything lives in `.env`, and `.env.example` documents each key — except the
+last two rows below, which the server reads straight from the process
+environment and `.env.example` does not carry.
 
 | Key | Default | Purpose |
 |---|---|---|
@@ -88,6 +108,8 @@ Everything lives in `.env`; `.env.example` documents each key.
 | `BM_AGENTS_TOKEN` | empty | Sent as `Authorization: Bearer …` when the dashboard sets `ANSWER_TOKEN` |
 | `BM_WATCHDOG_FILE` | `~/.backlog-manager/settings/watchdog.json` | Where the server itself writes the run watchdog's own settings |
 | `BM_WATCHDOG` | on | `off` disables the run watchdog entirely — the operator's kill switch, separate from its Settings toggle |
+| `BM_ORCH_HOME` | `~/.backlog-manager/orchestrator/` | The orchestrator's run-state directory: `orchestrate.mjs` writes each run's `run.json` there and archives finished runs under `runs/`, and this server only ever reads it. Not in `.env.example` |
+| `BM_ORCH_CONTROL_HOME` | `~/.backlog-manager/settings/orchestrator-control/` | Where this server writes a pause request, which a live run reads back at its dispatch gates — the one file travelling server to tool. Not in `.env.example` |
 
 A project outside `BM_PROJECT_ROOT` is invisible to the container and is
 reported as missing on `/api/projects` rather than silently dropped from the
@@ -111,6 +133,13 @@ from the item file, not from the click, so an ungroomed bug cannot be executed
 by asking nicely — and nothing here ever writes an item: the spawned session
 runs the skills, which remain the only writers.
 
+The board's Orchestrate control goes out the same way and through the same
+switch: with `BM_AGENTS` off there is nothing to spawn a run with. Pausing or
+cancelling a live run is the deliberate exception — a pause is a fact on this
+machine's own disk and calls nothing outbound, so it keeps working after that
+switch is turned off, which is what stops a run started while agents were on
+from becoming unstoppable.
+
 ## Install the skills
 
 The repo is its own plugin marketplace:
@@ -120,10 +149,15 @@ The repo is its own plugin marketplace:
 /plugin install backlog-manager@backlog-manager-marketplace
 ```
 
-That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, and
-`/backlog-execute`. `init` and `new` both register the current project in the
-real registry, so a project appears on the board the first time any of the
-four skills runs in it — no separate registration step.
+That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`,
+`/backlog-execute` and `/backlog-orchestrate`, plus the read-only reviewer
+agent `backlog-manager:backlog-reviewer` that `/backlog-orchestrate` dispatches
+before every merge. (An install carries `agents/` because a marketplace with no
+`sparsePaths` clones the whole repo; if your own declaration in
+`~/.claude/settings.json` pins that key, it has to list `agents` alongside
+`skills` or the reviewer is invisible in the install.) `init` and `new` both register the current project in the
+real registry, so a project appears on the board the first time any of the five
+skills runs in it — no separate registration step.
 
 If you ran these skills before this repo existed, they are still sitting in
 `~/.claude/skills/` and will now load a second time alongside the plugin's
@@ -167,11 +201,17 @@ instead.
 ## Architecture
 
 ```
-skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manager/registry.json
-        backlog-groom, backlog-execute)                                  |
-                                                                     read-only
-                                                                           v
-     React SPA (client/)   <->   Nest API (server/)   ->   <project>/backlog/*.md
+skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/registry.json
+        backlog-groom, backlog-execute)                                |
+                                                                   read-only
+                                                                         v
+    React SPA (client/)  <->  Nest API (server/)  ---------->  <project>/backlog/*.md
+                                    |     ^
+                              spawns|     |read-only
+                                    v     |
+      skill (backlog-orchestrate)  ->  orchestrate.mjs  ->  ~/.backlog-manager/
+                                                              orchestrator/run.json
+                                                              orchestrator/runs/
 ```
 
 - `server/src/health/` — `GET /api/health`, a plain liveness check.
@@ -183,28 +223,71 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   registry — a path outside every registered project's `backlog/` 404s).
 - `server/src/registry/` — read-only view of the registry file, re-read on
   every request so a capture made mid-session shows up on the next fetch.
-- `server/src/agents/` — `GET /api/agents/status` (whether dispatch is on
-  and whether `../claude-agents-dashboard` answered), `POST /api/agents/plan`
-  (this item's next step, derived from the file, plus a composed default
-  prompt), `POST /api/agents/dispatch` (spawns the session in that
-  dashboard).
-- `client/src/` — a side rail (Board / Archive / Settings, a plain section
-  switch),
+- `server/src/agents/` — the one module that calls anything outbound, and
+  every POST in it is guarded by content-type and origin: `GET
+  /api/agents/status` (whether dispatch is on and whether
+  `../claude-agents-dashboard` answered), `POST /api/agents/plan` (this item's
+  next step, derived from the file, plus a composed default prompt), `POST
+  /api/agents/dispatch` (spawns the session in that dashboard), `POST
+  /api/agents/orchestrate` (spawns a headless `/backlog-orchestrate` run for
+  one project — the prompt is composed server-side, so a caller can influence
+  which items and which modes and nothing else), `POST /api/agents/resume`
+  (re-spawns a run that crashed or was paused), `POST /api/agents/pause`
+  (writes the pause request a live run reads back at its dispatch gates; the
+  one route here that is independent of `BM_AGENTS` and makes no outbound
+  call), `GET /api/agents/watchdog` and `POST /api/agents/watchdog/config` (the
+  run watchdog's live state, and the four server-side knobs behind it — this
+  server's only write outside a run's pause file), and `GET
+  /api/agents/merge-check` (a local, read-only look at whether a project's main
+  tree is in a state that can receive a merge).
+- `server/src/orchestrator/` — a read-only view of the orchestrator's
+  run-state directory: `GET /api/orchestrator/runs` (every project's current
+  `run.json`, re-read fresh on every request, which is what lets the board
+  watch a run's heartbeat live — plus the runs this server has itself just
+  asked for and whose run file does not exist yet), `GET
+  /api/orchestrator/archive` (every run a project has ever produced, current
+  and archived alike) and `GET /api/orchestrator/archive/run` (one run file
+  verbatim, gated by an id pattern and an allowlist built the same way item
+  bodies are). `orchestrate.mjs` is that directory's only writer; this module
+  never writes it and never caches it.
+- `client/src/` — a side rail (Board / Runs / Archive / Settings, a plain
+  section switch),
   the board (toolbar with search plus project/status/sort selects, four fixed
-  columns, a click-to-open drawer rendering the item's Markdown body, plus a
+  columns, a click-to-open drawer rendering the item's Markdown body, a
   dispatch button — on the card and again in the drawer — that opens a
-  launch sheet onto `../claude-agents-dashboard`), and Settings (five themes,
-  density, text scale, landing section, the staleness window — all per-device,
-  in `localStorage`, never sent to the server — plus a Claude Agents group
-  reporting that dashboard's status).
+  launch sheet onto `../claude-agents-dashboard`, an Orchestrate control that
+  opens a three-step sheet for starting a run over the filtered project's
+  queue — pick the items, hand-order them, then choose permission mode, model,
+  effort, merge mode and question mode — and, above the columns, a strip
+  carrying every project's live runs, a crashed one included, with
+  Pause / Cancel / Resume in its drawer), Runs (aggregate stat tiles including
+  machine time by stage, a Today / week / month / all range control, a project
+  filter, a day-grouped run history with live runs pinned above it, and a
+  detail pane with a seven-node stage track and per-stage timings for every
+  item in the run — plus a Watchdog mode that replaces the whole body with the
+  sweeper's own live state: its phase, the runs it is watching, each one's
+  heartbeat freshness, and an activity feed), Archive, and Settings (five
+  themes, density, text scale, landing section, the staleness window and the
+  two orchestrator run defaults — all per-device, in `localStorage`, never sent
+  to the server — plus a Claude Agents group reporting that dashboard's status,
+  and an Orchestrator watchdog group, the one place Settings does write to the
+  server: four knobs that live in `settings/watchdog.json` beside the registry
+  rather than in this browser).
 
   The Board shows what is live: an open refactor, idea or bug nobody has
   touched inside the staleness window (30 days by default, `Settings → Board →
   Archive after`) leaves it for Archive on its own. "Touched" is the `updated:`
-  stamp every `start`/`stop` writes, falling back to `created` for a file that
-  predates the stamp — **so the first load after upgrading moves genuinely old,
-  never-touched items off the Board.** Nothing is lost: grooming one refreshes
-  the stamp and it is back at the next load. Tasks are the exception and never
+  stamp every `start`/`stop` writes, falling back to the last commit that
+  touched the item file, and to `created` only when git can answer neither —
+  that middle rung is there because a groom session which edits an item through
+  the editor rather than through the CLI leaves the frontmatter silent.
+  **So the first load after upgrading moves genuinely old, never-touched items
+  off the Board.** Nothing is lost: grooming one refreshes the stamp and it is
+  back at the next load. Two things outrank the arithmetic outright — an item a
+  skill session is working right now, and an item a live orchestrator run has
+  claimed — because neither is neglected, whatever its own stamps say: a run
+  writes `started:` inside its own worktree, so the copy the board renders
+  stays silent for the whole run. Tasks are the exception and never
   leave — a task rotting for six weeks is a fact to look at, so it keeps its
   column and gains a `stale` marker instead.
 
@@ -219,15 +302,24 @@ skills (backlog, backlog-capture,       ->   backlog.mjs   ->   ~/.backlog-manag
   files a *new* item citing `from: <id>` and leaves the original rejected on
   the record. (That id keeps whatever prefix it always had — a rejection moves
   a file, it never renames one, so most rejected items are still `bug-N` or
-  `task-N`.) As everywhere else, the board writes nothing; the spawned session
-  does.
-- `shared/` — `types.ts` (registry and API shapes, defined once and imported
-  by both sides), `agent.ts` (`deriveAction` and `dispatchGate` — the single
-  implementation of what a dispatch click does and whether it may happen,
-  imported by the board to label a button and by the server to validate the
-  request, so a button can never promise what the API refuses) and `theme.css`
-  (the five theme palettes as CSS custom properties).
-- `skills/` — the four published skills; this is the plugin's skill root.
+  `task-N`.) As everywhere else, the board writes no item file; the spawned
+  session does.
+- `shared/` — `types.ts` (registry, API and run shapes, defined once and
+  imported by both sides), `agent.ts` (the derivations both sides have to agree
+  on: `deriveAction` and `dispatchGate` — what a dispatch click does and
+  whether it may happen, imported by the board to label a button and by the
+  server to validate the request, so a button can never promise what the API
+  refuses — alongside the run-claim and watchdog predicates the board and the
+  sweeper must not each re-implement) and `theme.css` (the five theme palettes
+  as CSS custom properties).
+- `skills/` — the five published skills; this is the plugin's skill root.
+  `skills/backlog/tools/backlog.mjs` is the CLI every skill calls and the
+  registry's only writer; `skills/backlog-orchestrate/tools/orchestrate.mjs` is
+  the orchestrator's own CLI and the run file's only writer.
+- `agents/` — the plugin's own agents, one file each, discovered from this
+  root-level directory by Claude Code's own convention. Currently one:
+  `backlog-reviewer.md`, the read-only reviewer `/backlog-orchestrate`
+  dispatches before every merge.
 - `backlog/` — this repo's own file-based backlog, self-registered like any
   other project (see `backlog/README.md`).
 - `docs/superpowers/` — the design spec and implementation plan this repo was
@@ -250,9 +342,10 @@ Tests are flat in `test/`. Component suites opt into jsdom with a
 
 | Path | Contents |
 |---|---|
-| `skills/` | The published skills — this is the plugin's skill root |
-| `server/` | Nest API: items, projects, item bodies, the registry reader |
-| `client/` | React SPA: side rail, board, drawer, settings |
+| `skills/` | The five published skills — this is the plugin's skill root |
+| `agents/` | The plugin's own agents; today just the orchestrator's reviewer |
+| `server/` | Nest API: items, projects, item bodies, the registry reader, the agents module and the orchestrator's run reader |
+| `client/` | React SPA: side rail, board, run strip, runs, archive, settings |
 | `shared/` | Types, the dispatch derivation (`agent.ts`) and theme tokens shared by both |
 | `backlog/` | This repo's own file-based backlog |
 | `docs/superpowers/` | Design spec and implementation plan |
