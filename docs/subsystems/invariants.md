@@ -196,11 +196,25 @@ somebody poking at the tool by hand, can never write into a real machine's
 history.
 
 **`sweep` opens the retro home, and it opens it read-only.** That is the one
-crossing, and it exists because a retro's whole value is the comparison: "fix
-loops are 38% of dispatched items" is a number, and "31%, after task-28
-landed" is a finding. The deltas need the newest record, so `sweep` reads it —
-and reading it is all it does. The write stays in `record`, behind one command
-a session calls once at the end.
+crossing into the directory `record` owns, and it exists because a retro's
+whole value is the comparison: "fix loops are 38% of dispatched items" is a
+number, and "31%, after task-28 landed" is a finding. The deltas need the
+newest record, so `sweep` reads it — and reading it is all it does. The write
+stays in `record`, behind one command a session calls once at the end.
+
+**The whole read surface is four homes, each env-overridable, and `sweep`
+writes none of them.** `$BM_ORCH_HOME` (the run state, the subject),
+`$BM_RETRO_HOME` (the previous record, for the deltas above),
+`$BM_REGISTRY_FILE` (read once, so the report can print a project's name
+beside its path — a broken or missing registry yields an empty name map
+rather than stopping a sweep that has perfectly good run state to report) and
+`$BM_CLAUDE_PROJECTS` (one driver transcript per run, by recorded lease id).
+Four rather than three because the registry is easy to forget: it contributes
+nothing to a single number in the report, which is exactly why a claim that
+`sweep` opens "nothing but the run state and a driver transcript" reads as
+true and is not. The overrides exist for one reason each tool here shares —
+a test process must never be able to read, and `record` must never be able to
+write, a real machine's state.
 
 **`record` refuses to overwrite (exit `2`), and that is not a safety
 interlock — it is what makes a record evidence.** A summary that can be

@@ -5,9 +5,15 @@
 // oversight: a plugin skill's `tools/` may never import another skill's
 // `tools/` (CLAUDE.md Invariants) — an install is a copy of whatever
 // shipped, and a prune of one skill must never break another — and neither
-// may import from the server. So `orchHome()` and `projectDir()` exist here
-// AND in `skills/backlog-orchestrate/tools/orchestrate.mjs` AND in
-// `server/src/orchestrator/`, each with a comment naming its twins.
+// may import from the server. So each function below names its own twins,
+// and the twin sets are NOT the same set — worth stating, because "all of
+// these exist in all of those files" is the tidy summary a reader assumes
+// and it is wrong in both directions. `orchHome()` has two twins
+// (`orchestrate.mjs` and `orchestrator.service.ts`); `projectDir()` has one
+// (`orchestrate.mjs` — the server keys the same directory but inlines
+// `encodeURIComponent(project)` rather than naming a function for it);
+// `registryFile()`'s twin is in `backlog.mjs`, which has neither of the
+// other two.
 //
 // The four homes are all env-overridable for one reason: a test process
 // must never be able to read, and `record` must never be able to write,
@@ -44,10 +50,12 @@ export function claudeProjectsRoot() {
   return process.env.BM_CLAUDE_PROJECTS || path.join(os.homedir(), '.claude', 'projects')
 }
 
-// Twin: orchestrate.mjs's `projectDir()`. encodeURIComponent turns every
-// `/` into `%2F`, which is what makes an absolute path safe as a single
-// path SEGMENT — `path.join` of the raw path would recreate the project's
-// whole directory tree under `root` instead.
+// Twin: orchestrate.mjs's `projectDir()`, and the same keying the server
+// performs inline (`orchestrator.service.ts`) rather than behind a function
+// of its own. encodeURIComponent turns every `/` into `%2F`, which is what
+// makes an absolute path safe as a single path SEGMENT — `path.join` of the
+// raw path would recreate the project's whole directory tree under `root`
+// instead.
 export function projectDir(root, project) {
   return path.join(root, encodeURIComponent(project))
 }

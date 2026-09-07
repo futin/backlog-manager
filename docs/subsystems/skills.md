@@ -46,9 +46,14 @@ an item has to be committed before an orchestrator run can read it.
   sweep, the session's labels and the report beside them, once, refusing to overwrite.
 
 None may import another: one skill's `tools/` directory is not on another's path once
-installed, which is why all three carry deliberate second copies of the small path
-helpers they share — the linked-worktree discriminator, `orchHome()`, `projectDir()` —
-each pinned by its own suite.
+installed, so a helper two of them need exists twice, on purpose. No helper is shared by
+all three, and the two pairs are different pairs — `backlog.mjs` and `orchestrate.mjs`
+each carry the linked-worktree discriminator (the `commondir` entry in a `gitdir:`
+target, never "`.git` is a file"), while `orchestrate.mjs` and `retro.mjs` each carry
+`orchHome()` and `projectDir()`. `retro.mjs` has no discriminator at all — it needs no
+git root, because its subject is every project at once — and `backlog.mjs` has neither
+path helper, because the run-state directory is none of its business. Each copy is
+pinned by its own tool's suite.
 
 ### `references/`
 

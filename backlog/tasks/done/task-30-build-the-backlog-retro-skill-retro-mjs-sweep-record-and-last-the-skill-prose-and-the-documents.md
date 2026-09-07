@@ -250,3 +250,75 @@ spec directly.
   on the next Claude Code restart, and the first `/backlog-retro` run then
   produces the first record.
 - `node_modules/` was installed in this worktree to run jest; it is gitignored.
+
+### Review round 1 — both Important findings fixed
+
+Both were accurate, and both were prose this branch wrote claiming more than
+the code does. Verified against the code before rewriting; the code was right
+in both cases, so only the sentences changed.
+
+**1. `CLAUDE.md:111` — the exhaustive read clause was false.** It said `sweep`
+"opens nothing else outside the run-state home but a run's driver transcript
+by recorded session id", while `buildSweep` (`retro.mjs:184`) calls
+`readRegistryNames(registryFile())` on every sweep. The bullet now states the
+read surface positively and completely: four homes — run state, retro home,
+`registry.json`, and one driver transcript per run by recorded lease id — and
+writes to none of them. `docs/subsystems/invariants.md` gained a matching
+paragraph naming all four with their env overrides, and the sentence above it
+("that is the one crossing") was tightened to "the one crossing into the
+directory `record` owns", which is what it meant and not what it said.
+`CLAUDE.md:58`'s Layout line had the same omission one bullet away and now
+names the registry too.
+
+**2. `docs/subsystems/skills.md:49` — "all three carry ... the discriminator,
+`orchHome()`, `projectDir()`" was false in both directions.** Measured:
+
+```
+                          orchHome()  projectDir()  commondir
+backlog.mjs                        0             0          7
+orchestrate.mjs                    1             1          7
+backlog-retro/lib/paths.mjs        1             1          0
+```
+
+No helper is in all three, and the two pairs are different pairs. The sentence
+now says exactly that: `backlog.mjs` + `orchestrate.mjs` share the
+linked-worktree discriminator, `orchestrate.mjs` + `retro.mjs` share
+`orchHome()` and `projectDir()`, `retro.mjs` has no discriminator (it needs no
+git root — its subject is every project at once) and `backlog.mjs` has neither
+path helper.
+
+**A third instance of the same defect, found while checking the second.**
+`lib/paths.mjs`'s own header claimed `orchHome()` and `projectDir()` exist
+"here AND in `orchestrate.mjs` AND in `server/src/orchestrator/`". The server
+has `orchHome()` but no `projectDir()` — it inlines `encodeURIComponent(project)`
+(`orchestrator.service.ts:477`). The header now names each function's own twin
+set and says outright that the sets differ, because "all of these exist in all
+of those files" is the tidy summary a reader assumes and it is wrong both ways.
+
+**One test added, so a claim the fix makes is mechanically true.** skills.md
+now says each duplicated copy is "pinned by its own tool's suite", and
+`retro-lib.test.mjs` pinned `retroHome()` alone by name — the other three
+homes were only exercised indirectly through the CLI's environment. One case
+now pins all four (`orchHome`, `retroHome`, `registryFile`,
+`claudeProjectsRoot`), override and default, and it replaces the narrower
+`retroHome` case it subsumes. Test count is unchanged at 508.
+
+Contract sweep: 4 sites updated (CLAUDE.md:58, CLAUDE.md:111,
+docs/subsystems/invariants.md, docs/subsystems/skills.md, plus
+skills/backlog-retro/tools/lib/paths.mjs's header); swept the repo for
+surviving copies of both claims and found none — every other "nothing else"
+is a writer claim or unrelated.
+Red proof: 4 tests went red with the change reverted
+
+The four are the new pinning case, probed one home at a time by dropping each
+`process.env.<KEY> ||` from `lib/paths.mjs`; all four went red and the tree was
+restored from a file copy and diffed clean. The two prose fixes have no test
+of their own — they are documentation corrections, and the code they describe
+was already correct and already pinned.
+
+Re-ran every check this Outcome lists: `pnpm run typecheck` clean; `pnpm test`
+green both runners (82 jest suites, 1566 tests; 508 skill tests); the baseline
+reconciliation still exact (`27 runs, 83 items, 92 sessions, $540.71`);
+`--json` parses through a pipe (447,726 bytes); `--project /nowhere` exits `1`,
+`last` exits `3`, an unknown command exits `1`; the driver line still carries
+`est.`; nothing written under `~/.backlog-manager/` outside this run's own log.

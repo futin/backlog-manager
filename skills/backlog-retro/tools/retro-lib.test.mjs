@@ -9,7 +9,8 @@ import os from 'node:os'
 import path from 'node:path'
 
 import {
-  claudeProjectKey, decodeProjectDir, projectDir, readRegistryNames, retroHome,
+  claudeProjectKey, claudeProjectsRoot, decodeProjectDir, orchHome, projectDir,
+  readRegistryNames, registryFile, retroHome,
 } from './lib/paths.mjs'
 
 // --- Task 1: paths -------------------------------------------------------
@@ -32,16 +33,39 @@ test('projectDir and decodeProjectDir round-trip a project path', () => {
   assert.equal(decodeProjectDir(path.basename(dir)), '/Users/a/p')
 })
 
-test('retroHome honours $BM_RETRO_HOME and falls back under the home directory', (t) => {
-  const before = process.env.BM_RETRO_HOME
+test('every home honours its own env override, and falls back under the home directory', (t) => {
+  // All four are pinned BY NAME, not merely exercised through the CLI. The
+  // override is the reason a test can run at all: `orchHome()` reading the
+  // ambient environment would point a sweep at the developer's real run
+  // state, and `retroHome()` doing so would let `record` write into their
+  // real history. `registryFile()` and `claudeProjectsRoot()` are the two
+  // reads that are easy to forget the tool even performs — which is exactly
+  // why they are listed here beside the two nobody forgets.
+  const keys = {
+    BM_ORCH_HOME: orchHome,
+    BM_RETRO_HOME: retroHome,
+    BM_REGISTRY_FILE: registryFile,
+    BM_CLAUDE_PROJECTS: claudeProjectsRoot,
+  }
+  const before = Object.fromEntries(Object.keys(keys).map((k) => [k, process.env[k]]))
   t.after(() => {
-    if (before === undefined) delete process.env.BM_RETRO_HOME
-    else process.env.BM_RETRO_HOME = before
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
   })
-  process.env.BM_RETRO_HOME = '/tmp/retro-here'
-  assert.equal(retroHome(), '/tmp/retro-here')
-  delete process.env.BM_RETRO_HOME
-  assert.equal(retroHome(), path.join(os.homedir(), '.backlog-manager', 'retro'))
+  const defaults = {
+    BM_ORCH_HOME: path.join(os.homedir(), '.backlog-manager', 'orchestrator'),
+    BM_RETRO_HOME: path.join(os.homedir(), '.backlog-manager', 'retro'),
+    BM_REGISTRY_FILE: path.join(os.homedir(), '.backlog-manager', 'registry.json'),
+    BM_CLAUDE_PROJECTS: path.join(os.homedir(), '.claude', 'projects'),
+  }
+  for (const [key, fn] of Object.entries(keys)) {
+    process.env[key] = `/tmp/pinned-${key}`
+    assert.equal(fn(), `/tmp/pinned-${key}`)
+    delete process.env[key]
+    assert.equal(fn(), defaults[key])
+  }
 })
 
 test('readRegistryNames maps every registered path to its name, and never throws', (t) => {

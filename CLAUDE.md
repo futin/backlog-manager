@@ -56,8 +56,8 @@ reasoning behind the rules in the next section lives in
   `skills/backlog/tools/backlog.mjs` is the registry's only writer;
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only
   writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state
-  directory and, by recorded lease id, each run's driver transcript, and owns
-  `~/.backlog-manager/retro/`
+  directory, the registry and — by recorded lease id — each run's driver
+  transcript, and owns `~/.backlog-manager/retro/`
   ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)).
   **Start orchestrator runs from the board, not by typing the trigger into a
   terminal.**
@@ -108,8 +108,9 @@ happened.
   writer, stated for the third directory under `~/.backlog-manager` a tool
   owns. A record is evidence, so `record` refuses to overwrite one (exit
   `2`): the fix for a wrong record is the next sweep, never an edit. `sweep`
-  opens the retro home read-only, for deltas, and opens nothing else outside
-  the run-state home but a run's driver transcript by recorded session id.
+  reads four homes and writes none of them — the run-state home, the retro
+  home (for deltas), `registry.json` (for project names) and, by recorded
+  lease id alone, one driver transcript per run.
   Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
 - **A run's sidecars are archived beside its run file, under a name derived
   from the archive path and stored nowhere.** One `archiveStem` names both
