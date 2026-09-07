@@ -1,7 +1,7 @@
 # backlog-manager
 
-A Claude Code plugin that publishes five backlog skills — capture, groom, execute,
-orchestrate and a read-only board printer — together with a local web app that shows
+A Claude Code plugin that publishes six backlog skills — capture, groom, execute,
+orchestrate, retro and a read-only board printer — together with a local web app that shows
 every registered project's backlog on one board. There is no database: the registry file
 and each project's `backlog/` directory *are* the data, and everything the app displays
 is derived from them on the way out.
@@ -18,7 +18,7 @@ file, and each file that holds state has exactly one writer.
 | [CLAUDE.md](../CLAUDE.md) | the normative index: one line per rule, for anyone (or anything) working in this repo |
 | [subsystems/api.md](subsystems/api.md) | the Nest side: what each module owns, which reads are cached and which must never be |
 | [subsystems/board.md](subsystems/board.md) | the client: the four surfaces, and what the browser derives rather than fetches |
-| [subsystems/skills.md](subsystems/skills.md) | the five skills, their two single-writer CLIs, and the reviewer agent |
+| [subsystems/skills.md](subsystems/skills.md) | the six skills, their three CLIs, and the reviewer agent |
 | [subsystems/invariants.md](subsystems/invariants.md) | the rationale behind the rules whose "why" outruns one line — most encode a failure that already happened |
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes |
 | [workflows/publishing.md](workflows/publishing.md) | getting a skill edit out of the working tree and into the installed plugin |
@@ -36,7 +36,7 @@ Deliberately not tracked, and each for a stated reason in
 
 ### The data plane
 
-Four artefacts hold everything, and the single-writer column is the load-bearing part:
+Five artefacts hold everything, and the single-writer column is the load-bearing part:
 
 | artefact | one writer | read by |
 | --- | --- | --- |
@@ -44,9 +44,12 @@ Four artefacts hold everything, and the single-writer column is the load-bearing
 | each project's `backlog/**/*.md` | the skills | the server's scan; the client renders it |
 | `~/.backlog-manager/orchestrator/<project>/run.json` | `skills/backlog-orchestrate/tools/orchestrate.mjs` | `server/src/orchestrator/`, fresh per request |
 | `~/.backlog-manager/settings/` | the server | the watchdog config it wrote, and — for the pause request — `orchestrate.mjs` |
+| `~/.backlog-manager/retro/` | `skills/backlog-retro/tools/retro.mjs record` | `retro.mjs sweep`, read-only, for the deltas against the newest record |
 
-That last row is the one exception to the direction of travel: everything else under
-`~/.backlog-manager` flows tool → server, and the pause request flows server → tool.
+The `settings/` row is the one exception to the direction of travel: everything else
+under `~/.backlog-manager` flows tool → server, and the pause request flows server →
+tool. The retro home travels nowhere at all — one tool writes it and the same tool reads
+it back on the next sweep.
 The run file's own single-writer guarantee is untouched by it.
 
 ### The API — [full doc](subsystems/api.md)

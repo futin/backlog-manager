@@ -1,8 +1,10 @@
 # backlog-manager
 
-A Claude Code plugin that homes five backlog skills — `/backlog`,
+A Claude Code plugin that homes six backlog skills — `/backlog`,
 `/backlog-capture`, `/backlog-groom`, `/backlog-execute`,
-`/backlog-orchestrate` — plus a small local web app that collects every
+`/backlog-orchestrate`, and `/backlog-retro`, which sweeps every orchestrator
+run on the machine into one report of what the pipeline cost, where the time
+went and how much of it was rework — plus a small local web app that collects every
 registered project's backlog, across every repo the skills have touched, into
 one kanban-by-type board.
 
@@ -14,7 +16,7 @@ four fixed columns — refactoring, ideas, bugs, tasks. Items that were decided
 against are not on the board at all: out-of-scope is a record rather than
 queue work, and it lives in Archive.
 
-`/backlog-orchestrate` is the largest of the five and the only one that touches
+`/backlog-orchestrate` is the largest of the six and the only one that touches
 git. Told to drain a project's groomed queue, it works every ready bug and task
 one at a time — each in its own git worktree and its own headless
 `/backlog-execute` session — then commits that item, has it reviewed and
@@ -156,14 +158,14 @@ The repo is its own plugin marketplace:
 ```
 
 That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`,
-`/backlog-execute` and `/backlog-orchestrate`, plus the read-only reviewer
+`/backlog-execute`, `/backlog-orchestrate` and `/backlog-retro`, plus the read-only reviewer
 agent `backlog-manager:backlog-reviewer` that `/backlog-orchestrate` dispatches
 before every merge. (An install carries `agents/` because a marketplace with no
 `sparsePaths` clones the whole repo; if your own declaration in
 `~/.claude/settings.json` pins that key, it has to list `agents` alongside
 `skills` or the reviewer is invisible in the install.) `init` and `new` both register the current project in the
-real registry, so a project appears on the board the first time any of the five
-skills runs in it — no separate registration step.
+real registry, so a project appears on the board the first time a skill files or
+scaffolds an item in it — no separate registration step.
 
 If you ran these skills before this repo existed, they are still sitting in
 `~/.claude/skills/` and will now load a second time alongside the plugin's
@@ -216,8 +218,10 @@ skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/
                               spawns|     |read-only
                                     v     |
       skill (backlog-orchestrate)  ->  orchestrate.mjs  ->  ~/.backlog-manager/
-                                                              orchestrator/run.json
-                                                              orchestrator/runs/
+                                                        |     orchestrator/run.json
+                                                   read-only  orchestrator/runs/
+                                                        v
+      skill (backlog-retro)        ->  retro.mjs      ->  ~/.backlog-manager/retro/
 ```
 
 Four seams, one doc each:
@@ -227,8 +231,8 @@ Four seams, one doc each:
   that can spawn a session, and only when `BM_AGENTS` says so.
 - [**The board**](docs/subsystems/board.md) — the React SPA: four lazy sections behind a
   side rail, with most of what you see derived in the browser from whole corpora.
-- [**The skills**](docs/subsystems/skills.md) — the five published skills, their two
-  single-writer CLIs, and the reviewer agent the orchestrator dispatches before a merge.
+- [**The skills**](docs/subsystems/skills.md) — the six published skills, their three
+  CLIs, and the reviewer agent the orchestrator dispatches before a merge.
 - [**Invariant rationale**](docs/subsystems/invariants.md) — the rules all three are held
   to, and the failure each one encodes.
 
@@ -263,7 +267,7 @@ are in [`docs/workflows/development.md`](docs/workflows/development.md).
 
 | Path | Contents |
 |---|---|
-| `skills/` | The five published skills — the plugin's skill root ([doc](docs/subsystems/skills.md)) |
+| `skills/` | The six published skills — the plugin's skill root ([doc](docs/subsystems/skills.md)) |
 | `agents/` | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md)) |
 | `server/` | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader ([doc](docs/subsystems/api.md)) |
 | `client/` | React SPA — side rail, board, run strip, runs, archive, settings ([doc](docs/subsystems/board.md)) |

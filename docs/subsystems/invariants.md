@@ -185,6 +185,98 @@ merely agree are two chances to disagree later. `archivedRun()` needs no
 filter at all, because it probes the exact path `runs/<runId>.json`, which a
 sibling directory named `<runId>` can never answer to.
 
+## `~/.backlog-manager/retro/` has exactly one writer, and the retro never writes run state
+
+**task-30.** This is the third directory under `~/.backlog-manager/` that a
+tool owns outright, and it keeps the same relationship the other two do:
+`registry.json` has `backlog.mjs`, `run.json` has `orchestrate.mjs`, and
+`~/.backlog-manager/retro/` has `retro.mjs record`. `$BM_RETRO_HOME` overrides
+it for exactly the reason `$BM_ORCH_HOME` exists — so a test process, or
+somebody poking at the tool by hand, can never write into a real machine's
+history.
+
+**`sweep` opens the retro home, and it opens it read-only.** That is the one
+crossing into the directory `record` owns, and it exists because a retro's
+whole value is the comparison: "fix loops are 38% of dispatched items" is a
+number, and "31%, after task-28 landed" is a finding. The deltas need the
+newest record, so `sweep` reads it — and reading it is all it does. The write
+stays in `record`, behind one command a session calls once at the end.
+
+**The whole read surface is four homes, each env-overridable, and `sweep`
+writes none of them.** `$BM_ORCH_HOME` (the run state, the subject),
+`$BM_RETRO_HOME` (the previous record, for the deltas above),
+`$BM_REGISTRY_FILE` (read once, so the report can print a project's name
+beside its path — a broken or missing registry yields an empty name map
+rather than stopping a sweep that has perfectly good run state to report) and
+`$BM_CLAUDE_PROJECTS` (one driver transcript per run, by recorded lease id).
+Four rather than three because the registry is easy to forget: it contributes
+nothing to a single number in the report, which is exactly why a claim that
+`sweep` opens "nothing but the run state and a driver transcript" reads as
+true and is not. The overrides exist for one reason each tool here shares —
+a test process must never be able to read, and `record` must never be able to
+write, a real machine's state.
+
+**`record` refuses to overwrite (exit `2`), and that is not a safety
+interlock — it is what makes a record evidence.** A summary that can be
+edited after the fact is a summary; a file that can only be superseded is a
+measurement. The fix for a record you disagree with is the next sweep, which
+will carry both its own numbers and the deltas against the one you disagree
+with. Exit `2` rather than a `1` for the same reason `orchestrate.mjs`'s
+`6` and `7` are not `1`s: a `1` means "fix this call and retry", and this call
+must never be retried.
+
+**Nothing under the run-state directory is ever written.** `run.json` keeps its
+single writer, and the whole of `backlog-retro` is a reader of it — a
+historian rather than the live reader `server/src/orchestrator/` is. The
+sidecar directories, the reviews and the verify statuses are read the same
+way, fresh per call and never cached.
+
+**One transcript, by recorded id, and never a search.** The execute sessions
+each end their `logs/<id>.jsonl` with a `result` event carrying the cost the
+CLI actually billed, so there is nothing to gain by opening their Claude Code
+transcripts and a spec-level non-goal against doing it. The orchestrating
+session is the exception: nothing records its spend at all, and on the
+2026-09-06 hand sweep it came to roughly a third of the bill. So the tool
+opens exactly one file per run — `~/.claude/projects/<key>/<driver session
+id>.jsonl`, where the id comes from bug-19's driver lease on the run file
+itself. Every run from before that lease reads `no-lease` and its driver is
+reported as **unmeasured, never as free**; the report says that once, with a
+count, rather than once per run.
+
+**Dollars the tool did not observe are marked, every time they are printed.**
+Only a `total_cost_usd` on a `result` event is measured. The driver's spend is
+priced from four per-token rates fitted by ordinary least squares over the
+sessions that did report one, requiring at least eight of them, shipping
+`maxResidualUsd`, and carrying `estimated: true` in JSON and `est.` in text.
+Fitted rather than tabulated because a hard-coded price table goes stale
+silently the day pricing moves; marked because a reader who cannot tell the
+fitted third of the bill from the billed two thirds is being misled by the
+report rather than by the pipeline.
+
+**The labels are the session's, the set is closed, and the tool enforces it.**
+Whether a reviewer's Important finding was prose drift, a test that could not
+fail, or a real defect is the one judgement in a retro, and `record` validates
+it against `drift | red-proof | defect | other` (and a candidate's status
+against `filed | declined | deferred`), refusing with exit `1` and writing
+nothing. The point is the next sweep: the comparison is arithmetic over the
+recorded strings, and one `nit` or `Drift` silently becomes a fifth category
+neither sweep counts, so the difference reads as improvement. `other` exists
+so there is always a correct answer that is not a new word.
+
+**One thing the design predates.** The spec describes the sidecar directories
+as flat, one set per project, a later run's files replacing an earlier run's.
+task-31 landed between the spec and the build: a finished run's sidecars are
+now archived into `runs/<archiveStem>/` beside its run file, so a sweep that
+read only the project directory's own `logs/` would see the live run's
+sessions and nothing else. The tool reads both locations. What it does NOT do
+is treat an archive directory as an attribution — the first archive after
+task-31 swept 74 transcripts belonging to a dozen runs into one stem — so a
+session is still joined to an item by `(project, itemId)`, still attributed to
+the latest run that dispatched it, and an item two runs dispatched still
+produces the `collision` caveat.
+
+Spec: [2026-09-06-backlog-retro-design.md](../superpowers/specs/2026-09-06-backlog-retro-design.md).
+
 ## A pause request is a file the server writes and the tool reads
 
 **task-17.** Everything else under `~/.backlog-manager/` travels tool →
