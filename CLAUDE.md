@@ -1106,8 +1106,14 @@ happened.
   `scripts/test-all.mjs`. The split is which runner executes a file, not which
   ones one word covers; see the Invariants entry. Cases that pin a **skill's
   prose** rather than a tool live in `skills/backlog/tools/backlog.test.mjs`
-  too (`backlog-groom`'s stamp order, `backlog-execute`'s pre-review checks and
-  the `agents/backlog-reviewer.md` half that reads them): that glob is the only
-  one the node runner has, and neither of those files sits beside a `tools/`
-  directory. They read the other file, never import it — the "one skill's
-  `tools/` may never import another's" rule is untouched.
+  too (`backlog-groom`'s stamp order and its closing `Groomed on disk only`
+  line, `backlog-execute`'s pre-review checks and the
+  `agents/backlog-reviewer.md` half that reads them): that glob is the only one
+  the node runner has, and none of those files sits beside a `tools/`
+  directory. The one exception is deliberate — the `Groomed on disk only` cases
+  assert `skills/backlog-orchestrate/SKILL.md`'s half of that seam too, in this
+  suite rather than in `orchestrate.test.mjs`, because the rule is two skills
+  agreeing on one sentence and a suite that reads only one half cannot catch
+  them drifting apart; the reviewer/execute pair is the same shape. They read
+  the other file, never import it — the "one skill's `tools/` may never import
+  another's" rule is untouched.

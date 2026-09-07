@@ -171,7 +171,9 @@ minute:
   because that ref's bytes are the only ones a dispatched session will ever
   see. An item groomed a minute ago and not yet committed is therefore
   refused, and the fix is a `git commit` of `backlog/` on `main`, not a
-  groom. The orchestrator will not make that commit for you: it commits
+  groom. This is the same seam `backlog-groom` closes on, in its own
+  `Groomed on disk only` line — one sentence, two skills, one wording.
+  The orchestrator will not make that commit for you: it commits
   inside a per-item worktree, on `backlog/<id>` alone, and nowhere else.
   (`plan` and `init` both take `--base <ref>` for a repository whose trunk is
   not called `main`; nothing in this file passes it, and the default is the
