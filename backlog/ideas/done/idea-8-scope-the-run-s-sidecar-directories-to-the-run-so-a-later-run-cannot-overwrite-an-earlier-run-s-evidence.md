@@ -3,6 +3,10 @@ id: idea-8
 title: Scope the run's sidecar directories to the run, so a later run cannot overwrite an earlier run's evidence
 created: 2026-09-06
 tags: skills, orchestrate, stats
+updated: 2026-09-07T05:26:59Z
+promoted-to: task-31
+groom-elapsed: 206
+groom-tokens: 34247
 ---
 
 ## Problem
