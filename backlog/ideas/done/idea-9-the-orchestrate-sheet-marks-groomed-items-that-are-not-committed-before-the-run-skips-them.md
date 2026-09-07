@@ -3,6 +3,10 @@ id: idea-9
 title: The Orchestrate sheet marks groomed items that are not committed, before the run skips them
 created: 2026-09-06
 tags: client, server, orchestrate
+updated: 2026-09-07T05:27:32Z
+promoted-to: task-32
+groom-elapsed: 158
+groom-tokens: 25001
 ---
 
 ## Problem
