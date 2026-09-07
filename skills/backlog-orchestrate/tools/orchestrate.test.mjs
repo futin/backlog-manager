@@ -7,8 +7,8 @@ import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
-  RUN_STALE_MS, controlFilePath, controlHome, isZombieStatState, pauseRequestEffective, readPermissionDenials,
-  readSessionUsage,
+  RUN_STALE_MS, archiveStem, controlFilePath, controlHome, isZombieStatState, pauseRequestEffective,
+  readPermissionDenials, readSessionUsage,
 } from './orchestrate.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
@@ -335,8 +335,10 @@ test('init over a status:"done" run archives the old file to runs/<runId>.json a
   assert.equal(current.status, 'running')
 })
 
-// A second archive after the resumed run also finishes proves pastRuns is a
-// plain directory-listing count, not a value carried on the run file itself.
+// A second archive after the resumed run also finishes proves pastRuns is
+// counted off the archive directory, not carried on the run file itself.
+// (Since task-31 that count is the listing filtered to `.json`; no sidecars
+// are seeded here, so this case's runs/ holds two files and nothing else.)
 test('a second done-then-init cycle grows runs/ to two archived files', (t) => {
   const { home, project } = orchFixture(t)
   assert.equal(run(project, home, 'init', '--project', project).status, 0)
@@ -348,6 +350,267 @@ test('a second done-then-init cycle grows runs/ to two archived files', (t) => {
 
   assert.equal(out.status, 0, out.stderr)
   assert.equal(fs.readdirSync(runsDir(home, project)).length, 2)
+})
+
+// --- task-31: a run's SIDECAR directories are archived beside its run file --
+//
+// Before this, `init` archived `run.json` alone and left `<dir>/logs`,
+// `<dir>/reviews`, `<dir>/verify`, `<dir>/questions` (and whatever else a
+// driver invented) flat and project-scoped, keyed by item id — so an item
+// dispatched in two runs had its first transcript, reviewer report and
+// verify output silently overwritten by its second. Every case below seeds
+// the sidecars by hand, because nothing in this suite creates them: the
+// directories are made by drivers following SKILL.md prose (`mkdir -p
+// "<dir>/logs"`), never by the tool, which is also why the archiver uses a
+// DENYLIST of two rather than an allowlist of the five names known today.
+
+// The per-project state directory itself — the parent `runFile`/`runsDir`
+// above both point into. Sidecar seeding needs the parent, not either child.
+function projStateDir(home, project) {
+  return path.join(home, encodeURIComponent(project))
+}
+
+// Writes one sidecar file at `<dir>/<rel>`, creating its parents. `rel` is
+// a POSIX-ish relative path ('logs/bug-1.jsonl'); joined a segment at a time
+// so this reads the same on any platform the suite runs on.
+function seedSidecar(home, project, rel, body) {
+  const target = path.join(projStateDir(home, project), ...rel.split('/'))
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, body)
+  return target
+}
+
+// Two runs in the same wall-clock second get the SAME runId (makeRunId is
+// second-precision), and archiveStem then files the second one under
+// `<runId>-2`. That collision is correct behaviour with its own unit case
+// above — but a test that wants to talk about "run 1's archive" and "run 2's
+// archive" BY RUN ID needs the two ids to actually differ, so it waits out
+// the second rather than asserting against two names that turn out to be
+// one. Only the cases that name both ids pay this second; nothing else does.
+function sleepPastRunIdSecond() {
+  return new Promise((resolve) => setTimeout(resolve, 1100))
+}
+
+test('init archives the previous run\'s sidecar directories into runs/<runId>/ beside its run file', (t) => {
+  const { home, project } = orchFixture(t)
+  const first = run(project, home, 'init', '--project', project)
+  assert.equal(first.status, 0, first.stderr)
+  const firstRunId = JSON.parse(first.stdout).runId
+  seedSidecar(home, project, 'logs/bug-1.jsonl', 'first')
+  seedSidecar(home, project, 'reviews/bug-1-1.md', '# review')
+  seedSidecar(home, project, 'verify/bug-1.out', 'ok')
+  seedSidecar(home, project, 'questions/bug-1.json', '[]')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+
+  const second = run(project, home, 'init', '--project', project)
+  assert.equal(second.status, 0, second.stderr)
+
+  const archived = path.join(runsDir(home, project), firstRunId)
+  assert.equal(fs.readFileSync(path.join(archived, 'logs', 'bug-1.jsonl'), 'utf8'), 'first')
+  assert.equal(fs.readFileSync(path.join(archived, 'reviews', 'bug-1-1.md'), 'utf8'), '# review')
+  assert.equal(fs.readFileSync(path.join(archived, 'verify', 'bug-1.out'), 'utf8'), 'ok')
+  assert.equal(fs.readFileSync(path.join(archived, 'questions', 'bug-1.json'), 'utf8'), '[]')
+  // Nothing but the fresh run file and the archive folder is left flat —
+  // the whole point is that the new run starts with empty sidecar paths.
+  assert.deepEqual(fs.readdirSync(projStateDir(home, project)).sort(), ['run.json', 'runs'])
+})
+
+// The case that fails against any ALLOWLIST implementation. `prompts/` is
+// real: one driver on this machine invented it unprompted, and bug-31 will
+// document `prompts/<id>-fix-<n>.txt` in SKILL.md §7. A stray top-level file
+// rides along for the same reason — the set of things a driver leaves under
+// <dir> is open by construction, so the archiver names only what it must NOT
+// move.
+test('init archives sidecar names the tool has never heard of, including a stray top-level file', (t) => {
+  const { home, project } = orchFixture(t)
+  const first = run(project, home, 'init', '--project', project)
+  assert.equal(first.status, 0, first.stderr)
+  const firstRunId = JSON.parse(first.stdout).runId
+  seedSidecar(home, project, 'prompts/bug-1-fix-1.txt', 'findings')
+  seedSidecar(home, project, 'notes.txt', 'scratch')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const archived = path.join(runsDir(home, project), firstRunId)
+  assert.equal(fs.readFileSync(path.join(archived, 'prompts', 'bug-1-fix-1.txt'), 'utf8'), 'findings')
+  assert.equal(fs.readFileSync(path.join(archived, 'notes.txt'), 'utf8'), 'scratch')
+  assert.deepEqual(fs.readdirSync(projStateDir(home, project)).sort(), ['run.json', 'runs'])
+})
+
+// The denylist is exactly two names, and both halves matter: sweeping
+// `runs/` into itself would bury every earlier run inside the latest one,
+// and sweeping `run.json` would archive the file twice under two names.
+test('the archive never sweeps runs/ into itself and never sweeps run.json', async (t) => {
+  const { home, project } = orchFixture(t)
+  const first = run(project, home, 'init', '--project', project)
+  assert.equal(first.status, 0, first.stderr)
+  const firstRunId = JSON.parse(first.stdout).runId
+  seedSidecar(home, project, 'logs/bug-1.jsonl', 'one')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  await sleepPastRunIdSecond()
+
+  const second = run(project, home, 'init', '--project', project)
+  assert.equal(second.status, 0, second.stderr)
+  const secondRunId = JSON.parse(second.stdout).runId
+  assert.notEqual(secondRunId, firstRunId)
+  seedSidecar(home, project, 'logs/bug-1.jsonl', 'two')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  const secondArchive = path.join(runsDir(home, project), secondRunId)
+  assert.equal(fs.existsSync(path.join(secondArchive, 'runs')), false, 'runs/ was swept into its own archive')
+  for (const runId of [firstRunId, secondRunId]) {
+    assert.equal(fs.existsSync(path.join(runsDir(home, project), runId, 'run.json')), false,
+      `run.json was swept into runs/${runId}/`)
+  }
+  assert.equal(fs.statSync(path.join(runsDir(home, project), `${firstRunId}.json`)).isFile(), true,
+    'the first run\'s archived file left the top of runs/')
+})
+
+// The whole point of the item, stated as one assertion: two runs that both
+// dispatch the same item each keep their own transcript. Against the
+// pre-change tool the first one is simply gone.
+test('a second run cannot overwrite the first run\'s evidence for the same item', async (t) => {
+  const { home, project } = orchFixture(t)
+  const first = run(project, home, 'init', '--project', project)
+  assert.equal(first.status, 0, first.stderr)
+  const run1 = JSON.parse(first.stdout).runId
+  seedSidecar(home, project, 'logs/bug-2.jsonl', 'first')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  await sleepPastRunIdSecond()
+
+  const second = run(project, home, 'init', '--project', project)
+  assert.equal(second.status, 0, second.stderr)
+  const run2 = JSON.parse(second.stdout).runId
+  assert.notEqual(run2, run1)
+  seedSidecar(home, project, 'logs/bug-2.jsonl', 'second')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  assert.equal(fs.readFileSync(path.join(runsDir(home, project), run1, 'logs', 'bug-2.jsonl'), 'utf8'), 'first')
+  assert.equal(fs.readFileSync(path.join(runsDir(home, project), run2, 'logs', 'bug-2.jsonl'), 'utf8'), 'second')
+})
+
+// An empty `runs/<runId>/` would claim evidence exists where none does, and
+// would break every existing case in this file that asserts the exact
+// listing of runs/. The directory is created only when there is something
+// to put in it.
+test('a run with no sidecars leaves no empty runs/<runId>/ behind', (t) => {
+  const { home, project } = orchFixture(t)
+  const first = run(project, home, 'init', '--project', project)
+  assert.equal(first.status, 0, first.stderr)
+  const firstRunId = JSON.parse(first.stdout).runId
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+
+  assert.deepEqual(fs.readdirSync(runsDir(home, project)), [`${firstRunId}.json`])
+})
+
+// The exit-4 lock is what makes moving a live child's pid file safe at all:
+// a crashed run still reads status "running", so `init` refuses it outright
+// and the sidecars a --resume session is about to read stay exactly where
+// that session expects them. Same stale-lock setup as the case above.
+test('an init refused by the stale "running" lock (exit 4) moves no sidecars at all', (t) => {
+  const { home, project } = orchFixture(t)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const file = runFile(home, project)
+  const stale = JSON.parse(fs.readFileSync(file, 'utf8'))
+  stale.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString()
+  fs.writeFileSync(file, JSON.stringify(stale, null, 2) + '\n')
+  const logPid = seedSidecar(home, project, 'logs/bug-1.pid', '4242')
+  const verifyPid = seedSidecar(home, project, 'verify/bug-1.pid', '4243')
+
+  const out = run(project, home, 'init', '--project', project)
+
+  assert.equal(out.status, 4)
+  assert.equal(fs.readFileSync(logPid, 'utf8'), '4242')
+  assert.equal(fs.readFileSync(verifyPid, 'utf8'), '4243')
+  assert.equal(fs.existsSync(runsDir(home, project)), false, 'a refused init created runs/')
+})
+
+// --- archiveStem, unit --------------------------------------------------
+//
+// Exported so the collision branch is reachable without racing two inits
+// into the same wall-clock second. The second half is the load-bearing one:
+// the check is on `<stem>.json` ALONE, so a leftover `<stem>/` directory
+// from an interrupted archive does NOT push the run file to `<stem>-2.json`
+// and split one run's evidence across two names forever.
+test('archiveStem bumps past a taken <stem>.json but ignores a bare <stem>/ directory', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-stem-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000')
+
+  fs.writeFileSync(path.join(dir, 'run-20260101-000000.json'), '{}')
+  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000-2')
+
+  fs.writeFileSync(path.join(dir, 'run-20260101-000000-2.json'), '{}')
+  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000-3')
+
+  // The repair case: a directory under the unsuffixed name, with that name's
+  // .json free — an archive interrupted between its two moves. Reusing the
+  // stem is the fix, not a collision.
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-stem-'))
+  t.after(() => fs.rmSync(dir2, { recursive: true, force: true }))
+  fs.mkdirSync(path.join(dir2, 'run-20260101-000000'))
+  assert.equal(archiveStem(dir2, 'run-20260101-000000'), 'run-20260101-000000')
+})
+
+// The crash window between the two moves, simulated by hand: sidecars
+// already under runs/<runId>/, run.json still flat and still done, more
+// sidecars still flat. The next init must finish the job into the SAME
+// directory rather than mint a <runId>-2 sibling.
+test('an archive interrupted between its two moves is repaired into one directory, not split', (t) => {
+  const { home, project } = orchFixture(t)
+  const first = run(project, home, 'init', '--project', project)
+  assert.equal(first.status, 0, first.stderr)
+  const firstRunId = JSON.parse(first.stdout).runId
+  seedSidecar(home, project, 'logs/a.jsonl', 'log bytes')
+  seedSidecar(home, project, 'reviews/a-1.md', 'review bytes')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+
+  // Hand-simulate the interruption: logs/ moved, run.json and reviews/ not.
+  const partial = path.join(runsDir(home, project), firstRunId)
+  fs.mkdirSync(partial, { recursive: true })
+  fs.renameSync(path.join(projStateDir(home, project), 'logs'), path.join(partial, 'logs'))
+
+  const out = run(project, home, 'init', '--project', project)
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(path.join(partial, 'logs', 'a.jsonl'), 'utf8'), 'log bytes')
+  assert.equal(fs.readFileSync(path.join(partial, 'reviews', 'a-1.md'), 'utf8'), 'review bytes')
+  assert.equal(fs.existsSync(path.join(runsDir(home, project), `${firstRunId}.json`)), true)
+  assert.deepEqual(fs.readdirSync(runsDir(home, project)).sort(), [firstRunId, `${firstRunId}.json`])
+})
+
+// Reachable only through that same interrupted-archive path, and the one
+// thing the mover must never do: renameSync onto an existing name is an
+// error on some platforms and a silent replace on others, and neither is a
+// thing to do to archived evidence. Skip, warn, keep going, exit 0.
+test('a sidecar name already present in the archive is skipped with a warning, never overwritten', (t) => {
+  const { home, project } = orchFixture(t)
+  const first = run(project, home, 'init', '--project', project)
+  assert.equal(first.status, 0, first.stderr)
+  const firstRunId = JSON.parse(first.stdout).runId
+  seedSidecar(home, project, 'logs/a.jsonl', 'original')
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+
+  const partial = path.join(runsDir(home, project), firstRunId)
+  fs.mkdirSync(partial, { recursive: true })
+  fs.renameSync(path.join(projStateDir(home, project), 'logs'), path.join(partial, 'logs'))
+  // A flat logs/ recreated under the same name, holding different bytes.
+  seedSidecar(home, project, 'logs/a.jsonl', 'later')
+
+  const out = run(project, home, 'init', '--project', project)
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(path.join(partial, 'logs', 'a.jsonl'), 'utf8'), 'original')
+  assert.match(out.stderr, /logs/)
+  assert.equal(fs.existsSync(path.join(runsDir(home, project), `${firstRunId}.json`)), true)
 })
 
 // --- Fix round 1 (Critical + Important #2): the validate-before-mutate

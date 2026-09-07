@@ -267,6 +267,13 @@ very diff being reviewed and ride the merge into `main`. Create the
 subdirectories as you need them (`mkdir -p "<dir>/logs"`), and stay out of
 `<dir>/runs/`, which is the tool's own archive of finished runs.
 
+Those flat subdirectories are always **this** run's, and always start empty:
+the `init` that opened this run swept the previous run's sidecars into
+`<dir>/runs/<runId>/`, beside that run's archived `<runId>.json`. So an
+earlier run's transcripts, reviewer reports, verify output and question
+payloads live there and are never overwritten by this one — and nothing you
+write under `<dir>` needs a run id in its name to stay distinct from theirs.
+
 **Exit `4` means a run already exists for this project** — either one is live
 right now, or one crashed and left its `running` status behind. Plain `init`
 refuses both, identically and deliberately: a stale `running` run is the last

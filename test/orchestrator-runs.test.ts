@@ -252,6 +252,24 @@ describe('GET /api/orchestrator/runs', () => {
     expect(res.body.runs[0].pastRuns).toBe(2);
   });
 
+  // task-31: `runs/` stopped being a directory of run files alone the moment
+  // each archived run gained a sibling `runs/<runId>/` holding its sidecars.
+  // pastRuns is the count a person actually reads — RunDrawer prints
+  // "<n> past run(s)" straight off it — so counting a run's evidence folder
+  // as a second run doubles that number on every archived run.
+  it('counts run FILES under runs/ as pastRuns, not a run\'s archived sidecar directory', async () => {
+    const run: OrchestratorRun = { ...fixture, updatedAt: new Date().toISOString() };
+    const dir = projectDir(run.project);
+    writeRun(run);
+    const runsDir = join(dir, 'runs');
+    mkdirSync(join(runsDir, 'run-20260101-000000'), { recursive: true });
+    writeFileSync(join(runsDir, 'run-20260101-000000.json'), '{}');
+    writeFileSync(join(runsDir, 'run-20260101-000000', 'bug-1.jsonl'), '{}');
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].pastRuns).toBe(1);
+  });
+
   it('attaches a zeroed watchdog record to a crashed running run', async () => {
     // The fixture as-is: its own updatedAt (2026-08-31) is already well past
     // RUN_STALE_MS relative to "now", and its own status is already

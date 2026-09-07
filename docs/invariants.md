@@ -29,7 +29,7 @@ skill side too — never hand-edit the run file, never `rm` it to get past an
 exit code `4`, never write it from the server or the client.
 
 The same one reader now also covers `runs/`, the archive directory
-`cmdInit` writes to when a new run supersedes a finished one (`archivePath`,
+`cmdInit` writes to when a new run supersedes a finished one (`archiveStem`,
 `orchestrate.mjs`) — before this feature nothing ever read it back, so a
 project's whole run history sat on disk with no surface showing it beyond
 the drawer's own `pastRuns` count. `OrchestratorService.archive()` walks
@@ -65,6 +65,90 @@ and cache nothing — the single-writer rule above is untouched by any of
 this; `orchestrate.mjs` remains the only process that ever writes a byte
 under `orchHome()`, this service only reads more of what was already
 there.
+
+### A run's sidecars are archived beside its run file (task-31)
+
+Until task-31, `cmdInit` archived `run.json` and nothing else. Everything else
+a run produced — `<dir>/logs/`, `<dir>/reviews/`, `<dir>/verify/`,
+`<dir>/questions/`, and the `<dir>/prompts/` one driver invented — stayed flat
+and project-scoped, keyed by **item id**. An item dispatched again in a later
+run therefore overwrote its own first attempt's transcript, reviewer report
+and verify output, silently. That is not hypothetical: bug-2 in this repo ran
+in three runs and task-9 in claude-agents-dashboard in two, and only the last
+log of each survives.
+
+`init` now moves that run's sidecars into `runs/<stem>/` at the same moment it
+moves its run file to `runs/<stem>.json`. Both names come from one
+`archiveStem` call, which is why nothing in the run file records where the
+evidence went: the two artefacts are siblings minted from one stem, so the
+location is derived from the archive path exactly the way "Groomed" and
+"Board-versus-Archive" are derived rather than stored. A `sidecarDir` field
+would be a second copy of a fact the path already carries, and the run file
+has one writer precisely so there is one authority per fact.
+
+**A denylist of two, not an allowlist of five.** The mover skips `run.json`
+(renamed by `cmdInit` itself moments later) and `runs` (which it would
+otherwise bury inside its own newest entry), and moves everything else. The
+sidecar directories are created by *drivers following SKILL.md prose*
+(`mkdir -p "<dir>/logs"`), never by the tool, so the set of names is open by
+construction — `prompts/` already exists on exactly one project on this
+machine because one driver invented it unprompted, and bug-31 will add
+`prompts/<id>-fix-<n>.txt` to SKILL.md §7 as the documented way findings
+reach a fix session. An allowlist minted today would silently drop whatever
+the next prose edit names, which is the very evidence loss this exists to
+close. Excluding `runs/` enforces a rule SKILL.md §2 already states ("stay out
+of `<dir>/runs/`") rather than inventing one.
+
+**Sidecars move first, `run.json` renames last, and the order is the design.**
+A crash between the two leaves the sidecars under `runs/<stem>/` with
+`run.json` still flat and still `done` — so the next `init` resolves the
+*same* stem (`archiveStem` checks `<stem>.json` alone, which is still free),
+merges whatever sidecars remain into the directory already there, and
+completes the rename. Self-repairing. The other order is not: renaming the run
+file first and crashing leaves `existing === null` on the next init, so the
+whole archive block never runs again and the sidecars are overwritten by the
+very run that was supposed to preserve them. This is also why the collision
+check is deliberately *not* widened to "`<stem>.json` **or** `<stem>/` is
+free" — that would split one run's evidence across `<stem>/` and
+`<stem>-2.json` permanently, turning the repair into the failure. A name
+already present in the destination is skipped with a stderr warning and never
+overwritten; `renameSync` onto an existing name is an error on some platforms
+and a silent replace on others, and neither is a thing to do to archived
+evidence.
+
+**Best-effort, never fatal.** Each move is its own `try`; a failure warns and
+the archive continues. `init`'s contract is that a bad call writes nothing and
+a good call ends with a valid `run.json`, and failing a real run over evidence
+bookkeeping would trade the run for a filing error.
+
+**Why moving a live child's pid file is safe.** `logs/<id>.pid` and
+`verify/<id>.pid` can name a process that is still running when a run dies.
+They are safe to move for one reason only: `init` refuses any run whose status
+still reads `running` — fresh or stale — with exit `4`, and `init` is the only
+command that archives anything. A crashed run stays `running` until a
+`--resume` or `--abort` deals with it, so no later run can sweep a resume's
+paths out from under it. `references/recovery.md` says this at the point a
+resume reads those flat paths, because that is where a reader needs it.
+
+**Orphaned sidecars are a deliberate non-goal.** Archiving happens inside
+`if (existing)`; with no `run.json` there is no run to name, so flat sidecars
+left by a run that never wrote a run file are not moved and can still be
+overwritten. Inventing `runs/orphan-<newRunId>/` would file evidence under a
+run id that never produced it, and a run that left no record of itself has no
+better name to offer.
+
+**One filter, two readers, server side.** `runs/` is a mixed listing of files
+and directories for the first time, and both readers of it were wrong the
+moment it became one: `countPastRuns` returned `readdirSync(...).length`, so
+the drawer would print "4 past runs" for two, and `archive()` handed every
+entry to `readOneRun`, whose `readFileSync` throws `EISDIR` on a directory and
+logs a skip warning per archived run per request — on a route the Runs view
+fetches on mount and on every window focus. `archivedRunFiles` is the single
+implementation of "which entries under `runs/` are run files", read by both,
+for the reason `isStale`/`leavesBoard` are one function: two expressions that
+merely agree are two chances to disagree later. `archivedRun()` needs no
+filter at all, because it probes the exact path `runs/<runId>.json`, which a
+sibling directory named `<runId>` can never answer to.
 
 ## A pause request is a file the server writes and the tool reads
 

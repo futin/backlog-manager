@@ -55,7 +55,7 @@ and a roomier view than the drawer.
 - `<orchHome>/<...>/runs/<runId>.json` — archived runs, written only
   by `cmdInit` when a new run supersedes a finished one. Same shape as
   `run.json`. `<runId>` is `run-YYYYMMDD-HHMMSS`, with a `-<n>` suffix
-  on collision (see `archivePath`).
+  on collision (see `archiveStem`).
 - Per queue item: `stage`, `stageAt` (one ISO stamp per stage — the
   **first arrival** only, per `RunQueueItem`'s own doc: a fix loop
   revisits `reviewing`/`fixing` without adding a second key, so this
