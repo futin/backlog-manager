@@ -1,7 +1,11 @@
 import {
-  RUN_STATUS_CLASS, RUN_STATUS_GLYPH, STAGE_TONE, stageChipClass, stageGlyph
+  RUN_STATUS_CLASS, RUN_STATUS_GLYPH, STAGE_TONE, runStatusChip, stageChipClass, stageGlyph
 } from '../client/src/lib/run-stage';
 import type { OrchestratorRun, RunStage } from '../shared/types';
+
+/** Sorted, so `Object.keys(...).sort()` can be compared against it directly
+ *  in the bug-29 case at the foot of this file. */
+const ALL_RUN_STATUSES = ['aborted', 'done', 'failed', 'paused', 'running'];
 
 /**
  * Every member of RunStage, restated here on purpose rather than imported
@@ -139,5 +143,67 @@ describe('run status chips', () => {
     expect((STAGE_TONE as Record<string, unknown>).running).toBeUndefined();
     expect((STAGE_TONE as Record<string, unknown>).done).toBeUndefined();
     expect((STAGE_TONE as Record<string, unknown>).aborted).toBeUndefined();
+  });
+});
+
+/**
+ * bug-29. The Runs list row and the detail pane's head both printed
+ * `authority.status` verbatim, so a run whose heartbeat died 46 minutes ago
+ * rendered the word `running` in the live tone while the Board strip one
+ * click away already said `crashed` off the same payload. `runStatusChip` is
+ * the one place that substitution is decided, so the two sites cannot drift
+ * — the same "one implementation, not two agreeing expressions" posture
+ * `watchdogStoodDown` and `isCrashed` itself already keep.
+ *
+ * `crashed` deliberately never becomes a sixth `RunStatus`: it is derived
+ * (`isCrashed`, lib/run-watchdog.ts) from a status AND a heartbeat, and the
+ * wire type carries no such member — a run file can never contain the word.
+ * That is why the substitution happens HERE, over the two records' existing
+ * `running` entry, rather than by growing the records.
+ */
+describe('runStatusChip', () => {
+  it('reads the run status verbatim when there is no live entry to judge a heartbeat against', () => {
+    // The archive-only row: a run file that is gone or superseded, whose
+    // recorded status is still `running`. Nothing here can tell whether that
+    // process is alive, so nothing here may reclassify it.
+    expect(runStatusChip('running', null)).toEqual({
+      label: 'running', glyph: RUN_STATUS_GLYPH.running, className: RUN_STATUS_CLASS.running
+    });
+  });
+
+  it('reads the run status verbatim while the live entry is fresh', () => {
+    expect(runStatusChip('running', { status: 'running', fresh: true })).toEqual({
+      label: 'running', glyph: RUN_STATUS_GLYPH.running, className: RUN_STATUS_CLASS.running
+    });
+  });
+
+  it('reads crashed for a running run whose live heartbeat has gone stale', () => {
+    const chip = runStatusChip('running', { status: 'running', fresh: false });
+    expect(chip.label).toBe('crashed');
+    // The strip's own amber for the same verdict — `.run-strip-crashed-label`
+    // (styles.css) is `var(--amber)`, and `runs-status-warn` is this list's
+    // existing amber slot, so the two surfaces agree on colour as well as word
+    // without minting a class.
+    expect(chip.className).toBe('runs-status-warn');
+  });
+
+  it('leaves every finished status alone even when the live entry is stale', () => {
+    // `isCrashed` is `running && !fresh`, never `!fresh` alone: a run that
+    // finished — however long ago — is not crashed, it is over. A paused run
+    // is the sharp case, since it is the one non-running status that can
+    // still be resumed.
+    for (const status of ['done', 'aborted', 'failed', 'paused'] as OrchestratorRun['status'][]) {
+      expect(runStatusChip(status, { status, fresh: false }).label).toBe(status);
+    }
+  });
+
+  it('keeps `crashed` out of the two status records entirely', () => {
+    // The mechanism, not a reminder: `Record<OrchestratorRun['status'], string>`
+    // is exhaustive at the definition site, so a sixth key fails the type
+    // check. This pins the runtime half — five keys, none of them `crashed`.
+    expect(Object.keys(RUN_STATUS_GLYPH).sort()).toEqual(ALL_RUN_STATUSES);
+    expect(Object.keys(RUN_STATUS_CLASS).sort()).toEqual(ALL_RUN_STATUSES);
+    expect((RUN_STATUS_GLYPH as Record<string, unknown>).crashed).toBeUndefined();
+    expect((RUN_STATUS_CLASS as Record<string, unknown>).crashed).toBeUndefined();
   });
 });

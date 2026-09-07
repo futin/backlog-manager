@@ -958,3 +958,44 @@ describe('RunDetail — the controls in its head', () => {
     }
   });
 });
+
+/**
+ * bug-29 — the pane's own half of "the stages below MOVE now; say they are
+ * last-reported". `RunsView`'s suite drives the whole surface end to end
+ * (the badge on both sites, the two chips, the poll actually advancing a
+ * stale run's stage); these two cases pin the one branch that suite cannot
+ * reach through the live payload, because the server would never build it.
+ */
+describe('RunDetail · crashed marker', () => {
+  /** `status: 'running'`, heartbeat stale — `isCrashed`'s exact condition. */
+  function crashedLive(over: Partial<LiveRun> = {}): LiveRun {
+    return { ...primaryFull(), status: 'running', fresh: false, ...over };
+  }
+
+  it('names the last heartbeat as a clock time, not a ticking age', () => {
+    // A clock stamp rather than "no heartbeat for 46m" on purpose: an age has
+    // to tick, and this pane installs no interval for a crashed run (`useNow`
+    // is gated on freshness) precisely because every other reading on it
+    // freezes itself on a dead heartbeat.
+    render(<RunDetail summary={primarySummary()} live={crashedLive()} {...CONTROL_PROPS} />);
+
+    expect(screen.getByTestId('run-detail-crashed')).toHaveTextContent(
+      `last heartbeat ${formatClock('2026-09-01T09:30:00.000Z')}`
+    );
+    expect(screen.getByTestId('run-detail-crashed'))
+      .toHaveTextContent('every stage below is last reported, not current');
+  });
+
+  it('still carries the qualifier when the heartbeat stamp will not parse', () => {
+    // An unreadable `updatedAt` is exactly the run the server already reads as
+    // un-fresh, so it arrives here crashed with no stamp to print. The
+    // qualifier is the load-bearing half and must not disappear with the
+    // stamp — otherwise the head says `crashed` over a queue of stages with
+    // nothing anywhere saying they are old.
+    render(<RunDetail summary={primarySummary()} live={crashedLive({ updatedAt: 'not-a-date' })} {...CONTROL_PROPS} />);
+
+    const note = screen.getByTestId('run-detail-crashed');
+    expect(note).toHaveTextContent('heartbeat stopped');
+    expect(note).toHaveTextContent('every stage below is last reported, not current');
+  });
+});

@@ -7,7 +7,7 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
-import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, mergeModeLabel } from '../../lib/run-stage';
+import { RUN_STATUS_GLYPH, mergeModeLabel, runStatusChip } from '../../lib/run-stage';
 import { MODE_BUTTON, RUNS_MODES, RUNS_MODE_KEY, isRunsMode } from '../../lib/runs-mode';
 import { aggregateRuns, dayKey, dayLabel, runStageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
@@ -120,40 +120,55 @@ import type {
  * pinned-region-plus-day-groups for one `no runs in this range` note.
  */
 
-/** One row of the merged run list: the archive's own record of the run, plus the fresh live entry backing it, if any. */
+/** One row of the merged run list: the archive's own record of the run, plus the live entry backing it, if the live payload has one at all. */
 interface MergedRun {
   run: OrchestratorArchiveRun;
   /**
-   * The live poll's own entry for this run, but ONLY when that entry's
-   * `fresh` flag is true — `null` otherwise, including when the run appears
-   * in the live payload at all but has gone stale. Being "in the live
-   * payload at all" is not enough on its own — a run whose heartbeat is
-   * older than `RUN_STALE_MS` is one the board cannot vouch for, and this
-   * list makes the same call the strip does: the
-   * live accent (and, per fix round 2, the live NUMBERS) mean "the board is
-   * actually still hearing from this process right now", not merely "this
-   * is the most recent run.json".
+   * The live poll's own entry for this run, if the payload has one at all —
+   * `null` only when it does not. Freshness is deliberately NOT a condition
+   * here; that is `isLive`'s whole job, one field down.
    *
-   * (The old wording said RunStrip "renders nothing special" for a stale
-   * run. That stopped being true twice over: a crashed run gets its own
-   * rendering (orchestrator-watchdog), and task-17 gave `paused` a third.
-   * Neither changes THIS field's rule — both of those runs are still
-   * un-fresh, so both still land here as `null` and read through the archive
-   * record, which is right: this list is history, and the pane's own
-   * controls read the summary's status for the one case that still has a
-   * future.)
+   * bug-29 is why. This field used to be gated on `entry.fresh === true`,
+   * which conflated two different questions the payload answers separately:
+   * `status` says whether the run is over, `fresh` says whether its
+   * heartbeat is recent. A run in a long review or merge step is `running`
+   * with a stale heartbeat — `SKILL.md` says outright that review and merge
+   * "can outlast the fifteen-minute freshness threshold on their own", and a
+   * scan of this machine's archived run files found 57 gaps of more than 15
+   * minutes between consecutive stage stamps, the worst two 249 and 206
+   * minutes. For every one of those windows this row read `live: null` and
+   * fell back to `useOrchestratorArchive`, which by design carries no poll,
+   * while `useOrchestratorRuns`' 5s poll went right on arriving (it keeps
+   * polling any `running` run, fresh or not) and being discarded. The stage
+   * readout froze until a reload or a window focus, on the one surface built
+   * to watch a run happen.
+   *
+   * The last stage a run file recorded is not a guess: `run.json` is re-read
+   * per request and its stage stamps are facts with timestamps on them,
+   * whatever the heartbeat age says about whether the process is still
+   * alive. So a stale-but-arriving live entry beats a minutes-old archive
+   * snapshot as DATA every time — which is exactly what `RunStrip` has
+   * always done for the same run, and why the two surfaces disagreed.
    *
    * Carried as the object itself, not a boolean, because of fix round 2:
    * `RunRow` needs this run's actual `queue`/`status`/`startedAt`/
    * `updatedAt` to compute merged/total and wall time through
    * `pickAuthority`, the same freshest-wins rule `RunDetail` applies to its
-   * own header. Deriving `isLive` from this field (`live !== null`) rather
-   * than keeping a separate boolean would be one more way to say the same
-   * thing; keeping both is deliberate — `isLive` reads as intent at every
-   * call site (pinning, the `runs-row-live` class), where `!== null` would
-   * make a reader stop and ask what null means here.
+   * own header.
    */
   live: LiveRun | null;
+  /**
+   * The PRESENTATION gate: `live?.fresh === true`, i.e. "is the board still
+   * hearing from this process right now". Read by the pinned region
+   * (`splitPinned`) and the `runs-row-live` accent, and by nothing that
+   * decides where a number comes from — that is `live`'s job, above.
+   *
+   * Kept as its own boolean rather than derived at each call site for the
+   * reason it always was: it reads as intent where `live?.fresh === true`
+   * would make a reader stop and re-derive the rule. Since bug-29 it is no
+   * longer one more way to say `live !== null`; the two now genuinely
+   * disagree for exactly the run this list used to freeze.
+   */
   isLive: boolean;
 }
 
@@ -185,11 +200,14 @@ function runKey(project: string, runId: string): string {
  * fetch (mount, window focus, or fix round 2's own targeted refresh below)
  * has picked it up, will not appear as a row at all yet. What changed in fix
  * round 2 is that the row's live-fronted NUMBERS no longer come from the
- * archive once a fresh live entry exists: `live` now carries that entry
+ * archive once a live entry exists: `live` now carries that entry
  * itself (not just a yes/no flag) so `RunRow` can read merged/total, status
  * and wall time off it through the same `pickAuthority` rule `RunDetail`
  * uses — see `MergedRun.live`'s own doc comment for why the object, not a
- * boolean, is what has to be carried.
+ * boolean, is what has to be carried. bug-29 then dropped the `fresh` filter
+ * from the map built below: a `running` run with a stale heartbeat still has
+ * a live entry arriving every 5 seconds, and dropping it handed the row back
+ * to a source that never polls.
  *
  * Dedupe is defensive, not load-bearing: two archive entries should never
  * share a `{project, runId}` in practice (each is either the one `run.json`
@@ -200,15 +218,18 @@ function runKey(project: string, runId: string): string {
  * rendering the same run twice in one list.
  */
 function mergeRuns(archiveRuns: readonly OrchestratorArchiveRun[], liveRuns: readonly LiveRun[]): MergedRun[] {
-  const freshByKey = new Map(liveRuns.filter((r) => r.fresh).map((r) => [runKey(r.project, r.runId), r]));
+  // bug-29: EVERY live entry, not `liveRuns.filter((r) => r.fresh)`. The
+  // freshness question moved down one line, onto `isLive` alone — see both
+  // fields' own doc comments for the split and why it is the whole fix.
+  const liveByKey = new Map(liveRuns.map((r) => [runKey(r.project, r.runId), r]));
   const seen = new Set<string>();
   const merged: MergedRun[] = [];
   for (const run of archiveRuns) {
     const key = runKey(run.project, run.runId);
     if (seen.has(key)) continue;
     seen.add(key);
-    const live = freshByKey.get(key) ?? null;
-    merged.push({ run, live, isLive: live !== null });
+    const live = liveByKey.get(key) ?? null;
+    merged.push({ run, live, isLive: live?.fresh === true });
   }
   return merged;
 }
@@ -299,7 +320,7 @@ function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
 }
 
 /**
- * `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` (imported above) key on the whole
+ * `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` key on the whole
  * RUN's own `status`, deliberately not `lib/run-stage.ts`'s `stageGlyph`/
  * `stageChipClass`, which key on one ITEM's `RunStage` — a different union
  * that shares only one spelling (`failed`) and means something different
@@ -308,6 +329,13 @@ function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
  * for its own header and had, at first, duplicated rather than shared them);
  * see that file's own comment, right beside `STAGE_TONE`, for the full
  * reasoning on why the two vocabularies cannot be merged into one map.
+ *
+ * The ROW no longer reads either record directly — bug-29 put
+ * `runStatusChip` (same file) in front of both, so a `running` run with a
+ * dead heartbeat prints `crashed` in the Board strip's own word rather than
+ * the live cyan `running` it used to. The tiles' by-status substat below
+ * still reads `RUN_STATUS_GLYPH` straight, and deliberately: that is a tally
+ * over the archived corpus, not a claim about any run right now.
  */
 
 /** Reading order for the tiles' by-status breakdown — active state first, then the three ways a run can have left it, worst-sounding last. */
@@ -419,6 +447,13 @@ function RunRow({
 }): JSX.Element {
   const { run } = row;
   const authority = pickAuthority([row.live], run);
+  // bug-29: the status word, glyph and class, with `running` + a dead
+  // heartbeat substituted to `crashed`. Derived from `row.live`, never from
+  // `authority` — `authority` can be the archive record, which carries no
+  // `fresh` field at all, and a row with no heartbeat to judge must keep
+  // printing its recorded status. See `runStatusChip` (lib/run-stage.ts) for
+  // why `crashed` stays derived rather than becoming a sixth `RunStatus`.
+  const status = runStatusChip(authority.status, row.live);
   const { completed, total } = queueCounts(authority);
   const wall = runWallMs(authority, now);
   const modeLabel = mergeModeLabel(authority.mergeMode, authority.mergeModeEffective);
@@ -432,13 +467,13 @@ function RunRow({
       onClick={onSelect}
     >
       <span className="runs-row-head">
-        <span className={`runs-status ${RUN_STATUS_CLASS[authority.status]}`}>
+        <span className={`runs-status ${status.className}`}>
           {/* aria-hidden: the status word right beside it is the accessible
               answer, the same "colour and glyph restate the word, never
               replace it" rule run-stage.ts's own doc comment states for the
               per-item chips this row deliberately does NOT reuse. */}
-          <span aria-hidden="true">{RUN_STATUS_GLYPH[authority.status]}</span>
-          {authority.status}
+          <span aria-hidden="true">{status.glyph}</span>
+          {status.label}
         </span>
         <span className="runs-row-project">{projectLabel(run.project)}</span>
         {modeLabel !== null && (
@@ -449,7 +484,14 @@ function RunRow({
             archived row has no live entry to derive it from. Reuses
             `.run-mode-badge` rather than minting a class: it is the same
             register (a small qualifier on the run's own headline) and sits in
-            the same slot. */}
+            the same slot.
+              bug-29 widened which rows can reach this, since `row.live` is no
+            longer gated on freshness — a crashed run with an outstanding pause
+            request now carries the badge where it used to be silent. That is
+            right rather than incidental: the request is a real file on this
+            machine's disk waiting at the run's next dispatch gate, and it is
+            still waiting whether or not the run has stamped a heartbeat
+            lately. */}
         {row.live?.pauseRequested === true && (
           <span className="run-mode-badge" data-testid={`runs-row-pausing-${run.runId}`}>pausing</span>
         )}
