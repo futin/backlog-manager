@@ -59,12 +59,18 @@ import type {
  * view: the full run file this pane fetches on demand for an ARCHIVED
  * selection, which lands strictly after `summary` was read and is therefore
  * at least as fresh — and which is the ONLY thing that can ever correct a
- * run that just stopped being live: a fix round found that the moment a
- * live run finishes, `live` goes `null` on the very next render (the
- * server's `fresh` flag flips), and falling back to `summary` at that exact
- * point reproduced a stale "running" header with an ever-growing elapsed
- * time and item rows frozen at their last-known live stage — while the
- * fetch this pane had *already issued* for that same transition sat unused.
+ * run whose live entry has gone away: a fix round found that when `live`
+ * turns `null` for a still-selected run, falling back to `summary` at that
+ * exact point reproduced a stale "running" header with an ever-growing
+ * elapsed time and item rows frozen at their last-known live stage — while
+ * the fetch this pane had *already issued* for that same transition sat
+ * unused. (That fix round attributed the transition to the server's `fresh`
+ * flag flipping as a run finished. It no longer is, and never needed to be:
+ * bug-29 took freshness out of `live`'s existence entirely, so an entry now
+ * disappears only when that run's `run.json` stops being its project's
+ * current file — which `init` does when it archives one run before starting
+ * the next. The defect, the fetch and this fallback are all unchanged; only
+ * the sentence naming the trigger was wrong.)
  *
  * `pickAuthority` (`lib/run-authority.ts`) is the fix, and its own doc
  * comment is the one place this three-tier precedence is written down —
@@ -241,10 +247,12 @@ export function RunDetail(
 
   // The file header's "Data source" section names the rule; `pickAuthority`
   // (lib/run-authority.ts) is its one implementation. `live` wins whenever
-  // it exists (freshest, by construction); otherwise the just-landed
-  // `fetchedRun` wins; `summary` is the fallback until either shows up —
-  // and critically, that fallback is no longer permanent once `live` goes
-  // `null` (a run finishing), because `fetchedRun` is already in flight for
+  // it exists (freshest, by construction — a per-request read of `run.json`
+  // arriving every 5s, whether or not that file's heartbeat is recent);
+  // otherwise the just-landed `fetchedRun` wins; `summary` is the fallback
+  // until either shows up — and critically, that fallback is no longer
+  // permanent once `live` goes `null` (this run's file stopped being its
+  // project's current one), because `fetchedRun` is already in flight for
   // exactly that transition (see the effect above) and replaces `summary`
   // itself, not merely one field on it, the moment it lands.
   //
@@ -284,8 +292,8 @@ export function RunDetail(
   // this clamped clock: it derives its own freshness internally, and handing
   // it a pre-clamped instant would make that check trivially true — reaching
   // the right number by accident rather than by rule. Same for `useNow`'s own
-  // `live !== null` gate above, which governs whether an interval exists at
-  // all, not what any reading measures against.
+  // `live?.fresh === true` gate above, which governs whether an interval
+  // exists at all, not what any reading measures against.
   const runLive = runIsLive(source, now);
   const clock = runClockMs(source, now);
 

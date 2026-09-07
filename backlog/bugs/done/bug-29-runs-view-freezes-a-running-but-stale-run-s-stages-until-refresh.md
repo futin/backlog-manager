@@ -349,3 +349,62 @@ The honest premise-check on the poll case, run by reinstating the
     Expected substring: "merging"
     Received string:    "e-1e-1 title●inspecting"
 ```
+
+### Review round 1 — comment sweep, no code change
+
+Verdict `fix`, one Important finding: six doc passages still stated the
+premise this fix removed — that `live` exists only while the server's `fresh`
+check holds. Rewritten to say what is now true (`live` is the data authority
+and may be stale; `fresh`/`isLive`/`isCrashed` is the presentation gate),
+each keeping the point it was making:
+
+- `client/src/lib/run-authority.ts` tier 1 — `live` is present whenever the
+  payload carries an entry, which is for as long as that `run.json` is the
+  project's current file, whatever its status or heartbeat age. Says outright
+  that both callers now pass a possibly-stale entry on purpose.
+- `client/src/lib/run-authority.ts` tier 2 — an entry disappears when the run
+  file stops being the project's current one (`init` archiving it), not when
+  a run finishes.
+- `client/src/components/runs/RunDetail.tsx` file header — the fix-round
+  defect, its fetch and this fallback are all unchanged; only the sentence
+  attributing the `live` → `null` transition to the `fresh` flag was wrong,
+  and it now says so and names the real trigger.
+- `RunDetail.tsx` `pickAuthority` comment — same correction, one line.
+- `RunDetail.tsx` `runStageTotals` comment — quoted `useNow`'s gate as
+  `live !== null` eleven lines after this branch changed it to
+  `live?.fresh === true`.
+- `client/src/lib/run-stats.ts` at both `runWallMs` and `runStageTotals` —
+  each said `pickAuthority` never picks a stale entry as a live winner. It
+  now does, by design, so the live path reaches the very door these two gates
+  close; the gates themselves are unchanged and the comments now say the door
+  is the main one rather than a side entrance through the archive.
+
+Two further one-word uses of the same false premise, outside the reviewer's
+six, swept with them since leaving them would be half a sweep:
+`RunsView.tsx`'s file header ("carries the fresh live entry itself") and
+`run-stats.ts`'s `aggregateRuns` shape note ("a fresh live
+`OrchestratorRun`").
+
+Deliberately not touched: `ArchiveView.tsx`'s "the hook polls only while some
+run is fresh". That one is also imprecise — `useOrchestratorRuns` polls while
+any run is fresh OR `running` OR `starting` — but it predates this branch,
+describes a different module, and nothing here changed it.
+
+No code changed in this round; `git diff` over the four files contains no
+non-comment line. Re-verified:
+
+```
+$ pnpm run typecheck
+typecheck exit=0
+
+$ pnpm test
+Test Suites: 79 passed, 79 total
+Tests:       1499 passed, 1499 total
+# tests 411
+# pass 411
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```

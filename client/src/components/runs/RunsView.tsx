@@ -61,7 +61,7 @@ import type {
  * this list never noticing a run that started (or finished) while the tab
  * stayed open and focused, because `useOrchestratorArchive`'s own refresh
  * was fetched and thrown away. Both are fixed together: `MergedRun` now
- * carries the fresh live entry itself (not just a boolean), `RunRow` reads
+ * carries the live entry itself (not just a boolean), `RunRow` reads
  * its numbers through `pickAuthority` (`lib/run-authority.ts`) — the same
  * function `RunDetail` uses, so the two surfaces can no longer independently
  * pick different winners — and an effect below re-fetches the archive
