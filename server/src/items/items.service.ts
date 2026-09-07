@@ -57,7 +57,10 @@ export class ItemsService {
 
   /**
    * GET /api/items/uncommitted's whole implementation (task-32) — which of
-   * this project's item files a board-started run would not find at `main`.
+   * this project's item files differ from `main`, i.e. which ones a
+   * board-started run will read a DIFFERENT copy of than the board is
+   * showing. Deliberately not "which ones the run cannot see": half of them
+   * it can, and `uncommitted.util.ts`'s header carries both fates.
    *
    * Registry-gated exactly like `AgentsService.mergeCheck`: a RAW STRING
    * compare against the registry's own `path` field, deliberately not

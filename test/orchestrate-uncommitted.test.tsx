@@ -172,7 +172,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     // reasons — the whole point of this note is that the two surfaces say one
     // thing, so a person who finds the skip afterwards can match it up.
     expect(note).toHaveTextContent('not committed on main');
-    expect(note).toHaveTextContent('2 items');
+    expect(note).toHaveTextContent('2 items differ');
     expect(note).toHaveTextContent('groomed on disk only');
   });
 
@@ -204,17 +204,47 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     // 2. The absent case, in the run's own words, scoped to it.
     expect(note).toHaveTextContent(/One missing from main altogether is skipped \("not committed on main"\)/);
     // 3. The present-but-stale case, which is not a skip at all.
-    expect(note).toHaveTextContent(/merely\s+stale there is gated and run on main's bytes/);
+    expect(note).toHaveTextContent(/present but stale there is gated\s+and run on main's bytes/);
     // And no blanket claim about the whole set being skipped.
     expect(note.textContent ?? '').not.toMatch(/and skip them/);
   });
 
-  it('says "item" for one row and "items" for two', async () => {
+  it('says "item differs" for one row and "items differ" for two', async () => {
     stub({ paths: [BUG_1.path], known: true });
     renderSheet();
+    expect(await screen.findByTestId('orchestrate-uncommitted-note'))
+      .toHaveTextContent('1 item differs from main');
+  });
+
+  /**
+   * Review round 2 (Minor). The note used to open `N items groomed on disk
+   * only` for every flagged row, while `queue` deliberately lists ungroomed
+   * bugs and tasks as well — so a flagged-and-ungroomed row was described as
+   * groomed, the one blanket claim left in a sentence whose whole point is not
+   * making blanket claims. The phrase stays (it is task-29's shared wording,
+   * and this screen's only link to it) but is now scoped as the name of the
+   * usual case rather than asserted of the whole set.
+   *
+   * The fixture is the case that made it false: one flagged row, `groomed:
+   * false`, so `deriveAction` labels it `groom` and it is still previewed.
+   */
+  it('case 17c: does not call a flagged-and-ungroomed row groomed', async () => {
+    const UNGROOMED = fakeItem({
+      id: 'bug-9', title: 'Ungroomed bug', section: 'bugs', groomed: false,
+      path: '/abs/alpha/backlog/bugs/open/bug-9.md'
+    });
+    stub({ paths: [UNGROOMED.path], known: true });
+    renderSheet([UNGROOMED, TASK_2]);
+
     const note = await screen.findByTestId('orchestrate-uncommitted-note');
-    expect(note).toHaveTextContent('1 item groomed on disk only');
-    expect(note).toHaveTextContent('it differs from main');
+    // The row really is on the list, labelled `groom` — this is not a case
+    // about filtering it out.
+    expect(within(row('bug-9')).getByText('uncommitted')).toBeInTheDocument();
+    // The count sentence claims a difference from main and nothing about
+    // grooming; the shared phrase survives only as a parenthetical.
+    expect(note).toHaveTextContent('1 item differs from main');
+    expect(note.textContent ?? '').not.toMatch(/1 item groomed on disk only/);
+    expect(note).toHaveTextContent(/"groomed on disk only", in the usual case/);
   });
 
   // --- case 18 ----------------------------------------------------------

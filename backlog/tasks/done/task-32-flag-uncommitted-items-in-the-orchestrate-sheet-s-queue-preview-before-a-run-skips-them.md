@@ -526,3 +526,118 @@ server/src/items/uncommitted.util.ts header, README.md) — every place that sta
 flag's consequence as a single fate.
 Red proof: 1 test (case 17b) went red with the old wording restored; the plural case
 went red with it, and the other 13 stayed green.
+
+## Review round 2
+
+Verdict: fix. Report:
+`~/.backlog-manager/orchestrator/…/reviews/task-32-2.md`.
+
+**Important — the narrow fate survived on four cited sites, and two more the review did
+not name. All six fixed.** Both halves of the finding are conceded outright:
+
+- The diff violated an invariant it added in the same commit. `items.controller.ts`
+  stated a consequence ("the rows the run will skip") and did not split it, one file
+  away from a CLAUDE.md rule reading "any surface stating a consequence must split it".
+  A rule whose first counter-example ships inside the commit that writes the rule is the
+  failure `docs/invariants.md` exists to prevent.
+- **The round-1 `Contract sweep:` line was false.** It claimed "every place that stated
+  the flag's consequence as a single fate" on the strength of five sites found by
+  reading, and a reader trusting it would not have looked again. The lesson is the one
+  the reviewer states: grep for the residue of the wording, then check every hit on the
+  feature's path — do not sweep by recall.
+
+Swept this time with `grep -rniE "not be able to see|would not find|will skip|cannot
+see|and skip them|not find at"` over `server/src client/src shared test docs CLAUDE.md
+README.md skills`, then a second pass on `skip them|flag the rows|rows the run|rows a
+run`. Six sites on this feature's path, of which the review cited four:
+
+1. `server/src/items/items.controller.ts` — the docstring. Now states no consequence at
+   all and points at the util header and *One question, two fates*: a two-branch rule
+   restated on the transport layer is a copy that will drift from the one that matters.
+2. `server/src/items/items.service.ts` — "would not find at `main`" → differ from
+   `main`, with the narrow phrasing named and refused inline.
+3. `client/src/components/board/OrchestrateSheet.tsx:224` — the state comment.
+4. `client/src/components/board/OrchestrateSheet.tsx:441` — the derivation comment.
+5. **`client/src/lib/agents.ts`** — not cited: "would NOT find at `main`, so the sheet
+   can flag the rows that run is going to skip". The `skip` claim, on the client's own
+   fetch layer.
+6. **`client/src/styles.css`** — not cited: "a row the run will not be able to see at
+   `main`", on the chip's own rule.
+
+Every remaining grep hit is now either an explicit negation of the wrong wording
+("deliberately not…", "never…", "Not 'the rows that run is going to skip'"), a
+deliberate quote of the old note as history (`docs/invariants.md`'s two-fates section,
+case 17b's own comment, and case 17b's negative assertion), or unrelated to this feature
+(the dashboard's "cannot see this project" family, `diff` cannot see an untracked file).
+
+**Minor 1 — the last blanket claim. Fixed rather than left.** The note opened `N items
+groomed on disk only` while `queue` deliberately previews ungroomed bugs and tasks, so a
+flagged-and-ungroomed row was called groomed — a blanket claim inside a sentence whose
+whole point is not making blanket claims. The count sentence now leads with the fact
+that is true of every flagged row and keeps task-29's shared phrase as the *name of the
+usual case*:
+
+> N items differ from main — the run reads main's copy rather than the file here
+> ("groomed on disk only", in the usual case). One missing from main altogether is
+> skipped ("not committed on main"); one present but stale there is gated and run on
+> main's bytes, so a plan written since the last commit is not the plan that runs.
+
+Scoping it costs one parenthesis; dropping the phrase would cost this screen's only link
+to the groom skill's own wording. Pinned by new **case 17c**, whose fixture is the case
+that made it false (one flagged row, `groomed: false`, still previewed and labelled
+`groom`): it asserts the count sentence, that `1 item groomed on disk only` does NOT
+appear, and that the phrase survives only as the parenthetical.
+
+**Minor 2 — agreed, filed, not implemented.** The server really does know each row's
+fate and discards it: `diff --name-only main` means present-at-main-and-edited,
+`ls-files --others` means never tracked, and `uncommittedItemPaths`' union merges them.
+Filed as **idea-10** in this worktree, `from: task-32` — including the wrinkle the
+Minor's own framing misses, that "which read found it" is not the same question as "does
+`main` hold this path": a file tracked on a branch `main` does not contain is reported by
+`diff` and is still absent from `main`, which is the case Decision 2 exists for. So the
+fate is a third git question, not a partition of the two already asked. The endpoint's
+shape is unchanged in this loop, as instructed.
+
+**Tool anomaly found while filing it, and worth someone's attention:** in this
+environment `node skills/backlog/tools/backlog.mjs new <section> "<title>"` prints the
+new item's path and frontmatter, exits `0`, and **creates no file**. Reproduced three
+times here and once in a throwaway `git init` + `backlog.mjs init` store under `/tmp`,
+where `init` itself wrote `backlog/README.md` correctly and the subsequent `new` wrote
+nothing. It also minted `idea-10` on all four attempts, so nothing was persisted between
+them. If that reproduces outside this sandbox, `/backlog-capture` files nothing while
+reporting success, which is worth a bug of its own — this session cannot file it, for
+the same reason. idea-10's file was therefore written by hand, matching the filename and
+frontmatter the tool printed; the registry needed no change (this project is already
+registered, and `new`'s only other job is the id, which was free).
+
+### Verification (round 2 fix)
+
+```
+Test Suites: 82 passed, 82 total
+Tests:       1566 passed, 1566 total
+
+# tests 450
+# pass 450
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ tsc --noEmit
+(no output)
+
+✓ built in 1.29s
+```
+
+Contract sweep: 6 sites updated (server/src/items/items.controller.ts,
+server/src/items/items.service.ts, client/src/lib/agents.ts,
+client/src/components/board/OrchestrateSheet.tsx ×2 comments,
+client/src/styles.css) — found by grepping four spellings of the wrong wording over the
+whole worktree and checking every hit on this feature's path, rather than by recall.
+Two of the six were outside the review's own list.
+Red proof: 1 test (case 17c) added for Minor 1 and proven — restoring the old
+`N items groomed on disk only` opening reddens 17c plus case 17 and the plural case, 13
+others green. The six Important sites are comment-only and carry no test by nature; the
+grep re-run above is their check, and case 17b (round 1) already pins the rendered
+sentence they were describing.

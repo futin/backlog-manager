@@ -221,8 +221,11 @@ export function OrchestrateSheet(
    */
   const [mergeCoverage, setMergeCoverage] = useState<MergeCheckResult | null>(null);
   /**
-   * Which of this project's item files the run will not be able to see at
-   * `main` (task-32). `null` covers the same three states `mergeCoverage`'s
+   * Which of this project's item files differ from `main` (task-32) — the
+   * rows whose bytes on disk are not the bytes the run will act on, which is
+   * broader than "the rows it cannot see" and is the whole reason the note
+   * below states two fates rather than one. `null` covers the same three
+   * states `mergeCoverage`'s
    * does — not asked, in flight, request failed — and all three render
    * nothing: this is a warning, not a gate, and no failure of it may cost
    * anyone a launch. `known: false` (the server could not make the read)
@@ -438,7 +441,11 @@ export function OrchestrateSheet(
   const emptySelection = queueIds.length > 0 && selectedIds.length === 0;
 
   /**
-   * The rows a board-started run will not be able to see (task-32).
+   * The rows whose file on disk is not the file a board-started run will read
+   * (task-32) — never "the rows it cannot see", since a row present at `main`
+   * and edited since is one the run finds, gates and executes, just not from
+   * these bytes. What follows from that is the note's business, and it splits
+   * it; this derivation only decides membership.
    *
    * `known` gates the whole derivation rather than being a decorative field:
    * `{ paths: [], known: false }` means the server could not make the read at
@@ -713,7 +720,14 @@ export function OrchestrateSheet(
                   `Groomed on disk only` is task-29's wording, said by the
                   groom skill at the moment the state is created; both phrases
                   earn their place, as two sentences to two readers at two
-                  times.
+                  times. It is offered as the NAME of the usual case rather
+                  than asserted of all N rows (review round 2, Minor): the
+                  queue preview deliberately lists ungroomed bugs and tasks
+                  too — see `queue` above — so a flagged-and-ungroomed row
+                  exists and "groomed on disk only" is false of it. Keeping the
+                  shared phrase and scoping it costs one parenthesis; dropping
+                  it would cost the one link between this screen's words and
+                  the groom skill's.
 
                   Its own note rather than another clause on the preview
                   disclaimer above: that one says the run may re-gate an item
@@ -721,12 +735,12 @@ export function OrchestrateSheet(
                   bytes the run gates are not the bytes on this screen". */}
               {uncommittedIds.length > 0 && (
                 <div className="sheet-note" data-testid="orchestrate-uncommitted-note">
-                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item' : 'items'} groomed on disk
-                  only — {uncommittedIds.length === 1 ? 'it differs' : 'they differ'} from main, and the
-                  run reads main's copy rather than the file here. One missing from main
-                  altogether is skipped ("not committed on main"); one that is merely
-                  stale there is gated and run on main's bytes, so a plan written since
-                  the last commit is not the plan that runs.
+                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item differs' : 'items differ'} from
+                  main — the run reads main's copy rather than the file here ("groomed on
+                  disk only", in the usual case). One missing from main altogether is
+                  skipped ("not committed on main"); one present but stale there is gated
+                  and run on main's bytes, so a plan written since the last commit is not
+                  the plan that runs.
                 </div>
               )}
 

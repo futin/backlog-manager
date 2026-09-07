@@ -26,10 +26,20 @@ export class ItemsController {
   }
 
   /**
-   * Which of one project's item files a board-started run would not find at
-   * `main` (task-32) — the Orchestrate sheet's own on-open read, so it can
-   * flag the rows the run will skip before anyone walks away from a
-   * multi-hour operation.
+   * Which of one project's item files differ from `main` (task-32) — the
+   * Orchestrate sheet's own on-open read, so it can flag the rows whose bytes
+   * on disk are not the bytes a run will act on, before anyone walks away
+   * from a multi-hour operation.
+   *
+   * No consequence stated here on purpose. The predicate is broader than any
+   * one gate verdict — absent from `main` is skipped, present-but-stale is
+   * gated and EXECUTED on `main`'s bytes — and CLAUDE.md's invariant requires
+   * that any surface stating a consequence split it. A docstring on the
+   * transport is the wrong place to restate a two-branch rule that will drift
+   * from the one copy of it, so this points at `uncommitted.util.ts`'s header
+   * and docs/invariants.md's "One question, two fates" instead. (Review
+   * round 2: this comment was the rule's own first counter-example, shipped
+   * in the commit that wrote the rule.)
    *
    * No guard, for the reason `AgentsController.mergeCheck`'s own comment
    * gives verbatim: `SameOriginPostGuard` answers "may this caller POST at

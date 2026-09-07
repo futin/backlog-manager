@@ -468,8 +468,15 @@ export async function fetchMergeCheck(project: string): Promise<MergeCheckResult
 
 /**
  * Body of `GET /api/items/uncommitted` (task-32) — which of a project's item
- * files a board-started orchestrator run would NOT find at `main`, so the
- * Orchestrate sheet can flag the rows that run is going to skip.
+ * files differ from `main`, so the Orchestrate sheet can flag the rows whose
+ * bytes on disk are not the bytes a run will act on.
+ *
+ * Not "the rows that run is going to skip", which is what this said for one
+ * review round: only the rows ABSENT from `main` are skipped, while a row
+ * present there and merely edited since is gated and executed on `main`'s
+ * copy. The sheet's own note is the one place that states both fates; see
+ * `server/src/items/uncommitted.util.ts`'s header for why the question is
+ * deliberately the broad one.
  *
  * Declared here rather than promoted into shared/types.ts, the same call
  * `MergeCheckResult` above already makes and for the same reason: promotion
