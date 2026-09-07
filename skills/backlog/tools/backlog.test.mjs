@@ -2878,3 +2878,107 @@ test('backlog-groom still gates the stamp on confirmation, and the gate still pr
   assert.notEqual(command, -1, 'backlog-groom/SKILL.md lost the `start <id> --as groom` command')
   assert.ok(gate < command, 'the confirmation gate no longer precedes the `start` command')
 })
+
+// --- task-28: the executor's pre-review checks, and the reviewer that reads them
+//
+// The 2026-09-06 cross-run sweep classified every fix-verdict review this
+// machine had produced (29 reviews, four projects): 14 were "another statement
+// of the old contract left standing" and 5 were "a new test that still passes
+// with the change reverted" — 19 of 29, against 8 genuine defects. Both are
+// mechanical checks over the executing session's own diff, so backlog-execute
+// now runs them before it writes `## Outcome`, records the result in two fixed
+// lines, and backlog-reviewer treats a missing pair as an Important finding.
+//
+// Pinned here for the same reason the backlog-groom cases above are: this is
+// prose that a headless session obeys, in files no compiler and no other test
+// reads, and the whole mechanism is one skill and one agent agreeing on two
+// literal line shapes. If either side re-words its half, the agreement is gone
+// and nothing else in this repo would notice.
+//
+// In THIS file rather than beside the skill it covers, like those cases and for
+// the same reason: `test:skills`'s glob is `skills/*/tools/*.test.mjs`, and
+// `backlog-execute` has no `tools/` directory to put a suite in — it publishes
+// prose only. `agents/backlog-reviewer.md` is further still from any tool, and
+// is read here because the contract is between the two files, so one suite
+// asserting both halves is the only shape that can catch them drifting apart.
+// A file read, never an import: the "one skill's tools/ may never import
+// another's" rule is untouched.
+const EXECUTE_SKILL_MD = fileURLToPath(new URL('../../backlog-execute/SKILL.md', import.meta.url))
+const REVIEWER_MD = fileURLToPath(new URL('../../../agents/backlog-reviewer.md', import.meta.url))
+
+// Whitespace-collapsed for markInProgressSection's reason: both files are
+// hard-wrapped prose, and a re-wrap that pushed a phrase across a line break
+// changes nothing a session reads.
+const flat = (file) => fs.readFileSync(file, 'utf8').replace(/\s+/g, ' ')
+
+test('backlog-execute runs the two checks after verification and before it writes ## Outcome', () => {
+  // The ORDER is the rule, not the presence: a sweep run before the work is
+  // finished sweeps a diff that is not the diff, and a red proof written into
+  // `## Outcome` after `move` has already archived the item proves nothing to
+  // anyone. Positions are asserted against the document, so a section that
+  // drifts below the archive steps fails here rather than being "still in the
+  // file".
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  const step = text.indexOf('## Before you call it done')
+  const verification = text.indexOf('superpowers:verification-before-completion')
+  const outcome = text.indexOf('## Archive when verification proves it')
+  assert.notEqual(step, -1, 'backlog-execute/SKILL.md lost the "Before you call it done" step')
+  assert.notEqual(verification, -1, 'backlog-execute/SKILL.md no longer invokes verification-before-completion')
+  assert.notEqual(outcome, -1, 'backlog-execute/SKILL.md lost the archive section')
+  assert.ok(step < verification, 'the two checks no longer sit with the verification step')
+  assert.ok(verification < outcome, 'verification no longer precedes the `## Outcome` write')
+})
+
+test('backlog-execute states both checks, and why each one cannot be done by reading the diff', () => {
+  // One assertion per rule, naming the rule rather than the string, so a
+  // failure says which half was lost. The two "why" needles are the load-
+  // bearing halves: a sweep scoped to the diff finds nothing (the stale
+  // sentence is always in a file the diff did not touch), and a red proof
+  // that never reverts anything is a test run, not a proof.
+  const text = flat(EXECUTE_SKILL_MD)
+  const RULES = [
+    ['Contract sweep', 'the sweep itself'],
+    ['Red proof', 'the red proof itself'],
+    ['not over the diff', 'the sweep is over the repository text, not the diff'],
+    ['confirm it fails', 'the red proof actually reverts and re-runs'],
+    ['does not pin the change', 'a test that stays green is the finding, not a pass'],
+    ['Never `git stash`', 'the stash stack is shared across worktrees and must not be used here'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(text.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+})
+
+// The two line shapes are the entire contract between the skill that writes
+// them and the agent that reads them. Pinned verbatim, from one table both
+// suites below iterate, so neither side can be re-worded alone: that is the
+// failure mode this whole mechanism exists to catch, applied to itself.
+const OUTCOME_LINES = ['Contract sweep:', 'Red proof:']
+
+test('backlog-execute writes the two fixed ## Outcome lines', () => {
+  const text = flat(EXECUTE_SKILL_MD)
+  for (const line of OUTCOME_LINES) {
+    assert.ok(text.includes(line), `backlog-execute/SKILL.md lost the \`${line}\` Outcome line`)
+  }
+  // Both branches of each line, so a rewrite cannot drop the "nothing to
+  // report" wording and leave a session with no honest way to say so — which
+  // is how a fixed shape turns into a line nobody writes.
+  const BRANCHES = ['Contract sweep: none found', 'Red proof: skipped']
+  for (const branch of BRANCHES) {
+    assert.ok(text.includes(branch), `backlog-execute/SKILL.md lost the empty-case branch: ${branch}`)
+  }
+})
+
+test('backlog-reviewer reads both lines and calls a missing pair Important', () => {
+  // Without this half the step is unenforced: a headless run has nobody to
+  // notice it was skipped, and the reviewer is the only reader the executor's
+  // `## Outcome` gets before the merge.
+  const text = flat(REVIEWER_MD)
+  for (const line of OUTCOME_LINES) {
+    assert.ok(text.includes(line), `backlog-reviewer.md no longer names the \`${line}\` line`)
+  }
+  assert.ok(
+    /missing or half-present pair is an Important finding\*\*/.test(text),
+    'backlog-reviewer.md no longer treats a missing pair as an Important finding',
+  )
+})

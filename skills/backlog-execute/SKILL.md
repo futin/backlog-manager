@@ -182,16 +182,84 @@ Write the file first, call `move` only once that write is on disk — same rule
 a moved file with a half-written `## Outcome` is the one state re-running this skill
 cannot repair.
 
-## Archive when verification proves it
+## Before you call it done
 
 Once the fix or the plan's steps are actually done, run
-`superpowers:verification-before-completion` — that's what turns "should work" into proof.
-Then, and only then:
+`superpowers:verification-before-completion` — that's what turns "should work" into
+proof.
+
+Verification proves the *work* does what the item asked. Two further checks prove the
+*diff* is finished, and they are here because these two findings dominate review: a
+2026-09-06 sweep of every fix-verdict review on this machine (29 reviews, four projects)
+put 14 on "another statement of the old contract left standing" and 5 on "a new test
+that still passes with the change reverted" — 19 of 29, against 8 genuine defects. Both
+are mechanical checks over a diff this session already has open, and each one skipped
+buys a fix loop: a median 22.6 minutes and about $5.60, for a finding that took two
+minutes to make here. The measurements are in `backlog-orchestrate`'s
+`references/rationale.md`.
+
+Read the diff first. In an orchestrator worktree the whole tree is this item's work and
+nothing else is in it:
+
+```bash
+git status --short
+git diff HEAD
+```
+
+In a hand session that same tree may hold unrelated in-flight changes — scope both
+checks to the files this item actually touched, not to everything `git diff` prints.
+
+**1. Contract sweep.** List every rule sentence, identifier, number, path, flag,
+command and default the diff changed or removed. For each, search the repository for
+its *old* form **outside the diff** — `CLAUDE.md`, `docs/`, `README*`, compose and env
+files, `skills/**/*.md`, `agents/*.md`, code comments and JSDoc, test names and test
+descriptions. `grep -rn` on the old spelling is the whole technique; the work is in
+listing what changed, not in searching for it.
+
+The sweep is over the repository's text, not over the diff, because the site that now
+lies is always in a file the diff did not touch — that is precisely why it survived to
+review. Update every site the change makes false. Where you leave one standing on
+purpose, record it in `## Outcome` with the reason: a reviewer who finds it and has to
+ask costs the same fix loop as fixing it would have.
+
+**2. Red proof.** For each test the diff adds or changes, prove it fails without the
+production change it pins:
+
+- Copy the production file aside, revert just that change in the original (or comment
+  it out), run *that one test file*, confirm it fails, then restore from the copy.
+- **Never `git stash` to do this.** The stash stack is shared with every other worktree
+  and checkout of this repository, including sessions running right now, so a stash
+  here can be popped by someone else — and theirs by you. A file copy is undoable by
+  this session alone.
+- A test that stays green does not pin the change. Fix the test, not the note: it is
+  asserting something that was already true, which is the same as asserting nothing.
+
+Skip only for a test that pins a pure refactor with no behaviour to revert, and say
+which test and why.
+
+## Archive when verification proves it
+
+Only once verification passed and both checks above have actually been run:
 
 1. Append `## Outcome` to the item's file, after its existing headings — never replacing
    them. Write the date, a sentence on what actually happened, and **the verification
    command's actual output**, pasted in. Not "tests pass" — the output that shows tests
-   passing.
+   passing. Then one line for each of the two checks above, in these exact shapes:
+
+   ```
+   Contract sweep: <n> sites updated (<paths>)
+   Contract sweep: none found
+   ```
+
+   ```
+   Red proof: <n> tests went red with the change reverted
+   Red proof: skipped — <why>
+   ```
+
+   Fixed shapes rather than prose, because the reviewer reads these two lines
+   specifically and treats a missing pair as an Important finding. That is the only
+   thing standing between the step above and being quietly skipped in a headless run
+   nobody is watching.
 2. Bill the session and clear the phase marker, but keep the record of when it started:
 
    ```bash

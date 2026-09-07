@@ -2,7 +2,8 @@
 name: backlog-reviewer
 description: >
   Review one backlog item's branch diff before the orchestrator merges it to main:
-  correctness first, the repo's CLAUDE.md invariants second, test adequacy third.
+  correctness first, the repo's CLAUDE.md invariants second, test adequacy third,
+  and the executor's own contract-sweep and red-proof lines fourth.
   backlog-orchestrate dispatches it once it has committed an item's work on
   backlog/<id>, handing it the worktree, the branch, the item file and a report path.
   It writes the full report to that path and returns only a verdict plus the
@@ -131,6 +132,18 @@ change do what the item said it would, correctly."
    that asserts a mock was called. Check that the item's `## Test cases` (if
    it has them) are all actually represented, and that a bug fix arrived with
    a test that fails without it.
+4. **The executor's own two checks.** `## Outcome` must carry a `Contract
+   sweep:` line and a `Red proof:` line — `backlog-execute` requires both, in
+   fixed shapes, and they are the executor's claim that it swept the
+   repository for statements of the contract this diff just changed and
+   proved each new test goes red without the change. **A missing or
+   half-present pair is an Important finding**, named as such, because those
+   two checks are exactly the two finding classes that dominate this repo's
+   fix loops and nothing else in a headless run can tell whether they ran.
+   The lines are a claim and not proof: spot-check them against the diff the
+   way you would any other claim, and where one is plainly false — a `none
+   found` beside a renamed flag still spelled the old way in `CLAUDE.md` —
+   report the site itself, at its own severity, not the line.
 
 Out of scope, deliberately: style and formatting preferences, naming
 bikesheds, refactors the item never asked for, and anything "while we're
