@@ -78,13 +78,31 @@ different one. Don't infer a verdict silently and act on it — grooming is a de
 Only once both are confirmed — the item and the verdict — say so on disk, before any of
 the three verdicts below touches the file:
 
+**Usually they were confirmed before this session started.** A prompt that already named
+the item and the verdict — "groom bug-23, fill in Cause and Fix, leave it in `bugs/open/`",
+or "reject task 5" — *is* that confirmation, and there is nothing left to wait for: run
+`start` now, as the very next command after `show`, before any investigation. A directed
+groom is the ordinary case, not an exception to the rule above. The gate is about
+*consent*, never about *sequence*, and a prompt is allowed to satisfy it in one turn.
+
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as groom
 ```
 
-Not any earlier: an item nobody has agreed to work on yet isn't "in progress," and
-stamping it ahead of the confirmation above would tell the board a session is running
-when the conversation might still end in "let's not." This is the same `started:` marker
+Not any earlier — and not any later. The stamp costs something in both directions. Too
+early: an item nobody has agreed to work on yet isn't "in progress," and stamping it ahead
+of the confirmation above would tell the board a session is running when the conversation
+might still end in "let's not." Too late: `start`'s "already in progress" refusal is the
+only mutex an item has, so every minute before the stamp leaves the item unlocked for a
+second groom or a `backlog-execute` to claim, and shows nobody on it on the board — while
+`groom-elapsed:` and `groom-tokens:` both bill from `started:`, so that same window is
+invisible in two counters that are permanent, accumulating and have no supported repair
+after the fact. A bug whose `## Cause` and `## Fix` *are* the investigation is where too
+late bites hardest: hold the stamp until the verdict is written and you have billed the
+cheapest minute of the session while leaving the expensive part unlocked and unrecorded.
+Nothing sits between `show` and `start` but the verdict decision itself.
+
+This is the same `started:` marker
 `backlog-execute` writes when it picks up a groomed item — grooming is active work on the
 item too, and the board's `»` column (see `skills/backlog/SKILL.md`) now means "someone
 is on this right now" for either skill, not execute alone.
