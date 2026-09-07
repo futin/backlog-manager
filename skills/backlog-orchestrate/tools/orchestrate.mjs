@@ -2405,6 +2405,192 @@ function cmdDenials(argv) {
   return 0
 }
 
+// --- task-27: what each dispatched session cost --------------------------
+//
+// The same transcript readPermissionDenials reads, asked a different
+// question, and sharing that function's two disciplines for the same two
+// reasons: `slice(0, -1)` drops a possibly-partial trailing line, and an
+// unparseable line is skipped rather than fatal. The LAST result event, not
+// the first, for readPermissionDenials' own reason — a `--resume` can append
+// a second one to the same transcript, and the last is the one that
+// describes the segment that just ended.
+//
+// Returns `null` when the transcript carries no result event at all. That is
+// a killed session, and it is NOT the same thing as a session that cost
+// nothing — see cmdUsage, which writes no entry for it.
+//
+// Every number is read through `finiteOrNull`: a field a future CLI renames
+// leaves a hole rather than a `0`, because a `0` would claim the session was
+// free (shared/types.ts, RunSessionUsage's own doc comment).
+function finiteOrNull(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+export function readSessionUsage(file) {
+  const text = fs.readFileSync(file, 'utf8')
+  const completeLines = text.split('\n').slice(0, -1)
+  let result = null
+  // The init event's session id is the fallback for a result event that
+  // carries none — read in the same pass rather than by a second call to
+  // findSessionIdInJsonl, which would re-read and re-parse the whole file
+  // (these transcripts run to tens of megabytes).
+  let initSessionId = null
+  for (const line of completeLines) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    let event
+    try {
+      event = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (!event || typeof event !== 'object') continue
+    if (event.type === 'system' && event.subtype === 'init' && typeof event.session_id === 'string' && initSessionId === null) {
+      initSessionId = event.session_id
+    }
+    if (event.type === 'result') result = event
+  }
+  if (result === null) return null
+
+  const usage = result.usage && typeof result.usage === 'object' ? result.usage : {}
+  // One key -> that model; several -> all of them joined, since a session
+  // that spanned two models is honestly described by neither alone. No key
+  // at all -> null, the same hole every numeric field leaves.
+  const models = result.modelUsage && typeof result.modelUsage === 'object' ? Object.keys(result.modelUsage) : []
+
+  return {
+    sessionId: typeof result.session_id === 'string' ? result.session_id : initSessionId,
+    costUsd: finiteOrNull(result.total_cost_usd),
+    turns: finiteOrNull(result.num_turns),
+    inputTokens: finiteOrNull(usage.input_tokens),
+    outputTokens: finiteOrNull(usage.output_tokens),
+    cacheReadTokens: finiteOrNull(usage.cache_read_input_tokens),
+    cacheCreationTokens: finiteOrNull(usage.cache_creation_input_tokens),
+    durationMs: finiteOrNull(result.duration_ms),
+    model: models.length === 0 ? null : models.join(', '),
+  }
+}
+
+// Which dispatch a transcript belongs to, from its FILE NAME and never from
+// its content — SKILL.md names all three shapes (`<id>.jsonl`,
+// `<id>-retry-<n>.jsonl`, `<id>-fix-<n>.jsonl`) and the content genuinely
+// cannot tell them apart: `claude -p --resume` keeps the session id it was
+// handed, so an item's first transcript and its fix loop's report the same
+// session (verified against this machine's own task-22 pair, 2026-09-07).
+//
+// `null` for a name matching none of the three, which cmdUsage turns into an
+// exit 1. Deliberately strict rather than defaulting to `execute`: the
+// realistic way to get here is passing ANOTHER item's transcript, and a
+// silent default would file that item's cost against this one forever.
+function transcriptSlot(itemId, file) {
+  const base = path.basename(file).replace(/\.jsonl$/, '')
+  if (base === itemId) return { kind: 'execute' }
+  const retry = new RegExp(`^${escapeForRegExp(itemId)}-retry-(\\d+)$`).exec(base)
+  if (retry) return { kind: 'retry', loop: Number(retry[1]) }
+  const fix = new RegExp(`^${escapeForRegExp(itemId)}-fix-(\\d+)$`).exec(base)
+  if (fix) return { kind: 'fix', loop: Number(fix[1]) }
+  return null
+}
+
+// Item ids are `^[a-z]+-\d+$` (backlog.mjs enforces it), so nothing that
+// reaches here can carry a metacharacter today. Escaped anyway, because the
+// alternative is a regex whose safety depends on a rule enforced in another
+// tool's file.
+function escapeForRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// An entry's identity: the transcript slot, not the session id. See
+// transcriptSlot above and RunSessionUsage's own doc comment for why the
+// obvious key does not work.
+function usageSlotKey(entry) {
+  return `${entry.kind}#${entry.loop ?? ''}`
+}
+
+// Named `usage` for the command, which collides awkwardly with this file's
+// `<CMD>_USAGE` convention for help strings. Kept anyway: the command name a
+// person types matters more than the constant name nobody does.
+const USAGE_USAGE = 'usage: orchestrate.mjs usage <itemId> --jsonl <file>'
+
+// The one writer of RunQueueItem.usage. Run at inspect time (SKILL.md §5),
+// on the same Bash invocation as `stage <id> inspecting`, so it costs the
+// driver no extra turn — which is the whole reason it is a command of its
+// own rather than something `stage` grew a flag for: `stage` is called from
+// a dozen places that have no transcript to point at.
+//
+// Subject to the driver lease like every other mutating command (exit 7).
+// Unlike `denials`, which is deliberately run-independent because a crashed
+// run must still be able to answer "was anything refused", this one WRITES
+// the run file — so it is exactly as bound by the lease as `stage` is.
+function cmdUsage(argv) {
+  const itemId = argv[0]
+  let jsonlFile
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--jsonl') jsonlFile = argv[++i]
+  }
+  if (!itemId || jsonlFile === undefined) {
+    throw new OrchestrateError(USAGE_USAGE, 1)
+  }
+
+  // Before the run file is opened: a bad file name is a problem with this
+  // call, and the caller has to be told which of the three shapes it should
+  // have used rather than being told the item is fine and the entry landed.
+  const slot = transcriptSlot(itemId, jsonlFile)
+  if (slot === null) {
+    throw new OrchestrateError(
+      `--jsonl ${jsonlFile}: a transcript for ${itemId} must be named ` +
+        `${itemId}.jsonl, ${itemId}-retry-<n>.jsonl or ${itemId}-fix-<n>.jsonl — ` +
+        `the file name is what says which dispatch this is, and the transcript itself cannot`,
+      1,
+    )
+  }
+
+  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const run = readRun(dir)
+  assertDriver(run)
+  const item = findQueueItem(run, itemId)
+
+  let parsed
+  try {
+    parsed = readSessionUsage(jsonlFile)
+  } catch (e) {
+    // An unreadable transcript is exit 1 for cmdDenials' reason restated:
+    // "could not read it" must never be recorded as, or mistaken for, "there
+    // was nothing to record".
+    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1)
+  }
+
+  // A killed session: the transcript stops mid-flight and never reaches its
+  // result event. Nothing is written and the run file is left byte-identical
+  // — an absent entry is the honest record, where a zero-valued one would
+  // claim the session was free. Exit 0 rather than 1 because the caller did
+  // nothing wrong and has nothing to retry: the inspect step that follows is
+  // already about to notice the session died.
+  if (parsed === null) {
+    console.error(`no result event in ${jsonlFile}: nothing recorded for ${itemId} (the session did not finish)`)
+    return 0
+  }
+
+  const entry = { ...parsed, kind: slot.kind, endedAt: nowISO() }
+  if (slot.loop !== undefined) entry.loop = slot.loop
+
+  // `?? []` covers a queue item written before this field existed, which a
+  // `--resume` against an older run file genuinely produces. Replace-by-slot
+  // rather than append-always, so a resumed driver re-running this over a
+  // transcript it already recorded (references/recovery.md) leaves one entry
+  // rather than two; every OTHER slot is copied through untouched, which is
+  // what keeps a fix loop's entry beside the first session's.
+  const existing = item.usage ?? []
+  const key = usageSlotKey(entry)
+  const replaced = existing.some((e) => usageSlotKey(e) === key)
+  item.usage = replaced ? existing.map((e) => (usageSlotKey(e) === key ? entry : e)) : [...existing, entry]
+
+  run.updatedAt = nowISO()
+  writeRunAtomic(dir, run)
+  console.log(JSON.stringify({ id: itemId, usage: entry }))
+  return 0
+}
+
 const WATCH_USAGE = 'usage: orchestrate.mjs watch <itemId> --pid <p> --jsonl <file> [--interval-ms 30000] [--budget-ms 540000]'
 
 function cmdWatch(argv) {
@@ -3020,6 +3206,7 @@ commands:
   status       print the current run
   watch        survive a long headless child across the loop's own Bash cap
   denials      list the permission denials a session's transcript recorded
+  usage        record what one dispatched session cost, from its transcript
   verify       run the project's proof commands and record them
   reconcile    read-only crash-recovery report
   abort        tear down worktrees/branches and end the run`
@@ -3090,6 +3277,7 @@ export function main(argv) {
     if (cmd === 'status') return cmdStatus(rest)
     if (cmd === 'watch') return cmdWatch(rest)
     if (cmd === 'denials') return cmdDenials(rest)
+    if (cmd === 'usage') return cmdUsage(rest)
     if (cmd === 'verify') return cmdVerify(rest)
     if (cmd === 'reconcile') return cmdReconcile(rest)
     if (cmd === 'abort') return cmdAbort()

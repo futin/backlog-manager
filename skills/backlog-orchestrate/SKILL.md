@@ -891,7 +891,19 @@ session id is read back from.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> inspecting
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
 ```
+
+**Both lines, one Bash invocation** — that is the whole reason `usage` is its
+own command and not a flag on something else: it costs this step no extra
+turn. It copies what the session cost (dollars, turns, the four token counts,
+the model) off the transcript's own `result` event onto the queue item, which
+is the only place that number survives once the logs are pruned. Exit `0` with
+a stderr line means the transcript never reached a result event — a killed
+session — and nothing was recorded, which is the honest answer and not a
+failure to work around. Run it once per transcript: again on the retry line
+below with `--jsonl` pointed at `<id>-retry-<n>.jsonl`, and again in step 7's
+fix loop.
 
 **First, before the item file: did the session get refused anything?**
 
@@ -1015,7 +1027,15 @@ cannot afford ten full reports in this session's context.
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
   ```
+
+  The second line is step 5's `usage` call again, on this loop's own
+  transcript — one entry per transcript, so it lands beside the first
+  session's rather than replacing it, and "the fix loop cost more than the
+  item did" stays an answerable question. It is on the same invocation as the
+  denials check for the same reason it rides `stage <id> inspecting` up there:
+  no extra turn.
 
   **This is the same gate step 5 runs, and it is not optional here.** A fix
   loop is a headless session under `--permission-mode auto` exactly like the

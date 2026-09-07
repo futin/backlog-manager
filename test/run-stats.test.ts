@@ -1,9 +1,11 @@
 import {
   itemStageSpans, runWallMs, runStageTotals, sumStageTotals, MACHINE_STAGES,
-  aggregateRuns, dayKey, dayLabel
+  aggregateRuns, dayKey, dayLabel, formatTurns, formatUsd, itemUsageTotals, runUsageTotals
 } from '../client/src/lib/run-stats';
 import { RUN_STALE_MS } from '../shared/types';
-import type { ArchiveQueueItem, OrchestratorArchiveRun, RunQueueItem, RunStage } from '../shared/types';
+import type {
+  ArchiveQueueItem, OrchestratorArchiveRun, RunQueueItem, RunSessionUsage, RunStage
+} from '../shared/types';
 
 /**
  * The derivations behind the Runs section's stat tiles and per-item stage
@@ -818,5 +820,119 @@ describe('dayLabel', () => {
 
   it('is null for a stamp that does not parse', () => {
     expect(dayLabel('garbage')).toBeNull();
+  });
+});
+
+/**
+ * task-27's usage rollups. `usage` is the first OPTIONAL field on a queue
+ * item, and the distinction these cases exist to pin is the one the whole
+ * feature turns on: absent (a run archived before the command existed) reads
+ * as `null` and renders nothing, where an empty-but-present rollup would
+ * render `$0.00` and claim a run was free.
+ */
+function usageEntry(over: Partial<RunSessionUsage> = {}): RunSessionUsage {
+  return {
+    sessionId: 'sess-1',
+    kind: 'execute',
+    costUsd: 1.5,
+    turns: 10,
+    inputTokens: 100,
+    outputTokens: 2000,
+    cacheReadTokens: 900_000,
+    cacheCreationTokens: 12_000,
+    durationMs: 60_000,
+    model: 'claude-opus-5[1m]',
+    endedAt: at(0),
+    ...over
+  };
+}
+
+describe('itemUsageTotals', () => {
+  it('sums cost and turns across an item\'s sessions and counts them', () => {
+    const item = archiveItem({
+      usage: [
+        usageEntry(),
+        usageEntry({ kind: 'fix', loop: 1, costUsd: 0.75, turns: 4 })
+      ]
+    });
+
+    expect(itemUsageTotals(item)).toEqual({ costUsd: 2.25, turns: 14, sessions: 2 });
+  });
+
+  it('is null for an item with no usage key at all', () => {
+    expect(itemUsageTotals(archiveItem())).toBeNull();
+  });
+
+  it('is null for an item whose usage key is present but empty', () => {
+    // Not a shape `orchestrate.mjs` writes — it only ever appends — but a
+    // hand-edited run file can hold it, and "no sessions recorded" is the
+    // same answer as "no key" for every caller.
+    expect(itemUsageTotals(archiveItem({ usage: [] }))).toBeNull();
+  });
+
+  it('reports a per-field null when every entry left that field a hole, without losing the others', () => {
+    // A transcript from a future CLI that renamed `total_cost_usd`. The
+    // rollup keeps the turns it has rather than collapsing wholesale, which
+    // is what lets the view print the half it knows.
+    const item = archiveItem({ usage: [usageEntry({ costUsd: null }), usageEntry({ costUsd: null, turns: 3 })] });
+
+    expect(itemUsageTotals(item)).toEqual({ costUsd: null, turns: 13, sessions: 2 });
+  });
+
+  it('keeps a genuine zero rather than reading it as a hole', () => {
+    expect(itemUsageTotals(archiveItem({ usage: [usageEntry({ costUsd: 0 })] })))
+      .toEqual({ costUsd: 0, turns: 10, sessions: 1 });
+  });
+});
+
+describe('runUsageTotals', () => {
+  it('sums every item\'s sessions across the whole queue', () => {
+    const run = archiveRun({
+      queue: [
+        archiveItem({ id: 'bug-1', usage: [usageEntry(), usageEntry({ kind: 'fix', loop: 1, costUsd: 0.5, turns: 2 })] }),
+        archiveItem({ id: 'task-2', usage: [usageEntry({ costUsd: 4, turns: 30 })] })
+      ]
+    });
+
+    expect(runUsageTotals(run)).toEqual({ costUsd: 6, turns: 42, sessions: 3 });
+  });
+
+  it('is null when no item in the queue carries any usage', () => {
+    expect(runUsageTotals(archiveRun({ queue: [archiveItem({ id: 'bug-1' }), archiveItem({ id: 'task-2' })] })))
+      .toBeNull();
+  });
+
+  it('reports what it has when only some items carry usage', () => {
+    // Every live run is this shape for most of its life: the first item is
+    // inspected while the rest are still pending.
+    const run = archiveRun({
+      queue: [archiveItem({ id: 'bug-1', usage: [usageEntry()] }), archiveItem({ id: 'task-2' })]
+    });
+
+    expect(runUsageTotals(run)).toEqual({ costUsd: 1.5, turns: 10, sessions: 1 });
+    expect(itemUsageTotals(run.queue[1])).toBeNull();
+  });
+});
+
+describe('formatUsd', () => {
+  it('always prints two decimals, because a dollar figure with one reads as a typo', () => {
+    expect(formatUsd(4.2)).toBe('$4.20');
+    expect(formatUsd(18.4449)).toBe('$18.44');
+  });
+
+  it('prints a sub-cent cost as <$0.01 rather than rounding it to nothing', () => {
+    expect(formatUsd(0.0012)).toBe('<$0.01');
+  });
+
+  it('prints an exact zero as $0.00, because that is a measurement rather than an absence', () => {
+    expect(formatUsd(0)).toBe('$0.00');
+  });
+});
+
+describe('formatTurns', () => {
+  it('singularises one turn — a one-turn session is a real diagnostic shape', () => {
+    expect(formatTurns(1)).toBe('1 turn');
+    expect(formatTurns(0)).toBe('0 turns');
+    expect(formatTurns(34)).toBe('34 turns');
   });
 });

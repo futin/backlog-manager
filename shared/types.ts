@@ -541,6 +541,89 @@ export interface RunVerification {
 }
 
 /**
+ * What one dispatched headless session cost, copied out of the `result`
+ * event its `--output-format stream-json` transcript ends with (task-27).
+ * Written by `orchestrate.mjs usage` and by nothing else, one entry per
+ * transcript — so an item that took a retry or two fix loops carries three
+ * or four of these, not one summed figure. The sum belongs to whoever is
+ * reading (`runUsageTotals`/`itemUsageTotals`, client/src/lib/run-stats.ts);
+ * what the run file stores is the per-session evidence, because "this run
+ * cost $18" and "the fix loop cost more than the item did" are different
+ * questions and only the second one survives an early fold.
+ *
+ * It is a COPY, deliberately, of numbers that already exist in the log
+ * directory. The alternative — leave them there and parse on demand — is
+ * what the 2026-09-06 cross-run sweep actually had to do: 43MB of
+ * transcripts for this project alone, a purpose-written script, and a
+ * fitted per-token rate because the logs are pruned long before the run
+ * history is. A hundred bytes on the queue item makes the archive
+ * self-contained for as long as the run file itself lives.
+ *
+ * EVERY NUMERIC FIELD IS NULLABLE, and that is the same rule the command's
+ * own "no result event writes no entry at all" refusal follows, applied one
+ * level down: a `0` here would read as "measured, and it was free", which
+ * is a claim no absent field justifies. A transcript from a future CLI that
+ * renames `total_cost_usd` must leave a hole, not a zero.
+ */
+export interface RunSessionUsage {
+  /**
+   * The session the transcript belongs to — the `result` event's own
+   * `session_id`, falling back to the transcript's `init` event, `null` when
+   * neither carries one.
+   *
+   * Deliberately NOT this entry's identity, which is the surprise worth
+   * recording here: `claude -p --resume` keeps the id it was handed, so an
+   * item's `<id>.jsonl`, `<id>-retry-1.jsonl` and `<id>-fix-1.jsonl` all
+   * report the SAME session (verified against this machine's own
+   * `task-22`/`task-22-fix-1` pair, 2026-09-07). Identity is `kind` + `loop`
+   * — the transcript slot the caller named — because that is the thing there
+   * is exactly one of per session segment. The plan for this task said
+   * "idempotent by sessionId"; on real transcripts that would have made a
+   * fix loop's entry OVERWRITE the execute session's, which is precisely
+   * what the same plan's next sentence forbids.
+   */
+  sessionId: string | null;
+  /**
+   * Which dispatch produced this transcript: the item's first session, a
+   * step-5 retry, or a step-7 fix loop. Derived from the file name the
+   * caller passed (`<id>.jsonl`, `<id>-retry-<n>.jsonl`,
+   * `<id>-fix-<n>.jsonl`) and never guessed from the content, for the reason
+   * above — the content cannot tell them apart.
+   */
+  kind: 'execute' | 'retry' | 'fix';
+  /** The `<n>` of a `retry`/`fix` transcript; absent on an `execute` one, which has no loop to count. */
+  loop?: number;
+  /** `total_cost_usd`, in whatever the CLI billed — dollars, list price, as the transcript reports it. */
+  costUsd: number | null;
+  /** `num_turns` — assistant turns in this session segment, the cheapest proxy for "how hard was this item". */
+  turns: number | null;
+  /**
+   * The four token counts, `usage.*` on the result event, kept SEPARATE
+   * rather than summed. `cacheReadTokens` routinely runs ~90% of the total
+   * (15.2M against 205k fresh on one measured session) and is billed at a
+   * different rate, so a single "tokens" number would be dominated by
+   * re-read context and say nothing about the work — the same reason
+   * `backlog.mjs stop` excludes cache reads from `execute-tokens:`.
+   */
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  /** `duration_ms` — wall time of the session itself, which is NOT the item's stage time (`itemDurationMs` measures that, and it includes everything around the session). */
+  durationMs: number | null;
+  /**
+   * The model the session ran on: the single key of the result event's
+   * `modelUsage`, or every key joined when a session spanned more than one.
+   * `null` when the transcript carries no `modelUsage` at all. A joined
+   * string rather than an array because this is a label, not a breakdown —
+   * the per-model split is in the transcript for anyone who needs it.
+   */
+  model: string | null;
+  /** When the entry was written, not when the session ended — this command runs at inspect time, minutes after. Named for what a reader will do with it (order the entries) rather than promising a precision the source cannot give. */
+  endedAt: string;
+}
+
+/**
  * One backlog item's full run record. Every field survives the item's whole
  * time in the queue rather than being cleared on a stage change, because the
  * run file is the only place this history exists once a worktree is removed
@@ -636,6 +719,22 @@ export interface RunQueueItem {
    * beside `attention`.
    */
   assumptions: { question: string; answer: string }[];
+  /**
+   * What every session dispatched for this item cost (task-27), one entry
+   * per transcript, oldest first. Written by `orchestrate.mjs usage` at
+   * inspect time — see `RunSessionUsage` for the shape and for why identity
+   * is the transcript slot rather than the session id.
+   *
+   * OPTIONAL, and it is the first field on this interface that is: every run
+   * file written before this task exists on disk right now and is served
+   * verbatim by both archive endpoints, so the client must read a missing
+   * key as "this run predates the feature" rather than as an empty run. That
+   * is also why it is not `[]`-defaulted anywhere on the way through — the
+   * distinction between "no sessions recorded" and "recorded nothing" is the
+   * one the Runs view renders (absent usage renders nothing, never `$0.00`),
+   * and a default at the seam would erase it before the view could ask.
+   */
+  usage?: RunSessionUsage[];
 }
 
 /**

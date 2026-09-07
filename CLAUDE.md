@@ -101,6 +101,11 @@ machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
   exists), and a persistent detail pane carrying
   that same per-run "machine time by stage" rollup plus a full-width
   seven-node `StageTrack` per item with durations printed under each node.
+  Cost rides both surfaces (task-27): the run total joins the row's foot line
+  beside its wall time, the pane's head adds cost · turns · sessions, and each
+  item gets its own line under its track — all of it from
+  `runUsageTotals`/`itemUsageTotals`, and all of it absent rather than zeroed
+  for a run that predates the recording (see Invariants).
   The whole section is bounded to one viewport on the wide layout
   (`.runs-board`, a definite `100vh / var(--font-scale)` height so the bar,
   the tiles and the two controls stay put) with the list and the pane each
@@ -1064,6 +1069,31 @@ happened.
   `run-20260901-112815` read bug-7 as 161m in the pane and 25m in the
   drawer — the difference was the four items ahead of it in the queue.
   `MACHINE_STAGES` is the closed list of what counts.
+- **A session's cost is recorded per transcript, and a transcript's identity
+  is its file name, not its session id** (task-27). `orchestrate.mjs usage
+  <id> --jsonl <file>` is the one writer of `RunQueueItem.usage`, called at
+  inspect time (SKILL.md §5, on `stage <id> inspecting`'s own Bash
+  invocation, so it costs the driver no turn) and again per retry or fix-loop
+  transcript; `references/recovery.md` has a resumed driver pick up whatever
+  the crashed one missed. One entry per transcript, never one summed figure —
+  "the fix loop cost more than the item did" is a question an early fold
+  destroys. The identity rule is the trap: `claude -p --resume` keeps the
+  session id it was handed, so an item's `<id>.jsonl` and its
+  `<id>-fix-1.jsonl` report the SAME session (verified against this machine's
+  `task-22` pair), and keying idempotency on `sessionId` — which this task's
+  own plan called for — would make a fix loop's entry overwrite the execute
+  session's. Identity is `kind` + `loop`, both derived from the file name the
+  caller passed and neither guessable from content, which also makes
+  re-running the command over an already-recorded transcript harmless.
+  **Absence is a value here, at three levels**: no result event in the
+  transcript writes no entry at all (a killed session was not free, and exits
+  `0` saying so); a numeric field a future CLI renames reads `null`, never
+  `0`; and `usage` is optional on the queue item, so a run archived before
+  this landed reads `null` from `runUsageTotals`/`itemUsageTotals`
+  (`client/src/lib/run-stats.ts`) and renders nothing at all rather than
+  `$0.00`. That is why nothing on the path from run file to view defaults it
+  to `[]` — `RunDetail`'s row mapper passes it through undefaulted where it
+  defaults `assumptions`, deliberately.
 
 ## Conventions
 
