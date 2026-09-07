@@ -13,6 +13,9 @@ docs:
   - path: docs/workflows/development.md
     kind: workflow
     note: Running the app while you work on it
+  - path: docs/workflows/publishing.md
+    kind: workflow
+    note: Publishing a change to the skills
 out-of-scope:
   - path: backlog/
     reason: the backlog store itself — item files are skill-written records, and the store README documents the store beside the items it describes
