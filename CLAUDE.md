@@ -314,7 +314,7 @@ happened.
 - **A board-started run is visible before its run file exists, from server
   memory that is never written to disk.** `GET /api/orchestrator/runs` can
   only see `run.json`, and `orchestrate.mjs init` writes it in SKILL.md §2 —
-  after the dashboard spawn, the session boot, a 1360-line SKILL.md read and
+  after the dashboard spawn, the session boot, a full SKILL.md read and
   the §1 `plan` turn, i.e. 1–5 minutes in which the board showed nothing and
   a click that silently failed looked identical to one that worked.
   `StartingRunsService` closes that FEEDBACK gap only; boot latency is
@@ -785,9 +785,9 @@ happened.
   orchestrated item's verification step (`resolveVerifyCommands` resolves to
   `['test','typecheck','build']` off `package.json`), any future CI — proved
   nothing at all about `orchestrate.mjs` (the run file's only writer) or
-  `backlog.mjs` (the registry's only writer), 4,711 LOC of single-writer
-  tooling that could regress past every automated gate this repo has and merge
-  to `main`. `backlog/verify.json` was the rejected alternative: it closes the
+  `backlog.mjs` (the registry's only writer) — the whole of this repo's
+  single-writer tooling (`wc -l skills/*/tools/*.mjs` prints how much), which
+  could regress past every automated gate this repo has and merge to `main`. `backlog/verify.json` was the rejected alternative: it closes the
   orchestrated-merge half and leaves a human's `pnpm test` false-green, and the
   human half is what the 2026-09-06 audit found. The price, measured on a
   clean tree 2026-09-07: ~143s instead of jest's ~60s, so roughly +83s on
@@ -1144,7 +1144,7 @@ happened.
   guard, cleared again the tick the derivation reads false, never a verdict.
   The rule survived a whole branch as two hand-written expressions and two
   prose sentences that merely agreed — widening the strip's half to
-  `canResume === true` left all 1102 tests green — so it is now pinned by
+  `canResume === true` left the whole suite green — so it is now pinned by
   `test/watchdog-coupling.test.tsx` (board) and `test/watchdog-sweep.test.ts`
   (sweeper) driving both sides from one table, `test/helpers/watchdog-coupling.ts`,
   whose rows carry a hand-checked verdict so the predicate itself cannot be

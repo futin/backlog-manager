@@ -1646,7 +1646,7 @@ per-run pass returns without spawning on exactly those two conditions (steps
 2 and 3). As shipped, those were two hand-written expressions in two files
 reviewed as two different tasks, plus prose. The whole-branch review measured
 what that was worth: widening the strip's half to `canResume === true` left
-all 1102 tests green.
+the whole suite green.
 
 So the rule is now one function, `watchdogStoodDown` (`shared/agent.ts`),
 called by `RunStrip.tsx` to decide whether to render the control and by
