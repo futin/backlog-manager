@@ -5,6 +5,41 @@ reasoning behind the ones whose "why" runs longer than the rule. Most of
 these encode a failure that already happened or an attack that was closed
 deliberately — read the relevant section before changing one.
 
+## `registry.json` has exactly one writer, and a linked worktree registers its main tree
+
+`~/.backlog-manager/registry.json` has exactly one writer:
+`skills/backlog/tools/backlog.mjs` (`init`/`new` upsert, plus `unregister`,
+the one removal path — the upsert has no undo, and the repair for an entry
+that should never have been written has to live behind the same single writer,
+not in the server and not in a text editor). The server re-reads it per
+request, never writes, never caches.
+
+**What gets written is `registryRoot(root)`, not the root `resolveRoot`
+returned**: those are the same path in every case but one, and that one is
+bug-17 — a per-item orchestrator worktree registered as a standalone project
+(`.worktrees/bug-13`, name "bug-13"), a phantom entry that outlived the
+directory it named, since a worktree is deleted the moment its item merges.
+
+`resolveRoot` is not at fault and is deliberately unchanged: an execute
+session inside a worktree MUST resolve `backlog/` to that worktree's own copy,
+which is why its walk accepts a `.git` file at all. The registry is the one
+consumer of that root for which a worktree is the wrong answer — it stores
+absolute host paths the board, the item-body allowlist and the orchestrator
+all key on — so the mapping sits at that seam alone.
+
+A linked worktree registers its **main tree** rather than being refused,
+because the worktree's items merge back into it and it is almost always
+already registered, making the upsert a harmless name refresh; `null`
+(register nothing, non-fatal stderr note) is reserved for a bare main repo,
+where no main-tree path can be named.
+
+The discriminator is `linkedWorktreeInfo`, a **second copy** of
+`orchestrate.mjs`'s function — duplicated because one skill's `tools/` may
+never import another's, and keyed on a `commondir` entry in the `gitdir:`
+target, never "`.git` is a file": a submodule working tree is a file too and
+must keep registering as itself. Both suites build a real submodule so a
+future git that changes that layout fails loudly in both places.
+
 ## The orchestrator's run file has exactly one writer, one reader — the same relationship the registry has
 
 The run file (`run.json`) is `orchestrate.mjs`'s entire state model for one
@@ -160,6 +195,14 @@ is the one file that travels the other way — the server writes
 (`{ runId, requestedAt }`, atomically, `$BM_ORCH_CONTROL_HOME` to override),
 and `skills/backlog-orchestrate/tools/orchestrate.mjs` reads it at its two
 dispatch gates.
+
+`POST /api/agents/pause` (`{ project, cancel? }`, origin-guarded,
+**independent of `BM_AGENTS`** and never calling the dashboard — a pause is a
+fact on this machine's disk, and gating it on that switch would mean a run
+started while agents were on could never be stopped after they were turned
+off) writes
+`~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json`
+— `{ runId, requestedAt }`, `$BM_ORCH_CONTROL_HOME` to override.
 
 **Why `settings/`, when it is not a setting.** That subdirectory is already
 the read-write nested mount inside an otherwise read-only
@@ -387,6 +430,9 @@ it is every request written before this field existed. Uncoded because
 `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this endpoint
 gives, and nothing about a malformed enum needs telling apart from another 4xx.
 
+`MergeMode` (`shared/types.ts`) is `merge | branch`, with `isMergeMode` as its
+one guard for the reason `isAgentAction` has one.
+
 Two run fields rather than one, because the archive has to answer "did this
 run merge, and was that the plan?" months later. `mergeMode` is what was
 asked for and is never rewritten; `mergeModeEffective` is what the run is
@@ -402,6 +448,10 @@ of one session re-reading its own body; a tool refusal does not drift. The
 converse is deliberately not enforced — `stage <id> branched` stays legal
 under `merge` mode, because that is precisely what a denied merge degrades an
 item to.
+
+`SKILL.md` is re-read on every one of a run's several hundred turns and prose
+drifts across them; a tool refusal does not, which is the same division of
+labour `buildGatedQueue` and its rationale already keep.
 
 ## `merged` is not the only success exit — `branched` is its branch-mode sibling
 
@@ -482,6 +532,52 @@ buys "find out in ten seconds instead of four hours" and nothing else: the
 verdict is per call, so a
 passing probe can still be followed by a denied merge, which is exactly why
 the degrade path exists as well as the probe.
+
+## Question mode is run-scoped, and it only ever takes effect in a headless run
+
+Question mode is run-scoped, and it only ever takes effect in a headless run.
+`QuestionMode` (`shared/types.ts`) is `decide | park`, with `isQuestionMode`
+as its one guard for the reason `isMergeMode` has one, and it travels the
+exact route `mergeMode` does: Settings seed (`orchestrateDefaultQuestionMode`,
+default `park`) → sheet → the spawn prompt's compile-time ` --question-mode
+decide` → `init` → one `run.json` field.
+
+**`park` is the default and appends nothing**, so a default run's prompt stays
+byte-identical to what shipped before the field existed — inverted from merge
+mode's silent `merge` and following the same rule, that whichever value is the
+default appends nothing.
+
+**Absent means `park`; present-but-invalid is a 400, never a clamp**, for
+`mergeMode`'s reason restated in this field's terms: the value is written
+verbatim into `run.json` and read out of the archive months later, so a typo
+resolving to the default would put a claim there that no caller made.
+
+**One field, not three** — nothing degrades or promotes a question mode
+mid-run the way a denied merge moves `merge` → `branch`, so a
+`questionModeEffective` would record a divergence that cannot occur.
+
+The two modes are **identical whenever `AskUserQuestion` is reachable**: the
+ask itself (SKILL.md §3, once, best-effort) is unchanged in both, and the mode
+governs only the unanswered branch — which gives the feature its one doctrine,
+repeated in the Settings hint, the sheet's hint, SKILL.md §3 and here: want
+control over a question, start the run from a harness that has
+`AskUserQuestion`; start it from the board and you are choosing between
+skipping the item and letting the runner answer.
+
+What a `decide` run settled is recorded by `orchestrate.mjs assume <id> --json
+<file>`, the one writer of `RunQueueItem.assumptions`, appending rather than
+replacing, and **the tool refuses it under `park`** — exit `1`, run file
+byte-identical — the same division of labour `stage <id> merged` under branch
+mode keeps, because SKILL.md is re-read on every one of a run's several
+hundred turns and prose drifts where a tool refusal does not. The converse is
+deliberately not enforced: `attention --kind needs-answers` stays legal under
+`decide`, because `decide` is permission to answer and not an obligation to
+invent.
+
+**No fourth `ATTENTION_KIND`** — that list stays the closed set of three and
+means "a human must look at this item", which a decided-and-merged item does
+not warrant; the same precedent a classifier denial already set, one section
+above.
 
 ## `orchestrate.mjs` is always invoked from the project root, never from inside a per-item worktree
 
@@ -880,6 +976,21 @@ date-only branch breaks real files. A bare date is aged in DAYS ONLY
 reading `14h` off `2026-08-26` would be inventing it. `elapsedSince` in
 `client/src/lib/item-age.ts` is the one implementation of both branches.
 
+## `refactors/` is a peer section, not a facet on ideas
+
+`refactors/` is a peer section, not a facet on ideas: ideas are new, refactors
+are existing things that should be improved. Prefix `ref` (short because the
+card's meta line is ~118px of nowrap), lifecycle identical to ideas (`open/` →
+`done/`, promotable to a task with `from:`, rejectable).
+
+`kind: chore | debt` is written by `backlog-capture`, round-tripped by the CLI
+as an unknown key, passed through verbatim by the API, and badged by the
+client only for the values `REFACTOR_KINDS` lists.
+
+`backlog-execute` refuses the section outright — its refusal gate inspects
+only a task's `## Plan` and a bug's `## Fix`, so an id from any other section
+has to be turned away by the directory check that runs before it.
+
 ## Editing `skills/` changes nothing until commit + push + `plugin:sync`
 
 A plugin install is a copy, not a link: Claude Code loads
@@ -906,6 +1017,42 @@ hash, and prunes older version copies — skipping any marked `.in_use`,
 which a running session still has open. New skills load on the next Claude
 Code restart, not in the session that ran the sync.
 
+## `pnpm test` is the union of both runners
+
+`pnpm test` is the union of BOTH runners — `scripts/test-all.mjs` runs
+`test:jest` and then `test:skills`, always both, and exits `1` if either
+failed. Do not "simplify" `test` back to bare jest: jest's `testMatch` is
+`test/**/*.test.ts(x)` and can never reach `skills/*/tools/*.test.mjs`, so for
+a long time the one word everything reaches for — a human, an orchestrated
+item's verification step (`resolveVerifyCommands` resolves to
+`['test','typecheck','build']` off `package.json`), any future CI — proved
+nothing at all about `orchestrate.mjs` (the run file's only writer) or
+`backlog.mjs` (the registry's only writer) — the whole of this repo's
+single-writer tooling (`wc -l skills/*/tools/*.mjs` prints how much), which
+could regress past every automated gate this repo has and merge to `main`.
+
+`backlog/verify.json` was the rejected alternative: it closes the
+orchestrated-merge half and leaves a human's `pnpm test` false-green, and the
+human half is what the 2026-09-06 audit found.
+
+The price, measured on a clean tree 2026-09-07: ~143s instead of jest's ~60s,
+so roughly +83s on every orchestrated item's verification step, paid
+knowingly. (Grooming predicted ~210s against a 136s jest baseline, i.e. +54%;
+both absolute figures were taken on a loaded machine and came down, while the
+ratio went the other way — +138%, because a free machine speeds jest up far
+more than it speeds the node runner up. The absolute number is what a run
+actually pays.)
+
+The two named scripts stay the single copy of what each runner runs —
+`test-all.mjs` delegates to them and never re-spells `test:skills`'s glob
+pair, whose `scripts/*.test.mjs` half is the one most easily lost. Neither
+runner short-circuits the other, because a run with both broken has to report
+both.
+
+The script has no test of its own on purpose: `scripts/test-all.test.mjs`
+would match `test:skills`'s own glob and spawn the whole suite from inside the
+suite.
+
 ## Loopback bind is the access control (except where noted)
 
 Nothing in this stack has auth in front of it — the item-body route reads
@@ -924,6 +1071,17 @@ That is a boundary a browser inside the loopback does not respect at all,
 which is exactly why the origin and content-type guard on those two routes
 exists — the bind and the guard cover different attackers, and neither
 substitutes for the other.
+
+**Both halves are pinned**, and asymmetrically for a reason: the dev server's
+bind is an ordinary import (`test/vite-proxy.test.ts`), while the API
+entrypoint's is read out of `server/src/main.ts`'s SOURCE
+(`test/server-bind.test.ts`) because `main.ts` calls `bootstrap()` at top
+level with no `require.main` guard, so importing it opens a real socket. The
+source test resolves the `.listen(...)` arguments through the consts they name
+and evaluates them against a fabricated `process.env`, so it asserts what the
+expression computes rather than that a `127.0.0.1` string appears somewhere —
+and a bare `app.listen(PORT)`, the refactor that silently binds the wildcard,
+fails it on the argument count.
 
 ## The served build carries a CSP; dev does not
 
@@ -957,6 +1115,19 @@ duplicated list has to survive. Note the controller rebuilds the dispatch
 body field by field, so a new field reaches the service only when it is
 added there too.
 
+The controller rebuilds the dispatch body field by field — a new field reaches
+the service only when added there too — and checks `action` with
+`isAgentAction`, never a hand-written comparison chain: that chain is a second
+copy of the vocabulary, and it is the copy that goes stale. **`AgentAction`
+has three members**, and the third is why the two archives no longer share a
+branch: `deriveAction` returns `capture` for an out-of-scope item, checked by
+SECTION and BEFORE the `status !== 'open'` line that would otherwise swallow a
+`terminal` item. A `done/` item still derives `null` — history genuinely has
+no next step, where a rejection does. Capture spawns `backlog-capture` for a
+**new** item citing `from: <id>`; the original stays rejected and `moveItem`
+still refuses every move out of `out-of-scope/`. Archive's Out of scope column
+is the only surface that renders the control.
+
 ## The orchestrate spawn prompt is composed server-side
 
 `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal string
@@ -978,7 +1149,8 @@ own request type, applied here to the one field that would otherwise be the
 sole way an attacker-controlled cross-origin request could make an
 unattended, headless session do anything at all.
 
-`ids` is the one thing a caller can put into that string, and it is not an
+`ids` was the first thing a caller could put into that string (merge mode and
+question mode joined it later — see the end of this section), and it is not an
 exception to the rule above so much as the clearest statement of it. The
 board's Orchestrate sheet can narrow a run to a subset of the queue, which
 means the spawned session has to be told `/backlog-orchestrate task-3 bug-7`
@@ -1014,12 +1186,32 @@ Two smaller rules ride along, both about the difference between *absent* and
 *empty*. An absent `ids` means "the whole queue" and produces the bare
 constant. An explicitly empty `ids` is a 400, never silently read as
 "everything" — that is `parseIdsArg`'s own distinction in `orchestrate.mjs`
-(`--ids ''` must not mean "give me everything") enforced one layer up, at
-the only place a browser can reach. And the sheet sends `ids` **only when
-the selection is a strict subset**: a full explicit list is a different
-instruction from no list at all, because it freezes the run to the queue as
-it stood when the sheet opened, dropping anything groomed and committed
-while the reader was looking at it.
+(`--ids ''` must not mean "give me everything") enforced one layer up, at the
+only place a browser can reach. And the sheet sends `ids` **only when the
+selection is a strict subset** (or, since task-20, a hand order): a full
+explicit list is a different instruction from no list at all, because it
+freezes the run to the queue as it stood when the sheet opened, dropping
+anything groomed and committed while the reader was looking at it.
+
+What a caller can influence is enumerated by the prompt composition in
+`orchestrate()` and nowhere else — deliberately not by a count in this
+sentence, which is the shape of line that already went stale once here. The
+first influence is `ids`, the board's item selection, and only after
+`resolveIds` proves every entry both *is* an id (`isItemId`, `shared/agent.ts`
+— the same `^[a-z]+-\d+$` `backlog.mjs` enforces, so no whitespace, path
+separator, shell metacharacter or newline survives) and *names* an open bug or
+task in **this** project (a per-request scan scoped to `req.project`,
+deliberately not `findItem`'s registry-wide walk). The others are `mergeMode`
+and `questionMode`, tighter surfaces still and identical in shape: each
+appends a compile-time literal selected by a guard (` --merge-mode branch` by
+`isMergeMode`, ` --question-mode decide` by `isQuestionMode`), with no caller
+string in it at all, and each one's DEFAULT appends nothing — `merge` there,
+`park` here — so a default run's prompt stays byte-identical to what shipped
+before either field existed. Order is ids, then `--merge-mode`, then
+`--question-mode`: ids first because the tool reads bare tokens as ids and a
+flag ahead of them would swallow the first one, and `--question-mode` last so
+every prompt this endpoint composed before it existed stays a byte-exact
+prefix of what it composes now.
 
 ## The browser never talks to the dashboard
 
@@ -1028,6 +1220,17 @@ so every call goes board → this API → dashboard. `BM_AGENTS_URL` is env-only
 and never client-supplied: there is deliberately no request shape in which a
 browser names the host this server will call. `BM_AGENTS` defaults to off,
 so an unconfigured install makes no outbound request at all.
+
+`BM_AGENTS` defaults to off — and **compose passes that one through as
+`${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by
+`test/compose-env.test.ts`). A literal there wins outright: the `environment:`
+block IS `process.env` in the container and dotenv never overwrites a key
+already in it, so `BM_AGENTS: 'on'` made the documented default unreachable
+from the documented Quick start — dispatch buttons *and* the watchdog sweeper
+armed, from a `cp .env.example .env`. `BM_AGENTS_URL` beside it stays a
+literal for the opposite reason: it is stack topology
+(`host.docker.internal`), not a policy default, and a passthrough would let a
+host-oriented `.env` break dispatch in the stack.
 
 ## A project the dashboard cannot see cannot be dispatched to
 
@@ -1286,6 +1489,107 @@ for the same reason. Which refusals carry it is stated in the constant's own
 doc comment and nowhere else, this file included — a tally kept in a second
 place has gone stale every time a sender was added.
 
+## A board-started run is visible before its run file exists
+
+A board-started run is visible before its run file exists, from server memory
+that is never written to disk. `GET /api/orchestrator/runs` can only see
+`run.json`, and `orchestrate.mjs init` writes it in SKILL.md §2 — after the
+dashboard spawn, the session boot, a full SKILL.md read and the §1 `plan`
+turn, i.e. 1–5 minutes in which the board showed nothing and a click that
+silently failed looked identical to one that worked.
+
+`StartingRunsService` closes that FEEDBACK gap only; boot latency is unchanged
+and nothing here makes a run start sooner. It is a `Map<project, requestedAt>`
+in the API process, lost on restart on purpose, and adds **no** writer to the
+run file — the alternative of having the server call `init` itself was
+rejected because the spawned session would then hit `init` exit `4` (lock
+held), whose documented answer is "never retry, go to `--resume`".
+
+It rides the payload as a **separate top-level `starting` array**, never a
+`status: 'starting'` member of `runs`: that array is documented as a verbatim
+read of a file `orchestrate.mjs` wrote and is iterated by `aggregateRuns`,
+`ArchiveView` and `RunsView`, so a synthetic member would reach all of them
+and every exhaustiveness site, where a separate field reaches only what opts
+in.
+
+An entry dies on any of **three** rules: a run in the same payload matches the
+project AND its `startedAt` parses to at or after `requestedAt` —
+**`startedAt`, not "a run.json exists"**, since `cmdInit` archives the old
+file and writes a new one, so a project that has ever run always has one; or
+the entry is older than `RUN_STALE_MS`, the app's one freshness number, reused
+rather than joined by a second; or **a run for that project already reads
+`status: 'running'`, fresh or crashed** (bug-21) — keyed on that status
+exactly, never on `!fresh` and never on "a run file exists", because `cmdInit`
+archives a `done`, `aborted`, `failed` or `paused` file before writing the
+next one, so a project holding any of those can legitimately start a new run
+and must keep its placeholder.
+
+Rule 3 used to be a render-time filter in `BoardView` guarding one thing (two
+strips for one project); it is server-side because the four gates below all
+need it and the server's own lock can read it from nowhere else.
+
+It is `mark`ed from `AgentsController` **after** the awaited spawn, beside
+`arm()` and for the same layering reason, so a failed spawn leaves no ghost;
+`runs()` calls the pure `list()` and `OrchestratorController.runs()` calls the
+mutating `sweep()`, the same pure/mutating seam `annotate()`/`observe()`
+already keep, both deferring to one shared predicate. Correctness never
+depends on the sweep — `list` re-applies all three rules every call, so an
+unswept map leaks at most one entry per project and never lies, which is what
+makes `AgentsService`'s own direct `runs()` calls safe without one.
+
+The board maps `StartingStrip` straight over `starting`, with **no client-side
+filter**: rule 3 is what rules out the collision that filter existed for — a
+placeholder drawn beside a `running` run file's own strip — and keeping a
+second expression beside it that merely agreed is the shape
+`watchdogStoodDown` and `isStale` are each one function to avoid. It is
+deliberately not a guarantee of one row per project in every case: the strip's
+list is `running || paused` while rule 3 is keyed on `running` alone, so a
+stale `paused` run plus a live starting entry renders two rows, which is
+reachable and correct — they are two different runs, and widening rule 3 to
+`paused` to suppress the second would strip the placeholder from a project
+that can legitimately start a run.
+
+`POST /api/agents/resume` is deliberately not marked: the run it resumes
+already reads `running`, so the board is already drawing a crashed strip for
+it and the screen was never blank.
+
+### A starting entry blocks what a run file blocks (bug-21)
+
+A starting entry blocks what a run file blocks, on every surface (bug-21). For
+the 1–5 minutes before `init` writes `run.json` the entry is the only evidence
+a run exists, and every gate read `payload.runs` alone — so a person could
+hand-dispatch an item the pending run was about to claim in its own worktree
+(the double execution bug-4 and bug-12 each closed), and a second Orchestrate
+press returned 200 and spawned a second session that died at `init` exit `4`.
+
+`runClaimBlock` (`shared/agent.ts`) takes `starting` as a **required third
+parameter, no `[]` default** — the same rule `isStale`/`leavesBoard` follow
+for `runs`, because the compile error at each of its four call sites
+(`BoardView`, `ArchiveView`, `plan`'s `blocked`, dispatch's 409) is the
+mechanism that makes the next caller decide instead of silently reinheriting
+this.
+
+The block it produces is **project-wide and deliberately coarse**: a
+`StartingRun` is `{ project, requestedAt }`, and even carrying the launch's
+`ids` would not help, since what a run actually queues is `buildGatedQueue`'s
+verdict inside the spawned session minutes later. A wrong allow costs a
+duplicated execution; a wrong block costs a wait bounded by the run file
+landing. Per-item wording wins over the coarse one where both could apply.
+
+The toolbar Orchestrate control **hides** on a starting entry rather than
+disabling — that is what preserves bug-16's `showOrchestrate` reasoning, in
+which a *rendered* toolbar button is blocked on project visibility alone. And
+`POST /api/agents/orchestrate` refuses a starting project with the **same**
+`RUN_IN_PROGRESS_CODE`, beside the `activeRun` throw and therefore still
+before `resolveIds`: it is the same lock one window earlier, and
+`OrchestrateSheet` already branches on that code to close and hand the screen
+to the `StartingStrip` — which is exactly right here.
+
+`runHoldsItem` deliberately does NOT gain the parameter: its caller asks "is a
+run holding THIS item", which a placeholder naming no items cannot answer, and
+the window is ≤15 minutes against a 30-day staleness threshold. Pinned by a
+test rather than left as prose.
+
 ## Every agents POST is guarded by content-type and origin
 
 (`server/src/agents/origin.guard.ts`) — this is the one place in the app
@@ -1373,6 +1677,33 @@ the mode that produced it sitting next to it.
 the browser's own parser, not a regex — and rejects any scheme but
 `http(s)`. It is the one settings key a hand-edited localStorage value could
 turn into script execution.
+
+## Escape has one owner, and the topmost dialog is the only one that closes
+
+Escape has one owner, and the topmost dialog is the only one that closes.
+`hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
+listener, installed on the first entry and removed with the last; all four
+dialogs (`ItemDrawer`, `LaunchSheet`, `RunDrawer`, `OrchestrateSheet`) call it
+and none binds its own listener. They used to bind four, unguarded, and two of
+them are mounted together by design — Board and Archive both keep the item
+drawer open behind the launch sheet — so one press ran both callbacks and took
+the drawer with the sheet (bug-23).
+
+Ranking is by **mount order**, a contract and not an accident: the entry's
+position is fixed for the dialog's mounted lifetime (registration effect keyed
+on `[]`, `onClose` read through a ref rewritten every render), because every
+call site passes an inline arrow and an effect keyed on `[onClose]` would
+re-push the drawer above the sheet on the next runs poll. Entries are removed
+by identity, never popped — a dialog can unmount from under one that is still
+open.
+
+Module state rather than a context, the shape `lib/view-keys.ts` already uses:
+Board and Archive are separate lazy chunks and four suites mount these
+components standalone.
+
+Knowingly out of scope: nothing traps focus, so a drawer opened *after* the
+sheet ranks above a sheet still painted over it — ranking by paint order would
+mean a z-index registry.
 
 ## A resume is serialized at three layers
 
@@ -1600,6 +1931,10 @@ only while there is something to lose track of makes idle a checkable state
 rather than a claim — and the chain schedules its next link only after the
 current tick's own awaits resolve, never on a bare wall-clock interval, so
 two ticks can never race the same crashed run for the same spawn.
+
+A run started by typing the trigger with the board never opened for its whole
+life is never watched; CLAUDE.md already says to start runs from the board,
+and this is one more reason.
 
 ### Grace: any attempt starts the clock, only a success counts
 
@@ -1830,6 +2165,49 @@ the outcome was enough to close the four-hour gap the incident actually
 produced, without also having to get a hook or a skill-prose rule right on
 the first try.
 
+### A crashed run renders as crashed, never as nothing
+
+A crashed run renders as crashed, never as nothing. Supersedes the strip's old
+doctrine that a stale run must render nothing because its stage can't be
+trusted — right about the stage, wrong that the whole strip had to go silent;
+a run sat crashed for four hours behind exactly that silence.
+
+The strip states only facts the payload carries: heartbeat age, the *last
+reported* stage (never claimed current), and the watchdog's own verdict
+(`lib/run-watchdog.ts`'s `watchdogClause`). Badges, card run bars and
+`runClaimBlock` stay freshness-based — a crashed run does not stop being a
+live claim on its item just because the board now says so out loud.
+
+**The Runs view says the same thing off the same payload** (bug-29):
+`mergeRuns` no longer filters the live map on `fresh`, so `MergedRun.live` is
+the DATA authority ("does the payload have an entry at all") while
+`MergedRun.isLive` stays the PRESENTATION gate ("`fresh`") — pinning and the
+`runs-row-live` accent still follow freshness and nothing else does. It had to
+be split because the two fields answer different questions: `status` says
+whether the run is over, `fresh` says whether the heartbeat is recent, and
+review or merge routinely outlast `RUN_STALE_MS` (57 gaps over 15 minutes
+across this machine's archived runs, worst two 249 and 206 minutes). Gating
+the data on `fresh` handed those windows to `useOrchestratorArchive`, which by
+design never polls, while the 5s live poll kept arriving and being discarded —
+so the one surface built to watch a run happen froze until a reload.
+
+Both status badges (`RunsView`'s row, `RunDetail`'s head) read `crashed`
+through `runStatusChip` (`lib/run-stage.ts`), the one implementation of that
+substitution, derived from the live entry and never from `authority` — an
+archive record carries no `fresh` field and must keep printing its recorded
+status.
+
+`crashed` is **not** a sixth `RunStatus`:
+`RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` stay exhaustive over the five wire
+statuses, and the aggregate tile's `byStatus` substat still counts a crashed
+run under `running`, because that is a tally over the archived corpus rather
+than a claim about any run right now.
+
+`useOrchestratorRuns` polls while any run is `running`, fresh or not. Widened
+from "any run is fresh" — a crashed run's attempt counter, error text and the
+moment it goes fresh again would otherwise wait for a window focus, and the
+crashed strip would read as a screenshot instead of something live.
+
 ## Queue wait is not work
 
 `itemDurationMs` (`client/src/lib/run-time.ts`) is the one implementation of
@@ -1876,6 +2254,105 @@ drawer, the Runs pane, and any surface built after them are guaranteed to
 agree with each other, the same guarantee `RowTime`'s move out of the run
 drawer and into a shared component exists to make structural rather than
 coincidental.
+
+## A session's cost is recorded per transcript, and a transcript's identity is its file name
+
+A session's cost is recorded per transcript, and a transcript's identity is
+its file name, not its session id (task-27). `orchestrate.mjs usage <id>
+--jsonl <file>` is the one writer of `RunQueueItem.usage`, called at inspect
+time (SKILL.md §5, on `stage <id> inspecting`'s own Bash invocation, so it
+costs the driver no turn) and again per retry or fix-loop transcript;
+`references/recovery.md` has a resumed driver pick up whatever the crashed one
+missed.
+
+One entry per transcript, never one summed figure — "the fix loop cost more
+than the item did" is a question an early fold destroys.
+
+The identity rule is the trap: `claude -p --resume` keeps the session id it
+was handed, so an item's `<id>.jsonl` and its `<id>-fix-1.jsonl` report the
+SAME session (verified against this machine's `task-22` pair), and keying
+idempotency on `sessionId` — which this task's own plan called for — would
+make a fix loop's entry overwrite the execute session's. Identity is `kind` +
+`loop`, both derived from the file name the caller passed and neither
+guessable from content, which also makes re-running the command over an
+already-recorded transcript harmless.
+
+**Absence is a value here, at three levels**: no result event in the
+transcript writes no entry at all (a killed session was not free, and exits
+`0` saying so); a numeric field a future CLI renames reads `null`, never `0`;
+and `usage` is optional on the queue item, so a run archived before this
+landed reads `null` from `runUsageTotals`/`itemUsageTotals`
+(`client/src/lib/run-stats.ts`) and renders nothing at all rather than
+`$0.00`.
+
+That is why nothing on the path from run file to view defaults it to `[]` —
+`RunDetail`'s row mapper passes it through undefaulted where it defaults
+`assumptions`, deliberately.
+
+## Board-versus-Archive is derived, and "last touched" has three rungs
+
+Board-versus-Archive is derived from `updated ?? lastCommit ?? created` and
+the run payload, never stored. `isStale`/`leavesBoard`
+(`client/src/lib/item-stale.ts`) are the one implementation, read by both
+BoardView and ArchiveView, so an item can never be in both surfaces or
+neither; `lastTouched` (`client/src/lib/item-touched.ts`) is the one
+implementation of the three-rung precedence, read by `isStale` and by
+Archive's month grouping so a column can never be ordered by a date nobody
+used to decide its contents.
+
+Five rules the predicate encodes and no caller may re-decide: an item **in
+progress** is never stale (`started` outranks the arithmetic); an item a
+**fresh orchestrator run holds** is never stale either, which is why both
+functions take `runs` — required, no `[]` default, because a default is what
+lets the next caller reintroduce bug-11 silently (`runHoldsItem`,
+`shared/agent.ts`, is every stage but the five true exits, so `pending` and
+`parked` both count, and it is a separate function from `runClaimBlock`
+because a parked item must stay on the Board *and* stay hand-dispatchable); a
+**done or rejected** item is never stale (staleness is about neglected work,
+and a done item is only reachable through the Board's own Done filter); an
+**unparseable or absent** pair of stamps reads as fresh, because a malformed
+file has to stay where someone will see it; and a **task never leaves the
+Board**, it gains a `stale` marker instead.
+
+The second rule exists because the item file cannot know: a run stamps
+`started:`/`phase:` on its own worktree's copy, so the copy the registry
+points at is silent for the whole run — the same reason `runClaimBlock`
+exists, and `ATTENTION_RUN_STAGES` moved to `shared/types.ts` (beside
+`RUN_CLAIMED_STAGES`) so a `lib/` module could read it without importing a
+React component.
+
+The window is a client setting (`staleDays`, default 30) — a view decision
+over a corpus the server already returns whole — and it is the one numeric
+setting whose clamp falls back to the DEFAULT rather than the nearest bound
+below `min`, because `0` would silently empty three columns.
+
+### The middle rung comes from git, not the item file
+
+The middle rung of "last touched" comes from git, not the item file.
+`updated:` has exactly one writer (`backlog.mjs start`/`stop`) while the item
+file has several editors, so a groom session that writes Cause and Fix through
+the editor without `start --as groom` leaves the frontmatter silent — and
+ixray's bug-7 aged off the Board on a five-week-old `created:` five days after
+it was groomed.
+
+`lastCommit` (`server/src/items/git-dates.util.ts`) is the committer date of
+the last commit touching the file, read once per scan with `git log
+--name-only --relative`, keyed relative to the *project* path because a
+registered directory need not be a repo root. Every failure — no git, no repo,
+untracked file, timeout — degrades to `created`, never throws: an unreadable
+history must not 500 every project's board.
+
+**The container needs `git` installed and `safe.directory` in system config**
+(Dockerfile); without either the degrade path is silent and the fix is
+host-only, which is how it first shipped invisible.
+
+The result is memoised per project against the mtimes of `index` and
+`logs/HEAD` — the one cache in `items/`, and it is a memo rather than the
+stale cache `ItemsService` refuses because it is keyed on the files git
+rewrites whenever the answer can change; with neither file present there is no
+key that can move and it recomputes instead. It exists because the call costs
+84–396ms per project and `scanProject` runs on both `/api/items` and
+`/api/projects`.
 
 ## The Orchestrate sheet's uncommitted flag is read from git per request and memoised nowhere
 
@@ -1968,6 +2445,10 @@ sheet open**. That asymmetry is the whole reason one of these two functions
 needs a cache and the other must not have one. The client half enforces the
 cadence too: the effect is keyed on `[project]` alone, so walking the three
 steps or flipping a picker re-asks nothing.
+
+**A sibling endpoint, not a `BacklogItem` field**, for `merge-check`'s reason:
+a field would put an un-memoisable git read inside `scanProject`, which runs
+for every registered project on both `/api/items` and `/api/projects`.
 
 ### 2. `main`, not `HEAD`
 
