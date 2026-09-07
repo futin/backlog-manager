@@ -304,3 +304,43 @@ run that died mid-item, with possibly a worktree on disk, a branch, and an item
 file still carrying an in-progress marker that is billing time to nobody.
 Deleting the run file to get past the refusal throws that record away — and with
 it the only map back to what is still on disk.
+
+---
+
+## §4 — Why the executor sweeps for contradicted prose and proves its tests red
+
+Measured 2026-09-06, across every fix-verdict review this machine had produced
+by then — 27 first passes and 2 second passes, four projects — each finding
+classified by what it actually was:
+
+| Finding class | Count | Examples |
+|---|---|---|
+| another statement of the old contract left standing | 14 | `CLAUDE.md:227` and `docs/invariants.md:408` (bug-4), `CLAUDE.md:522` (task-20), a JSDoc on `RUN_IN_PROGRESS_CODE` (bug-21, twice), `README:12` (task-4), docker-compose `MAX_SESSIONS=10` (dashboard bug-4), `docs/overview.md` (dashboard task-11) |
+| a new test that still passes with the change reverted | 5 | a `styles.css` rule invisible to the suite (bug-16), a conditional `TZ` pin (task-15), a dedupe test that cannot tell pre- from post-slice (dashboard bug-15), `bookingDate` never pinned (finance task-4) |
+| a genuine defect | 8 | pause cleared on watchdog resume (task-17), a NUL byte in a source file (task-18), the lease bricking `--abort` (bug-19) |
+| other | 2 | |
+
+Nineteen of 29 were the first two rows, and both are mechanical checks over a
+diff the executing session already has open — not judgement calls the reviewer
+is better placed to make. A fix loop costs a median 22.6 minutes and about
+$5.60 all in (the fix session, the re-review, and roughly ten driver turns);
+the 26 loops in that corpus cost it about $145 and 9.4 hours.
+
+So `backlog-execute`'s SKILL.md gained a "Before you call it done" step
+carrying exactly those two checks, and `## Outcome` gained the two fixed lines
+(`Contract sweep:` and `Red proof:`) that let the reviewer see they ran —
+missing pair, Important finding. The step lives in `backlog-execute` rather
+than in §4's dispatch prompt on purpose: the executor already loads that skill
+and would load a longer prompt on every dispatch instead, and §4's prompt is
+carried in a run's context for its whole life while the skill body is read once
+per item, inside the session that needs it.
+
+Both classes share a shape worth naming, because it is why the executing
+session catches them and the reviewer only catches them late: **the evidence is
+never in the diff.** The stale contract sentence is in a file the change did
+not touch, and a test that cannot fail looks identical to one that can until
+something reverts the change under it. Reading the diff harder finds neither.
+
+Dated deliberately. The next cross-run sweep can compare the fix-verdict rate
+against the 27-of-91 this one measured and say whether the step moved it; if it
+did not, this section is the record of what was tried.
