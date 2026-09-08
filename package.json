@@ -17,6 +17,7 @@
     "test:jest": "jest --runInBand",
     "test:skills": "node --test skills/*/tools/*.test.mjs scripts/*.test.mjs",
     "plugin:sync": "node scripts/sync-plugin.mjs",
+    "tailnet": "node scripts/tailnet.mjs",
     "typecheck": "tsc --noEmit",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
