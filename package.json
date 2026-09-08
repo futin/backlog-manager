@@ -2,7 +2,7 @@
   "name": "backlog-manager",
   "private": true,
   "version": "0.1.0",
-  "packageManager": "pnpm@11.13.0",
+  "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=22.13"
   },
