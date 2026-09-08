@@ -1175,6 +1175,65 @@ expression computes rather than that a `127.0.0.1` string appears somewhere —
 and a bare `app.listen(PORT)`, the refactor that silently binds the wildcard,
 fails it on the argument count.
 
+## The tailnet serve is a script, and its port is read where compose reads it
+
+`scripts/tailnet.mjs` (`pnpm run tailnet`, subcommands `up` | `status` |
+`down`) is the sanctioned way around the loopback bind above, and the reason
+it is a script rather than a documented one-liner is drift. A `tailscale
+serve` typed by hand stores a **copy** of the port number inside tailscaled —
+outside this repo, outside git, and surviving reboots. compose reads
+`BM_WEB_PORT` from `.env`; the moment that variable moves because something
+else on the machine claimed 5177, the copy inside tailscaled keeps pointing
+at the old port and the phone gets a bare 502 from Tailscale, which reads as
+a Tailscale fault rather than a stale mapping. This machine already sits on a
+non-default `BM_WEB_PORT`, so that is not hypothetical. The script resolves
+the port the way compose resolves it — an exported variable wins over the
+file, and the fallback is the compose default — so there is no second copy to
+keep in sync, and `scripts/tailnet.test.mjs` asserts against the source text
+that `5177` appears exactly once and no other port literal appears at all.
+
+Three properties are deliberate and each costs something if traded away:
+
+- **The tailnet port and the loopback port are the same number.** tailscaled
+  answers this machine's tailnet address, compose publishes on `127.0.0.1`,
+  and the two never contend for one socket — so one number names the project
+  wherever you type it. This is what rules out an HTTPS serve: `--https`
+  accepts only 443, 8443 and 10000, so a browser-trusted certificate and the
+  matching-port property cannot both hold. `off` takes the *listener's* port,
+  which is why `serveArgs`/`offArgs` read one resolved number rather than two
+  expressions.
+- **Plain HTTP is not plaintext on the wire.** The hop from the phone to this
+  machine is WireGuard-encrypted end to end; the HTTP exists only inside that
+  tunnel, between tailscaled and a loopback socket. The dispatch POSTs survive
+  the terminating proxy because `origin.guard.ts` compares host and port and
+  deliberately **not** the scheme — a serve sends `Origin: https://…` while
+  the request arriving here is still HTTP, and comparing schemes would 403
+  the documented setup for no security gain.
+- **Never `tailscale funnel`.** Funnel publishes to the public internet. The
+  board reads every registered project's backlog files off this filesystem
+  with no auth, and with `BM_AGENTS` on it fronts a POST that spawns a Claude
+  Code session with write permission in another repo. The tailnet boundary is
+  what makes both acceptable; Funnel removes it. Avoid `--set-path` too: the
+  SPA references `/assets` and `/api` absolutely and breaks anywhere but a
+  root.
+
+The script refuses to escalate. `serve` edits the node's configuration, so
+tailscaled rejects it from a user who is neither root nor the declared
+operator; the fix is one `sudo tailscale set --operator=$USER`, printed
+rather than run, because a helper that silently reconfigures your machine's
+network is worse than an error message. It warns — and does not fail — when
+nothing is listening on the loopback port, since registering before
+`pnpm run docker:up` is a reasonable order to work in and the registration
+persists. `--dry-run` prints the command instead of running it, which is what
+lets the suite pin the argument strings without reconfiguring the machine that
+runs the tests.
+
+Ported from guide-manager's `bin/tailnet.js`, which exists for the same
+reason one variable over (`GM_WEB_PORT`). The layout differs on purpose:
+there `bin/` is ESM inside a CommonJS repo and the suite is jest, here the
+script joins `scripts/` beside `sync-plugin.mjs` and its suite is picked up
+by `test:skills`'s existing `scripts/*.test.mjs` glob.
+
 ## The served build carries a CSP; dev does not
 
 `server/src/security.ts` sets the header from Nest, so it rides on

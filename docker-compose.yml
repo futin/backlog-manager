@@ -26,12 +26,13 @@
 # Origin (server/src/agents/origin.guard.ts).
 #
 # Reaching this from elsewhere (a phone, another machine on the tailnet) is a
-# separate, deliberate step layered on top: point
-# `tailscale serve` at the loopback port yourself — there is no script here
-# that does it for you. That is also the only reason `allowedHosts:
-# ['.ts.net']` in vite.config.ts means anything: without a tailnet serve in
-# front of it, no request ever arrives with a .ts.net Host header for that
-# allowlist to match.
+# separate, deliberate step layered on top: `pnpm run tailnet`
+# (scripts/tailnet.mjs) points a `tailscale serve` at the loopback port, and
+# reads BM_WEB_PORT from the same .env this file interpolates it from, so the
+# tailnet port and the published port are always one number. That serve is
+# also the only reason `allowedHosts: ['.ts.net']` in vite.config.ts means
+# anything: without it, no request ever arrives with a .ts.net Host header for
+# that allowlist to match.
 services:
   server:
     build: .
