@@ -67,13 +67,32 @@ services:
       # overwrites a key already in process.env (bug-25). `:-` so an empty
       # BM_AGENTS= reads as off like an absent one.
       BM_AGENTS: '${BM_AGENTS:-off}'
-      # A literal on purpose, and deliberately NOT a passthrough like the line
-      # above: this is stack topology, not a policy default. Inside the stack
-      # the dashboard is on the host, not on this container's loopback — hence
-      # host.docker.internal rather than the 127.0.0.1 default that is right
-      # for `pnpm run dev` on the host. Passing it through would let a
-      # host-oriented .env line flow in and break dispatch in the container.
-      BM_AGENTS_URL: 'http://host.docker.internal:4173'
+      # Stack topology, not a policy default — which is why this is NOT a
+      # passthrough of BM_AGENTS_URL like the BM_AGENTS line above is of
+      # BM_AGENTS. Inside the stack the dashboard is on the host, not on this
+      # container's loopback, so the 127.0.0.1 form that is right for
+      # `pnpm run dev` on the host is wrong here; passing BM_AGENTS_URL
+      # through would let that host-oriented .env line flow in and silently
+      # break dispatch in the container.
+      #
+      # But host.docker.internal is not universally routable either. On
+      # Docker Desktop for WSL2 it resolves (192.168.65.254, plus an IPv6
+      # address) and then refuses the connection: nothing at that gateway
+      # forwards to the host's 4173, and the bridge gateways (172.17.0.1,
+      # 172.18.0.1) refuse it too, so `extra_hosts: host-gateway` is no fix
+      # either. The only container-reachable addresses for a host process are
+      # the host's real interface IPs — its LAN address, which changes on
+      # reboot, or its tailnet address, which does not.
+      #
+      # Hence the override, under a SECOND name rather than this one. The
+      # default keeps the documented Docker Desktop topology, and a machine
+      # where that topology does not work sets BM_AGENTS_DOCKER_URL in the
+      # same .env — without BM_AGENTS_URL, the host-oriented key, becoming
+      # able to reach in here. Two names is the whole point: one key cannot
+      # hold both "where the dashboard is from the host" and "where it is
+      # from inside this container" when those differ, and bug-25 is the
+      # record of what a single key silently outranking the other does.
+      BM_AGENTS_URL: '${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}'
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:

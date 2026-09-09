@@ -351,7 +351,11 @@ happened.
   API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off —
   and **compose passes that one through as `${BM_AGENTS:-off}`, never as a
   literal** (bug-25, pinned by `test/compose-env.test.ts`). `BM_AGENTS_URL`
-  beside it stays a literal: stack topology, not a policy default.
+  beside it is stack topology, not a policy default, so compose overrides it
+  under a **second key** and never interpolates `BM_AGENTS_URL` itself:
+  `${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}`. Both halves are
+  pinned — the default string, and that no `${BM_AGENTS_URL…}` appears anywhere
+  in the file. Do not collapse the two names back into one.
   Why: [invariants.md](docs/subsystems/invariants.md#the-browser-never-talks-to-the-dashboard)
 - **A project the dashboard cannot see cannot be dispatched to.** Never
   derive a `dirName` from a path to route around this. The `dispatchGate`

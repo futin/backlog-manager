@@ -1378,10 +1378,36 @@ so an unconfigured install makes no outbound request at all.
 block IS `process.env` in the container and dotenv never overwrites a key
 already in it, so `BM_AGENTS: 'on'` made the documented default unreachable
 from the documented Quick start — dispatch buttons *and* the watchdog sweeper
-armed, from a `cp .env.example .env`. `BM_AGENTS_URL` beside it stays a
-literal for the opposite reason: it is stack topology
-(`host.docker.internal`), not a policy default, and a passthrough would let a
-host-oriented `.env` break dispatch in the stack.
+armed, from a `cp .env.example .env`. `BM_AGENTS_URL` beside it is overridable
+for the opposite reason, and under a **second key**: it is stack topology, not
+a policy default, so a passthrough of `BM_AGENTS_URL` itself would let the
+host-oriented `.env` line — loopback, which inside a container means the
+container — break dispatch in the stack. Compose therefore reads
+`${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}` and never
+interpolates `BM_AGENTS_URL` at all, which `test/compose-env.test.ts` pins
+from both directions: the exact default string, and a whole-file assertion
+that no `${BM_AGENTS_URL…}` appears anywhere in it. That second case is the
+load-bearing one — collapsing the two names back into one looks exactly like
+the line it replaces and would read as a cleanup.
+
+Two names rather than one because one key cannot hold both answers when they
+differ, and they differ on more machines than the original literal assumed.
+`host.docker.internal` is a Docker Desktop convenience, not a guarantee: under
+WSL2 it *resolves* (`192.168.65.254`, plus an IPv6 address) and then refuses
+the connection, because nothing at that gateway forwards to the host's port.
+The bridge gateways (`172.17.0.1`, `172.18.0.1`) refuse it too, so
+`extra_hosts: ["host.docker.internal:host-gateway"]` is not a fix either — the
+only addresses a container can reach a host process on are the host's own
+interface IPs. Prefer a stable one: a LAN address changes on reboot, a tailnet
+address does not, at the cost of making dispatch-from-the-stack depend on
+tailscaled being up.
+
+The failure this produces is worth recognising by sight, because nothing in it
+names the cause: `GET /api/agents/status` answers
+`{"enabled":true,"reachable":false,…,"error":"fetch failed"}` and Settings
+reports the dashboard unreachable, while `curl 127.0.0.1:4173/api/health` on
+the host answers `200`. A healthy dashboard plus an unreachable one is the
+signature of the container looking somewhere the host is not.
 
 ## A project the dashboard cannot see cannot be dispatched to
 

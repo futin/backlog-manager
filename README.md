@@ -112,7 +112,8 @@ environment and `.env.example` does not carry.
 | `BM_WEB_PORT` / `BM_API_PORT` | `5177` / `4322` | Host-side ports, for when something else already holds one |
 | `BM_PROJECT_ROOT` | `~/Documents/custom-projects` | The tree mounted read-only into the server container |
 | `BM_AGENTS` | off | Turns on dispatching backlog items to `../claude-agents-dashboard` |
-| `BM_AGENTS_URL` | `http://127.0.0.1:4173` | The dashboard's API origin — its `PORT`, not its Vite port |
+| `BM_AGENTS_URL` | `http://127.0.0.1:4173` | The dashboard's API origin — its `PORT`, not its Vite port. The host-side answer; compose deliberately never interpolates this key |
+| `BM_AGENTS_DOCKER_URL` | `http://host.docker.internal:4173` | The same origin as seen from inside the server container. Set it when that default does not reach your host — under WSL2 it resolves and then refuses, and the bridge gateways refuse it too, so use one of the host's own interface IPs (prefer a tailnet address, which survives a reboot) |
 | `BM_AGENTS_TOKEN` | empty | Sent as `Authorization: Bearer …` when the dashboard sets `ANSWER_TOKEN` |
 | `BM_WATCHDOG_FILE` | `~/.backlog-manager/settings/watchdog.json` | Where the server itself writes the run watchdog's own settings |
 | `BM_WATCHDOG` | on | `off` disables the run watchdog entirely — the operator's kill switch, separate from its Settings toggle |
@@ -134,8 +135,9 @@ dashboard's `POST /api/spawn`, and the session shows up in the dashboard a
 poll later — where you can watch it, and answer its questions from a phone if
 its hooks are installed.
 
-Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, and `BM_AGENTS_TOKEN`
-if the dashboard sets `ANSWER_TOKEN`). **Settings ▸ Claude Agents** reports
+Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, or
+`BM_AGENTS_DOCKER_URL` when the stack is doing the calling, and
+`BM_AGENTS_TOKEN` if the dashboard sets `ANSWER_TOKEN`). **Settings ▸ Claude Agents** reports
 exactly which gate is closed and what to do about it. The action is derived
 from the item file, not from the click, so an ungroomed bug cannot be executed
 by asking nicely — and nothing here ever writes an item: the spawned session
