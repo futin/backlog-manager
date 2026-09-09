@@ -22,12 +22,15 @@ data.
 | Tests, jest only | `pnpm run test:jest` (`jest --runInBand`) |
 | Skill tests | `pnpm run test:skills` (`node --test`) |
 | Reinstall the plugin from the pushed HEAD | `pnpm run plugin:sync` |
+| Publish the web port to the tailnet | `pnpm run tailnet` (`up` \| `status` \| `down`) |
 | Types | `pnpm run typecheck` |
 | Production build | `pnpm run build` |
 
 Ports: API `4322`, Vite `5177` (guide-manager holds 4321/5175/5176 on this
 machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in
 `.env` — inside the compose stack they are fixed.
+`pnpm run tailnet` reads `BM_WEB_PORT` from that same `.env` and serves the
+tailnet on the same number.
 
 ## Layout
 
@@ -68,9 +71,10 @@ reasoning behind the rules in the next section lives in
   every merge.
 - `backlog/` — this repo's own backlog, self-registered like any project.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD,
-  → [docs/workflows/publishing.md](docs/workflows/publishing.md)) and
+  → [docs/workflows/publishing.md](docs/workflows/publishing.md)),
   `test-all.mjs` (`pnpm test`,
-  → [docs/workflows/development.md](docs/workflows/development.md)).
+  → [docs/workflows/development.md](docs/workflows/development.md)) and
+  `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper).
 - `docs/` — the reference docs; `docs/superpowers/` holds the design spec and
   implementation plans this repo was built from.
 
@@ -283,6 +287,18 @@ happened.
   `known_marketplaces.json` — a cache, and hand-editing it triggers the
   revert. The sync measures every published path on both sides (bug-10).
   Why: [invariants.md](docs/subsystems/invariants.md#agents-is-part-of-the-plugins-publish-surface)
+- **The tailnet serve is a script, and its port is read where compose reads
+  it.** `scripts/tailnet.mjs` (`pnpm run tailnet`, `up`/`status`/`down`) is
+  the one sanctioned way past the loopback bind below; it resolves
+  `BM_WEB_PORT` the way compose does — exported variable over `.env` over the
+  compose default — because a hand-typed `tailscale serve` stores a second
+  copy of the port inside tailscaled, which drifts and surfaces as a bare 502
+  on the phone. The tailnet port and the loopback port are always the same
+  number (which is why HTTPS serve is out: `--https` takes only 443/8443/10000);
+  plain HTTP is deliberate and rides inside WireGuard; `funnel` and
+  `--set-path` are never used. `5177` appears once in the script, asserted
+  against its source text by `scripts/tailnet.test.mjs`.
+  Why: [invariants.md](docs/subsystems/invariants.md#the-tailnet-serve-is-a-script-and-its-port-is-read-where-compose-reads-it)
 - **Both processes bind `127.0.0.1` by default; loopback is the access
   control** (nothing has auth). `BM_BIND` is the single knob; compose sets
   `0.0.0.0`. Both halves are pinned: `test/vite-proxy.test.ts` imports the dev
@@ -335,7 +351,11 @@ happened.
   API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off —
   and **compose passes that one through as `${BM_AGENTS:-off}`, never as a
   literal** (bug-25, pinned by `test/compose-env.test.ts`). `BM_AGENTS_URL`
-  beside it stays a literal: stack topology, not a policy default.
+  beside it is stack topology, not a policy default, so compose overrides it
+  under a **second key** and never interpolates `BM_AGENTS_URL` itself:
+  `${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}`. Both halves are
+  pinned — the default string, and that no `${BM_AGENTS_URL…}` appears anywhere
+  in the file. Do not collapse the two names back into one.
   Why: [invariants.md](docs/subsystems/invariants.md#the-browser-never-talks-to-the-dashboard)
 - **A project the dashboard cannot see cannot be dispatched to.** Never
   derive a `dirName` from a path to route around this. The `dispatchGate`

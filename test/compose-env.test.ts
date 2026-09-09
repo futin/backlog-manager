@@ -53,11 +53,24 @@ describe('docker-compose BM_AGENTS', () => {
     }
   });
 
-  it('keeps BM_AGENTS_URL a literal, because it is topology and not policy', () => {
-    // Inside the stack the dashboard is only reachable at host.docker.internal,
-    // while .env.example documents the loopback form that is right for
-    // `pnpm run dev` on the host. A passthrough here would let a host-oriented
-    // .env line flow in and silently break dispatch in the container.
-    expect(assignments('BM_AGENTS_URL')).toEqual(['http://host.docker.internal:4173']);
+  it('overrides BM_AGENTS_URL under a second name, never a passthrough of itself', () => {
+    // Topology, not policy: inside the stack the loopback form .env.example
+    // documents for `pnpm run dev` is wrong, so a passthrough of BM_AGENTS_URL
+    // itself would let that host-oriented line flow in and silently break
+    // dispatch in the container. The override therefore rides a DIFFERENT key,
+    // and the default is still the documented Docker Desktop topology — so a
+    // `cp .env.example .env` install reaches the same address it always did.
+    expect(assignments('BM_AGENTS_URL'))
+      .toEqual(['${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}']);
+  });
+
+  it('never interpolates the host-oriented key into the container', () => {
+    // The load-bearing half of the pair above. Asserting the exact string is
+    // what pins the default, but this is what pins the SEPARATION: a later
+    // edit that "simplifies" the two names back into one — `${BM_AGENTS_URL:-…}`
+    // — matches the shape of the line it replaces and would read as a cleanup.
+    // Matched against the whole file rather than this one assignment, because
+    // the mistake is just as wrong anywhere else in it.
+    expect(COMPOSE).not.toMatch(/\$\{BM_AGENTS_URL[:}]/);
   });
 });

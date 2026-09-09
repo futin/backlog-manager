@@ -148,9 +148,15 @@ build path.
 **A `.env` edit doesn't reach the container.** `environment:` in
 [`docker-compose.yml`](../../docker-compose.yml) *is* `process.env` in the container, and
 dotenv never overwrites a key already there — so a literal in that block outranks `.env`
-outright. That is why `BM_AGENTS` is a passthrough, and why `BM_AGENTS_URL` is
-deliberately still a literal: it is stack topology (`host.docker.internal`), not a policy
-default.
+outright. That is why `BM_AGENTS` is a passthrough. `BM_AGENTS_URL` is stack topology
+(`host.docker.internal`), not a policy default, so it is overridable under a **second**
+key instead: compose reads `${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}`
+and never interpolates `BM_AGENTS_URL`, whose loopback value means the container itself
+in here. Set `BM_AGENTS_DOCKER_URL` when that default cannot reach your host — under
+WSL2 it resolves and then refuses, and so do the bridge gateways, which is why
+`extra_hosts: host-gateway` is no fix; use one of the host's own interface IPs, a tailnet
+address for preference. The symptom is a `reachable: false, "error": "fetch failed"` from
+`/api/agents/status` while `curl 127.0.0.1:4173/api/health` on the host answers `200`.
 
 <!-- docs-sync:
   sources:
