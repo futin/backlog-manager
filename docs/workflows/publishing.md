@@ -108,5 +108,5 @@ that a sync makes the new behaviour available to the *next* run, not the current
     - scripts/sync-plugin.test.mjs
     - .claude-plugin
   kind: workflow
-  verified: c8a7bd892b82da46fea507eedf12ddadbe1d5a46
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->

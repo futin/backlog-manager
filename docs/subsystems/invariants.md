@@ -2744,6 +2744,64 @@ where not knowing costs a run slot. Step 2 of the sheet carries no chip
 either, and that is a decision rather than an omission: the flag is a step 1
 fact about membership, and step 1 is where the control that acts on it lives.
 
+## This file stays one document (decided 2026-09-12, task-33)
+
+The question task-33 deferred to the end of its pass: now that df008f8 gave
+**every** `CLAUDE.md` invariant a long-form home here and d7463d2 cut
+`CLAUDE.md` down to a normative index plus anchored `Why:` links, should this
+file split into one document per invariant — or per subsystem?
+
+**No. It stays one document.** Four reasons, in the order they weighed:
+
+- **The whole link surface is `CLAUDE.md`, the one file no session can avoid
+  reading.** Measured on 2026-09-12: 45 anchored `invariants.md#…` references,
+  43 of them distinct, and *every one of them* lives in `CLAUDE.md` — no other
+  doc, skill or agent links into this file by anchor at all. A split rewrites
+  all 45 in the file that is auto-loaded into every session and every headless
+  orchestrator run in this repo, so a botched target is not a dead link
+  somebody finds later, it is auto-loaded breakage. The concentration cuts both
+  ways and it is the reason to be conservative: one file to edit means the
+  split is *mechanically* easy, which is exactly how it would be done
+  carelessly.
+
+- **This file is addressed by section already, and nothing loads it whole.**
+  It is 2,759 lines and ~170 KB, and that number is what makes a split
+  *sound* obvious. But it is never auto-loaded — it is reached by following one
+  anchor, and a reader who follows one anchor reads one `##` section. Splitting
+  buys file granularity over a document that already has heading granularity.
+  The size argument would become real the day something routinely reads the
+  file end to end; today nothing does.
+
+- **Several sections are only correct as a pair, and a split puts the pairs in
+  different files.** The three-layer resume and the sweeper's prune keep-set;
+  merge mode and `branched` as its sibling exit; the uncommitted read and
+  board-versus-archive staleness, which share a `runs` argument and a "no
+  default" rule. Each pair is one fact told from two sides, and "one home per
+  fact" is the rule this whole directory exists to serve. A reader who has both
+  halves in one scroll catches them drifting apart; a reader who has to open a
+  second file does not.
+
+- **Symmetry with the subsystem docs is not a reason.** `api.md`, `board.md`
+  and `skills.md` are each one subsystem's map. This file is the reasoning
+  behind rules that cut *across* all three — the single-writer relationships
+  alone span the server, the client and three CLIs — so there is no per-subsystem
+  seam to split it on that would not put one rule's rationale in two places.
+
+**Ordering against [idea-11](../../backlog/ideas/open/idea-11-path-scoped-claude-rules-pointers-into-the-invariant-rationale-once-headless-loading-is-proven.md),
+stated so it is not rediscovered.** idea-11 proposes `.claude/rules/*.md`
+pointers whose payload is "read `invariants.md` §A, §B, §C" — they consume this
+document's anchor shape, so a split after they exist rewrites every one of them
+on top of the 45 in `CLAUDE.md`. This decision therefore had to be made first,
+and it is now made: **idea-11 may be built against the current anchors.** If a
+split is ever reopened it has to land *before* those pointers, not after.
+
+**What would reopen it**, stated concretely rather than as "if it gets too
+big": something other than a human or an anchor-following agent starts reading
+this file end to end on a routine path — a rules loader, a retrieval step, a
+skill that `cat`s it — at which point the 170 KB stops being inert and the
+per-section split earns its rewrite. Absent that, growth alone does not.
+
+
 <!-- docs-sync:
   sources:
     - server/src
@@ -2755,5 +2813,5 @@ fact about membership, and step 1 is where the control that acts on it lives.
     - test
     - docker-compose.yml
   kind: subsystem
-  verified: bb20a03538aca602eacbff8bed6393478115d83f
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->

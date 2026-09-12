@@ -14,9 +14,11 @@ development you open **Vite**, not the API — that is the one with hot reload.
 ### Once
 
 pnpm only, pinned by [`packageManager`](../../package.json) and enforced through corepack
-in the image. Node ≥ 22.13, because pnpm 11 declares that engine and means it — on Node
-20 it dies during its own module init before it reads the lockfile
-([`Dockerfile`](../../Dockerfile)).
+in the image. Node ≥ 22.13, the floor `engines.node` declares in the same file; the image
+is `node:24-slim` ([`Dockerfile`](../../Dockerfile)). That floor is this repo's, not the
+package manager's — pnpm 12, the pinned version, asks only for Node ≥ 18, where the
+pnpm 11 this was pinned to before died on Node 20 during its own module init, before it
+ever read the lockfile.
 
 ```bash
 pnpm install
@@ -63,17 +65,20 @@ sets `BM_BIND=0.0.0.0` in both services for the opposite reason: there the
 `127.0.0.1:<port>:<port>` publish is the boundary, and a container-loopback bind would
 only make the published port unreachable.
 
-Reaching the board from another device is a separate, deliberate step — put your own
-`tailscale serve` in front of the loopback port. That is also the only thing that makes
-`allowedHosts: ['.ts.net']` in the Vite config mean anything.
+Reaching the board from another device is a separate, deliberate step:
+`pnpm run tailnet` ([`scripts/tailnet.mjs`](../../scripts/tailnet.mjs)) puts a
+`tailscale serve` in front of the loopback port, reading `BM_WEB_PORT` the way compose
+reads it so the two ports are always one number — a hand-typed `tailscale serve` stores a
+second copy of the port inside tailscaled instead, which drifts. That serve is also the
+only thing that makes `allowedHosts: ['.ts.net']` in the Vite config mean anything.
 
 ### What the container mounts
 
 `~/.backlog-manager` and the project tree come in **read-only**, at their host paths,
 because the registry stores absolute host paths and they have to mean the same thing
 inside. One nested mount is read-write: `~/.backlog-manager/settings`, the only place the
-server itself writes (the watchdog config). The image also carries `git` and a
-system-config `safe.directory` — see Failure modes.
+server itself writes — the watchdog config, and the pause request a live run reads back.
+The image also carries `git` and a system-config `safe.directory` — see Failure modes.
 
 ## Verification
 
@@ -89,9 +94,9 @@ pnpm run build
 
 - The two runners cover disjoint trees. Jest's `testMatch`
   ([`jest.config.ts`](../../jest.config.ts)) is `test/**/*.test.ts(x)` and can never
-  reach `skills/*/tools/*.test.mjs`, which is where this repo's single-writer tooling is
-  proved — so bare jest under the name `test` was a false green over
-  `orchestrate.mjs` and `backlog.mjs`.
+  reach `test:skills`'s own glob pair — `skills/*/tools/*.test.mjs`, where this repo's
+  single-writer tooling is proved, plus `scripts/*.test.mjs` — so bare jest under the name
+  `test` was a false green over `orchestrate.mjs` and `backlog.mjs`.
 - Stderr, and last, because an orchestrated item's verification step records only a short
   tail of stdout-then-stderr, and jest writes its whole report to stderr. A summary on
   stdout would sort *above* jest's output and never survive the tail.
@@ -110,14 +115,14 @@ and with `BM_AGENTS` genuinely on in that shell, a crashed run sitting there wou
 ## Failure modes
 
 **Vite won't start.** `esbuild`'s install script was skipped: it has to be named in
-`allowBuilds` in [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml), and pnpm 11 runs no
+`allowBuilds` in [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml), and pnpm runs no
 dependency install script otherwise. The symptom arrives much later than the cause — as a
 dev server that dies at startup, not as an install error.
 
 **Every container start reinstalls the whole dependency tree.** `PNPM_CONFIG_STORE_DIR`
 disagreed with the path baked into `node_modules/.modules.yaml`, so pnpm judged
 `node_modules` stale. It is pinned to `/pnpm/store` on both sides — the `Dockerfile` and
-both compose services — and the two must stay equal. Note the prefix: pnpm 11 reads
+both compose services — and the two must stay equal. Note the prefix: pnpm reads
 `PNPM_CONFIG_*` and silently ignores the npm-compatible `npm_config_*` form, which looks
 exactly like the bug being unfixed.
 
@@ -170,5 +175,5 @@ address for preference. The symptom is a `reachable: false, "error": "fetch fail
     - scripts/test-all.mjs
     - server/src/main.ts
   kind: workflow
-  verified: 9af3c42862f28594255816111b350f39890170c4
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->

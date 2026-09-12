@@ -2,9 +2,12 @@
 id: task-33
 title: Verify the three moved subsystem docs against the code and stamp them
 created: 2026-09-07
-updated: 2026-09-08T11:14:07Z
+updated: 2026-09-12T18:19:20Z
 groom-elapsed: 119
 groom-tokens: 22089
+started: 2026-09-12T17:57:08Z
+execute-elapsed: 1332
+execute-tokens: 231511
 ---
 
 ## Goal
@@ -148,3 +151,166 @@ All nine tracked docs report `current`, every stamp names a commit that is an an
 blockquote, and the `invariants.md` split question has an answer recorded — either in
 `docs/subsystems/invariants.md` itself or as its own backlog item, with its ordering
 against idea-11 stated, not left implicit.
+
+## Outcome
+
+2026-09-12. All nine tracked docs read `current`. The three moved subsystem docs were
+read against the trees they name, corrected, their "deliberately unstamped" blockquote
+removed, and stamped; the six `stale` docs — one more than the plan listed, see below —
+were read against their drifted sources, corrected and re-baselined. The
+`invariants.md` split question is answered and recorded in `invariants.md` itself.
+
+**Six stale docs, not five.** `docs/workflows/development.md` (baseline 9af3c42) went
+stale after the 2026-09-08 groom, against `.env.example`, `docker-compose.yml` and
+`package.json`. It was worked like the other five.
+
+**What was actually wrong** (the plan predicted "mostly a re-baseline"; eight real
+errors were found, six of them in docs the plan expected to be clean):
+
+- `board.md` step 3 said the five Orchestrate pickers had "the last two seeded from
+  Settings". Four of the five seed from Settings — `OrchestrateSheet.tsx` reads
+  `dispatchDefaultModel`/`dispatchDefaultEffort` for model and effort, exactly as the
+  launch sheet does, plus both orchestrator defaults. Only permission mode does not; it
+  starts at `auto` clamped to the host ceiling. Corrected, and the Settings paragraph
+  extended to name the Claude Agents group's own rows, since that is where the model and
+  effort defaults live.
+- `skills.md` attributed the retro home's overwrite refusal to `retro.mjs sweep`. `sweep`
+  writes nothing at all; the refusal is `record`'s (`retro.mjs:340`, exit `2`). Rewritten
+  so the refusal sits on `record`. Also "a session judges" → "a session labels", matching
+  the heading it paraphrases.
+- `overview.md` said "Five skills under `skills/`, two CLIs beneath them" — six and
+  three since 73d4349; its own opening line already said six.
+- `overview.md` still announced that the three subsystem docs "carry no `verified:`
+  baseline yet ... The checker reports them `unstamped` until that pass happens". This
+  pass is that pass. Removed.
+- `README.md` and `docs/workflows/development.md` both required "pnpm 11". 7673d60 moved
+  `packageManager` to `pnpm@12.3.4` and touched no doc. Worse, the *reason* was stale
+  too: pnpm 12.3.4 declares `engines.node >= 18.*` (read from the corepack cache), so the
+  Node 22.13 floor is now this repo's own `engines.node`, not the package manager's.
+  Both rewritten; two further version-bound sentences in development.md made
+  version-free so they cannot re-stale.
+- `CLAUDE.md` claimed twice that `test:skills` has one glob. 7452664 added
+  `scripts/*.test.mjs` beside `skills/*/tools/*.test.mjs`. Both sentences corrected;
+  `invariants.md` already said "glob pair" and needed no change.
+- `development.md` said reaching the board from another device means putting "your own
+  `tailscale serve` in front of the loopback port" — the exact hand-typed serve
+  `scripts/tailnet.mjs` exists to prevent. Rewritten around `pnpm run tailnet`.
+- `development.md` called `~/.backlog-manager/settings` "the only place the server itself
+  writes (the watchdog config)" — the pause request lives there too. Extended.
+
+`api.md` and `publishing.md` needed no prose correction: every route, cache posture,
+`BM_AGENTS` gate, writer and guard in `api.md` was checked against `server/src` and
+matched, and `publishing.md`'s only drifted source is `.claude-plugin/plugin.json`, whose
+description gained one word the doc does not quote. Both were stamped as honest
+"read at this commit, found nothing" re-baselines.
+
+`invariants.md` was verified by targeted section reads plus two mechanical sweeps rather
+than a line-by-line read of all 2,759 lines: the sections its drifted sources touch
+(retro, tailnet, the compose two-key override, the `pnpm test` union) were each checked
+against the code — `LABELS`, `MIN_SESSIONS = 8`, `no-lease`, `serveArgs`/`offArgs`, the
+single `5177` literal, the exit-code table in `orchestrate.mjs` — and every repo path any
+of the nine docs names in backticks was checked to exist. The remaining drift in it was
+authored by the same commits that drifted it (73d4349, efef8f6, 7452664, 2d5b563,
+335ae43, 69ac259, 37a36ca each edited it in place).
+
+**The split question (plan step 8), decided and recorded** in
+`docs/subsystems/invariants.md` → "This file stays one document (decided 2026-09-12,
+task-33)". It stays one document. Measured rather than assumed: 45 anchored
+`invariants.md#…` references exist, 43 distinct, and *every one* is in `CLAUDE.md` — no
+other doc, skill or agent links in by anchor — so a split rewrites 45 targets in the one
+file every session auto-loads. Nothing reads the file end to end; it is reached one
+anchor at a time, so a split buys file granularity over a document that already has
+heading granularity. Several sections are only correct as a pair (the three-layer resume
+and the sweeper's keep-set; merge mode and `branched`; the uncommitted read and
+board-versus-archive), and a split separates them. The ordering against idea-11 is stated
+in that section: this decision had to come first, it is now made, and idea-11 may be
+built against the current anchors — a split reopened later would have to land *before*
+those pointers, never after. The section also names the one concrete condition that
+reopens it: something starting to read the file end to end on a routine path.
+
+**Not committed, and the stamps name `d3dbf88`.** The plan's step 5 asks for a commit per
+doc so each baseline is an ancestor of `HEAD`; this session runs under an orchestrator
+run and never commits. All nine stamps therefore name `d3dbf88` (this branch's base,
+`git merge-base --is-ancestor` verified for each), and every edit in this diff is a doc
+the checker tracks — no tracked *source* is touched — so the docs stay `current` after
+the run commits them.
+
+That constraint is the reason for the two sites left standing on purpose:
+
+- `Dockerfile` (3 comments), `docker-compose.yml` (1) and `pnpm-workspace.yaml` (1) still
+  say "pnpm 11". They are code comments made false by 7673d60, not by this diff.
+- `docker-compose.yml:106` still calls the read-write settings mount "watchdog.json
+  alone".
+
+All five are sources of `README.md`, `CLAUDE.md`, `invariants.md` and/or
+`development.md`. Editing one puts a source change in this commit, which re-stales those
+docs immediately — and a session that cannot commit cannot re-stamp them. Fixing them is
+a one-commit job for a session that can, and it is the natural follow-up to this item.
+
+**Verification.** `node ~/.claude/skills/docs-sync/tools/provenance.mjs --repo .`
+(invoked at its real path — `~/.claude/skills` is a symlink into `~/claude-global`, and
+Node's module-URL realpathing makes the tool's `process.argv[1]` guard fail silently
+through the symlinked path, printing nothing and exiting `0`):
+
+```
+docs-sync — 9 doc(s) tracked, plan: docs/.docs-sync.yml (standard-1)
+
+CLAUDE.md                      current
+README.md                      current
+docs/overview.md               current
+docs/subsystems/api.md         current
+docs/subsystems/board.md       current
+docs/subsystems/invariants.md  current
+docs/subsystems/skills.md      current
+docs/workflows/development.md  current
+docs/workflows/publishing.md   current
+EXIT=0
+```
+
+No `unstamped`, no `stale`, no `baseline-missing`, no layout violation, no dead link.
+Each stamp checked individually:
+
+```
+OK  CLAUDE.md d3dbf88
+OK  README.md d3dbf88
+OK  docs/overview.md d3dbf88
+OK  docs/subsystems/api.md d3dbf88
+OK  docs/subsystems/board.md d3dbf88
+OK  docs/subsystems/invariants.md d3dbf88
+OK  docs/subsystems/skills.md d3dbf88
+OK  docs/workflows/development.md d3dbf88
+OK  docs/workflows/publishing.md d3dbf88
+```
+
+`grep -l 'until that pass happens' docs/subsystems/{api,board,skills}.md` matches nothing
+(exit `1`).
+
+`pnpm test`:
+
+```
+Test Suites: 82 passed, 82 total
+Tests:       1567 passed, 1567 total
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+The worktree had no `node_modules`, so jest exited `127` until `pnpm install
+--frozen-lockfile` ran. The first full run after that reported one failure —
+`test/agents-resume.test.ts › 404s without any outbound call when BM_AGENTS is off`,
+expecting `{ error: 'not found' }` and receiving `{}`. It did not reproduce: that file
+alone passes 25/25, and the second full run is the green one above. Order-dependent
+pollution under `--runInBand`, not this diff — the diff touches no `.ts`, `.tsx` or
+`.mjs` file at all.
+
+Contract sweep: 3 sites updated (docs/overview.md's "unstamped until that pass happens"
+paragraph, which stated the same contract the three blockquotes did; CLAUDE.md's two
+"only glob" sentences; docs/workflows/development.md's two version-bound pnpm sentences).
+Greps for every old form — `until that pass happens`, `pnpm 11`, `only glob`,
+`Five skills`, `two CLIs`, `the last two seeded`, `a session judges`, `put your own` —
+return nothing outside the five source-file comments recorded above as deliberately left.
+Red proof: skipped — the diff adds and changes no test, and contains no production change
+to revert; it is documentation prose plus nine provenance stamps.

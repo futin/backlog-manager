@@ -5,10 +5,6 @@ Six skills under `skills/`, one agent under `agents/`, and three CLIs beneath th
 that only reads them. This is the plugin's skill root — never duplicated under
 `.claude/skills/`, which would load the same skills twice and drift.
 
-> Moved here from `README.md` and `CLAUDE.md` during the docs restructure, so the prose
-> is the repo's own, but nobody has yet read it back against the code — this doc is
-> deliberately `unstamped` until that pass happens.
-
 ## Mechanism
 
 ### The six
@@ -63,7 +59,7 @@ several hundred turns: `recovery.md` (all of `--resume`/`--abort`, read in full 
 either) and `rationale.md` (the measurements behind the rules).
 
 `skills/backlog-retro/references/rationale.md` is the same idea: why a tool computes and
-a session judges, why the label set is closed, and the 2026-09-06 baseline the first
+a session labels, why the label set is closed, and the 2026-09-06 baseline the first
 record is measured against.
 
 ### `agents/`
@@ -82,9 +78,10 @@ dispatches before every merge. It is published only because `PUBLISHED_PATHS`
 - **The run file** — `orchestrate.mjs` writes it; the API reads it. The pause request
   travels the other way, server → tool, and is the one file that does.
 - **The retro home** — `retro.mjs record` writes `~/.backlog-manager/retro/`
-  (`$BM_RETRO_HOME`) and nothing else does; `retro.mjs sweep` reads it back for the
-  deltas and refuses to overwrite a record. Nothing in the server or the client reads it
-  at all — a board view over the newest record is a separate design, once records exist.
+  (`$BM_RETRO_HOME`) and nothing else does, once per sweep and refusing to overwrite an
+  existing record; `retro.mjs sweep` only reads it back for the deltas. Nothing in the
+  server or the client reads it at all — a board view over the newest record is a
+  separate design, once records exist.
 - **The plugin install** — a run resolves its own skill files through
   `$CLAUDE_PLUGIN_ROOT`, a copy of the pushed `HEAD`. Getting an edit there is
   [workflows/publishing.md](../workflows/publishing.md).
@@ -106,4 +103,5 @@ authority on how that skill behaves; this doc is the map, not a second copy of i
     - skills
     - agents
   kind: subsystem
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->

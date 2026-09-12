@@ -491,10 +491,11 @@ happened.
   prose** rather than a tool live in `skills/backlog/tools/backlog.test.mjs`
   too (`backlog-groom`'s stamp order and its closing `Groomed on disk only`
   line, `backlog-execute`'s pre-review checks and the
-  `agents/backlog-reviewer.md` half that reads them): that glob is the only one
-  the node runner has, and none of those files sits beside a `tools/`
-  directory. The one exception is deliberate — the `Groomed on disk only` cases
-  assert `skills/backlog-orchestrate/SKILL.md`'s half of that seam too, in this
+  `agents/backlog-reviewer.md` half that reads them): that glob is the node
+  runner's only reach into `skills/` — the other half of the pair,
+  `scripts/*.test.mjs`, covers `scripts/` and nothing else — and none of those
+  files sits beside a `tools/` directory. The one exception is deliberate — the
+  `Groomed on disk only` cases assert `skills/backlog-orchestrate/SKILL.md`'s half of that seam too, in this
   suite rather than in `orchestrate.test.mjs`, because the rule is two skills
   agreeing on one sentence and a suite that reads only one half cannot catch
   them drifting apart; the reviewer/execute pair is the same shape. They read
@@ -502,9 +503,10 @@ happened.
   another's" rule is untouched. `backlog-retro` splits its suite in two —
   `retro.test.mjs` (the CLI, spawned as a child process) and
   `retro-lib.test.mjs` (the modules under `tools/lib/`) — and BOTH sit at the
-  `tools/` level on purpose: `test:skills`'s only glob is
-  `skills/*/tools/*.test.mjs`, so a file under `tools/lib/` would never be
-  run, which is the same as not existing.
+  `tools/` level on purpose: `test:skills`'s globs are
+  `skills/*/tools/*.test.mjs` and `scripts/*.test.mjs`, so a file under
+  `tools/lib/` matches neither and would never be run, which is the same as
+  not existing.
 
 <!-- docs-sync:
   sources:
@@ -520,5 +522,5 @@ happened.
     - vite.config.ts
     - pnpm-workspace.yaml
   kind: index
-  verified: bb20a03538aca602eacbff8bed6393478115d83f
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->
