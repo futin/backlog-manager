@@ -1,6 +1,8 @@
 import type { MiddlewareConsumer } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 
+import { allowedHostGate } from './allowed-hosts';
+
 /**
  * sha256 of the pre-paint theme script inlined in client/index.html, base64,
  * over the exact bytes between its <script> tags.
@@ -57,7 +59,18 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
  * v8, which rejects a bare wildcard. Exported so AppModule and the test that
  * pins the ordering against ServeStaticModule share one route matcher rather
  * than drifting apart.
+ *
+ * The Host gate rides here, ahead of the headers, so no app built in this repo
+ * — the one main.ts boots, the ones the suites build — can carry the CSP
+ * without also carrying the gate (bug-22). Registering ahead of
+ * ServeStaticModule is already how the CSP reaches the served index.html, and
+ * the gate needs that position for the same reason: serve-static streams the
+ * file itself, so a middleware behind it never runs for that request.
+ *
+ * Named for the two rather than for headers alone — it no longer only applies
+ * headers, and the name is what a reader checks before assuming this file is
+ * response-side only.
  */
-export function applySecurityHeaders(consumer: MiddlewareConsumer): void {
-  consumer.apply(securityHeaders).forRoutes('{*splat}');
+export function applySecurityMiddleware(consumer: MiddlewareConsumer): void {
+  consumer.apply(allowedHostGate, securityHeaders).forRoutes('{*splat}');
 }

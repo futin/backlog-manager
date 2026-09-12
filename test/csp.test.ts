@@ -10,7 +10,7 @@ import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
-import { CSP_POLICY, applySecurityHeaders } from '../server/src/security';
+import { CSP_POLICY, applySecurityMiddleware } from '../server/src/security';
 import { clientDistModules } from '../server/src/static';
 import { makeRegistry } from './helpers/store';
 
@@ -29,7 +29,7 @@ copyFileSync(INDEX_HTML, join(distFixture, 'index.html'));
 @Module({ imports: [...clientDistModules(distFixture)] })
 class StaticFixtureModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    applySecurityHeaders(consumer);
+    applySecurityMiddleware(consumer);
   }
 }
 

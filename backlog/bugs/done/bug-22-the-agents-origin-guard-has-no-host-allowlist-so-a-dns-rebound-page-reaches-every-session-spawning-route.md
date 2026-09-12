@@ -3,9 +3,12 @@ id: bug-22
 title: The agents origin guard has no Host allowlist, so a DNS-rebound page reaches every session-spawning route
 created: 2026-09-06
 tags: security, audit-2026-09-06
-updated: 2026-09-12T16:15:00Z
+updated: 2026-09-12T18:46:05Z
 groom-elapsed: 417
 groom-tokens: 81919
+started: 2026-09-12T18:31:37Z
+execute-elapsed: 868
+execute-tokens: 105584
 ---
 
 ## Symptom
@@ -251,3 +254,94 @@ Verify with `pnpm test` (both runners) and `pnpm run typecheck`.
 - **No browser check.** The defect is in a header a page cannot set by hand from the
   devtools console (`Host` is a forbidden header name), so Playwright cannot express the
   repro; the supertest cases above are the executable form of it.
+
+## Outcome
+
+2026-09-12 — Fixed as planned: a `Host` allowlist gating every route, not a third check
+inside the origin guard.
+
+`server/src/allowed-hosts.ts` is new and holds both halves — `isAllowedHost(hostHeader,
+env = process.env)`, read per request with no cache, and `allowedHostGate`, plain Express
+middleware. It accepts any IP literal (`net.isIP`, IPv6 brackets stripped), `localhost`,
+any `.ts.net` name matched at a label boundary at the end of the hostname, and anything in
+`BM_ALLOWED_HOSTS` (comma-separated, trimmed, lowercased, a leading `.` being a suffix
+match). Hostname only, never the port; a trailing dot stripped; an unparseable, empty or
+absent `Host` refused. Everything else gets 403 `{ error: 'unrecognised Host header' }`.
+
+The gate answers the response itself rather than throwing an `HttpException` — a
+divergence from the plan's wording worth naming. Nest's exception layer wraps controllers,
+guards and pipes, not middleware configured through `MiddlewareConsumer`; a throw there
+lands in Express's own error handler as a 500 with a stack page. The observable shape is
+the one the plan asked for (403, `{ error }`), which is what a caller can see.
+
+`applySecurityHeaders` became `applySecurityMiddleware` and now applies
+`consumer.apply(allowedHostGate, securityHeaders)`, gate first, with its two call sites
+(`server/src/app.module.ts`, `test/csp.test.ts`) following. `SameOriginPostGuard`'s logic
+is untouched — only its header comment, which now names rebinding as the case it does not
+close and points at the new file.
+
+### Verification
+
+`pnpm run typecheck`:
+
+```
+$ tsc --noEmit
+=== EXIT typecheck: 0 ===
+```
+
+`pnpm test` (both runners):
+
+```
+# pass 535
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 67408.702292
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+jest's own summary, for the count:
+
+```
+Test Suites: 83 passed, 83 total
+Tests:       1597 passed, 1597 total
+Snapshots:   0 total
+Time:        58.831 s, estimated 67 s
+```
+
+New suite `test/allowed-hosts.test.ts`, 30 cases: the unit table from the plan verbatim,
+plus the integration half against `AppModule` — the rebound dispatch, the rebound
+`/api/items/body` read, a rebound `/api/health`, the tailnet Host over both `http` and
+`https` origins, `BM_ALLOWED_HOSTS`, and the ordering-against-`ServeStaticModule` case
+against a static fixture app. Every pre-existing suite stayed green with no header added
+to any of them, which is rule 1 doing exactly what grooming predicted: supertest sends
+`Host: 127.0.0.1:<ephemeral port>`.
+
+Contract sweep: 7 sites updated (server/src/agents/origin.guard.ts, CLAUDE.md,
+docs/subsystems/invariants.md, docs/subsystems/api.md, docs/overview.md, README.md,
+.env.example)
+
+One site left standing on purpose: the `docs-sync: verified:` stamps in
+`docs/subsystems/api.md`, `docs/subsystems/invariants.md` and `docs/overview.md` still
+name commit `d3dbf88`. This session never commits, so the commit these edits belong to
+does not exist yet and there is no sha to stamp. A stale stamp over-reports drift and
+never under-reports it, so the next `/docs-sync` finds these three sections already
+correct and re-baselines them.
+
+Red proof: 9 tests went red with the change reverted
+
+Three reverts, each by file copy (never `git stash` — the stack is shared with every other
+worktree of this repo):
+
+- Gate unregistered from the applier (`consumer.apply(securityHeaders)`) → 4 red, and the
+  first of them is the bug itself: `expected 403 "Forbidden", got 201 "Created"` on the
+  rebound dispatch, i.e. the attacker's prompt reaching `/api/spawn`.
+- Label-boundary suffix match reverted to a substring one → 3 red (`evilts.net`,
+  `ts.net.evil.test`, and the `BM_ALLOWED_HOSTS` suffix case).
+- Absent/empty `Host` defaulted to allowed → 2 red.

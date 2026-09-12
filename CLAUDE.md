@@ -44,7 +44,8 @@ reasoning behind the rules in the next section lives in
   module, plus the run watchdog), `orchestrator/` (a read-only view of the
   run-state directory, plus the in-memory watchdog and starting-run records and
   the two files the server does write), `registry/`, `static.ts` (serves
-  `client/dist` only when built), `security.ts`.
+  `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host
+  allowlist every route is gated by).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs,
   Archive, Settings), a run strip above the board's columns, and the
@@ -305,6 +306,18 @@ happened.
   config, `test/server-bind.test.ts` reads `server/src/main.ts`'s SOURCE — a
   bare `app.listen(PORT)` fails it.
   Why: [invariants.md](docs/subsystems/invariants.md#loopback-bind-is-the-access-control-except-where-noted)
+- **Every route is gated by a Host allowlist, because a bind is no defence
+  against DNS rebinding** (bug-22). `isAllowedHost`
+  (`server/src/allowed-hosts.ts`) is the one implementation; loopback and every
+  other IP literal, `localhost`, `.ts.net` and `BM_ALLOWED_HOSTS` are the only
+  names this app answers to, and an absent or empty `Host` is refused, never
+  defaulted. Hostname only, never the port; read from the environment per
+  request, never cached. The gate is registered by the **same applier as the
+  CSP** (`applySecurityMiddleware`, host gate first), so no app built here can
+  carry one without the other, and it is global rather than scoped to the
+  agents POSTs because the read routes are exposed to the same page. The origin
+  guard is deliberately unchanged — it inherits the allowlist transitively.
+  Why: [invariants.md](docs/subsystems/invariants.md#every-route-is-gated-by-a-host-allowlist)
 - **The served build carries a CSP (`server/src/security.ts`); dev does
   not.** `script-src` pins the pre-paint theme script's sha256 — edit that
   script and `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.

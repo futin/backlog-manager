@@ -47,6 +47,20 @@ import type { Request } from 'express';
  *
  * GET /api/agents/status is deliberately NOT guarded: it is read-only, and
  * every other GET in this app is open by the same posture.
+ *
+ * **What these two checks do NOT close: DNS rebinding** (bug-22). Both of them
+ * are computed from headers one attacking page controls *together*. A page
+ * served from evil.test, whose DNS re-resolves to 127.0.0.1 after load, sends
+ * `Origin: http://evil.test:4322` and `Host: evil.test:4322` — a perfect match
+ * for the check below, which asserts a *relation* between two headers and not
+ * an *identity* — and the browser considers that fetch genuinely same-origin,
+ * so there is no preflight to withhold and `application/json` rides along for
+ * free. Two checks, one bypass. The layer that closes it is
+ * `server/src/allowed-hosts.ts`: a Host allowlist, global rather than scoped
+ * here, because the same page reaches every GET in this app too. With that
+ * gate in front, the equality below inherits the allowlist transitively — an
+ * allowlisted `Host` plus equality means an allowlisted `Origin` — which is
+ * why nothing in this file changed when it landed.
  */
 @Injectable()
 export class SameOriginPostGuard implements CanActivate {

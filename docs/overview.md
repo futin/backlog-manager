@@ -66,11 +66,14 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`agents/`** — the one module that makes an outbound call, to the local
   claude-agents-dashboard, and the only one that can start a session. Off unless
   `BM_AGENTS` says otherwise; every POST here is additionally guarded by content-type and
-  `Origin`, because loopback is no boundary against a page in this machine's own browser.
+  `Origin`, because loopback is no boundary against a page in this machine's own browser
+  (the `Host` allowlist above is what covers the rebinding case those two checks do not).
   The run watchdog lives here too, armed only while some run file says `running`.
 - **`registry/`** — read-only view of the registry file.
-- **`static.ts` / `security.ts`** — the built client is served only if it was built, and
-  the served build carries a CSP whose `script-src` pins the inline theme script by hash.
+- **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only
+  if it was built; the served build carries a CSP whose `script-src` pins the inline theme
+  script by hash; and every route, read or write, is gated by a `Host` allowlist, which is
+  what a page that rebinds DNS onto loopback cannot pass.
 
 ### The client — [full doc](subsystems/board.md)
 

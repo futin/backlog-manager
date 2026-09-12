@@ -6,7 +6,7 @@ import { HealthController } from './health/health.controller';
 import { ItemsModule } from './items/items.module';
 import { AgentsModule } from './agents/agents.module';
 import { OrchestratorModule } from './orchestrator/orchestrator.module';
-import { applySecurityHeaders } from './security';
+import { applySecurityMiddleware } from './security';
 import { clientDistModules } from './static';
 
 @Module({
@@ -28,6 +28,6 @@ export class AppModule implements NestModule {
    * and the header lands on the served index.html, not just on /api.
    */
   configure(consumer: MiddlewareConsumer): void {
-    applySecurityHeaders(consumer);
+    applySecurityMiddleware(consumer);
   }
 }
