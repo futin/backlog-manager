@@ -285,8 +285,9 @@ export function archiveStem(archiveDir, runId) {
 // (`logs`, `reviews`, `verify`, `questions`, `prompts`). Those directories
 // are created by DRIVERS following SKILL.md prose (`mkdir -p
 // "<dir>/logs"`), never by this tool, so the set is open by construction —
-// `prompts/` exists on exactly one project on this machine because one
-// driver invented it unprompted. An allowlist minted today would silently
+// `prompts/` began as a directory one driver invented unprompted on one
+// project, and bug-31 later made it prescribed in SKILL.md §5 and §7 without
+// this list needing an edit. An allowlist minted today would silently
 // drop whatever the next prose edit names, which is precisely the evidence
 // loss this whole mechanism exists to close. `runs/` being off limits to
 // drivers is already SKILL.md §2's rule ("stay out of `<dir>/runs/`"), so

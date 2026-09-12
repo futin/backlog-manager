@@ -328,12 +328,22 @@ be asked at every merge later.
   branch mode. The run does not stop and nothing is parked:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "<the classifier's own message, verbatim>"
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge probe"
   ```
 
   `--note` is mandatory (omitting it exits `1`), and the command only ever
   moves `merge` → `branch`, only once per run — a second call exits `1`
   rather than overwriting the first note.
+
+  **That note is fixed text, not the classifier's message.** The denial's
+  second half is a free-text `Reason:` written by a model, so §4's rule
+  applies to it exactly as it applies to a reviewer's findings: it does not go
+  on a command line. What is lost by paraphrasing is small and the trade is
+  worth stating — `mergeModeNote` answers "why is this run in branch mode",
+  and which of the two denial sites asked is the whole of that answer; the
+  `Reason:` text itself is in this session's own transcript, beside the
+  command that provoked it, which is where a person goes when the one line is
+  not enough.
 
 **The probe is early warning, not a guarantee.** The verdict is per call, not
 per project: an identical merge command was allowed in one run and denied in
@@ -465,9 +475,13 @@ absent, which is every run file written before the mode existed).
 **Not answered, `questionMode: park`** → record the questions verbatim and
 move on:
 
+Write `<dir>/questions/<id>.json` with the **Write tool** — a JSON array of
+the questions exactly as the item words them, `["question one","question
+two"]` — and then record it. The Write tool rather than a shell line for §4's
+reason: a question containing an apostrophe is a syntax error inside `printf
+'%s' '…'`, and a question is prose.
+
 ```bash
-mkdir -p "<dir>/questions"
-printf '%s' '["question one","question two"]' > "<dir>/questions/<id>.json"
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind needs-answers --detail "asked, no channel — skipped" --questions-json "<dir>/questions/<id>.json"
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> needs-answers
 ```
@@ -492,8 +506,11 @@ then record what you decided:
 3. Record the pairs on the queue item, so the archive can answer months later
    whether this item's plan was written by a human or filled in by the runner:
 
+Write `<dir>/questions/<id>-assumed.json` with the **Write tool** too — an
+array of `{"question":…,"answer":…}` pairs, `[{"question":"question
+one","answer":"what you decided"}]` — and pass it in:
+
 ```bash
-printf '%s' '[{"question":"question one","answer":"what you decided"}]' > "<dir>/questions/<id>-assumed.json"
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" assume <id> --json "<dir>/questions/<id>-assumed.json"
 ```
 
@@ -827,6 +844,43 @@ that string:
   between `merge` and `branch` — it never merges either way — and a marker
   naming facts the session cannot act on trains it to skim the ones it must.
 
+**Prose this run did not compose — reviewer findings, execute's `## Outcome`,
+a captured error — never rides a shell command line; it goes in a file and the
+command names the file.** This is the general form of the constraint above it,
+and it is stated separately because the two have different reach: "no
+apostrophes" governs the fixed marker text *this run writes itself*, and can
+be obeyed by choosing different words, while the words in a fix-loop or retry
+prompt belong to somebody else — a reviewer quoting `` `rowId` `` is simply
+what a code review looks like, and no rule aimed at the driver can make that
+text safe in a command position. Every `"…"` inside the single-quoted `sh -c`
+body is still a command position: `sh` performs command substitution (`` `x` ``
+and `$(x)`) and parameter expansion (`$x`) there, and one apostrophe ends the
+body outright. Three `.err` files across three projects on this machine are
+that rule being learned the other way (bug-31). The tool already works this
+way for the payloads it takes — `attention --questions-json <file>` and
+`assume --json <file>` — and §5's retry launcher, §7's fix loop and §3's two
+questions payloads are the prose halves that now match it.
+
+The Write tool creates the directory on its way to the file, so none of
+those paths needs a `mkdir -p` ahead of it — unlike `<dir>/logs/` and
+`<dir>/verify/`, which a shell redirect will not create for itself.
+
+**The rule has a second half, and it is the one that looks harmless:
+`attention --detail`, `stage --note` and `merge-mode --note` take the
+driver's own short words — a summary in your voice, never a verbatim quote of
+text this run did not compose.** Those three values stay inline arguments on
+purpose: they are one short line each, they are what the run drawer renders,
+and routing every one of them through a file would trade a real cost for a
+hazard that paraphrasing removes outright. What makes that safe is that the
+copy of record already exists somewhere else and the entry names it — the
+reviewer's report at `<dir>/reviews/<id>-<n>.md`, a verify attempt's rows in
+`status --json`, a session's own `<dir>/logs/<id>.jsonl`. So each value is a
+pointer plus a sentence, and pasting the thing it points at both duplicates
+the record and puts model output on a command line. Every placeholder in one
+of those values is spelled to say whose words it is, and a test reads them out
+of this file against a closed list: a new placeholder there is a decision to
+make, not a blank to fill.
+
 The marker also arrives in that session as `$2`…`$N`, substituted into
 `backlog-execute`'s SKILL.md before it is read. That is safe only because no
 fenced block under `skills/` reads a positional parameter — the bug-9 guard,
@@ -946,12 +1000,37 @@ compensate for.
 
 For both failure shapes, ask the user — best-effort, exactly like pre-flight
 — which of three they want: **retry**, **skip**, or **stop the run**. Retry
-resumes that item's own session so its context is not paid for twice:
+resumes that item's own session so its context is not paid for twice.
+**Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first,
+with the Write tool**, and only then launch. §4's rule about prose in a
+command position covers this text: it quotes execute's failure `## Outcome`,
+which carries command output verbatim.
 
 ```bash
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "<what to do differently>" --output-format stream-json --verbose --permission-mode auto -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" --output-format stream-json --verbose --permission-mode auto -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
+
+Three details on that line, each of which was a defect before it was a rule
+(bug-31):
+
+- **`$(cat "<file>")`, and the prompt is the file's bytes.** The *output* of a
+  command substitution is not re-scanned for expansions, so argv arrives
+  byte-identical to what the Write tool put on disk — backticks, `$(…)`,
+  `var(--ink)` and apostrophes all intact, nothing executed. The inner double
+  quotes around the path are what keep a path containing a space in one piece;
+  both sit inside the single-quoted body, which is otherwise unchanged.
+- **`test -s "<file>" &&` ahead of the assignment.** A missing or empty prompt
+  file then spawns nothing at all: `sh` exits, `watch` sees a dead pid within a
+  second, and the driver treats it as the dispatch failure it is. Without the
+  guard `$(cat …)` degrades to `""` and the run spends its one retry on a
+  session resumed with no instruction — which on every surface looks exactly
+  like a session that simply failed to improve.
+- **The Write tool, never a heredoc and never `printf`.** A heredoc delimiter
+  that happens to appear in the text ends the document early, and `printf '%s'
+  '…'` re-introduces the apostrophe problem the file-carried prompt exists to
+  remove. The prompt is prose; the tool that writes prose takes it as an
+  argument rather than as shell syntax.
 
 Then `watch` again exactly as in step 4, with `--jsonl` pointed at the new
 transcript and `--pid` at the pid you just recorded, and come back to this
@@ -961,9 +1040,11 @@ The session id comes from `status --json` (recorded by `watch`); a null there
 means the session died before its init event ever landed, and there is
 nothing to resume — a fresh dispatch is the only retry available. With no
 channel to ask through, do not guess: `attention <id> --kind parked --detail
-"<what happened>"` plus `stage <id> parked`, keep the worktree and branch, and
-continue with the next item. Skipping is `stage <id> skipped --note "…"`.
-Stopping the run is `finish --status failed` after parking this item.
+"<what happened, your words>"` plus `stage <id> parked`, keep the worktree and
+branch, and continue with the next item. Skipping is `stage <id> skipped
+--note "<why, your words>"` — your own short reason, under the same rule as
+the detail beside it. Stopping the run is `finish --status failed` after
+parking this item.
 
 ## 6. Commit — the orchestrator's job, still never execute's
 
@@ -1022,17 +1103,30 @@ cannot afford ten full reports in this session's context.
 
   `--fix-loop` is the only valueless flag on `stage`; it increments this
   item's `fixLoops` and echoes the new value back, so the line prints
-  `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then resume the item's own
-  executor session with the findings pasted in — step 5's retry line
-  unchanged, every flag included and `--verbose` among them, writing to this
-  loop's own transcript (`<dir>/logs/<id>-fix-<n>.jsonl`, `<n>` matching the
-  `fixLoops` you just read back, so a second loop never overwrites the first
-  one's evidence) — then `watch` it out as in step 4, **check that transcript
-  for denials before committing anything**, commit again (step 6), and review
-  again with a fresh report path (`<dir>/reviews/<id>-2.md`). Paste the
-  findings as the reviewer wrote them — they name `file:line`, and
-  paraphrasing them into "fix the review comments" hands the session a puzzle
-  instead of a task.
+  `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then **write the reviewer's
+  findings, verbatim, to `<dir>/prompts/<id>-fix-<n>.txt` with the Write
+  tool** — `<n>` being the `fixLoops` value that line just echoed back, so a
+  second loop keeps the first one's prompt beside its own rather than over it
+  — and resume the item's own executor session with step 5's retry line.
+  Unchanged but for the names that carry this loop's `<n>`, and every one of
+  them does: the prompt file it reads (`<dir>/prompts/<id>-fix-<n>.txt` in
+  place of `<id>-retry-1.txt`, in the `test -s` guard and the `$(cat …)`
+  alike), the transcript it writes (`<dir>/logs/<id>-fix-<n>.jsonl`), the
+  stderr beside it (`<dir>/logs/<id>-fix-<n>.err`) and the session name
+  (`-n "orch <id> fix <n>"`). The rule is one substitution, applied
+  everywhere `retry 1` appears, so a second loop never overwrites the first
+  one's evidence — the `.err` included, which is where this whole item's
+  symptom was found. Every flag it carries comes too,
+  `--verbose` among them. Then `watch` it out as in step 4, **check that
+  transcript for denials before committing anything**, commit again (step 6),
+  and review again with a fresh report path (`<dir>/reviews/<id>-2.md`).
+
+  **The findings reach that file as the reviewer wrote them** — they name
+  `file:line`, and paraphrasing them into "fix the review comments" hands the
+  session a puzzle instead of a task. That verbatim copy is the whole reason
+  the prompt is a file rather than an argument: reviewer prose is the text in
+  this system most certain to carry the backticks, `$(…)` and apostrophes §4's
+  rule is about, and pasting it into the launcher instead is what bug-31 was.
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
@@ -1071,8 +1165,13 @@ After the second `fix` verdict (`fixLoops` is now `2`), stop looping and hand
 it to a human:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary> — report at <dir>/reviews/<id>-2.md"
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary, your words> — report at <dir>/reviews/<id>-2.md"
 ```
+
+`<verdict summary, your words>` is one line of your own on what the reviewer
+still objects to — never a quote from the report. The report path sitting
+beside it in the same string is the verbatim copy, which is precisely why the
+entry points at the report rather than carrying it (§4's rule, second half).
 
 Then, **with a channel**, ask: merge anyway, keep fixing, skip, or stop the
 run — their call, on their repo. **With no channel**, `stage <id> parked` and
@@ -1141,9 +1240,16 @@ Five details in those lines, none of them the same as step 4's:
   `$PWD` needs none of this care, which is why step 4's line uses it directly.
   (`references/rationale.md`, §8.)
 - **`BM_RUN_DIR` also retires the `<dir>` placeholder inside this command.**
-  Every other `<dir>` in this file is pasted once; here it was pasted three
-  times into one line, and each paste was a chance to redirect an attempt's
-  output at the wrong run's directory. Substitute it once, into `env`.
+  It was pasted three times into this one line, and each paste was a chance to
+  redirect an attempt's output at the wrong run's directory. Substitute it
+  once, into `env`. The other line that pastes `<dir>` more than once is §5's
+  retry launcher — four times since bug-31 (the `test -s` guard, the `$(cat
+  …)`, the `.jsonl` and the `.err`) — and it cannot take the same treatment,
+  because its body is single-quoted so that `$(cat …)` runs in the child, and
+  an `env` name would be a fourth `BM_` variable this file does not own. Its
+  protection is different and worth knowing: the guard and the `$(cat …)` name
+  the same file, so a mismatched paste between those two spawns **nothing**
+  rather than reading the wrong prompt.
 - **The tool still runs from the project root.** `nohup` inherits this
   session's cwd and there is no `cd` anywhere in the line; the worktree is
   named by `--cwd`, which is exactly what that flag is for (see "Where
@@ -1219,9 +1325,14 @@ the same call as the launch.
   command is not an opinion.
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, verification still red: <the failing commands> — rows in status --json"
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, verification still red: <the failing command names> — rows in status --json"
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
+
+  `<the failing command names>` is the names alone — `pnpm test`, `pnpm run
+  typecheck` — and never their output. The rows in `status --json` carry the
+  output and the exit codes, and the detail says so rather than repeating it:
+  captured output is exactly the text §4's rule keeps off a command line.
 
   With a channel you may still say so and ask whether to keep fixing, skip,
   or stop the run — three of §7's four options. Never the fourth. Never merge
@@ -1366,7 +1477,7 @@ that has just been shown to fail:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "<the classifier's own message, verbatim>"
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge of <id>"
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
 ```
 

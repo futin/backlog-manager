@@ -139,6 +139,14 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   `--verbose` among them, since a `claude -p --output-format stream-json`
   without it exits in under a second and this path would read that as another
   crash — then re-enter the loop at Inspect.
+
+  "Unchanged" now includes the half that is not on the line: **write
+  `<dir>/prompts/<id>-retry-1.txt` with the Write tool first**, because the
+  line reads its prompt out of that file and refuses to spawn at all when the
+  file is missing or empty (§4's rule that prose the run did not compose never
+  rides a command line; bug-31). A resume that skips the write gets a `test
+  -s` that fails, a pid that is dead within a second, and a reconcile that
+  looks exactly like the crash it was recovering from.
 - **`redispatch-after-stop`** — same, but no session id was ever recorded, so
   there is nothing to resume. **Clear the dead marker first**, and this is the
   one command in this skill that runs with the worktree as its cwd, because

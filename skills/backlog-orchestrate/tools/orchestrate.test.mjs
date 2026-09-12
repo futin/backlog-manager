@@ -416,8 +416,8 @@ test('init archives the previous run\'s sidecar directories into runs/<runId>/ b
 })
 
 // The case that fails against any ALLOWLIST implementation. `prompts/` is
-// real: one driver on this machine invented it unprompted, and bug-31 will
-// document `prompts/<id>-fix-<n>.txt` in SKILL.md §7. A stray top-level file
+// real: one driver on this machine invented it unprompted, and bug-31 then
+// made `prompts/<id>-fix-<n>.txt` SKILL.md §7's own prescription. A stray top-level file
 // rides along for the same reason — the set of things a driver leaves under
 // <dir> is open by construction, so the archiver names only what it must NOT
 // move.
@@ -3758,6 +3758,279 @@ test('SKILL.md names no environment variable but the three it owns', () => {
   const unexpected = [...new Set([...text.matchAll(/BM_[A-Z_]+/g)].map((m) => m[0]))].filter((n) => !ALLOWED.has(n))
   assert.deepEqual(unexpected, [], `SKILL.md names an environment variable nothing reads: ${unexpected.join(', ')}`)
   assert.ok(text.includes(ORCH_RUN_ENV), `SKILL.md no longer names ${ORCH_RUN_ENV} at all`)
+})
+
+// --- bug-31: a run-composed prompt travels in a file, never in argv --------
+// The retry launcher spelled its prompt `"<what to do differently>"` — double
+// quoted, but INSIDE the single-quoted `sh -c '…'` body, which is a command
+// position: a double-quoted word still undergoes command substitution. §7 then
+// ordered the one text most certain to contain backticks pasted into exactly
+// that position ("paste the findings as the reviewer wrote them"), so a
+// reviewer quoting `rowId` had the driver's shell run `rowId`. Three `.err`
+// files on this machine caught it, in three different projects.
+//
+// The last two cases EXECUTE the line out of SKILL.md rather than asserting
+// about its text, because the property at stake — "sh does not expand this" —
+// is a property of sh, not of a string, and only sh can be asked.
+
+const RETRY_PROMPT_FILE = '<dir>/prompts/<id>-retry-1.txt'
+const FIX_PROMPT_FILE = '<dir>/prompts/<id>-fix-<n>.txt'
+
+// The two `nohup sh -c '… exec claude -p …'` launchers, read off SKILL.md.
+// Named apart from `dispatchNames()` below, which parses the same two lines
+// for a different field.
+function execClaudeLines(text) {
+  return text.split('\n').filter((l) => l.includes('exec claude -p'))
+}
+
+function retryLineOf(text) {
+  const line = execClaudeLines(text).find((l) => l.includes('--resume'))
+  assert.ok(line, 'SKILL.md no longer carries a `--resume` retry launcher at all')
+  return line
+}
+
+test('the retry launcher takes its prompt from a file, not from argv', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  assert.equal(execClaudeLines(text).length, 2, 'expected exactly 2 headless dispatch lines')
+  const retry = retryLineOf(text)
+  assert.ok(
+    retry.includes(`$(cat "${RETRY_PROMPT_FILE}")`),
+    `the retry launcher does not read its prompt back from ${RETRY_PROMPT_FILE}: ${retry}`,
+  )
+  assert.ok(
+    !retry.includes('<what to do differently>'),
+    `the retry launcher still interpolates prose into a command position: ${retry}`,
+  )
+  // The guard: without it a missing or empty prompt file degrades to `""` and
+  // the run spends its one fix loop on a session resumed with no instruction.
+  assert.ok(
+    retry.includes(`test -s "${RETRY_PROMPT_FILE}"`),
+    `the retry launcher has no \`test -s\` guard on its prompt file: ${retry}`,
+  )
+})
+
+test('the prompt file is written before the launcher, and by the Write tool', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  assert.ok(text.includes(FIX_PROMPT_FILE), `SKILL.md never names ${FIX_PROMPT_FILE}, so §7's fix loop has no prompt file`)
+  const launcherAt = text.indexOf(retryLineOf(text))
+  const writeAt = text.indexOf(RETRY_PROMPT_FILE)
+  assert.ok(writeAt !== -1, `SKILL.md never names ${RETRY_PROMPT_FILE}`)
+  assert.ok(writeAt < launcherAt, 'the prompt file is named for the first time on the launcher line itself — nothing has written it yet')
+  assert.match(
+    text.slice(writeAt, launcherAt),
+    /Write tool/,
+    'nothing between naming the prompt file and launching says to write it with the Write tool',
+  )
+  // Mechanical, because this is the half a later edit "simplifies": a heredoc
+  // delimiter that happens to appear in the findings ends the document early,
+  // and `printf '%s' '…'` re-introduces the apostrophe problem the whole fix
+  // exists to remove.
+  const shellWrites = text.split('\n').filter((l) => l.includes('prompts/') && (l.includes('printf') || l.includes('<<')))
+  assert.deepEqual(shellWrites, [], 'a prompt file is being written through the shell rather than with the Write tool')
+})
+
+test('the no-prose-in-argv rule is stated once, and §3 obeys it too', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  // The rule itself, in §4's dispatch rules, so it covers the family rather
+  // than only the two lines bug-31 happened to find.
+  assert.match(
+    text,
+    /never rides a shell command line/,
+    "§4's dispatch rules no longer state the rule that prose this run did not compose goes in a file",
+  )
+  // §3's two payload writes were the remaining inline ones: an apostrophe
+  // inside a question was a syntax error there too.
+  const printfPayloads = text.split('\n').filter((l) => l.includes('printf') && l.includes('questions/'))
+  assert.deepEqual(printfPayloads, [], 'a questions payload is still being written with printf')
+  // The second half, which the first round of this fix left out: the values
+  // that stay inline are safe because they are PARAPHRASES, and the rule has
+  // to say so or the three sites that take one have no rule over them.
+  assert.match(
+    text,
+    /never a verbatim quote of\s+text this run did not compose/,
+    "§4 states the rule for argv payloads but not for the --detail/--note values that stay inline",
+  )
+})
+
+// A payload with one of each hazard the Cause names: a backtick-quoted
+// identifier, a `$(…)` that leaves visible evidence when it runs, and CSS
+// whose `var(--ink)` is what produced bug-15-fix-1.err's `syntax error near
+// unexpected token`.
+const HOSTILE_SUBST = 'Fix `rowId` here, then $(touch OWNED), and `.run-track-name-stalled { color: var(--ink) }`'
+// Plus the second failure mode: an apostrophe closes the single-quoted body.
+const HOSTILE = `${HOSTILE_SUBST} — it's wrong\n`
+
+// Composes a runnable command out of SKILL.md's own retry line: every
+// placeholder substituted, `claude` swapped for a stub that dumps its argv,
+// and nothing else touched. Retyping the line here would prove something
+// about this test instead of about the file a run actually reads.
+//
+// `inline: true` reproduces the PRE-fix shape through the same harness —
+// prompt interpolated into the command, no `test -s` guard — which is what
+// makes a green result mean anything.
+function retryHarness(t, { prompt, inline = false, writePrompt = true }) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-shell-')))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const dir = path.join(root, 'runstate')
+  fs.mkdirSync(path.join(dir, 'logs'), { recursive: true })
+  fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true })
+  const cwd = path.join(root, 'project')
+  // The line's first act is `cd "$PWD/.worktrees/<id>"`, so the substitution
+  // below runs with THAT as its cwd — which is where a `touch` would land.
+  fs.mkdirSync(path.join(cwd, '.worktrees', 'bug-1'), { recursive: true })
+
+  const argvFile = path.join(root, 'argv')
+  const stub = path.join(root, 'stub.sh')
+  fs.writeFileSync(stub, `#!/bin/sh\n: > ${argvFile}\nfor a in "$@"; do printf '%s\\0' "$a" >> ${argvFile}; done\n`)
+  fs.chmodSync(stub, 0o755)
+
+  const promptFile = path.join(dir, 'prompts', 'bug-1-retry-1.txt')
+  if (writePrompt) fs.writeFileSync(promptFile, prompt)
+
+  let line = retryLineOf(fs.readFileSync(SKILL_MD, 'utf8'))
+    .replaceAll('<dir>', dir)
+    .replaceAll('<id>', 'bug-1')
+    .replaceAll('<runId>', 'run-1')
+    .replaceAll('<sessionId>', 's1')
+    .replace('exec claude ', `exec ${stub} `)
+  if (inline) {
+    line = line.replace(`test -s "${promptFile}" && `, '').replace(`"$(cat "${promptFile}")"`, `"${prompt.trimEnd()}"`)
+    assert.ok(!line.includes('$(cat'), 'the inline variant still reads the prompt from a file')
+  }
+  // `wait` for the backgrounded `nohup … &`: the line detaches on purpose, and
+  // a test that did not wait would assert against a process still starting.
+  const result = spawnSync('sh', ['-c', `${line}\nwait`], { cwd, encoding: 'utf8' })
+
+  const argv = fs.existsSync(argvFile) ? fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1) : null
+  const owned = fs.readdirSync(root, { recursive: true }).filter((p) => String(p).endsWith('OWNED'))
+  const errFile = path.join(dir, 'logs', 'bug-1-retry-1.err')
+  return { root, argv, owned, result, err: fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf8') : null }
+}
+
+test('bug-31 red proof: a file-carried prompt reaches argv intact and executes nothing', (t) => {
+  const fixed = retryHarness(t, { prompt: HOSTILE })
+  assert.ok(fixed.argv, `the launcher spawned nothing at all: ${fixed.result.stderr}`)
+  // `-p --resume s1 <prompt> --output-format …` — the prompt is argv[3].
+  // `$(cat …)` strips trailing newlines, which is the only difference allowed.
+  assert.equal(fixed.argv[3], HOSTILE.trimEnd())
+  assert.deepEqual(fixed.owned, [], 'the substitution in the prompt was executed')
+  assert.equal(fixed.err, '', `stderr from the launcher: ${fixed.err}`)
+
+  // The same harness on the pre-fix shape — if this stayed green the case
+  // above would be pinning nothing.
+  const pre = retryHarness(t, { prompt: `${HOSTILE_SUBST}\n`, inline: true })
+  assert.ok(pre.argv, 'the pre-fix shape spawned nothing, so this comparison is vacuous')
+  assert.ok(pre.owned.length > 0, 'the pre-fix shape did not execute the substitution, so this harness cannot go red')
+  assert.notEqual(pre.argv[3], HOSTILE_SUBST, 'the pre-fix shape delivered the prompt intact')
+
+  // Second failure mode, unseen in the wild only because it destroys the
+  // dispatch before anything can log it: one apostrophe ends the body.
+  const quoted = retryHarness(t, { prompt: HOSTILE, inline: true })
+  assert.equal(quoted.argv, null, 'an apostrophe in an inline prompt still managed to spawn a session')
+})
+
+test('an absent or empty prompt file spawns nothing', (t) => {
+  const absent = retryHarness(t, { prompt: HOSTILE, writePrompt: false })
+  assert.equal(absent.argv, null, 'the launcher resumed a session with no instruction at all')
+  const empty = retryHarness(t, { prompt: '' })
+  assert.equal(empty.argv, null, 'an empty prompt file still resumed the session')
+})
+
+// The other half of the same rule, and the half the first round of this fix
+// missed: `attention --detail`, `stage --note` and `merge-mode --note` stay
+// inline arguments, so what protects them is that their VALUES are the
+// driver's own words. §2 and §9 both used to say `--note "<the classifier's
+// own message, verbatim>"` — model-written free text (`Reason: …`) in a
+// double-quoted argument, which is the identical defect to the one the retry
+// launcher had, in the file that now forbids it.
+//
+// A closed allowlist rather than a pattern, for the reason the environment
+// variable case above uses one: no regex can tell "a placeholder the driver
+// fills with its own summary" from "a placeholder the driver fills with
+// somebody else's prose". Adding a spelling here is meant to be a decision.
+const NOTE_PLACEHOLDERS = new Map([
+  // Substituted by the run from its own state: an item id proven by
+  // `isItemId`, and paths/refs it read out of git. None can carry a
+  // backtick or an apostrophe by construction.
+  ['<id>', 'a validated item id'],
+  ['<dir>', 'the run-state directory this run resolved'],
+  ['<path>', 'a worktree path this run created'],
+  ['<paths>', 'paths git printed as dirty'],
+  ['<ref>', 'the ref the main tree has checked out'],
+  // Composed by the tool in this repo, not by a model: `plan --json`'s own
+  // fixed refusal strings.
+  ["<the gate's own reason>", "the ungroomed gate's own fixed wording"],
+  // Spelled to say whose words they are. The verbatim text each of these
+  // summarises lives where the same string points — the reviewer's report,
+  // the rows in `status --json`, this session's transcript.
+  ['<what happened, your words>', "the driver's summary of a dead session"],
+  ['<verdict summary, your words>', "the driver's summary of a review verdict"],
+  ['<the failing command names>', 'command names, never their output'],
+  ['<why, your words>', "the driver's reason for skipping an item"],
+])
+
+// Values can wrap across lines in prose (`--detail\n"<what happened…>"`), so
+// the text is flattened first: a line-by-line scan silently misses those, and
+// a missed site is exactly how this class survived round one.
+function noteValues(file) {
+  const flat = fs.readFileSync(file, 'utf8').replace(/\s*\n\s*/g, ' ')
+  return [...flat.matchAll(/--(?:note|detail)\s+"([^"]*)"/g)].map((m) => m[1])
+}
+
+test("every --detail and --note value is the driver's own words", () => {
+  // `invariants.md` is in this list because leaving it out is how the rule
+  // drifted: fix loop 1 changed both `merge-mode branch --note` sites in
+  // SKILL.md and left this file — the one CLAUDE.md sends a reader to before
+  // touching merge mode — still prescribing the value it had just removed. The
+  // canonical statement of a command and the command itself are two copies of
+  // one contract, so one scan reads both.
+  const FILES = [
+    SKILL_MD,
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'recovery.md'),
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'rationale.md'),
+    path.join(SKILLS_ROOT, '..', 'docs', 'subsystems', 'invariants.md'),
+  ]
+  const seen = new Set()
+  let count = 0
+  for (const file of FILES) {
+    for (const value of noteValues(file)) {
+      count += 1
+      assert.doesNotMatch(
+        value,
+        /verbatim|word for word|as the reviewer wrote|as written/i,
+        `a --detail/--note value asks for a verbatim quote of prose the run did not compose: "${value}" (${path.basename(file)})`,
+      )
+      for (const [placeholder] of value.matchAll(/<[^>]*>/g)) {
+        seen.add(placeholder)
+        assert.ok(
+          NOTE_PLACEHOLDERS.has(placeholder),
+          `${placeholder} appears in a --detail/--note value in ${path.basename(file)} and is not on the list of values the driver composes itself. ` +
+            'Either spell it so it says whose words it is, or add it here with the reason it is safe.',
+        )
+      }
+    }
+  }
+  // The file is the authority, not this list: a spelling that disappears from
+  // the prose has to disappear from here too, or the next reader takes the
+  // list for a description of a file it no longer matches.
+  const unused = [...NOTE_PLACEHOLDERS.keys()].filter((k) => !seen.has(k))
+  assert.deepEqual(unused, [], `these placeholders are on the list but no longer appear in any --detail/--note value: ${unused.join(', ')}`)
+  // A guard on the scan itself: a regex that quietly stopped matching would
+  // make every assertion above vacuous.
+  assert.ok(count >= 15, `only ${count} --detail/--note values found — the scan is no longer reaching them`)
+})
+
+test('the classifier denial records the run fact, not the classifier prose', () => {
+  // Both denial sites — §2's pre-flight probe and §9's real merge — and the
+  // note has to name which one asked, because that IS the answer
+  // `mergeModeNote` exists to give.
+  const flat = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s*\n\s*/g, ' ')
+  const notes = [...flat.matchAll(/merge-mode branch --note "([^"]*)"/g)].map((m) => m[1])
+  assert.equal(notes.length, 2, `expected exactly 2 \`merge-mode branch --note\` sites, found ${notes.length}`)
+  assert.deepEqual(notes.sort(), [
+    'auto mode classifier denied the merge of <id>',
+    'auto mode classifier denied the merge probe',
+  ])
 })
 
 // --- task-17: the pause gates, finish paused, unpause ----------------------
