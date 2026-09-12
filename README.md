@@ -63,8 +63,9 @@ refactor an existing thing that should be improved.
 
 ## Requirements
 
-- Node 22.13+ (pnpm 11 requires it)
-- pnpm 11+ (`corepack enable`, then `corepack prepare --activate` in this repo)
+- Node 22.13+ (the floor `engines.node` in `package.json` declares; the image
+  ships Node 24)
+- pnpm 12+ (`corepack enable`, then `corepack prepare --activate` in this repo)
 - Docker, if you want the containerized stack rather than running the two
   Node processes on the host
 
@@ -379,5 +380,5 @@ it, and drop the image at `docs/board.png`._
     - .env.example
     - pnpm-workspace.yaml
   kind: readme
-  verified: bb20a03538aca602eacbff8bed6393478115d83f
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->

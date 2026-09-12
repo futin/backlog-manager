@@ -6,10 +6,6 @@ state, and — behind a switch that is off by default — asking another local p
 start a Claude Code session. It writes no item file and no run file; the only bytes it
 owns are two files under `~/.backlog-manager/settings/`.
 
-> Moved here from `README.md` and `CLAUDE.md` during the docs restructure, so the prose
-> is the repo's own, but nobody has yet read it back against the code — this doc is
-> deliberately `unstamped` until that pass happens.
-
 ## Modules
 
 ### `items/`
@@ -124,4 +120,5 @@ conditions. They are not restated here; one home per fact.
   sources:
     - server/src
   kind: subsystem
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->

@@ -7,10 +7,6 @@ Archive, how long an item's work took, what a run cost. Those derivations live i
 `client/src/lib/` as one implementation each, so two surfaces cannot disagree about the
 same item.
 
-> Moved here from `README.md` and `CLAUDE.md` during the docs restructure, so the prose
-> is the repo's own, but nobody has yet read it back against the code — this doc is
-> deliberately `unstamped` until that pass happens.
-
 ## Mechanism
 
 ### The rail
@@ -44,8 +40,11 @@ length is the project's queue:
    stored resolved). The screen says a `runner-fix:` item may still hoist above the chosen
    order, and that it cannot tell which.
 3. **Modes.** All five pickers — permission mode, model, effort, merge mode, question
-   mode, the last two seeded from Settings — plus, in merge mode, a setup hint fed by
-   `GET /api/agents/merge-check`.
+   mode. Every one but permission mode seeds from Settings: model and effort off the same
+   `dispatchDefaultModel` / `dispatchDefaultEffort` keys the launch sheet reads, merge and
+   question mode off the two orchestrator defaults. Permission mode has no stored default
+   and starts at `auto`, clamped down to whatever ceiling the dashboard reports. Plus, in
+   merge mode, a setup hint fed by `GET /api/agents/merge-check`.
 
 Above the columns, a run strip (`RunStrip`/`RunDrawer`) showing every project's
 orchestrator runs. A crashed run — `running`, heartbeat stale — renders as crashed with
@@ -117,7 +116,8 @@ as a prop, so switching modes adds no request.
 
 Five themes, density, text scale, landing section, the staleness window and the two
 orchestrator run defaults — all per-device, in `localStorage`, never sent to the server.
-Plus a Claude Agents group reporting the dashboard's status, and an Orchestrator watchdog
+Plus a Claude Agents group — the dashboard's status, the default model and effort every
+launch sheet seeds from, and the dashboard link base — and an Orchestrator watchdog
 group: the one place Settings writes to the server, four knobs that live in
 `settings/watchdog.json` beside the registry rather than in this browser.
 
@@ -146,4 +146,5 @@ click through, the dialog escape stack, "queue wait is not work" — are in
     - client/src
     - shared/types.ts
   kind: subsystem
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->

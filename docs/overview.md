@@ -23,10 +23,6 @@ file, and each file that holds state has exactly one writer.
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes |
 | [workflows/publishing.md](workflows/publishing.md) | getting a skill edit out of the working tree and into the installed plugin |
 
-The three subsystem docs above carry no `verified:` baseline yet: their prose was moved
-out of README and CLAUDE.md rather than written from a code read, and a stamp claims
-someone did the latter. The checker reports them `unstamped` until that pass happens.
-
 Deliberately not tracked, and each for a stated reason in
 [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README),
 `docs/superpowers/` (specs, plans, decision logs), `audits/` (dated findings), and
@@ -89,9 +85,10 @@ about the same item; the ones the server needs too live in
 
 ### The skills — [full doc](subsystems/skills.md)
 
-Five skills under `skills/`, two CLIs beneath them (`backlog.mjs`, the registry's only
-writer; `orchestrate.mjs`, the run file's only writer), and one agent under `agents/`
-that the orchestrator dispatches to review an item's branch before it merges.
+Six skills under `skills/`, three CLIs beneath them (`backlog.mjs`, the registry's only
+writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the retro home's only
+writer and the one of the three nothing else reads at runtime), and one agent under
+`agents/` that the orchestrator dispatches to review an item's branch before it merges.
 `backlog-orchestrate` is the only skill that touches git history at all — it works one
 item per worktree and merges to `main` — while execute does the work and groom writes the
 plans, neither of them committing anything.
@@ -118,5 +115,5 @@ the disagreement itself is a bug worth fixing in the same sitting.
     - agents
     - docs/.docs-sync.yml
   kind: overview
-  verified: 07169ebeb2df774c00d134b5bb926ce8d5762b9f
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
 -->
