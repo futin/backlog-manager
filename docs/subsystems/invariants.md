@@ -1197,6 +1197,97 @@ expression computes rather than that a `127.0.0.1` string appears somewhere —
 and a bare `app.listen(PORT)`, the refactor that silently binds the wildcard,
 fails it on the argument count.
 
+What a bind does **not** cover is a name: see [Every route is gated by a Host
+allowlist](#every-route-is-gated-by-a-host-allowlist) below, where a page in
+this machine's own browser walks straight through the boundary this section
+draws.
+
+## Every route is gated by a Host allowlist
+
+`isAllowedHost` and `allowedHostGate` (`server/src/allowed-hosts.ts`), and the
+attack they close is DNS rebinding — bug-22, the sole Critical of the
+2026-09-06 audit.
+
+The bind above draws a boundary around this machine. A browser on this machine
+is already inside it, which is the reasoning that produced [the origin
+guard](#every-agents-post-is-guarded-by-content-type-and-origin). But that
+guard asks whether two headers **agree** — `new URL(origin).host ===
+req.headers.host` — and both of them belong to the attacking page. A page
+served from `evil.test`, whose DNS re-resolves to `127.0.0.1` after the page
+loads, sends `Origin: http://evil.test:4322` and `Host: evil.test:4322`: a
+perfect match. Its `fetch` is genuinely same-origin as far as the browser is
+concerned, so there is no preflight to withhold and `application/json` — the
+guard's other check — is sent for free. Two checks, one bypass, and the
+request lands on `POST /api/agents/dispatch`, which forwards the attacker's
+prompt to the dashboard's `/api/spawn` at the dashboard's permission ceiling.
+
+An allowlist is the check that attack cannot pass, and the reason is
+structural rather than statistical: the browser derives `Host` from the URL
+the attacker's own page was loaded from. They choose its value freely, but
+they cannot make it read `localhost` while the page's origin stays
+`evil.test` — the authority in both headers is theirs by construction. "Do
+these two headers agree" is a question a rebound page always answers yes to;
+"is this a name this app answers to" is one it always answers no to. The gate
+asserts an **identity**, where the guard asserts a *relation*.
+
+**Global, not scoped to the agents POSTs.** The guard is route-scoped; the
+exposure is not. The same rebound page reaches every GET here —
+`/api/items/body` reads any registered project's backlog file straight off
+disk, `/api/projects` and the orchestrator reader hand over absolute host
+paths and run state. That read surface is precisely what the loopback bind
+exists to protect, so a fix scoped to the POST routes would have closed the
+session-spawning half and left the original asset open to the same page.
+
+**Registered by the same applier as the CSP**, host gate first
+(`applySecurityMiddleware`, `security.ts`). One applier, so no app built in
+this repo — the one `main.ts` boots, the ones the suites build — can carry the
+CSP without also carrying the gate; and that applier already sits ahead of
+`ServeStaticModule`, which the gate needs for the same reason the CSP does:
+serve-static streams `index.html` itself, so middleware behind it never runs
+for that request. `test/allowed-hosts.test.ts` pins that ordering
+behaviourally — a rebound `GET /` comes back 403 without the page's bytes —
+rather than by reading source. The applier was renamed from
+`applySecurityHeaders` when the gate landed, because it no longer only applies
+headers.
+
+**What the list accepts, and why each entry cannot be rebound:**
+
+- **Any IP literal** (`net.isIP`, with IPv6 brackets stripped —
+  `new URL('http://[::1]:4322').hostname` is `'[::1]'`). An IP is not a name,
+  so there is nothing to rebind: for a browser to send `Host: 203.0.113.5` to
+  this socket, the packet would have to route to that address. This rule is
+  also why every pre-existing suite stayed green with no header added to it —
+  supertest binds an ephemeral port and sends `Host: 127.0.0.1:<port>`.
+- **`localhost`.**
+- **Any `.ts.net` name.** `pnpm run tailnet` is the one documented remote path,
+  and this mirrors `vite.config.ts`'s `allowedHosts: ['.ts.net']` deliberately,
+  so the API and the dev server answer to the same set. A tailnet name is
+  minted by Tailscale for a node, not by whoever registers a domain. Matched at
+  a label boundary at the **end** of the hostname: `evilts.net` and
+  `ts.net.evil.test` both fail.
+- **`BM_ALLOWED_HOSTS`** — comma-separated, trimmed, lowercased, empty entries
+  ignored; a leading `.` is a suffix match, anything else is exact. The escape
+  hatch for a setup this repo does not ship: a reverse proxy, an mDNS `.local`
+  name, another container calling the API by service name.
+
+Everything else is refused with 403 and `{ error: 'unrecognised Host header' }`
+— **including an absent or empty `Host`**. HTTP/1.1 requires the header and
+every browser and curl sends it, so defaulting an absent one to "allowed" would
+reopen the hole to a hand-rolled client. The hostname alone is compared, never
+the port: the port a request arrives on is the port this process chose to
+listen on, and pinning it here would plant a third copy of `BM_API_PORT` /
+`BM_WEB_PORT` / the tailnet port for no security gain, since an attacker's page
+must already reach our socket to matter. The variable is read per request with
+no cache, the same posture `BM_AGENTS` has.
+
+**What deliberately did not change.** The origin guard's logic: with the gate
+in front, its equality inherits the allowlist transitively — an allowlisted
+`Host` plus equality means an allowlisted `Origin` — so it needs no third check
+and gains no duplicate of this rule. `Origin: null` and the preflight-free form
+POST are still its job. `main.ts` and `BM_BIND`: the bind was never the
+failure. No `helmet`, no `enableCors()` — neither answers this, and
+`enableCors` would weaken it.
+
 ## The tailnet serve is a script, and its port is read where compose reads it
 
 `scripts/tailnet.mjs` (`pnpm run tailnet`, subcommands `up` | `status` |
@@ -1809,7 +1900,11 @@ outside it, like every other GET here. Known consequence: a
 TLS-terminating proxy in front of this that rewrites `Host` without
 rewriting `Origin` will 403 — the guard compares host and port only, not
 the scheme, precisely so a `tailscale serve` that preserves `Host` keeps
-working.
+working. Known **limit**, closed elsewhere: neither half
+answers DNS rebinding, where one page controls `Origin` and `Host` together and
+they agree — see [Every route is gated by a Host
+allowlist](#every-route-is-gated-by-a-host-allowlist), which is the layer that
+does, and which this guard now sits behind.
 
 `dispatch` is the guard's original, motivating route — the hidden-form
 story above is its own. `plan` carries the identical guard because it

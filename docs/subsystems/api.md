@@ -88,13 +88,22 @@ two files it genuinely writes: `watchdog-config.util.ts`, the first file the ser
 wrote, and `pause-control.util.ts`, the second — the pause request `orchestrate.mjs` reads
 back at its two dispatch gates, the one file in this system travelling server → tool.
 
-### `health/`, `static.ts`, `security.ts`
+### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 
 `GET /api/health` is a plain liveness check. `static.ts` serves `client/dist` only when
 it has been built — registering the static module against a missing bundle would install
-a catch-all with nothing behind it. `security.ts` applies the response headers, including
-the CSP whose `script-src` pins the pre-paint theme script by hash; it is configured on
-the root module so every app built from `AppModule` carries it, the tests' included.
+a catch-all with nothing behind it. `security.ts` is the one applier of both pieces of
+request-and-response middleware this app has (`applySecurityMiddleware`): the Host gate
+first, then the CSP whose `script-src` pins the pre-paint theme script by hash. It is
+configured on the root module so every app built from `AppModule` carries both, the
+tests' included, and ahead of the static module so both reach the served `index.html`.
+
+`allowed-hosts.ts` is that gate: `isAllowedHost` refuses any `Host` header that is not an
+IP literal, `localhost`, a `.ts.net` name or an entry in `BM_ALLOWED_HOSTS`, with 403 and
+`{ error }`. It answers the question the origin guard cannot — which host was this
+request *addressed* to — and so closes DNS rebinding, which satisfies that guard with two
+matching lies. Global rather than scoped to `agents/`, because the read routes are
+exposed to the same page.
 
 ## Interfaces
 

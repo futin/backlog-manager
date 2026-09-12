@@ -110,6 +110,7 @@ environment and `.env.example` does not carry.
 | `PORT` | `4322` | API port, and the port the built client bundle is served from |
 | `BM_REGISTRY_FILE` | `~/.backlog-manager/registry.json` | Where `backlog.mjs` writes |
 | `BM_BIND` | `127.0.0.1` | Interface both processes bind. Compose sets `0.0.0.0` inside the containers, where the loopback publish is the boundary |
+| `BM_ALLOWED_HOSTS` | empty | Extra `Host` names this API answers to, comma-separated (a leading `.` is a suffix match). IP literals, `localhost` and `.ts.net` names are always allowed; everything else is refused with 403, because a `Host` allowlist is what a DNS-rebound page cannot pass |
 | `BM_WEB_PORT` / `BM_API_PORT` | `5177` / `4322` | Host-side ports, for when something else already holds one |
 | `BM_PROJECT_ROOT` | `~/Documents/custom-projects` | The tree mounted read-only into the server container |
 | `BM_AGENTS` | off | Turns on dispatching backlog items to `../claude-agents-dashboard` |
