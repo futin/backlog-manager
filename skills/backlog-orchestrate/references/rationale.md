@@ -194,6 +194,64 @@ An unattended run can never rule out that the user has uncommitted work sitting
 in their main tree, so the noisier history a revert commit leaves behind is the
 price, knowingly paid, of never destroying something nobody backed up.
 
+### Why `git worktree remove` gets two responses, and where the numbers come from
+
+Two runs of this repo paged a human over build output: `run-20260903-112622`
+(bug-14) and `run-20260905-213627` (task-19). Both merged green, both then
+recorded `attention … --kind parked`, and both driver transcripts
+(`5cc699d1-08ca-4f95-9355-4ae4f29593df`, `309af058-c96d-44e6-b40c-34d34d80bb42`)
+carry the identical three lines:
+
+```
+{"id":"task-19","stage":"merged"}
+error: failed to delete '/…/.worktrees/task-19': Directory not empty
+remove_exit=255
+Deleted branch backlog/task-19 (was 838048d).
+```
+
+The bug filed against this blamed the ignored `dist/` step 8's build leaves
+behind, and proposed `--force`. Both halves are wrong, and the measurement is
+why the prose branches on git's message instead. Measured on `git version
+2.50.1 (Apple Git-155)`, in a throwaway repo with `dist/` ignored — the same
+three cases the test
+`git worktree remove: ignored build output alone removes cleanly, and a failed
+delete deregisters first` re-measures on every run of `pnpm run test:skills`:
+
+| Worktree contents | `git worktree remove` | After it |
+|---|---|---|
+| Nothing but an ignored `dist/` | exit `0` | directory gone, `dist/` deleted with it |
+| An untracked or modified file | exit `128`, `fatal: '<path>' contains modified or untracked files, use --force to delete it` | nothing deleted, still registered |
+| Tracked, unmodified, one child git cannot unlink | exit `255`, `error: failed to delete '<path>': <errno>` | admin entry already gone, directory partly deleted |
+
+Three consequences, in the order §9 needs them:
+
+- **Ignored build output never refuses**, so `--force` was a fix for a failure
+  that has not happened here. The reported occurrences were the third row.
+- **The clean check and the delete are different failures with opposite
+  preconditions.** The first fires *before* anything is touched and means
+  something in there was never committed — the one state in which `--force`
+  both works and destroys. The second fires *after* git certified the tree
+  clean, so nothing uncommitted can be in what survives.
+- **After the third row the worktree is not a worktree any more.** git removes
+  `.git/worktrees/<id>` first and the directory second, so `git worktree list`
+  no longer names it, `git worktree remove --force` answers `fatal: '<path>' is
+  not a working tree` (exit `128`), and `git worktree prune` prunes nothing.
+  Both recorded attention details told a human to run `prune`; both were
+  no-ops. That is why the prose names all three dead ends explicitly rather
+  than leaving a session to discover them.
+
+Why only `dist/` survived in those two runs is the ordinary shape of a
+half-finished recursive delete, not a property of ignored files: git walks the
+tree and ends with `rmdir` on the root, which reports `ENOTEMPTY` for whatever
+the walk missed or could not unlink. In the reproduction here a *tracked*
+`src/` survived. So the response keys on git's message, which is exact, and
+never on inspecting the leftovers, which carry no information.
+
+`--abort`'s `git worktree remove --force` (§10) is untouched by all of this: it
+acts on a worktree that is still registered and may hold uncommitted work the
+run is deliberately discarding, which is the one state where forcing means
+anything.
+
 ---
 
 ## §4 — Create the worktree
