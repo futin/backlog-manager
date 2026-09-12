@@ -356,7 +356,9 @@ PASS  node --test (skills)
 pnpm test: both runners passed.
 ```
 
-Contract sweep: none found. `<the classifier's own message…>` survives only in
+Contract sweep: 0 sites updated — **and that claim was wrong**; see `### Fix
+loop 2` below, which found one and says why this sweep missed it.
+`<the classifier's own message…>` survives in
 `docs/superpowers/plans/2026-09-04-orchestrator-merge-mode.md:541`, the plan
 this feature was built from — a record of what was decided then, not a
 statement of the contract now. `mergeModeNote`'s own contract
@@ -372,3 +374,85 @@ Red proof: 3 tests went red with the change reverted — with §5's SKILL.md at
 denial records the run fact, not the classifier prose` and the extended `the
 no-prose-in-argv rule is stated once, and §3 obeys it too` all failed
 (`# pass 0 / # fail 3`); SKILL.md was restored from a file copy, never a stash.
+
+### Fix loop 2 — 2026-09-12
+
+The reviewer's Important finding was right, and so was its judgement that
+`Contract sweep: none found.` in `### Fix loop 1` is false. That line is
+corrected above rather than left standing.
+
+`docs/subsystems/invariants.md:594` — the canonical statement of the same
+command, and the section CLAUDE.md sends a reader to before touching merge
+mode — still read `merge-mode branch --note "<the classifier's message>"`
+after fix loop 1 changed both SKILL.md sites. Two contradictory contracts for
+one string, with the wrong copy in the file a future implementer is pointed
+at.
+
+**Why the fix loop 1 sweep missed it, which is the part worth keeping.** That
+sweep searched for the *spelling* it had removed — `grep -rn "classifier's own
+message"` — and this site says "the classifier's message", without "own". The
+old form was never a string; it was a *contract* ("this value carries the
+classifier's prose"), and a grep for one wording of a contract finds only the
+sites that happened to word it the same way. The sweep this loop ran instead
+enumerates the *construct*: every `--note "…"` / `--detail "…"` value in every
+`.md`, `.mjs`, `.ts`, `.tsx`, `.json` and `.yaml` file in the repo, flattened
+across line wraps first. 33 values, one of them wrong.
+
+What changed:
+
+- **`docs/subsystems/invariants.md`** now states both literals SKILL.md
+  carries (`"auto mode classifier denied the merge of <id>"` and `"auto mode
+  classifier denied the merge probe"`) and a paragraph saying the note is
+  fixed text naming which site asked, not the classifier's message, with the
+  reason and the trade — the same statement §2 makes, in the file that
+  explains the rule.
+- **`every --detail and --note value is the driver's own words` now scans
+  `docs/subsystems/invariants.md` too.** Leaving it out is exactly how this
+  drifted: the canonical statement of a command and the command itself are two
+  copies of one contract, so one scan reads both. The comment on the `FILES`
+  list says so, naming this loop.
+- **The reviewer's second Minor is closed too**, because it was a hole in the
+  test this item added: `stage <id> skipped --note "…"` was the one value with
+  neither guidance nor a placeholder, so a driver could fill the ellipsis with
+  a reviewer's sentence and satisfy every assertion. It is now `--note "<why,
+  your words>"`, with that spelling on the closed list.
+
+One Minor is deliberately **not** fixed, and it is a real finding:
+`SKILL.md`'s §6 commit line builds `git commit -m "fix(board): …"` from the
+item's own title, and an item title is repo content that can carry a backtick,
+`$(…)` or an apostrophe exactly as a reviewer's finding can — the apostrophe
+case does not even need `sh -c`, since `-m "…"` is a double-quoted word in the
+driver's own shell. §4's rule as written reaches it and §6 says nothing about
+it. It is pre-existing, untouched by this diff, and outside this item's
+`## Fix`, which enumerates its sites; closing it means deciding how a commit
+subject is carried (a message file, `-F`, or a sanitising rule), which is its
+own item. **Worth filing as a new bug** — this session cannot file one, so it
+is recorded here and in this session's final message.
+
+Verification — `pnpm test`, both runners, on the final tree:
+
+```
+$ pnpm test
+Test Suites: 82 passed, 82 total
+Tests:       1567 passed, 1567 total
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
+
+Contract sweep: 1 site updated (docs/subsystems/invariants.md:594), found by
+enumerating every `--note`/`--detail` value in the repo rather than grepping
+the old wording. The other 32 values were read: `recovery.md:194` and
+`invariants.md`'s quote of the runner-fix note are fixed text and correct;
+`docs/superpowers/plans/2026-09-04-orchestrator-merge-mode.md` (`<the
+classifier's own message>`, `<text>`, `<message>`),
+`docs/superpowers/plans/2026-08-31-backlog-orchestrate.md`,
+`docs/superpowers/plans/2026-09-05-orchestrate-question-mode.md`,
+`backlog/bugs/done/bug-5-…`, `backlog/tasks/done/task-13-…` and this item's own
+`## Cause`/`## Fix` are records of what was decided or observed at the time,
+not statements of the current contract, and are left standing on purpose.
+Red proof: 2 tests went red with the change reverted — with `invariants.md` at
+`HEAD`, `every --detail and --note value is the driver's own words` failed
+naming the exact site (`<the classifier's message> appears in a
+--detail/--note value in invariants.md and is not on the list…`), and with
+`SKILL.md` at `HEAD` the same case failed on the unused `<why, your words>`
+entry. Both files were restored from file copies, never a stash.

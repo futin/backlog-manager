@@ -1040,9 +1040,11 @@ The session id comes from `status --json` (recorded by `watch`); a null there
 means the session died before its init event ever landed, and there is
 nothing to resume — a fresh dispatch is the only retry available. With no
 channel to ask through, do not guess: `attention <id> --kind parked --detail
-"<what happened, your words>"` plus `stage <id> parked`, keep the worktree and branch, and
-continue with the next item. Skipping is `stage <id> skipped --note "…"`.
-Stopping the run is `finish --status failed` after parking this item.
+"<what happened, your words>"` plus `stage <id> parked`, keep the worktree and
+branch, and continue with the next item. Skipping is `stage <id> skipped
+--note "<why, your words>"` — your own short reason, under the same rule as
+the detail beside it. Stopping the run is `finish --status failed` after
+parking this item.
 
 ## 6. Commit — the orchestrator's job, still never execute's
 

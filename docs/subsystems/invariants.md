@@ -591,9 +591,21 @@ recognised the item was already done.
 
 The degrade is narrow on purpose. When the merge is refused by the classifier
 the item is staged `branched` (not `parked`), the run records the downgrade
-once with `merge-mode branch --note "<the classifier's message>"` so the rest
-of the queue skips a merge just shown to fail, and the run continues to the
-next item.
+once with `merge-mode branch --note "auto mode classifier denied the merge of
+<id>"` — or `"auto mode classifier denied the merge probe"` when §2's pre-flight
+probe is what was refused — so the rest of the queue skips a merge just shown to fail, and the
+run continues to the next item.
+
+**That note is fixed text naming which of the two sites asked, not the
+classifier's own message** (bug-31). The denial's second half is a free-text
+`Reason:` written by a model, and §4's rule — prose this run did not compose
+never rides a shell command line — reaches a `--note` value exactly as it
+reaches a prompt. What `mergeModeNote` has to answer is "why is this run in
+branch mode", and which call was refused is the whole of that answer; the
+`Reason:` text itself stays in the driver's own transcript beside the command
+that provoked it. `orchestrate.test.mjs`'s `every --detail and --note value is
+the driver's own words` reads this file too, so the two copies of the command
+cannot drift apart again — which is how they drifted in the first place.
 
 `parked` is wrong here, and correcting it is what this whole feature exists
 for. Parked means a human must look at the work. Nothing is wrong with the

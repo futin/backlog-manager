@@ -3966,6 +3966,7 @@ const NOTE_PLACEHOLDERS = new Map([
   ['<what happened, your words>', "the driver's summary of a dead session"],
   ['<verdict summary, your words>', "the driver's summary of a review verdict"],
   ['<the failing command names>', 'command names, never their output'],
+  ['<why, your words>', "the driver's reason for skipping an item"],
 ])
 
 // Values can wrap across lines in prose (`--detail\n"<what happened…>"`), so
@@ -3977,10 +3978,17 @@ function noteValues(file) {
 }
 
 test("every --detail and --note value is the driver's own words", () => {
+  // `invariants.md` is in this list because leaving it out is how the rule
+  // drifted: fix loop 1 changed both `merge-mode branch --note` sites in
+  // SKILL.md and left this file — the one CLAUDE.md sends a reader to before
+  // touching merge mode — still prescribing the value it had just removed. The
+  // canonical statement of a command and the command itself are two copies of
+  // one contract, so one scan reads both.
   const FILES = [
     SKILL_MD,
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'recovery.md'),
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'rationale.md'),
+    path.join(SKILLS_ROOT, '..', 'docs', 'subsystems', 'invariants.md'),
   ]
   const seen = new Set()
   let count = 0
