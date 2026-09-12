@@ -3,9 +3,12 @@ id: bug-24
 title: A failed watchdog config save is silent: the error only renders when status is null
 created: 2026-09-06
 tags: ui, settings, audit-2026-09-06
-updated: 2026-09-12T16:11:42Z
+updated: 2026-09-12T19:13:57Z
 groom-elapsed: 215
 groom-tokens: 62147
+started: 2026-09-12T18:56:05Z
+execute-elapsed: 1072
+execute-tokens: 128302
 ---
 
 ## Symptom
@@ -210,3 +213,87 @@ The value shown is the one still on the server.` appears directly beneath the "G
 after" row, the select still shows `2`, and the other three knobs are untouched. Reload the
 page (dropping the fetch wrapper) and change the same knob again: the save succeeds, the
 select shows the new value and no message is rendered.
+
+## Outcome
+
+2026-09-12 — Fixed as planned: `useWatchdog` gained a second state field
+`saveError: { field, message } | null`, and `WatchdogGroup` renders it as its own
+`role="alert"` row directly under the control whose save was refused, chosen by the
+exported total function `saveErrorSlot`. The `status === null` load-failure branch, the
+`{ live: false }` call, the three ladders and all four controls are untouched, as are
+`client/src/lib/agents.ts`, `server/` and `shared/`. `.set-error-row`/`.set-error`
+(`var(--red)`, 10.5px) were added beside the other `.set-*` rules.
+
+Nine test cases were added, all written before the code and all watched fail first:
+five in `test/watchdog-hook.test.tsx` (non-2xx POST, rejected POST, empty patch → `field:
+null`, a later success clears it, a successful reload leaves it standing) and four in
+`test/settings-watchdog.test.tsx` (a refused save renders and keeps every knob, the
+message sits in the failing control's own row, the checkbox path behaves identically, a
+later success removes it), plus a DOM-free case pinning `saveErrorSlot`'s totality.
+`stubFetch`'s `onConfigPost` now also accepts `'reject'` or `{ status, body }`; its
+success shape is unchanged, so the pre-existing cases are untouched.
+
+Verification — `pnpm run typecheck` then `pnpm test` (both runners), on the final tree:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm test
+Test Suites: 83 passed, 83 total
+Tests:       1607 passed, 1607 total
+# tests 535
+# pass 535
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
+
+Browser check (playwright, API on 4399 + Vite on 5199 so the user's own stack on
+4322/5177 was never touched; both killed by pid afterwards). Settings → Orchestrator
+watchdog rendered its four knobs (so the GET had succeeded and `status` was non-null —
+the exact state that made the bug unreachable before). With `window.fetch` wrapped to
+answer the config POST 500 `{"error":"watchdog.json is read-only"}`, changing "Give up
+after":
+
+```
+alertText:            "Not saved — watchdog.json is read-only. The value shown is the one still on the server."
+alertColor:           rgb(224, 83, 63)      (var(--red))
+prevSiblingHasSelect: true                  (the row above the alert is the "Give up after" row)
+giveUpAfter:          "3"                   (unchanged — the server's own value)
+checkEvery/grace/enabled: unchanged
+unavailableNotice:    false                 (the group did not collapse into the load-failure notice)
+```
+
+Reloading without the wrapper and changing the same knob to 4 saved for real: no alert
+rendered and the select read `4`. That real save wrote `maxAttempts: 4` into
+`~/.backlog-manager/settings/watchdog.json`; it was restored to its prior `3` immediately
+afterwards and the file was re-read to confirm.
+
+Contract sweep: 3 sites updated (docs/subsystems/board.md — the Settings section now
+states that the one group that writes to the server is also the one that can be refused,
+and how that reads; client/src/components/settings/WatchdogGroup.tsx — the header's
+"a setting that cannot be seen to fail to stick is worse than one that refuses outright"
+argument now names bug-24 as the same argument arriving from the refusal side, the save
+paragraph names the new row, and the `status === null` comment says where a failed SAVE
+lands instead; test/settings-watchdog.test.tsx — a comment citing `useWatchdog.ts:88-97`
+for `save`, already stale and made staler by this diff, now cites the function by name
+with no line numbers). Left standing on purpose: `docs/superpowers/plans/` and
+`docs/superpowers/specs/` still record the old four-field `useWatchdog` return shape
+(`{ status; error; reload; save }`, e.g. `2026-09-04-orchestrator-watchdog.md:360`,
+`2026-09-05-watchdog-monitor.md:89`). Those are the historical plan and spec documents
+this repo was built from, not live reference docs — rewriting them would falsify the
+record of what was designed at the time. `docs/subsystems/board.md`'s docs-sync stamp was
+deliberately NOT re-baselined: its `verified:` sha must name a commit, and this session
+does not commit.
+
+Red proof: 9 tests went red with the change reverted. With `save`'s catch restored to
+`setError(...)` in `useWatchdog.ts` (file copied aside, restored from the copy — never
+`git stash`), all five new hook cases failed and the nine pre-existing ones stayed green.
+With the hook restored and only the five `{errorRow(...)}` render sites removed from
+`WatchdogGroup.tsx`, the four new DOM cases failed and the thirteen pre-existing ones
+stayed green. The tenth new case (`saveErrorSlot`'s totality) stays green under that
+second variant by design — it pins a pure function that variant still exports; its own
+red was the `TS2305: has no exported member 'saveErrorSlot'` this suite failed with
+before the function existed.

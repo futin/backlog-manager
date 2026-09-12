@@ -21,6 +21,28 @@ import type { WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 export const WATCHDOG_POLL_MS = 5_000;
 
 /**
+ * A refused `POST /api/agents/watchdog/config`, carrying the field it was
+ * refused for (bug-24).
+ *
+ * A second state field rather than a second meaning for `error`, because the
+ * two failures need two PLACES on screen and one field can only be rendered
+ * in one of them. A failed GET is a group-level fact — there is no config to
+ * bind a control to, so the whole group is replaced by a notice. A failed
+ * POST is the opposite: `status` is intact and every control still reads a
+ * real server value, so the only thing missing is a line saying THIS change
+ * was refused, and that line belongs beside the control that was changed.
+ * `field` is what buys that placement: without it a consumer can only render
+ * a group-level banner, which is the shape that made the original defect
+ * possible (the message rendered in the one branch a successful GET had
+ * already made unreachable).
+ *
+ * `field` is `null` for a patch with no keys — an unattributable failure
+ * still carries its message, because a `saveError` that renders nowhere is
+ * exactly the bug this type exists to end.
+ */
+export type WatchdogSaveError = { field: keyof WatchdogConfig | null; message: string };
+
+/**
  * The watchdog's own status (design §4.2, §6.4) — the one hook both
  * `WatchdogMonitor` (Runs › Watchdog) and `WatchdogGroup` (Settings) read,
  * mount + focus like `useAgents`, plus the ARMED-ONLY poll
@@ -68,6 +90,7 @@ export const WATCHDOG_POLL_MS = 5_000;
 export function useWatchdog(opts: { live?: boolean } = {}): {
   status: WatchdogStatus | null;
   error: string | null;
+  saveError: WatchdogSaveError | null;
   reload: () => Promise<void>;
   save: (patch: Partial<WatchdogConfig>) => Promise<void>;
 } {
@@ -75,6 +98,7 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
 
   const [status, setStatus] = useState<WatchdogStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<WatchdogSaveError | null>(null);
 
   // Flipped false on unmount, checked before every setState below — the
   // identical guard and identical StrictMode rationale `useOrchestratorRuns`'
@@ -97,6 +121,14 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
       if (mountedRef.current) {
         setStatus(fresh);
         setError(null);
+        // `saveError` is deliberately NOT cleared here. This reload runs on
+        // the window's schedule (mount, and every focus), not the user's: a
+        // tab switch must not erase the one line telling them their change
+        // never stuck. And the freshly-read `config` this very call just
+        // installed is what makes that line TRUE rather than stale — the
+        // values on screen are once again the server's own, which is
+        // precisely what the message says. The next save attempt is the only
+        // thing that clears it.
       }
     } catch (e) {
       // The last good status stays on screen (see the class comment above)
@@ -109,15 +141,35 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
   }, []);
 
   const save = useCallback(async (patch: Partial<WatchdogConfig>) => {
+    // Cleared synchronously, BEFORE the await: a retry must not sit there
+    // displaying the previous attempt's refusal while the new POST is still
+    // in flight, which reads as "still broken" for as long as the round trip
+    // takes.
+    setSaveError(null);
     try {
       const fresh = await updateWatchdogConfig(patch);
       if (mountedRef.current) {
         setStatus(fresh);
         setError(null);
+        setSaveError(null);
       }
     } catch (e) {
       if (mountedRef.current) {
-        setError(e instanceof Error ? e.message : 'failed to save watchdog config');
+        // Neither `status` nor `error` is touched: the failure was on the
+        // write, so the last value the server actually returned is still
+        // correct on screen, and `error` keeps meaning "this tab could not
+        // READ the watchdog" for the other consumer that renders it.
+        //
+        // The field is the patch's first key. Every control posts exactly
+        // one — the whole group's save path is one knob at a time
+        // (`WatchdogGroup`) — so "first" and "only" are the same key here,
+        // and a patch with no keys at all reports `null` rather than
+        // dropping the message.
+        const [first] = Object.keys(patch) as (keyof WatchdogConfig)[];
+        setSaveError({
+          field: first ?? null,
+          message: e instanceof Error ? e.message : 'failed to save watchdog config'
+        });
       }
     }
   }, []);
@@ -150,5 +202,5 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
     return () => clearInterval(id);
   }, [live, status?.phase, reload]);
 
-  return { status, error, reload, save };
+  return { status, error, saveError, reload, save };
 }
