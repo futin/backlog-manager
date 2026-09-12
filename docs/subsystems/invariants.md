@@ -105,7 +105,8 @@ there.
 
 Until task-31, `cmdInit` archived `run.json` and nothing else. Everything else
 a run produced — `<dir>/logs/`, `<dir>/reviews/`, `<dir>/verify/`,
-`<dir>/questions/`, and the `<dir>/prompts/` one driver invented — stayed flat
+`<dir>/questions/`, and `<dir>/prompts/`, at the time a directory one driver
+had invented for itself — stayed flat
 and project-scoped, keyed by **item id**. An item dispatched again in a later
 run therefore overwrote its own first attempt's transcript, reviewer report
 and verify output, silently. That is not hypothetical: bug-2 in this repo ran
@@ -126,10 +127,12 @@ has one writer precisely so there is one authority per fact.
 otherwise bury inside its own newest entry), and moves everything else. The
 sidecar directories are created by *drivers following SKILL.md prose*
 (`mkdir -p "<dir>/logs"`), never by the tool, so the set of names is open by
-construction — `prompts/` already exists on exactly one project on this
-machine because one driver invented it unprompted, and bug-31 will add
-`prompts/<id>-fix-<n>.txt` to SKILL.md §7 as the documented way findings
-reach a fix session. An allowlist minted today would silently drop whatever
+construction — `prompts/` first existed on exactly one project on this
+machine because one driver invented it unprompted, and bug-31 then made it
+prescribed — SKILL.md §5 and §7 now name `prompts/<id>-retry-1.txt` and
+`prompts/<id>-fix-<n>.txt` as the way a run-composed prompt reaches a resumed
+session at all. The denylist carried that change without an edit, which is the
+property it was chosen for. An allowlist minted today would silently drop whatever
 the next prose edit names, which is the very evidence loss this exists to
 close. Excluding `runs/` enforces a rule SKILL.md §2 already states ("stay out
 of `<dir>/runs/`") rather than inventing one.

@@ -4,9 +4,12 @@ title: The fix-loop and retry launcher interpolates reviewer findings inside sh 
 created: 2026-09-06
 tags: skills, orchestrate, security
 runner-fix: true
-updated: 2026-09-12T16:08:40Z
+updated: 2026-09-12T16:34:30Z
 groom-elapsed: 278
 groom-tokens: 62062
+started: 2026-09-12T16:18:03Z
+execute-elapsed: 987
+execute-tokens: 147610
 ---
 
 ## Symptom
@@ -197,3 +200,93 @@ the *next* run until this is committed, pushed and `pnpm run plugin:sync` has
 copied it into the install, which is why the item carries `runner-fix: true`:
 the run that executes it must not be the run still dispatching through the
 broken line.
+
+## Outcome
+
+2026-09-12 — fixed as the `## Fix` describes, all seven steps.
+
+`skills/backlog-orchestrate/SKILL.md` §5's retry launcher now reads its prompt
+from `<dir>/prompts/<id>-retry-1.txt` (`"$(cat "…")"`), guarded by `test -s
+"…" &&` so a missing or empty prompt file spawns nothing; §7's `verdict: fix`
+writes the reviewer's findings verbatim to `<dir>/prompts/<id>-fix-<n>.txt`
+with the Write tool and reuses that same line with this loop's `<n>` in both
+the guard and the `$(cat …)`; §4's dispatch rules now carry the general rule
+("prose this run did not compose … never rides a shell command line; it goes
+in a file and the command names the file"), and §3's two `printf '%s' '…' >
+questions/…` payload writes became Write-tool writes under it.
+`references/recovery.md`'s `resume-session` says to write the prompt file
+before the line it calls "unchanged". Still exactly two `exec claude -p` lines
+in the file, and neither contains an apostrophe.
+
+Five cases added to `skills/backlog-orchestrate/tools/orchestrate.test.mjs`.
+The last two execute SKILL.md's own retry line with `claude` swapped for an
+argv-dumping stub, rather than asserting about its text: a hostile prompt
+(`` `rowId` ``, `$(touch OWNED)`, `var(--ink)`, `it's`) arrives in argv
+byte-identical, creates no `OWNED`, and leaves an empty `.err`; the same
+harness run over the pre-fix inline shape does create `OWNED` and delivers a
+mangled prompt, and with the apostrophe present spawns nothing at all — both
+failure modes the `## Cause` names, reproduced.
+
+Verification — `pnpm test`, both runners:
+
+```
+$ pnpm test
+Test Suites: 82 passed, 82 total
+Tests:       1567 passed, 1567 total
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
+
+The skills runner re-run alone afterwards, on the final file state:
+
+```
+$ pnpm run test:skills
+# tests 526
+# pass 526
+# fail 0
+```
+
+The four existing tests the `## Fix` named as constraints, run by name
+together with the five new ones:
+
+```
+ok 1 - no dispatch line contains an apostrophe
+ok 2 - the run id assignment sits inside the sh -c body, not in front of nohup
+ok 3 - SKILL.md names no environment variable but the three it owns
+ok 4 - the retry launcher takes its prompt from a file, not from argv
+ok 5 - the prompt file is written before the launcher, and by the Write tool
+ok 6 - the no-prose-in-argv rule is stated once, and §3 obeys it too
+ok 7 - bug-31 red proof: a file-carried prompt reaches argv intact and executes nothing
+ok 8 - an absent or empty prompt file spawns nothing
+ok 9 - both dispatch lines name the session they spawn
+# pass 9
+# fail 0
+```
+
+One deviation from the plan, stated rather than left to be found: the plan's
+step 1 spoke only of `<dir>/prompts/`, and §5's block originally gained a
+`mkdir -p "<dir>/prompts"` alongside §4's `mkdir -p "<dir>/logs"`. That was
+removed again — the Write tool creates the directory on its way to the file,
+so the `mkdir` would have sat *after* the write it was meant to enable. §4
+now says so once, and contrasts it with `<dir>/logs/` and `<dir>/verify/`,
+which a shell redirect will not create for itself. The same reasoning removed
+`mkdir -p "<dir>/questions"` from §3.
+
+Contract sweep: 3 sites updated (docs/subsystems/invariants.md — both the
+"`<dir>/prompts/` one driver invented" clause at ~108 the plan named and the
+denylist rationale at ~131 that said "bug-31 will add…";
+skills/backlog-orchestrate/tools/orchestrate.mjs:288, the same sentence in
+`archiveSidecars`'s comment; skills/backlog-orchestrate/tools/orchestrate.test.mjs:419,
+the sidecar case's "bug-31 will document…"). Four further hits were left
+standing on purpose, all of them records of what was true when written rather
+than statements of the current contract: the done items
+`backlog/tasks/done/task-31-…`, `backlog/ideas/done/idea-8-…`, the plan
+`docs/superpowers/plans/2026-09-01-orchestrate-skill-floor-trim.md:127`, and
+the two comments that say "whatever else a driver invented" as a description
+of an open set (`server/src/orchestrator/orchestrator.service.ts:125`,
+`orchestrate.test.mjs:359`) — that set is still open, so those two are simply
+still true.
+Red proof: 5 tests went red with the change reverted — all five new cases were
+written and run against the unmodified SKILL.md first (`# pass 0 / # fail 5`),
+and the red-proof case additionally executes the pre-fix shape in-process on
+every run, so it cannot quietly stop pinning anything.
