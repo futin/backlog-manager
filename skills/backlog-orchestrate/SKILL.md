@@ -1365,17 +1365,18 @@ and skip the rest of it:**
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
-git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
+git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
 No `stage <id> merging` — nothing is merging. No `symbolic-ref` precondition
 and no dirty-path probe: both exist to protect a write to the main tree, and
 there is no write. And **no `git branch -d`. The branch is the deliverable**,
 the only copy of this item's work anywhere. `remove` stays plain and never
-`--force`; if it refuses, the item stays `branched` and is never re-staged —
-record the leftover exactly as the merge path's own removal refusal does at
-the end of this section (`attention … --kind parked`, with `branched` in place
-of `merged` in the detail) and carry on.
+`--force`; if it does not exit `0`, the item stays `branched` and is never
+re-staged — read git's message and record the leftover exactly as the merge
+path's own removal outcome does at the end of this section, which branches on
+that message into a park and a finish-the-delete (with `branched` in place of
+`merged` wherever a detail is written) — and carry on.
 
 `branched` is a success exit in the same terminal position `merged` occupies:
 the item is finished and the run holds nothing. The pairing is enforced by
@@ -1478,14 +1479,15 @@ that has just been shown to fail:
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge of <id>"
-git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
+git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
 Then continue with the next item, which now takes the branch path at the top
 of this section. Keep the branch — no `branch -d`, for the reason that path
-gives — and if `worktree remove` refuses, handle it exactly as that path says:
-the item stays `branched` and the leftover directory is recorded with
-`attention … --kind parked`. (A `merge-mode` exit `1` saying the run is
+gives — and if `worktree remove` does not exit `0`, handle it exactly as that
+path says: the item stays `branched`, and which of git's two failures it is
+decides whether the leftover directory is parked or finished off without
+paging anyone. (A `merge-mode` exit `1` saying the run is
 already in branch mode is the right state, not a failure — a resumed,
 already-degraded run hits it, and the stage above has already landed.)
 
@@ -1564,28 +1566,77 @@ noisier history is the price, knowingly paid. `-m 1` names the first parent —
 `main` as it was before this merge. (`references/rationale.md`, §9, has the
 measurement.)
 
-**On success**, record it and clean up:
+**On success**, record it and clean up. Capture the removal's status — the
+rest of this section branches on it, and on what git printed:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged
-git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"
+git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 git -C "$PWD" branch -d backlog/<id>
 ```
 
-Plain `remove`, not `--force`: if git refuses because the worktree is not
-clean, something is in there that was never committed, never reviewed and
-never merged, and forcing would delete it with no undo.
+Plain `remove`, never `--force`. **`remove=0` is the ordinary case and needs
+nothing further** — including for a worktree holding only an ignored `dist/`
+that step 8's build wrote, which removes cleanly and takes the build output
+with it (measured; `references/rationale.md`, §9).
 
-**What happens to the item when that removal refuses: nothing. It stays
-`merged`.** The `stage <id> merged` above already landed and it was true —
-the branch is in `main` — so do not re-stage it to `parked`, which would tell
-the board and the run summary that an item which actually merged did not. The
-leftover is a cleanup problem, not a pipeline state: record it with
-`attention <id> --kind parked --detail "merged; worktree <path> would not
-remove cleanly — uncommitted leftovers to look at"` (the `parked` kind is the
-attention list's closest fit, and the detail is what disambiguates it), leave
-the directory and branch alone, and carry on to the next item. A human deletes
-it after looking; nothing in the run depends on it being gone.
+**What happens to the item when that removal does not return `0`: nothing
+happens to the *item*. It stays `merged`.** The `stage <id> merged` above
+already landed and it was true — the branch is in `main` — so do not re-stage
+it to `parked` on either branch below, which would tell the board and the run
+summary that an item which actually merged did not. What differs between the
+two is only whether a human is paged, and **that is decided by git's own
+message, never by looking at what is left in the directory**: the leftovers of
+a half-finished delete are whatever the pass happened to miss, which carries no
+information at all.
+
+**`fatal: '<path>' contains modified or untracked files, use --force to delete
+it`** (exit `128`) — git's clean check refused. **Nothing was deleted and the
+worktree is still registered**, and what stopped it was something in there that
+was never committed, never reviewed and never merged; forcing would delete it
+with no undo. This is the one state `--force` would work in and the one state
+it must never be used in. Park it: `attention <id> --kind parked --detail
+"merged; worktree <path> would not remove cleanly — uncommitted leftovers to
+look at"` (the `parked` kind is the attention list's closest fit, and the
+detail is what disambiguates it), leave the directory and the branch alone, and
+carry on to the next item. A human deletes it after looking; nothing in the run
+depends on it being gone.
+
+**`error: failed to delete '<path>': <errno>`** (exit `255`, `Directory not
+empty` in both recorded occurrences) — a different failure with the opposite
+response. The clean check **passed** here: git certified the tree carried
+nothing modified and nothing untracked, began the delete, and could not finish
+it. git drops the admin entry `.git/worktrees/<id>` *first* and the directory
+second, so by the time this prints **the worktree is already unregistered** —
+`git worktree list` no longer names it, a `--force` retry answers `fatal:
+'<path>' is not a working tree`, and `git worktree prune` has nothing left to
+prune. Do not reach for any of those three. Finish the removal git started:
+
+```bash
+rm -rf "$PWD/.worktrees/<id>"; echo "rm=$?"
+[ ! -e "$PWD/.worktrees/<id>" ]; echo "gone=$?"
+```
+
+**On `gone=0`, record no `attention` entry and say nothing about it.** Nothing
+here needs a human: the item merged green, git certified the tree clean before
+it started deleting, and the run finished a cleanup git left half-done. Paging
+someone over that is the defect this branch exists to remove. Only if the
+directory survives — `gone` is not `0` — park it, with `rm`'s own error quoted
+in the detail: a child git could not unlink is usually one `rm` cannot unlink
+either, and that *is* a human's problem.
+
+**The guards on that `rm -rf`, which are its entire licence** — it is the only
+destructive filesystem verb in this skill:
+
+- **Only in this branch**, i.e. only after git's own delete-failure message
+  above, whose precondition is that git's clean check already passed. Never after the
+  refusal above it, and never on a hunch about what is in the directory.
+- **Only the literal `"$PWD/.worktrees/<id>"` path this run created** — never a
+  path read back from the run file, a `git worktree list`, or anywhere else,
+  and never a bare shell variable that can expand to nothing.
+- **Never as a substitute for the first attempt.** `git worktree remove` always
+  runs first: dropping the registration stays git's job, and this command only
+  ever finishes what git already committed to.
 
 Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a
 branch that is actually merged, so a refusal here is real information — the

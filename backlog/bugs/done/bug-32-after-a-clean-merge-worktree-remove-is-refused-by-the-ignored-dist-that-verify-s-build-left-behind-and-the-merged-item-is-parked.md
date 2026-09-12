@@ -4,9 +4,12 @@ title: After a clean merge, worktree remove is refused by the ignored dist/ that
 created: 2026-09-06
 tags: skills, orchestrate
 runner-fix: true
-updated: 2026-09-12T16:14:26Z
+updated: 2026-09-12T17:46:15Z
 groom-elapsed: 626
 groom-tokens: 106432
+started: 2026-09-12T17:22:32Z
+execute-elapsed: 1423
+execute-tokens: 85977
 ---
 
 ## Symptom
@@ -205,3 +208,84 @@ This is a `runner-fix:` item (frontmatter carries `runner-fix: true`) because it
 "After a runner-fix item lands" rule — re-read the repo's SKILL.md and follow it for the
 rest of the run — and the change is inert for the *next* run until it is pushed and
 `pnpm run plugin:sync` has reinstalled the plugin.
+
+## Outcome
+
+2026-09-12 — Fixed as planned, prose only: no tool change, no new attention kind, no new
+stage, no run-file field.
+
+`skills/backlog-orchestrate/SKILL.md` §9's "what happens when that removal refuses"
+paragraph now branches on git's own message instead of on a single "it refused". The
+success block captures the status (`; echo "remove=$?"`); `remove=0` is named as the
+ordinary case, including a worktree holding only step 8's ignored `dist/`; `fatal: …
+contains modified or untracked files` keeps today's park verbatim; `error: failed to
+delete '<path>': <errno>` states that the worktree is already unregistered, that
+`--force` answers `is not a working tree` and that `prune` is a no-op, then finishes the
+delete with the one `rm -rf "$PWD/.worktrees/<id>"` in the file and **records no
+attention entry** when `gone=0`. The three guards on that `rm -rf` (this branch only,
+the literal path only, never a substitute for `git worktree remove`) are written into
+the prose. The branch-mode and classifier-denial cleanups still delegate to that one
+paragraph — they gained the status capture and a pointer to the split, not a second copy
+of it. The measurement (git 2.50.1 Apple Git-155, the three cases, exit codes, why only
+`dist/` survived) went into `references/rationale.md` §9, not SKILL.md, which is injected
+in full into every turn of a run.
+
+Seven cases added to `skills/backlog-orchestrate/tools/orchestrate.test.mjs`, including
+one that re-measures git itself rather than asserting its behaviour (skipped under uid 0,
+since root ignores the `0555` bit the failed-delete case needs).
+
+Verification — `pnpm test` (both runners, the union `scripts/test-all.mjs` runs):
+
+```
+1..535
+# tests 535
+# suites 0
+# pass 535
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 66602.886917
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+Contract sweep: 2 sites updated (docs/subsystems/invariants.md, skills/backlog-orchestrate/references/recovery.md)
+
+- `invariants.md`'s "Every other §9 failure keeps its behaviour exactly … all still park"
+  read as covering the cleanup failure too, which no longer parks in half its cases;
+  narrowed to §9 *merge* failures with the split named and pointed at its one home.
+- `recovery.md`'s abort path said "a refusal means something is still uncommitted in
+  there" — true only of the clean-check refusal; now names that message and points at
+  §9 for the other failure. Its own `git worktree remove --force` is untouched: `--abort`
+  acts on a still-registered worktree, the one state where forcing means anything.
+- Left standing on purpose: `docs/superpowers/plans/2026-09-04-orchestrator-merge-mode.md`
+  and `docs/superpowers/specs/2026-09-04-orchestrator-merge-mode-design.md` both say
+  "the same 'a refusal is information' handling". They are the dated record of what was
+  designed then, not live contract; editing them would falsify the record rather than
+  correct a rule.
+
+Red proof: 4 tests went red with the change reverted
+
+`git show HEAD:…/SKILL.md` over the working copy, `node --test …/orchestrate.test.mjs`,
+then restored from a file copy (never `git stash` — the stack is shared with every other
+worktree):
+
+```
+not ok 231 - §9 names both worktree-removal failures as distinct cases, and the park template sits under the clean-check one
+not ok 232 - the removal split has exactly one home, and the other two cleanups still delegate to it
+not ok 233 - exactly one `rm -rf` is executable in SKILL.md, and it is the worktree path this run created
+not ok 235 - the finished-cleanup branch pages nobody, and no attention detail template offers `worktree prune`
+# pass 233
+# fail 4
+```
+
+The other three added cases pass with the change reverted, by design and by the plan's
+own wording: they pin things the fix must *not* change — `worktree remove --force` never
+entering a fenced block in any skill, `ATTENTION_KINDS` still exactly the three, and
+git's measured behaviour, which is the evidence the new prose rests on rather than an
+effect of it.

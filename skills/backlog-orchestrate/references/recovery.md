@@ -309,8 +309,11 @@ For each preserved item, in this order:
    ```
 
    Plain `remove` again, for the reason it is plain everywhere else in this
-   file: a refusal means something is still uncommitted in there, and this is
-   the one path where that is *likely* rather than surprising. `-D` on the
+   file: a `contains modified or untracked files` refusal means something is
+   still uncommitted in there, and this is the one path where that is *likely*
+   rather than surprising. git's *other* removal failure — it began the delete
+   and could not finish it — is not that, and SKILL.md §9's removal branch is
+   the one home for telling them apart and for what to do about each. `-D` on the
    branch, unlike the merge path's `-d`: an aborted branch was never merged
    anywhere, so a safe delete would always refuse it. These are the *preserved*
    items only — never run `-D` on a branch abort reported as **kept**, which is

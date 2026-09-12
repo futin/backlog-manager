@@ -4912,3 +4912,182 @@ test('readSessionUsage returns null for a transcript with no result event, and h
     assert.equal(holes[field], null, `${field} was filled with something rather than left a hole`)
   }
 })
+
+// --- bug-32: `git worktree remove` fails in two ways, not one -----------
+//
+// Two runs of this repo (run-20260903-112622 bug-14, run-20260905-213627
+// task-19) paged a human over build output: the item merged green, the
+// worktree removal printed `error: failed to delete '<path>': Directory not
+// empty`, and §9's single refusal response recorded `attention … --kind
+// parked`. That message is NOT git's clean check. Measured on git 2.50.1
+// (Apple Git-155), and pinned by the last test in this block: the clean check
+// refuses with `fatal: … contains modified or untracked files` and exit 128,
+// having deleted nothing and unregistered nothing; a failed recursive delete
+// exits 255 AFTER the clean check passed and AFTER the admin entry is gone,
+// so the leftover directory is no longer a worktree at all. The two states
+// need opposite responses — park the first, finish the second — and these
+// cases exist to stop them collapsing back into one.
+
+// Every line inside a ``` fence, trimmed: what a session actually runs, as
+// opposed to prose that mentions a command in order to forbid it.
+function fencedLinesOf(text) {
+  const out = []
+  let inFence = false
+  for (const line of text.split('\n')) {
+    if (line.startsWith('```')) { inFence = !inFence; continue }
+    if (inFence) out.push(line.trim())
+  }
+  return out
+}
+
+test('§9 names both worktree-removal failures as distinct cases, and the park template sits under the clean-check one', () => {
+  // Searched against a whitespace-flattened copy throughout: this file is
+  // hard-wrapped prose, so any of these sentences can cross a line break for
+  // reasons that have nothing to do with the rule being pinned.
+  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ')
+
+  const cleanCheck = text.indexOf('contains modified or untracked files')
+  const failedDelete = text.indexOf('failed to delete')
+  assert.ok(cleanCheck > 0, '§9 no longer quotes git\'s clean-check refusal')
+  assert.ok(failedDelete > 0, '§9 no longer names the failed recursive delete — the failure 2 of 2 real occurrences hit')
+
+  // The park template belongs to the clean check alone. Ordering is the
+  // assertion that survives rewording: leftovers nobody committed are parked,
+  // and that paragraph precedes the failed-delete one, which pages nobody.
+  const park = text.indexOf('would not remove cleanly')
+  assert.ok(park > 0, 'the park detail template is gone entirely')
+  assert.ok(
+    cleanCheck < park && park < failedDelete,
+    `the park template must sit under the clean-check branch and above the failed-delete branch (cleanCheck=${cleanCheck} park=${park} failedDelete=${failedDelete})`,
+  )
+})
+
+test('the removal split has exactly one home, and the other two cleanups still delegate to it', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ')
+
+  const copies = text.split('failed to delete').length - 1
+  assert.equal(copies, 1, `the split is stated ${copies} times; it has one home and two delegating cross-references`)
+
+  // Branch mode (§9's opening) and the classifier denial both clean up a
+  // worktree and both already say "handle it exactly as that path says".
+  // A second copy of a three-branch rule is how the copies drift apart.
+  const branchMode = text.indexOf('record the leftover exactly as')
+  const denial = text.indexOf('handle it exactly as that path says')
+  assert.ok(branchMode > 0, 'the branch-mode cleanup no longer delegates its removal refusal')
+  assert.ok(denial > 0, 'the classifier-denial cleanup no longer delegates its removal refusal')
+  assert.ok(branchMode < text.indexOf('failed to delete') && denial < text.indexOf('failed to delete'))
+})
+
+test('exactly one `rm -rf` is executable in SKILL.md, and it is the worktree path this run created', () => {
+  // The first destructive filesystem verb in this file. It is licensed by
+  // branch 3 alone — git has already certified the tree clean and already
+  // dropped the registration — and by the literal path, never a variable
+  // that can expand empty and never a path read back from anywhere.
+  const lines = fencedLinesOf(fs.readFileSync(SKILL_MD, 'utf8')).filter((l) => l.includes('rm -rf'))
+  assert.equal(lines.length, 1, `expected exactly 1 executable rm -rf, found ${lines.length}:\n${lines.join('\n')}`)
+  assert.ok(
+    lines[0].startsWith('rm -rf "$PWD/.worktrees/<id>"'),
+    `the one rm -rf must target the literal worktree path, got: ${lines[0]}`,
+  )
+})
+
+test('`worktree remove --force` never enters a fenced block in any skill', () => {
+  // §10's `--abort` mention is prose explaining why marker order matters,
+  // and the forced form is legal there only because that path acts on a
+  // worktree that is still registered. Nothing in the cleanup path may copy
+  // it: after `failed to delete` the registration is already gone, so
+  // `--force` answers `is not a working tree` and deletes nothing.
+  const skills = fs.readdirSync(path.join(path.dirname(SKILL_MD), '..'))
+  let checked = 0
+  for (const name of skills) {
+    const file = path.join(path.dirname(SKILL_MD), '..', name, 'SKILL.md')
+    if (!fs.existsSync(file)) continue
+    checked += 1
+    const bad = fencedLinesOf(fs.readFileSync(file, 'utf8')).filter((l) => /worktree remove.*--force/.test(l))
+    assert.deepEqual(bad, [], `${name}/SKILL.md runs a forced worktree remove:\n${bad.join('\n')}`)
+  }
+  assert.ok(checked >= 6, `expected to have read every skill body, read ${checked}`)
+})
+
+test('the finished-cleanup branch pages nobody, and no attention detail template offers `worktree prune`', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+
+  // From `failed to delete` to the end of §9: the branch must say outright
+  // that nothing is recorded, or a session reaching it reaches for the park
+  // template one paragraph up — which is the whole bug.
+  const start = text.indexOf('failed to delete')
+  const end = text.indexOf('\n## ', start)
+  const branch = text.slice(start, end > 0 ? end : text.length)
+  assert.match(
+    branch,
+    /no `?attention`? entry/i,
+    'the failed-delete branch no longer says it records no attention entry',
+  )
+
+  // Both recorded occurrences told a human to run `git worktree prune` on a
+  // worktree git had already deregistered. The instruction was a no-op twice.
+  const prune = text.split('\n').filter((l) => l.includes('--kind parked') && l.includes('worktree prune'))
+  assert.deepEqual(prune, [], `an attention detail template still advises worktree prune:\n${prune.join('\n')}`)
+})
+
+test('ATTENTION_KINDS is still exactly needs-answers, parked, fix-exhausted — no cleanup kind was invented', () => {
+  // The fix is prose-only: no new kind, no new stage, no new run-file field.
+  // Case 11 above proves the tool refuses a fourth kind; this proves the
+  // list itself was not widened to admit one.
+  const tool = fs.readFileSync(SCRIPT, 'utf8')
+  assert.ok(
+    tool.includes("const ATTENTION_KINDS = ['needs-answers', 'parked', 'fix-exhausted']"),
+    'ATTENTION_KINDS is no longer the exact three-member list SKILL.md is written against',
+  )
+})
+
+test('git worktree remove: ignored build output alone removes cleanly, and a failed delete deregisters first', (t) => {
+  // The two assumptions the §9 prose rests on, measured rather than asserted,
+  // because the prose tells an unattended session which commands are pointless
+  // (`--force`, `prune`) in a state it cannot inspect afterwards.
+  if (process.getuid?.() === 0) return // root ignores the 0555 bit the second case needs
+
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-wt-')))
+  const repo = path.join(root, 'main')
+  t.after(() => {
+    // Restore the mode first or the temp tree itself cannot be deleted.
+    fs.chmodSync(path.join(repo, 'wt-locked', 'src'), 0o755)
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+  const git = (...args) => spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' })
+
+  fs.mkdirSync(repo, { recursive: true })
+  spawnSync('git', ['init', '-q', repo], { encoding: 'utf8' })
+  git('config', 'user.email', 'test@example.com')
+  git('config', 'user.name', 'test')
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'dist/\n')
+  fs.mkdirSync(path.join(repo, 'src'))
+  fs.writeFileSync(path.join(repo, 'src', 'a.txt'), 'a\n')
+  git('add', '-A')
+  git('commit', '-qm', 'init')
+
+  // 1. Nothing but ignored build output — the shape the bug report blamed.
+  //    It removes cleanly: `--force` was never the fix for what was observed.
+  git('worktree', 'add', '-q', 'wt-dist', '-b', 'b-dist')
+  fs.mkdirSync(path.join(repo, 'wt-dist', 'dist'))
+  fs.writeFileSync(path.join(repo, 'wt-dist', 'dist', 'bundle.js'), 'x'.repeat(1000))
+  const clean = git('worktree', 'remove', 'wt-dist')
+  assert.equal(clean.status, 0, `ignored output blocked a plain remove: ${clean.stderr}`)
+  assert.equal(fs.existsSync(path.join(repo, 'wt-dist')), false)
+
+  // 2. A tracked, unmodified tree git cannot finish deleting: the clean check
+  //    passes, the delete fails, and the admin entry is already gone.
+  git('worktree', 'add', '-q', 'wt-locked', '-b', 'b-locked')
+  fs.chmodSync(path.join(repo, 'wt-locked', 'src'), 0o555)
+  const failed = git('worktree', 'remove', 'wt-locked')
+  assert.notEqual(failed.status, 0, 'the locked child did not stop the delete')
+  assert.match(failed.stderr, /failed to delete/, `expected a delete failure, got: ${failed.stderr}`)
+  assert.doesNotMatch(failed.stderr, /contains modified or untracked files/, 'this is the clean check, not the delete')
+
+  const listed = git('worktree', 'list', '--porcelain').stdout
+  assert.ok(!listed.includes('wt-locked'), `the worktree is still registered after a failed delete:\n${listed}`)
+
+  const forced = git('worktree', 'remove', '--force', 'wt-locked')
+  assert.equal(forced.status, 128, `a --force retry should be refused outright, got ${forced.status}: ${forced.stderr}`)
+  assert.match(forced.stderr, /is not a working tree/)
+})
