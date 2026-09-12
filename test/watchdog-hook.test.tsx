@@ -230,4 +230,139 @@ describe('useWatchdog', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  // --- bug-24: a failed SAVE is its own state, with its own render site -----
+  //
+  // The defect these five pin: `save`'s catch used to write the same `error`
+  // field `reload`'s catch writes, and `WatchdogGroup` renders `error` in
+  // exactly one branch — the one guarded by `status === null`, which a
+  // successful mount GET has already made unreachable. A refused POST
+  // therefore had NO render site at all. `saveError` is a second field
+  // precisely so the two failures can land in two places; the cases below
+  // pin that they stay apart, that the failing field travels with the
+  // message (that is what buys per-control placement in the group), and
+  // that a background refetch does not silently erase it.
+
+  it('lands a non-2xx POST in saveError and nowhere else', async () => {
+    const fetchMock = stubFetch(status('idle'));
+    const { result } = renderHook(() => useWatchdog());
+    await flush();
+
+    fetchMock.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: 'watchdog.json is read-only' })
+      } as unknown as Response)
+    );
+
+    const mounted = result.current.status;
+    await act(async () => {
+      await result.current.save({ tickMs: 120_000 });
+    });
+
+    expect(result.current.saveError).toEqual({
+      field: 'tickMs', message: 'watchdog.json is read-only'
+    });
+    expect(result.current.error).toBeNull();
+    // `status` untouched: the failure was on the write, so what is on screen
+    // is still the last value the server actually returned.
+    expect(result.current.status).toEqual(mounted);
+    expect(result.current.status?.config.tickMs).toBe(DEFAULT_WATCHDOG_CONFIG.tickMs);
+  });
+
+  it('lands a rejected POST in saveError too, carrying the field it was posting', async () => {
+    const fetchMock = stubFetch(status('idle'));
+    const { result } = renderHook(() => useWatchdog());
+    await flush();
+
+    fetchMock.mockImplementationOnce(() => Promise.reject(new Error('network down')));
+
+    const mounted = result.current.status;
+    await act(async () => {
+      await result.current.save({ maxAttempts: 4 });
+    });
+
+    expect(result.current.saveError?.message).toBe('network down');
+    expect(result.current.saveError?.field).toBe('maxAttempts');
+    expect(result.current.status).toEqual(mounted);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('reports a null field rather than dropping the message when the patch is empty', async () => {
+    const fetchMock = stubFetch(status('idle'));
+    const { result } = renderHook(() => useWatchdog());
+    await flush();
+
+    fetchMock.mockImplementationOnce(() => Promise.reject(new Error('network down')));
+
+    await act(async () => {
+      await result.current.save({});
+    });
+
+    // The message is the point: a `saveError` that renders nowhere is the
+    // bug, so an unattributable failure must still carry something to show.
+    expect(result.current.saveError?.field).toBeNull();
+    expect(typeof result.current.saveError?.message).toBe('string');
+    expect((result.current.saveError?.message as string).length).toBeGreaterThan(0);
+  });
+
+  it('clears saveError on a later successful save', async () => {
+    const fetchMock = stubFetch(status('idle'));
+    const { result } = renderHook(() => useWatchdog());
+    await flush();
+
+    fetchMock.mockImplementationOnce(() => Promise.reject(new Error('network down')));
+    await act(async () => {
+      await result.current.save({ tickMs: 120_000 });
+    });
+    expect(result.current.saveError).not.toBeNull();
+
+    const saved = status('idle', { config: { ...DEFAULT_WATCHDOG_CONFIG, tickMs: 300_000 } });
+    fetchMock.mockImplementationOnce(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(saved) } as Response)
+    );
+    await act(async () => {
+      await result.current.save({ tickMs: 300_000 });
+    });
+
+    expect(result.current.saveError).toBeNull();
+    expect(result.current.status?.config.tickMs).toBe(300_000);
+  });
+
+  it('leaves saveError standing across a successful reload', async () => {
+    const fetchMock = stubFetch(status('idle'));
+    const { result } = renderHook(() => useWatchdog());
+    await flush();
+
+    fetchMock.mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: 'watchdog.json is read-only' })
+      } as unknown as Response)
+    );
+    await act(async () => {
+      await result.current.save({ tickMs: 120_000 });
+    });
+    const afterSave = result.current.saveError;
+    expect(afterSave).toEqual({ field: 'tickMs', message: 'watchdog.json is read-only' });
+
+    // A focus refetch fires on the window's schedule, not the user's. It
+    // must not erase the one line telling them their change never stuck —
+    // and the refreshed config is what makes that line true rather than
+    // stale, since the value on screen is once again the server's own.
+    const refetched = status('armed');
+    fetchMock.mockImplementationOnce(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(refetched) } as Response)
+    );
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.status).toEqual(refetched);
+    expect(result.current.saveError).toEqual(afterSave);
+  });
 });

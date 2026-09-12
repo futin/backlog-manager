@@ -119,7 +119,12 @@ orchestrator run defaults — all per-device, in `localStorage`, never sent to t
 Plus a Claude Agents group — the dashboard's status, the default model and effort every
 launch sheet seeds from, and the dashboard link base — and an Orchestrator watchdog
 group: the one place Settings writes to the server, four knobs that live in
-`settings/watchdog.json` beside the registry rather than in this browser.
+`settings/watchdog.json` beside the registry rather than in this browser. Because it is
+the one write, it is also the one group that can be refused: a rejected
+`POST /api/agents/watchdog/config` renders one red line in its own row directly under the
+control it was refused for, while every knob keeps showing the value the server actually
+holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it,
+because a failed read replaces the whole group and a failed write must not.
 
 ## Interfaces
 

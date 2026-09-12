@@ -1,6 +1,7 @@
 import { useWatchdog } from '../../hooks/useWatchdog';
 import { formatSpanCompact } from '../../lib/run-time';
 import { SettingsGroup, SettingsRow } from './SettingsRow';
+import type { WatchdogConfig } from '../../../../shared/types';
 
 /**
  * The watchdog Settings group (design §6.4, trimmed by task-18) — the four
@@ -46,6 +47,11 @@ import { SettingsGroup, SettingsRow } from './SettingsRow';
  * every" and watch it silently become `30000` the next time this group
  * reloads, with nothing on screen ever having said so: a setting that
  * cannot be seen to fail to stick is worse than one that refuses outright.
+ * bug-24 is that same argument arriving from the other direction: the
+ * ladders close the CLAMP's silent gap, but a POST the server refuses
+ * outright was equally silent until `saveError` below got a render site of
+ * its own, because the only `error` render here sits behind `status ===
+ * null` — a branch a successful mount GET closes forever.
  * A `<select>` whose options are built from the same `WATCHDOG_LIMITS`
  * triples the server clamps against cannot offer a value the server would
  * ever have to correct — the UI and the clamp read one shared source of
@@ -61,7 +67,9 @@ import { SettingsGroup, SettingsRow } from './SettingsRow';
  * Every save below posts the ONE field that changed
  * (`useWatchdog.save(patch)` → `POST /api/agents/watchdog/config`) and
  * redraws every row from that POST's own response, never a follow-up GET
- * (design §5.3; `useWatchdog`'s own comment has the full reasoning). Rows
+ * (design §5.3; `useWatchdog`'s own comment has the full reasoning) — and,
+ * when that POST is refused, says so in a row of its own under the control
+ * that was changed (`saveErrorSlot`). Rows
  * are not gated on `phase`: a knob is worth setting while nothing is
  * running, so the three selects and the checkbox render identically whether
  * the sweeper is `off`, `idle` or `armed` — and this group no longer reports
@@ -108,6 +116,36 @@ function ladderWithSelected(ladder: readonly number[], value: number): number[] 
   return ladder.includes(value) ? [...ladder] : [...ladder, value].sort((a, b) => a - b);
 }
 
+/** Where a refused save's message goes: the row for the field that was
+ *  refused, or the end of the group when there is no such row. */
+export type SaveErrorSlot = 'enabled' | 'tickMs' | 'graceMs' | 'maxAttempts' | 'end';
+
+/**
+ * The refused field → the row its message is rendered under (bug-24).
+ *
+ * Exported so its totality can be pinned without a DOM. That totality is the
+ * whole point rather than a formality: the defect this function exists to
+ * end was a save-failure message with nowhere to render, so the one thing
+ * this must never do is return "nowhere". `'end'` is what a `null` field (an
+ * empty patch) and any field with no row of its own — a fifth knob added to
+ * `WatchdogConfig`, a hand-built patch — both fall back to, so the message
+ * still lands somewhere a reader will see it, just without the placement
+ * that would have said which setting it was about.
+ *
+ * Written as an explicit list rather than a `field ?? 'end'` cast, because
+ * the cast would claim every present field has a row and quietly produce a
+ * slot no JSX below matches — which renders nothing, which is the bug again.
+ */
+export function saveErrorSlot(field: keyof WatchdogConfig | null): SaveErrorSlot {
+  switch (field) {
+    case 'enabled': return 'enabled';
+    case 'tickMs': return 'tickMs';
+    case 'graceMs': return 'graceMs';
+    case 'maxAttempts': return 'maxAttempts';
+    default: return 'end';
+  }
+}
+
 /** The watchdog's own Settings group. Mounted directly after `AgentsGroup`
  *  in `SettingsView.tsx`. */
 export function WatchdogGroup() {
@@ -116,12 +154,14 @@ export function WatchdogGroup() {
   // redraw nobody can see. The mount fetch and the focus refetch stay, and
   // they are what this group actually needs: they are how it learns the
   // config changed on another device.
-  const { status, error, save } = useWatchdog({ live: false });
+  const { status, error, saveError, save } = useWatchdog({ live: false });
 
   // `useWatchdog` never throws — a failed GET lands in `error` and leaves
   // `status` at its initial `null` (see that hook's own comment for why a
   // stale-but-real status is kept on a LATER failure while `null` is kept
-  // on the FIRST one). There is no `config` to bind three selects and a
+  // on the FIRST one). A failed SAVE lands in `saveError` instead and is
+  // rendered below, with `status` intact — the two failures are two fields
+  // because they need two places on screen. There is no `config` to bind three selects and a
   // checkbox to in that state, so this group renders a one-line notice and
   // nothing else — never a half-built row reading off a value that does
   // not exist, and never a thrown error from dereferencing `status.config`
@@ -143,6 +183,27 @@ export function WatchdogGroup() {
   }
 
   const { config } = status;
+
+  // A refused POST (bug-24). `status` is intact here and every control below
+  // is still showing a real server value, so this is NOT the load failure the
+  // `status === null` branch above handles — it is one line saying the change
+  // the user just made was refused, rendered beside the control they changed
+  // so its position names the setting and the sentence does not have to.
+  // Exactly one such row renders, and only when there is a `saveError`:
+  // `slot` is a single value, so the `errorRow` guards below are mutually
+  // exclusive by construction rather than by four conditions agreeing.
+  const slot = saveError === null ? null : saveErrorSlot(saveError.field);
+  const errorRow = (at: SaveErrorSlot) => (
+    saveError !== null && slot === at
+      ? (
+        <div className="set-row set-error-row" role="alert">
+          <span className="set-error">
+            Not saved — {saveError.message}. The value shown is the one still on the server.
+          </span>
+        </div>
+      )
+      : null
+  );
 
   return (
     <SettingsGroup title="Orchestrator watchdog · this server">
@@ -175,6 +236,7 @@ export function WatchdogGroup() {
           onChange={(e) => void save({ enabled: e.target.checked })}
         />
       </SettingsRow>
+      {errorRow('enabled')}
 
       <SettingsRow
         name="Check every"
@@ -190,6 +252,7 @@ export function WatchdogGroup() {
           ))}
         </select>
       </SettingsRow>
+      {errorRow('tickMs')}
 
       <SettingsRow
         name="Leave a resumed run alone for"
@@ -205,6 +268,7 @@ export function WatchdogGroup() {
           ))}
         </select>
       </SettingsRow>
+      {errorRow('graceMs')}
 
       <SettingsRow
         name="Give up after"
@@ -220,6 +284,8 @@ export function WatchdogGroup() {
           ))}
         </select>
       </SettingsRow>
+      {errorRow('maxAttempts')}
+      {errorRow('end')}
     </SettingsGroup>
   );
 }

@@ -568,6 +568,14 @@ body {
 .set-name { font-size: 12px; font-weight: 600; color: var(--ink) }
 .set-hint { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
 .set-hint code { font-family: var(--mono); font-size: 10px; color: var(--cyan) }
+/* A refused `POST /api/agents/watchdog/config` (bug-24), rendered as its own
+   row directly under the control that was refused. `var(--red)`, matching
+   `.run-controls-error`'s posture rather than `.sheet-error`'s amber: this is
+   a write the server actually refused, not a warning about something that
+   still happens. Size tracks `.set-hint` — it sits in the same reading
+   register as the hint above it, one line explaining the row it follows. */
+.set-error-row { border-color: var(--red) }
+.set-error { font-size: 10.5px; line-height: 1.45; color: var(--red) }
 .set-dot-green { color: var(--green) }
 .set-dot-amber { color: var(--amber) }
 .set-dot-gray { color: var(--ink3) }

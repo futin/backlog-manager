@@ -7,7 +7,7 @@ import '@testing-library/jest-dom';
 
 import SettingsView from '../client/src/components/settings/SettingsView';
 import {
-  ATTEMPT_LADDER, GRACE_LADDER, TICK_LADDER
+  ATTEMPT_LADDER, GRACE_LADDER, TICK_LADDER, saveErrorSlot
 } from '../client/src/components/settings/WatchdogGroup';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
@@ -58,10 +58,18 @@ function jsonOk(body: unknown): Promise<Response> {
  * degrade the same way. `onConfigPost` lets cases 7/8 hand back a
  * POST-specific response (the field the save actually changed) without
  * duplicating this whole routing switch per test.
+ *
+ * bug-24: `onConfigPost` may also answer a FAILURE — the string `'reject'`
+ * for a rejected promise, or `{ status, body }` for a non-2xx routed through
+ * the same `json()` shape `jsonOk` uses. Both are how a refused save reaches
+ * `useWatchdog.save`'s catch: `updateWatchdogConfig` throws on either. The
+ * success shape is unchanged so the cases that predate this stay untouched.
  */
+type PostFailure = 'reject' | { status: number; body: unknown };
+
 function stubFetch(opts: {
   watchdog: WatchdogStatus | 'reject';
-  onConfigPost?: (patch: Record<string, unknown>) => WatchdogStatus;
+  onConfigPost?: (patch: Record<string, unknown>) => WatchdogStatus | PostFailure;
 }): jest.Mock {
   const fn = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -72,7 +80,19 @@ function stubFetch(opts: {
 
     if (url.endsWith('/api/agents/watchdog/config')) {
       const patch = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
-      if (opts.onConfigPost) return jsonOk(opts.onConfigPost(patch));
+      if (opts.onConfigPost) {
+        const answer = opts.onConfigPost(patch);
+        if (answer === 'reject') return Promise.reject(new Error('config post rejected'));
+        if (typeof answer === 'object' && answer !== null && 'status' in answer && 'body' in answer) {
+          const fail = answer as { status: number; body: unknown };
+          return Promise.resolve({
+            ok: false,
+            status: fail.status,
+            json: () => Promise.resolve(fail.body)
+          } as unknown as Response);
+        }
+        return jsonOk(answer);
+      }
       return jsonOk(opts.watchdog === 'reject' ? watchdogStatus() : opts.watchdog);
     }
 
@@ -287,8 +307,8 @@ describe('WatchdogGroup', () => {
       expect((screen.getByLabelText('Give up after') as HTMLSelectElement).value).toBe('3');
     });
 
-    // The behaviour itself: `useWatchdog.save` (`useWatchdog.ts:88-97`)
-    // redraws `status` straight from the POST's own response and never
+    // The behaviour itself: `useWatchdog.save` redraws `status` straight
+    // from the POST's own response and never
     // calls `reload()` afterwards, so a save must add ZERO new GETs to
     // `/api/agents/watchdog` — proven here directly by a call-count
     // assertion, rather than only inferred (as the two `waitFor`s above
@@ -407,5 +427,109 @@ describe('WatchdogGroup', () => {
     expect(names).toEqual([
       'Live view', 'Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after'
     ]);
+  });
+  // --- bug-24: a refused save says so, beside the control that was changed --
+  //
+  // What made this reachable in the first place: every case above stubs a
+  // SUCCEEDING POST (cases 7/8) or a rejecting GET (case 11). No case ever
+  // failed a POST, so the fact that a refused save had no render site at all
+  // — the only `error` render sits behind `status === null`, which a
+  // successful mount GET has permanently closed — was never asserted either
+  // way.
+
+  const READ_ONLY = 'watchdog.json is read-only';
+
+  /** The whole group loaded normally, with every POST refused 500. */
+  function stubRefusedSave(): jest.Mock {
+    return stubFetch({
+      watchdog: watchdogStatus({ phase: 'idle' }),
+      onConfigPost: () => ({ status: 500, body: { error: READ_ONLY } })
+    });
+  }
+
+  it('renders a message and keeps every knob when a save is refused', async () => {
+    stubRefusedSave();
+    renderView();
+
+    const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+    await userEvent.selectOptions(attempts, '3');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Not saved/);
+    expect(alert).toHaveTextContent(READ_ONLY);
+
+    // The select showing the old value is not a second defect: it is
+    // controlled off `status.config`, which a failed write left at the last
+    // value the server actually returned. What was missing is the line above.
+    expect((screen.getByLabelText('Give up after') as HTMLSelectElement).value).toBe('2');
+    expect(screen.getByLabelText('Enabled')).toBeInTheDocument();
+    expect(screen.getByLabelText('Check every')).toBeInTheDocument();
+    expect(screen.getByLabelText('Leave a resumed run alone for')).toBeInTheDocument();
+    // A failed WRITE is not a failed READ — the group must not collapse into
+    // the load-failure notice.
+    expect(screen.queryByText(/Could not reach the watchdog/)).not.toBeInTheDocument();
+  });
+
+  it('places the message in the failing control\'s own row', async () => {
+    stubRefusedSave();
+    renderView();
+
+    const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+    await userEvent.selectOptions(attempts, '3');
+
+    // This is the assertion a group-level banner fails, which is what makes
+    // "beside the control" a tested claim rather than a comment in the file.
+    const alert = await screen.findByRole('alert');
+    expect(alert.previousElementSibling).toContainElement(screen.getByLabelText('Give up after'));
+  });
+
+  it('reports a refused save from the checkbox the same way', async () => {
+    stubRefusedSave();
+    renderView();
+
+    const checkbox = await screen.findByLabelText('Enabled') as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    await userEvent.click(checkbox);
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect((screen.getByLabelText('Enabled') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('removes the message once a later save succeeds', async () => {
+    const succeeded = watchdogStatus({
+      config: { ...DEFAULT_WATCHDOG_CONFIG, maxAttempts: 4 }
+    });
+    let refuse = true;
+    stubFetch({
+      watchdog: watchdogStatus({ phase: 'idle' }),
+      onConfigPost: () => (refuse ? { status: 500, body: { error: READ_ONLY } } : succeeded)
+    });
+    renderView();
+
+    const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+    await userEvent.selectOptions(attempts, '3');
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+    refuse = false;
+    await userEvent.selectOptions(screen.getByLabelText('Give up after'), '4');
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Give up after') as HTMLSelectElement).value).toBe('4');
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  // The fallback is the point, not a formality: a message with no matching
+  // row must still land somewhere, because a `saveError` that renders
+  // nowhere is precisely the defect being fixed here — and an unrecognised
+  // field (a fifth knob added to `WatchdogConfig`, a hand-built patch) is
+  // exactly how it would come back.
+  it('maps every known field to its own slot and everything else to the end', () => {
+    expect(saveErrorSlot('enabled')).toBe('enabled');
+    expect(saveErrorSlot('tickMs')).toBe('tickMs');
+    expect(saveErrorSlot('graceMs')).toBe('graceMs');
+    expect(saveErrorSlot('maxAttempts')).toBe('maxAttempts');
+    expect(saveErrorSlot(null)).toBe('end');
+    expect(saveErrorSlot('somethingElse' as unknown as 'enabled')).toBe('end');
   });
 });
