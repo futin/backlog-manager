@@ -3,6 +3,9 @@ id: bug-24
 title: A failed watchdog config save is silent: the error only renders when status is null
 created: 2026-09-06
 tags: ui, settings, audit-2026-09-06
+updated: 2026-09-12T16:11:42Z
+groom-elapsed: 215
+groom-tokens: 62147
 ---
 
 ## Symptom
@@ -42,16 +45,168 @@ The select snaps back to the stored value with no message.
 
 ## Cause
 
-One `error` state serving two failure kinds that need different placements. A load failure
-(`status === null`) legitimately replaces the whole group; a save failure must render
-*beside the control*, with `status` intact — and the render site only handles the first.
+One `error` state serving two failure kinds that need different placements, and only one
+of them has a render site.
+
+- `useWatchdog` keeps a single `error` field. `reload()`'s catch writes it
+  (`client/src/hooks/useWatchdog.ts:101-108`) and `save()`'s catch writes the same field
+  (`:118-122`), correctly leaving `status` alone — the failure was on the write, not the
+  read.
+- `WatchdogGroup` reads `error` in exactly one place: inside `if (status === null)`
+  (`client/src/components/settings/WatchdogGroup.tsx:129-143`), where it is appended to
+  the "Unavailable" notice at `:136`. Nothing below that early return ever mentions
+  `error`.
+- `status` is never reset to `null` once a GET has succeeded — neither catch touches it —
+  so from the first successful mount fetch onward the only branch that renders `error` is
+  permanently unreachable. A save failure therefore has no render site at all.
+- The select "snapping back" is not a second defect: all four controls are controlled off
+  `status.config` (`:174`, `:185`, `:200`, `:216`), and a failed save leaves `status` at
+  the last value the server actually returned. The value on screen is correct; what is
+  missing is anything saying the change was refused.
+- Nothing else catches it either. `client/src` has no toast or alert host — the only
+  live-region role in the whole client is `role="status"` on the board's empty state
+  (`client/src/App.tsx:129`) — and `updateWatchdogConfig`
+  (`client/src/lib/agents.ts:588-598`) throws on a non-2xx (via `unwrap`, `:60-68`, whose
+  `ApiError` carries the server's own `error` string), on a rejected fetch, and on a
+  malformed 200 body, so all three arrive in that same dead-ended catch.
+
+A load failure (`status === null`) legitimately replaces the whole group; a save failure
+must render *beside the control*, with `status` intact — and the render site only handles
+the first.
 
 ## Fix
 
-unknown — the shape is separating the two errors so a save failure has its own render site
-that does not require `status === null`. Whether that is a second state field, a discriminated
-`error` value, or per-control error placement is the open call. Whichever is chosen, add the
-case that is missing: `test/settings-watchdog.test.tsx` stubs only successful PATCHes
-(`:254`, `:303`) and only a rejecting GET (`:341`), and `test/watchdog-hook.test.tsx`'s nine
-cases reject only `fetchWatchdog` (`:148`), never `updateWatchdogConfig` — which is why this
-survived.
+Split the two failures in the hook and give the save failure its own render site that
+does not require `status === null`. Of the three shapes the audit left open — a second
+state field, a discriminated `error` value, per-control placement — this takes the second
+state field *carrying the field name*, which buys per-control placement without changing
+`error`'s meaning for the hook's other consumer (`WatchdogMonitor` never calls `save`, so
+it needs no change at all).
+
+**1. `client/src/hooks/useWatchdog.ts` — a second state field.**
+
+Return one more field beside `status`/`error`/`reload`/`save`:
+
+```ts
+saveError: { field: keyof WatchdogConfig | null; message: string } | null
+```
+
+Rules, all of which the cases below pin:
+
+- `save(patch)` clears `saveError` synchronously *before* its `await`, so a retry never
+  displays the previous attempt's message while the new POST is in flight.
+- `save`'s catch sets `saveError` and touches neither `status` nor `error`. `field` is the
+  first key of `patch` (`Object.keys(patch)[0]`, narrowed to `keyof WatchdogConfig`) —
+  every control posts exactly one key — and `null` when `patch` is empty. `message` is the
+  same string the current catch computes.
+- `save`'s success path clears `saveError` as well as `error`, as today.
+- `reload`'s success path clears `error` only and deliberately leaves `saveError`
+  standing. The mount fetch and the focus refetch fire on their own schedule; a window
+  switch must not erase the one line telling the user their change never stuck, and the
+  refreshed `config` is what makes that line *true* rather than stale. The next save
+  attempt is the only thing that clears it.
+- Both writes keep the existing `mountedRef.current` guard.
+
+**2. `client/src/components/settings/WatchdogGroup.tsx` — one render site, chosen by a
+pure function.**
+
+Export, so a test can pin it without a DOM:
+
+```ts
+export function saveErrorSlot(field: keyof WatchdogConfig | null):
+  'enabled' | 'tickMs' | 'graceMs' | 'maxAttempts' | 'end'
+```
+
+It returns the field's own slot for the four known keys and `'end'` for `null` or anything
+it does not recognise. That total-by-construction fallback is the point: a message with no
+matching row must still land somewhere, because a `saveError` that renders nowhere is
+precisely the bug being fixed, and an unrecognised field is how it would come back.
+
+Render the message as its own row — `<div className="set-row set-error-row" role="alert">`
+— immediately after the `SettingsRow` whose slot matches, and after the last row for
+`'end'`. The text is one line, naming no setting (its position does that):
+
+> Not saved — {message}. The value shown is the one still on the server.
+
+Exactly one such row is rendered, and only when `saveError !== null`. The `status === null`
+branch at `:129` is unchanged — its "Unavailable" notice stays the load failure's render
+site — and so is the `{ live: false }` call, the ladders, and all four controls.
+
+**3. `client/src/styles.css` — `.set-error-row` / `.set-error`**, beside the other `.set-*`
+rules (~`:558-570`). `var(--red)`, matching `.run-controls-error`'s posture for a real
+failure rather than `.sheet-error`'s amber: this is a write the server refused, not a
+warning about a run that still starts. Font size tracks `.set-hint` (10.5px).
+
+**4. Out of scope, deliberately:** a GET that fails *after* a first success is also silent
+in this group (`error` set, `status` populated, nothing rendered) — but Settings only
+reloads on mount and on focus, and what it leaves on screen is the last real server value,
+not a lie about a change the user just made. `WatchdogMonitor` (`:81`, `:107-117`) gates
+its own `error` render the same way and is a live view whose staleness has other tells.
+Neither changes here. Nothing in `client/src/lib/agents.ts`, `server/` or `shared/` changes
+either.
+
+### Test cases
+
+The reason this survived: `test/settings-watchdog.test.tsx` stubs only successful POSTs
+(`:254`, `:303`) and only a rejecting GET (`:341`), and `test/watchdog-hook.test.tsx`'s
+cases reject only `fetchWatchdog` (`:148`), never `updateWatchdogConfig`. Every case below
+is a failing POST.
+
+`test/watchdog-hook.test.tsx` (mount GET succeeds with `status('idle')` in all five; the
+POST is overridden per case with `mockImplementationOnce`):
+
+1. **A non-2xx POST lands in `saveError` and nowhere else.** POST resolves
+   `{ ok: false, status: 500, json: () => ({ error: 'watchdog.json is read-only' }) }`;
+   after `save({ tickMs: 120_000 })`: `saveError` equals
+   `{ field: 'tickMs', message: 'watchdog.json is read-only' }`, `error` is `null`, and
+   `status` still deep-equals the mounted status (`config.tickMs` still
+   `DEFAULT_WATCHDOG_CONFIG.tickMs`).
+2. **A rejected POST lands there too.** POST rejects `new Error('network down')`;
+   `saveError.message` is `'network down'`, `saveError.field` is `'maxAttempts'` for
+   `save({ maxAttempts: 4 })`, `status` unchanged, `error` `null`.
+3. **An empty patch reports a `null` field rather than dropping the message.**
+   `save({})` against a rejecting POST: `saveError.field` is `null` and
+   `saveError.message` is a non-empty string.
+4. **A later successful save clears it.** Fail `save({ tickMs: 120_000 })`, then succeed on
+   `save({ tickMs: 300_000 })` with a 200 carrying that config: `saveError` is `null` and
+   `status.config.tickMs` is `300_000`.
+5. **A successful reload leaves it standing.** Fail a save, then dispatch a `window`
+   `focus` event answered by a successful GET: `error` is `null`, `status` is the refetched
+   value, and `saveError` is still the object from case 1.
+
+`test/settings-watchdog.test.tsx` — `stubFetch` needs one addition: let `onConfigPost`
+return either a `WatchdogStatus` (as today, so cases 7/8 are untouched) or a failure
+marker — the string `'reject'` for a rejected promise, or `{ status: number; body: unknown }`
+for a non-2xx response routed through the same `json()` shape `jsonOk` uses.
+
+6. **A refused save renders a message and keeps every knob.** GET returns the default
+   config; POST answers 500 with `{ error: 'watchdog.json is read-only' }`. Select `'3'`
+   on "Give up after": an element with `role="alert"` appears whose text contains
+   `Not saved` and `watchdog.json is read-only`; the select still reads `'2'`; all four
+   controls are still in the document; `Could not reach the watchdog` is **not**.
+7. **The message sits in the failing control's row.** Same setup as 6;
+   `screen.getByRole('alert').previousElementSibling` must contain the element returned by
+   `screen.getByLabelText('Give up after')`. This is the assertion that would fail on a
+   group-level banner, which is what makes "beside the control" a tested claim rather than
+   a comment.
+8. **The checkbox path behaves identically.** POST answers 500; click "Enabled": the
+   checkbox is still `checked`, and the alert is present.
+9. **A later successful save removes the message.** After case 6's failure, re-stub the
+   POST to succeed with `maxAttempts: 4` and select `'4'`: `queryByRole('alert')` is
+   `null` and the select reads `'4'`.
+10. **`saveErrorSlot` is total.** A plain unit case, no DOM: each of the four keys returns
+    its own slot; `null` returns `'end'`; an unrecognised string (cast) returns `'end'`.
+
+Run `pnpm test` (both runners) and `pnpm run typecheck`.
+
+In the browser (playwright MCP tools): open `http://127.0.0.1:5177/` with the API up, go to
+Settings and wait for the "Orchestrator watchdog · this server" group to render its four
+knobs (so the GET has succeeded and `status` is non-null — the exact state that makes the
+bug reachable). Then evaluate a snippet that wraps `window.fetch` so a POST to
+`/api/agents/watchdog/config` resolves as a 500 with body
+`{"error":"watchdog.json is read-only"}` while every other request passes through. Change
+"Give up after" to `3`. Expected: a red line reading `Not saved — watchdog.json is read-only.
+The value shown is the one still on the server.` appears directly beneath the "Give up
+after" row, the select still shows `2`, and the other three knobs are untouched. Reload the
+page (dropping the fetch wrapper) and change the same knob again: the save succeeds, the
+select shows the new value and no message is rendered.
