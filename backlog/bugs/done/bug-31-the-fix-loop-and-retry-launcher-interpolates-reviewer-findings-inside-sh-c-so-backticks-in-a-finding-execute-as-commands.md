@@ -290,3 +290,85 @@ Red proof: 5 tests went red with the change reverted — all five new cases were
 written and run against the unmodified SKILL.md first (`# pass 0 / # fail 5`),
 and the red-proof case additionally executes the pre-fix shape in-process on
 every run, so it cannot quietly stop pinning anything.
+
+### Fix loop 1 — 2026-09-12
+
+The reviewer's Important finding was right, and the `## Outcome` above was
+wrong to say "all seven steps": step 5 has two clauses and only the first was
+implemented. The rule went into §4 and §3's `printf` payloads became Write-tool
+writes, but "`attention --detail` / `stage --note` values stay the driver's own
+short words rather than a verbatim quote" did not — so §2:331 and §9:1431 were
+still telling a driver to paste `--note "<the classifier's own message,
+verbatim>"`, model-written `Reason:` free text in a double-quoted argument, in
+the same file that had just forbidden exactly that.
+
+What changed in this loop:
+
+- **§4's rule gained its second half.** `attention --detail`, `stage --note`
+  and `merge-mode --note` stay inline arguments on purpose — one short line
+  each, and what the run drawer renders — and what makes that safe is stated:
+  the value is the driver's own summary plus a pointer, and the copy of record
+  already lives where the same string points (the report, the `status --json`
+  rows, the transcript).
+- **Both classifier-denial notes are fixed text now**: `--note "auto mode
+  classifier denied the merge probe"` (§2) and `--note "auto mode classifier
+  denied the merge of <id>"` (§9). The trade is stated where it is made: the
+  `Reason:` free text is lost from `mergeModeNote`, which answers "why is this
+  run in branch mode" — and which of the two sites asked is the whole of that
+  answer. The verbatim message is still in the driver's own transcript beside
+  the command that provoked it.
+- **Three placeholders now say whose words they are**: `<verdict summary, your
+  words>` (§7), `<the failing command names>` (§8, names and never their
+  output) and `<what happened, your words>` (§5), each with a sentence under
+  it saying what the string points at instead of carrying.
+- **Two Minor findings, both made worse by this diff, fixed too.** §8's
+  "every other `<dir>` in this file is pasted once" was false once the retry
+  line pasted it four times; it now names the retry line and says why that one
+  cannot take the same `env` treatment — and why a mismatched paste there
+  spawns nothing rather than reading the wrong prompt. §7's "the two names
+  that carry this loop's `<n>`" read as a closed list that omitted the `.err`
+  and the session name, which is how a fix loop overwrites the retry's stderr —
+  the very file this item's `## Symptom` was found in. It is now every name,
+  stated as one substitution of `retry 1` → `fix <n>`.
+
+Coverage for the class the finding named, in
+`skills/backlog-orchestrate/tools/orchestrate.test.mjs`:
+
+- `every --detail and --note value is the driver's own words` — flattens
+  SKILL.md, `recovery.md` and `rationale.md` (values wrap across lines; a
+  line-by-line scan is how this class survived round one), then holds every
+  `--note`/`--detail` value against two rules: no value may ask for a verbatim
+  quote, and every `<…>` placeholder inside one must be on a closed list, each
+  entry carrying the reason it is safe. The list is asserted in both
+  directions, so a spelling that leaves the prose has to leave the list, and a
+  floor on the number of values found keeps the scan from passing vacuously.
+- `the classifier denial records the run fact, not the classifier prose` —
+  exactly two `merge-mode branch --note` sites, with their exact strings.
+- The existing rule test gained the second-half sentence.
+
+Verification — `pnpm test`, both runners, on the final tree:
+
+```
+$ pnpm test
+Test Suites: 82 passed, 82 total
+Tests:       1567 passed, 1567 total
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
+
+Contract sweep: none found. `<the classifier's own message…>` survives only in
+`docs/superpowers/plans/2026-09-04-orchestrator-merge-mode.md:541`, the plan
+this feature was built from — a record of what was decided then, not a
+statement of the contract now. `mergeModeNote`'s own contract
+(`shared/types.ts:845`, `orchestrate.mjs:1941`, `invariants.md:515-608`) says
+"why `mergeModeEffective` differs" and never "the classifier's message", so it
+is unchanged by this; `RunDetail.tsx:399` and `run-stage.ts:176` say the note's
+post-mortem value is naming *which call* was denied, which both new notes do.
+§10's "quoting `mergeModeNote` verbatim" is now quoting the run's own sentence,
+so it stays as written.
+Red proof: 3 tests went red with the change reverted — with §5's SKILL.md at
+`HEAD` (this item's round-one commit) and the test file as it now stands,
+`every --detail and --note value is the driver's own words`, `the classifier
+denial records the run fact, not the classifier prose` and the extended `the
+no-prose-in-argv rule is stated once, and §3 obeys it too` all failed
+(`# pass 0 / # fail 3`); SKILL.md was restored from a file copy, never a stash.

@@ -3842,6 +3842,14 @@ test('the no-prose-in-argv rule is stated once, and §3 obeys it too', () => {
   // inside a question was a syntax error there too.
   const printfPayloads = text.split('\n').filter((l) => l.includes('printf') && l.includes('questions/'))
   assert.deepEqual(printfPayloads, [], 'a questions payload is still being written with printf')
+  // The second half, which the first round of this fix left out: the values
+  // that stay inline are safe because they are PARAPHRASES, and the rule has
+  // to say so or the three sites that take one have no rule over them.
+  assert.match(
+    text,
+    /never a verbatim quote of\s+text this run did not compose/,
+    "§4 states the rule for argv payloads but not for the --detail/--note values that stay inline",
+  )
 })
 
 // A payload with one of each hazard the Cause names: a backtick-quoted
@@ -3926,6 +3934,95 @@ test('an absent or empty prompt file spawns nothing', (t) => {
   assert.equal(absent.argv, null, 'the launcher resumed a session with no instruction at all')
   const empty = retryHarness(t, { prompt: '' })
   assert.equal(empty.argv, null, 'an empty prompt file still resumed the session')
+})
+
+// The other half of the same rule, and the half the first round of this fix
+// missed: `attention --detail`, `stage --note` and `merge-mode --note` stay
+// inline arguments, so what protects them is that their VALUES are the
+// driver's own words. §2 and §9 both used to say `--note "<the classifier's
+// own message, verbatim>"` — model-written free text (`Reason: …`) in a
+// double-quoted argument, which is the identical defect to the one the retry
+// launcher had, in the file that now forbids it.
+//
+// A closed allowlist rather than a pattern, for the reason the environment
+// variable case above uses one: no regex can tell "a placeholder the driver
+// fills with its own summary" from "a placeholder the driver fills with
+// somebody else's prose". Adding a spelling here is meant to be a decision.
+const NOTE_PLACEHOLDERS = new Map([
+  // Substituted by the run from its own state: an item id proven by
+  // `isItemId`, and paths/refs it read out of git. None can carry a
+  // backtick or an apostrophe by construction.
+  ['<id>', 'a validated item id'],
+  ['<dir>', 'the run-state directory this run resolved'],
+  ['<path>', 'a worktree path this run created'],
+  ['<paths>', 'paths git printed as dirty'],
+  ['<ref>', 'the ref the main tree has checked out'],
+  // Composed by the tool in this repo, not by a model: `plan --json`'s own
+  // fixed refusal strings.
+  ["<the gate's own reason>", "the ungroomed gate's own fixed wording"],
+  // Spelled to say whose words they are. The verbatim text each of these
+  // summarises lives where the same string points — the reviewer's report,
+  // the rows in `status --json`, this session's transcript.
+  ['<what happened, your words>', "the driver's summary of a dead session"],
+  ['<verdict summary, your words>', "the driver's summary of a review verdict"],
+  ['<the failing command names>', 'command names, never their output'],
+])
+
+// Values can wrap across lines in prose (`--detail\n"<what happened…>"`), so
+// the text is flattened first: a line-by-line scan silently misses those, and
+// a missed site is exactly how this class survived round one.
+function noteValues(file) {
+  const flat = fs.readFileSync(file, 'utf8').replace(/\s*\n\s*/g, ' ')
+  return [...flat.matchAll(/--(?:note|detail)\s+"([^"]*)"/g)].map((m) => m[1])
+}
+
+test("every --detail and --note value is the driver's own words", () => {
+  const FILES = [
+    SKILL_MD,
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'recovery.md'),
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'rationale.md'),
+  ]
+  const seen = new Set()
+  let count = 0
+  for (const file of FILES) {
+    for (const value of noteValues(file)) {
+      count += 1
+      assert.doesNotMatch(
+        value,
+        /verbatim|word for word|as the reviewer wrote|as written/i,
+        `a --detail/--note value asks for a verbatim quote of prose the run did not compose: "${value}" (${path.basename(file)})`,
+      )
+      for (const [placeholder] of value.matchAll(/<[^>]*>/g)) {
+        seen.add(placeholder)
+        assert.ok(
+          NOTE_PLACEHOLDERS.has(placeholder),
+          `${placeholder} appears in a --detail/--note value in ${path.basename(file)} and is not on the list of values the driver composes itself. ` +
+            'Either spell it so it says whose words it is, or add it here with the reason it is safe.',
+        )
+      }
+    }
+  }
+  // The file is the authority, not this list: a spelling that disappears from
+  // the prose has to disappear from here too, or the next reader takes the
+  // list for a description of a file it no longer matches.
+  const unused = [...NOTE_PLACEHOLDERS.keys()].filter((k) => !seen.has(k))
+  assert.deepEqual(unused, [], `these placeholders are on the list but no longer appear in any --detail/--note value: ${unused.join(', ')}`)
+  // A guard on the scan itself: a regex that quietly stopped matching would
+  // make every assertion above vacuous.
+  assert.ok(count >= 15, `only ${count} --detail/--note values found — the scan is no longer reaching them`)
+})
+
+test('the classifier denial records the run fact, not the classifier prose', () => {
+  // Both denial sites — §2's pre-flight probe and §9's real merge — and the
+  // note has to name which one asked, because that IS the answer
+  // `mergeModeNote` exists to give.
+  const flat = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s*\n\s*/g, ' ')
+  const notes = [...flat.matchAll(/merge-mode branch --note "([^"]*)"/g)].map((m) => m[1])
+  assert.equal(notes.length, 2, `expected exactly 2 \`merge-mode branch --note\` sites, found ${notes.length}`)
+  assert.deepEqual(notes.sort(), [
+    'auto mode classifier denied the merge of <id>',
+    'auto mode classifier denied the merge probe',
+  ])
 })
 
 // --- task-17: the pause gates, finish paused, unpause ----------------------
