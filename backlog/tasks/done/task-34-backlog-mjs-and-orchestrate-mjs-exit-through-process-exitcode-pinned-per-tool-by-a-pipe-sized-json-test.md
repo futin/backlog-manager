@@ -4,6 +4,10 @@ title: backlog.mjs and orchestrate.mjs exit through process.exitCode, pinned per
 created: 2026-09-13
 from: ref-3
 runner-fix: true
+updated: 2026-09-13T09:16:56Z
+started: 2026-09-13T08:53:27Z
+execute-elapsed: 1409
+execute-tokens: 92021
 ---
 
 ## Goal
@@ -168,3 +172,90 @@ apply.
   `CLAUDE.md` carries the invariant bullet with a working `Why:` anchor into
   `docs/subsystems/invariants.md`
 - `pnpm test` is green — both runners, per the union rule
+
+## Outcome
+
+2026-09-13 — done. Both entry guards now read `process.exitCode =
+main(process.argv.slice(2))`, each with its own comment naming the incident and stating
+why *that* file leaves no handle open; `retro.mjs` is byte-for-byte unchanged (it never
+appears in `git status`). The grooming claims were re-verified against the tree before
+editing: `backlog.mjs` has no async, no child process, no timer and no server (its only
+grep hits are `RegExp.prototype.exec` calls and the word "execute" in prose), and
+`orchestrate.mjs`'s only `setTimeout` mention is the comment at :2325 explaining why
+`sleepSync` blocks on `Atomics.wait` instead.
+
+Three tests added — two behaviour, one source guard — plus the stale comment correction
+the plan called for.
+
+**Red proof, observed before the fix:**
+
+```
+not ok 212 - a board larger than the pipe buffer arrives whole
+  error: 'only 65536 bytes reached the pipe'
+
+not ok 1 - a status --json larger than the pipe buffer arrives whole
+  error: 'only 65536 bytes reached the pipe'
+```
+
+Both landed on exactly 65,536 — the pipe buffer, to the byte. The source guard was
+observed red twice, once per tool, by hand-reverting each guard to
+`process.exit(main(...))` (file copied aside, restored from the copy — never `git
+stash`, which is shared with every other worktree of this repo):
+
+```
+not ok 213 - all three skill CLIs end through process.exitCode, never process.exit
+  error: 'backlog.mjs no longer sets process.exitCode from main() in its entry guard'
+
+not ok 1 - all three skill CLIs end through process.exitCode, never process.exit
+  error: 'orchestrate.mjs no longer sets process.exitCode from main() in its entry guard'
+```
+
+**One thing the plan did not predict, and it is the interesting part.** With stdout no
+longer truncated, `verify`'s existing E2BIG case started failing — `status: null`, a
+child killed by SIGTERM rather than the exit `1` the case asserts. Cause: that fixture
+builds a deliberately 3MB-long command string, `verify`'s human-readable output echoes it
+back, and the output is now *whole* — 3,145,805 bytes measured — which overruns
+`spawnSync`'s 1MB default `maxBuffer` in the test helper. The tool is correct; the
+harness was the narrower pipe of the two. `run()` in `orchestrate.test.mjs` now passes
+`maxBuffer: 64MB`, with a comment recording why the default could never be reached
+before this change. Worth noting for the same reason the original bug is: `process.exit()`
+had been hiding how much this command really prints.
+
+**Verification — `pnpm test`, both runners:**
+
+```
+Test Suites: 84 passed, 84 total
+Tests:       1615 passed, 1615 total
+
+1..538
+# tests 538
+# pass 538
+# fail 0
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+`pnpm run typecheck` (`tsc --noEmit`) exits 0. `grep -rn "process\.exit(" skills/*/tools/*.mjs`
+returns comment lines only across the three tools; the remaining hits in the two `.test.mjs`
+files are `node -e "process.exit(0)"` fixture *commands* handed to child processes, which is
+a different thing entirely and none of the guard's business.
+
+Contract sweep: 4 sites updated (docs/subsystems/skills.md `### The three CLIs`, CLAUDE.md
+Invariants, docs/subsystems/invariants.md, skills/backlog-orchestrate/tools/orchestrate.test.mjs)
+
+Two sites left standing on purpose:
+
+- `backlog/refactors/done/ref-3-*.md` and `backlog/tasks/done/task-30-*.md:244` both say
+  `backlog.mjs` and `orchestrate.mjs` still carry the truncation. Both are archived
+  items — evidence of what was true when they were written, and ref-3 is the very item
+  this task came from. A record that is edited to agree with the present stops being a
+  record.
+- `docs/subsystems/skills.md`'s `docs-sync: verified:` sha is now stale against `skills/`.
+  It cannot be set from here: the value is the commit this work lands in, and the
+  orchestrator commits after this session exits. `docs-sync` owns that stamp.
+
+Red proof: 3 tests went red with the change reverted (the source guard twice, once per tool)

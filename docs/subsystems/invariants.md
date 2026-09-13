@@ -2950,6 +2950,73 @@ where not knowing costs a run slot. Step 2 of the sheet carries no chip
 either, and that is a decision rather than an omission: the flag is a step 1
 fact about membership, and step 1 is where the control that acts on it lives.
 
+## All three skill CLIs exit through `process.exitCode`, never `process.exit()`
+
+`process.exit()` in an entry guard is not a neutral way of spelling "return
+this code". Writing to a **pipe** is asynchronous on POSIX, so `process.exit()`
+tears the process down before stdout has drained and everything past the 64KB
+pipe buffer is dropped — silently, with a zero exit status and no error
+anywhere.
+
+This shipped. A real `retro.mjs sweep --json` of this machine is 442,757 bytes;
+through `| jq` it arrived as **exactly 65,536 bytes** and a parse error, while
+`> file.json` — a redirect to a file, which is a synchronous write — was
+perfectly fine every time. That asymmetry is the whole reason it survived: the
+hand checks that a human runs all redirect to a file or read a small fixture,
+and both of those are green against the bug. `retro.mjs` was fixed the
+afternoon it was found; ref-3 asked whether the other two tools had the same
+defect, and task-34 (2026-09-13) confirmed they did and closed it.
+
+Setting `process.exitCode` instead lets node finish flushing and exit on its
+own. Nothing about the exit code changes: every command path in both tools
+returns an integer, and `process.exitCode = undefined` and
+`process.exit(undefined)` both exit `0`, so even a path that returned nothing
+behaves identically.
+
+### Why "exit naturally" is not a hang waiting to happen
+
+What `process.exit()` bought was a forced teardown even if something *were*
+holding the event loop open. Measured against both files as they stand:
+
+- **`backlog.mjs` holds nothing open.** Every read is synchronous `fs`. No
+  timer, no child process, no server, no stdin read.
+- **`orchestrate.mjs` holds nothing open either, despite looking like it
+  might** — this was ref-3's one genuinely open question. Every child process
+  is `spawnSync`, reaped before the call returns, and `watch`'s polling sleep
+  is `sleepSync`: an `Atomics.wait` on a throwaway `SharedArrayBuffer`, which
+  *blocks the thread* rather than scheduling a timer. There is no
+  `setTimeout`, no `setInterval`, no `async`/`await`, no server and no stdin
+  read in the file, so `watch` and `verify` — the two commands ref-3 flagged —
+  leave no live handle when `main` returns. Neither tool needs an explicit
+  drain.
+
+So the trade is real but narrow: a future edit that opens a timer, a server or
+an async child would hang instead of being killed. **The rule for whoever makes
+that edit is to close the handle — not to bring `process.exit()` back**, which
+would restore the truncation along with it.
+
+### How it is pinned
+
+Three cases, because each covers something the others cannot:
+
+- One behaviour test per tool, each driving the real CLI through `spawnSync`
+  (a real pipe) with a fixture deliberately larger than 65,536 bytes:
+  `backlog.test.mjs`'s `board --json` over 250 seeded items, and
+  `orchestrate.test.mjs`'s `status --json` over a 250-item committed queue.
+  Both assert the measured byte count, not just that the JSON parses — a
+  fixture that lands under the buffer is vacuous, and a test that redirected to
+  a file could not fail on this bug at all. Both were observed red at exactly
+  65,536 bytes before the fix.
+- A source guard in `backlog.test.mjs` reading all three tools as text
+  (`backlog.mjs`, `orchestrate.mjs`, `retro.mjs`), asserting each sets
+  `process.exitCode = main(` and that no non-comment line calls
+  `process.exit(`. It lives beside the other cross-skill cases in that suite,
+  for the same reason they do: the rule spans three skills and a suite reading
+  one half cannot catch the halves drifting. It is also the only one of the
+  three that covers a CLI or an entry point nobody has written yet. Comment
+  lines are stripped before matching because `retro.mjs`'s own note quotes the
+  literal `process.exit()` twice while being the correct file.
+
 ## This file stays one document (decided 2026-09-12, task-33)
 
 The question task-33 deferred to the end of its pass: now that df008f8 gave
