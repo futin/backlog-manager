@@ -7,6 +7,7 @@ import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
@@ -121,6 +122,7 @@ describe('POST /api/agents/orchestrate — questionMode', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterEach(async () => {

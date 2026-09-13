@@ -12,6 +12,7 @@ import { isAllowedHost } from '../server/src/allowed-hosts';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { applySecurityMiddleware } from '../server/src/security';
 import { clientDistModules } from '../server/src/static';
+import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 
 /**
@@ -166,6 +167,7 @@ describe('the Host gate, over the whole app', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterEach(async () => {
@@ -266,6 +268,7 @@ describe('the Host gate against the static handler', () => {
 
     page = await NestFactory.create(StaticFixtureModule, { logger: false });
     await page.init();
+    await listenLoopback(page);
   });
 
   afterAll(async () => {

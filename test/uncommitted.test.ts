@@ -10,6 +10,7 @@ import request from 'supertest';
 import { UNCOMMITTED_BASE_REF, uncommittedItemPaths } from '../server/src/items/uncommitted.util';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 
 /**
@@ -287,6 +288,7 @@ describe('GET /api/items/uncommitted', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterEach(async () => {

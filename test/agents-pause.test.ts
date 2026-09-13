@@ -8,6 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
@@ -57,7 +58,11 @@ describe('POST /api/agents/pause', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    await app.listen(0);
+    /* Listening once per app was already this suite's shape; the helper adds
+       the host argument, without which the ephemeral port is bound on `::`
+       and any stranger holding that number on 127.0.0.1 answers supertest's
+       dial instead of this app (bug-33). */
+    await listenLoopback(app);
   }
 
   beforeEach(async () => {

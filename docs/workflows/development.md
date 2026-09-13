@@ -112,6 +112,15 @@ developer's real orchestrator state directory unless the suite overrode `BM_ORCH
 and with `BM_AGENTS` genuinely on in that shell, a crashed run sitting there would have
 `pnpm test` start a real agent session against the developer's own repo.
 
+A suite that hands a Nest app to supertest listens once through `listenLoopback`
+(`test/helpers/app.ts`), never with a bare `app.listen(0)` and never by leaving the bind
+to supertest. A host-less bind lands on the IPv6 wildcard while supertest dials
+`127.0.0.1`, so another process holding that port on loopback answers instead — about one
+request in 1,500 on a loaded machine, which is one unreproducible failure per full run and
+therefore a false red at the merge gate (bug-33; the reasoning is in
+[invariants.md](../subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)).
+`test/supertest-bind.test.ts` fails the suite if a new one forgets.
+
 ## Failure modes
 
 **Vite won't start.** `esbuild`'s install script was skipped: it has to be named in

@@ -1167,6 +1167,113 @@ The script has no test of its own on purpose: `scripts/test-all.test.mjs`
 would match `test:skills`'s own glob and spawn the whole suite from inside the
 suite.
 
+## A supertest suite listens once, on `127.0.0.1`, through `listenLoopback`
+
+bug-33. A full `pnpm test` occasionally reported **exactly one** failed test
+out of ~1500, always a supertest assertion, always green on the very next run
+of the same command against the same tree, and never in a diff that touched
+server code at all.
+
+That is a merge-gate defect, not a cosmetic one. `backlog-orchestrate` §8
+makes the exit code of `pnpm test` the only thing that green-lights a merge,
+and "never merges red" is a Hard limit with no unrelated-looking-failure
+escape hatch. A one-in-N false red either parks a green, reviewed item or —
+worse — teaches whoever drives the run to re-run the gate until it passes,
+which is the habit that would let a real regression through.
+
+**The mechanism.** supertest builds its URL in `serverAddress()`
+(`node_modules/supertest/lib/test.js`, 7.2.2):
+
+```js
+if (!addr) this._server = app.listen(0);         // binds `::` — no host argument
+const port = app.address().port;
+return protocol + '://127.0.0.1:' + port + path; // dials IPv4 loopback — hardcoded
+```
+
+Those two lines do not agree. `listen(0)` with no host binds the IPv6 wildcard
+`::`, and the kernel draws the ephemeral port against that address alone — a
+socket some other process already holds on `127.0.0.1:P` does not make `::P`
+unavailable. The dial then goes to `127.0.0.1:P` and is routed to the **most
+specific** match: the stranger's socket, not ours. The request never reaches
+the app under test, and the assertion runs against whatever that other program
+answered.
+
+One mechanism, every observed surface error and no others: a non-HTTP listener
+gives `Parse Error: Expected HTTP/, RTSP/ or ICE/`; an HTTP listener gives a
+status this app never returns for that route (the observed `expected 403, got
+400` — read at the time as the body parser rejecting before `OriginGuard`,
+which was a sound inference about a response this app never produced); a
+listener that accepts nothing gives `connect ETIMEDOUT`.
+
+**Measured**, not inferred. A 20,000-iteration probe replaying supertest's
+pattern exactly, against this machine as it stood (40 loopback listeners, 4 of
+them on `127.0.0.1` inside the ephemeral range — two `java`, Postman,
+WebStorm): 13 anomalies, ~1 in 1,540 — 8 wrong statuses, 2 parse errors, 3
+connect timeouts. The identical probe with the single change
+`listen(0, '127.0.0.1')`: zero. `test/supertest-bind.test.ts` reproduces the
+same thing deterministically in milliseconds — a wildcard `listen(P)` succeeds
+on a port `127.0.0.1` already holds and reports `::`, the IPv4 dial to it comes
+back `HPE_INVALID_CONSTANT`, and the same bind written with the host is
+refused `EADDRINUSE`.
+
+Everything previously filed as inexplicable follows from it: exactly one
+failure per run (a few hundred draws at ~1 in 1,500), never reproducible (the
+colliding port is a fresh draw, so re-running proves nothing about the tree),
+only ever the full suite (the draw count is the number of supertest requests
+in the process), worse on a loaded machine (the rate is foreign `127.0.0.1`
+listeners in the ephemeral range over the size of that range — and all four
+sightings came from `pnpm test` inside an orchestrator run, with a headless
+session, a verify suite and a dev server all holding ports), and untouched
+server code in every triggering diff (the defect is in the harness's socket
+setup, not in anything under test).
+
+**The rule.** `listenLoopback` (`test/helpers/app.ts`) is
+`app.listen(0, '127.0.0.1')` and is the only way a suite here puts an app on a
+socket. One helper rather than an inline call in eighteen suites, because the
+host argument is the entire fix and eighteen copies are eighteen chances to
+drop it. A named host cannot be shadowed: the kernel refuses it `EADDRINUSE`
+when the port is taken.
+
+Listening once has a second effect that matters as much: with `app.address()`
+non-null, supertest's `if (!addr)` branch never runs, so it opens and closes
+**nothing** per request. `orchestrator-runs.test.ts` had already blamed that
+per-request churn for a separate intermittent `socket hang up` (~1 run in 4)
+and worked around it with a bare `await app.listen(0)` — half right, and the
+half it left in place is exactly the wildcard bind above. Every
+`await app.close()` stays where it is; it now tears down a real listener, and
+it is the only thing that does.
+
+**Not `jest.retryTimes`.** A retry hides a real regression exactly as well as
+it hides this one, and the gate's whole value is that red means red.
+
+**`watchdog-sweep.test.ts` is the one exception and must stay one.** Its
+`createApp()` runs inside each case, and five cases call
+`jest.useFakeTimers()` before it, so a real `listen()` awaited there could
+never settle. It takes `createApp({ listen: true })` and only the cases that
+hand the app to supertest — all under real timers — pass it. Moving
+`jest.useFakeTimers()` after `createApp()` to avoid the parameter is not
+available: the watchdog arms its chain during `init()`, and those cases exist
+to drive that chain from the fake clock.
+
+**Pinned by source guard, because behaviour cannot reach it.** A suite that
+forgets the helper stays green roughly 1,499 runs in 1,500 — that is the
+defect itself. So `test/supertest-bind.test.ts` reads every file under `test/`
+and asserts that each one importing supertest also calls `listenLoopback(`,
+and that a bare `.listen(0)` appears nowhere at all, comments blanked first
+(the same precaution `server-bind.test.ts` takes, and for the same reason:
+several files quote the bad spelling while explaining it). What the guard
+cannot catch, stated so a green is not over-read: a suite that builds a
+**second** app and listens only the first. Two such pairs exist today (`csp`,
+`allowed-hosts`) and both listen every app they hand to `request(...)`.
+
+**Left unproven deliberately:** a `pnpm test` that once printed `FAIL jest`
+over a jest summary reporting zero failures. It is consistent with this bug —
+a crossed-over connection can fail after the test that made it has settled,
+making jest exit non-zero while attributing no failed test — but this fix
+removes the only demonstrated source, and if it recurs it is a defect in
+`scripts/test-all.mjs`'s exit-code handling and earns its own bug rather than
+a guess recorded here as fact.
+
 ## Loopback bind is the access control (except where noted)
 
 Nothing in this stack has auth in front of it — the item-body route reads
@@ -1257,7 +1364,11 @@ headers.
   so there is nothing to rebind: for a browser to send `Host: 203.0.113.5` to
   this socket, the packet would have to route to that address. This rule is
   also why every pre-existing suite stayed green with no header added to it —
-  supertest binds an ephemeral port and sends `Host: 127.0.0.1:<port>`.
+  the request goes to an ephemeral port on loopback and carries
+  `Host: 127.0.0.1:<port>`. (supertest used to open that port itself; since
+  bug-33 the suite opens it through `listenLoopback` and supertest only dials
+  it. The Host header is unchanged, which is the whole of what this rule
+  reads.)
 - **`localhost`.**
 - **Any `.ts.net` name.** `pnpm run tailnet` is the one documented remote path,
   and this mirrors `vite.config.ts`'s `allowedHosts: ['.ts.net']` deliberately,
@@ -2886,7 +2997,9 @@ file split into one document per invariant — or per subsystem?
 stated so it is not rediscovered.** idea-11 proposes `.claude/rules/*.md`
 pointers whose payload is "read `invariants.md` §A, §B, §C" — they consume this
 document's anchor shape, so a split after they exist rewrites every one of them
-on top of the 45 in `CLAUDE.md`. This decision therefore had to be made first,
+on top of every `Why:` pointer in `CLAUDE.md` (a set that grows with each rule
+— it was 45 when this was decided and 47 by bug-33, which is exactly why the
+argument is stated as "every one of them" rather than as a number). This decision therefore had to be made first,
 and it is now made: **idea-11 may be built against the current anchors.** If a
 split is ever reopened it has to land *before* those pointers, not after.
 

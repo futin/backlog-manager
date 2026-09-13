@@ -9,6 +9,7 @@ import { AppModule } from '../server/src/app.module';
 import { AgentsService } from '../server/src/agents/agents.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { projectDispatchGate } from '../shared/agent';
+import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import {
@@ -130,6 +131,7 @@ describe('POST /api/agents/resume', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterEach(async () => {
