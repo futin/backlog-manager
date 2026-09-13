@@ -3,6 +3,10 @@ id: task-35
 title: Path-scoped .claude/rules pointers into the invariant rationale
 created: 2026-09-13
 from: idea-11
+updated: 2026-09-13T09:43:33Z
+started: 2026-09-13T09:28:56Z
+execute-elapsed: 877
+execute-tokens: 147906
 ---
 
 ## Goal
@@ -218,3 +222,109 @@ Plus, unchanged and expected green: `pnpm test` (both runners) and `pnpm run typ
 - No hook, settings key or probe artefact is left behind in this repo: `git status` shows
   only the intended files, and `.claude/settings.local.json` is untouched.
 - `pnpm test` and `pnpm run typecheck` are green, with output quoted in `## Outcome`.
+
+## Outcome
+
+2026-09-13 — probe matrix run in full, gate opened on P3, four pointer files written,
+record and guard landed. Claude Code 2.1.268 (same build grooming measured on).
+
+**Probe verdicts** (harness: throwaway git repo in `mktemp -d`, `InstructionsLoaded`
+hook appending stdin to `loaded.jsonl`, unscoped `control.md` kept in every case as the
+positive control, each session launched in the background and killed by its recorded
+pid):
+
+- **P1 — headless `claude -p`, plain checkout: POSITIVE.** Reproduced grooming's lines
+  exactly:
+  ```
+  session_start    <probe>/CLAUDE.md
+  session_start    ~/.claude/CLAUDE.md
+  session_start    <probe>/.claude/rules/control.md
+  path_glob_match  <probe>/.claude/rules/scoped.md   trigger: <probe>/src/target.ts
+  ```
+- **P2 — custom subagent: POSITIVE, under the parent's `session_id`.** Parent used only
+  `Task`; the `Read` is in `…/0a0d5141…/subagents/agent-ade89434bd6dcf744.jsonl`. The
+  glob line carries the parent id `0a0d5141`, the same id as its `session_start` control
+  line — subagent reads are not a separate instruction scope.
+- **P3 — linked worktree: POSITIVE.** This was the gate.
+  ```
+  session_start    <probe>/.worktrees/probe/.claude/rules/control.md
+  path_glob_match  <probe>/.worktrees/probe/.claude/rules/scoped.md
+                   trigger: <probe>/.worktrees/probe/src/target.ts
+  ```
+- **P4 — trigger surface beyond `Read`: NEGATIVE, both halves.** A session that wrote
+  `src/added.ts` with `Write` (file landed, `result: success`) and a session that ran
+  `Grep` + `Glob` over `src/` each logged the control line and **no** `path_glob_match`.
+- **P5 — `codegraph_explore`: NEGATIVE.** In this repo, the tool returned the verbatim
+  source of `orchestrator.service.ts` with `Read` never used (transcript
+  `660efbc8…`: `ToolSearch`, then `mcp__codegraph__codegraph_explore`); the log holds
+  two `session_start` lines and no `path_glob_match`. Recorded as a real limit: a session
+  following this repo's own CodeGraph-first guidance gets no rule injection, which is why
+  nothing was moved out of CLAUDE.md.
+
+**End-to-end, in this repo** (four pointer files in place, cwd this worktree, `claude -p`
+told to read one orchestrator file):
+
+```
+path_glob_match  <repo>/.claude/rules/orchestrator.md
+                 trigger: <repo>/server/src/orchestrator/orchestrator.service.ts
+                 globs:   ['skills/backlog-orchestrate', 'server/src/orchestrator', 'shared/agent.ts']
+```
+
+**Shipped:** `.claude/rules/{orchestrator,dispatch-watchdog,board,skills}.md` — 34
+anchors, 12–16 lines each, `paths:` on every one, pointers only;
+`docs/subsystems/invariants.md` §"Path-scoped `.claude/rules` reach a headless run in a
+linked worktree (task-35)" holding the matrix and the evidence; CLAUDE.md Layout line +
+Invariants bullet; `test/claude-rules.test.ts` with the six cases.
+
+**Verification.** `pnpm run typecheck` → `$ tsc --noEmit` and nothing else, exit 0.
+`pnpm test` (both runners), tail:
+
+```
+1..538
+# tests 538
+# suites 0
+# pass 538
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 73740.607625
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+`test/claude-rules.test.ts` on its own:
+
+```
+PASS test/claude-rules.test.ts
+  .claude/rules
+    ✓ every rule file declares a non-empty paths: list (2 ms)
+    ✓ every invariants.md anchor a rule file cites resolves to a heading (10 ms)
+    ✓ every paths: glob matches at least one tracked file today (48 ms)
+    ✓ rule files are pointers only — no second copy of the reasoning
+    ✓ no rule file exceeds 25 lines
+    ✓ passes vacuously when there is no rules directory
+Tests:       6 passed, 6 total
+```
+
+Contract sweep: 2 sites updated (docs/subsystems/invariants.md — the task-33 "ordering
+against idea-11" paragraph linked `backlog/ideas/open/idea-11-…`, which moved to
+`done/` at promotion, and still read "idea-11 may be built"; docs/overview.md — the doc
+map said nothing about a `.claude/` surface). Left standing on purpose:
+`docs/.docs-sync.yml`'s `out-of-scope:` list does not gain a `.claude/rules/` row — that
+file's own header says "Edit only via bootstrap", and the overview now states in prose
+why the rules are guarded by a test instead of by `/docs-sync`.
+
+Red proof: 5 tests went red with the change reverted. The "production change" here is
+the content of the rule files, so each case was proved against the pre-change shape of
+one file, restored from a copy afterwards (never `git stash`): dropped the `paths:` line
+from `board.md` → case 1 red; typoed one anchor in `skills.md` → case 2 red; pointed
+`dispatch-watchdog.md` at `server/src/nosuchdir/**` → case 3 red; appended one prose
+sentence to `orchestrator.md` → case 4 red; padded `board.md` past 25 lines → case 5 red;
+files restored → all six green. Case 6 (vacuous pass) is the one case with nothing to
+revert — it asserts the absence path directly, against a directory name that does not
+exist.

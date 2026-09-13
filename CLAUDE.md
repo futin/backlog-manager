@@ -70,6 +70,10 @@ reasoning behind the rules in the next section lives in
   root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before
   every merge.
+- `.claude/rules/` — four path-scoped pointer files, injected into a session
+  the moment it reads a file under their `paths:` glob. Each is one line per
+  anchor into `docs/subsystems/invariants.md` and nothing else; the reasoning
+  has one home and this is not it.
 - `backlog/` — this repo's own backlog, self-registered like any project.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD,
   → [docs/workflows/publishing.md](docs/workflows/publishing.md)),
@@ -502,6 +506,17 @@ happened.
   writes no entry, a renamed numeric field reads `null` never `0`, and
   `usage` stays optional so an older run renders nothing rather than `$0.00`.
   Why: [invariants.md](docs/subsystems/invariants.md#a-sessions-cost-is-recorded-per-transcript-and-a-transcripts-identity-is-its-file-name)
+- **Every `.claude/rules/` file carries `paths:` and is a pointer, never a
+  second copy of the reasoning.** A rule with no `paths:` loads at
+  `session_start` in every session — a context-floor increase on all of them,
+  which is the one failure mode the mechanism can introduce; a rule that
+  restated a rule would be a third statement of it, free to drift from both
+  CLAUDE.md and the rationale. Measured, not assumed (Claude Code 2.1.268): a
+  glob fires for a headless `claude -p`, inside a linked worktree, and for a
+  custom subagent's read; it does NOT fire for `Write`, `Grep`/`Glob`, or a
+  source read through `codegraph_explore`. Pinned by
+  `test/claude-rules.test.ts`, which passes vacuously on an empty directory.
+  Why: [invariants.md](docs/subsystems/invariants.md#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35)
 
 ## Conventions
 

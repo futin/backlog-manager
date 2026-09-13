@@ -3060,22 +3060,150 @@ file split into one document per invariant — or per subsystem?
   alone span the server, the client and three CLIs — so there is no per-subsystem
   seam to split it on that would not put one rule's rationale in two places.
 
-**Ordering against [idea-11](../../backlog/ideas/open/idea-11-path-scoped-claude-rules-pointers-into-the-invariant-rationale-once-headless-loading-is-proven.md),
-stated so it is not rediscovered.** idea-11 proposes `.claude/rules/*.md`
+**Ordering against [idea-11](../../backlog/ideas/done/idea-11-path-scoped-claude-rules-pointers-into-the-invariant-rationale-once-headless-loading-is-proven.md),
+stated so it is not rediscovered** — since built, as task-35, against exactly
+these anchors; see [the probe matrix](#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35).
+idea-11 proposes `.claude/rules/*.md`
 pointers whose payload is "read `invariants.md` §A, §B, §C" — they consume this
 document's anchor shape, so a split after they exist rewrites every one of them
 on top of every `Why:` pointer in `CLAUDE.md` (a set that grows with each rule
 — it was 45 when this was decided and 47 by bug-33, which is exactly why the
 argument is stated as "every one of them" rather than as a number). This decision therefore had to be made first,
-and it is now made: **idea-11 may be built against the current anchors.** If a
-split is ever reopened it has to land *before* those pointers, not after.
+and it is now made: **idea-11 may be built against the current anchors.** It
+has been: the four pointer files under `.claude/rules/` cite 34 of them. If a
+split is ever reopened it has to land *before* those pointers, not after —
+which now means rewriting those four files as well as every `Why:` line in
+CLAUDE.md.
 
 **What would reopen it**, stated concretely rather than as "if it gets too
 big": something other than a human or an anchor-following agent starts reading
 this file end to end on a routine path — a rules loader, a retrieval step, a
-skill that `cat`s it — at which point the 170 KB stops being inert and the
+skill that `cat`s it (the `.claude/rules/` pointers are not that: they carry
+anchors, and the loader injects the 12-to-16-line pointer file, never this one) — at which point the 170 KB stops being inert and the
 per-section split earns its rewrite. Absent that, growth alone does not.
 
+
+## Path-scoped `.claude/rules` reach a headless run in a linked worktree (task-35)
+
+Every file under `.claude/rules/` carries a `paths:` glob and is a **pointer** — one
+line per anchor into this file, never a second copy of the reasoning. Both halves are
+load-bearing, and both were measured rather than assumed.
+
+**Why `paths:` is mandatory.** A rule file with no frontmatter is loaded at
+`session_start`, in *every* session, whether or not it is relevant — a permanent
+context-floor increase on all of them. That is exactly what the pointers must not
+cost, so an always-loaded rule file is the one failure mode this mechanism can
+introduce, and `test/claude-rules.test.ts` fails naming any file that has no
+non-empty `paths:` list.
+
+**Why pointers only.** CLAUDE.md is the normative index and this file is the single
+copy of the reasoning. A rule file that restated a rule would be a third statement of
+it, free to drift from both — and `backlog-execute`'s contract sweep would then have
+to visit it. A pointer states no contract, so the sweep needs no change; the same
+suite fails any body line that mentions neither this file nor CLAUDE.md.
+
+### How this was measured
+
+The evidence is the **`InstructionsLoaded` hook**, never a session's self-report. It
+fires when a CLAUDE.md or `.claude/rules/*.md` file is loaded and receives on stdin a
+JSON object carrying `session_id`, `load_reason`, `file_path` and — for a glob match —
+`globs` and `trigger_file_path`. `load_reason` is one of `session_start`,
+`nested_traversal`, `path_glob_match`, `include`, `compact`; the probe reads
+`path_glob_match` off the log.
+
+The harness is a throwaway git repo outside this one (`mktemp -d`) holding a
+`CLAUDE.md`, `.claude/rules/control.md` with **no** frontmatter,
+`.claude/rules/scoped.md` with `paths: ["src/**/*.ts"]`, and `src/target.ts`; a
+`hook.sh` appending stdin to an absolute `loaded.jsonl`; and a `probe-settings.json`
+registering that hook on `InstructionsLoaded` with no matcher. Each case is one
+`claude -p … --settings <abs> --allowedTools … --permission-mode acceptEdits
+--output-format json < /dev/null`, launched in the background and killed by its
+recorded pid: the hook log is complete within seconds while the session itself can run
+for minutes, so waiting on the transcript measures nothing but patience.
+
+`control.md` is the **positive control** and every case keeps one. It is what separates
+"the rule did not load" from "the hook never ran" — an empty or control-less log is an
+inconclusive probe, never a negative result.
+
+### The matrix — Claude Code 2.1.268, measured 2026-09-13
+
+| Case | Question | Verdict |
+|---|---|---|
+| P1 | headless `claude -p`, plain checkout | **positive** |
+| P2 | custom subagent does the reading | **positive**, under the *parent's* `session_id` |
+| P3 | headless `claude -p`, **linked worktree** | **positive** |
+| P4 | trigger surface beyond `Read` — `Write`, `Grep`/`Glob` | **negative** |
+| P5 | source read through `codegraph_explore` | **negative** |
+
+P1 — `load_reason | file_path`, one `session_id`, `<probe>` for the probe directory:
+
+```
+session_start    <probe>/CLAUDE.md
+session_start    ~/.claude/CLAUDE.md
+session_start    <probe>/.claude/rules/control.md
+path_glob_match  <probe>/.claude/rules/scoped.md   (trigger: <probe>/src/target.ts)
+```
+
+P2 — the parent held `Read` and `Task` but used only `Task`; the transcript shows the
+`Read` under `…/subagents/agent-*.jsonl`, and the glob line carries the parent's id:
+
+```
+session_start    <probe>/.claude/rules/control.md
+path_glob_match  <probe>/.claude/rules/scoped.md   (trigger: <probe>/src/target.ts)
+```
+
+P3 — cwd is `<probe>/.worktrees/probe`, created with `git worktree add`. A glob written
+relative to the project root still matches when that root is a linked worktree, and the
+loaded paths are the worktree's own copies:
+
+```
+session_start    <probe>/.worktrees/probe/.claude/rules/control.md
+path_glob_match  <probe>/.worktrees/probe/.claude/rules/scoped.md
+                 (trigger: <probe>/.worktrees/probe/src/target.ts)
+```
+
+P4 — two sessions, each with the control line present and **no** `path_glob_match`. One
+wrote `src/added.ts` with `Write` and nothing else (the file landed; the rule did not);
+one ran `Grep` and `Glob` over `src/`. The trigger surface is a file *read*, not "any
+tool that names a matching path".
+
+P5 — in this repo, `codegraph_explore` returned the verbatim source of
+`server/src/orchestrator/orchestrator.service.ts` with the `Read` tool never used, and
+the log holds the two `session_start` lines and no `path_glob_match`. This is the one
+negative with teeth: CLAUDE.md tells sessions to reach for CodeGraph *before* `Read`,
+so a session that follows this repo's own guidance can edit a file whose rule never
+fired. The pointers are a floor, not a guarantee — CLAUDE.md remains the surface that
+every session loads unconditionally, which is why no rule is moved out of it.
+
+### The end-to-end check, in this repo
+
+With the four pointer files in place, cwd this repo's `task-35` worktree, a `claude -p`
+session told to read one orchestrator file:
+
+```
+path_glob_match  <repo>/.claude/rules/orchestrator.md
+                 trigger: <repo>/server/src/orchestrator/orchestrator.service.ts
+                 globs:   ['skills/backlog-orchestrate', 'server/src/orchestrator', 'shared/agent.ts']
+```
+
+Note what the loader reports back: `skills/backlog-orchestrate/**` is normalised to the
+directory itself, which is why `test/claude-rules.test.ts`'s own glob matcher treats
+`dir/**` as "the directory and everything under it".
+
+### What the suite pins, and why it passes on nothing
+
+`test/claude-rules.test.ts` reads `.claude/rules/*.md` as source: every file declares a
+non-empty `paths:`; every `docs/subsystems/invariants.md#…` anchor resolves to a real
+`##`/`###` heading (with the slugifier itself checked against a heading known to
+round-trip, so a broken slugifier cannot pass by matching nothing against nothing);
+every glob matches at least one tracked file *today*, because a pattern that matches
+nothing is a rule that never fires and fails silently forever; every body line is a
+pointer; no file exceeds 25 lines.
+
+It passes **vacuously** on an absent or empty directory, and that is deliberate: P3
+could have come back negative, in which case the correct deliverable was zero rule
+files and a recorded negative. A guard that went red in that world would have made the
+honest outcome look like a failure.
 
 <!-- docs-sync:
   sources:
