@@ -4,6 +4,10 @@ title: backlog.mjs and orchestrate.mjs still exit through process.exit and carry
 created: 2026-09-07
 kind: debt
 tags: skills, cli, json, stdout
+updated: 2026-09-13T08:35:59Z
+promoted-to: task-34
+groom-elapsed: 373
+groom-tokens: 74236
 ---
 
 ## What exists today
