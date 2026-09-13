@@ -3,6 +3,10 @@ id: idea-11
 title: Path-scoped .claude/rules pointers into the invariant rationale, once headless loading is proven
 created: 2026-09-07
 tags: docs, claude-code
+updated: 2026-09-13T08:40:49Z
+promoted-to: task-35
+groom-elapsed: 724
+groom-tokens: 82026
 ---
 
 ## Problem
