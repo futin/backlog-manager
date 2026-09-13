@@ -351,6 +351,25 @@ task-28 sighting) is still unproven and was not chased. `## Cause` explains why 
 consistent with this bug but not demonstrated by it, and if it recurs it belongs to
 `scripts/test-all.mjs`'s exit-code handling and earns its own item.
 
+**bug-34 is superseded by this fix and must be re-groomed, not executed as written.**
+It is the same root cause — a host-less bind answering a `127.0.0.1` dial — reached from
+`question-mode`'s 400 instead of from the four sightings above, and its own grooming
+independently measured the same mechanism across four more suites. Its Fix steps 1 and 2
+are what landed here (steps 1's 15 suites are a subset of this diff's 18; step 2's
+"do not wrap `listen()` to supply the host" is the finding that made the awaited helper
+the only option). **Step 3 is the part that has to change**: it installs a process-wide
+wrapper on `http.Server.prototype.listen` in `test/helpers/env.ts` that THROWS on any
+host-less call, and this diff's platform-characterisation cases
+(`test/supertest-bind.test.ts:151` and `:161`) make host-less `listen(P)` calls
+deliberately — that is the bug being reproduced. With that guard armed they would throw
+instead of asserting, so bug-34 as written turns this diff's own proof red. A regroom has
+to decide between the source guard that shipped here and that runtime guard, or scope the
+runtime one to exempt the file whose job is to call the bad form; it should also recheck
+what is left of bug-34 at all, since the behaviour it was filed for is fixed and its
+remaining value is the stricter guard plus its verification plan (3,536/3,536 binds
+reporting `127.0.0.1`, and 10 consecutive green full runs — a statistical claim this item
+deliberately did not make).
+
 Contract sweep: 4 sites updated (docs/subsystems/invariants.md ×2 — the Host-allowlist
 section's "supertest binds an ephemeral port" clause, now false for these suites, and the
 task-33 section's pointer count, which said 45 while HEAD already had 46;
