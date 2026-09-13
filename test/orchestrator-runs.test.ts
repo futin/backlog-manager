@@ -9,6 +9,7 @@ import { AppModule } from '../server/src/app.module';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
 import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
@@ -113,7 +114,15 @@ describe('GET /api/orchestrator/runs', () => {
     // that one address for the whole test and never touches listen/close
     // itself — see the `if (!addr)` branch in serverAddress. `app.close()`
     // below still tears the one listener down at the end of each test.
-    await app.listen(0);
+    //
+    // What that reasoning got half right (bug-33): the churn is what buys a
+    // ticket in the port lottery per REQUEST rather than per suite, but the
+    // bare `listen(0)` it was written as left the wildcard bind in place, so
+    // this suite kept the rarer half of the defect — supertest dials
+    // 127.0.0.1 while a host-less bind takes the port on `::`, and whoever
+    // else holds that number on 127.0.0.1 answers. The helper is the same
+    // single listen with the host argument that closes it.
+    await listenLoopback(app);
   });
 
   afterEach(async () => {

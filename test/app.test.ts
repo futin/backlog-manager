@@ -5,6 +5,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { clientDistModules } from '../server/src/static';
+import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 
 describe('app bootstrap', () => {
@@ -17,6 +18,7 @@ describe('app bootstrap', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterAll(async () => {

@@ -11,6 +11,7 @@ import { OrchestratorService } from '../server/src/orchestrator/orchestrator.ser
 import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { WatchdogStateService, type WatchdogEntry } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
 import { COUPLING_ROWS, rowWatchdog } from './helpers/watchdog-coupling';
 import { watchdogStoodDown } from '../shared/agent';
@@ -152,7 +153,16 @@ describe('watchdog sweeper', () => {
     };
   }
 
-  async function createApp(): Promise<INestApplication> {
+  /* `listen` is opt-in, and it has to be: most cases here call
+     `jest.useFakeTimers()` BEFORE createApp(), and a real `listen()` awaited
+     under a fake clock could never settle. Only the cases that actually hand
+     this app to supertest ask for it — those run under real timers — and they
+     need it for the reason `helpers/app.ts` states: without the host argument
+     supertest's dial can land on another process's 127.0.0.1 socket (bug-33).
+     The alternative, moving `jest.useFakeTimers()` after createApp(), is not
+     available: the watchdog arms its chain during `init()`, and those cases
+     exist to drive that chain from the fake clock. */
+  async function createApp({ listen = false }: { listen?: boolean } = {}): Promise<INestApplication> {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
       .useValue(
@@ -168,6 +178,7 @@ describe('watchdog sweeper', () => {
     // `app.close()` calls onApplicationShutdown on its own, which is what
     // afterEach relies on to disarm the chain before the temp directory goes.
     await created.init();
+    if (listen) await listenLoopback(created);
     app = created;
     return created;
   }
@@ -541,7 +552,7 @@ describe('watchdog sweeper', () => {
   it('resumes again, and reports exhausted: false, once maxAttempts is raised past the attempts spent', async () => {
     const dash = stubDashboard();
     writeConfig({ maxAttempts: 1 });
-    await createApp();
+    await createApp({ listen: true }); // hands this app to supertest below
     writeRun(crashedRun(projectPath));
 
     await svc().tick();
@@ -730,7 +741,7 @@ describe('watchdog sweeper', () => {
 
   it('keeps the resume lock across a sweep that prunes the run it belongs to', async () => {
     const dash = stubDashboard();
-    await createApp();
+    await createApp({ listen: true }); // hands this app to supertest below
     writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
 
     await request(app!.getHttpServer())
@@ -818,7 +829,7 @@ describe('watchdog sweeper', () => {
   it('keeps watching but never spawns while the config toggle is off', async () => {
     const dash = stubDashboard();
     writeConfig({ enabled: false });
-    await createApp();
+    await createApp({ listen: true }); // hands this app to supertest below
     writeRun(crashedRun(projectPath));
 
     await svc().tick();

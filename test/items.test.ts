@@ -7,6 +7,7 @@ import request from 'supertest';
 
 import { ItemsModule } from '../server/src/items/items.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import type { BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
 
@@ -88,6 +89,7 @@ describe('GET /api/items and /api/projects', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterAll(async () => {
@@ -324,6 +326,7 @@ describe('malformed registry entries and unreadable item paths', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterAll(async () => {

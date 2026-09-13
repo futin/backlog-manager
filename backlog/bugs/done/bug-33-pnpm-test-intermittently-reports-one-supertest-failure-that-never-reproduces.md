@@ -3,9 +3,12 @@ id: bug-33
 title: pnpm test intermittently reports one supertest failure that never reproduces
 created: 2026-09-07
 tags: tests, ci, orchestrator
-updated: 2026-09-13T05:44:48Z
+updated: 2026-09-13T06:59:11Z
 groom-elapsed: 742
 groom-tokens: 131850
+started: 2026-09-13T06:36:34Z
+execute-elapsed: 1357
+execute-tokens: 132545
 ---
 
 ## Symptom
@@ -270,3 +273,92 @@ single green run and should not be claimed — the useful evidence is the determ
 characterisation test above plus, optionally, `pnpm run test:jest` in a loop on a
 deliberately loaded machine, which is the only thing that would have caught this before
 and costs roughly a minute a run.
+
+## Outcome
+
+2026-09-13 — fixed as groomed. The cause in `## Cause` was re-confirmed live against this
+worktree before anything changed: `serverAddress()` in supertest 7.2.2 still reads
+`if (!addr) this._server = app.listen(0)` and still returns a hardcoded
+`http://127.0.0.1:<port>`, and a probe on this machine reproduced all three halves of the
+mechanism in one run — a wildcard `listen(P)` succeeded on a port `127.0.0.1` already
+held and reported `{"address":"::","family":"IPv6"}`, the IPv4 dial to it came back
+`HPE_INVALID_CONSTANT Parse Error: Expected HTTP/, RTSP/ or ICE/` from the squatter, and
+the same bind written `listen(P, '127.0.0.1')` was refused `EADDRINUSE`.
+
+What landed, against the plan's six steps:
+
+1. `test/helpers/app.ts` — `listenLoopback(app)`, `app.listen(0, '127.0.0.1')`, with the
+   comment stating what the host argument buys and that a pre-listening server makes
+   supertest re-bind nothing per request.
+2. All 18 supertest suites listen through it after `app.init()`, once per app object —
+   the second apps included (`page` in `csp` and `allowed-hosts`, `api` in `csp`, both
+   `describe`s in `items`). The two pre-existing bare `await app.listen(0)` calls
+   (`orchestrator-runs`, `agents-pause`) were replaced, not kept.
+3. `watchdog-sweep.test.ts` took the opt-in parameter — `createApp({ listen: true })` at
+   the three cases that hand the app to supertest, all under real timers; the fake-timer
+   cases are untouched.
+4. Every `await app.close()` left exactly where it was — the test diff deletes six lines
+   in total and not one of them is a close.
+5. `test/supertest-bind.test.ts` — 8 cases: the IPv4 bind assertion, the listen/close
+   spies, three deterministic platform-characterisation cases, and the source guard in
+   both halves (every supertest suite calls the helper; no bare `.listen(0)` under
+   `test/`, comments blanked first).
+6. `CLAUDE.md` `## Conventions` gained the rule; `docs/subsystems/invariants.md` gained
+   its rationale section, which the bullet links to.
+
+Two deviations from the plan text, both forced and both in the new test file: the
+platform cases destroy the sockets they accepted before closing the servers (a
+`socket.end()` only half-closes, and `server.close()` waits for connections — without it
+the case died on jest's hook timeout instead of its own assertion), and the "no bare
+`.listen(0)`" scanner assembles its needle from two string pieces, because a scanner
+holding its own needle in *code* reports itself and blanking comments cannot save it.
+That also let the rule keep zero exemptions, which the plan's `helpers/app.ts` exemption
+would not have.
+
+Verification — `pnpm test` (both runners) and `pnpm run typecheck`, run fresh on the
+final tree:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run test:jest
+Test Suites: 84 passed, 84 total
+Tests:       1615 passed, 1615 total
+Snapshots:   0 total
+Time:        70.354 s
+
+$ pnpm test
+1..535
+# tests 535
+# suites 0
+# pass 535
+# fail 0
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+The statistical half is deliberately NOT claimed from that green: a single passing run
+cannot distinguish a fixed lottery from an unlucky-draw-that-did-not-happen. The evidence
+for the mechanism is the deterministic characterisation block above, which fails in
+milliseconds on any machine where the platform stops behaving as described.
+
+Left standing on purpose: the `FAIL jest` printed over a zero-failure jest summary (the
+task-28 sighting) is still unproven and was not chased. `## Cause` explains why — it is
+consistent with this bug but not demonstrated by it, and if it recurs it belongs to
+`scripts/test-all.mjs`'s exit-code handling and earns its own item.
+
+Contract sweep: 4 sites updated (docs/subsystems/invariants.md ×2 — the Host-allowlist
+section's "supertest binds an ephemeral port" clause, now false for these suites, and the
+task-33 section's pointer count, which said 45 while HEAD already had 46;
+docs/workflows/development.md — the testing section gained the rule beside the
+`BM_WATCHDOG` default; test/orchestrator-runs.test.ts and test/agents-pause.test.ts — the
+comments that justified the bare `listen(0)` as the whole fix)
+Red proof: 4 tests went red with the change reverted (host argument dropped → the IPv4
+bind case and the bare-`listen(0)` guard; the helper made a no-op → the bind case and the
+listen/close spy case; `listenLoopback` removed from one suite → the skips-the-helper
+guard). The three platform-characterisation cases pin Node and kernel behaviour, not a
+production change in this diff, so they have nothing to revert.

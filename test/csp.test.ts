@@ -12,6 +12,7 @@ import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { CSP_POLICY, applySecurityMiddleware } from '../server/src/security';
 import { clientDistModules } from '../server/src/static';
+import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 
 const INDEX_HTML = join(__dirname, '..', 'client', 'index.html');
@@ -44,6 +45,7 @@ describe('Content-Security-Policy header', () => {
       .compile();
     api = apiRef.createNestApplication();
     await api.init();
+    await listenLoopback(api);
 
     // NestFactory, not Test.createTestingModule, for this one: serve-static
     // picks its loader from a factory that returns a NoopLoader when
@@ -53,6 +55,7 @@ describe('Content-Security-Policy header', () => {
     // path main.ts actually takes.
     page = await NestFactory.create(StaticFixtureModule, { logger: false });
     await page.init();
+    await listenLoopback(page);
   });
 
   afterAll(async () => {

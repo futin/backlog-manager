@@ -18,6 +18,7 @@ import request from 'supertest';
 import { mergeCheck } from '../server/src/agents/merge-check.util';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 
 /** Writes `{ permissions: { allow } }` under `<root>/.claude/<filename>` and returns its path. */
@@ -140,6 +141,7 @@ describe('GET /api/agents/merge-check', () => {
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await listenLoopback(app);
   });
 
   afterEach(async () => {

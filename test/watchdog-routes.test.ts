@@ -11,6 +11,7 @@ import { AgentsController } from '../server/src/agents/agents.controller';
 import { WatchdogService } from '../server/src/agents/watchdog.service';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
+import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
@@ -81,6 +82,7 @@ describe('the two watchdog routes', () => {
       .compile();
     const created = moduleRef.createNestApplication();
     await created.init();
+    await listenLoopback(created);
     app = created;
     return created;
   }

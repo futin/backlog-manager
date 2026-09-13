@@ -495,6 +495,18 @@ happened.
 
 - Comments explain *why*, at length, and the existing density is deliberate —
   match it rather than stripping it.
+- **A suite that hands an app to supertest listens once, on `127.0.0.1`, via
+  `listenLoopback` (`test/helpers/app.ts`)** — never on the wildcard, never
+  per request. supertest dials `http://127.0.0.1:<port>` unconditionally while
+  a bare `listen(0)` binds `::`, so any process holding that port on
+  `127.0.0.1` answers instead: ~1 request in 1,500 on a loaded machine, which
+  is one false red per `pnpm test` and so a merge-gate defect (bug-33). Not
+  `jest.retryTimes`. `watchdog-sweep.test.ts` is the one exception —
+  `createApp({ listen: true })`, opt-in, because its other cases install fake
+  timers first. Pinned by a source guard in `test/supertest-bind.test.ts`:
+  behaviour cannot catch a suite that forgets, since forgetting is green 1,499
+  runs in 1,500.
+  Why: [invariants.md](docs/subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)
 - Tests are flat in `test/`, `*.test.ts` / `*.test.tsx`; component suites opt
   into jsdom with a `@jest-environment jsdom` docblock. Skill tests live next
   to the tool they cover (`skills/*/tools/*.test.mjs`) and run under node's
