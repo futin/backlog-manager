@@ -23,6 +23,13 @@ file, and each file that holds state has exactly one writer.
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes |
 | [workflows/publishing.md](workflows/publishing.md) | getting a skill edit out of the working tree and into the installed plugin |
 
+`.claude/rules/` sits beside that table rather than in it: four path-scoped
+pointer files that a session loads automatically when it reads a file under their
+`paths:` glob, each one line per anchor into `subsystems/invariants.md` and no prose
+of its own. They are guarded by `test/claude-rules.test.ts` rather than by
+`/docs-sync`, because what can rot in them is a dead anchor or a glob that matches
+nothing — both mechanical checks.
+
 Deliberately not tracked, and each for a stated reason in
 [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README),
 `docs/superpowers/` (specs, plans, decision logs), `audits/` (dated findings), and
