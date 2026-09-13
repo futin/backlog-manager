@@ -3095,3 +3095,74 @@ test('backlog-orchestrate points its "not committed" verdict back at groom line'
     'backlog-orchestrate/SKILL.md no longer points at backlog-groom\'s "Groomed on disk only" line',
   )
 })
+
+// --- task-34: the entry guard exits through process.exitCode ----------------
+// `process.stdout.write` to a PIPE is asynchronous, so `process.exit()` in an
+// entry guard tears the process down without draining it and everything past
+// the 64KB pipe buffer is silently dropped. retro.mjs shipped that bug for an
+// afternoon (a 442,757-byte sweep arrived through `| jq` as exactly 65,536 and
+// a parse error, while `> file.json` — a synchronous write on POSIX — was
+// always fine); retro.mjs:396-407 is the long-form record. These three cases
+// are the other two tools' half of it.
+
+test('a board larger than the pipe buffer arrives whole', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  // The fixture has to actually exceed 65,536 bytes or this case is vacuous —
+  // it would pass just as well against the bug. 250 items with ~120-character
+  // titles clears it with room to spare (this repo's own board measured 2,745
+  // bytes for 8 items on 2026-09-13, and a tmpdir's paths are shorter than
+  // this repo's, so the count is deliberately generous rather than fitted),
+  // and the byte assertion below is what actually enforces the sizing.
+  const count = 250
+  const title = (i) => `Item ${i} with a deliberately long ASCII title so the rendered board comfortably outgrows the pipe buffer`
+  for (let i = 1; i <= count; i += 1) writeItem(backlog, 'tasks/open', `task-${i}`, title(i))
+
+  // `run` is spawnSync, i.e. a REAL pipe — the entire point. A test that
+  // redirected stdout to a file could not fail on this bug at all, because a
+  // file write is synchronous on POSIX and `process.exit()` never truncates it.
+  const out = run(dir, 'board', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  // `run` decodes with encoding: 'utf8', so measure bytes explicitly rather
+  // than trusting `.length` (characters) to be the same number.
+  const bytes = Buffer.byteLength(out.stdout, 'utf8')
+  assert.ok(bytes > 65536, `only ${bytes} bytes reached the pipe`)
+  const board = JSON.parse(out.stdout)
+  assert.equal(board.length, count)
+})
+
+// Read as text, never imported: these are three separate skills' tools, and
+// the rule is one agreement spanning all three — the same shape as the
+// GROOM_SKILL_MD / EXECUTE_SKILL_MD cross-skill cases above, and the same
+// reason (a suite that reads only its own half cannot catch the halves
+// drifting apart). This guard is why the two behaviour cases are not enough on
+// their own: they drive two surfaces, and a new CLI or a second entry point
+// would reintroduce the bug green.
+const CLI_SOURCES = {
+  'backlog.mjs': fileURLToPath(new URL('./backlog.mjs', import.meta.url)),
+  'orchestrate.mjs': fileURLToPath(new URL('../../backlog-orchestrate/tools/orchestrate.mjs', import.meta.url)),
+  'retro.mjs': fileURLToPath(new URL('../../backlog-retro/tools/retro.mjs', import.meta.url)),
+}
+
+// Comment lines are stripped before matching because retro.mjs's own note
+// quotes the literal `process.exit()` twice while being the CORRECT file — a
+// naive whole-file substring search goes red on the reference copy.
+const codeLines = (file) =>
+  fs.readFileSync(file, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('//'))
+
+test('all three skill CLIs end through process.exitCode, never process.exit', () => {
+  for (const [name, file] of Object.entries(CLI_SOURCES)) {
+    const lines = codeLines(file)
+    assert.ok(
+      lines.some((line) => line.includes('process.exitCode = main(')),
+      `${name} no longer sets process.exitCode from main() in its entry guard`,
+    )
+    const offenders = lines.filter((line) => line.includes('process.exit('))
+    assert.deepEqual(
+      offenders,
+      [],
+      `${name} calls process.exit(), which truncates a --json payload larger than the pipe buffer`,
+    )
+  }
+})

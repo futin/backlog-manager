@@ -275,6 +275,18 @@ happened.
   both or neither. Inert for the *next* run until push + `pnpm run
   plugin:sync`.
   Why: [invariants.md](docs/subsystems/invariants.md#a-runner-fix-item-is-hoisted-to-the-front-of-the-queue-and-the-marker-is-read-at-base)
+- **All three skill CLIs end with `process.exitCode = main(...)`, never
+  `process.exit(main(...))`.** Writing to a pipe is asynchronous, so
+  `process.exit()` drops everything past 65,536 bytes of a `--json` payload
+  while a `> file.json` redirect stays fine — which is why the shipped
+  instance passed every hand check. Safe only because none of the three holds
+  the event loop open (synchronous `fs`, `spawnSync` children, and `watch`'s
+  `Atomics.wait` sleep); whoever adds a timer, server or async child closes
+  the handle rather than restoring `process.exit()`. Each tool carries its own
+  note on why *its* file is safe; `retro.mjs`'s is the long-form copy.
+  `backlog.test.mjs`'s source guard reads all three sources and is the only
+  one of the three cases that covers an entry point nobody has written yet.
+  Why: [invariants.md](docs/subsystems/invariants.md#all-three-skill-clis-exit-through-processexitcode-never-processexit)
 - **Editing `skills/` changes nothing until it is committed, pushed, and
   `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD,
   never the working tree; the sync refuses dirty/unpushed/behind states. New

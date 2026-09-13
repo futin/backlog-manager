@@ -68,10 +68,23 @@ function orchFixture(t) {
 // test's own throwaway home — never the ambient environment's value, so a
 // developer's real orchestrator state can never leak into, or be clobbered
 // by, a test run.
+//
+// `maxBuffer` is raised off spawnSync's 1MB default because task-34 made the
+// CLI's stdout arrive WHOLE: the entry guard used to `process.exit()`, which
+// truncated every pipe write at 65,536 bytes, so no test could ever reach the
+// default. The E2BIG case below echoes a deliberately 3MB-long command back in
+// its human-readable output, and over the default spawnSync SIGTERMs the child
+// and reports `status: null` — a killed process rather than the exit code the
+// case is about. A shell, which is what really runs this tool, has no such
+// limit; the ceiling here exists only so the harness stops being the narrower
+// pipe of the two.
+const CLI_MAX_BUFFER = 64 * 1024 * 1024
+
 function run(cwd, home, ...args) {
   return spawnSync('node', [SCRIPT, ...args], {
     encoding: 'utf8',
     cwd,
+    maxBuffer: CLI_MAX_BUFFER,
     env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` },
   })
 }
@@ -2603,11 +2616,9 @@ test('verify distinguishes "could not run this command" from a command that ran 
   const out = run(project, home, 'verify', 'task-8', '--cwd', worktree)
 
   // Rows read back from the run file, not from stdout, and deliberately
-  // without `--json`: the megabyte-long command string is echoed inside every
-  // row, and main()'s `process.exit(...)` truncates a pipe write that large
-  // (a pre-existing property of the CLI, unrelated to this test's subject).
-  // run.json is written before anything is printed, so the file is the whole
-  // and honest record either way — which is the thing worth asserting on.
+  // without `--json`: run.json is written before anything is printed, so the
+  // file is the whole and honest record either way — which is the thing worth
+  // asserting on.
   //
   // Both rows are red — an unrunnable command is no more proof the item works
   // than a failing one — but they do not read the same.
@@ -5090,4 +5101,31 @@ test('git worktree remove: ignored build output alone removes cleanly, and a fai
   const forced = git('worktree', 'remove', '--force', 'wt-locked')
   assert.equal(forced.status, 128, `a --force retry should be refused outright, got ${forced.status}: ${forced.stderr}`)
   assert.match(forced.stderr, /is not a working tree/)
+})
+
+// --- task-34: a --json payload larger than the pipe buffer -------------------
+
+test('a status --json larger than the pipe buffer arrives whole', (t) => {
+  const { home, project } = orchFixture(t)
+  // `process.stdout.write` to a PIPE is asynchronous, so `process.exit()` in
+  // the entry guard drops everything past the 64KB pipe buffer — silently, and
+  // only through a pipe (a `> file.json` redirect is a synchronous write on
+  // POSIX and never shows it). `run` is spawnSync, i.e. a real pipe, which is
+  // the whole point of driving the CLI here instead of calling cmdStatus.
+  // retro.mjs:396-407 carries the long-form record of the shipped incident.
+  const count = 250
+  const title = (i) => `Queued item ${i} with a deliberately long ASCII title so that the printed run file comfortably outgrows the pipe buffer`
+  for (let i = 1; i <= count; i += 1) seedReadyTask(project, `task-${i}`, title(i))
+  // Load-bearing: the gate reads each item at `<base>` through `git show`, so
+  // an uncommitted item is skipped as ungroomed and would never reach the
+  // queue — leaving a fixture that is small, green, and proves nothing.
+  commitEverything(project, 'seed a queue big enough to outgrow the pipe buffer')
+
+  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const out = run(project, home, 'status', '--json')
+
+  assert.equal(out.status, 0, out.stderr)
+  const bytes = Buffer.byteLength(out.stdout, 'utf8')
+  assert.ok(bytes > 65536, `only ${bytes} bytes reached the pipe`)
+  assert.equal(JSON.parse(out.stdout).queue.length, count)
 })

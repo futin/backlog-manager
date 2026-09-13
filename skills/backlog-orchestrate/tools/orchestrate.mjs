@@ -3386,6 +3386,22 @@ export function main(argv) {
   }
 }
 
+// `process.exitCode`, NOT `process.exit()` — the same rule all three skill
+// CLIs follow; retro.mjs's own entry guard carries the full record of the
+// incident (a `--json` payload silently cut at exactly 65,536 bytes, because
+// writing to a PIPE is asynchronous and `process.exit()` never drains it,
+// while a `> file.json` redirect is synchronous on POSIX and always looked
+// fine). `status --json` prints the run file verbatim, so this tool has a
+// payload that outgrows the buffer as soon as a queue is long.
+//
+// This file looks like the one that might need the forced exit and does not:
+// every child process is `spawnSync` (reaped before the call returns), and
+// `watch`'s polling sleep is `sleepSync`, an `Atomics.wait` that BLOCKS the
+// thread rather than scheduling a timer. There is no `setTimeout`, no
+// `setInterval`, no async/await, no server and no stdin read here, so `main`
+// returning leaves no live handle. A future edit that introduces one must
+// close it rather than restore `process.exit()`, which would bring the
+// truncation back with it.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exit(main(process.argv.slice(2)))
+  process.exitCode = main(process.argv.slice(2))
 }

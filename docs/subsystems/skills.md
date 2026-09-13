@@ -51,6 +51,20 @@ git root, because its subject is every project at once — and `backlog.mjs` has
 path helper, because the run-state directory is none of its business. Each copy is
 pinned by its own tool's suite.
 
+What all three *do* share is how they end: `process.exitCode = main(...)`, never
+`process.exit(main(...))`. Writing to a pipe is asynchronous, so `process.exit()` tears
+the process down before stdout drains and a `--json` payload is silently cut at exactly
+65,536 bytes — while a `> file.json` redirect, synchronous on POSIX, stays perfectly
+fine, which is why the shipped instance (a 442,757-byte `retro.mjs sweep --json` that
+arrived through `| jq` as 65,536 bytes and a parse error) survived every hand check.
+Setting the code instead lets node flush and exit on its own. That is only safe because
+none of the three holds the event loop open: all reads are synchronous `fs`, every child
+is `spawnSync`, and `orchestrate.mjs watch` sleeps by blocking on `Atomics.wait` rather
+than on a timer. Whoever adds a timer, a server or an async child closes its handle —
+restoring `process.exit()` would restore the truncation. One rule, three files, three
+comments; `retro.mjs`'s is the long-form copy the other two point at, and
+`backlog.test.mjs`'s source guard reads all three.
+
 ### `references/`
 
 `skills/backlog-orchestrate/references/` holds the two parts its `SKILL.md` deliberately

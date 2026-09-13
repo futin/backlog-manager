@@ -1849,6 +1849,17 @@ export function main(argv) {
   return 1
 }
 
+// `process.exitCode`, NOT `process.exit()` — the same rule all three skill
+// CLIs follow, and retro.mjs's entry guard carries the full record of the
+// incident behind it (see retro.mjs, just above its own guard): writing to a
+// PIPE is asynchronous, so `process.exit()` tears the process down undrained
+// and a `--json` payload is cut at exactly 65,536 bytes, while a `> file.json`
+// redirect — synchronous on POSIX — stays perfectly fine, which is why every
+// hand check passed. Safe for THIS file specifically because nothing in it
+// holds the event loop open: every read is synchronous `fs`, and there is no
+// timer, no child process and no server anywhere in it. A future edit that
+// adds one must close its handle rather than restore `process.exit()`, which
+// would bring the truncation back with it.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exit(main(process.argv.slice(2)))
+  process.exitCode = main(process.argv.slice(2))
 }
