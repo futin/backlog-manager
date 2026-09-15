@@ -94,7 +94,7 @@ Required content of §8.0: a departures table like the dashboard's (spec/mock vs
 
 - [ ] **Step 2: Write §8.1**
 
-Required content: the eight-row table from spec §2.3 (role / size-weight / where), the 11 px floor, one face named Hanken Grotesk **self-hosted via `@fontsource/hanken-grotesk` (400/500/600/700)** with the CSP reason (served build has `default-src 'self'` and no `font-src`; `style-src` pinned by `test/csp.test.ts`; tailnet/phone wants no third-party fetch) as the one departure from the dashboard's foundation; `--mono` and `--display` deleted not aliased and why (a stale `var(--mono)` must fall back to the inherited face, not keep Plex); `code, kbd, samp, pre { font-family: inherit }`; `tabular-nums` on `body`; uppercase survives on `.rail-kicker` alone; the three faces and the counts they leave behind (80 `--mono` uses, 14 `--display`, 31 uppercase rules, 129 of 130 `font-size` declarations ≤ 12.5 px).
+Required content: the eight-row table from spec §2.3 (role / size-weight / where), the 11 px floor, one face named Hanken Grotesk **self-hosted via `@fontsource/hanken-grotesk` (400/500/600/700)** with the CSP reason (served build has `default-src 'self'` and no `font-src`; `style-src` pinned by `test/csp.test.ts`; tailnet/phone wants no third-party fetch) as the one departure from the dashboard's foundation; `--mono` and `--display` deleted not aliased and why (a stale `var(--mono)` must fall back to the inherited face, not keep Plex); `code, kbd, samp, pre { font-family: inherit }`; `tabular-nums` on `body`; uppercase survives on `.rail-kicker` alone; the three faces and the counts they leave behind (80 `--mono` uses, 14 `--display`, 31 uppercase rules, 124 of 130 `font-size` declarations ≤ 12.5 px).
 
 - [ ] **Step 3: Write §8.2**
 
@@ -311,7 +311,7 @@ Expected: no matches from the first grep (the word `later` is allowed only in "r
 
 - [ ] **Step 2: Spec coverage by number**
 
-For each number in spec §2.2's daylight table, §2.3's type table, §3.4's card, §4.1's live card and figure strip, §6.1's modal geometry: confirm it appears in `.claude/DESIGN.md` verbatim. Run the three `node -e` checks from tasks 2, 4 and 5 again; each must print `ALL PRESENT`.
+For each number in spec §2.2's daylight table, §2.3's type table, §3.4's card, §4.1's figure strip, list rows and detail sheet, §6.1's modal geometry: confirm it appears in `.claude/DESIGN.md` verbatim. Run the three `node -e` checks from tasks 2, 4 and 5 again; each must print `ALL PRESENT`.
 
 - [ ] **Step 3: Confirm the working tree is clean and the commits are on main**
 

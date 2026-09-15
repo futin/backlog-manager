@@ -26,7 +26,7 @@ was ported from:
 
 - **Three faces.** Barlow, Barlow Condensed and IBM Plex Mono; 80 `--mono`
   uses, 14 `--display`, 31 `text-transform: uppercase` rules.
-- **Type under the floor.** 129 of 130 `font-size` declarations in
+- **Type under the floor.** 124 of 130 `font-size` declarations in
   `client/src/styles.css` are 12.5 px or smaller; 21 are 8–9.5 px.
 - **A 150 px rail** of uppercase condensed labels with a cyan accent bar.
 - **Manila daylight.** `[data-theme="daylight"]` is `#e8e3d7` paper, not the
