@@ -62,7 +62,7 @@ describe('run stage tones', () => {
 
   /**
    * The two class names the existing card/strip suites already assert on
-   * (test/orchestrator-strip.test.tsx). The tone map is new; these two
+   * (test/board-live-cards.test.tsx). The tone map is new; these two
    * strings are not, and renaming them would break a passing suite for a
    * purely cosmetic gain.
    */

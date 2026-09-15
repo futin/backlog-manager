@@ -948,7 +948,7 @@ export interface OrchestratorRunsPayload {
    * exhaustiveness site, and each would have to learn to skip a run that
    * has no queue, no runId and no startedAt — for a card that exists for a
    * minute or two. A separate field reaches only what opts into reading it,
-   * which today is exactly one component (`StartingStrip`).
+   * which today is exactly one component (`RunChip`, which counts it).
    */
   starting: StartingRun[];
 }

@@ -588,12 +588,14 @@ describe('watchdog sweeper', () => {
   // --- 7d: the sweeper half of the Resume coupling --------------------------
   //
   // Driven from `COUPLING_ROWS` (test/helpers/watchdog-coupling.ts), the same
-  // table `test/watchdog-coupling.test.tsx` renders the board's crashed strip
-  // from. Together the two suites assert the one rule that keeps a board click
+  // table `test/watchdog-coupling.test.ts` drives the client's half from.
+  // Together the two suites assert the one rule that keeps a board click
   // and a sweep from both spawning `--resume` into one run: **the board offers
   // a hand resume exactly when this sweeper declines to spawn one.** Neither
-  // suite can hold both halves — one needs jsdom, this one needs a real Nest
-  // app — so the table is what joins them, and the row's own `standsDown`
+  // suite can hold both halves — one needs a real Nest app, and the other
+  // needed jsdom until task-37 deleted the control it rendered (that file's
+  // own header has where the rendering half went) — so the table is what
+  // joins them, and the row's own `standsDown`
   // literal is what keeps `watchdogStoodDown` from being broken into a
   // constant that both halves would then agree with.
   //

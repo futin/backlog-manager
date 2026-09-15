@@ -76,7 +76,7 @@ export function stageGlyph(stage: RunStage): string {
  * The chip's class list. `active` returns the bare base class rather than a
  * `-active` modifier, and `warn`/`bad` keep the exact names they already had:
  * both the card suite and the strip suite assert on those literal strings
- * (test/orchestrator-strip.test.tsx), and this change is a restyle, not a
+ * (test/board-live-cards.test.tsx), and this change is a restyle, not a
  * rename.
  */
 export function stageChipClass(stage: RunStage): string {

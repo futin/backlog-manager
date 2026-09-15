@@ -218,14 +218,21 @@ with a pause request waiting for it is still resumed — a request is not a paus
 **`init` archives a `paused` run like a `done` one.** It refuses only a file that still says `running`, so a person who gives up on resuming can start fresh
 without any special case.
 
-**The controls are one component on two surfaces, behind one gate.** `client/src/components/RunControls.tsx` is hosted by the board's run drawer and the Runs
+**The controls are one component on two surfaces, behind one gate.** `client/src/components/RunControls.tsx` was hosted by the board's run drawer and the Runs
 view's detail pane — two lazy chunks that may not import from each other, which is why it sits at the top level of `components/` like `lib/view-keys.ts` does.
-`resumeGate` (`shared/agent.ts`) is the single environment-half gate both hosts call, hoisted out of `BoardView`'s own three inline lines: two expressions that
-merely agree is the failure `watchdogStoodDown` already records.
+task-37 deleted the run drawer (the redesign's §8.3: the run's detail is the Runs page's own sheet, never a second copy on the Board), so it has one host today
+and the top-level placement is what the second one — the Runs detail head that task 3 builds — will compose without moving it. `resumeGate` (`shared/agent.ts`)
+is the single environment-half gate both hosts call, hoisted out of `BoardView`'s own three inline lines: two expressions that merely agree is the failure
+`watchdogStoodDown` already records.
 
-**Resume for a CRASHED run stays on the strip alone,** behind `watchdogStoodDown`, because the watchdog may be about to spawn one itself. A paused run was never
-a watchdog subject, so `RunControls` renders nothing for a crashed run and the paused strip carries no watchdog clause and no watchdog condition on its button.
-Do not "align" the two.
+**Resume for a CRASHED run is behind `watchdogStoodDown`, wherever it is drawn,** because the watchdog may be about to spawn one itself. A paused run was never
+a watchdog subject, so `RunControls` renders nothing for a crashed run and the paused control carries no watchdog clause and no watchdog condition on its
+button. Do not "align" the two.
+
+It lived on `RunStrip`'s crashed strip until task-37, which deleted the strip; the redesign's §8.4.1 moves it to the Runs detail sheet's head, alongside the
+paused Resume that is already there, so neither state has two Resumes to keep in agreement. Between task-37's merge and task 3's there is **no crashed-run
+Resume on the client at all** — a lost affordance (resume by hand from a terminal) and not a lost guarantee, because the hazard the gate exists for is a SECOND
+spawn and a client offering none cannot cause one.
 
 **`noteResume` keeps the poll alive for three minutes, and closes one gap without closing another.** `RESUME_POLL_GRACE_MS`
 (`client/src/hooks/useOrchestratorRuns.ts`) exists because a paused run is neither fresh nor running, so nothing else would poll it after a Resume click — and a
@@ -1094,11 +1101,13 @@ calls the pure `list()` and `OrchestratorController.runs()` calls the mutating `
 both deferring to one shared predicate. Correctness never depends on the sweep — `list` re-applies all three rules every call, so an unswept map leaks at most
 one entry per project and never lies, which is what makes `AgentsService`'s own direct `runs()` calls safe without one.
 
-The board maps `StartingStrip` straight over `starting`, with **no client-side filter**: rule 3 is what rules out the collision that filter existed for — a
-placeholder drawn beside a `running` run file's own strip — and keeping a second expression beside it that merely agreed is the shape `watchdogStoodDown` and
-`isStale` are each one function to avoid. It is deliberately not a guarantee of one row per project in every case: the strip's list is `running || paused` while
-rule 3 is keyed on `running` alone, so a stale `paused` run plus a live starting entry renders two rows, which is reachable and correct — they are two different
-runs, and widening rule 3 to `paused` to suppress the second would strip the placeholder from a project that can legitimately start a run.
+The board reads `starting` straight, with **no client-side filter**: rule 3 is what rules out the collision that filter existed for — a placeholder drawn beside
+a `running` run file's own row — and keeping a second expression beside it that merely agreed is the shape `watchdogStoodDown` and `isStale` are each one
+function to avoid. The reader was `StartingStrip` until task-37 and is `RunChip` (`client/src/components/board/RunChip.tsx`) now, which counts the array into
+its own line (`1 starting ›`) under the same rule. It is deliberately not a guarantee of one row per project in every case: the old strip's list was
+`running || paused` while rule 3 is keyed on `running` alone, so a stale `paused` run plus a live starting entry counted two, which is reachable and correct —
+they are two different runs, and widening rule 3 to `paused` to suppress the second would strip the placeholder from a project that can legitimately start a
+run.
 
 `POST /api/agents/resume` is deliberately not marked: the run it resumes already reads `running`, so the board is already drawing a crashed strip for it and the
 screen was never blank.
@@ -1196,9 +1205,11 @@ the one settings key a hand-edited localStorage value could turn into script exe
 ## Escape has one owner, and the topmost dialog is the only one that closes
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-listener, installed on the first entry and removed with the last; all four dialogs (`ItemDrawer`, `LaunchSheet`, `RunDrawer`, `OrchestrateSheet`) call it and
-none binds its own listener. They used to bind four, unguarded, and two of them are mounted together by design — Board and Archive both keep the item drawer
-open behind the launch sheet — so one press ran both callbacks and took the drawer with the sheet (bug-23).
+listener, installed on the first entry and removed with the last; all three dialogs (`ItemDrawer`, `LaunchSheet`, `OrchestrateSheet`) call it and none binds its
+own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which is the Runs page's own sheet — inline, beside
+the list, never a dialog — so it is off the stack rather than migrated onto it, and `useDialogEscape` itself is untouched. They used to bind four, unguarded,
+and two of them are mounted together by design — Board and Archive both keep the item drawer open behind the launch sheet — so one press ran both callbacks and
+took the drawer with the sheet (bug-23).
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the
@@ -1377,18 +1388,21 @@ What keeps them apart is a coincidence of two rules stated in two places: design
 3). As shipped, those were two hand-written expressions in two files reviewed as two different tasks, plus prose. The whole-branch review measured what that was
 worth: widening the strip's half to `canResume === true` left the whole suite green.
 
-So the rule is now one function, `watchdogStoodDown` (`shared/agent.ts`), called by `RunStrip.tsx` to decide whether to render the control and by
-`watchdog.service.ts`'s `visit()` to decide whether to return without spawning. Its two inputs are single implementations for the same reason.
-`WatchdogStateService.spawningEnabled(config)` is the one answer to "may the watchdog spawn" — it fills the wire's `RunWatchdog.enabled` AND is what the
+So the rule is now one function, `watchdogStoodDown` (`shared/agent.ts`), called by the client to decide whether to render the control and by
+`watchdog.service.ts`'s `visit()` to decide whether to return without spawning. The client caller was `RunStrip.tsx`; task-37 deleted it and the redesign's
+§8.4.1 makes the Runs detail sheet's head the next one, so between those two merges the sweeper is the only caller — see the crashed-Resume note above for why
+that gap is safe, and `test/watchdog-coupling.test.ts`'s second case for what stops it being forgotten. Its two inputs are single implementations for the same
+reason. `WatchdogStateService.spawningEnabled(config)` is the one answer to "may the watchdog spawn" — it fills the wire's `RunWatchdog.enabled` AND is what the
 sweeper's own gate calls, rather than the sweeper re-testing `config.enabled` under an env check made separately in `sweep()`; that was the second copy of a
 vocabulary, and CLAUDE.md's `isAgentAction` invariant already says which copy goes stale. And `exhausted` is **derived**, never stored — see below.
 
 Pinned by two suites and one table, because no single `it` can hold both halves (one needs jsdom and a React tree, the other a real Nest app):
-`test/watchdog-coupling.test.tsx` renders the strip for every row of `test/helpers/watchdog-coupling.ts`, and `test/watchdog-sweep.test.ts`'s own table case
-arranges the sweeper for the same rows and asserts it spawns iff the row does not stand down. Each row carries a hand-checked `standsDown` literal rather than a
-derived one: without it, both halves would assert only that they agree with `watchdogStoodDown`, which a `watchdogStoodDown` broken into a constant would also
-satisfy — the two sides would move together and stay "coupled" while saying something false. Sharing a fixture across suites is against this repo's usual
-convention, and is the point here: two copies of the table would be two copies of the rule.
+`test/watchdog-coupling.test.ts` drives the predicate against every row of `test/helpers/watchdog-coupling.ts` — and rendered the strip for each of them until
+task-37 deleted it, which is why that file now also pins WHO reads `watchdogStoodDown`: the moment a client surface does, the rendering leg has to come back
+with it. `test/watchdog-sweep.test.ts`'s own table case arranges the sweeper for the same rows and asserts it spawns iff the row does not stand down. Each row
+carries a hand-checked `standsDown` literal rather than a derived one: without it, both halves would assert only that they agree with `watchdogStoodDown`, which
+a `watchdogStoodDown` broken into a constant would also satisfy — the two sides would move together and stay "coupled" while saying something false. Sharing a
+fixture across suites is against this repo's usual convention, and is the point here: two copies of the table would be two copies of the rule.
 
 ### `exhausted` is derived from `attempts` and `maxAttempts`, never stored
 

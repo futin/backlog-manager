@@ -22,9 +22,11 @@ import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, 
 /**
  * Runs — the board's third surface: history of every backlog-orchestrate run
  * across every registered project, not the single currently-running one the
- * board's own RunStrip already surfaces above the columns. RunStrip answers
- * "is anything running right now"; this section answers "what has this
- * project's orchestrator ever done".
+ * board's own run chip counts in its band. The chip answers "is anything
+ * running right now" and opens this section; this section answers "what has
+ * this project's orchestrator ever done" — and, since task-37 took the
+ * board's strip and drawer away, everything they used to say about a live
+ * run too (the redesign's §8.4.1 lists each reading and where it lands).
  *
  * Task 5 landed only the shell (a heading and the fixed "no runs yet" empty
  * state, wired into the rail). This task fills it in: a project filter, five
@@ -672,7 +674,7 @@ export default function RunsView() {
   // `refresh` and never called it, so a run that started (or finished)
   // while the tab stayed open and focused never showed up here at all — for
   // a project's very first run, the page kept reading "no runs yet" while
-  // RunStrip on the Board showed it live a click away.
+  // the Board showed it live a click away.
   //
   // The set of currently-FRESH live runIds is exactly the "did anything
   // change at a run boundary" signal the design doc's own reasoning already

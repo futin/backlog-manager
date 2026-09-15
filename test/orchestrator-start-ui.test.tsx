@@ -108,7 +108,7 @@ describe('toolbar Orchestrate button', () => {
     global.fetch = realFetch;
   });
 
-  /** Same URL-branching shape board.test.tsx / orchestrator-strip.test.tsx
+  /** Same URL-branching shape board.test.tsx / board-live-cards.test.tsx
    *  already use, with every endpoint BoardView now calls on mount. */
   function stub(opts: { agents?: AgentsStatus; runs?: RunPayload[]; items?: BacklogItem[]; projects?: ProjectSummary[] }): jest.Mock {
     AGENTS = opts.agents ?? READY;
@@ -223,19 +223,20 @@ describe('toolbar Orchestrate button', () => {
   });
 
   // --- Test case 4 -----------------------------------------------------
-  it('renders no button once a fresh run exists for the project — the strip owns that space', async () => {
+  it('renders no button once a fresh run exists for the project — the run chip owns that space', async () => {
     stub({ runs: [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }] });
     await renderNarrowed();
-    // The strip itself is proof the run landed, so the button's absence
-    // here is "replaced by", not merely "coincides with".
-    await waitFor(() => expect(screen.getByTestId('run-strip')).toBeInTheDocument());
+    // The chip itself is proof the run landed, so the button's absence
+    // here is "replaced by", not merely "coincides with". It was the run
+    // strip until task-37; the chip is what carries the fact now (DESIGN.md
+    // §8.3), and the hide rule it proves is unchanged.
+    await waitFor(() => expect(screen.getByTestId('run-chip')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument();
   });
 
-  // A stale run must NOT hide the button — the strip itself renders
-  // nothing for a stale run (RunStrip.tsx's own file comment), so the
-  // toolbar control is the only way to start a fresh one once the last
-  // one has gone silent. Not one of the brief's numbered cases, but the
+  // A stale run must NOT hide the button — a run that has gone silent is not
+  // a run in progress, so the band's control is the only way to start a fresh
+  // one once the last one has stopped reporting. Not one of the brief's numbered cases, but the
   // inverse of case 4 is exactly the kind of edge its own "fresh" qualifier
   // implies, and it costs one more stub call to pin.
   it('still renders the button when the only known run for the project is stale', async () => {
@@ -426,33 +427,15 @@ describe('toolbar Orchestrate button', () => {
     expect(screen.queryAllByRole('dialog')).toHaveLength(1);
   });
 
-  // The run-drawer half of the same gap. Needs a run belonging to a
-  // DIFFERENT project than the one the board is narrowed to — see
-  // PROJECTS_TWO's own comment for why: a project's own fresh run hides ITS
-  // button (test case 4), so a run strip for the NARROWED project would
-  // leave no Orchestrate button here to click at all.
-  it('opening the Orchestrate sheet closes an open run drawer, and vice versa — never more than one dialog', async () => {
-    stub({
-      projects: PROJECTS_TWO,
-      runs: [{ ...fixture, project: '/abs/beta', fresh: true, pastRuns: 0, pauseRequested: false }]
-    });
-    await renderNarrowed();
-
-    const strip = await screen.findByTestId('run-strip');
-    await userEvent.click(strip);
-    expect(await screen.findByRole('dialog', { name: 'beta run' })).toBeInTheDocument();
-    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Orchestrate' }));
-    expect(await screen.findByRole('dialog', { name: /orchestrate/ })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'beta run' })).not.toBeInTheDocument();
-    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
-
-    await userEvent.click(strip);
-    expect(await screen.findByRole('dialog', { name: 'beta run' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
-    expect(screen.queryAllByRole('dialog')).toHaveLength(1);
-  });
+  // The run-drawer half of this gap — "opening Orchestrate closes an open run
+  // drawer, and vice versa" — was a third case here until task-37 deleted
+  // `RunDrawer` (DESIGN.md §8.3's "What leaves"). It is not replaced by
+  // another case because the hazard it guarded is gone with the component:
+  // the run's detail is the Runs page's own sheet now, always beside the
+  // list and never a dialog, so the Board has one dialog family left and
+  // `useDialogEscape`'s stack is three deep rather than four
+  // (`test/dialog-escape.test.tsx` holds that count). The exclusion the case
+  // above proves — Orchestrate against the item drawer — is untouched.
 });
 
 // =====================================================================

@@ -565,8 +565,8 @@ export class AgentsService {
        The SAME `code`, deliberately, not a second one. It is the same lock
        the case above enforces, and `OrchestrateSheet` branches on that code
        to `refresh()` + `onClose()` — exactly the right behaviour here, since
-       the sheet closes and hands the screen to the `StartingStrip` that is
-       already rendering. `RUN_IN_PROGRESS_CODE` stays the app's only coded
+       the sheet closes and hands the screen to the board's run chip, which is
+       already counting the starting entry. `RUN_IN_PROGRESS_CODE` stays the app's only coded
        409 — this is a second OCCASION for it, not a second code — and the
        comment on the throw above says so from its side too, since a reader
        who lands there first must not be told a second coded 409 on this
@@ -595,7 +595,7 @@ export class AgentsService {
     // this project can be orchestrated at all, and this one answers what the
     // run should contain. Ordering matters for the two locks above — they are
     // the refusals this endpoint CODES, and OrchestrateSheet branches on that
-    // code to close itself and hand the screen to the run strip. A stale
+    // code to close itself and hand the screen to the board's run chip. A stale
     // board tab whose selection has since
     // been archived must still be told "a run is already in progress", not
     // "task-3 is not open"; validating ids first would answer the second and

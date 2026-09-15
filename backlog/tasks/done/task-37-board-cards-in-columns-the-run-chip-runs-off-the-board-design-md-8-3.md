@@ -3,6 +3,10 @@ id: task-37
 title: Board: cards in columns, the run chip, runs off the board (DESIGN.md 8.3)
 created: 2026-09-15
 tags: fe-redesign, board
+updated: 2026-09-15T23:10:32Z
+started: 2026-09-15T22:01:08Z
+execute-elapsed: 4164
+execute-tokens: 650179
 ---
 
 ## Goal
@@ -191,3 +195,83 @@ green by accident against deleted markup.
   removed `RunStrip.tsx`/`StartingStrip.tsx`/`RunDrawer.tsx`,
   `client/src/styles.css`, and test files. No server route, no skill, no
   `shared/` change beyond what `task-36` already landed.
+
+## Outcome
+
+**2026-09-15 — done.** The Board is a `Band` over four ramp-coloured `BoardColumn`s of restyled `ItemCard`s, with one `RunChip` in the band where the run
+strip, the starting strip and the run drawer used to be. `RunStrip.tsx`, `StartingStrip.tsx` and `RunDrawer.tsx` are deleted; `BoardColumn.tsx` and
+`RunChip.tsx` are new; `DispatchButton` composes `Chip` at 28 px and lost its `variant` prop with the tear-off tab. Every one of the plan's eleven test cases
+has a home, and the thirteen `liveBarFor` cases task-9 pinned all still pass against the new selectors — this task restyled that function's output and
+rederived none of it.
+
+```
+$ pnpm test
+Test Suites: 101 passed, 101 total
+Tests:       1613 passed, 1613 total
+# pass 538
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run typecheck   →  tsc --noEmit, clean
+$ pnpm run build       →  ✓ built in 988ms
+$ npx prettier --check client shared server test docs .claude CLAUDE.md
+All matched files use Prettier code style!
+```
+
+Screenshots: Board at 1400 px and 400 px, daylight and midnight, through a static server on 127.0.0.1:4399 started and killed by its own recorded pid (the rig
+served `client/dist` and stubbed `/api/*`; artifacts under the gitignored `.playwright-mcp/`). All four read as the design: hatched `--fill-live` strips, ramp
+dots, count pills, the chip reading `2 runs · 1 crashed · 1 live ›`, and one column under 700 px.
+
+Contract sweep: 34 sites updated (CLAUDE.md — five invariant entries; docs/subsystems/invariants.md — six passages; .claude/DESIGN.md §8.2's `--magenta` count
+and its token table; client/src/styles.css — eight comments; BoardView, RunControls, useDialogEscape, useOrchestratorRuns, RunsView, OrchestrateSheet,
+RunRowTime, lib/agents.ts, lib/run-stage.ts, lib/run-watchdog.ts, shared/agent.ts, shared/types.ts, server/src/agents/{agents,watchdog}.service.ts; and eleven
+test files naming a suite this task renamed or deleted)
+Red proof: 15 tests went red with the change reverted (eight separate reverts: `RunChip`'s `STATES` precedence, `BoardColumn`'s head and dot, `ItemCard`'s
+marker-row gate, `BoardView`'s `starting` pass-through and its count line, `DispatchButton`'s 28 px size, `project-hue`'s `classFor`-through-`hueFor`,
+`theme.css`'s `--on-fill` in one block of five, and four stylesheet rules — the strip's fill and ink, the chip's busy/disabled order, the column head's border)
+
+### One departure from the design's letter, to keep its intent
+
+DESIGN.md §8.3 writes the live strip's text as `11/500 --ink`. That is right on daylight (`#131313` on `#F5A15C`, 7.3:1) and unreadable on the four dark
+themes, where `--ink` is near-white against a bright amber fill: **1.4:1 on midnight, which is the DEFAULT theme** (measured in the browser, not estimated).
+`--on-accent` fails the other way — on daylight the accents are dark, so that token is `#ffffff`, 2.0:1 against the same fill. So this task added a third token,
+`--on-fill`, to all five blocks of `shared/theme.css` — the dark end of each palette — exactly as `task-36` added `--fill-live`/`--fill-progress` for the
+neighbouring gap, and amended DESIGN.md §8.2's token table and §8.3's sentence to match. Guard 5 (`test/design-guards.test.ts`) now requires it in every block,
+because a token declared in four blocks out of five resolves to nothing in the fifth and inherits precisely the pairing it was added to fix.
+
+This is the one thing in the diff that crosses the plan's "no `shared/` change beyond what task-36 already landed" line. It is one declaration per theme block
+and it is flagged here rather than quietly taken, because the alternative was shipping illegible type on the default theme.
+
+### Deliberate deviations and deferrals, each with its reason
+
+1. **`client/src/lib/project-hue.ts` was touched, against test case 11.** `ProjectHues` gained `hueFor(project): number`, and `classFor` is now written in
+   terms of it. The card's project dot composes `Dot`, which takes the hue as a NUMBER and builds `.ui-dot-proj-N` itself, while the item modal's pill still
+   takes the class — and the only alternative was parsing the number back out of `pill-proj-N` at the call site, which would put that format in two places when
+   `pillClass` exists so that it is in one. No derivation was added: it is the same assignment in a second shape, pinned by a new case in
+   `test/project-hue.test.ts` asserting `classFor(name) === pillClass(hueFor(name))` for every project including the unregistered fallback.
+2. **The crashed-run Resume has no client surface between this merge and task-38's.** `watchdogStoodDown`'s only client reader was `RunStrip`; §8.4.1 moves it
+   to the Runs detail sheet's head, which task-38 builds. The gap is safe in the one direction that matters — the hazard the gate exists for is a SECOND spawn,
+   and a client offering no Resume cannot cause one — and it is a lost affordance (resume by hand from a terminal) rather than a lost guarantee.
+   `test/watchdog-coupling.test.ts` kept its predicate leg and gained a second case pinning the exact set of files that CALL `watchdogStoodDown`, so the moment
+   a client surface reads it again this suite goes red and whoever added it has to restore the rendering leg rather than ship a coupling that agrees only with
+   itself. CLAUDE.md and `invariants.md` both say so in place.
+3. **CSS left standing on purpose.** `.run-strip*` is gone (nothing rendered it), but `.run-drawer-*` stays — `RunDetail.tsx` is its reader and renaming a live
+   family is task-41's. `.run-stepper*` is now genuinely dead (`RowStepper` lived inside `RunDrawer.tsx`), and it is deliberately NOT deleted here:
+   `test/run-track-style.test.ts` asserts `.run-stepper-dot-stalled` alongside the surviving track's rules, so removing the family means editing a suite that
+   belongs to another surface. task-41 owns both. `.board-bar`/`.board-title`/`.board-search`/`.board-select`/`.board-col-h`/`.board-col-tick` also stay,
+   because `ArchiveView` still draws every one of them and its band is task-39's to redraw — which is why the Board's band and column header took their own
+   class names rather than retuning shared rules out from under another page.
+4. **`docs/subsystems/board.md` is untouched.** It describes the strip and the drawer and is now wrong in places; spec §11 assigns its rewrite to task 6
+   (`task-41`) by name, so editing it here would be doing that task's work in the wrong worktree.
+5. **Historical records are untouched**: `docs/superpowers/plans/*`, `specs/*`, `audits/*` and every `done/` backlog item name the deleted components. They are
+   dated accounts of what was true when they were written, and this repo does not rewrite them.
+6. **`RunChip` renders for a finished run** (`1 run ›`, no state word). Both spec §3.2 and DESIGN.md §8.3 state the absence rule as "no run AND no starting
+   entry", and the payload keeps a project's last run file until the next `init` archives it — so a finished run is still a run. That reading is also the only
+   one that reproduces all three of the design's worked examples exactly (`2 runs · 1 live ›` needs a second run in no named state), and
+   `test/board-run-chip.test.tsx` asserts the three verbatim. The strip it replaces rendered nothing for a finished run, so this is a deliberate behaviour
+   change, not an oversight.
+7. **The count pill is `Pill`'s own geometry.** §8.3 sizes it 22×20 on `--strip-hi`; `.ui-pill` now carries `min-width: 22px; height: 20px` and the
+   `--strip-hi` fill, set on the primitive rather than from the page, because a page rule reaching into `.ui-chip`/`.ui-pill` is what guard 7 refuses. Nothing
+   else composes `Pill` yet, so the blast radius is this one call site.

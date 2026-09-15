@@ -94,7 +94,13 @@ function AppShell() {
             wide by default. */}
         <div className={section === 'settings' ? 'wrap' : 'wrap wide'}>
           <Suspense fallback={<SectionLoading />}>
-            {section === 'board' && <BoardView />}
+            {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
+                the setter it navigates with — the same `change` the rail's own
+                Runs entry calls, handed down rather than reimplemented, so the
+                two cannot come to disagree about what opening Runs does (and
+                so the chip's click is recorded in `backlog-manager.section`
+                exactly as the rail's is). */}
+            {section === 'board' && <BoardView onOpenRuns={() => change('runs')} />}
             {section === 'runs' && <RunsView />}
             {section === 'archive' && <ArchiveView />}
             {section === 'settings' && <SettingsView />}

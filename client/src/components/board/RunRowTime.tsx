@@ -38,8 +38,9 @@ import type { RunQueueItem, RunStage } from '../../../../shared/types';
  *
  * `testIdPrefix` defaults to `run-drawer-time` — the drawer's own literal
  * prefix — so this move alone changes nothing it renders: an unpassed prop
- * reproduces the exact test id `test/run-time-ui.test.tsx` and
- * `test/orchestrator-drawer.test.tsx` already assert on. A second caller in
+ * reproduces the exact test id the drawer's own suites asserted on before
+ * task-37 deleted both it and them (`test/run-detail.test.tsx` is where the
+ * surviving host's cases live). A second caller in
  * the same document (the detail pane, once Task 6 wires it in) supplies its
  * own prefix instead of colliding on that same test id twice on one page.
  */

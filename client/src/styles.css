@@ -34,15 +34,22 @@
 
 :root {
   --body-pad: 24px;
-  /* Split into halves and recomposed, because the card's in-progress bar needs
-     the INLINE half on its own: it is full-width by design and only its left and
-     right padding may line up with the face's. A `y x` pair cannot be indexed in
-     CSS, so the pair is built from the parts rather than the parts guessed from
-     the pair. */
-  --card-pad-y: 10px;
-  --card-pad-x: 14px;
-  --card-pad: var(--card-pad-y) var(--card-pad-x);
+  /* Split into three named edges, because the card's face is padded 14/16/12
+     (DESIGN.md §8.3): the top edge is deeper than the bottom, since the title
+     sits under a live strip that may or may not be there and the marker row
+     under it carries its own breathing room. A `t x b` triple cannot be
+     indexed in CSS, so the edges are declared apart rather than guessed back
+     out of a shorthand — the same reason the pair this replaces was split.
+     `--card-pad-x` keeps its name and its second reader: the live strip is
+     full-width by design and only its inline padding lines up with the
+     face's. */
+  --card-pad-t: 14px;
+  --card-pad-x: 16px;
+  --card-pad-b: 12px;
   --card-gap: 10px;
+  /* The column gutter, apart from the card stack's own gap: §3.3 fixes it at
+     16 px, where the cards inside a column sit closer together. */
+  --col-gap: 16px;
   --card-inner-gap: 10px;
   --group-gap: 14px;
   --set-pad: 9px 12px;
@@ -51,9 +58,11 @@
    specificity, so source order is the only thing deciding the winner. */
 [data-density="compact"] {
   --body-pad: 14px;
-  --card-pad-y: 7px;
-  --card-pad-x: 11px;
+  --card-pad-t: 10px;
+  --card-pad-x: 12px;
+  --card-pad-b: 8px;
   --card-gap: 6px;
+  --col-gap: 10px;
   --card-inner-gap: 6px;
   --group-gap: 9px;
   --set-pad: 6px 10px;
@@ -279,35 +288,60 @@ code, kbd, samp, pre { font-family: inherit }
 /* Focus is the cyan rule, matching .set-control's fields in Settings — the UA
    outline is dropped only because something visible replaces it. */
 .board-search:focus, .board-select:focus { outline: none; color: var(--ink); border-color: var(--cyan) }
-/* Task 13: the toolbar's "drain this project's queue" control — the one
-   button among four form fields, so it wears the sheet's own filled "go"
-   look (.sheet-launch's cyan fill, restated rather than shared since that
-   class also carries .sheet-actions' own margin/alignment this control does
-   not want) instead of the recessed-well look above. Sized off the same
-   4px-vertical rhythm .board-search/.board-select use so all five controls
-   still read as one instrument row despite the different treatment. */
-.board-orchestrate {
-  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--bg);
-  background: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
-  padding: 4px 10px; cursor: pointer; white-space: nowrap;
+/* Task 13's `.board-orchestrate` — the toolbar's filled cyan "drain this
+   project's queue" button — is gone with the toolbar (task-37). The control is
+   the page's ONE ink `Chip` now (DESIGN.md §8.3), and both attribute states it
+   carried, `[aria-disabled]` and `[aria-busy]`, moved with it into the chip's
+   own family at the end of this file: they are a chip's states wherever a chip
+   is drawn, and bug-16's ordering constraint (busy declared after disabled, so
+   the later rule wins at equal specificity) is restated there.
+
+   The four rules above are ARCHIVE's now. `.board-bar`, `.board-title`,
+   `.board-tools`, `.board-search` and `.board-select` are still drawn by
+   `ArchiveView`, whose own band is task 4's to redraw; the Board's band is the
+   `Band` primitive plus the two rules below. That is why nothing above was
+   retuned in place — a page still using a rule is not a page that wants
+   another page's new numbers. */
+
+/* The band's search field (§8.3): 36 px, 12 px radius, a `--hairline` stroke.
+   Its own class rather than `.board-search`'s retune, per the note above. */
+.board-band-search {
+  font-family: inherit; font-size: 13px; color: var(--ink);
+  height: 36px; width: 200px; min-width: 0; padding: 0 14px;
+  background: var(--strip); border: 1px solid var(--hairline); border-radius: 12px;
 }
-.board-orchestrate:hover { background: color-mix(in srgb, var(--cyan) 82%, var(--ink)) }
-/* `[aria-disabled]`, not `:disabled` — same reasoning as .dispatch-tab's own
-   identical rule: the button stays real and focusable on purpose (see
-   BoardView's onClick guard), so "looks unavailable" is this repo's job
-   rather than the browser's. */
-.board-orchestrate[aria-disabled='true'] {
-  color: var(--ink3); background: var(--steel); border-color: var(--hairline); cursor: default;
+.board-band-search::placeholder { color: var(--ink3) }
+.board-band-search:focus { outline: none; border-color: var(--ink3) }
+/* The native select inside a filter `Chip`. The chip owns the shell; this
+   takes the UA's away so the two do not draw two boxes, and takes the UA arrow
+   with it — the glyph beside it is drawn at this board's own size and ink.
+   `color: inherit` so the value reads in the chip's ink whatever the chip's
+   variant paints, rather than restating it here and drifting from it. */
+.board-filter {
+  font-family: inherit; font-size: 13px; font-weight: 500; color: inherit;
+  background: none; border: 0; padding: 0; margin: 0;
+  max-width: 170px; text-overflow: ellipsis;
+  cursor: pointer; appearance: none;
 }
-/* Disabled and DOING something: the status re-ask a click on a
-   project-visibility block now provokes (bug-16, BoardView.tsx). Declared
-   after the disabled rule deliberately — equal specificity, both matching at
-   once, so the later one wins and the busy look is not swallowed by the
-   disabled colour. Identical rule and identical ordering constraint
-   .dispatch-tab/.dispatch-chip already carry for bug-13. */
-.board-orchestrate[aria-busy='true'] {
-  color: var(--ink2); cursor: progress;
+.board-filter:focus { outline: none }
+.board-filter-mark { font-size: 11px; line-height: 1; color: var(--ink3) }
+
+/* The run chip (§8.3) — everything the Board still says about orchestrator
+   runs. Flat: it sits in a band beside two stroked chips and an ink one, and a
+   fourth stroke there would read as a fourth filter rather than as the one
+   thing on the row that navigates. `--strip-hi` on hover is the same "a fill
+   is the affordance" move the rail's rows make. */
+.board-run-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 10px; border-radius: 12px;
+  font-family: inherit; color: var(--ink);
+  background: none; border: 0; cursor: pointer;
+  transition: background .15s;
 }
+.board-run-chip:hover { background: var(--strip-hi) }
+.board-run-chip-line { font-size: 12px; font-weight: 500; white-space: nowrap }
+.board-run-chip-mark { font-size: 12px; line-height: 1; color: var(--ink3) }
+
 /* A centred flex line, not plain centred text: the loading fallback puts an icon
    beside the word, and `vertical-align` would not align it — an inline SVG's
    baseline is its bottom edge, which hangs the arc below the x-height of the text
@@ -359,75 +393,52 @@ code, kbd, samp, pre { font-family: inherit }
   .board-select { flex: 1 1 0; min-width: 0; max-width: none }
 }
 
-/* The card is a strip in two parts: the printed face (.board-card-main) and,
-   when the item has a next step, the tear-off tab down its right edge
-   (.dispatch-tab, in the dispatch block far below). The row here is the seam
-   between them; the face is a flex column of its own — the in-progress bar, then
-   the padded content (.board-card-face).
-   `overflow: hidden` is what makes the tab meet the card's rounded corners
-   instead of squaring them off, and what clips the in-progress bar's own top
-   corners to the same radius.
-   Padding lives on .board-card-face, never on this rule or on
-   .board-card-main, so the tab reaches the card's own top and bottom edges —
-   the dashboard's .row/.row-main split, for the same reason. It is also why the
-   bar stops at the tab's seam rather than crossing it: the bar is inside the
-   face, and the tab is the face's sibling. */
+/* The card, redrawn at the design's scale (DESIGN.md §8.3): `--strip`, 12 px
+   radius, NO stroke and NO shadow. A card is told from the page by its ground
+   rather than by a line around it (§5), and the hairline this replaced was
+   doing the job the ground now does — on daylight it sat two points off the
+   fill and vanished, which is the failure §8's own intro warns about.
+   Hover changes the cursor and nothing else: a card is a button by role, and
+   this design marks nothing by hover. The old `border-color` hover and the two
+   live-state border recolourings went with it.
+   `overflow: hidden` is what clips the live strip's own top corners to the
+   card's radius; the strip reaches the card's left and right edges because the
+   padding lives on `.board-card-face` alone, never here. */
 .board-card {
-  display: flex; align-items: stretch;
-  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  cursor: pointer; transition: border-color .15s;
-  box-shadow: inset 0 1px 0 var(--edge); overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--strip); border-radius: 12px;
+  cursor: pointer; overflow: hidden;
 }
-/* The face's own column: the in-progress bar, then the padded content. It holds
-   NO padding itself, which is what lets that bar reach the face's left and right
-   edges — a bar inset by the card's padding reads as a chip, not as a state the
-   whole card is in.
-   `min-width: 0` because this is a flex item beside the tab, and a flex item's
-   default `min-width: auto` would let a long unbroken title push the card wider
-   than its column. */
-.board-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column }
-/* A flex column, where the row layout used a named-areas grid. The grid put the
-   pill and the meta line in a grid row, and a grid row cannot be pushed to the
-   bottom of a cell that a taller neighbour stretched — which is what every cell
-   in a card grid is. .board-card-foot plus margin-top:auto can be.
-   Every padding and gap the card has lives in this one rule, so task-8's
-   [data-density="compact"] override stays a single block (of variables) rather
-   than a hunt through four selectors. `flex: 1` so this column, not the bar
-   above it, absorbs the height a taller neighbour stretches the card to — which
-   is what keeps margin-top:auto on the foot working. */
+/* Every padding and gap the card has lives in this one rule, so the
+   compact-density retune stays a single block (of variables) rather than a
+   hunt through four selectors. 14/16/12 with a 10 px internal gap. */
 .board-card-face {
-  flex: 1;
   display: flex; flex-direction: column; gap: var(--card-inner-gap);
-  padding: var(--card-pad);
+  padding: var(--card-pad-t) var(--card-pad-x) var(--card-pad-b);
 }
-.board-card:hover { border-color: var(--hairline2) }
-.board-card-title { font-size: 14px; font-weight: 500; color: var(--ink) }
-/* margin-top:auto is the pin: cards in a row are as tall as the tallest title, and
-   without it the meta lines of neighbours sit at different heights. */
-/* Wraps, rather than compressing its children onto one line. Three things want
-   this row — the project pill, `id · date`, and the groomed/done marker — and at
-   the real column width (about 150px inside the padding) they do not all fit.
-   Something has to give, and the choice of WHAT is the whole point: with
-   nowrap, the meta line was the only shrinkable child, so it clipped to
-   `bug-1 · aug…` — the id and date being cut is the complaint this card was
-   rebuilt to fix. Wrapping spends a line of height instead, which the card has:
-   its neighbours are already unequal heights because titles wrap. */
-.board-card-foot {
-  margin-top: auto; display: flex; flex-wrap: wrap; align-items: baseline;
-  gap: 4px 8px;
-}
-/* All three unshrinkable, so wrapping is what happens instead of clipping. The
-   pill holds the project name, which is identity and must read in full; the
-   meta is id-and-date, which is the card's handle on the file. `max-width: 100%`
-   plus the ellipsis below is the last resort for a single value too long for the
-   whole card on its own — a hand-written id, say — where wrapping has nowhere
-   left to go. */
-.board-card-foot .pill { flex: none; max-width: 100% }
-.board-card-meta {
-  flex: none; max-width: 100%;
-  font-size: 12px; color: var(--ink3);
+.board-card-title { font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--ink) }
+/* The foot: project dot + name left, `id · date` pushed right. No wrapping —
+   the row's two halves have fixed jobs and a second line would put the date
+   under the project name, where it reads as a second fact about it. What gives
+   instead is the project NAME, which ellipsises: it is the only value here a
+   reader can recover from anywhere else on the card (the drawer states it in
+   full), where the id is the card's handle on the file and the date is the one
+   reading nothing else carries. */
+.board-card-foot { display: flex; align-items: center; gap: 8px; min-width: 0 }
+.board-card-proj { display: flex; align-items: center; gap: 6px; min-width: 0 }
+.board-card-proj-name {
+  font-size: 12px; font-weight: 400; color: var(--ink2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.board-card-meta {
+  margin-left: auto; flex: none;
+  font-size: 12px; font-weight: 400; color: var(--ink3); white-space: nowrap;
+}
+/* The marker row (DESIGN.md §8.3), drawn whenever a marker applies OR dispatch
+   is available — ItemCard decides which, through `dispatchAvailable`. The words
+   are `Marker`'s (a `ui/` primitive); this rule only lays them out and pushes
+   the dispatch chip to the right end. */
+.board-card-markers { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px }
 
 /* Project pill: the item's project, in that project's own hue, on its card and
    in the drawer head. Both halves now say the same thing — name in the text,
@@ -455,37 +466,14 @@ code, kbd, samp, pre { font-family: inherit }
 .pill-proj-6 { color: var(--proj-6); border-color: var(--proj-6) }
 .pill-proj-7 { color: var(--proj-7); border-color: var(--proj-7) }
 .pill-proj-8 { color: var(--proj-8); border-color: var(--proj-8) }
-/* Foot markers, beside the meta line rather than inside it: `flex: none` is why
-   they sit out there at all — inside the nowrap-with-ellipsis meta they were
-   clipped to `· gr…`. They inherit nothing from that line (they are its
-   siblings), so the size and weight are restated here — 11/500, the scale's
-   marker row (DESIGN.md §8.1); it was the mono family and its size before
-   task-36 left one face in the app.
-   Groomed is quiet confirmation, not an alarm; done is history and dims. */
-.board-card-groomed, .board-card-done, .board-card-kind, .board-card-stale {
-  flex: none; font-size: 11px; font-weight: 500; white-space: nowrap;
-}
-.board-card-groomed { color: var(--green) }
-.board-card-done { color: var(--ink2) }
-/* A refactor's kind, in --ink3 for both values rather than a colour per kind.
-   `chore` and `debt` are not two states of a lifecycle — nothing is waiting on
-   either, and neither is a warning — so the word carries the whole distinction
-   and the colour carries none. It also keeps the footer from becoming a traffic
-   light: the amber live bar, the green groomed marker and the dimmed done
-   marker are already three signals competing in one strip, and a fourth hue
-   there would cost more than it told anyone. */
-.board-card-kind { color: var(--ink3) }
-/* Task 5: an open item nobody has touched inside the staleness window. Only a
-   task can actually wear it on the Board — every other stale section has left
-   for Archive by then (item-stale.ts, `leavesBoard`), and the whole reason a
-   task stays is so this word can be on it.
-   Mustard, the theme's own "incomplete/pending". Not amber, which is reserved
-   for the live bar directly above it and means the opposite — a human is on
-   this right now. Not red: six quiet weeks on a task is a thing to look at,
-   not a failure, and the board has exactly one danger colour to spend. Not
-   --ink3 like the kind badge either, which would be the wrong register in the
-   other direction: this one IS asking for something. */
-.board-card-stale { color: var(--mustard) }
+/* The four foot markers — groomed, done, kind, stale — were four rules here
+   until task-37. They are `Marker`'s tones now (`components/ui/Marker.tsx`,
+   DESIGN.md §8.3), declared once in the ui primitives block at the end of this
+   file, because the Archive card draws the same words and two surfaces must
+   not be free to disagree about what `stale` looks like. The tokens did not
+   move with them: groomed is still `--green`, kind and done `--ink3`, stale
+   `--mustard`.
+
 /* Task 11: the orchestrator's own per-stage chip — the one marker whose source
    is a run payload rather than an item file, and the reason it is shaped as an
    actual chip (border + tinted fill) rather than plain coloured text like the
@@ -495,11 +483,11 @@ code, kbd, samp, pre { font-family: inherit }
    have read a single word of it.
      Task 9 left every one of these rules untouched and took away one of their
    two callers: ItemCard's own footer chip is gone, because all seven stages it
-   chipped now render as the card's own live bar instead (the run-tone modifier
-   at the end of this section). RunDrawer chips all fifteen stages and is the
-   only caller left, which is why these names still read as the board's own —
-   they are still the board's legend, just no longer painted on a card. The
-   stale marker above is unrelated and still a card's.
+   chipped now render as the card's own live strip instead. The Runs section
+   chips all fifteen stages and is the only caller left — the run drawer was,
+   until task-37 took it off the Board — which is why these names still read as
+   the board's own: they are still the board's legend, just no longer painted
+   on a card. The stale marker above is unrelated and still a card's.
    Colour: cyan, not green or amber, and both exclusions are deliberate.
    Green is `.board-card-groomed`'s own colour a few lines up, and a bug
    that is both groomed AND mid-run would otherwise show two green markers
@@ -577,10 +565,10 @@ code, kbd, samp, pre { font-family: inherit }
   color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
   background: color-mix(in srgb, var(--amber) 10%, var(--strip));
 }
-/* failed: RunDrawer's own addition (fix round 1) — the card never chipped this
-   stage at all even when it still had a chip (it's outside ACTIVE_RUN_STAGES and
-   isn't needs-answers), so this variant has always existed for the drawer's
-   per-row chip alone. Red/danger rather than the default cyan:
+/* failed: the run drawer's own addition (fix round 1) — the card never chipped
+   this stage at all even when it still had a chip (it's outside
+   ACTIVE_RUN_STAGES and isn't needs-answers), so this variant has always
+   existed for a per-row chip alone, the Runs detail's since task-37. Red/danger rather than the default cyan:
    RunAttention.kind has no `failed` member, so a failed item never earns a
    box in the Attention section the way needs-answers/parked/fix-exhausted
    do — this chip is the only place in the drawer a failure is visible at
@@ -589,67 +577,48 @@ code, kbd, samp, pre { font-family: inherit }
   color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline));
   background: color-mix(in srgb, var(--red) 10%, var(--strip));
 }
-/* In progress: the card's own hairline goes amber, and a filled amber bar runs
-   across the top of its face. "Which of these twelve is anyone on" is a question
-   asked of a whole column at once, and the 3px amber inset this replaces — like
-   the small marker before it — could not answer it at a glance.
-   border-color rather than a border of its own: the 1px border and the padding
-   are one tuned block (with a compact-density override), so recolouring the
-   existing line moves nothing. The `inset 0 1px 0 var(--edge)` catch-light from
-   .board-card is inherited untouched, since nothing here declares box-shadow. */
-.board-card-live { border-color: var(--amber) }
-/* The bar. Filled rather than outlined, because it is competing with a whole
-   column of cards and an outline at this height reads as another hairline.
-   --on-accent is the theme's own "ink on a filled accent" — the same pairing the
-   amber Send button uses — so this stays legible on the light palette, where
-   --amber is a dark ochre and dark ink on it would not.
-   The inline padding is the face's own --card-pad-x, so the label lines up with
-   the title beneath it and follows the compact-density retune with it. The block
-   padding is fixed and small: this bar is a band, and scaling its height with
-   the card's padding would make it a second header at comfortable density. */
-.board-card-live-bar {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-  background: var(--amber); color: var(--on-accent);
-  font-size: 11px; font-weight: 600;
-  padding: 2px var(--card-pad-x);
+/* The live strip: 24 px across the card's top edge, `--fill-live` under the
+   `.hatch` utility, 11/500 `--ink` text — the stage word left, the elapsed
+   reading right (DESIGN.md §8.3). "Which of these twelve is anyone on" is a
+   question asked of a whole column at once, and neither the 3 px amber inset
+   this began as nor the small footer chip before it could answer it at a
+   glance.
+   ONE fill, where task-9's bar had two. The second tone — cyan for the
+   orchestrator's six working stages, amber for a run blocked on a person — is
+   gone, and its disappearance is the rule rather than a simplification: this
+   design marks state by ink and never by accent (DESIGN.md §5), so the stage
+   word carries the distinction the colour used to. `liveBarFor` still decides
+   which word and still keeps the two axes apart; nothing about the derivation
+   moved, only this fill.
+   `--on-fill`, the token task-37 added to every theme block for exactly this
+   (§8.2): DESIGN.md §8.3 wrote the ink as `--ink`, which is right on daylight
+   (#131313 on #F5A15C, 7.3:1) and wrong on the four dark themes, where `--ink`
+   is near-white and this fill is a bright amber — 1.4:1 on midnight, the
+   DEFAULT theme, for 11 px type. `--on-accent` fails the other way round, for
+   the reason its own name gives. `--on-fill` is the dark end of each palette,
+   whichever token that happens to be there.
+   The inline padding is the face's own `--card-pad-x`, so the word lines up
+   with the title beneath it and follows the compact-density retune with it.
+   The height is fixed: this is a band, and scaling it with the card's padding
+   would make it a second header at comfortable density. */
+.board-card-live {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 24px; padding: 0 var(--card-pad-x);
+  background: var(--fill-live); color: var(--on-fill);
+  font-size: 11px; font-weight: 500;
 }
 /* flex:none so the reading stays whole if the label ever has to yield: the
-   elapsed time is the half that cannot be guessed from the bar's colour, and
-   three hours versus three weeks is the whole reason a timestamp is stored
-   rather than a boolean. Inherits the bar's ink rather than painting amber on
-   amber.
+   elapsed time is the half that cannot be guessed from the words beside it,
+   and three hours versus three weeks is the whole reason a timestamp is stored
+   rather than a boolean.
    This used to carry `text-transform: none`, and it was load-bearing rather
    than a style choice: the bar uppercased its label, and an uppercased `21m`
    renders as `21M`, which reads as twenty-one MONTHS. task-36 took the
    uppercasing off the bar itself (DESIGN.md §8.1 leaves it on `.rail-kicker`
    alone), so the override has nothing left to correct — but the reason is kept
-   here, because anyone putting the bar back into caps has to put this line back
-   with it. */
-.board-card-live-mark {
-  flex: none; white-space: nowrap;
-  font-size: 12px;
-}
-/* Task 9: the same bar, in the tone the board's colour legend already assigns
-   to "the orchestrator is running this, without a human" — cyan, the exact
-   argument .board-card-stage above makes at length for the run chips. No new
-   palette entry was added for this, in any of the five themes, and none should
-   be: the meaning already had a colour, and a second cyan-ish token would have
-   been a synonym for it that the next reader has to tell apart.
-   A modifier over the base rule, not a rule of its own: the padding, the
-   --card-pad-x alignment that lines the label up with the title beneath it, the
-   --on-accent ink pairing and the compact-density retune are all inherited, and
-   the ONLY declarations here are the two colours. A sibling bar would have had
-   to re-derive four tuned values to change one.
-   --on-accent on filled --cyan is an established pairing, not a new bet:
-   .dispatch-chip.execute:hover is the same fill with the same ink, and the ink
-   inverts with the palette (near-black on the four dark themes, near-white on
-   the light one, where --cyan is a dark teal).
-   Only the six ACTIVE_RUN_STAGES reach this class. A run blocked on a person
-   (ATTENTION_RUN_STAGES) keeps the base rule's amber, which is the same legend
-   read the other way: a question waiting on you is a human's turn, not
-   progress. */
-.board-card-live-run { border-color: var(--cyan) }
-.board-card-live-bar-run { background: var(--cyan) }
+   here, because anyone putting the strip back into caps has to put this line
+   back with it. */
+.board-card-live-mark { flex: none; white-space: nowrap }
 
 /* ---------------------------------------------- Settings section */
 .mdetail-label {
@@ -752,7 +721,7 @@ code, kbd, samp, pre { font-family: inherit }
    unbroken title shrinking with the row rather than overflowing it, and
    align-items:start keeps a short column from stretching to its tallest
    neighbour. */
-.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--card-gap); align-items: start }
+.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap); align-items: start }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
@@ -780,6 +749,20 @@ code, kbd, samp, pre { font-family: inherit }
   color: var(--ink);
 }
 .board-col-count { font-size: 11px; color: var(--ink3) }
+/* The Board's own column header (DESIGN.md §8.3): an 8 px ramp `Dot`, the name
+   at 15/500, the count `Pill` pushed right — and NO rule under it, which is the
+   whole reason it is a second class rather than a modifier on `.board-col-h`
+   above. The cards' own ground gap is the separation; §8's standing "nothing on
+   `--board` uses `--strip-hi` as its only separator" rule does not apply,
+   because a gap is not a stroke. `.board-col-h` stays for Archive, whose header
+   is task 4's to redraw.
+   `align-items: center` where the old header baselines: a dot has no baseline
+   worth aligning to, and the pill beside the name is a box rather than a word. */
+.board-col-head { display: flex; align-items: center; gap: 8px; min-width: 0 }
+/* The layout half of the count pill — `Pill` owns every part of its look, and a
+   page that set its margin through the primitive's own class would be the
+   restatement guard 7 refuses. This span is where the pushing-right happens. */
+.board-col-pill { margin-left: auto; flex: none; display: inline-flex }
 /* The column's cards, in their own element rather than as .board-col's
    remaining children. Two reasons: an empty column needs something to render
    in place of the stack, and any per-column overflow later has to scroll the
@@ -817,253 +800,18 @@ code, kbd, samp, pre { font-family: inherit }
    below it is still real, just partial. */
 .board-warn { font-size: 12px; color: var(--amber); line-height: 1.5 }
 
-/* ---------------------------------------------- orchestrator run strip
-   Task 11: one row per project with a run currently worth watching live —
-   see RunStrip.tsx for the full rationale on why this exists at all (the
-   item files the columns below render do not change while a run works
-   them, so this is the board's only source for "this item is executing
-   right now"). Sits right under the toolbar, ahead of .board-warn above:
-   a run in flight is live, actionable information, where the warnings are
-   a standing fact about the registry that will read the same tomorrow.
-   A real <button>, matching .dispatch-tab/.dispatch-chip's own reset — its
-   own click and native Enter/Space activation are what open the run drawer
-   (Task 12), the same "no hand-rolled keyboard handling needed" reasoning
-   DispatchButton's button already gets for free. */
-.run-strips { display: flex; flex-direction: column; gap: 6px }
-.run-strip {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  font-family: inherit; font-size: 11.5px; color: var(--ink2);
-  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 7px 12px; cursor: pointer; text-align: left;
-  transition: border-color .15s;
-}
-.run-strip:hover { border-color: var(--hairline2) }
-/* The live/aged dot. aria-hidden in the markup — the adjacent
-   .run-strip-heartbeat text is the actual "live" vs "3m" answer, this is
-   only the at-a-glance restatement of it in colour. Cyan for "live", matching
-   the card badge's own "orchestrator is actively doing something" tone
-   (.board-card-stage, above) rather than --good/--green, which this same
-   strip's progress bar below uses for a DIFFERENT fact (how much has
-   actually merged) — conflating the two into one colour would make "still
-   heartbeating" and "already succeeded" look like the same claim. */
-.run-strip-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink3) }
-.run-strip-dot-live { background: var(--cyan) }
-.run-strip-project {
-  flex: none; font-size: 12px; font-weight: 600;
-  color: var(--ink);
-}
-/* Task 9's own badge for `lib/run-stage.ts`'s `mergeModeLabel` — shared
-   verbatim by RunStrip, RunsView's row, RunDetail's header and (since the
-   final whole-branch review) RunDrawer's meta line, rather than four copies
-   of the same small pill, the same reuse `.runs-status` already gets across
-   RunsView and RunDetail. Mustard, not the amber
-   `.board-card-stage-warn`/`.run-strip-attention` already use for "a human
-   must act on this NOW": a branch-mode run is not an alert, it is a standing
-   fact about how this run finishes work, which is the same "incomplete, not
-   a problem" register mustard already carries for a pending stage chip. It
-   cannot reuse `stageChipClass` itself — that function's own Record is keyed
-   on `RunStage`, and `MergeMode` is a different, two-member union entirely
-   (`lib/run-stage.ts`'s own file header has the fuller argument for why the
-   two vocabularies must not share one map). */
-.run-mode-badge {
-  flex: none; display: inline-flex; align-items: center;
-  font-size: 11px; font-weight: 600;
-  white-space: nowrap;
-  padding: 1.5px 7px; border: 1px solid; border-radius: 999px;
-  color: var(--mustard); border-color: color-mix(in srgb, var(--mustard) 45%, var(--hairline));
-  background: color-mix(in srgb, var(--mustard) 10%, var(--strip));
-}
-.run-strip-heartbeat { flex: none; font-size: 12px; color: var(--ink3) }
-/* The run's own total, sitting immediately after the heartbeat because the
-   two are read as a pair — "still being heard from" then "for how long" —
-   and separating them would make the reader hunt. Dimmer than the count and
-   quieter than the project name: it is context for everything else on the
-   strip, never the thing the strip is about. `font-variant-numeric:
-   tabular-nums` matters here specifically: this is one of only two readings
-   on the board that reticks on its own (5s while the run is fresh), and
-   proportional digits make it visibly jitter its neighbours sideways as the
-   minutes roll over. */
-.run-strip-elapsed {
-  flex: none; font-size: 12px; color: var(--ink3);
-  font-variant-numeric: tabular-nums;
-}
-.run-strip-count { flex: none; font-size: 11px; font-weight: 600; color: var(--ink) }
-/* The bar restates the count beside it graphically (aria-hidden in the
-   markup, for that exact reason) — it does NOT track a separate "processed"
-   fraction that could disagree with the count printed beside it, on purpose:
-   the brief pins one ratio (RunStrip.tsx's own `completed`/`total`), and a
-   second, undefined one would be one more thing to keep in step by hand.
-   --good is --green's own "success" alias (shared/theme.css) — `merged` and
-   `branched` are the pipeline's two success exits (one per `MergeMode`,
-   RunStrip.tsx's own comment on `completed` has the full reasoning), and
-   both fill this bar the same green: the colour is about the outcome, not
-   which mode produced it. */
-.run-strip-bar {
-  flex: 1 1 80px; min-width: 40px; height: 4px; border-radius: 2px;
-  background: var(--steel); overflow: hidden;
-}
-.run-strip-bar-fill { display: block; height: 100%; background: var(--good) }
-/* inline-flex, not the plain inline box this was: the stage half is now a
-   chip (see RunStrip.tsx's own comment on why), and a chip in a text run
-   sitting on a text baseline rides half a pixel low next to the id beside it.
-   The `overflow: hidden` + ellipsis stay for the id, which is the half that
-   can actually be long enough to need them. */
-.run-strip-current {
-  flex: none; display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--ink2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
-}
-/* Amber, matching both the in-progress bar's and the card badge's
-   needs-answers variant: "a human must act" is one legend, reused a third
-   time here rather than invented anew. */
-.run-strip-attention { flex: none; font-size: 12px; font-weight: 600; color: var(--amber) }
-/* Trailing "there is more here" mark, same glyph and same aria-hidden
-   reasoning as DispatchButton's own .dispatch-mark. */
-.run-strip-mark { flex: none; font-size: 11px; line-height: 1; color: var(--ink3) }
+/* ---------------------------------------------- run controls
+   The orchestrator run strip, the crashed strip, the paused strip and the
+   starting placeholder stood here — every `.run-strip*` rule, ~280 lines —
+   until task-37 took the three components that drew them off the Board
+   (DESIGN.md §8.3's "What leaves"). Nothing in `client/src` renders one now;
+   what is left in this file is the control row both surviving hosts share.
 
-/* ---------------------------------------------- crashed run strip
-   orchestrator-watchdog (design §6.1): a run whose heartbeat has gone
-   stale while `status` still reads `running` — `isCrashed`,
-   lib/run-watchdog.ts. --amber, not a new colour and not the red
-   `.board-card-stage-bad`/`--red` uses for a genuine item-level `failed` —
-   this reuses the exact tone `.board-card-stage-warn` already carries for
-   `parked`/`needs-answers` (lib/run-stage.ts's own `STAGE_TONE`), because a
-   crashed run is the same register as those two: the pipeline has stopped
-   and needs a person, not proof that anything is broken beyond repair (the
-   watchdog itself, or a person via Resume, may well fix it unattended).
-   Declared after the plain `.run-strip`/`.run-strip:hover` rules above so
-   its equal-specificity `:hover` still wins by source order.
-
-   Fix round 1: `.run-strip-crashed` now lands on a `<div>`, not a
-   `<button>` — the root had to change shape so Resume could become a real
-   sibling `<button>` instead of a `role="button"` span nested inside one
-   (RunStrip.tsx's own doc comment on `renderCrashedStrip` has the full
-   reasoning). Every rule below is keyed on the CLASS, not the element, so
-   none of it needed to change to keep applying; `.run-strip`'s own base
-   rule (flex row, border, background, padding, pointer cursor) still lands
-   on this div exactly as it did on the button, for the same reason. */
-.run-strip-crashed {
-  border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
-  background: color-mix(in srgb, var(--amber) 8%, var(--strip));
-}
-.run-strip-crashed:hover { border-color: var(--amber) }
-/* task-17's paused rendering. Neutral hairline and the plain strip
-   background, deliberately NOT the crashed row's amber: a paused run is not
-   an alert — somebody stopped it on purpose — and dressing the two the same
-   would cost the crashed row the whole point of its colour. Same
-   `.run-strip` base (flex row, border, padding) as the other two. */
-.run-strip-paused {
-  border-color: var(--hairline);
-  background: var(--strip);
-}
-.run-strip-paused:hover { border-color: var(--ink3) }
-/* The word itself, in `.run-strip-crashed-label`'s slot but in the quiet
-   ink — same construction as `.run-strip-starting-label` above and for the
-   same reason. */
-.run-strip-paused-label {
-  flex: none; font-size: 11px; font-weight: 700;
-  color: var(--ink2);
-}
-/* `pausing · finishes <id>` on a run that is still going — amber, because
-   unlike the paused row itself this IS a state in transition that a person
-   may want to cancel, and it sits among the fresh strip's own live
-   readings. */
-.run-strip-pausing {
-  flex: none; font-size: 12px; font-weight: 600;
-  color: var(--amber); white-space: nowrap;
-}
-/* The `Resuming…` placeholder that stands in `.run-strip-resume`'s slot
-   while a resume this board asked for is on its way — quiet ink, matching
-   `.run-strip-heartbeat`: it is a state, not a control. */
-.run-strip-resuming {
-  flex: none; font-size: 12px; color: var(--ink2);
-  white-space: nowrap;
-}
-/* task-14's placeholder row (StartingStrip.tsx) — a run this server spawned
-   whose run.json has not been written yet. Dashed border and `cursor:
-   default`, both saying the same thing in the two languages this stack
-   already speaks: the row is provisional, and unlike either RunStrip shape
-   there is nothing here to click (no run file means no drawer to open). No
-   `:hover` rule for the same reason — a hover response on a row that does
-   not respond to a click is a promise the row cannot keep.
-
-   Declared after `.run-strip` above so the dashed border and default cursor
-   win on equal specificity by source order, exactly as `.run-strip-crashed`
-   relies on for its own colours. */
-.run-strip-starting {
-  border-style: dashed;
-  border-color: var(--hairline);
-  cursor: default;
-}
-/* Hollow, never the cyan `.run-strip-dot-live`: cyan means "heartbeating
-   right now", and this run has not reported anything at all yet. A ring
-   rather than a fill is the same "present but not filled in" register the
-   dashed border above carries. */
-.run-strip-dot-starting {
-  background: none;
-  border: 1px solid var(--ink3);
-}
-/* The word itself, in `.run-strip-crashed-label`'s slot and register but in
-   the quiet ink rather than amber: "starting" is not an alert, it is the
-   most ordinary thing a run can be doing. */
-.run-strip-starting-label {
-  flex: none; font-size: 11px; font-weight: 700;
-  color: var(--ink2);
-}
-/* The open-the-drawer control inside a crashed strip's `<div>` root (fix
-   round 1) — everything `.run-strip` itself used to BE, now split into a
-   button that only covers the informational body, with Resume as a
-   sibling outside it. A full reset (no border, no background, no padding
-   of its own — the div already carries `.run-strip`'s) plus `flex: 1 1
-   auto; min-width: 0` so it still gives up width the same way the bar
-   segment in a fresh strip does, keeping `.run-strip-current`'s own
-   ellipsis working; `font`/`color: inherit` so none of the text inside it
-   quietly picks up a browser's default button typography. */
-.run-strip-open {
-  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
-  background: none; border: none; padding: 0; margin: 0;
-  font: inherit; color: inherit; text-align: left; cursor: pointer;
-}
-/* The word itself — deliberately not folded into `.run-strip-project`, which
-   keeps its own treatment for the project name alone; this is a second,
-   independent fact sitting next to it. */
-.run-strip-crashed-label {
-  flex: none; font-size: 11px; font-weight: 700;
-  color: var(--amber);
-}
-/* The watchdog's own one-sentence clause (lib/run-watchdog.ts's
-   `watchdogClause`) — quiet, matching `.run-strip-heartbeat`'s own
-   register: it is context sitting next to the louder amber facts either
-   side of it, not itself an alarm. */
-.run-strip-watchdog { flex: none; font-size: 12px; color: var(--ink3) }
-/* The Resume control — fix round 1: a real, sibling `<button>` now (see
-   RunStrip.tsx's own comment on why a nested `role="button"` span was the
-   defect), so this reset undoes a plain `<button>`'s own UA chrome
-   (background, border) before the pill styling below applies — `cursor:
-   pointer` stays even though a real button supplies its own, cheap
-   insurance against a future UA default overriding it. `[aria-disabled=
-   "true"]` (not the native `disabled` attribute — CLAUDE.md's per-item
-   disable-not-hide rule, applied to a project-level control the same way
-   it already applies to DispatchButton) dims it rather than hiding it, and
-   deliberately does NOT use `:disabled` — a genuinely `disabled` button
-   drops out of the tab order, which this control must not do. */
-.run-strip-resume {
-  flex: none; display: inline-flex; align-items: center;
-  font-size: 13px; font-weight: 600;
-  white-space: nowrap;
-  padding: 2px 8px; margin: 0; background: none;
-  border: 1px solid var(--amber); border-radius: 999px;
-  color: var(--amber); cursor: pointer;
-}
-.run-strip-resume:hover { background: color-mix(in srgb, var(--amber) 12%, transparent) }
-.run-strip-resume[aria-disabled="true"] { opacity: .5; cursor: not-allowed }
-/* A failed Resume click's own message (anything but the 409 "already
-   recovered" case, which renders no error at all) — --red, the same
-   danger-threshold tone `.board-card-stage-bad` uses for an item's own
-   `failed`, because this genuinely is a request that came back wrong,
-   distinct from the amber "needs a person" register the rest of this
-   strip reads in. */
-.run-strip-error { flex: none; font-size: 12px; color: var(--red) }
+   Where each reading went is DESIGN.md §8.4.1's own table, and the Runs
+   section is where task 3 lands it: a crashed run is a Live row with its
+   clause, a starting entry is a Live row reading `starting… · <age>`, and
+   Resume — for a crashed run and for a paused one alike — is the detail
+   sheet's head, which is `RunControls` below. */
 
 /* task-17's shared run controls (client/src/components/RunControls.tsx),
    hosted by both the board's run drawer and the Runs view's detail pane.
@@ -1093,14 +841,6 @@ code, kbd, samp, pre { font-family: inherit }
    `.run-strip-heartbeat`'s register: these are states, not alerts. */
 .run-controls-note { flex: none; font-size: 12px; color: var(--ink2) }
 .run-controls-error { flex: none; font-size: 12px; color: var(--red) }
-
-@media (max-width: 700px) {
-  /* The bar is the one segment built to give up its width first — the dot,
-     heartbeat, count and attention are all fixed-width facts that would
-     otherwise clip before it does. */
-  .run-strip { flex-wrap: wrap }
-  .run-strip-current { max-width: 100% }
-}
 
 /* ---------------------------------------------- item drawer
    A right-hand panel over the board; the board stays mounted behind it.
@@ -1142,8 +882,8 @@ code, kbd, samp, pre { font-family: inherit }
      `stretch` pulled it to the container's full width and rendered a
      full-width mustard bar instead of a tag. Fixed on the container rather
      than the badge itself, which is the one thing this rule must NOT do:
-     `.run-mode-badge` is shared verbatim with RunStrip, RunsView's row and
-     RunDetail's header, all row-flex parents relying on its default
+     `.run-mode-badge` is shared verbatim with RunsView's row and
+     RunDetail's header (and with `RunStrip` until task-37), all row-flex parents relying on its default
      vertical centering, and an `align-self` baked into the shared class
      would retune their alignment too for a bug that is specific to this
      one column-flex parent. */
@@ -1172,11 +912,13 @@ code, kbd, samp, pre { font-family: inherit }
 .drawer-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 10px; color: var(--ink2); margin: 6px 0 }
 
 /* ---------------------------------------------- run drawer
-   RunStrip's detail view (RunDrawer.tsx). The .drawer scaffolding above —
-   backdrop, the aside itself, .drawer-head, .drawer-close, .drawer-meta,
-   .drawer-body and its h2 "printed label" rule — is REUSED wholesale, not
-   duplicated: RunDrawer.tsx's own file comment has the accessibility half of
-   that reasoning, and this section exists only for what a run's content
+   The board's own detail view of a run (RunDrawer.tsx) until task-37 deleted
+   it; every rule below is read by `RunDetail.tsx` (the Runs section) now, and
+   only the names still say "drawer" — renaming a live class family is task 6's
+   cleanup, not this one's. The .drawer scaffolding above — backdrop, the aside
+   itself, .drawer-head, .drawer-close, .drawer-meta, .drawer-body and its h2
+   "printed label" rule — was REUSED wholesale rather than
+   duplicated, and this section exists only for what a run's content
    needs that an item's markdown body never did — a stale-run fault note, a
    pipeline summary, and per-item queue/attention rows. */
 .run-drawer-note {
@@ -1512,112 +1254,41 @@ code, kbd, samp, pre { font-family: inherit }
 .sheet-link { font-size: 12px; color: var(--cyan) }
 .sheet-note { font-size: 12px; color: var(--ink3); line-height: 1.45 }
 
-/* The dispatch control, in two shapes for the two places it hangs.
-   ONE component renders both (DispatchButton's `variant`) and they share the
-   tone rules below, because the thing that must never drift is the colour a
-   given action wears — not the silhouette.
-     .dispatch-tab   — on a card: the tear-off tab down its right edge, ported
-                       from the dashboard's `.row-chat`. It reads down a whole
-                       column at a glance, which a 10px chip in the foot never
-                       did, and it is the card's own edge rather than one more
-                       thing competing with the meta line for width.
-     .dispatch-chip  — in the drawer head: there is no card to tear off, and a
-                       full-height slab beside a single-line title would be a
-                       slab. Same word, same tone, chip-shaped.
+/* The dispatch control, ONE shape since task-37: `DispatchButton` composes
+   `Chip` at 28 px (DESIGN.md §8.3) and this family is what is left of its own
+   — the wrapper that pushes it to the right end of a marker row and catches
+   the two events the card must not see, and the word's action tone.
 
-   Tone is the action, and the two are the palette's existing vocabulary rather
-   than new colours: cyan is the board's one "go" accent, so it is execute;
-   mustard already means incomplete/pending everywhere else, which is exactly
-   what an ungroomed item is. Amber is deliberately NOT used — it means "a
-   human must act", and it is already spoken for by the in-progress mark two
-   elements away on the same card. */
-.dispatch-tab {
-  /* Fixed basis, and `min-width: 0` to hold it there: a flex item's default
-     `min-width: auto` refuses to shrink below its content, so `execute` would
-     otherwise carve itself a wider tab than `groom` and the column would read
-     as two different controls. Both words fit the basis at this size; the
-     card's `overflow: hidden` is the backstop if a theme's fallback face runs
-     wide. */
-  flex: 0 0 64px; min-width: 0;
-  display: flex; justify-content: center; align-items: flex-start;
-  /* Vertical padding rides the density token so the word lines up with the
-     card title; the sides are cut back, since 14px each side of a 64px tab
-     leaves nothing. Two declarations because --card-pad is a `y x` pair. */
-  padding: var(--card-pad); padding-inline: 6px;
-  background: var(--steel); color: var(--ink3);
-  border: 0; border-left: 1px solid var(--hairline); border-radius: 0 1px 1px 0;
-  cursor: pointer; transition: color .15s, background .15s, border-color .15s;
-}
-.dispatch-tab-in { display: flex; flex-direction: column; align-items: center; gap: 3px }
-.dispatch-word {
-  font-size: 13px; font-weight: 600;
-  white-space: nowrap;
-}
-.dispatch-mark { font-size: 11px; line-height: 1 }
+   `.dispatch-tab`, the card's tear-off right edge, went with the edge: the
+   card has no stroke to tear from now, and the control sits inside the marker
+   row rather than beside the face. The `variant` prop that chose between them
+   went with it.
 
-.dispatch-chip {
-  /* `flex: none` keeps it unshrinkable in the drawer head: the title's
-     ellipsis is the thing in that row built to give up room, not this. */
-  flex: none; display: inline-flex; align-items: center; gap: 5px;
-  font-size: 13px; font-weight: 600;
-  padding: 3px 8px; border: 1px solid; border-radius: 2px; cursor: pointer;
-  transition: color .15s, background .15s, border-color .15s;
-}
-.dispatch-chip .dispatch-mark { font-size: 11px; opacity: .8 }
+   Tone is the action, and DESIGN.md §8.2 keeps all three exactly as they were:
+   mustard already means incomplete/pending everywhere else, which is what an
+   ungroomed item is; cyan is the board's one "go" accent, so it is execute;
+   magenta is capture, Archive's own action, the one accent with no competing
+   job on a control. Amber is deliberately NOT used — it means "a human must
+   act", and the card's live strip two elements away is already speaking it.
 
-/* Tone, both shapes. `color-mix` against --strip rather than a hand-picked
-   tint per theme: five palettes and two tones would be twenty values to keep
-   in step, and the mix follows a palette edit for free. */
-.dispatch-tab.groom { color: var(--mustard); background: color-mix(in srgb, var(--mustard) 12%, var(--strip)); border-left-color: var(--mustard) }
-.dispatch-tab.execute { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, var(--strip)); border-left-color: var(--cyan) }
-/* The third action, Archive's own: reviving a rejection by capturing a new item
-   that cites it. --magenta because it is the one accent with no competing job
-   on a CONTROL — its other use on this screen is the refactors column tick, a
-   filled 14x3 block in a header, which is the same "two shapes never read as
-   the same object" argument that tick's own note already makes about project
-   pills. It must not be mustard or cyan: those two are the actions this one is
-   not, and a capture wearing groom's colour is the button lying about what it
+   The tone paints the WORD and not the chip, and that is the rule rather than
+   a compromise: `Chip` owns its own shell, and a rule here reaching into
+   `.ui-chip` to repaint it is precisely the restatement
+   `test/design-guards.test.ts`'s guard 7 refuses — every class token in a
+   selector is checked, so a descendant selector cannot smuggle one in either.
+   It also reads the way §5 asks: the shell is the control, the ink is what it
    will do. */
-.dispatch-tab.capture { color: var(--magenta); background: color-mix(in srgb, var(--magenta) 12%, var(--strip)); border-left-color: var(--magenta) }
-.dispatch-tab.groom:hover { color: var(--ink); background: color-mix(in srgb, var(--mustard) 30%, var(--strip)) }
-.dispatch-tab.execute:hover { color: var(--ink); background: color-mix(in srgb, var(--cyan) 30%, var(--strip)) }
-.dispatch-tab.capture:hover { color: var(--ink); background: color-mix(in srgb, var(--magenta) 30%, var(--strip)) }
-
-.dispatch-chip.groom { color: var(--mustard); border-color: color-mix(in srgb, var(--mustard) 45%, var(--hairline)); background: color-mix(in srgb, var(--mustard) 10%, var(--strip)) }
-.dispatch-chip.execute { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline)); background: color-mix(in srgb, var(--cyan) 10%, var(--strip)) }
-.dispatch-chip.capture { color: var(--magenta); border-color: color-mix(in srgb, var(--magenta) 45%, var(--hairline)); background: color-mix(in srgb, var(--magenta) 10%, var(--strip)) }
-/* The chip fills on hover where the tab only deepens: it is the one control in
-   a drawer head, so it can afford to be the loud thing; a tab doing this would
-   flash a 64px slab of accent on every pointer sweep down a column. */
-.dispatch-chip.groom:hover { color: var(--on-accent); background: var(--mustard); border-color: var(--mustard) }
-.dispatch-chip.execute:hover { color: var(--on-accent); background: var(--cyan); border-color: var(--cyan) }
-.dispatch-chip.capture:hover { color: var(--on-accent); background: var(--magenta); border-color: var(--magenta) }
-
-/* `[aria-disabled]`, not `:disabled` — the button stays a real, focusable
-   button on purpose (see DispatchButton.tsx), so the *look* of unavailable is
-   this repo's job rather than the browser's. Declared after the tone rules so
-   it wins over them without !important: an unusable control must not wear the
-   colour of an action it will not perform. Not `opacity`, which would fade the
-   tab's own left rule into a gap in the card's edge. */
-.dispatch-tab[aria-disabled='true'] {
-  color: var(--ink3); background: var(--steel); border-left-color: var(--hairline); cursor: default;
-}
-.dispatch-chip[aria-disabled='true'] {
-  color: var(--ink3); background: var(--steel); border-color: var(--hairline); cursor: default;
-}
-
-/* The one control state that is disabled and DOING something: the status
-   re-ask a click on a project-visibility block now provokes (bug-13,
-   DispatchButton.tsx). Declared after the two rules above deliberately —
-   equal specificity, both matching at once, so the later one wins and the
-   busy look is not swallowed by the disabled colour. Not a spinner: the
-   re-ask is one request long, and a control that grows moving parts for
-   200ms is worse than a cursor and a lighter label saying "asked". The
-   `default` cursor the disabled rules set is exactly the wrong signal here,
-   which is why cursor is restated rather than inherited. */
-.dispatch-tab[aria-busy='true'], .dispatch-chip[aria-busy='true'] {
-  color: var(--ink2); cursor: progress;
-}
+.dispatch-chip { flex: none; margin-left: auto; display: inline-flex }
+.dispatch-word { font-weight: 500; white-space: nowrap }
+.dispatch-mark { font-size: 11px; line-height: 1; opacity: .8 }
+.dispatch-word.groom { color: var(--mustard) }
+.dispatch-word.execute { color: var(--cyan) }
+.dispatch-word.capture { color: var(--magenta) }
+/* Blocked replaces the tone rather than dimming it (DispatchButton picks one
+   class or the other), so an unusable control never wears the colour of an
+   action it will not perform. The chip's own dashed stroke and quiet ink under
+   `[aria-disabled]` are `Chip`'s, in the ui primitives block. */
+.dispatch-word.blocked { color: var(--ink3) }
 
 /* Reachable by a screen reader and by nothing else. The 1px-clip idiom rather
    than display:none or visibility:hidden, which both remove the node from the
@@ -1631,7 +1302,7 @@ code, kbd, samp, pre { font-family: inherit }
 /* ---------------------------------------------- Runs section (Task 6)
    RunsView.tsx: the stat-tile header, project filter, and day-grouped run
    list for the orchestration archive. Deliberately built from the same
-   materials as the live run strip/drawer above rather than a new visual
+   materials as the live run strip and drawer that stood above rather than a new visual
    language of its own — strip-paper surfaces, hairline borders, 2px radii,
    mono type for ids/numbers/durations — because this section and that one
    are answering the same underlying question ("what has the orchestrator
@@ -2040,9 +1711,9 @@ code, kbd, samp, pre { font-family: inherit }
 }
 .runs-day-rows { display: flex; flex-direction: column; gap: 6px }
 
-/* One row, matching .run-strip's own button reset and paper surface — a
-   real <button> for the same free keyboard activation RunStrip.tsx's own
-   comment already argues for, not a div with a click handler bolted on. */
+/* One row, matching the run strip's own button reset and paper surface (the
+   strip left with task-37; the reset is kept) — a real <button> for the free
+   keyboard activation that buys, not a div with a click handler bolted on. */
 .runs-row {
   display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
   font-family: inherit; font-size: 11px; color: var(--ink2);
@@ -2175,9 +1846,9 @@ code, kbd, samp, pre { font-family: inherit }
 /* ---------------------------------------------- run detail pane (Task 7)
    RunDetail.tsx, rendered inside .runs-detail above. Its own chrome is
    deliberately small: the per-item chips, queue rows, verification
-   <details>, and attention entries all wear RunDrawer.tsx's own classes
-   verbatim (.run-drawer-chips, .run-drawer-item*, .run-drawer-attn*) — see
-   that component's file header for the reuse-not-reinvention rationale.
+   <details>, and attention entries all wear the run drawer's own classes
+   verbatim (.run-drawer-chips, .run-drawer-item*, .run-drawer-attn*), and are
+   their only reader since task-37 deleted that component.
    What is genuinely new here is the header row this pane needs that the
    drawer's own .drawer-head/.drawer-meta scaffolding does not fit into (this
    pane is not a <aside role="dialog">, just plain content inside
@@ -2256,7 +1927,7 @@ code, kbd, samp, pre { font-family: inherit }
 
 /* The one failure this pane can hit on its own (the tail fetch — the list
    and the poll it reads `summary`/`live` from are both handled upstream).
-   Red rather than RunDrawer's amber .run-drawer-note: that note reports a
+   Red rather than the amber .run-drawer-note: that note reports a
    run the board has stopped hearing from — a live-process fault — where
    this one reports a plain network failure on a read-only GET, a different
    and lesser kind of trouble that does not deserve the same alarm color. */
@@ -2685,13 +2356,51 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-chip-flat { border-color: transparent; background: none }
 .ui-chip-flat:hover:not(:disabled) { background: var(--strip-hi) }
 .ui-chip-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline2)) }
+/* `[aria-disabled]`, not `:disabled`, and it is a second state rather than a
+   duplicate of the rule above: a natively disabled button leaves the tab order
+   and the accessibility tree's interactive surface, and two of this board's
+   chips must NOT (task-37 brought both here). `DispatchButton` names a
+   specific, actionable reason in its `title` and an aria-describedby span, and
+   one of its three blocks answers a click by re-asking the status (bug-13);
+   the band's Orchestrate chip does the same (bug-16). Neither is readable by a
+   keyboard user if the control cannot be focused at all.
+   A dashed stroke rather than opacity: the stroke is what the chip IS at rest,
+   so dashing it says "this one is not available" in the shape's own language,
+   where a faded chip reads as a rendering artefact. Declared after every
+   variant so it wins at equal specificity without !important — an unusable
+   control must not keep wearing an available one's fill. */
+.ui-chip[aria-disabled='true'] {
+  color: var(--ink3); background: var(--strip);
+  border-color: var(--hairline2); border-style: dashed; cursor: default;
+}
+.ui-chip-ink[aria-disabled='true'] { background: var(--steel); border-color: var(--hairline) }
+.ui-chip[aria-disabled='true']:hover { background: var(--strip) }
+.ui-chip-ink[aria-disabled='true']:hover { background: var(--steel); opacity: 1 }
+/* Disabled and DOING something: the one-request status re-ask a click on a
+   project-visibility block provokes (bug-13/bug-16). Declared AFTER the
+   disabled rules deliberately — equal specificity, both matching at once, so
+   the later one wins and the busy signal is not swallowed by the disabled
+   colour. Not a spinner: the re-ask is one request long, and a control that
+   grows moving parts for 200 ms is worse than a cursor and a lighter label
+   saying "asked". The `default` cursor the rules above set is exactly the
+   wrong signal here, which is why the cursor is restated rather than
+   inherited. */
+.ui-chip[aria-busy='true'] { color: var(--ink2); cursor: progress }
 
 /* Pill — §1's status micro-label at 11/500, 999 px (§4's radius-full). */
+/* 22x20 is a FLOOR, not a fixed box (§8.3 sizes the column count pill at it):
+   a two-digit count fits inside 22 px and a three-digit one has to be allowed
+   to grow, where a fixed width would clip a board with 100 open bugs. The
+   height is fixed, because every pill in a row has to sit on one line.
+   `--strip-hi` rather than `--steel`: a count pill sits on `--strip` (a sheet)
+   or directly on `--board` (a column header), and `--steel` is the recessed
+   fill this design keeps for tracks and code spans. */
 .ui-pill {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 22px; height: 20px;
   font-size: 11px; font-weight: 500; line-height: 1.5; white-space: nowrap;
-  padding: 1px 8px; border-radius: 999px;
-  color: var(--ink2); background: var(--steel);
+  padding: 0 8px; border-radius: 999px;
+  color: var(--ink2); background: var(--strip-hi);
 }
 .ui-pill-live { color: var(--on-accent); background: var(--fill-live) }
 .ui-pill-warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, var(--strip)) }

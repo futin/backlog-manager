@@ -33,7 +33,7 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   plus the run watchdog), `orchestrator/` (a read-only view of the run-state directory, plus the in-memory watchdog and starting-run records and the two files
   the server does write), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is
   gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
-- `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), a run strip above the board's columns, and the three-step
+- `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), one run chip in the board's band, and the three-step
   Orchestrate sheet. Every derivation has one home in `lib/`, and every look more than one surface draws has one home in `components/ui/`. →
   [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
@@ -91,7 +91,8 @@ any of these — most encode a failure that already happened.
   refuses a starting project with the same `RUN_IN_PROGRESS_CODE`. `runHoldsItem` deliberately does NOT gain the parameter. Why:
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-  listener; all four dialogs call it and none binds its own (bug-23). Ranking is by mount order; entries are removed by identity, never popped. Why:
+  listener; all three dialogs call it and none binds its own (bug-23 — four until task-37 took the run drawer off the Board). Ranking is by mount order; entries
+  are removed by identity, never popped. Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
   the skills, which remain the only writers.
@@ -233,7 +234,8 @@ any of these — most encode a failure that already happened.
   `~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json`, the one file travelling server → tool; `run.json` keeps its single
   writer. Effectiveness is derived on both sides, never stored. `orchestrate.mjs` refuses `stage <id> preflight`/`dispatched` with exit `6`, only on a
   transition; `heartbeat` never touches a status; the watchdog needs no change; `init` archives a paused run like a done one. Resume for `paused` is on both
-  surfaces (`RunControls`, `resumeGate`); Resume for a crashed run stays on the strip alone. Why:
+  surfaces (`RunControls`, `resumeGate`); Resume for a crashed run is behind `watchdogStoodDown` wherever it is drawn — its surface, the board's crashed strip,
+  left with task-37 and lands on the Runs detail head in task-38. Why:
   [invariants.md](docs/subsystems/invariants.md#a-pause-request-is-a-file-the-server-writes-and-the-tool-reads)
 - **A resume is serialized at three layers, and only the third one can refuse a resume this app never asked for** (bug-19). (1) The board's Resume control has a
   synchronous in-flight guard and its mark ends on `running` **and `fresh`**. (2) `AgentsService.resume()` takes `WatchdogEntry.resumeSpawnAt` synchronously
@@ -248,10 +250,10 @@ any of these — most encode a failure that already happened.
   phase and the event log live in `WatchdogStateService`, in memory, lost on restart on purpose. `settings/watchdog.json` (`watchdog-config.util.ts`) is the
   server's one write, its own single writer, under its own nested read-write mount. Why:
   [invariants.md](docs/subsystems/invariants.md#the-watchdog-spawns-it-never-writes-the-run-file)
-- **A crashed run renders as crashed, never as nothing.** The strip states only facts the payload carries; badges, card run bars and `runClaimBlock` stay
-  freshness-based. The Runs view reads the same payload (bug-29): `MergedRun.live` is the data authority, `MergedRun.isLive` the presentation gate; both status
-  badges read `crashed` through `runStatusChip` (`lib/run-stage.ts`), never from `authority`. `crashed` is **not** a sixth `RunStatus`. Why:
-  [invariants.md](docs/subsystems/invariants.md#a-crashed-run-renders-as-crashed-never-as-nothing)
+- **A crashed run renders as crashed, never as nothing.** The Board counts it in `RunChip`'s own line (`1 run · crashed ›`) and says nothing the payload does
+  not carry; badges, card live strips and `runClaimBlock` stay freshness-based. The Runs view reads the same payload (bug-29): `MergedRun.live` is the data
+  authority, `MergedRun.isLive` the presentation gate; both status badges read `crashed` through `runStatusChip` (`lib/run-stage.ts`), never from `authority`.
+  `crashed` is **not** a sixth `RunStatus`. Why: [invariants.md](docs/subsystems/invariants.md#a-crashed-run-renders-as-crashed-never-as-nothing)
 - **The watchdog is armed only while some `run.json` says `running`.** No standing interval — a `setTimeout` chain that disarms the tick it finds none. It arms
   on the board's own runs reads, a boot-time scan, a successful `orchestrate`/`resume` spawn (wired in `AgentsController`, never `AgentsService`) and every
   `POST /api/agents/watchdog/config` save, which calls `arm()` and then an unawaited `tick()`. A run started by typing the trigger with the board never opened
@@ -262,8 +264,9 @@ any of these — most encode a failure that already happened.
   too (`WatchdogService.noteBoardResume`, called from the controller BEFORE `arm()`): grace yes, cap no. Why:
   [invariants.md](docs/subsystems/invariants.md#grace-any-attempt-starts-the-clock-only-a-success-counts)
 - **The board offers a hand resume exactly when the watchdog will not spawn one, and that is one function, not two agreeing expressions.** `watchdogStoodDown`
-  (`shared/agent.ts`) is read by `RunStrip` and by `watchdog.service.ts`'s `visit()`; its inputs `spawningEnabled()` and `watchdogExhausted`
-  (`attempts >= maxAttempts`, DERIVED, never stored) are single implementations too. Pinned by `test/watchdog-coupling.test.tsx` and
+  (`shared/agent.ts`) is read by `watchdog.service.ts`'s `visit()` and by whichever surface offers the click — `RunStrip` until task-37, the Runs detail head
+  from task-38, and NOTHING in between, which `test/watchdog-coupling.test.ts`'s reader list is what stops anyone forgetting. Its inputs `spawningEnabled()` and
+  `watchdogExhausted` (`attempts >= maxAttempts`, DERIVED, never stored) are single implementations too. Pinned by `test/watchdog-coupling.test.ts` and
   `test/watchdog-sweep.test.ts` driving both sides from one table of hand-checked verdicts. Why:
   [invariants.md](docs/subsystems/invariants.md#the-resume-coupling-the-board-offers-a-hand-resume-exactly-when-the-sweeper-will-not)
 - **Every agents POST is guarded by content-type and origin** (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the access control.

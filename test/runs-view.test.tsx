@@ -102,7 +102,7 @@ function watchdogStatus(over: Partial<WatchdogStatus> = {}): WatchdogStatus {
  * deliberately inert (no fix loops, no verification, no stage timestamps) so
  * every fixture item below states only the fields its own case actually
  * cares about, the same "narrow the default, override what matters" shape
- * the rest of this repo's test fixtures use (see orchestrator-strip.test.tsx's
+ * the rest of this repo's test fixtures use (see board-live-cards.test.tsx's
  * `fakeItem`).
  */
 function item(

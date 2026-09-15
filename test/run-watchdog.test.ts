@@ -5,7 +5,7 @@ import type { RunWatchdog, WatchdogEventKind, WatchdogStatus } from '../shared/t
 /**
  * A full `RunWatchdog`, overridden per case — the same "state everything a
  * case cares about, default the rest" shape this repo's other fixture
- * factories use (test/orchestrator-strip.test.tsx's own `queueItem`, e.g.).
+ * factories use (test/board-live-cards.test.tsx's own `queueItem`, e.g.).
  * The baseline reads as "just started watching, nothing has happened yet":
  * enabled, no attempts, no error, not exhausted.
  */

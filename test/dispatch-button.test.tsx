@@ -82,22 +82,30 @@ describe('DispatchButton', () => {
 
   // The tone class IS the action, so the palette cannot drift from the
   // derivation — `.groom` is mustard and `.execute` cyan in styles.css, and
-  // neither is amber, which the in-progress mark on the same card owns.
-  it('wears the action as its tone class, in both shapes', () => {
-    const { unmount } = render(<DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} variant="tab" />);
-    expect(screen.getByRole('button', { name: 'execute' })).toHaveClass('dispatch-tab', 'execute');
+  // neither is amber, which the live strip on the same card owns.
+  //
+  // ONE shape since task-37: the card's tear-off `tab` went with the card's
+  // edge (DESIGN.md §8.3 puts this control in the marker row as a 28 px
+  // `Chip`), and the `variant` prop went with it. The tone moved with the
+  // shape — it paints the WORD now, not the button, because the button is a
+  // `ui/` primitive and a page may never restate a primitive's look
+  // (`test/design-guards.test.ts`'s guard 7).
+  it('wears the action as its tone class on the word, inside a 28 px chip', () => {
+    const { unmount } = render(<DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} />);
+    const execute = screen.getByRole('button', { name: 'execute' });
+    expect(execute).toHaveClass('ui-chip', 'ui-chip-28');
+    expect(execute.querySelector('.dispatch-word')).toHaveClass('execute');
     unmount();
 
     render(<DispatchButton item={fakeItem({ section: 'bugs', groomed: false })} status={READY} onDispatch={() => {}} />);
-    // chip is the default shape: the drawer head renders it with no variant.
-    expect(screen.getByRole('button', { name: 'groom' })).toHaveClass('dispatch-chip', 'groom');
+    expect(screen.getByRole('button', { name: 'groom' }).querySelector('.dispatch-word')).toHaveClass('groom');
   });
 
   // The ▸ is decoration. If it ever reaches the accessible name, every query in
   // this file that asks for 'groom' or 'execute' stops matching — and so does a
   // screen reader's rendering of the control.
   it('keeps the mark out of the accessible name', () => {
-    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} variant="tab" />);
+    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} />);
     expect(screen.getByRole('button', { name: 'execute' })).toBeInTheDocument();
   });
 
