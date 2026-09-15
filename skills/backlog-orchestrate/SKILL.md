@@ -1,103 +1,65 @@
 ---
 name: backlog-orchestrate
 description: >
-  Drain a project's groomed backlog unattended: every ready bug and task, one at a time,
-  each in its own git worktree and its own headless backlog-execute session, then
-  committed, reviewed, verified and merged to main before the next item starts — or, told
-  to leave branches instead, stopped at a reviewed git branch per item with main never
-  touched. Use it to drain the backlog, work the whole queue, run the backlog while I'm
-  away, orchestrate tasks 3-7, drain the backlog but leave me branches to merge by hand, or
-  to --resume or --abort a run that was interrupted. It is the only skill that commits or
-  merges — execute still does the work, groom still writes the plans, and neither of them
-  ever touches git. Trigger: /backlog-orchestrate
+  Drain a project's groomed backlog unattended: every ready bug and task, one at a time, each in its own git worktree and its own headless backlog-execute
+  session, then committed, reviewed, verified and merged to main before the next item starts — or, told to leave branches instead, stopped at a reviewed git
+  branch per item with main never touched. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7, drain the
+  backlog but leave me branches to merge by hand, or to --resume or --abort a run that was interrupted. It is the only skill that commits or merges — execute
+  still does the work, groom still writes the plans, and neither of them ever touches git. Trigger: /backlog-orchestrate
 trigger: /backlog-orchestrate
 ---
 
 # /backlog-orchestrate — drain the queue, one verified item at a time
 
-Orchestrate is the loop around `backlog-execute`, and only the loop. For every
-groomed bug and task in a project's backlog it creates a worktree, runs one
-fresh headless `backlog-execute` session inside it, commits what that session
-produced, has it reviewed, proves it with real commands, and merges it to
-`main` — then starts the next item from the updated `main`. Under
-`--merge-mode branch` a verified item stops at its reviewed branch instead and
-`main` is never written (section 2). Execute keeps doing the work, groom keeps
-writing the plans, capture keeps filing new items.
+Orchestrate is the loop around `backlog-execute`, and only the loop. For every groomed bug and task in a project's backlog it creates a worktree, runs one fresh
+headless `backlog-execute` session inside it, commits what that session produced, has it reviewed, proves it with real commands, and merges it to `main` — then
+starts the next item from the updated `main`. Under `--merge-mode branch` a verified item stops at its reviewed branch instead and `main` is never written
+(section 2). Execute keeps doing the work, groom keeps writing the plans, capture keeps filing new items.
 
-Two things make this skill different from its three siblings, and both are
-worth having in mind before the first command runs:
+Two things make this skill different from its three siblings, and both are worth having in mind before the first command runs:
 
-- **It commits and merges.** No other backlog skill touches git at all;
-  execute's "never commits, never pushes" hard limit is unchanged and still
-  holds _inside_ the sessions this skill spawns. The orchestrator is the
-  committer, on `backlog/<id>` branches and on `main`, by merge commit only.
-- **It runs unattended.** The person who started it is usually not watching.
-  So every rule below that looks paranoid — park rather than merge, ask
-  best-effort rather than block, never `reset --hard` — is there because the
-  failure it prevents would otherwise happen silently, hours after anyone
-  could have caught it.
+- **It commits and merges.** No other backlog skill touches git at all; execute's "never commits, never pushes" hard limit is unchanged and still holds _inside_
+  the sessions this skill spawns. The orchestrator is the committer, on `backlog/<id>` branches and on `main`, by merge commit only.
+- **It runs unattended.** The person who started it is usually not watching. So every rule below that looks paranoid — park rather than merge, ask best-effort
+  rather than block, never `reset --hard` — is there because the failure it prevents would otherwise happen silently, hours after anyone could have caught it.
 
-The trigger carries the whole invocation surface:
-`/backlog-orchestrate [ids…] [--max N] [--merge-mode branch]
-[--question-mode decide] [--resume] [--abort]`. Ids and `--max` shape the
-queue (section 1); `--merge-mode` decides whether a verified item is merged to
-`main` or stops at its reviewed branch (section 2); `--question-mode` decides
-what happens to an item whose open questions nobody is there to answer —
-`park` (the default: record them, skip the item, keep draining) or `decide`
-(answer them yourself, write the answers into the item, record what you
-assumed, and execute it), section 3; `--resume` takes over a run that was
-interrupted and `--abort` ends one (section 10). With none of them, the run is
-every ready item in the project's backlog, in the board's own order, merged,
-parking anything it cannot get an answer for.
+The trigger carries the whole invocation surface: `/backlog-orchestrate [ids…] [--max N] [--merge-mode branch] [--question-mode decide] [--resume] [--abort]`.
+Ids and `--max` shape the queue (section 1); `--merge-mode` decides whether a verified item is merged to `main` or stops at its reviewed branch (section 2);
+`--question-mode` decides what happens to an item whose open questions nobody is there to answer — `park` (the default: record them, skip the item, keep
+draining) or `decide` (answer them yourself, write the answers into the item, record what you assumed, and execute it), section 3; `--resume` takes over a run
+that was interrupted and `--abort` ends one (section 10). With none of them, the run is every ready item in the project's backlog, in the board's own order,
+merged, parking anything it cannot get an answer for.
 
-The run's state lives in a machine-local run file, and
-`skills/backlog-orchestrate/tools/orchestrate.mjs` is its **only** writer —
-the same single-writer discipline `backlog.mjs` keeps for the registry and for
-item files. This skill never edits that file by hand, and never writes item
-files either, except for one narrow case in pre-flight (see below).
+The run's state lives in a machine-local run file, and `skills/backlog-orchestrate/tools/orchestrate.mjs` is its **only** writer — the same single-writer
+discipline `backlog.mjs` keeps for the registry and for item files. This skill never edits that file by hand, and never writes item files either, except for one
+narrow case in pre-flight (see below).
 
-Two reference files sit beside this one and are **not** loaded with it. Read
-them at the moment they apply, not up front:
+Two reference files sit beside this one and are **not** loaded with it. Read them at the moment they apply, not up front:
 
-- **`references/recovery.md`** — the whole of `--resume` and `--abort`. Read it
-  **in full** before running either, before any other command.
-- **`references/rationale.md`** — the measurements and the failures behind the
-  rules here. Read the matching section before arguing with a rule, or before
+- **`references/recovery.md`** — the whole of `--resume` and `--abort`. Read it **in full** before running either, before any other command.
+- **`references/rationale.md`** — the measurements and the failures behind the rules here. Read the matching section before arguing with a rule, or before
   simplifying one away.
 
 ## Where commands run, and why it is not negotiable
 
-**This session's cwd must be the project root every time `orchestrate.mjs`
-is called — whatever put it somewhere else.** Never a worktree this run
-created. A cwd inside a linked worktree (and a `--project` pointed at one)
-exits `1` with a message naming both the worktree and the project root to
-re-run from.
+**This session's cwd must be the project root every time `orchestrate.mjs` is called — whatever put it somewhere else.** Never a worktree this run created. A
+cwd inside a linked worktree (and a `--project` pointed at one) exits `1` with a message naming both the worktree and the project root to re-run from.
 
-**The scope is wider than the `cd`s this file prescribes: _anything_ that
-leaves the shell inside a worktree arms it.** The refusal is loud, but a
-refusal mid-run is still a run that stopped. (What it used to do instead, and
-the stray command that first triggered it, are in
-`references/rationale.md` under "Where commands run".)
+**The scope is wider than the `cd`s this file prescribes: _anything_ that leaves the shell inside a worktree arms it.** The refusal is loud, but a refusal
+mid-run is still a run that stopped. (What it used to do instead, and the stray command that first triggered it, are in `references/rationale.md` under "Where
+commands run".)
 
-Everything that genuinely concerns a worktree takes its path as an explicit
-flag instead of implying it from cwd: `stage --worktree`, `verify --cwd`, and
-plain `git -C <path>` for git. There are exactly two exceptions in this whole
-skill, both `backlog.mjs` rather than `orchestrate.mjs`, and both called out
-where they happen: `backlog.mjs stop` in the resume and abort paths runs
-_inside_ the worktree, because the item file it clears the marker on is the
-worktree's own copy; and §4's post-checkout probe runs `backlog.mjs show`
-inside the worktree for the same reason in reverse — asking _that_ tree, and
-only that tree, whether the item is in it is the entire point of the call.
+Everything that genuinely concerns a worktree takes its path as an explicit flag instead of implying it from cwd: `stage --worktree`, `verify --cwd`, and plain
+`git -C <path>` for git. There are exactly two exceptions in this whole skill, both `backlog.mjs` rather than `orchestrate.mjs`, and both called out where they
+happen: `backlog.mjs stop` in the resume and abort paths runs _inside_ the worktree, because the item file it clears the marker on is the worktree's own copy;
+and §4's post-checkout probe runs `backlog.mjs show` inside the worktree for the same reason in reverse — asking _that_ tree, and only that tree, whether the
+item is in it is the entire point of the call.
 
-**That exception runs in a subshell — `( cd <worktree> && … )` — never a bare
-`cd`.** Still mandatory, and one instance of the wider rule above rather than
-its whole extent. A bare `cd` persists as the session's working directory for
-every later command, and from there every `orchestrate.mjs` call refuses with
-exit `1` until something changes back — an unattended run stops dead. The
-parentheses keep the move inside one child shell that exits with the command.
-The two `sh -c 'cd … && exec claude …'` dispatch lines below are the same
-discipline by another spelling: `sh -c` is already its own process, so the
-`cd` inside it never reaches this session.
+**That exception runs in a subshell — `( cd <worktree> && … )` — never a bare `cd`.** Still mandatory, and one instance of the wider rule above rather than its
+whole extent. A bare `cd` persists as the session's working directory for every later command, and from there every `orchestrate.mjs` call refuses with exit `1`
+until something changes back — an unattended run stops dead. The parentheses keep the move inside one child shell that exits with the command. The two
+`sh -c 'cd … && exec claude …'` dispatch lines below are the same discipline by another spelling: `sh -c` is already its own process, so the `cd` inside it
+never reaches this session.
 
 The tool's exit codes, which the rest of this file quotes constantly:
 
@@ -111,36 +73,27 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `6`  | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; go to §10, _Pausing_                                                                                                                                         |
 | `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ |
 
-`6` and `7` are the two codes whose reaction is neither a fix nor a retry,
-which is exactly why neither is a `1`. A `1` means "this call was wrong". A
-`6` means "this call was right and the run is being asked to stop": never
-retry it, never work around it, go to §10. A `7` means "this call was right
-and this session is no longer the one driving this run": another `--resume`
-session claimed it, and two sessions past that point both stage-write one
-`run.json` and both end in a merge to `main`. Stop — do not retry, do not
-re-claim, do not finish the run. (That prohibition is about a session refused
-mid-run. It does not touch `--abort`, which opens by taking the run over on
-purpose: see `references/recovery.md`.) `references/recovery.md` has the whole of
-the lease, including the `claim` a resume opens with.
+`6` and `7` are the two codes whose reaction is neither a fix nor a retry, which is exactly why neither is a `1`. A `1` means "this call was wrong". A `6` means
+"this call was right and the run is being asked to stop": never retry it, never work around it, go to §10. A `7` means "this call was right and this session is
+no longer the one driving this run": another `--resume` session claimed it, and two sessions past that point both stage-write one `run.json` and both end in a
+merge to `main`. Stop — do not retry, do not re-claim, do not finish the run. (That prohibition is about a session refused mid-run. It does not touch `--abort`,
+which opens by taking the run over on purpose: see `references/recovery.md`.) `references/recovery.md` has the whole of the lease, including the `claim` a
+resume opens with.
 
-That `3` carries two meanings for `watch` deliberately: "no run yet" and
-"still running, call me again" are the same shape of retry from here. And
-unlike `backlog.mjs`, this tool has no exit `2` — running it outside a git
-repository is a `1` whose message says `no .git found`.
+That `3` carries two meanings for `watch` deliberately: "no run yet" and "still running, call me again" are the same shape of retry from here. And unlike
+`backlog.mjs`, this tool has no exit `2` — running it outside a git repository is a `1` whose message says `no .git found`.
 
 ## 1. Preview the queue — `plan` first, always
 
-Before anything is created, spawned, or locked, print the queue that a run
-_would_ work. `plan` writes nothing at all: no run file, no directories, no
-state. It is safe to run as many times as it takes to agree on the queue.
+Before anything is created, spawned, or locked, print the queue that a run _would_ work. `plan` writes nothing at all: no run file, no directories, no state. It
+is safe to run as many times as it takes to agree on the queue.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD"
 ```
 
-`--project` must be an **absolute** path (a relative one exits `1`) and must
-be the project root — the same string every later command will derive from
-its own cwd. Real output looks like this:
+`--project` must be an **absolute** path (a relative one exits `1`) and must be the project root — the same string every later command will derive from its own
+cwd. Real output looks like this:
 
 ```
 ready         task-4  Re-ask the dispatch route for a project it cannot see  (runner fix — hoisted)
@@ -152,103 +105,64 @@ needs-answers task-5  Let the run drawer jump straight to a parked item's worktr
     ? There is a TBD in this item — what still needs deciding before it can run?
 ```
 
-Three gate verdicts, and they mean exactly what `backlog-execute`'s own
-refusal gate means — this is the same rule, applied up front so a whole
-session spawn is not spent on an item execute would refuse in its first
-minute:
+Three gate verdicts, and they mean exactly what `backlog-execute`'s own refusal gate means — this is the same rule, applied up front so a whole session spawn is
+not spent on an item execute would refuse in its first minute:
 
-- **`ready`** — a task with real content under `## Plan`, or a bug whose
-  `## Fix` is no longer the `unknown` placeholder. These are the only items
-  that ever get dispatched.
-- **`ungroomed`** — the gate refused it, with the reason on the `-` lines.
-  Never dispatched, never a failure: it is a groom job, and the user should
-  see it named here rather than discover it missing later.
+- **`ready`** — a task with real content under `## Plan`, or a bug whose `## Fix` is no longer the `unknown` placeholder. These are the only items that ever get
+  dispatched.
+- **`ungroomed`** — the gate refused it, with the reason on the `-` lines. Never dispatched, never a failure: it is a groom job, and the user should see it
+  named here rather than discover it missing later.
 
-  One of those reasons is not a grooming problem at all and reads
-  differently: `not committed on main — the worktree this run creates from
-main would not contain backlog/…`. The gate reads each candidate's content
-  **at the ref a worktree is created from**, not off the working copy,
-  because that ref's bytes are the only ones a dispatched session will ever
-  see. An item groomed a minute ago and not yet committed is therefore
-  refused, and the fix is a `git commit` of `backlog/` on `main`, not a
-  groom. This is the same seam `backlog-groom` closes on, in its own
-  `Groomed on disk only` line — one sentence, two skills, one wording.
-  The orchestrator will not make that commit for you: it commits
-  inside a per-item worktree, on `backlog/<id>` alone, and nowhere else.
-  (`plan` and `init` both take `--base <ref>` for a repository whose trunk is
-  not called `main`; nothing in this file passes it, and the default is the
-  same literal `main` §4's `worktree add` uses.)
+  One of those reasons is not a grooming problem at all and reads differently:
+  `not committed on main — the worktree this run creates from main would not contain backlog/…`. The gate reads each candidate's content **at the ref a worktree
+  is created from**, not off the working copy, because that ref's bytes are the only ones a dispatched session will ever see. An item groomed a minute ago and
+  not yet committed is therefore refused, and the fix is a `git commit` of `backlog/` on `main`, not a groom. This is the same seam `backlog-groom` closes on,
+  in its own `Groomed on disk only` line — one sentence, two skills, one wording. The orchestrator will not make that commit for you: it commits inside a
+  per-item worktree, on `backlog/<id>` alone, and nowhere else. (`plan` and `init` both take `--base <ref>` for a repository whose trunk is not called `main`;
+  nothing in this file passes it, and the default is the same literal `main` §4's `worktree add` uses.)
 
-- **`needs-answers`** — the gate passed, but the item still carries an open
-  question (a `TBD`, a question line in the plan, a `## Done when` naming a
-  command this project cannot resolve). Still a candidate; see pre-flight.
+- **`needs-answers`** — the gate passed, but the item still carries an open question (a `TBD`, a question line in the plan, a `## Done when` naming a command
+  this project cannot resolve). Still a candidate; see pre-flight.
 
-Only bugs and tasks are ever candidates, bugs first then tasks, oldest first
-within each — ideas, refactors and out-of-scope items have nothing to execute
-by definition.
+Only bugs and tasks are ever candidates, bugs first then tasks, oldest first within each — ideas, refactors and out-of-scope items have nothing to execute by
+definition.
 
-**One thing outranks that ordering: a `runner-fix:` frontmatter key.** It
-means _executing this item repairs machinery this run itself depends on_ —
-this SKILL.md, `orchestrate.mjs`, the reviewer agent, the dispatch route —
-and any item carrying it is hoisted to the front of the queue, ahead of every
-unmarked item of either section, with `(runner fix — hoisted)` printed on its
-row. The reason is an observed run that queued a permission-flag fix as item
-3 of 5 and had item 1's very first dispatch refused by exactly the flag item 3
-existed to replace. Four things about the key:
+**One thing outranks that ordering: a `runner-fix:` frontmatter key.** It means _executing this item repairs machinery this run itself depends on_ — this
+SKILL.md, `orchestrate.mjs`, the reviewer agent, the dispatch route — and any item carrying it is hoisted to the front of the queue, ahead of every unmarked
+item of either section, with `(runner fix — hoisted)` printed on its row. The reason is an observed run that queued a permission-flag fix as item 3 of 5 and had
+item 1's very first dispatch refused by exactly the flag item 3 existed to replace. Four things about the key:
 
-- **Presence hoists; only `false` opts out.** `runner-fix: true`,
-  `runner-fix: yes` and a bare `runner-fix:` all hoist. A key that hoisted on
-  `true` alone would let `runner-fix: yes` silently do nothing — a queue in
-  the wrong order with nobody told, which is the failure this marker exists
-  to remove.
-- **It is read at `<base>`, exactly like the gate verdict beside it.** A
-  marker present only in the working copy does not reorder the run, for the
-  same reason a plan present only there does not pass the gate: the worktree
-  this run creates would not contain it. An item absent from `<base>`
-  altogether never hoists either.
-- **The gate is untouched.** An ungroomed marked item hoists too, appears
-  first labelled `ungroomed`, and is skipped at pre-flight like any other —
-  "the thing that would fix your runner is not groomed" is information, at
-  the top where it will be read.
-- **A human writes it**, during grooming. There is no path heuristic: most
-  `skills/` edits do not affect a running orchestrator, and a dispatch-route
-  fix that does need not name any particular path.
+- **Presence hoists; only `false` opts out.** `runner-fix: true`, `runner-fix: yes` and a bare `runner-fix:` all hoist. A key that hoisted on `true` alone would
+  let `runner-fix: yes` silently do nothing — a queue in the wrong order with nobody told, which is the failure this marker exists to remove.
+- **It is read at `<base>`, exactly like the gate verdict beside it.** A marker present only in the working copy does not reorder the run, for the same reason a
+  plan present only there does not pass the gate: the worktree this run creates would not contain it. An item absent from `<base>` altogether never hoists
+  either.
+- **The gate is untouched.** An ungroomed marked item hoists too, appears first labelled `ungroomed`, and is skipped at pre-flight like any other — "the thing
+  that would fix your runner is not groomed" is information, at the top where it will be read.
+- **A human writes it**, during grooming. There is no path heuristic: most `skills/` edits do not affect a running orchestrator, and a dispatch-route fix that
+  does need not name any particular path.
 
-Two optional flags, and they pass through to `init`
-identically, which is the point: whatever you previewed is what you get.
+Two optional flags, and they pass through to `init` identically, which is the point: whatever you previewed is what you get.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD" --ids task-3,bug-7 --max 2
 ```
 
-- **`--ids a,b,c`** restricts the run to those ids **in the order given,
-  after any runner-fix item is hoisted to the front**, overriding the
-  bugs-then-tasks ordering. An id no open item matches exits `1` naming it —
-  relay that rather than guessing what was meant. (The hoist applies here
-  too because the board sends `ids` for any strict subset of its checkbox
-  list: that list is a _selection_, not an ordering — nobody chose the order
-  it arrives in.)
-- **`--max N`** bounds how much of the queue this run will look at at all:
-  counting from the top, once `N` ready items have been placed, every item
-  after that is dropped from the run — including ones that would have read
-  `ungroomed`. It is a cap on the run, not a cap on dispatches within a
-  longer queue.
+- **`--ids a,b,c`** restricts the run to those ids **in the order given, after any runner-fix item is hoisted to the front**, overriding the bugs-then-tasks
+  ordering. An id no open item matches exits `1` naming it — relay that rather than guessing what was meant. (The hoist applies here too because the board sends
+  `ids` for any strict subset of its checkbox list: that list is a _selection_, not an ordering — nobody chose the order it arrives in.)
+- **`--max N`** bounds how much of the queue this run will look at at all: counting from the top, once `N` ready items have been placed, every item after that
+  is dropped from the run — including ones that would have read `ungroomed`. It is a cap on the run, not a cap on dispatches within a longer queue.
 
-Show the user this table and get agreement on it before starting a run,
-unless the trigger already named ids explicitly. A run is a long, expensive,
-mostly-unattended thing; the preview is the last cheap moment to notice that
-half the queue is ungroomed.
+Show the user this table and get agreement on it before starting a run, unless the trigger already named ids explicitly. A run is a long, expensive,
+mostly-unattended thing; the preview is the last cheap moment to notice that half the queue is ungroomed.
 
 ## 2. Start the run
 
-**Prefer a run started from the board to one started by typing this trigger
-into an interactive terminal.** A board-started run is spawned headless
-(`claude -p`); an interactive one additionally carries every MCP server and
-hook that terminal connects, and a run's context floor is re-read on every one
-of its several hundred turns. Measured on this machine: interactive sessions
-floor around 68k tokens before any work, headless ones around 50k. No
-board-started _orchestrate_ run existed when this was written, so treat that
-~18k as the expected order for this path, not a measured result for it.
+**Prefer a run started from the board to one started by typing this trigger into an interactive terminal.** A board-started run is spawned headless
+(`claude -p`); an interactive one additionally carries every MCP server and hook that terminal connects, and a run's context floor is re-read on every one of
+its several hundred turns. Measured on this machine: interactive sessions floor around 68k tokens before any work, headless ones around 50k. No board-started
+_orchestrate_ run existed when this was written, so treat that ~18k as the expected order for this path, not a measured result for it.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project "$PWD" --ids task-3,bug-7 --max 2
@@ -260,29 +174,19 @@ Same flags, same queue, now written down. `init` prints one JSON line:
 { "runId": "run-20260831-123118", "dir": "/Users/you/.backlog-manager/orchestrator/%2FUsers%2Fyou%2Fprojects%2Ffoo" }
 ```
 
-**Keep `dir`.** It is this run's own state directory, outside the repo, and
-it is where every artifact this skill produces belongs: session transcripts,
-pid files, question payloads, reviewer reports. Nothing this skill generates
-is ever written into the repo — an artifact inside the tree would land in the
-very diff being reviewed and ride the merge into `main`. Create the
-subdirectories as you need them (`mkdir -p "<dir>/logs"`), and stay out of
-`<dir>/runs/`, which is the tool's own archive of finished runs.
+**Keep `dir`.** It is this run's own state directory, outside the repo, and it is where every artifact this skill produces belongs: session transcripts, pid
+files, question payloads, reviewer reports. Nothing this skill generates is ever written into the repo — an artifact inside the tree would land in the very diff
+being reviewed and ride the merge into `main`. Create the subdirectories as you need them (`mkdir -p "<dir>/logs"`), and stay out of `<dir>/runs/`, which is the
+tool's own archive of finished runs.
 
-Those flat subdirectories are always **this** run's, and always start empty:
-the `init` that opened this run swept the previous run's sidecars into
-`<dir>/runs/<runId>/`, beside that run's archived `<runId>.json`. So an
-earlier run's transcripts, reviewer reports, verify output and question
-payloads live there and are never overwritten by this one — and nothing you
-write under `<dir>` needs a run id in its name to stay distinct from theirs.
+Those flat subdirectories are always **this** run's, and always start empty: the `init` that opened this run swept the previous run's sidecars into
+`<dir>/runs/<runId>/`, beside that run's archived `<runId>.json`. So an earlier run's transcripts, reviewer reports, verify output and question payloads live
+there and are never overwritten by this one — and nothing you write under `<dir>` needs a run id in its name to stay distinct from theirs.
 
-**Exit `4` means a run already exists for this project** — either one is live
-right now, or one crashed and left its `running` status behind. Plain `init`
-refuses both, identically and deliberately: a stale `running` run is the last
-surviving record of a run that died mid-item, and possibly of a worktree, a
-branch and an in-progress marker still on disk (`references/rationale.md`, §2).
-Do not retry `init`, and **never delete the run file to get past this.** Run
-`status`, show the user, then take the run over with `--resume` or end it with
-`--abort` — both of which begin at `references/recovery.md`.
+**Exit `4` means a run already exists for this project** — either one is live right now, or one crashed and left its `running` status behind. Plain `init`
+refuses both, identically and deliberately: a stale `running` run is the last surviving record of a run that died mid-item, and possibly of a worktree, a branch
+and an in-progress marker still on disk (`references/rationale.md`, §2). Do not retry `init`, and **never delete the run file to get past this.** Run `status`,
+show the user, then take the run over with `--resume` or end it with `--abort` — both of which begin at `references/recovery.md`.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
@@ -290,24 +194,17 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stat
 
 ### Merge mode, and the probe before item 1
 
-When the trigger carries `--merge-mode branch`, add that flag to the `init`
-above and change nothing else. Absent, the run is `merge` mode —
-today's behaviour byte for byte.
+When the trigger carries `--merge-mode branch`, add that flag to the `init` above and change nothing else. Absent, the run is `merge` mode — today's behaviour
+byte for byte.
 
-When the trigger carries `--question-mode decide`, add that flag to the `init`
-above too, and change nothing else. Absent, the run is `park` mode — also
-today's behaviour byte for byte. Kept as its own sentence rather than merged
-into the one above deliberately: a run reading this on turn 300 skims, and a
-compound sentence about two flags is where one of them gets dropped. The mode is run-level — set at `init`, applied
-to the whole queue, and only ever moved one way afterwards (`merge` → `branch`,
-below). `status --json` carries it as `mergeModeEffective`, which is where a
-resumed session reads it.
+When the trigger carries `--question-mode decide`, add that flag to the `init` above too, and change nothing else. Absent, the run is `park` mode — also today's
+behaviour byte for byte. Kept as its own sentence rather than merged into the one above deliberately: a run reading this on turn 300 skims, and a compound
+sentence about two flags is where one of them gets dropped. The mode is run-level — set at `init`, applied to the whole queue, and only ever moved one way
+afterwards (`merge` → `branch`, below). `status --json` carries it as `mergeModeEffective`, which is where a resumed session reads it.
 
-- **`merge`** — each verified item is merged to `main`, then its worktree and
-  branch are cleaned up (§9).
-- **`branch`** — each verified item stops at its reviewed `backlog/<id>`
-  branch and `main` is never written. Review and verification are unchanged:
-  the mode decides where a _successful_ item stops, nothing else.
+- **`merge`** — each verified item is merged to `main`, then its worktree and branch are cleaned up (§9).
+- **`branch`** — each verified item stops at its reviewed `backlog/<id>` branch and `main` is never written. Review and verification are unchanged: the mode
+  decides where a _successful_ item stops, nothing else.
 
 **In `merge` mode only, probe once, here, before item 1:**
 
@@ -315,67 +212,44 @@ resumed session reads it.
 git merge --no-ff --no-edit HEAD
 ```
 
-Merging `HEAD` into itself prints `Already up to date.`, exits `0`, and
-changes nothing that matters — no commit, no index change, no reflog entry,
-dirty tree or clean (it does refresh `.git/ORIG_HEAD`, the same as any other
-`git merge` invocation, harmlessly). The point is not the merge; it is that
-the command shape is byte-identical to
-§9's real one, so the permission classifier is asked now exactly what it will
-be asked at every merge later.
+Merging `HEAD` into itself prints `Already up to date.`, exits `0`, and changes nothing that matters — no commit, no index change, no reflog entry, dirty tree
+or clean (it does refresh `.git/ORIG_HEAD`, the same as any other `git merge` invocation, harmlessly). The point is not the merge; it is that the command shape
+is byte-identical to §9's real one, so the permission classifier is asked now exactly what it will be asked at every merge later.
 
 - **Allowed** → carry on in merge mode.
-- **Denied** (`Permission for this action was denied by the Claude Code auto
-mode classifier`) → record the downgrade and run the **whole queue** in
-  branch mode. The run does not stop and nothing is parked:
+- **Denied** (`Permission for this action was denied by the Claude Code auto mode classifier`) → record the downgrade and run the **whole queue** in branch
+  mode. The run does not stop and nothing is parked:
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge probe"
   ```
 
-  `--note` is mandatory (omitting it exits `1`), and the command only ever
-  moves `merge` → `branch`, only once per run — a second call exits `1`
-  rather than overwriting the first note.
+  `--note` is mandatory (omitting it exits `1`), and the command only ever moves `merge` → `branch`, only once per run — a second call exits `1` rather than
+  overwriting the first note.
 
-  **That note is fixed text, not the classifier's message.** The denial's
-  second half is a free-text `Reason:` written by a model, so §4's rule
-  applies to it exactly as it applies to a reviewer's findings: it does not go
-  on a command line. What is lost by paraphrasing is small and the trade is
-  worth stating — `mergeModeNote` answers "why is this run in branch mode",
-  and which of the two denial sites asked is the whole of that answer; the
-  `Reason:` text itself is in this session's own transcript, beside the
-  command that provoked it, which is where a person goes when the one line is
-  not enough.
+  **That note is fixed text, not the classifier's message.** The denial's second half is a free-text `Reason:` written by a model, so §4's rule applies to it
+  exactly as it applies to a reviewer's findings: it does not go on a command line. What is lost by paraphrasing is small and the trade is worth stating —
+  `mergeModeNote` answers "why is this run in branch mode", and which of the two denial sites asked is the whole of that answer; the `Reason:` text itself is in
+  this session's own transcript, beside the command that provoked it, which is where a person goes when the one line is not enough.
 
-**The probe is early warning, not a guarantee.** The verdict is per call, not
-per project: an identical merge command was allowed in one run and denied in
-the next, with no permission rule anywhere in either
-(`references/rationale.md`, §2 — merge mode). So a probe that passes can still
-be followed by a denied merge, which is precisely why §9 carries a degrade
-path of its own. Skip the probe in branch mode: there is no merge to ask
-about.
+**The probe is early warning, not a guarantee.** The verdict is per call, not per project: an identical merge command was allowed in one run and denied in the
+next, with no permission rule anywhere in either (`references/rationale.md`, §2 — merge mode). So a probe that passes can still be followed by a denied merge,
+which is precisely why §9 carries a degrade path of its own. Skip the probe in branch mode: there is no merge to ask about.
 
-Then work the queue **strictly one item at a time**, in the order `status
---json` lists it. Sequential is not a performance compromise to be optimised
-away later: one worktree and one session in flight is what keeps each item's
-diff attributable and each session's context clean, and two items forfeit
-both. In `merge` mode the merge between items adds a second reason — each
-item starts from the updated `main`. Branch mode gives up that half and only
-that half (§9); the rule itself is unconditional.
+Then work the queue **strictly one item at a time**, in the order `status --json` lists it. Sequential is not a performance compromise to be optimised away
+later: one worktree and one session in flight is what keeps each item's diff attributable and each session's context clean, and two items forfeit both. In
+`merge` mode the merge between items adds a second reason — each item starts from the updated `main`. Branch mode gives up that half and only that half (§9);
+the rule itself is unconditional.
 
 ## 3. Pre-flight, per item
 
 ### Recognise a leftover branched item, before anything else
 
-**Run this before the gate and before hunting for questions.** An item that
-already finished under branch mode in a _previous_ run — worktree removed,
-branch kept, waiting on a hand-merge — cannot be told apart from one that
-still needs pre-flight by reading its file: any pre-flight answer a prior run
-wrote went **into that run's worktree** ("Writing an answer into the item",
-below), which rides the branch and is never merged back into the main-tree
-copy the hunt reads. Skip this check and the hunt finds the same unresolved
-`TBD` on every subsequent run, staging a green, reviewed, verified branch as
-`needs-answers` forever — the exact failure this mode exists to avoid, one
-layer up.
+**Run this before the gate and before hunting for questions.** An item that already finished under branch mode in a _previous_ run — worktree removed, branch
+kept, waiting on a hand-merge — cannot be told apart from one that still needs pre-flight by reading its file: any pre-flight answer a prior run wrote went
+**into that run's worktree** ("Writing an answer into the item", below), which rides the branch and is never merged back into the main-tree copy the hunt reads.
+Skip this check and the hunt finds the same unresolved `TBD` on every subsequent run, staging a green, reviewed, verified branch as `needs-answers` forever —
+the exact failure this mode exists to avoid, one layer up.
 
 ```bash
 git -C "$PWD" show-ref --verify --quiet refs/heads/backlog/<id>; echo "branch=$?"
@@ -383,37 +257,30 @@ git -C "$PWD" worktree list --porcelain | grep -qxF "worktree $PWD/.worktrees/<i
 [ -e "$PWD/.worktrees/<id>" ]; echo "dir=$?"
 ```
 
-(Swallowed exit status, and the directory checked apart from git's own
-worktree registration — the same probe §4's "Create the worktree" reuses
-below; its own comment there has the full reasoning for both.)
+(Swallowed exit status, and the directory checked apart from git's own worktree registration — the same probe §4's "Create the worktree" reuses below; its own
+comment there has the full reasoning for both.)
 
-- **`branch=0 worktree=1 dir=1`** (branch exists, worktree does not — what a
-  _finished_ branch-mode item leaves behind) — confirm it actually finished:
+- **`branch=0 worktree=1 dir=1`** (branch exists, worktree does not — what a _finished_ branch-mode item leaves behind) — confirm it actually finished:
 
   ```bash
   git -C "$PWD" diff --name-only main...backlog/<id> | grep -q "/done/<id>-"; echo "archived=$?"
   ```
 
-  - **`archived=0`** — finished, waiting on a hand-merge. Stage it and move
-    straight to the **next** item; do not re-gate, hunt, dispatch, review or
-    verify it again — that would spend a whole item's budget re-proving what
-    is already green.
+  - **`archived=0`** — finished, waiting on a hand-merge. Stage it and move straight to the **next** item; do not re-gate, hunt, dispatch, review or verify it
+    again — that would spend a whole item's budget re-proving what is already green.
 
     ```bash
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
     ```
 
-  - **`archived=1`** — a real leftover, not a finished item (a crash before
-    this run re-checked the branch out). Continue below; §4 resumes it.
+  - **`archived=1`** — a real leftover, not a finished item (a crash before this run re-checked the branch out). Continue below; §4 resumes it.
 
 - **Any other combination** — nothing to recognise yet. Continue below.
 
 ### Re-check the gate
 
-`init` used the gate to decide _membership and order only_ — it deliberately
-did not bake the verdict into the run file, because a run can span hours and
-a human may groom an item mid-run. So re-gate this one item immediately
-before dispatching it:
+`init` used the gate to decide _membership and order only_ — it deliberately did not bake the verdict into the run file, because a run can span hours and a
+human may groom an item mid-run. So re-gate this one item immediately before dispatching it:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD" --ids <id> --json
@@ -425,13 +292,10 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> ungroomed --note "<the gate's own reason>"
   ```
 
-  `stage`, not `attention`: the attention list takes exactly three kinds —
-  `needs-answers`, `parked`, `fix-exhausted` — and anything else exits `1`.
-  An ungroomed item is not something that went wrong in this run, it is work
-  waiting on `/backlog-groom`, and the drawer reads it off the stage.
+  `stage`, not `attention`: the attention list takes exactly three kinds — `needs-answers`, `parked`, `fix-exhausted` — and anything else exits `1`. An
+  ungroomed item is not something that went wrong in this run, it is work waiting on `/backlog-groom`, and the drawer reads it off the stage.
 
-- **exit `1`, "unknown item id"** → the item is no longer open (somebody
-  archived or rejected it since `init`). Not an error worth stopping for:
+- **exit `1`, "unknown item id"** → the item is no longer open (somebody archived or rejected it since `init`). Not an error worth stopping for:
   `stage <id> skipped --note "no longer open"` and continue.
 - **`ready` or `needs-answers`** → carry on below.
 
@@ -441,148 +305,99 @@ Then say so on the record before doing anything slow:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> preflight
 ```
 
-**Exit `6`** — the board asked this run to pause. Do not pre-flight the item,
-do not create anything: go straight to §10, _Pausing_. Nothing was written,
-the item is still `pending`, and a resumed run picks it up from here as if
-this turn had never happened.
+**Exit `6`** — the board asked this run to pause. Do not pre-flight the item, do not create anything: go straight to §10, _Pausing_. Nothing was written, the
+item is still `pending`, and a resumed run picks it up from here as if this turn had never happened.
 
 ### Hunt for open questions
 
-Read the item file in the **main tree** (read-only — no worktree exists yet)
-and look for what would stop a headless session cold: a `TBD`, an unresolved
-either/or in the plan, a section the plan refers to that is empty, a
-`## Done when` naming a command this repo does not have. The gate's own
-`questions` array from the `plan --json` above is a starting point, not the
-whole hunt — it reads three mechanical signals; you are reading the item.
+Read the item file in the **main tree** (read-only — no worktree exists yet) and look for what would stop a headless session cold: a `TBD`, an unresolved
+either/or in the plan, a section the plan refers to that is empty, a `## Done when` naming a command this repo does not have. The gate's own `questions` array
+from the `plan --json` above is a starting point, not the whole hunt — it reads three mechanical signals; you are reading the item.
 
 No questions → skip straight to the loop.
 
 ### With questions: ask, best-effort
 
-Use `AskUserQuestion`, once, with the questions as written in the item. If a
-channel exists (an interactive terminal, or a spawned session whose host
-carries asks to the user's phone) the answer comes back and the run keeps its
-momentum. **Treat the ask as best-effort:** if the tool is unavailable in
-this session, errors, or returns without an answer, take the no-channel path
-below immediately. Never re-ask, never poll, never wait in a loop — a
-stalled unattended run is the exact failure this whole design exists to
-avoid, and an item skipped with its question recorded costs one groom edit
-and one re-run.
+Use `AskUserQuestion`, once, with the questions as written in the item. If a channel exists (an interactive terminal, or a spawned session whose host carries
+asks to the user's phone) the answer comes back and the run keeps its momentum. **Treat the ask as best-effort:** if the tool is unavailable in this session,
+errors, or returns without an answer, take the no-channel path below immediately. Never re-ask, never poll, never wait in a loop — a stalled unattended run is
+the exact failure this whole design exists to avoid, and an item skipped with its question recorded costs one groom edit and one re-run.
 
-There are three outcomes, not two, and which of the last two applies is the
-run's `questionMode` (`status --json` carries it; `park` if the field is
-absent, which is every run file written before the mode existed).
+There are three outcomes, not two, and which of the last two applies is the run's `questionMode` (`status --json` carries it; `park` if the field is absent,
+which is every run file written before the mode existed).
 
-**Answered**, in either mode → the answer is written into the item body, but
-_not yet_ and _not here_; see "Writing an answer into the item" below.
+**Answered**, in either mode → the answer is written into the item body, but _not yet_ and _not here_; see "Writing an answer into the item" below.
 
-**Not answered, `questionMode: park`** → record the questions verbatim and
-move on:
+**Not answered, `questionMode: park`** → record the questions verbatim and move on:
 
-Write `<dir>/questions/<id>.json` with the **Write tool** — a JSON array of
-the questions exactly as the item words them, `["question one","question
-two"]` — and then record it. The Write tool rather than a shell line for §4's
-reason: a question containing an apostrophe is a syntax error inside `printf
-'%s' '…'`, and a question is prose.
+Write `<dir>/questions/<id>.json` with the **Write tool** — a JSON array of the questions exactly as the item words them, `["question one","question two"]` —
+and then record it. The Write tool rather than a shell line for §4's reason: a question containing an apostrophe is a syntax error inside `printf '%s' '…'`, and
+a question is prose.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind needs-answers --detail "asked, no channel — skipped" --questions-json "<dir>/questions/<id>.json"
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> needs-answers
 ```
 
-`--questions-json` takes a file holding a JSON array of strings, and its
-content is only ever applied for `--kind needs-answers` — the other two kinds
-read the flag and validate it, then ignore its content. Both lines: the
-`attention` entry is what the run drawer surfaces to the user, the `stage` is
-what stops this item being treated as still in flight. Then continue with the
-next item; a `needs-answers` item is not a failed run.
+`--questions-json` takes a file holding a JSON array of strings, and its content is only ever applied for `--kind needs-answers` — the other two kinds read the
+flag and validate it, then ignore its content. Both lines: the `attention` entry is what the run drawer surfaces to the user, the `stage` is what stops this
+item being treated as still in flight. Then continue with the next item; a `needs-answers` item is not a failed run.
 
-**Not answered, `questionMode: decide`** → decide each question yourself,
-then record what you decided:
+**Not answered, `questionMode: decide`** → decide each question yourself, then record what you decided:
 
-1. Answer every question, using the item, the repo's `CLAUDE.md` and the code
-   as it actually is. Prefer the smallest answer that lets the plan proceed.
-2. Write those answers into the item body through the **same** path an
-   answered question takes — "Writing an answer into the item" below, inside
-   the worktree, in step 4. That is what makes the answer ride the branch into
-   `main` and show up in the item's own diff, instead of living only in a run
-   file nobody reads.
-3. Record the pairs on the queue item, so the archive can answer months later
-   whether this item's plan was written by a human or filled in by the runner:
+1. Answer every question, using the item, the repo's `CLAUDE.md` and the code as it actually is. Prefer the smallest answer that lets the plan proceed.
+2. Write those answers into the item body through the **same** path an answered question takes — "Writing an answer into the item" below, inside the worktree,
+   in step 4. That is what makes the answer ride the branch into `main` and show up in the item's own diff, instead of living only in a run file nobody reads.
+3. Record the pairs on the queue item, so the archive can answer months later whether this item's plan was written by a human or filled in by the runner:
 
-Write `<dir>/questions/<id>-assumed.json` with the **Write tool** too — an
-array of `{"question":…,"answer":…}` pairs, `[{"question":"question
-one","answer":"what you decided"}]` — and pass it in:
+Write `<dir>/questions/<id>-assumed.json` with the **Write tool** too — an array of `{"question":…,"answer":…}` pairs,
+`[{"question":"question one","answer":"what you decided"}]` — and pass it in:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" assume <id> --json "<dir>/questions/<id>-assumed.json"
 ```
 
-Then continue to the loop and dispatch the item like any other. `assume`
-appends rather than replaces, so a second question decided later in this same
-pre-flight does not erase the first. It **exits `1` on a `park` run**, nothing
-written — the tool enforces this, not this file, because this file is re-read
-on every one of a run's several hundred turns and prose drifts across them
-where a refusal does not. It is the same division of labour `stage <id>
-merged` under branch mode already keeps.
+Then continue to the loop and dispatch the item like any other. `assume` appends rather than replaces, so a second question decided later in this same
+pre-flight does not erase the first. It **exits `1` on a `park` run**, nothing written — the tool enforces this, not this file, because this file is re-read on
+every one of a run's several hundred turns and prose drifts across them where a refusal does not. It is the same division of labour `stage <id> merged` under
+branch mode already keeps.
 
-Two rules go with all three outcomes, and both carry their reasons because a
-bare prohibition is exactly what drifts:
+Two rules go with all three outcomes, and both carry their reasons because a bare prohibition is exactly what drifts:
 
-1. **Never restate an unanswered question in prose**, in either mode. A prose
-   question ends the turn. In a board-started run that exits the session,
-   `watch` sees it die, and the whole run then needs `--resume` — so "ask in
-   prose and wait" is not a milder park, it is stopping the entire run.
-   Someone who wants a question actually put to a human starts the run from a
-   harness that has `AskUserQuestion`; a run started from the board is
-   choosing between skipping the item and answering it itself.
-2. **A decided answer is an assumption, and is written as one.** The item body
-   records what was assumed and that the runner assumed it — never phrased as
-   though a human had settled it. Someone reading that item in six months has
-   to be able to tell the two apart without opening a run file.
+1. **Never restate an unanswered question in prose**, in either mode. A prose question ends the turn. In a board-started run that exits the session, `watch`
+   sees it die, and the whole run then needs `--resume` — so "ask in prose and wait" is not a milder park, it is stopping the entire run. Someone who wants a
+   question actually put to a human starts the run from a harness that has `AskUserQuestion`; a run started from the board is choosing between skipping the item
+   and answering it itself.
+2. **A decided answer is an assumption, and is written as one.** The item body records what was assumed and that the runner assumed it — never phrased as though
+   a human had settled it. Someone reading that item in six months has to be able to tell the two apart without opening a run file.
 
-And one thing `decide` does **not** change: `attention <id> --kind
-needs-answers` stays legal and stays right under it. `decide` is permission to
-answer, never an obligation to invent. A question that genuinely cannot be
-answered — a plan citing a section nobody wrote, an either/or between two
-products — still parks its item, in either mode.
+And one thing `decide` does **not** change: `attention <id> --kind needs-answers` stays legal and stays right under it. `decide` is permission to answer, never
+an obligation to invent. A question that genuinely cannot be answered — a plan citing a section nobody wrote, an either/or between two products — still parks
+its item, in either mode.
 
 ### Writing an answer into the item
 
-Orchestrate is a plugin skill and therefore a legitimate writer of item
-files — but only here, only for a pre-flight answer, and under
-`backlog-groom`'s write rules, which exist because the file is round-tripped
-by tools that must not lose what they did not understand:
+Orchestrate is a plugin skill and therefore a legitimate writer of item files — but only here, only for a pre-flight answer, and under `backlog-groom`'s write
+rules, which exist because the file is round-tripped by tools that must not lose what they did not understand:
 
-- round-trip every frontmatter key you did not come to change, byte-for-byte,
-  including ones you have never seen before;
-- leave the rest of the body byte-for-byte identical — write the answer under
-  the section it clarifies, do not reflow, retitle, or tidy anything else;
-- write before any move (nothing here moves a file, but the rule is the same
-  one, and it is what keeps a half-written item from ever existing).
+- round-trip every frontmatter key you did not come to change, byte-for-byte, including ones you have never seen before;
+- leave the rest of the body byte-for-byte identical — write the answer under the section it clarifies, do not reflow, retitle, or tidy anything else;
+- write before any move (nothing here moves a file, but the rule is the same one, and it is what keeps a half-written item from ever existing).
 
-**Write it inside the worktree, after the worktree exists — not in the main
-tree.** Two reasons, both hard-won: a worktree checks out `main`'s _commit_,
-so an uncommitted amendment sitting in the main tree would never reach the
-session that needs it; and worse, that same uncommitted change to the item's
-own path is what makes `git merge` refuse later ("your local changes would be
-overwritten"), because the item file is exactly the path the branch also
-touches when execute archives it. Amending inside the worktree instead means
-the answer rides the branch and reaches `main` through the merge, like every
-other change this item makes. So: hunt and ask here, write in step 4.
+**Write it inside the worktree, after the worktree exists — not in the main tree.** Two reasons, both hard-won: a worktree checks out `main`'s _commit_, so an
+uncommitted amendment sitting in the main tree would never reach the session that needs it; and worse, that same uncommitted change to the item's own path is
+what makes `git merge` refuse later ("your local changes would be overwritten"), because the item file is exactly the path the branch also touches when execute
+archives it. Amending inside the worktree instead means the answer rides the branch and reaches `main` through the merge, like every other change this item
+makes. So: hunt and ask here, write in step 4.
 
 ## 4. The loop — worktree, dispatch, watch
 
 ### Create the worktree
 
-**Probe for leftovers before creating anything.** Every park path in this
-file keeps the item's branch _and_ its worktree on purpose — fix-exhausted
-(§7), nothing to verify with (§8), a merge conflict and a main tree not on
-`main` (§9) — and `finish` cleans up none of it. The item most likely to be
-queued by the _next_ run is therefore exactly the one that already has both
-on disk, because parking is what leaves it open. `worktree add` fails on
-either: the directory is already there, and the branch answers
-`fatal: a branch named 'backlog/<id>' already exists`.
+**Probe for leftovers before creating anything.** Every park path in this file keeps the item's branch _and_ its worktree on purpose — fix-exhausted (§7),
+nothing to verify with (§8), a merge conflict and a main tree not on `main` (§9) — and `finish` cleans up none of it. The item most likely to be queued by the
+_next_ run is therefore exactly the one that already has both on disk, because parking is what leaves it open. `worktree add` fails on either: the directory is
+already there, and the branch answers `fatal: a branch named 'backlog/<id>' already exists`.
 
 ```bash
 git -C "$PWD" show-ref --verify --quiet refs/heads/backlog/<id>; echo "branch=$?"
@@ -590,109 +405,81 @@ git -C "$PWD" worktree list --porcelain | grep -qxF "worktree $PWD/.worktrees/<i
 [ -e "$PWD/.worktrees/<id>" ]; echo "dir=$?"
 ```
 
-`0` means it is there, `1` means it is not. All three swallow their own exit
-status so the call itself always succeeds — a `1` from `show-ref` is an
-answer, not a failure. The directory is probed _separately_ from the worktree
-registration because the two can disagree: a pruned registration leaves a
-plain directory git no longer knows about, and `worktree add` refuses that
-just as hard as one it does know about. Then:
+`0` means it is there, `1` means it is not. All three swallow their own exit status so the call itself always succeeds — a `1` from `show-ref` is an answer, not
+a failure. The directory is probed _separately_ from the worktree registration because the two can disagree: a pruned registration leaves a plain directory git
+no longer knows about, and `worktree add` refuses that just as hard as one it does know about. Then:
 
 - **All three `1`** — nothing left over. Create it, below.
-- **`branch=0 worktree=0 dir=0`** — a previous run's work is sitting there.
-  **Never delete either to make room.** That is the same rule §10's abort
-  path spells out, for the same reason: an unmerged worktree can hold
-  uncommitted work that no commit and no reflog can bring back, and this run
-  cannot know from outside that it doesn't. Look first —
+- **`branch=0 worktree=0 dir=0`** — a previous run's work is sitting there. **Never delete either to make room.** That is the same rule §10's abort path spells
+  out, for the same reason: an unmerged worktree can hold uncommitted work that no commit and no reflog can bring back, and this run cannot know from outside
+  that it doesn't. Look first —
 
   ```bash
   git -C "$PWD/.worktrees/<id>" status
   git -C "$PWD" log --oneline main..backlog/<id>
   ```
 
-  — then ask, best-effort, exactly as pre-flight does, and take one of two
-  answers:
-  - **Resume onto it.** Record the existing pair and re-enter the loop at
-    **Inspect** (step 5), _not_ at dispatch: the tree already carries a
-    previous session's work, and a fresh execute session dropped on top of it
-    would produce a diff nobody can attribute, which the reviewer and the
-    committer would then treat as this run's.
+  — then ask, best-effort, exactly as pre-flight does, and take one of two answers:
+  - **Resume onto it.** Record the existing pair and re-enter the loop at **Inspect** (step 5), _not_ at dispatch: the tree already carries a previous session's
+    work, and a fresh execute session dropped on top of it would produce a diff nobody can attribute, which the reviewer and the committer would then treat as
+    this run's.
 
     ```bash
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id>
     ```
 
-  - **Park it again** — the only answer with no channel, and the honest one
-    either way: the item is parked because a human decision was already asked
-    for and not given, and a new run does not change that.
+  - **Park it again** — the only answer with no channel, and the honest one either way: the item is parked because a human decision was already asked for and
+    not given, and a new run does not change that.
 
     ```bash
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "leftover worktree $PWD/.worktrees/<id> and branch backlog/<id> from an earlier run — resume or clear them by hand before the next run"
     node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
     ```
 
-- **`branch=0 worktree=1 dir=1`** — a branch with no worktree. **A real
-  leftover, not a finished item**: §3's own copy of this probe (top of that
-  section) already ran the archive-move check for this exact shape, and would
-  have staged the item `branched` and skipped straight to the next item had
-  it found one — an item cannot reach this point in this state any other way.
-  What's left is the other cause of a branch with no worktree: a run
-  committed the item's work and then crashed before re-checking the branch
-  out. Resume it: check the branch out into a fresh worktree _without_ `-b`:
+- **`branch=0 worktree=1 dir=1`** — a branch with no worktree. **A real leftover, not a finished item**: §3's own copy of this probe (top of that section)
+  already ran the archive-move check for this exact shape, and would have staged the item `branched` and skipped straight to the next item had it found one — an
+  item cannot reach this point in this state any other way. What's left is the other cause of a branch with no worktree: a run committed the item's work and
+  then crashed before re-checking the branch out. Resume it: check the branch out into a fresh worktree _without_ `-b`:
 
   ```bash
   git -C "$PWD" worktree add .worktrees/<id> backlog/<id>
   ```
 
-  then `stage <id> dispatched --worktree … --branch …` and Inspect, because
-  the branch may already carry commits.
+  then `stage <id> dispatched --worktree … --branch …` and Inspect, because the branch may already carry commits.
 
-- **Any other combination** — a registered worktree whose directory is gone,
-  a directory git has no record of, a worktree sitting on a detached HEAD.
-  These are states this skill never creates, so it does not get to guess what
-  they mean: park, with the detail naming exactly what the three probes said.
-  Do not `worktree prune`, do not `branch -D`, do not `--force` anything —
-  this run's authority stops at worktrees it created itself.
+- **Any other combination** — a registered worktree whose directory is gone, a directory git has no record of, a worktree sitting on a detached HEAD. These are
+  states this skill never creates, so it does not get to guess what they mean: park, with the detail naming exactly what the three probes said. Do not
+  `worktree prune`, do not `branch -D`, do not `--force` anything — this run's authority stops at worktrees it created itself.
 
 ```bash
 git -C "$PWD" worktree add .worktrees/<id> -b backlog/<id> main
 ```
 
-The main working tree is never touched by this, and a dirty main tree does
-not block it: the new worktree checks out `main`'s HEAD commit, not the
-working copy. Creating a worktree on a _new_ branch while `main` itself is
-checked out in the main tree is legal — the branches differ, so nothing is
-locked.
+The main working tree is never touched by this, and a dirty main tree does not block it: the new worktree checks out `main`'s HEAD commit, not the working copy.
+Creating a worktree on a _new_ branch while `main` itself is checked out in the main tree is legal — the branches differ, so nothing is locked.
 
-**Then prove the item survived the checkout, before writing any pre-flight
-answer and before dispatching anything.** That same sentence — the worktree
-checks out `main`'s _commit_, not the working copy — is also how an item can
-be missing from the tree the session is about to run in: an item groomed but
-never committed, which is the normal state of an item the moment grooming
-finishes, exists only in the main tree. Ask `backlog.mjs` from inside the new
-worktree, so its own `.git`-ancestor walk resolves to the worktree and not to
-the main tree (a subshell, per the rules at the top of this file):
+**Then prove the item survived the checkout, before writing any pre-flight answer and before dispatching anything.** That same sentence — the worktree checks
+out `main`'s _commit_, not the working copy — is also how an item can be missing from the tree the session is about to run in: an item groomed but never
+committed, which is the normal state of an item the moment grooming finishes, exists only in the main tree. Ask `backlog.mjs` from inside the new worktree, so
+its own `.git`-ancestor walk resolves to the worktree and not to the main tree (a subshell, per the rules at the top of this file):
 
 ```bash
 ( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" show <id> ); echo "present=$?"
 ```
 
 - **`present=0`** — the item is in the worktree. Carry on below.
-- **`present=1`** — it is not. Park, and keep the worktree and the branch
-  exactly as every other park path in this file does: delete nothing, `prune`
-  nothing, `-D` nothing.
+- **`present=1`** — it is not. Park, and keep the worktree and the branch exactly as every other park path in this file does: delete nothing, `prune` nothing,
+  `-D` nothing.
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<id> is not present in the worktree checked out from main — commit backlog/ on main, then re-run"
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
-§1's gate refuses an uncommitted item before a run ever starts, so on the
-ordinary path this probe never fires. It is here because it catches strictly
-more than that gate can — and because what it prevents is not a crash but a
-_silent success_: a session with no item file in its tree finds the main
-tree's copy, works that one, and every stage of the run reports success over a
-branch carrying code with no lifecycle move on it. (`references/rationale.md`,
-§4, lists everything the probe catches that the gate cannot.)
+§1's gate refuses an uncommitted item before a run ever starts, so on the ordinary path this probe never fires. It is here because it catches strictly more than
+that gate can — and because what it prevents is not a crash but a _silent success_: a session with no item file in its tree finds the main tree's copy, works
+that one, and every stage of the run reports success over a branch carrying code with no lifecycle move on it. (`references/rationale.md`, §4, lists everything
+the probe catches that the gate cannot.)
 
 Then keep the new directory out of everybody's `git status`, idempotently:
 
@@ -701,42 +488,30 @@ EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
 grep -qxF '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '.worktrees/\n' >> "$EXCLUDE"
 ```
 
-Run that from the project root (the path `git rev-parse` prints is relative
-to cwd). Three details, all load-bearing, all explained in
-`references/rationale.md` (§4):
+Run that from the project root (the path `git rev-parse` prints is relative to cwd). Three details, all load-bearing, all explained in `references/rationale.md`
+(§4):
 
-- **`--git-common-dir`, and the check before the append** — `info/exclude` is
-  one shared file for the repo and every worktree of it, so a blind append
-  grows duplicates in a file the user owns and changes `git status` repo-wide.
-- **`grep -qxF`** — whole line, fixed string. Anything looser either misses an
-  existing entry or matches an unrelated one and skips a needed append.
-- **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it
-  is an uncommitted change in the user's repo at best, and a stray commit
-  riding a merge into `main` at worst.
+- **`--git-common-dir`, and the check before the append** — `info/exclude` is one shared file for the repo and every worktree of it, so a blind append grows
+  duplicates in a file the user owns and changes `git status` repo-wide.
+- **`grep -qxF`** — whole line, fixed string. Anything looser either misses an existing entry or matches an unrelated one and skips a needed append.
+- **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it is an uncommitted change in the user's repo at best, and a stray commit riding a
+  merge into `main` at worst.
 
-Now write any pre-flight answer into the worktree's copy of the item file
-(see above), and record the worktree on the run:
+Now write any pre-flight answer into the worktree's copy of the item file (see above), and record the worktree on the run:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id> --permission-mode auto
 ```
 
-Pass the worktree as an **absolute** path: `reconcile` and `abort` both test
-it with a plain existence check from wherever they happen to be running, and
-a relative path that resolves for one of them may not for the other.
+Pass the worktree as an **absolute** path: `reconcile` and `abort` both test it with a plain existence check from wherever they happen to be running, and a
+relative path that resolves for one of them may not for the other.
 
-`--permission-mode auto` here records on the run what the dispatch below is
-about to launch under. It must match that dispatch line's own flag — the
-field exists so that a denial found in a transcript has the mode that
-produced it recorded beside it, and a field recording the wrong mode is
-worse than no field.
+`--permission-mode auto` here records on the run what the dispatch below is about to launch under. It must match that dispatch line's own flag — the field
+exists so that a denial found in a transcript has the mode that produced it recorded beside it, and a field recording the wrong mode is worse than no field.
 
-**Exit `6` here** — the pause request arrived during pre-flight. Leave the
-worktree and the branch exactly as they are (the worktree may carry the
-pre-flight answer you just wrote into it; nothing else has happened in it),
-leave the item at `preflight`, and go to §10, _Pausing_. A resumed run
-re-enters at this same dispatch line onto that same worktree —
-`references/recovery.md` names the shape.
+**Exit `6` here** — the pause request arrived during pre-flight. Leave the worktree and the branch exactly as they are (the worktree may carry the pre-flight
+answer you just wrote into it; nothing else has happened in it), leave the item at `preflight`, and go to §10, _Pausing_. A resumed run re-enters at this same
+dispatch line onto that same worktree — `references/recovery.md` names the shape.
 
 ### Dispatch the headless session
 
@@ -746,181 +521,104 @@ nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/b
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
-Both lines in **one** Bash invocation — each invocation gets its own shell,
-so `$!` is only readable in the call that backgrounded the child; that is why
-the pid goes straight into a file. `exec` matters too: it makes the pid you
-recorded the `claude` process itself rather than a wrapper shell around it,
-and `watch` polls exactly that pid. `nohup` and the redirects are what let
-the session outlive the single tool call that started it. stdout is the
-stream-json transcript and goes to the `.jsonl` that `watch` reads; stderr
-goes to its own file, so a warning printed by the CLI never lands in the
-middle of the transcript.
+Both lines in **one** Bash invocation — each invocation gets its own shell, so `$!` is only readable in the call that backgrounded the child; that is why the
+pid goes straight into a file. `exec` matters too: it makes the pid you recorded the `claude` process itself rather than a wrapper shell around it, and `watch`
+polls exactly that pid. `nohup` and the redirects are what let the session outlive the single tool call that started it. stdout is the stream-json transcript
+and goes to the `.jsonl` that `watch` reads; stderr goes to its own file, so a warning printed by the CLI never lands in the middle of the transcript.
 
-**`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the
-prompt marker by another spelling.** It says "a run owns this process" to a
-reader that cannot see the prompt at all: the machine's `Stop` hook, which
-holds a finished turn open at the dashboard for up to ten minutes so a remote
-answer can arrive. That hold is right for a hand-started headless session — no
-terminal to type into means the dashboard is its only channel — and pure
-wall-clock for this one, which nobody is going to answer and which is under
-orders to ignore a dashboard message anyway. A hook set up to read the
-variable notifies and exits instead; a machine without that hook is unaffected,
-so the assignment costs nothing either way. Substituted from this run, exactly
-like the prompt marker's own `<runId>`, and safe inside the single-quoted body
-by construction: a run id is `run-YYYYMMDD-HHMMSS`, no quote, space or
-metacharacter in it. It goes **inside** the `sh -c '…'` body as a prefix on
-`exec` — POSIX puts a simple command's assignments in the environment of the
-program it execs — rather than in front of `nohup`, where it would be one more
-thing a stray space can detach from the command. **§5's `--resume` retry
-carries it too**, unlike the prompt marker, which that line deliberately does
-not repeat: a resumed session keeps its original prompt but gets a brand-new
-environment, so the assignment has to be made again or the retry pays the hold
-the fresh dispatch was spared.
+**`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the prompt marker by another spelling.** It says "a run owns this process" to a reader
+that cannot see the prompt at all: the machine's `Stop` hook, which holds a finished turn open at the dashboard for up to ten minutes so a remote answer can
+arrive. That hold is right for a hand-started headless session — no terminal to type into means the dashboard is its only channel — and pure wall-clock for this
+one, which nobody is going to answer and which is under orders to ignore a dashboard message anyway. A hook set up to read the variable notifies and exits
+instead; a machine without that hook is unaffected, so the assignment costs nothing either way. Substituted from this run, exactly like the prompt marker's own
+`<runId>`, and safe inside the single-quoted body by construction: a run id is `run-YYYYMMDD-HHMMSS`, no quote, space or metacharacter in it. It goes **inside**
+the `sh -c '…'` body as a prefix on `exec` — POSIX puts a simple command's assignments in the environment of the program it execs — rather than in front of
+`nohup`, where it would be one more thing a stray space can detach from the command. **§5's `--resume` retry carries it too**, unlike the prompt marker, which
+that line deliberately does not repeat: a resumed session keeps its original prompt but gets a brand-new environment, so the assignment has to be made again or
+the retry pays the hold the fresh dispatch was spared.
 
-**`-n "orch <id>"` is the third marker, and its reader is a person.** The
-prompt marker is read by the model, `BM_ORCH_RUN` by a hook, and this one by
-whoever opens the dashboard mid-run to see what is happening — the channel
-follows the reader, three times on one line. Without it this was the one
-session in the whole system with no display name: every other spawn goes
-through the board's own server, which composes one (`orchestrate <project>`,
-`bl <project> <id>`, `resume <project>`, `watchdog resume <project>`) and
-posts it to the dashboard, while this line spawns `claude` itself and reached
-none of that code. An unnamed session's row falls back to the bare project
-name, so the session actually doing the work read exactly like one somebody
-started in a terminal, identifiable only by opening its transcript.
+**`-n "orch <id>"` is the third marker, and its reader is a person.** The prompt marker is read by the model, `BM_ORCH_RUN` by a hook, and this one by whoever
+opens the dashboard mid-run to see what is happening — the channel follows the reader, three times on one line. Without it this was the one session in the whole
+system with no display name: every other spawn goes through the board's own server, which composes one (`orchestrate <project>`, `bl <project> <id>`,
+`resume <project>`, `watchdog resume <project>`) and posts it to the dashboard, while this line spawns `claude` itself and reached none of that code. An unnamed
+session's row falls back to the bare project name, so the session actually doing the work read exactly like one somebody started in a terminal, identifiable
+only by opening its transcript.
 
-The name is the **item id**, not the project and not the run id. The worktree
-cwd already files the row under a project of its own
-(`…backlog-manager--worktrees-<id>`), `run.json` maps session id to run for
-anything machine-side, and `BM_ORCH_RUN` above carries the run id to the one
-reader that needs it — so spending the name on either would repeat what is
-already on screen instead of the one thing a reader is looking for. It also
-keeps the whole name far under the dashboard's 60-character cap, which matters
-because going over it is silent (`parseSpawnRequest` drops an over-long or
-mis-charactered name and the row falls back to the project name, with no
-failed request anywhere to notice). Same reason there is no `:` or `/` in it
-and the separator is a space: the dashboard's `NAME_RE` is
-`/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/`, which is what the three server-side helpers
-each concluded independently.
+The name is the **item id**, not the project and not the run id. The worktree cwd already files the row under a project of its own
+(`…backlog-manager--worktrees-<id>`), `run.json` maps session id to run for anything machine-side, and `BM_ORCH_RUN` above carries the run id to the one reader
+that needs it — so spending the name on either would repeat what is already on screen instead of the one thing a reader is looking for. It also keeps the whole
+name far under the dashboard's 60-character cap, which matters because going over it is silent (`parseSpawnRequest` drops an over-long or mis-charactered name
+and the row falls back to the project name, with no failed request anywhere to notice). Same reason there is no `:` or `/` in it and the separator is a space:
+the dashboard's `NAME_RE` is `/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/`, which is what the three server-side helpers each concluded independently.
 
-**§5's `--resume` retry names itself too, and differently** — `orch <id> retry
-1`, the same counter its own `<id>-retry-1.jsonl` carries. `-n` on a resume
-renames the existing row rather than adding a second one (measured on CLI
-2.1.250: the flag appends a fresh `custom-title` record to the same
-transcript, and the dashboard reads the newest), which is exactly what should
-happen — the row should say the item is on its retry, while still reading as
-the same item. Double-quoted inside the single-quoted body because the name
-holds a space; unquoted it would split, and `claude` would take `orch` as the
-name and the id as a stray argument.
+**§5's `--resume` retry names itself too, and differently** — `orch <id> retry 1`, the same counter its own `<id>-retry-1.jsonl` carries. `-n` on a resume
+renames the existing row rather than adding a second one (measured on CLI 2.1.250: the flag appends a fresh `custom-title` record to the same transcript, and
+the dashboard reads the newest), which is exactly what should happen — the row should say the item is on its retry, while still reading as the same item.
+Double-quoted inside the single-quoted body because the name holds a space; unquoted it would split, and `claude` would take `orch` as the name and the id as a
+stray argument.
 
-**The prompt is spent on more than the trigger, and every word of the marker
-is load-bearing.** The prompt is the _entire_ channel from this run to that
-session — after it the two processes share nothing but a directory — and
-everything else the session could infer is genuinely ambiguous: a worktree cwd
-is also what a human makes by hand, and a `backlog/<id>` branch is also what a
-_previous_ run leaves behind for a hand-merge (§3 has a probe for exactly that
-state). Left as the bare trigger, a dispatched session reads as a
-hand-started one, and the one that was messaged through the dashboard mid-run
-answered the user instead of leaving the problem for this run to find — three
-message round-trips with the whole queue idle behind it. Six constraints on
-that string:
+**The prompt is spent on more than the trigger, and every word of the marker is load-bearing.** The prompt is the _entire_ channel from this run to that session
+— after it the two processes share nothing but a directory — and everything else the session could infer is genuinely ambiguous: a worktree cwd is also what a
+human makes by hand, and a `backlog/<id>` branch is also what a _previous_ run leaves behind for a hand-merge (§3 has a probe for exactly that state). Left as
+the bare trigger, a dispatched session reads as a hand-started one, and the one that was messaged through the dashboard mid-run answered the user instead of
+leaving the problem for this run to find — three message round-trips with the whole queue idle behind it. Six constraints on that string:
 
-- **The id stays the first token after the trigger**, marker after it.
-  `backlog-execute`'s "Pick an item" reads the trigger's own words for an id.
-  Putting anything between the two is how this line teaches it to guess.
-- **One line, and no apostrophes.** The dispatch is `nohup sh -c '…'` — a
-  single-quoted body with the prompt double-quoted inside it. One apostrophe
-  closes the outer quote and the whole dispatch becomes a syntax error, on the
-  one line whose failure mode is "every item in the queue parks". Write
-  "you cannot", never the contraction.
-- **The marker opens with `[orchestrator-run`,** a fixed, greppable token.
-  `backlog-execute`'s own section names that exact literal, and a test reads it
-  off this line and asserts it into that file, so the two cannot drift into two
-  markers that merely look alike.
-- **`<runId>`, `<n> of <m>` and the branch are substituted**, the standing rule
-  is fixed text. Fill the first three from this run and this item's position in
+- **The id stays the first token after the trigger**, marker after it. `backlog-execute`'s "Pick an item" reads the trigger's own words for an id. Putting
+  anything between the two is how this line teaches it to guess.
+- **One line, and no apostrophes.** The dispatch is `nohup sh -c '…'` — a single-quoted body with the prompt double-quoted inside it. One apostrophe closes the
+  outer quote and the whole dispatch becomes a syntax error, on the one line whose failure mode is "every item in the queue parks". Write "you cannot", never
+  the contraction.
+- **The marker opens with `[orchestrator-run`,** a fixed, greppable token. `backlog-execute`'s own section names that exact literal, and a test reads it off
+  this line and asserts it into that file, so the two cannot drift into two markers that merely look alike.
+- **`<runId>`, `<n> of <m>` and the branch are substituted**, the standing rule is fixed text. Fill the first three from this run and this item's position in
   the queue; change none of the words after the colon.
-- **The prompt, not `--append-system-prompt` and not an env var.** Both reach
-  the model; neither reaches the dashboard drawer. The prompt is the only
-  string the model and the _human_ reading that conversation both see, and the
-  human not knowing a run owns the work is the other half of the same defect.
-  This rules an env var out for _this_ marker and for nothing else — a marker
-  whose reader is a hook belongs in the environment, because a hook cannot read
-  a prompt. The channel follows the reader.
-- **Merge mode is deliberately left out.** Nothing the session may do differs
-  between `merge` and `branch` — it never merges either way — and a marker
-  naming facts the session cannot act on trains it to skim the ones it must.
+- **The prompt, not `--append-system-prompt` and not an env var.** Both reach the model; neither reaches the dashboard drawer. The prompt is the only string the
+  model and the _human_ reading that conversation both see, and the human not knowing a run owns the work is the other half of the same defect. This rules an
+  env var out for _this_ marker and for nothing else — a marker whose reader is a hook belongs in the environment, because a hook cannot read a prompt. The
+  channel follows the reader.
+- **Merge mode is deliberately left out.** Nothing the session may do differs between `merge` and `branch` — it never merges either way — and a marker naming
+  facts the session cannot act on trains it to skim the ones it must.
 
-**Prose this run did not compose — reviewer findings, execute's `## Outcome`,
-a captured error — never rides a shell command line; it goes in a file and the
-command names the file.** This is the general form of the constraint above it,
-and it is stated separately because the two have different reach: "no
-apostrophes" governs the fixed marker text _this run writes itself_, and can
-be obeyed by choosing different words, while the words in a fix-loop or retry
-prompt belong to somebody else — a reviewer quoting `` `rowId` `` is simply
-what a code review looks like, and no rule aimed at the driver can make that
-text safe in a command position. Every `"…"` inside the single-quoted `sh -c`
-body is still a command position: `sh` performs command substitution (`` `x` ``
-and `$(x)`) and parameter expansion (`$x`) there, and one apostrophe ends the
-body outright. Three `.err` files across three projects on this machine are
-that rule being learned the other way (bug-31). The tool already works this
-way for the payloads it takes — `attention --questions-json <file>` and
-`assume --json <file>` — and §5's retry launcher, §7's fix loop and §3's two
-questions payloads are the prose halves that now match it.
+**Prose this run did not compose — reviewer findings, execute's `## Outcome`, a captured error — never rides a shell command line; it goes in a file and the
+command names the file.** This is the general form of the constraint above it, and it is stated separately because the two have different reach: "no
+apostrophes" governs the fixed marker text _this run writes itself_, and can be obeyed by choosing different words, while the words in a fix-loop or retry
+prompt belong to somebody else — a reviewer quoting `` `rowId` `` is simply what a code review looks like, and no rule aimed at the driver can make that text
+safe in a command position. Every `"…"` inside the single-quoted `sh -c` body is still a command position: `sh` performs command substitution (`` `x` `` and
+`$(x)`) and parameter expansion (`$x`) there, and one apostrophe ends the body outright. Three `.err` files across three projects on this machine are that rule
+being learned the other way (bug-31). The tool already works this way for the payloads it takes — `attention --questions-json <file>` and `assume --json <file>`
+— and §5's retry launcher, §7's fix loop and §3's two questions payloads are the prose halves that now match it.
 
-The Write tool creates the directory on its way to the file, so none of
-those paths needs a `mkdir -p` ahead of it — unlike `<dir>/logs/` and
-`<dir>/verify/`, which a shell redirect will not create for itself.
+The Write tool creates the directory on its way to the file, so none of those paths needs a `mkdir -p` ahead of it — unlike `<dir>/logs/` and `<dir>/verify/`,
+which a shell redirect will not create for itself.
 
-**The rule has a second half, and it is the one that looks harmless:
-`attention --detail`, `stage --note` and `merge-mode --note` take the
-driver's own short words — a summary in your voice, never a verbatim quote of
-text this run did not compose.** Those three values stay inline arguments on
-purpose: they are one short line each, they are what the run drawer renders,
-and routing every one of them through a file would trade a real cost for a
-hazard that paraphrasing removes outright. What makes that safe is that the
-copy of record already exists somewhere else and the entry names it — the
-reviewer's report at `<dir>/reviews/<id>-<n>.md`, a verify attempt's rows in
-`status --json`, a session's own `<dir>/logs/<id>.jsonl`. So each value is a
-pointer plus a sentence, and pasting the thing it points at both duplicates
-the record and puts model output on a command line. Every placeholder in one
-of those values is spelled to say whose words it is, and a test reads them out
-of this file against a closed list: a new placeholder there is a decision to
-make, not a blank to fill.
+**The rule has a second half, and it is the one that looks harmless: `attention --detail`, `stage --note` and `merge-mode --note` take the driver's own short
+words — a summary in your voice, never a verbatim quote of text this run did not compose.** Those three values stay inline arguments on purpose: they are one
+short line each, they are what the run drawer renders, and routing every one of them through a file would trade a real cost for a hazard that paraphrasing
+removes outright. What makes that safe is that the copy of record already exists somewhere else and the entry names it — the reviewer's report at
+`<dir>/reviews/<id>-<n>.md`, a verify attempt's rows in `status --json`, a session's own `<dir>/logs/<id>.jsonl`. So each value is a pointer plus a sentence,
+and pasting the thing it points at both duplicates the record and puts model output on a command line. Every placeholder in one of those values is spelled to
+say whose words it is, and a test reads them out of this file against a closed list: a new placeholder there is a decision to make, not a blank to fill.
 
-The marker also arrives in that session as `$2`…`$N`, substituted into
-`backlog-execute`'s SKILL.md before it is read. That is safe only because no
-fenced block under `skills/` reads a positional parameter — the bug-9 guard,
-which this line makes load-bearing for a second, unrelated reason.
+The marker also arrives in that session as `$2`…`$N`, substituted into `backlog-execute`'s SKILL.md before it is read. That is safe only because no fenced block
+under `skills/` reads a positional parameter — the bug-9 guard, which this line makes load-bearing for a second, unrelated reason.
 
-**`--verbose` is required, not a contingency.** With `--print`, the installed
-CLI refuses the stream-json format without it, and in `-p` mode `--verbose` is
-also what _produces_ the event stream at all. Leaving it off is the quietest
-failure in this whole file: every item in the queue parks as a crashed
-session, and the run merges nothing. `references/rationale.md` has the exact
-error and the full chain.
+**`--verbose` is required, not a contingency.** With `--print`, the installed CLI refuses the stream-json format without it, and in `-p` mode `--verbose` is
+also what _produces_ the event stream at all. Leaving it off is the quietest failure in this whole file: every item in the queue parks as a crashed session, and
+the run merges nothing. `references/rationale.md` has the exact error and the full chain.
 
-**`--permission-mode auto`, and not the rung above it.** What makes an
-unattended session tolerable is not trust in the session, it is four walls:
-a **disposable worktree** created seconds ago from `main`, an **independent
-review** before anything moves, **verification commands** that must come back
-green, and the **merge as the only door back to `main`**, walked by this skill
-and never by the session. Remove any one and dispatching unattended stops
-being defensible at any rung.
+**`--permission-mode auto`, and not the rung above it.** What makes an unattended session tolerable is not trust in the session, it is four walls: a
+**disposable worktree** created seconds ago from `main`, an **independent review** before anything moves, **verification commands** that must come back green,
+and the **merge as the only door back to `main`**, walked by this skill and never by the session. Remove any one and dispatching unattended stops being
+defensible at any rung.
 
-`auto` is the lowest rung that clears an execute session's real workload —
-`acceptEdits` below it still prompts on `pnpm test` and on `git`. Do **not**
-"tighten" it to `dontAsk` plus `--allowedTools`: that was probed and it is dead
-on arrival, because it requires enumerating every command before the work
+`auto` is the lowest rung that clears an execute session's real workload — `acceptEdits` below it still prompts on `pnpm test` and on `git`. Do **not**
+"tighten" it to `dontAsk` plus `--allowedTools`: that was probed and it is dead on arrival, because it requires enumerating every command before the work
 starts. The measurements behind both claims are in `references/rationale.md`.
 
-**A denial is silent in every signal but one.** A refused call comes back as an
-ordinary `tool_result` the session improvises around; the run still reports
-`subtype: "success"`, `is_error: false`, and exit `0` **even when every call was
-refused**. The one machine-readable trace is `permission_denials` on the result
-event — which is why step 5 checks it before judging anything else, and why
-that check is not optional in the fix loop either. Never read what `auto`
-permitted on one day as a contract: it is a classifier's judgment, not a list.
+**A denial is silent in every signal but one.** A refused call comes back as an ordinary `tool_result` the session improvises around; the run still reports
+`subtype: "success"`, `is_error: false`, and exit `0` **even when every call was refused**. The one machine-readable trace is `permission_denials` on the result
+event — which is why step 5 checks it before judging anything else, and why that check is not optional in the fix loop either. Never read what `auto` permitted
+on one day as a contract: it is a classifier's judgment, not a list.
 
 ### Watch until it exits
 
@@ -928,33 +626,22 @@ permitted on one day as a contract: it is a classifier's judgment, not a list.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/logs/<id>.pid')" --jsonl "<dir>/logs/<id>.jsonl"
 ```
 
-**Make this call with the Bash tool's timeout raised to its maximum:
-`timeout: 600000`.** The default is `120000` — two minutes — and nothing
-raises it for you. Left at the default, every `watch` call is cut off two
-minutes into a nine-minute budget. That is survivable rather than fatal (the
-child is `nohup`ed and unaffected, and the heartbeat has already landed on
-the call's first tick), but it turns one designed call into five, each ending
-in a tool error the loop has to read past instead of an exit code it has a
-branch for. Ten minutes is the ceiling the tool will accept, and it is
-exactly the number `--budget-ms`'s default was chosen to sit a minute under.
+**Make this call with the Bash tool's timeout raised to its maximum: `timeout: 600000`.** The default is `120000` — two minutes — and nothing raises it for you.
+Left at the default, every `watch` call is cut off two minutes into a nine-minute budget. That is survivable rather than fatal (the child is `nohup`ed and
+unaffected, and the heartbeat has already landed on the call's first tick), but it turns one designed call into five, each ending in a tool error the loop has
+to read past instead of an exit code it has a branch for. Ten minutes is the ceiling the tool will accept, and it is exactly the number `--budget-ms`'s default
+was chosen to sit a minute under.
 
-`watch` blocks for up to `--budget-ms` (default `540000`, nine minutes),
-polling every `--interval-ms` (default `30000`). Each tick it heartbeats the
-run, and the first time it finds the `system`/`init` event in the transcript
-it records the session id onto the queue item for you — which is why this
-skill never parses that file itself, and why `status --json` is where the
-session id is read back from.
+`watch` blocks for up to `--budget-ms` (default `540000`, nine minutes), polling every `--interval-ms` (default `30000`). Each tick it heartbeats the run, and
+the first time it finds the `system`/`init` event in the transcript it records the session id onto the queue item for you — which is why this skill never parses
+that file itself, and why `status --json` is where the session id is read back from.
 
 - **exit `0`** — the child is gone. Move to Inspect.
-- **exit `3`** — the budget elapsed and the child is still alive. **Call
-  `watch` again**, unchanged, as many times as it takes. That is the entire
-  reason the command exists: nine minutes stays under a ten-minute tool-call
-  ceiling with slack, so a two-hour item survives as thirteen calls instead
-  of one call that gets cut off.
-- **exit `1`** — a problem with this call: a missing `.jsonl` after the first
-  interval, or one that cannot be read at all. The session may still be
-  running; do not assume it died. Inspect the worktree and the `.err` file
-  before deciding anything.
+- **exit `3`** — the budget elapsed and the child is still alive. **Call `watch` again**, unchanged, as many times as it takes. That is the entire reason the
+  command exists: nine minutes stays under a ten-minute tool-call ceiling with slack, so a two-hour item survives as thirteen calls instead of one call that
+  gets cut off.
+- **exit `1`** — a problem with this call: a missing `.jsonl` after the first interval, or one that cannot be read at all. The session may still be running; do
+  not assume it died. Inspect the worktree and the `.err` file before deciding anything.
 
 ## 5. Inspect what the session left behind
 
@@ -963,16 +650,11 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
 ```
 
-**Both lines, one Bash invocation** — that is the whole reason `usage` is its
-own command and not a flag on something else: it costs this step no extra
-turn. It copies what the session cost (dollars, turns, the four token counts,
-the model) off the transcript's own `result` event onto the queue item, which
-is the only place that number survives once the logs are pruned. Exit `0` with
-a stderr line means the transcript never reached a result event — a killed
-session — and nothing was recorded, which is the honest answer and not a
-failure to work around. Run it once per transcript: again on the retry line
-below with `--jsonl` pointed at `<id>-retry-<n>.jsonl`, and again in step 7's
-fix loop.
+**Both lines, one Bash invocation** — that is the whole reason `usage` is its own command and not a flag on something else: it costs this step no extra turn. It
+copies what the session cost (dollars, turns, the four token counts, the model) off the transcript's own `result` event onto the queue item, which is the only
+place that number survives once the logs are pruned. Exit `0` with a stderr line means the transcript never reached a result event — a killed session — and
+nothing was recorded, which is the honest answer and not a failure to work around. Run it once per transcript: again on the retry line below with `--jsonl`
+pointed at `<id>-retry-<n>.jsonl`, and again in step 7's fix loop.
 
 **First, before the item file: did the session get refused anything?**
 
@@ -980,86 +662,56 @@ fix loop.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>.jsonl"
 ```
 
-Prints `{"count":N,"denials":[…]}`. A non-zero `count` means the session ran
-`auto` into a call the classifier refused (see step 4's rationale) — and
-because a denied run reports `success` and exits `0` like any other, this is
-the only place it shows. **A non-zero count means the item is not clean even
-if it looks done**: whatever the session built, it built around a command
-that never ran. Treat it exactly like the two failure shapes below — ask the
-user, and do not merge the diff. Exit `1` here is an unreadable transcript,
-not a clean run; look at it before deciding anything. On the retry path
-below, re-run this against the _retry's_ transcript.
+Prints `{"count":N,"denials":[…]}`. A non-zero `count` means the session ran `auto` into a call the classifier refused (see step 4's rationale) — and because a
+denied run reports `success` and exits `0` like any other, this is the only place it shows. **A non-zero count means the item is not clean even if it looks
+done**: whatever the session built, it built around a command that never ran. Treat it exactly like the two failure shapes below — ask the user, and do not
+merge the diff. Exit `1` here is an unreadable transcript, not a clean run; look at it before deciding anything. On the retry path below, re-run this against
+the _retry's_ transcript.
 
-Then look at the item file **in the worktree**, not in the main tree — the
-main tree's copy has not changed and will not until the merge, which is
-exactly what the board shows and exactly what the run strip exists to
-compensate for.
+Then look at the item file **in the worktree**, not in the main tree — the main tree's copy has not changed and will not until the merge, which is exactly what
+the board shows and exactly what the run strip exists to compensate for.
 
-- **Moved to `backlog/<section>/done/`, with an `## Outcome` carrying real
-  verification output** → execute succeeded on its own terms. Continue to
-  Commit.
-- **Still open, with a failure `## Outcome`** → execute's own failure path:
-  it tried, verification failed, and it deliberately left the item where it
-  was. That record is the most useful thing you have.
-- **Neither** (no `## Outcome` at all, item still open, session gone) → the
-  session died: a crash, a usage cap, a dropped connection.
+- **Moved to `backlog/<section>/done/`, with an `## Outcome` carrying real verification output** → execute succeeded on its own terms. Continue to Commit.
+- **Still open, with a failure `## Outcome`** → execute's own failure path: it tried, verification failed, and it deliberately left the item where it was. That
+  record is the most useful thing you have.
+- **Neither** (no `## Outcome` at all, item still open, session gone) → the session died: a crash, a usage cap, a dropped connection.
 
-For both failure shapes, ask the user — best-effort, exactly like pre-flight
-— which of three they want: **retry**, **skip**, or **stop the run**. Retry
-resumes that item's own session so its context is not paid for twice.
-**Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first,
-with the Write tool**, and only then launch. §4's rule about prose in a
-command position covers this text: it quotes execute's failure `## Outcome`,
-which carries command output verbatim.
+For both failure shapes, ask the user — best-effort, exactly like pre-flight — which of three they want: **retry**, **skip**, or **stop the run**. Retry resumes
+that item's own session so its context is not paid for twice. **Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first, with the Write tool**,
+and only then launch. §4's rule about prose in a command position covers this text: it quotes execute's failure `## Outcome`, which carries command output
+verbatim.
 
 ```bash
 nohup sh -c 'cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" --output-format stream-json --verbose --permission-mode auto -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
-Three details on that line, each of which was a defect before it was a rule
-(bug-31):
+Three details on that line, each of which was a defect before it was a rule (bug-31):
 
-- **`$(cat "<file>")`, and the prompt is the file's bytes.** The _output_ of a
-  command substitution is not re-scanned for expansions, so argv arrives
-  byte-identical to what the Write tool put on disk — backticks, `$(…)`,
-  `var(--ink)` and apostrophes all intact, nothing executed. The inner double
-  quotes around the path are what keep a path containing a space in one piece;
-  both sit inside the single-quoted body, which is otherwise unchanged.
-- **`test -s "<file>" &&` ahead of the assignment.** A missing or empty prompt
-  file then spawns nothing at all: `sh` exits, `watch` sees a dead pid within a
-  second, and the driver treats it as the dispatch failure it is. Without the
-  guard `$(cat …)` degrades to `""` and the run spends its one retry on a
-  session resumed with no instruction — which on every surface looks exactly
-  like a session that simply failed to improve.
-- **The Write tool, never a heredoc and never `printf`.** A heredoc delimiter
-  that happens to appear in the text ends the document early, and `printf '%s'
-'…'` re-introduces the apostrophe problem the file-carried prompt exists to
-  remove. The prompt is prose; the tool that writes prose takes it as an
-  argument rather than as shell syntax.
+- **`$(cat "<file>")`, and the prompt is the file's bytes.** The _output_ of a command substitution is not re-scanned for expansions, so argv arrives
+  byte-identical to what the Write tool put on disk — backticks, `$(…)`, `var(--ink)` and apostrophes all intact, nothing executed. The inner double quotes
+  around the path are what keep a path containing a space in one piece; both sit inside the single-quoted body, which is otherwise unchanged.
+- **`test -s "<file>" &&` ahead of the assignment.** A missing or empty prompt file then spawns nothing at all: `sh` exits, `watch` sees a dead pid within a
+  second, and the driver treats it as the dispatch failure it is. Without the guard `$(cat …)` degrades to `""` and the run spends its one retry on a session
+  resumed with no instruction — which on every surface looks exactly like a session that simply failed to improve.
+- **The Write tool, never a heredoc and never `printf`.** A heredoc delimiter that happens to appear in the text ends the document early, and `printf '%s' '…'`
+  re-introduces the apostrophe problem the file-carried prompt exists to remove. The prompt is prose; the tool that writes prose takes it as an argument rather
+  than as shell syntax.
 
-Then `watch` again exactly as in step 4, with `--jsonl` pointed at the new
-transcript and `--pid` at the pid you just recorded, and come back to this
-step when it exits.
+Then `watch` again exactly as in step 4, with `--jsonl` pointed at the new transcript and `--pid` at the pid you just recorded, and come back to this step when
+it exits.
 
-The session id comes from `status --json` (recorded by `watch`); a null there
-means the session died before its init event ever landed, and there is
-nothing to resume — a fresh dispatch is the only retry available. With no
-channel to ask through, do not guess: `attention <id> --kind parked --detail
-"<what happened, your words>"` plus `stage <id> parked`, keep the worktree and
-branch, and continue with the next item. Skipping is `stage <id> skipped
---note "<why, your words>"` — your own short reason, under the same rule as
-the detail beside it. Stopping the run is `finish --status failed` after
-parking this item.
+The session id comes from `status --json` (recorded by `watch`); a null there means the session died before its init event ever landed, and there is nothing to
+resume — a fresh dispatch is the only retry available. With no channel to ask through, do not guess:
+`attention <id> --kind parked --detail "<what happened, your words>"` plus `stage <id> parked`, keep the worktree and branch, and continue with the next item.
+Skipping is `stage <id> skipped --note "<why, your words>"` — your own short reason, under the same rule as the detail beside it. Stopping the run is
+`finish --status failed` after parking this item.
 
 ## 6. Commit — the orchestrator's job, still never execute's
 
-Execute's hard limit is unchanged and still true inside the session: it never
-commits and never pushes, because staging inside a tree it does not own can
-sweep up work it knows nothing about. Here that reasoning does not apply —
-the worktree contains this item's work and nothing else, which is the whole
-point of creating one — so the orchestrator commits, and says so in the
-commit body:
+Execute's hard limit is unchanged and still true inside the session: it never commits and never pushes, because staging inside a tree it does not own can sweep
+up work it knows nothing about. Here that reasoning does not apply — the worktree contains this item's work and nothing else, which is the whole point of
+creating one — so the orchestrator commits, and says so in the commit body:
 
 ```bash
 git -C "$PWD/.worktrees/<id>" add -A
@@ -1067,15 +719,11 @@ git -C "$PWD/.worktrees/<id>" commit -m "fix(board): stop the launch sheet dropp
 Committed by backlog-orchestrate on behalf of the headless backlog-execute session."
 ```
 
-Conventional-commit subject, derived from the item's own title, in the type
-that matches the item (`fix:` for a bug, usually `feat:`/`refactor:`/`chore:`
-for a task). The body names the item id and names the orchestrator as the
-committer, so `git log` never implies a human read this diff before it
-existed — a reviewer, and the user reading history next month, both need to
-know which commits arrived unattended.
+Conventional-commit subject, derived from the item's own title, in the type that matches the item (`fix:` for a bug, usually `feat:`/`refactor:`/`chore:` for a
+task). The body names the item id and names the orchestrator as the committer, so `git log` never implies a human read this diff before it existed — a reviewer,
+and the user reading history next month, both need to know which commits arrived unattended.
 
-`add -A` is safe _here specifically_: the worktree is a fresh checkout that
-nothing else has written to. Never run it in the main tree.
+`add -A` is safe _here specifically_: the worktree is a fresh checkout that nothing else has written to. Never run it in the main tree.
 
 ## 7. Review
 
@@ -1083,117 +731,78 @@ nothing else has written to. Never run it in the main tree.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> reviewing
 ```
 
-Dispatch the plugin's own reviewer, `backlog-manager:backlog-reviewer`, with
-the four fields its input contract requires and nothing else:
+Dispatch the plugin's own reviewer, `backlog-manager:backlog-reviewer`, with the four fields its input contract requires and nothing else:
 
 - `worktree` — `"$PWD/.worktrees/<id>"`
 - `branch` — `backlog/<id>`
 - `item file path` — the item's absolute path _inside the worktree_
 - `report path` — `<dir>/reviews/<id>-1.md` (`-2` on the second loop)
 
-That agent writes its full report to the report path and returns only
-`verdict: approve` or `verdict: fix` plus its Critical/Important findings, one
-line each. Do not re-state that contract in the dispatch prompt as if it were
-optional, and do not ask for a summary in the message — the contract lives in
-the agent definition precisely because prompt-side copies of it have
-historically lost to generic reviewer templates, and a run of ten items
-cannot afford ten full reports in this session's context.
+That agent writes its full report to the report path and returns only `verdict: approve` or `verdict: fix` plus its Critical/Important findings, one line each.
+Do not re-state that contract in the dispatch prompt as if it were optional, and do not ask for a summary in the message — the contract lives in the agent
+definition precisely because prompt-side copies of it have historically lost to generic reviewer templates, and a run of ten items cannot afford ten full
+reports in this session's context.
 
 - **`verdict: approve`** → straight to Verify.
-- **`verdict: fix`** → one fix loop. Spend it on the run file first, and read
-  the count back:
+- **`verdict: fix`** → one fix loop. Spend it on the run file first, and read the count back:
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> fixing --fix-loop
   ```
 
-  `--fix-loop` is the only valueless flag on `stage`; it increments this
-  item's `fixLoops` and echoes the new value back, so the line prints
-  `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then **write the reviewer's
-  findings, verbatim, to `<dir>/prompts/<id>-fix-<n>.txt` with the Write
-  tool** — `<n>` being the `fixLoops` value that line just echoed back, so a
-  second loop keeps the first one's prompt beside its own rather than over it
-  — and resume the item's own executor session with step 5's retry line.
-  Unchanged but for the names that carry this loop's `<n>`, and every one of
-  them does: the prompt file it reads (`<dir>/prompts/<id>-fix-<n>.txt` in
-  place of `<id>-retry-1.txt`, in the `test -s` guard and the `$(cat …)`
-  alike), the transcript it writes (`<dir>/logs/<id>-fix-<n>.jsonl`), the
-  stderr beside it (`<dir>/logs/<id>-fix-<n>.err`) and the session name
-  (`-n "orch <id> fix <n>"`). The rule is one substitution, applied
-  everywhere `retry 1` appears, so a second loop never overwrites the first
-  one's evidence — the `.err` included, which is where this whole item's
-  symptom was found. Every flag it carries comes too,
-  `--verbose` among them. Then `watch` it out as in step 4, **check that
-  transcript for denials before committing anything**, commit again (step 6),
-  and review again with a fresh report path (`<dir>/reviews/<id>-2.md`).
+  `--fix-loop` is the only valueless flag on `stage`; it increments this item's `fixLoops` and echoes the new value back, so the line prints
+  `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then **write the reviewer's findings, verbatim, to `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool** —
+  `<n>` being the `fixLoops` value that line just echoed back, so a second loop keeps the first one's prompt beside its own rather than over it — and resume the
+  item's own executor session with step 5's retry line. Unchanged but for the names that carry this loop's `<n>`, and every one of them does: the prompt file it
+  reads (`<dir>/prompts/<id>-fix-<n>.txt` in place of `<id>-retry-1.txt`, in the `test -s` guard and the `$(cat …)` alike), the transcript it writes
+  (`<dir>/logs/<id>-fix-<n>.jsonl`), the stderr beside it (`<dir>/logs/<id>-fix-<n>.err`) and the session name (`-n "orch <id> fix <n>"`). The rule is one
+  substitution, applied everywhere `retry 1` appears, so a second loop never overwrites the first one's evidence — the `.err` included, which is where this
+  whole item's symptom was found. Every flag it carries comes too, `--verbose` among them. Then `watch` it out as in step 4, **check that transcript for denials
+  before committing anything**, commit again (step 6), and review again with a fresh report path (`<dir>/reviews/<id>-2.md`).
 
-  **The findings reach that file as the reviewer wrote them** — they name
-  `file:line`, and paraphrasing them into "fix the review comments" hands the
-  session a puzzle instead of a task. That verbatim copy is the whole reason
-  the prompt is a file rather than an argument: reviewer prose is the text in
-  this system most certain to carry the backticks, `$(…)` and apostrophes §4's
-  rule is about, and pasting it into the launcher instead is what bug-31 was.
+  **The findings reach that file as the reviewer wrote them** — they name `file:line`, and paraphrasing them into "fix the review comments" hands the session a
+  puzzle instead of a task. That verbatim copy is the whole reason the prompt is a file rather than an argument: reviewer prose is the text in this system most
+  certain to carry the backticks, `$(…)` and apostrophes §4's rule is about, and pasting it into the launcher instead is what bug-31 was.
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
   ```
 
-  The second line is step 5's `usage` call again, on this loop's own
-  transcript — one entry per transcript, so it lands beside the first
-  session's rather than replacing it, and "the fix loop cost more than the
-  item did" stays an answerable question. It is on the same invocation as the
-  denials check for the same reason it rides `stage <id> inspecting` up there:
-  no extra turn.
+  The second line is step 5's `usage` call again, on this loop's own transcript — one entry per transcript, so it lands beside the first session's rather than
+  replacing it, and "the fix loop cost more than the item did" stays an answerable question. It is on the same invocation as the denials check for the same
+  reason it rides `stage <id> inspecting` up there: no extra turn.
 
-  **This is the same gate step 5 runs, and it is not optional here.** A fix
-  loop is a headless session under `--permission-mode auto` exactly like the
-  first one, so it can be refused a call exactly like the first one — and this
-  path reaches Commit without passing through step 5, so nothing else on it
-  would ever look. A refused fix session is the worst-placed denial in the
-  whole loop: it has already been told what is wrong, so whatever it produced
-  instead of the refused command looks like a response to the review, and the
-  next reviewer reads a diff that was shaped by a command that never ran. A
-  non-zero `count` means **do not commit this loop's work** — treat it as the
-  fix loop failing, and take it to the fix-exhausted menu below rather than
-  spending the second loop on a session that was not actually able to work.
+  **This is the same gate step 5 runs, and it is not optional here.** A fix loop is a headless session under `--permission-mode auto` exactly like the first
+  one, so it can be refused a call exactly like the first one — and this path reaches Commit without passing through step 5, so nothing else on it would ever
+  look. A refused fix session is the worst-placed denial in the whole loop: it has already been told what is wrong, so whatever it produced instead of the
+  refused command looks like a response to the review, and the next reviewer reads a diff that was shaped by a command that never ran. A non-zero `count` means
+  **do not commit this loop's work** — treat it as the fix loop failing, and take it to the fix-exhausted menu below rather than spending the second loop on a
+  session that was not actually able to work.
 
-**At most two fix loops per item, counted in the run file — not in your own
-head.** `fixLoops` is what `--fix-loop` maintains, and reading the ceiling off
-it (from the echoed value, or from `status --json`) is what makes it survive
-the thing most likely to break it: a crash and a `--resume`, after which the
-session that was counting is gone and a fresh one takes over an item that has
-already burned both its loops. A ceiling held in a session's memory silently
-resets there; one held in the run file does not. It is also the number the run
-drawer renders, so an item that took two loops says so afterwards.
+**At most two fix loops per item, counted in the run file — not in your own head.** `fixLoops` is what `--fix-loop` maintains, and reading the ceiling off it
+(from the echoed value, or from `status --json`) is what makes it survive the thing most likely to break it: a crash and a `--resume`, after which the session
+that was counting is gone and a fresh one takes over an item that has already burned both its loops. A ceiling held in a session's memory silently resets there;
+one held in the run file does not. It is also the number the run drawer renders, so an item that took two loops says so afterwards.
 
-After the second `fix` verdict (`fixLoops` is now `2`), stop looping and hand
-it to a human:
+After the second `fix` verdict (`fixLoops` is now `2`), stop looping and hand it to a human:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary, your words> — report at <dir>/reviews/<id>-2.md"
 ```
 
-`<verdict summary, your words>` is one line of your own on what the reviewer
-still objects to — never a quote from the report. The report path sitting
-beside it in the same string is the verbatim copy, which is precisely why the
-entry points at the report rather than carrying it (§4's rule, second half).
+`<verdict summary, your words>` is one line of your own on what the reviewer still objects to — never a quote from the report. The report path sitting beside it
+in the same string is the verbatim copy, which is precisely why the entry points at the report rather than carrying it (§4's rule, second half).
 
-Then, **with a channel**, ask: merge anyway, keep fixing, skip, or stop the
-run — their call, on their repo. **With no channel**, `stage <id> parked` and
-continue to the next item, keeping the branch and worktree for them to look
-at. Never merge unreviewed-through changes silently just because the loop ran
-out: "merge anyway" is a decision a person makes, not a default.
+Then, **with a channel**, ask: merge anyway, keep fixing, skip, or stop the run — their call, on their repo. **With no channel**, `stage <id> parked` and
+continue to the next item, keeping the branch and worktree for them to look at. Never merge unreviewed-through changes silently just because the loop ran out:
+"merge anyway" is a decision a person makes, not a default.
 
-**That menu belongs to an unresolved review verdict and to nothing else.** A
-reviewer's findings are a judgement, and a person is entitled to read the
-report and decide they do not block a merge. A failing verification is not a
-judgement — it is a command that came back red — so when the shared ceiling
-runs out with `verify` still failing, this paragraph is _not_ the paragraph
-that applies: §8 says what happens there, and what happens there is always a
-park. Arriving here from §8 and reading "merge anyway" as still on offer is
-the one way to talk this system into breaking its own Hard limit, so the
-offer is scoped here rather than left to be inferred.
+**That menu belongs to an unresolved review verdict and to nothing else.** A reviewer's findings are a judgement, and a person is entitled to read the report
+and decide they do not block a merge. A failing verification is not a judgement — it is a command that came back red — so when the shared ceiling runs out with
+`verify` still failing, this paragraph is _not_ the paragraph that applies: §8 says what happens there, and what happens there is always a park. Arriving here
+from §8 and reading "merge anyway" as still on offer is the one way to talk this system into breaking its own Hard limit, so the offer is scoped here rather
+than left to be inferred.
 
 ## 8. Verify
 
@@ -1205,78 +814,49 @@ nohup env BM_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" BM_RUN_DIR="<dir>" sh -c 'node "$
 echo $! > "<dir>/verify/<id>.pid"
 ```
 
-**All four lines in one Bash call**, and the `rm -f` in particular must never
-be skipped or split off — see the first detail below for what it is actually
+**All four lines in one Bash call**, and the `rm -f` in particular must never be skipped or split off — see the first detail below for what it is actually
 preventing.
 
-**Detached, for the same reason the session in step 4 is.** A baseline suite
-is the one step in this loop with no upper bound, and a Bash call cannot
-outlive ten minutes. Run inline, a suite that outruns the call is killed
-mid-flight and `verify` writes no exit code at all — an undefined state at the
-merge gate, unattended. Detached, the ten-minute ceiling applies only to the
-polling, which is built to be re-called. (`references/rationale.md`, §8.)
+**Detached, for the same reason the session in step 4 is.** A baseline suite is the one step in this loop with no upper bound, and a Bash call cannot outlive
+ten minutes. Run inline, a suite that outruns the call is killed mid-flight and `verify` writes no exit code at all — an undefined state at the merge gate,
+unattended. Detached, the ten-minute ceiling applies only to the polling, which is built to be re-called. (`references/rationale.md`, §8.)
 
 Five details in those lines, none of them the same as step 4's:
 
-- **`rm -f` first, and it is a merge-gate rule rather than housekeeping.**
-  `<dir>` belongs to the _run_, not to the attempt: nothing removes these three
-  files afterwards, so a second attempt would inherit the first attempt's
-  `.status` verbatim. Both "the verification did not finish" branches at the end
-  of this section are predicated on that file being **absent**, so from the
-  second attempt onward neither could fire — and the failure that produces is a
-  green merge gate on a verification that never finished. Second attempts are
-  ordinary here, not exotic: §9 parks an item _after_ a green verify, and the
-  next run resumes it at Inspect. `.out` and `.pid` are cleared on the same
-  rule. **If you ever find yourself reading a `.status` you did not clear
-  moments earlier in the same call, it is not this attempt's answer — treat it
-  as absent and start the block again.** (`references/rationale.md`, §8, has
-  the full chain and why step 4 needs no equivalent.)
-- **No `exec`, unlike the dispatch line.** The pid recorded here is
-  deliberately the wrapper `sh`, because the wrapper is what outlives `node`
-  long enough to write `.status`. `exec` would replace it and the exit code —
-  the one thing this whole step exists to produce — would be lost.
-- **Named `env` variables inside the quotes, never a positional.** The quotes
-  must stay single so `$?` reaches the inner shell rather than this one, which
-  rules out interpolating `$CLAUDE_PLUGIN_ROOT` directly; `env` sets both names
-  for the child instead. **Never pass them positionally.** Slash-command
-  argument substitution rewrites positional parameters in this file before the
-  session reads it, fenced code included — it has corrupted this exact line in a
-  live run. Keep the plugin root and the run directory in `BM_PLUGIN_ROOT` /
-  `BM_RUN_DIR`, and do not reintroduce a positional anywhere in this file.
-  `$PWD` needs none of this care, which is why step 4's line uses it directly.
-  (`references/rationale.md`, §8.)
-- **`BM_RUN_DIR` also retires the `<dir>` placeholder inside this command.**
-  It was pasted three times into this one line, and each paste was a chance to
-  redirect an attempt's output at the wrong run's directory. Substitute it
-  once, into `env`. The other line that pastes `<dir>` more than once is §5's
-  retry launcher — four times since bug-31 (the `test -s` guard, the `$(cat
-…)`, the `.jsonl` and the `.err`) — and it cannot take the same treatment,
-  because its body is single-quoted so that `$(cat …)` runs in the child, and
-  an `env` name would be a fourth `BM_` variable this file does not own. Its
-  protection is different and worth knowing: the guard and the `$(cat …)` name
-  the same file, so a mismatched paste between those two spawns **nothing**
-  rather than reading the wrong prompt.
-- **The tool still runs from the project root.** `nohup` inherits this
-  session's cwd and there is no `cd` anywhere in the line; the worktree is
-  named by `--cwd`, which is exactly what that flag is for (see "Where
-  commands run" at the top of this file).
+- **`rm -f` first, and it is a merge-gate rule rather than housekeeping.** `<dir>` belongs to the _run_, not to the attempt: nothing removes these three files
+  afterwards, so a second attempt would inherit the first attempt's `.status` verbatim. Both "the verification did not finish" branches at the end of this
+  section are predicated on that file being **absent**, so from the second attempt onward neither could fire — and the failure that produces is a green merge
+  gate on a verification that never finished. Second attempts are ordinary here, not exotic: §9 parks an item _after_ a green verify, and the next run resumes
+  it at Inspect. `.out` and `.pid` are cleared on the same rule. **If you ever find yourself reading a `.status` you did not clear moments earlier in the same
+  call, it is not this attempt's answer — treat it as absent and start the block again.** (`references/rationale.md`, §8, has the full chain and why step 4
+  needs no equivalent.)
+- **No `exec`, unlike the dispatch line.** The pid recorded here is deliberately the wrapper `sh`, because the wrapper is what outlives `node` long enough to
+  write `.status`. `exec` would replace it and the exit code — the one thing this whole step exists to produce — would be lost.
+- **Named `env` variables inside the quotes, never a positional.** The quotes must stay single so `$?` reaches the inner shell rather than this one, which rules
+  out interpolating `$CLAUDE_PLUGIN_ROOT` directly; `env` sets both names for the child instead. **Never pass them positionally.** Slash-command argument
+  substitution rewrites positional parameters in this file before the session reads it, fenced code included — it has corrupted this exact line in a live run.
+  Keep the plugin root and the run directory in `BM_PLUGIN_ROOT` / `BM_RUN_DIR`, and do not reintroduce a positional anywhere in this file. `$PWD` needs none of
+  this care, which is why step 4's line uses it directly. (`references/rationale.md`, §8.)
+- **`BM_RUN_DIR` also retires the `<dir>` placeholder inside this command.** It was pasted three times into this one line, and each paste was a chance to
+  redirect an attempt's output at the wrong run's directory. Substitute it once, into `env`. The other line that pastes `<dir>` more than once is §5's retry
+  launcher — four times since bug-31 (the `test -s` guard, the `$(cat …)`, the `.jsonl` and the `.err`) — and it cannot take the same treatment, because its
+  body is single-quoted so that `$(cat …)` runs in the child, and an `env` name would be a fourth `BM_` variable this file does not own. Its protection is
+  different and worth knowing: the guard and the `$(cat …)` name the same file, so a mismatched paste between those two spawns **nothing** rather than reading
+  the wrong prompt.
+- **The tool still runs from the project root.** `nohup` inherits this session's cwd and there is no `cd` anywhere in the line; the worktree is named by
+  `--cwd`, which is exactly what that flag is for (see "Where commands run" at the top of this file).
 
-Then poll it out, with the same maximum Bash timeout step 4's `watch` needs
-(`timeout: 600000`), as many times as it takes — exit `3` means "still
-running, call me again", exactly as it does there:
+Then poll it out, with the same maximum Bash timeout step 4's `watch` needs (`timeout: 600000`), as many times as it takes — exit `3` means "still running, call
+me again", exactly as it does there:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/verify/<id>.pid')" --jsonl "<dir>/verify/<id>.out"
 ```
 
-Yes, `watch` — the same command, doing the same three jobs: sleeping inside
-node rather than in the shell, returning `0` the moment the pid is gone, and
-heartbeating the run every interval, which is what stops a long suite making
-the board call a perfectly healthy run stale. Its `--jsonl` is a required
-flag whose only purpose is finding a session's `system`/`init` event;
-`verify`'s log has none, so that lookup finds nothing and writes nothing.
-Pointing it at the log satisfies the flag with a file that genuinely exists,
-which is all its missing-file check (exit `1`) is really testing for.
+Yes, `watch` — the same command, doing the same three jobs: sleeping inside node rather than in the shell, returning `0` the moment the pid is gone, and
+heartbeating the run every interval, which is what stops a long suite making the board call a perfectly healthy run stale. Its `--jsonl` is a required flag
+whose only purpose is finding a session's `system`/`init` event; `verify`'s log has none, so that lookup finds nothing and writes nothing. Pointing it at the
+log satisfies the flag with a file that genuinely exists, which is all its missing-file check (exit `1`) is really testing for.
 
 Then read the exit code out of the file, never off the poll:
 
@@ -1284,117 +864,79 @@ Then read the exit code out of the file, never off the poll:
 cat "<dir>/verify/<id>.status"
 ```
 
-`verify` resolves the project's baseline commands from
-`<worktree>/backlog/verify.json`'s `commands` array, or failing that from the
-obvious `package.json` scripts (`test`, `typecheck`, `build`, only the ones
-that exist, run with `pnpm` when the project is pnpm-managed), unions them
-with the fenced commands under the item's own `## Done when`, runs every one
-of them in the worktree, and records `{cmd, ok, tail}` rows onto the queue
-item. Every command runs even after one fails — a red first command must
-never hide a second, independent failure.
+`verify` resolves the project's baseline commands from `<worktree>/backlog/verify.json`'s `commands` array, or failing that from the obvious `package.json`
+scripts (`test`, `typecheck`, `build`, only the ones that exist, run with `pnpm` when the project is pnpm-managed), unions them with the fenced commands under
+the item's own `## Done when`, runs every one of them in the worktree, and records `{cmd, ok, tail}` rows onto the queue item. Every command runs even after one
+fails — a red first command must never hide a second, independent failure.
 
-This re-runs checks execute already ran, on purpose: a fix loop may have
-changed the code after execute's own verification, and green _here_ is the
-merge gate.
+This re-runs checks execute already ran, on purpose: a fix loop may have changed the code after execute's own verification, and green _here_ is the merge gate.
 
-Both of the first two branches below read "the file is not there", which is
-only ever true because the `rm -f` above made it true. That is why it is in
-the same call as the launch.
+Both of the first two branches below read "the file is not there", which is only ever true because the `rm -f` above made it true. That is why it is in the same
+call as the launch.
 
-- **no `.status` file yet** — the verification has not finished. Either
-  `watch` came back `3` and the suite is still going, or the poll itself was
-  cut short. Poll again. **This is never a merge**, and it is never a
-  failure either: it is the absence of a result.
-- **the pid is gone and there is still no `.status`** — something killed the
-  verification (the machine slept, a human `kill`ed it, the OS ran out of
-  memory). Nothing was proved, so nothing is merged. Re-run the whole block
-  above from the top, `rm -f` included — that line is what makes the next
-  attempt's answer its own. It is both safe and the only recovery. `verify`
-  writes its rows in a single atomic write _after_ every command has
-  finished, so an interrupted run leaves the run file exactly as it found it
-  and a fresh attempt simply appends a fresh set of rows — the merge gate
-  never sees a half-written verification, only a complete one or none.
-  **The gate is the exit code of the last attempt that produced one**, and no
-  `.status` means there is none.
+- **no `.status` file yet** — the verification has not finished. Either `watch` came back `3` and the suite is still going, or the poll itself was cut short.
+  Poll again. **This is never a merge**, and it is never a failure either: it is the absence of a result.
+- **the pid is gone and there is still no `.status`** — something killed the verification (the machine slept, a human `kill`ed it, the OS ran out of memory).
+  Nothing was proved, so nothing is merged. Re-run the whole block above from the top, `rm -f` included — that line is what makes the next attempt's answer its
+  own. It is both safe and the only recovery. `verify` writes its rows in a single atomic write _after_ every command has finished, so an interrupted run leaves
+  the run file exactly as it found it and a fresh attempt simply appends a fresh set of rows — the merge gate never sees a half-written verification, only a
+  complete one or none. **The gate is the exit code of the last attempt that produced one**, and no `.status` means there is none.
 - **exit `0`** — every command passed. Merge.
-- **exit `1`** — something is red. Treat the failing rows exactly like review
-  findings: feed them into a fix loop, spent the same way
-  (`stage <id> fixing --fix-loop`, then resume, commit, re-review). The
-  ceiling is the same two loops and it is _shared_ with review — an item does
-  not get two review loops _and_ two verify loops, which is exactly what one
-  counter per item, incremented by whoever spends the loop, enforces.
+- **exit `1`** — something is red. Treat the failing rows exactly like review findings: feed them into a fix loop, spent the same way
+  (`stage <id> fixing --fix-loop`, then resume, commit, re-review). The ceiling is the same two loops and it is _shared_ with review — an item does not get two
+  review loops _and_ two verify loops, which is exactly what one counter per item, incremented by whoever spends the loop, enforces.
 
-  **When that shared ceiling runs out with verification still red, the item
-  parks — with a channel or without one.** Do not fall through to §7's
-  exhaustion paragraph: its "merge anyway" is an offer about an unresolved
-  review _verdict_, and there is no equivalent judgement to make here. A red
-  command is not an opinion.
+  **When that shared ceiling runs out with verification still red, the item parks — with a channel or without one.** Do not fall through to §7's exhaustion
+  paragraph: its "merge anyway" is an offer about an unresolved review _verdict_, and there is no equivalent judgement to make here. A red command is not an
+  opinion.
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, verification still red: <the failing command names> — rows in status --json"
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
-  `<the failing command names>` is the names alone — `pnpm test`, `pnpm run
-typecheck` — and never their output. The rows in `status --json` carry the
-  output and the exit codes, and the detail says so rather than repeating it:
-  captured output is exactly the text §4's rule keeps off a command line.
+  `<the failing command names>` is the names alone — `pnpm test`, `pnpm run typecheck` — and never their output. The rows in `status --json` carry the output
+  and the exit codes, and the detail says so rather than repeating it: captured output is exactly the text §4's rule keeps off a command line.
 
-  With a channel you may still say so and ask whether to keep fixing, skip,
-  or stop the run — three of §7's four options. Never the fourth. Never merge
-  red: nothing green-lights a merge except the commands passing.
+  With a channel you may still say so and ask whether to keep fixing, skip, or stop the run — three of §7's four options. Never the fourth. Never merge red:
+  nothing green-lights a merge except the commands passing.
 
-- **exit `5`** — nothing resolvable to verify with: no `verify.json`, no
-  `test`/`typecheck`/`build` script, no fenced `## Done when` command. Nothing
-  was written, and this item cannot prove itself. **Park it**:
+- **exit `5`** — nothing resolvable to verify with: no `verify.json`, no `test`/`typecheck`/`build` script, no fenced `## Done when` command. Nothing was
+  written, and this item cannot prove itself. **Park it**:
 
   ```bash
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "nothing to verify with — add backlog/verify.json or a ## Done when block"
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
-  Annoying on an unconfigured repo, and correct anyway: "merged, verified by
-  nothing" is the false-done this entire system exists to prevent.
+  Annoying on an unconfigured repo, and correct anyway: "merged, verified by nothing" is the false-done this entire system exists to prevent.
 
-On an exit `1`, read the rows themselves (`status --json`) before spending a
-loop, because one of them is not what it looks like. A row whose `tail`
-begins **`could not run this command (…)`** never executed at all — a missing
-binary, a command string the OS refused, output too large to capture. It is
-red like any other red row and it gates the merge identically, but sending a
-fix loop after the _code_ over it wastes a session on an item nothing was
-ever tested against. Fix the command or the environment, or park the item
-with that row quoted in the detail.
+On an exit `1`, read the rows themselves (`status --json`) before spending a loop, because one of them is not what it looks like. A row whose `tail` begins
+**`could not run this command (…)`** never executed at all — a missing binary, a command string the OS refused, output too large to capture. It is red like any
+other red row and it gates the merge identically, but sending a fix loop after the _code_ over it wastes a session on an item nothing was ever tested against.
+Fix the command or the environment, or park the item with that row quoted in the detail.
 
 ## 9. Merge — the only door to `main`
 
-**In `branch` mode this whole section collapses to two commands. Take them
-and skip the rest of it:**
+**In `branch` mode this whole section collapses to two commands. Take them and skip the rest of it:**
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
-No `stage <id> merging` — nothing is merging. No `symbolic-ref` precondition
-and no dirty-path probe: both exist to protect a write to the main tree, and
-there is no write. And **no `git branch -d`. The branch is the deliverable**,
-the only copy of this item's work anywhere. `remove` stays plain and never
-`--force`; if it does not exit `0`, the item stays `branched` and is never
-re-staged — read git's message and record the leftover exactly as the merge
-path's own removal outcome does at the end of this section, which branches on
-that message into a park and a finish-the-delete (with `branched` in place of
-`merged` wherever a detail is written) — and carry on.
+No `stage <id> merging` — nothing is merging. No `symbolic-ref` precondition and no dirty-path probe: both exist to protect a write to the main tree, and there
+is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy of this item's work anywhere. `remove` stays plain and never `--force`; if
+it does not exit `0`, the item stays `branched` and is never re-staged — read git's message and record the leftover exactly as the merge path's own removal
+outcome does at the end of this section, which branches on that message into a park and a finish-the-delete (with `branched` in place of `merged` wherever a
+detail is written) — and carry on.
 
-`branched` is a success exit in the same terminal position `merged` occupies:
-the item is finished and the run holds nothing. The pairing is enforced by
-the tool, not by this sentence — `stage <id> merged` under a branch-mode run
-exits `1` and writes nothing.
+`branched` is a success exit in the same terminal position `merged` occupies: the item is finished and the run holds nothing. The pairing is enforced by the
+tool, not by this sentence — `stage <id> merged` under a branch-mode run exits `1` and writes nothing.
 
-The next item still branches from an **unchanged `main`**, so two items in
-this run that touch the same files produce two branches that will conflict
-with each other at hand-merge time. That is inherent to not merging; the run
-cannot fix it and must not pretend to. §10's summary names the merge order and
-flags the overlapping pairs, and that is the whole of what can be done here.
+The next item still branches from an **unchanged `main`**, so two items in this run that touch the same files produce two branches that will conflict with each
+other at hand-merge time. That is inherent to not merging; the run cannot fix it and must not pretend to. §10's summary names the merge order and flags the
+overlapping pairs, and that is the whole of what can be done here.
 
 **Everything below is the `merge` path.**
 
@@ -1403,21 +945,15 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 git -C "$PWD" symbolic-ref HEAD
 ```
 
-**Precondition: the main tree must actually have `main` checked out** — that
-command must print `refs/heads/main`, and it must succeed. Two distinct
-failures, and both mean the same thing here:
+**Precondition: the main tree must actually have `main` checked out** — that command must print `refs/heads/main`, and it must succeed. Two distinct failures,
+and both mean the same thing here:
 
-- it prints another ref (`refs/heads/some-feature`) — the user switched
-  branches mid-run;
-- it prints **nothing at all and exits non-zero**, with
-  `fatal: ref HEAD is not a symbolic ref` on stderr — the main tree is on a
-  detached HEAD (mid-rebase, mid-bisect, or checked out at a tag). Check the
-  exit status, not just the output: a bare "does it equal `refs/heads/main`"
-  comparison reads an empty string here and, written carelessly, can look
-  like a mismatch you handled rather than a command that failed.
+- it prints another ref (`refs/heads/some-feature`) — the user switched branches mid-run;
+- it prints **nothing at all and exits non-zero**, with `fatal: ref HEAD is not a symbolic ref` on stderr — the main tree is on a detached HEAD (mid-rebase,
+  mid-bisect, or checked out at a tag). Check the exit status, not just the output: a bare "does it equal `refs/heads/main`" comparison reads an empty string
+  here and, written carelessly, can look like a mismatch you handled rather than a command that failed.
 
-In either case do **not** check out `main` yourself: their working tree is
-theirs, and this run's authority stops at its own worktrees. Park instead and
+In either case do **not** check out `main` yourself: their working tree is theirs, and this run's authority stops at its own worktrees. Park instead and
 continue:
 
 ```bash
@@ -1425,12 +961,9 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" atte
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
 ```
 
-**Second precondition: the main tree's uncommitted paths must not overlap the
-branch's.** A dirty main tree is fine — this run does not get to demand a
-clean one — but only as long as the dirt sits somewhere the branch does not
-touch. Test that rather than assuming it, because the answer changes during a
-run: the person whose repo this is may edit anything at any moment, and the
-item most likely to collide is the one whose subsystem they are working in.
+**Second precondition: the main tree's uncommitted paths must not overlap the branch's.** A dirty main tree is fine — this run does not get to demand a clean
+one — but only as long as the dirt sits somewhere the branch does not touch. Test that rather than assuming it, because the answer changes during a run: the
+person whose repo this is may edit anything at any moment, and the item most likely to collide is the one whose subsystem they are working in.
 
 ```bash
 git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
@@ -1438,18 +971,13 @@ git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.b
 comm -12 "<dir>/verify/<id>.branch-paths" "<dir>/verify/<id>.dirty-paths"
 ```
 
-Empty output means merge. Non-empty output names the exact files that will
-refuse, and it is what makes the park detail actionable — "merge refused"
-sends the user hunting, "`ItemCard.tsx` is uncommitted and this branch also
-touches it" does not. Both scratch files go under the run's `<dir>`, never
-`/tmp` and never the repo. `diff --cached` is not optional: a _staged_
-uncommitted change refuses the merge exactly as an unstaged one does, and a
-`git diff`-only probe reads clean over it.
+Empty output means merge. Non-empty output names the exact files that will refuse, and it is what makes the park detail actionable — "merge refused" sends the
+user hunting, "`ItemCard.tsx` is uncommitted and this branch also touches it" does not. Both scratch files go under the run's `<dir>`, never `/tmp` and never
+the repo. `diff --cached` is not optional: a _staged_ uncommitted change refuses the merge exactly as an unstaged one does, and a `git diff`-only probe reads
+clean over it.
 
-On a non-empty intersection, do not stash, commit, or check anything out on
-the user's behalf — their uncommitted work is theirs, and this is the same
-boundary abort's preservation branch draws. Take the worktree-side resolve
-below if it applies, otherwise park with the overlapping paths named:
+On a non-empty intersection, do not stash, commit, or check anything out on the user's behalf — their uncommitted work is theirs, and this is the same boundary
+abort's preservation branch draws. Take the worktree-side resolve below if it applies, otherwise park with the overlapping paths named:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "merge would be refused: <paths> are uncommitted in the main tree and this branch also touches them — commit or stash them, then merge backlog/<id> by hand"
@@ -1462,13 +990,11 @@ Otherwise merge:
 git merge --no-ff --no-edit backlog/<id>
 ```
 
-`--no-ff` so every item is one identifiable merge commit in `main`'s history
-even when it could have fast-forwarded; `--no-edit` so no editor opens in a
-session that has no terminal to open one in.
+`--no-ff` so every item is one identifiable merge commit in `main`'s history even when it could have fast-forwarded; `--no-edit` so no editor opens in a session
+that has no terminal to open one in.
 
-**Three different failures, and they take different commands. Do not conflate
-them: only the first one degrades the run, and the other two park the item
-exactly as they always have.**
+**Three different failures, and they take different commands. Do not conflate them: only the first one degrades the run, and the other two park the item exactly
+as they always have.**
 
 **A permission denial** — the command never reached git at all:
 
@@ -1477,11 +1003,9 @@ Permission for this action was denied by the Claude Code auto mode
 classifier. Reason: Blocked by classifier.
 ```
 
-Nothing was attempted, `main` is untouched, and **the work is fine** — every
-step before this one was green and the last step of the pipeline was refused.
-That is not something a human must look at, so this item takes the _branch_
-outcome instead of a park, and the rest of the queue stops attempting a merge
-that has just been shown to fail:
+Nothing was attempted, `main` is untouched, and **the work is fine** — every step before this one was green and the last step of the pipeline was refused. That
+is not something a human must look at, so this item takes the _branch_ outcome instead of a park, and the rest of the queue stops attempting a merge that has
+just been shown to fail:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
@@ -1489,21 +1013,14 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merg
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
-Then continue with the next item, which now takes the branch path at the top
-of this section. Keep the branch — no `branch -d`, for the reason that path
-gives — and if `worktree remove` does not exit `0`, handle it exactly as that
-path says: the item stays `branched`, and which of git's two failures it is
-decides whether the leftover directory is parked or finished off without
-paging anyone. (A `merge-mode` exit `1` saying the run is
-already in branch mode is the right state, not a failure — a resumed,
-already-degraded run hits it, and the stage above has already landed.)
+Then continue with the next item, which now takes the branch path at the top of this section. Keep the branch — no `branch -d`, for the reason that path gives —
+and if `worktree remove` does not exit `0`, handle it exactly as that path says: the item stays `branched`, and which of git's two failures it is decides
+whether the leftover directory is parked or finished off without paging anyone. (A `merge-mode` exit `1` saying the run is already in branch mode is the right
+state, not a failure — a resumed, already-degraded run hits it, and the stage above has already landed.)
 
-**No `attention` entry here.** The attention list means "a human must look at
-_this item_", and a green, reviewed branch does not qualify; `ATTENTION_KINDS`
-stays the three kinds it has always taken. One classifier verdict is one
-run-level fact and is recorded once, in `mergeModeNote` — N identical rows
-would be N copies of it. The actionable part, the merge command per branch in
-order, belongs in §10's summary.
+**No `attention` entry here.** The attention list means "a human must look at _this item_", and a green, reviewed branch does not qualify; `ATTENTION_KINDS`
+stays the three kinds it has always taken. One classifier verdict is one run-level fact and is recorded once, in `mergeModeNote` — N identical rows would be N
+copies of it. The actionable part, the merge command per branch in order, belongs in §10's summary.
 
 **A pre-merge refusal** — git declined before touching anything:
 
@@ -1513,13 +1030,9 @@ error: Your local changes to the following files would be overwritten by merge:
 Please commit your changes or stash them before you merge.
 ```
 
-Nothing was modified, there is no `MERGE_HEAD`, and **`git merge --abort` is
-the wrong command** — it errors with `fatal: There is no merge to abort`. The
-tree is already in the state an abort would have restored. This is what the
-overlap probe above is for; reaching it means the probe was skipped or the
-tree changed in the seconds since. Handle it exactly as the probe's non-empty
-branch does — park with the paths named, or resolve worktree-side — and issue
-no `--abort`.
+Nothing was modified, there is no `MERGE_HEAD`, and **`git merge --abort` is the wrong command** — it errors with `fatal: There is no merge to abort`. The tree
+is already in the state an abort would have restored. This is what the overlap probe above is for; reaching it means the probe was skipped or the tree changed
+in the seconds since. Handle it exactly as the probe's non-empty branch does — park with the paths named, or resolve worktree-side — and issue no `--abort`.
 
 **A conflict** — the merge started and left markers behind:
 
@@ -1527,54 +1040,36 @@ no `--abort`.
 git -C "$PWD" merge --abort
 ```
 
-then `attention <id> --kind parked --detail "merge conflict with main — worktree and branch kept"`, `stage <id> parked`, keep the worktree and the
-branch exactly as they are, and continue with the next item. A conflict means
-`main` moved under the run (the user pushed, or an earlier item in this same
-run touched the same lines); resolving it is a human's judgement call, and
-the branch is the thing that makes that possible later.
+then `attention <id> --kind parked --detail "merge conflict with main — worktree and branch kept"`, `stage <id> parked`, keep the worktree and the branch
+exactly as they are, and continue with the next item. A conflict means `main` moved under the run (the user pushed, or an earlier item in this same run touched
+the same lines); resolving it is a human's judgement call, and the branch is the thing that makes that possible later.
 
-**When `main` moved under the run, resolving on the _branch_ side is better
-than parking — and it is the only option that keeps the merge gate honest.**
-Those two failures — the refusal and the conflict, not the denial above them —
-have the same root cause: `main` is no longer the commit this item was
-verified against. Merging into it anyway would put content into
-`main` that nothing green ever ran — every individual step was green, and the
-combination was never tested. That is a hole in the "never merges red" hard
-limit which is invisible precisely because nothing reports red.
+**When `main` moved under the run, resolving on the _branch_ side is better than parking — and it is the only option that keeps the merge gate honest.** Those
+two failures — the refusal and the conflict, not the denial above them — have the same root cause: `main` is no longer the commit this item was verified
+against. Merging into it anyway would put content into `main` that nothing green ever ran — every individual step was green, and the combination was never
+tested. That is a hole in the "never merges red" hard limit which is invisible precisely because nothing reports red.
 
-So bring `main` into the worktree, prove the combination there, and only then
-merge out:
+So bring `main` into the worktree, prove the combination there, and only then merge out:
 
 ```bash
 git -C "$PWD/.worktrees/<id>" merge --no-edit main
 ```
 
-- **It merges cleanly** — re-run **all of step 8** against the combined
-  content, starting with its `rm -f`. This is exactly the second-attempt case
-  that rule exists for, and skipping it reads the first attempt's `0` for a
-  suite that never saw `main`'s changes. Green, then merge to `main` as above,
-  which is now conflict-free. Red, then it is an ordinary §8 failure: a fix
-  loop if the shared ceiling allows one, a park if it does not.
-- **It conflicts** — park, per the conflict branch above. Resolving real
-  content conflicts is a human judgement call and that has not changed;
-  what changed is that this is now the _second_ thing tried, not the first.
+- **It merges cleanly** — re-run **all of step 8** against the combined content, starting with its `rm -f`. This is exactly the second-attempt case that rule
+  exists for, and skipping it reads the first attempt's `0` for a suite that never saw `main`'s changes. Green, then merge to `main` as above, which is now
+  conflict-free. Red, then it is an ordinary §8 failure: a fix loop if the shared ceiling allows one, a park if it does not.
+- **It conflicts** — park, per the conflict branch above. Resolving real content conflicts is a human judgement call and that has not changed; what changed is
+  that this is now the _second_ thing tried, not the first.
 
-Nothing here touches the user's working tree: the merge, the resolution and
-the verification all happen inside a worktree this run created, which is the
-same reason the pre-flight amendment rule insists the item file is only ever
-edited there.
+Nothing here touches the user's working tree: the merge, the resolution and the verification all happen inside a worktree this run created, which is the same
+reason the pre-flight amendment rule insists the item file is only ever edited there.
 
-**Undoing a merge that already completed is `git revert -m 1 <merge-sha>`,
-never `git reset --hard`.** `reset --hard` was measured destroying an unrelated,
-uncommitted modification in the main tree along with the merge, unrecoverably;
-the same undo by revert left it byte-for-byte intact. An unattended run can
-never rule out that the user has uncommitted work in their main tree, so the
-noisier history is the price, knowingly paid. `-m 1` names the first parent —
-`main` as it was before this merge. (`references/rationale.md`, §9, has the
-measurement.)
+**Undoing a merge that already completed is `git revert -m 1 <merge-sha>`, never `git reset --hard`.** `reset --hard` was measured destroying an unrelated,
+uncommitted modification in the main tree along with the merge, unrecoverably; the same undo by revert left it byte-for-byte intact. An unattended run can never
+rule out that the user has uncommitted work in their main tree, so the noisier history is the price, knowingly paid. `-m 1` names the first parent — `main` as
+it was before this merge. (`references/rationale.md`, §9, has the measurement.)
 
-**On success**, record it and clean up. Capture the removal's status — the
-rest of this section branches on it, and on what git printed:
+**On success**, record it and clean up. Capture the removal's status — the rest of this section branches on it, and on what git printed:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged
@@ -1582,85 +1077,56 @@ git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 git -C "$PWD" branch -d backlog/<id>
 ```
 
-Plain `remove`, never `--force`. **`remove=0` is the ordinary case and needs
-nothing further** — including for a worktree holding only an ignored `dist/`
-that step 8's build wrote, which removes cleanly and takes the build output
-with it (measured; `references/rationale.md`, §9).
+Plain `remove`, never `--force`. **`remove=0` is the ordinary case and needs nothing further** — including for a worktree holding only an ignored `dist/` that
+step 8's build wrote, which removes cleanly and takes the build output with it (measured; `references/rationale.md`, §9).
 
-**What happens to the item when that removal does not return `0`: nothing
-happens to the _item_. It stays `merged`.** The `stage <id> merged` above
-already landed and it was true — the branch is in `main` — so do not re-stage
-it to `parked` on either branch below, which would tell the board and the run
-summary that an item which actually merged did not. What differs between the
-two is only whether a human is paged, and **that is decided by git's own
-message, never by looking at what is left in the directory**: the leftovers of
-a half-finished delete are whatever the pass happened to miss, which carries no
-information at all.
+**What happens to the item when that removal does not return `0`: nothing happens to the _item_. It stays `merged`.** The `stage <id> merged` above already
+landed and it was true — the branch is in `main` — so do not re-stage it to `parked` on either branch below, which would tell the board and the run summary that
+an item which actually merged did not. What differs between the two is only whether a human is paged, and **that is decided by git's own message, never by
+looking at what is left in the directory**: the leftovers of a half-finished delete are whatever the pass happened to miss, which carries no information at all.
 
-**`fatal: '<path>' contains modified or untracked files, use --force to delete
-it`** (exit `128`) — git's clean check refused. **Nothing was deleted and the
-worktree is still registered**, and what stopped it was something in there that
-was never committed, never reviewed and never merged; forcing would delete it
-with no undo. This is the one state `--force` would work in and the one state
-it must never be used in. Park it: `attention <id> --kind parked --detail
-"merged; worktree <path> would not remove cleanly — uncommitted leftovers to
-look at"` (the `parked` kind is the attention list's closest fit, and the
-detail is what disambiguates it), leave the directory and the branch alone, and
-carry on to the next item. A human deletes it after looking; nothing in the run
-depends on it being gone.
+**`fatal: '<path>' contains modified or untracked files, use --force to delete it`** (exit `128`) — git's clean check refused. **Nothing was deleted and the
+worktree is still registered**, and what stopped it was something in there that was never committed, never reviewed and never merged; forcing would delete it
+with no undo. This is the one state `--force` would work in and the one state it must never be used in. Park it:
+`attention <id> --kind parked --detail "merged; worktree <path> would not remove cleanly — uncommitted leftovers to look at"` (the `parked` kind is the
+attention list's closest fit, and the detail is what disambiguates it), leave the directory and the branch alone, and carry on to the next item. A human deletes
+it after looking; nothing in the run depends on it being gone.
 
-**`error: failed to delete '<path>': <errno>`** (exit `255`, `Directory not
-empty` in both recorded occurrences) — a different failure with the opposite
-response. The clean check **passed** here: git certified the tree carried
-nothing modified and nothing untracked, began the delete, and could not finish
-it. git drops the admin entry `.git/worktrees/<id>` _first_ and the directory
-second, so by the time this prints **the worktree is already unregistered** —
-`git worktree list` no longer names it, a `--force` retry answers `fatal:
-'<path>' is not a working tree`, and `git worktree prune` has nothing left to
-prune. Do not reach for any of those three. Finish the removal git started:
+**`error: failed to delete '<path>': <errno>`** (exit `255`, `Directory not empty` in both recorded occurrences) — a different failure with the opposite
+response. The clean check **passed** here: git certified the tree carried nothing modified and nothing untracked, began the delete, and could not finish it. git
+drops the admin entry `.git/worktrees/<id>` _first_ and the directory second, so by the time this prints **the worktree is already unregistered** —
+`git worktree list` no longer names it, a `--force` retry answers `fatal: '<path>' is not a working tree`, and `git worktree prune` has nothing left to prune.
+Do not reach for any of those three. Finish the removal git started:
 
 ```bash
 rm -rf "$PWD/.worktrees/<id>"; echo "rm=$?"
 [ ! -e "$PWD/.worktrees/<id>" ]; echo "gone=$?"
 ```
 
-**On `gone=0`, record no `attention` entry and say nothing about it.** Nothing
-here needs a human: the item merged green, git certified the tree clean before
-it started deleting, and the run finished a cleanup git left half-done. Paging
-someone over that is the defect this branch exists to remove. Only if the
-directory survives — `gone` is not `0` — park it, with `rm`'s own error quoted
-in the detail: a child git could not unlink is usually one `rm` cannot unlink
-either, and that _is_ a human's problem.
+**On `gone=0`, record no `attention` entry and say nothing about it.** Nothing here needs a human: the item merged green, git certified the tree clean before it
+started deleting, and the run finished a cleanup git left half-done. Paging someone over that is the defect this branch exists to remove. Only if the directory
+survives — `gone` is not `0` — park it, with `rm`'s own error quoted in the detail: a child git could not unlink is usually one `rm` cannot unlink either, and
+that _is_ a human's problem.
 
-**The guards on that `rm -rf`, which are its entire licence** — it is the only
-destructive filesystem verb in this skill:
+**The guards on that `rm -rf`, which are its entire licence** — it is the only destructive filesystem verb in this skill:
 
-- **Only in this branch**, i.e. only after git's own delete-failure message
-  above, whose precondition is that git's clean check already passed. Never after the
+- **Only in this branch**, i.e. only after git's own delete-failure message above, whose precondition is that git's clean check already passed. Never after the
   refusal above it, and never on a hunch about what is in the directory.
-- **Only the literal `"$PWD/.worktrees/<id>"` path this run created** — never a
-  path read back from the run file, a `git worktree list`, or anywhere else,
-  and never a bare shell variable that can expand to nothing.
-- **Never as a substitute for the first attempt.** `git worktree remove` always
-  runs first: dropping the registration stays git's job, and this command only
+- **Only the literal `"$PWD/.worktrees/<id>"` path this run created** — never a path read back from the run file, a `git worktree list`, or anywhere else, and
+  never a bare shell variable that can expand to nothing.
+- **Never as a substitute for the first attempt.** `git worktree remove` always runs first: dropping the registration stays git's job, and this command only
   ever finishes what git already committed to.
 
-Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a
-branch that is actually merged, so a refusal here is real information — the
-merge you think happened did not, and that _is_ worth stopping to understand
-before the next item builds on a `main` you may have misread.
+Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a branch that is actually merged, so a refusal here is real information — the merge
+you think happened did not, and that _is_ worth stopping to understand before the next item builds on a `main` you may have misread.
 
-Then the next item starts from the updated `main`, so later items build on
-earlier ones.
+Then the next item starts from the updated `main`, so later items build on earlier ones.
 
 ### After a runner-fix item lands
 
-A merged fix does **not** reach this run on its own. Every skill body and
-every `orchestrate.mjs` invocation here resolves through
-`$CLAUDE_PLUGIN_ROOT` — the _installed plugin copy_ — while the merge just
-landed in this repo's `main`. Hoisting the item to the front of the queue
-(§1) buys ordering and nothing else unless the run is told, once, to follow
-the repo's copy for the rest of the run.
+A merged fix does **not** reach this run on its own. Every skill body and every `orchestrate.mjs` invocation here resolves through `$CLAUDE_PLUGIN_ROOT` — the
+_installed plugin copy_ — while the merge just landed in this repo's `main`. Hoisting the item to the front of the queue (§1) buys ordering and nothing else
+unless the run is told, once, to follow the repo's copy for the rest of the run.
 
 So after every merge, print what it brought in:
 
@@ -1668,48 +1134,33 @@ So after every merge, print what it brought in:
 git -C "$PWD" diff --name-only HEAD^1 HEAD
 ```
 
-- If those paths include **`skills/backlog-orchestrate/SKILL.md`**, re-read
-  that file from this repo's working tree and follow it for the remainder of
-  the run. The body you were handed came from the installed copy and cannot
-  know about the fix.
-- If they **also** include
-  **`skills/backlog-orchestrate/tools/orchestrate.mjs`**, switch the CLI
-  invocation to the repo copy for the remainder of the run as well.
+- If those paths include **`skills/backlog-orchestrate/SKILL.md`**, re-read that file from this repo's working tree and follow it for the remainder of the run.
+  The body you were handed came from the installed copy and cannot know about the fix.
+- If they **also** include **`skills/backlog-orchestrate/tools/orchestrate.mjs`**, switch the CLI invocation to the repo copy for the remainder of the run as
+  well.
 
-**Prose and tool move together or not at all.** Following freshly merged
-prose while still invoking the installed tool is the one genuinely dangerous
-combination: the new body may name a flag the old tool refuses. Both come
-from the same checkout, so taking both keeps them consistent with each other,
-and taking neither leaves the run exactly as it was. Never one.
+**Prose and tool move together or not at all.** Following freshly merged prose while still invoking the installed tool is the one genuinely dangerous
+combination: the new body may name a flag the old tool refuses. Both come from the same checkout, so taking both keeps them consistent with each other, and
+taking neither leaves the run exactly as it was. Never one.
 
-Record the switch on the item that carried the fix, through the note channel
-that already exists rather than a new field:
+Record the switch on the item that carried the fix, through the note channel that already exists rather than a new field:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged --note "runner fix — the remainder of this run follows the repo copy"
 ```
 
-(or `branched` under branch mode, same note). **No `attention` entry** —
-`ATTENTION_KINDS` is the closed set of three and means "a human must look at
-this item", which a run that successfully picked up its own fix does not
-warrant.
+(or `branched` under branch mode, same note). **No `attention` entry** — `ATTENTION_KINDS` is the closed set of three and means "a human must look at this
+item", which a run that successfully picked up its own fix does not warrant.
 
-**A resumed session does not inherit the switch, and has to re-derive it.**
-The switch is session state; nothing on disk carries it. A run that crashes
-after picking up its own fix is continued by a _fresh_ headless session —
-the board's Resume control, or the server's watchdog resuming it unattended —
-and that session is handed the **installed** SKILL.md again, exactly as the
-first one was. Both halves revert together, so nothing becomes inconsistent;
-what lapses silently is the whole point of the marker, at the one moment a
-broken runner makes a crash most likely. The note written just above is the
-durable record: a resumed session that finds any queue item staged `merged`
-or `branched` carrying that note takes the switch again before it works the
-rest of the queue. `references/recovery.md` carries that step for `--resume`.
+**A resumed session does not inherit the switch, and has to re-derive it.** The switch is session state; nothing on disk carries it. A run that crashes after
+picking up its own fix is continued by a _fresh_ headless session — the board's Resume control, or the server's watchdog resuming it unattended — and that
+session is handed the **installed** SKILL.md again, exactly as the first one was. Both halves revert together, so nothing becomes inconsistent; what lapses
+silently is the whole point of the marker, at the one moment a broken runner makes a crash most likely. The note written just above is the durable record: a
+resumed session that finds any queue item staged `merged` or `branched` carrying that note takes the switch again before it works the rest of the queue.
+`references/recovery.md` carries that step for `--resume`.
 
-**None of this substitutes for the sync.** A merged runner fix is inert for
-the _next_ run either way until this repo's HEAD is pushed and
-`pnpm run plugin:sync` has run — git is the publishing boundary. This
-subsection is a within-run workaround for one run, nothing more.
+**None of this substitutes for the sync.** A merged runner fix is inert for the _next_ run either way until this repo's HEAD is pushed and
+`pnpm run plugin:sync` has run — git is the publishing boundary. This subsection is a within-run workaround for one run, nothing more.
 
 ## 10. Finishing, resuming, aborting
 
@@ -1721,50 +1172,34 @@ When the queue is drained:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status done
 ```
 
-`--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits
-`1`. Then
-summarise for the user from `status --json`: what merged or branched, what
-parked and why,
-what was skipped as `ungroomed` or `needs-answers` and therefore wants a
-groom pass before the next run. A clean item — no fix loops, no retries,
-green first try — should have produced no ping at all along the way; the
-summary is where it finally gets mentioned.
+`--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits `1`. Then summarise for the user from `status --json`: what merged or branched,
+what parked and why, what was skipped as `ungroomed` or `needs-answers` and therefore wants a groom pass before the next run. A clean item — no fix loops, no
+retries, green first try — should have produced no ping at all along the way; the summary is where it finally gets mentioned.
 
-**Any item that finished `branched` owes the user a merge list.** Name those
-branches in queue order — each was verified against the `main` its predecessor
-started from, and one carried over from an earlier run (§3's own recognition
-step) against that run's — with the literal command per branch:
+**Any item that finished `branched` owes the user a merge list.** Name those branches in queue order — each was verified against the `main` its predecessor
+started from, and one carried over from an earlier run (§3's own recognition step) against that run's — with the literal command per branch:
 
 ```bash
 git merge --no-ff backlog/<id>
 ```
 
-Then flag the pairs that will fight: two branches that touch a common path
-mean a conflict for whichever is merged second, regardless of which `main`
-each one actually started from — a carried-over branch (§3) can predate this
-run by days, and a run that downgraded mid-queue means `main` itself moved
-(the items that merged before the denial) before it froze. Write each
-branch's paths into the run's own `<dir>` and intersect them — the three-dot
-diff each file is built from is merge-base relative, so it isolates each
-branch's own changes correctly regardless of any of that:
+Then flag the pairs that will fight: two branches that touch a common path mean a conflict for whichever is merged second, regardless of which `main` each one
+actually started from — a carried-over branch (§3) can predate this run by days, and a run that downgraded mid-queue means `main` itself moved (the items that
+merged before the denial) before it froze. Write each branch's paths into the run's own `<dir>` and intersect them — the three-dot diff each file is built from
+is merge-base relative, so it isolates each branch's own changes correctly regardless of any of that:
 
 ```bash
 git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
 comm -12 "<dir>/verify/<a>.branch-paths" "<dir>/verify/<b>.branch-paths"
 ```
 
-And when `mergeModeEffective` is `branch` while `mergeMode` is `merge`, say so
-**once**, run-level, quoting `mergeModeNote` verbatim: the run wanted to merge
-and was refused, the work is green, and those branches are what it produced
-instead. Not per item — one classifier verdict is one fact. A downgraded run
-still finishes `--status done`; nothing about it failed.
+And when `mergeModeEffective` is `branch` while `mergeMode` is `merge`, say so **once**, run-level, quoting `mergeModeNote` verbatim: the run wanted to merge
+and was refused, the work is green, and those branches are what it produced instead. Not per item — one classifier verdict is one fact. A downgraded run still
+finishes `--status done`; nothing about it failed.
 
-Long steps in between deserve a heartbeat. `watch` stamps one every interval
-— through the dispatched session in step 4 and through the detached
-verification in step 8, which is precisely why neither of those two can make
-a healthy run read as stale any more — but review and merge still can outlast
-the fifteen-minute freshness threshold on their own, and a run whose
-heartbeat goes stale reads to the board (and to a later `init`) as crashed:
+Long steps in between deserve a heartbeat. `watch` stamps one every interval — through the dispatched session in step 4 and through the detached verification in
+step 8, which is precisely why neither of those two can make a healthy run read as stale any more — but review and merge still can outlast the fifteen-minute
+freshness threshold on their own, and a run whose heartbeat goes stale reads to the board (and to a later `init`) as crashed:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
@@ -1772,108 +1207,67 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" hear
 
 ### Pausing
 
-You are here because `stage <id> preflight` or `stage <id> dispatched` exited
-`6`. Nothing was written by that call. Finish the run:
+You are here because `stage <id> preflight` or `stage <id> dispatched` exited `6`. Nothing was written by that call. Finish the run:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
 ```
 
-Then summarise exactly as _Finishing_ above does — what merged or branched,
-what parked and why, the branch list and its conflict pairs if any item
-finished `branched` — **plus the items still pending, by name**. Those are
-what a resume will pick up, and naming them is the difference between a
-summary and a receipt.
+Then summarise exactly as _Finishing_ above does — what merged or branched, what parked and why, the branch list and its conflict pairs if any item finished
+`branched` — **plus the items still pending, by name**. Those are what a resume will pick up, and naming them is the difference between a summary and a receipt.
 
-Close with one sentence: the run resumes from the board's Resume control, on
-the strip or in the Runs view, or by `/backlog-orchestrate --resume` in a
-terminal at the project root.
+Close with one sentence: the run resumes from the board's Resume control, on the strip or in the Runs view, or by `/backlog-orchestrate --resume` in a terminal
+at the project root.
 
-Then end the turn. Do not ping, do not ask whether to continue, do not wait:
-the board's own control is what asked for this pause, so the person who asked
-is already looking at the surface that will restart it.
+Then end the turn. Do not ping, do not ask whether to continue, do not wait: the board's own control is what asked for this pause, so the person who asked is
+already looking at the surface that will restart it.
 
 ### `--resume` and `--abort`
 
-**Both begin by reading `references/recovery.md` in full, before any other
-command.** That file carries the whole of both paths: `reconcile`'s four
-verdicts and what each one means, the ruling that a resumed session's dead
-marker is billed with a plain `stop` rather than `--abandon` (deliberately the
-opposite of what `backlog-groom` prescribes for a marker that looks identical),
-and abort's order-of-operations, which is its entire safety property.
+**Both begin by reading `references/recovery.md` in full, before any other command.** That file carries the whole of both paths: `reconcile`'s four verdicts and
+what each one means, the ruling that a resumed session's dead marker is billed with a plain `stop` rather than `--abandon` (deliberately the opposite of what
+`backlog-groom` prescribes for a marker that looks identical), and abort's order-of-operations, which is its entire safety property.
 
-The board may spawn `--resume` itself for a run whose heartbeat has gone
-stale, so this path is entered unattended and must stay safe to enter that
-way — which it is, the only write before `reconcile`'s verdicts being `claim`
-re-stamping `updatedAt` on a run `status` has just confirmed is `running`,
-the identical stamp the run's own loop writes on every turn, gated by `status`
-alone so a finished run is never re-stamped.
+The board may spawn `--resume` itself for a run whose heartbeat has gone stale, so this path is entered unattended and must stay safe to enter that way — which
+it is, the only write before `reconcile`'s verdicts being `claim` re-stamping `updatedAt` on a run `status` has just confirmed is `running`, the identical stamp
+the run's own loop writes on every turn, gated by `status` alone so a finished run is never re-stamped.
 
-`claim` also records **which** session is driving the run, and that half is
-not optional: a resume can arrive from this app's own board and from the
-dashboard's session-resume at once, and nothing outside the run file can see
-both. If `claim`, or any later write, exits `7`, another session took the run
-over — stop immediately, write nothing more, and exit. `references/recovery.md`
-has the mechanism and why the loser stopping on the first refusal is the whole
-guarantee.
+`claim` also records **which** session is driving the run, and that half is not optional: a resume can arrive from this app's own board and from the dashboard's
+session-resume at once, and nothing outside the run file can see both. If `claim`, or any later write, exits `7`, another session took the run over — stop
+immediately, write nothing more, and exit. `references/recovery.md` has the mechanism and why the loser stopping on the first refusal is the whole guarantee.
 
-Two rules stay here, because a reader who stops at this line still has to know
-them:
+Two rules stay here, because a reader who stops at this line still has to know them:
 
-- **`--resume` starts from what is on disk, not from what the run file hoped.**
-  `orchestrate.mjs reconcile` is read-only and prints one of four suggestions
-  per item; deciding what to do with each is this skill's job, not the tool's.
-- **`--abort` runs before any marker is cleared, never after.** Clearing a
-  mid-flight item's marker first makes `abort` classify that item as safe and
-  `git worktree remove --force` it — which deletes uncommitted work that was
-  never committed and never staged, with no reflog entry to recover it from.
+- **`--resume` starts from what is on disk, not from what the run file hoped.** `orchestrate.mjs reconcile` is read-only and prints one of four suggestions per
+  item; deciding what to do with each is this skill's job, not the tool's.
+- **`--abort` runs before any marker is cleared, never after.** Clearing a mid-flight item's marker first makes `abort` classify that item as safe and
+  `git worktree remove --force` it — which deletes uncommitted work that was never committed and never staged, with no reflog entry to recover it from.
 
-`--abort` ends a run; it never undoes one. Everything already merged stays
-merged.
+`--abort` ends a run; it never undoes one. Everything already merged stays merged.
 
 ## Hard limits
 
-- **Sequential, always.** One item in flight, start to finish, before the next
-  begins. No flag enables parallel items; one worktree and one session at a
-  time is the isolation, and parallelism forfeits it (§2).
-- **Never merges red.** Verification failure parks the item exactly like a
-  conflict does. Nothing green-lights a merge except the commands passing —
-  not a clean review, not a confident `## Outcome`, not "the failure looks
-  unrelated."
-- **Branch mode never writes `main`, and a denied merge never parks.** The
-  mode is set at `init`, applies to the whole queue, and only ever moves one
-  way afterwards (`merge` → `branch`, never back — §2, §9). `branched` is a
-  success exit, not a failure — the tool refuses `stage <id> merged` under
-  branch mode so the run file cannot say otherwise.
-- **Never force-pushes, never rewrites `main`'s history, never pushes at all.**
-  Merge commits only; undoing one is `git revert -m 1`, never
-  `git reset --hard` (step 9). Publishing anything is the user's call.
-- **Never writes the registry.** `~/.backlog-manager/registry.json` keeps its
-  single writer (`backlog.mjs` `init`/`new`), untouched by anything here.
-- **Item bodies: pre-flight answers only.** Nothing else in the item
-  lifecycle belongs to this skill — `start`, `## Outcome`, and the archive
-  move all belong to `backlog-execute`, inside the session, and the plan
-  belongs to `backlog-groom`. The single exception is the dead-marker
-  `backlog.mjs stop` in the resume and abort paths, which clears a marker the
-  session that set it is no longer alive to clear; it goes through the tool,
-  never through an edit of the file.
-- **The run file is written only through `orchestrate.mjs`.** Never hand-edit
-  it, never `rm` it to get past an exit `4`, never write it from the server or
-  the client. One writer, one reader — the same relationship the registry has.
-- **`orchestrate.mjs` runs from the project root, always** (see the top of
-  this file). Worktree-scoped work goes through `--worktree`, `--cwd` and
-  `git -C`.
+- **Sequential, always.** One item in flight, start to finish, before the next begins. No flag enables parallel items; one worktree and one session at a time is
+  the isolation, and parallelism forfeits it (§2).
+- **Never merges red.** Verification failure parks the item exactly like a conflict does. Nothing green-lights a merge except the commands passing — not a clean
+  review, not a confident `## Outcome`, not "the failure looks unrelated."
+- **Branch mode never writes `main`, and a denied merge never parks.** The mode is set at `init`, applies to the whole queue, and only ever moves one way
+  afterwards (`merge` → `branch`, never back — §2, §9). `branched` is a success exit, not a failure — the tool refuses `stage <id> merged` under branch mode so
+  the run file cannot say otherwise.
+- **Never force-pushes, never rewrites `main`'s history, never pushes at all.** Merge commits only; undoing one is `git revert -m 1`, never `git reset --hard`
+  (step 9). Publishing anything is the user's call.
+- **Never writes the registry.** `~/.backlog-manager/registry.json` keeps its single writer (`backlog.mjs` `init`/`new`), untouched by anything here.
+- **Item bodies: pre-flight answers only.** Nothing else in the item lifecycle belongs to this skill — `start`, `## Outcome`, and the archive move all belong to
+  `backlog-execute`, inside the session, and the plan belongs to `backlog-groom`. The single exception is the dead-marker `backlog.mjs stop` in the resume and
+  abort paths, which clears a marker the session that set it is no longer alive to clear; it goes through the tool, never through an edit of the file.
+- **The run file is written only through `orchestrate.mjs`.** Never hand-edit it, never `rm` it to get past an exit `4`, never write it from the server or the
+  client. One writer, one reader — the same relationship the registry has.
+- **`orchestrate.mjs` runs from the project root, always** (see the top of this file). Worktree-scoped work goes through `--worktree`, `--cwd` and `git -C`.
 
 ## Next
 
-`/backlog` shows the board with every merged item archived — but a `branched`
-item still reads as open there, because its archive move is committed on
-`backlog/<id>` and lands only when that branch is merged. **Merge those
-branches before the next run**: until you do, those items stay open and the
-next run queues them again (it recognises the shape and passes them through
-untouched, §3 — but that is a re-report, not progress). Items left as
-`ungroomed` or `needs-answers` are a `/backlog-groom` pass away from being
-ready for the next run; parked items are a human decision, and their branches
-are still there. Anything the work surfaced along the way — a new bug, a
-follow-on idea — is a `/backlog-capture`, not an edit to an item this run
-already merged.
+`/backlog` shows the board with every merged item archived — but a `branched` item still reads as open there, because its archive move is committed on
+`backlog/<id>` and lands only when that branch is merged. **Merge those branches before the next run**: until you do, those items stay open and the next run
+queues them again (it recognises the shape and passes them through untouched, §3 — but that is a re-report, not progress). Items left as `ungroomed` or
+`needs-answers` are a `/backlog-groom` pass away from being ready for the next run; parked items are a human decision, and their branches are still there.
+Anything the work surfaced along the way — a new bug, a follow-on idea — is a `/backlog-capture`, not an edit to an item this run already merged.

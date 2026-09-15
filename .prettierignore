@@ -48,13 +48,11 @@ skills/*/tools/fixtures/
 docs/superpowers/specs/*.html
 docs/superpowers/specs/**/*.html
 
-# Markdown, everywhere except the skills. A repo-wide pass over the 51 tracked .md files outside skills/ changes +3223/-2611 lines and every one of
-# those changes is *em* -> _em_ or a table's pipes re-padded — proseWrap: preserve governs prose line breaks only, never emphasis characters, list
-# markers or table cells. That is the whole diff: no line gets shorter, nothing gets more readable, and `git blame` on docs/subsystems/invariants.md
-# stops pointing at the person who worked out each invariant. The skills are the deliberate exception (see the block above), so they are re-included
-# below rather than being left to fall under this rule.
-*.md
-!skills/**/*.md
+# Markdown outside skills/ WAS excluded here for a few hours on 2026-09-15, because under the then-current proseWrap: preserve a pass over those files
+# changed nothing but *em* -> _em_ and table padding — churn with no reading benefit at all. proseWrap is now `always` (see .prettierrc.yaml), which
+# changes the trade completely: the pass now applies the 160-column convention to every doc in the tree, which is the thing that was wanted. So there is
+# no markdown rule here any more. The named .md exclusions elsewhere in this file stand on their own reasons — .claude/DESIGN.md is byte-identical to
+# another repo's copy, backlog/ is round-tripped by a single-writer tool, and the skills fixture holds item files rather than prose.
 
 # The two stylesheets, byte-pinned the same way client/index.html is, just verified by source-text regex instead of a hash. Three suites read these
 # files as TEXT rather than parsing them — test/project-hue.test.ts matches the literal selector `:root,[data-theme="midnight"]` to collect a theme's
@@ -64,3 +62,10 @@ docs/superpowers/specs/**/*.html
 # tolerate whitespace, which trades a real check for a cosmetic diff; excluding the files keeps the guards strict and costs nothing.
 shared/theme.css
 client/src/styles.css
+
+# The path-scoped rule files, excluded for a structural reason rather than a cosmetic one. Each body line in .claude/rules/ is ONE pointer — a sentence
+# plus a single docs/subsystems/invariants.md anchor — and test/claude-rules.test.ts enforces that by requiring every non-heading line to contain that
+# path, on the reasoning that a line which does not is a second copy of the rationale starting to grow. proseWrap: always has no way to know that: on
+# 2026-09-15 it split orchestrator.md's 174-character pointer across two lines, leaving "- Before changing files here, read" alone on the first, which
+# is exactly the shape the guard exists to reject. Nothing here is prose to be wrapped, so there is nothing for a width to improve.
+.claude/rules/

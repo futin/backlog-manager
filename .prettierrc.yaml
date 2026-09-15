@@ -20,6 +20,15 @@ jsxSingleQuote: false
 # first contact — the single loudest reason to state this file at all.
 trailingComma: none
 
-# Leave markdown line breaks exactly as written. Docs here are wrapped by hand and pinned in places by tests that read prose; rewrapping them would
-# rewrite blame on every line for no behaviour change.
-proseWrap: preserve
+# Rewrap markdown prose to printWidth above. This was `preserve` until 2026-09-15, on the argument that docs here are hand-wrapped and pinned in places
+# by tests that read prose, so rewrapping would rewrite blame for no behaviour change. Both halves of that turned out to be answerable. The blame half
+# is the cost of applying ~/.claude/CLAUDE.md's 160-column convention to a tree that predates it at all, and it is paid once here rather than a line at
+# a time forever; the pinned-prose half was measured rather than assumed, and the full suite stays green — those assertions match substrings, and
+# rewrapping only ever makes a phrase MORE contiguous, never less.
+#
+# What this does NOT do is as important as what it does. `always` rewraps paragraph prose and nothing else: a table keeps its rows, a fenced code block
+# is untouched, a list keeps one item per line, and a line with no break opportunity inside 160 (a long URL, a wide table row) is left over-long rather
+# than broken. Comment interiors in .ts/.tsx/.mjs are outside this entirely — prettier treats a comment as an opaque block at any printWidth and never
+# reflows the words inside one, which is why the ~75-column wrap in code comments survives this setting and is still governed by ~/.claude/CLAUDE.md
+# alone.
+proseWrap: always
