@@ -1,0 +1,25 @@
+# Formatting for this repo. YAML rather than JSON so each value can carry the measurement that chose it — the numbers below were counted off the tree,
+# not guessed, and a future edit that disagrees with one should re-count first.
+#
+# Prettier is deliberately NOT a dependency here and no `format` script exists: this file configures the prettier your editor already runs, for the
+# files you touch. A repo-wide pass is a separate decision, not something a config should cause by sitting here.
+
+# The point of the file. Code lines here sit at p50 33, p95 87 — everything typical is already well inside 160, so this mostly stops prettier from
+# breaking a line that reads fine whole. It does NOT touch comment interiors: prettier never reflows a comment at any width, so the ~75-column prose
+# wrap throughout this tree is governed by ~/.claude/CLAUDE.md, not by this number.
+printWidth: 160
+
+# 367 single-quoted imports against 9 double-quoted.
+singleQuote: true
+
+# 472 double-quoted JSX attributes against 0 single — prettier's default, kept explicit because it reads as a contradiction of singleQuote above and
+# would otherwise look like an oversight.
+jsxSingleQuote: false
+
+# 507 multiline closers whose previous line ends without a comma, against 1 that has one. Prettier 3 defaults to "all", which would rewrite all 507 on
+# first contact — the single loudest reason to state this file at all.
+trailingComma: none
+
+# Leave markdown line breaks exactly as written. Docs here are wrapped by hand and pinned in places by tests that read prose; rewrapping them would
+# rewrite blame on every line for no behaviour change.
+proseWrap: preserve

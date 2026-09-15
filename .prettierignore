@@ -1,0 +1,37 @@
+# Generated, vendored, or not ours to format.
+node_modules
+dist
+client/dist
+pnpm-lock.yaml
+.worktrees
+.codegraph
+.preview
+.playwright-mcp
+
+# Byte-pinned: test/csp.test.ts sha256-hashes the inline <script> in this file and compares it to THEME_SCRIPT_SHA256 (server/src/security.ts). Any
+# reformat, however cosmetic, changes those bytes and turns that test red — silently correct-looking until someone switches theme in the built page.
+client/index.html
+
+# Byte-pinned across repos, same failure mode as the line above but verified by exact diff against another tree instead of hashed in a test. Two
+# separate statements, easy to conflate: lines 1-159 are a don't-touch region (our four-line head — title, blank, provenance sentence, blank — plus the
+# copy), while the identity claim is narrower, our 5-159 === ../claude-agents-dashboard/.claude/DESIGN.md 3-157, 155 lines,
+# sha256 89a69b26766f0144b740a31229e9c0290fe225701ba6c9af1a09a1a134e640ac. That one hash is BOTH sides — being the same number is what the check
+# asserts. Line 160 opens section 8, which is this app's own writing and not copied from anywhere.
+#
+# 62 of those 155 lines are markdown table rows, and prettier re-pads table cells to align the pipes regardless of proseWrap — preserve governs prose
+# line breaks only, not tables, list markers or emphasis characters. So one format-on-save breaks the copy and falsifies the provenance sentence at the
+# head of the file; the diff catches it, but only after the damage is in the working tree.
+.claude/DESIGN.md
+
+# Skill-owned. skills/backlog/tools/backlog.mjs round-trips item bodies byte-for-byte and is the registry's only writer; a formatter editing what it
+# round-trips puts a second writer on files that are documented as having exactly one.
+backlog/
+
+# The plugin's publish surface. SKILL.md prose is asserted line-by-line by skills/backlog/tools/backlog.test.mjs (the groom stamp order, the closing
+# "Groomed on disk only" line, the reviewer/execute pair), and an install is a copy of the pushed HEAD — so a cosmetic edit here ships.
+skills/
+
+# Design artifacts: the mockups carry deliberately minified one-line CSS so a screen's whole style block reads at a glance. Prettier would explode each
+# of those into hundreds of lines and lose the thing they were drawn for.
+docs/superpowers/specs/*.html
+docs/superpowers/specs/**/*.html
