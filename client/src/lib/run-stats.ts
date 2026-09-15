@@ -2,67 +2,24 @@ import { isTerminalStage, itemDurationMs, runIsLive } from './run-time';
 import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../../../shared/types';
 
 /**
- * The statistics behind the Runs section's stat tiles (Task 6) and per-item
- * stage bars (Task 7) — pure derivations over `OrchestratorArchiveRun`, the
- * archive listing's own shape. No React, no fetching: `RunsView` calls these
- * against whatever payload `useOrchestratorArchive` already holds, the same
- * separation `run-time.ts` draws between deriving a number and rendering it.
+ * The statistics behind the Runs section's stat tiles (Task 6) and per-item stage bars (Task 7) — pure derivations over `OrchestratorArchiveRun`, the archive
+ * listing's own shape. No React, no fetching: `RunsView` calls these against whatever payload `useOrchestratorArchive` already holds, the same separation
+ * `run-time.ts` draws between deriving a number and rendering it.
  *
- * This module now IMPORTS two of that file's exports — `itemDurationMs`,
- * `isTerminalStage` — where an earlier version of this file deliberately
- * did not import anything from `run-time.ts` at all. The reason
- * is that "how long did this item take" must have exactly one
- * implementation, not two that quietly disagree. Before this change, this
- * module answered that question itself, with its own `itemWallMs` — first
- * recorded `stageAt` arrival to last, `pending` included — while
- * `run-time.ts`'s `itemDurationMs` answered it by excluding `pending` (the
- * queue-wait interval; see that function's own doc comment). Both numbers
- * described the same item, and on a real run they diverged by the item's
- * entire wait in line: `run-20260901-112815`'s bug-7 read 161 minutes in
- * this module's stat tiles and 25 minutes in the drawer that reads
- * `itemDurationMs` — the other 136 minutes were the four items ahead of it
- * in the queue, not anything that happened to bug-7 itself. `itemWallMs` is
- * gone now; every "how long" reading in this file goes through
- * `run-time.ts`'s version instead, so the two surfaces this feature puts
- * side by side cannot drift apart again — there is only one implementation
- * left for either of them to read.
+ * Every "how long" reading here goes through `run-time.ts`'s `itemDurationMs` rather than being derived locally. This module once had its own `itemWallMs`
+ * answering the same question a different way, and the two disagreed on a real run by the whole of the item's queue wait; that history and its numbers are in
+ * docs/subsystems/invariants.md#queue-wait-is-not-work, which is also where the `stageAt` first-arrival blur these spans inherit is written up
+ * (#stageat-records-first-arrivals-only-and-what-that-costs-the-stage-rollups).
  *
- * Two conventions carried over from that file, deliberately unchanged here:
+ * Two conventions carried over from `run-time.ts`, deliberately unchanged here:
  *
- * - Every derivation returns `null` (or skips the offending entry) rather
- *   than throwing when a stamp will not parse. A run file is hand-editable
- *   JSON on disk, there is no ErrorBoundary above whatever eventually
- *   renders these numbers, and a `null` a caller chooses not to render beats
- *   a `NaN` baked into a stat tile or a whole view crashing on one bad file.
- * - `now` is always a parameter, never read internally via `Date.now()`.
- *   `RunDrawer.tsx` states the reason once for the whole app: a caller
- *   rendering several of these numbers against one instant must take that
- *   instant itself and thread it down, or two readings taken a millisecond
- *   apart can print durations that do not agree with each other at a rung
- *   boundary. `aggregateRuns` and `runWallMs` both take `now` for this
- *   reason, not because they default to the wall clock and might skip it.
- *
- * KNOWN BLUR, carried over from `RunQueueItem.stageAt`'s own doc comment and
- * restated here because `itemStageSpans` is where it actually bites:
- * `stageAt` records each stage's FIRST arrival only — `orchestrate.mjs`
- * guards its write with `if (!(stage in item.stageAt))` — so a fix-and-
- * re-review loop's second (or third) pass through `reviewing`/`fixing` never
- * gets a stamp of its own. That second pass's time does not vanish from the
- * spans below; it folds into whichever span was open when the loop actually
- * happened, which is the span belonging to whatever stage's stamp is
- * chronologically just before the NEXT stage the item reached for the first
- * time. A `reviewing` → `fixing` → `reviewing` → `merged` item, for example,
- * reports one `reviewing` span running from the first `reviewing` arrival to
- * `merged`'s arrival — the second trip through `reviewing` is real time
- * spent, but it is invisible as its own span, indistinguishable from time
- * spent on the first pass. This is exactly why the design doc rejected a
- * gantt/timeline rendering of this data: a per-item stage bar (Task 7) is
- * still worth drawing because "which stage ate the most wall time" survives
- * the blur even when "how many passes did it take" does not, but a timeline
- * would present the folded span as if it were one uninterrupted visit, which
- * is the misleading reading the design doc calls out by name.
+ * - Every derivation returns `null` (or skips the offending entry) rather than throwing when a stamp will not parse. A run file is hand-editable JSON on disk,
+ *   there is no ErrorBoundary above whatever renders these numbers, and a `null` a caller chooses not to render beats a `NaN` baked into a stat tile or a whole
+ *   view crashing on one bad file.
+ * - `now` is always a parameter, never read internally via `Date.now()`. `RunDrawer.tsx` states the reason once for the whole app: a caller rendering several of
+ *   these numbers against one instant must take that instant itself and thread it down, or two readings taken a millisecond apart can print durations that do
+ *   not agree with each other at a rung boundary. `aggregateRuns` and `runWallMs` both take `now` for this reason, not because they default to the wall clock.
  */
-
 /**
  * `Date.parse`, but `null` instead of `NaN`. Still a duplicate of
  * `run-time.ts`'s own private `parseStamp` rather than an import of it, even
@@ -271,154 +228,22 @@ export const MACHINE_STAGES: readonly RunStage[] = ['preflight', 'dispatched', '
 export type StageTotals = Partial<Record<RunStage, number>>;
 
 /**
- * Per-stage total milliseconds of MACHINE TIME — the orchestrator actually
- * working, never queue wait — across every item in the queue. "Across this
- * whole run, where did the time actually go," the number behind the detail
- * pane's stage-time breakdown (Task 6).
+ * Per-stage total milliseconds of MACHINE TIME — the orchestrator actually working, never queue wait — across every item in the queue. "Across this whole run,
+ * where did the time actually go", the number behind the detail pane's stage-time breakdown (Task 6).
  *
- * Two things are deliberately excluded from the sum, both for the same
- * underlying reason: this function answers "where did the ORCHESTRATOR'S
- * time go," not "where did the WALL-CLOCK time between two stamps go."
+ * Four rules hold this function up. Each is load-bearing and none is redundant; the reasoning and the review rounds that produced them are in
+ * docs/subsystems/invariants.md#the-two-corrections-inside-runstagetotals.
  *
- *   - `pending` spans (`itemStageSpans` entries labeled `pending`, and the
- *     implicit "still in pending" case for a live item — see the second
- *     bullet) are dropped via the `MACHINE_STAGES.includes(span.stage)`
- *     filter below. A run works its queue one item at a time; every OTHER
- *     item's `pending` span is time this item spent waiting its turn, not
- *     time the orchestrator was idle or the run was somehow slow. Summing
- *     five items' queue waits into this total would report four run-lengths
- *     of pure nothing on top of whatever the run actually did.
- *   - A span labeled by a TERMINAL stage (`merged`, `parked`, ...) is
- *     dropped by that SAME `MACHINE_STAGES.includes(span.stage)` filter,
- *     which lists only the seven working stages and so excludes every
- *     terminal one. That filter is the guarantee, and it is therefore NOT
- *     redundant — a reader who believed the weaker claim below could delete
- *     it. What is true, but only of files the orchestrator itself writes, is
- *     that a terminal arrival is the LAST recorded stamp and `itemStageSpans`
- *     opens no span from the last stamp: an ordering convention, not a
- *     structural invariant. `parsedArrivals` sorts by TIME and this module's
- *     whole stated posture (see that function's own comment) is that a
- *     hand-edited or corrupt file is the input it exists to survive — so a
- *     terminal stamp that is not chronologically last WILL open a span, and
- *     the filter is what stops it counting. The open-span step below is
- *     guarded separately, by `isTerminalStage`.
- *
- * On top of `itemStageSpans`'s own completed spans, this adds an OPEN span
- * for a still-live item — `now` minus (a corrected version of) the current
- * stage's own arrival, credited to that stage — but ONLY when the RUN is
- * itself `status === 'running'`. That run-level gate is fix round 1's
- * addition, and the reason is `now`: for a run that has stopped —
- * `done`/`aborted`/`failed` — whatever `stage` an item was frozen in when
- * the run stopped is not "still happening," it is the last thing that
- * happened before nobody was watching anymore. Crediting `now − stamp` to
- * an aborted run's stranded `fixing` item would add however long it has
- * been since the abort — hours, days, however stale the archive is read —
- * as if the orchestrator were still working it. That single unbounded
- * number does not just misreport one stage: Task 7 sums `runStageTotals`
- * across every run in a selected range, so one dead item's ever-growing
- * "open" span would keep inflating a RANGE total that should be fixed
- * forever once every run in it has stopped, and the per-run stage bar
- * (which scales every segment to the largest value in the set) would
- * flatten every other, real stage into an invisible sliver beside it. The
- * spec's own reasoning for the open span ("so the row for the stage it is
- * in grows as the pane ticks") is about a live run specifically — an
- * archived, stopped run was an omission in that reasoning, not something it
- * argued for, so gating on it is filling a gap rather than overriding a
- * decision. `status` is a REQUIRED field of the parameter, not optional
- * with some default: every real caller already has it on hand (`RunDetail`'s
- * resolved `source`, and Task 7's `pickAuthority(...)` result both carry a
- * `status`), so there is no legitimate call site that would need a default,
- * and an optional field is exactly the kind of gap a future caller could
- * silently fall through — passing archived data without its `status` would
- * otherwise resolve to whatever the default happened to be instead of
- * failing to compile.
- *
- * The open span's OWN start is also corrected from what a first reading of
- * the spec would produce, and this is fix round 1's second, unrelated fix
- * living in the same function. `stageAt[item.stage]` is that stage's FIRST
- * arrival only (`orchestrate.mjs` guards the write with `if (!(stage in
- * item.stageAt))` — see this file's own KNOWN BLUR paragraph above), so an
- * item that re-entered its current stage after a fix loop — `reviewing` →
- * `fixing` → back to `reviewing`, with no fresh `stageAt.reviewing` key for
- * the second visit — has a current-stage stamp that is now STALE: it points
- * at the first visit, which chronologically precedes a LATER stamp
- * (`fixing`'s own arrival) already recorded on the item. Naively opening the
- * span at that stale stamp would credit the WHOLE interval from the first
- * `reviewing` arrival to `now`, but the first-arrival-to-`fixing` portion of
- * that interval is ALSO already counted once, as the closed `reviewing` span
- * `itemStageSpans` produces from those same two stamps — so the item's
- * second pass through `reviewing` would have its whole first pass counted
- * TWICE. This is a different failure from the file's own accepted KNOWN
- * BLUR: that paragraph accepts MIS-ATTRIBUTION (the second pass's real time
- * folds invisibly into whichever span was open when the loop happened,
- * rather than appearing as its own `reviewing` span) as a cost worth paying
- * for keeping `stageAt` a shape record instead of a full event log; it does
- * not accept DOUBLE-COUNTING the same interval into two different numbers
- * that get summed together, which is an arithmetic error, not a blur. The
- * fix is to open the live span from `max(the item's own latest parseable
- * arrival across every stamp it has, stageAt[item.stage])` instead of from
- * `stageAt[item.stage]` alone. For an item that never re-entered its current
- * stage, that MAX is a no-op — the current stage's own arrival already IS
- * the latest stamp the item has, because nothing chronologically later has
- * been recorded — so no existing case's numbers move. For a re-entered
- * stage, the max resolves to whatever LATER stage's stamp the item picked up
- * on its way through the loop (`fixing`'s arrival, above), which is exactly
- * the boundary the closed span already stopped counting at, so the open
- * span now measures only the genuinely uncounted tail: from that later
- * stamp to `now`.
- *
- * FIX ROUND 2 (final-review wave): the run-level gate above — `status ===
- * 'running'` — is right but was INCOMPLETE on its own, for a case fix round
- * 1 did not anticipate: a CRASHED orchestrator leaves `run.json` at
- * `status: "running"` forever. `orchestrate.mjs init` refuses to overwrite
- * a run file already at that status, fresh or stale — recovery is
- * `--resume`/`--abort` only (this repo's own "One run per project, checked
- * twice" invariant) — so `status` alone cannot tell a run still genuinely
- * being worked apart from one whose process died hours or days ago and
- * simply never got the chance to write anything else. `GET
- * /api/orchestrator/archive` serves that frozen file verbatim, so the
- * archive path was still handing this function a `running` run of
- * arbitrarily old heartbeat, and crediting its frozen item `now - stamp`
- * forever: the exact unbounded-growth failure the `status` gate above exists
- * to prevent, reached through the one door that gate left open, both to this
- * run's own rollup and — via `sumStageTotals` — to the wide tile summing
- * every run in scope.
- *
- * At the time, the LIVE path could not reach that door: `RunsView`'s merge
- * dropped any un-fresh entry, so `pickAuthority` could never pick one as a
- * live winner. bug-29 removed that filter — a stale-but-arriving live entry
- * is now exactly what this function receives for a run in a long review or
- * merge step — which changes nothing about the fix below and everything
- * about how load-bearing it is: the door this gate closes is now the main
- * one, not a side entrance through the archive.
- *
- * The fix mirrors `runElapsedMs` (run-time.ts), which already forks on
- * exactly this distinction for the live board: `now − startedAt` while
- * genuinely live, `updatedAt − startedAt` once not, gated on `status ===
- * 'running' && fresh`. This function cannot read that same `fresh` flag —
- * `OrchestratorArchiveRun` carries no `fresh` field at all, live-backed or
- * archived (see `runWallMs`'s own corrected comment above for the identical
- * fact stated from that function's side) — so freshness has to be derived
- * here instead of trusted from a passed-in flag: the same `RUN_STALE_MS`
- * heartbeat check the server performs once for the live payload, measured
- * here directly against `updatedAt`. While fresh, the open span still ends
- * at `now`, unchanged from fix round 1. Once stale, it ends at `updatedAt`
- * instead — frozen at the run's own last confirmed heartbeat, the same
- * honest reading `runElapsedMs`'s own comment gives for a process nobody
- * knows the state of, rather than at whatever instant the archive happens
- * to be read.
- *
- * An `updatedAt` that will not parse is treated as NOT fresh — an
- * unparseable heartbeat is not evidence a process is still alive, so it
- * cannot earn the `now`-ticking branch — but it also leaves no honest
- * instant to freeze the open span AT. Such an item's open span contributes
- * nothing at all in that case, beyond the closed spans already summed above
- * for it: the same "skip rather than fabricate" rule this file applies to
- * every other unparseable stamp (see `parsedArrivals` above), rather than
- * either extreme a less careful reading might reach for — crediting `now`
- * anyway (silently un-fixing the very bug this round closes) or throwing
- * (a hand-editable run file is exactly the kind of input this whole module
- * exists to survive).
+ * 1. `MACHINE_STAGES.includes(span.stage)` drops BOTH `pending` spans and terminal-stage spans. Do not delete it on the belief that a terminal arrival is
+ *    always the last stamp — that holds only for files the orchestrator wrote, and `parsedArrivals` sorts by time precisely because a hand-edited file is the
+ *    input this module survives.
+ * 2. The open span for a still-live item is added only when the RUN is `status === 'running'`. A stopped run's frozen item is not still working, and its
+ *    `now − stamp` would grow forever into the range totals `StageBars` sums. `status` is REQUIRED on the parameter, never optional with a default.
+ * 3. That status is not enough on its own, because a crashed run keeps `running` forever, so freshness is DERIVED here against `updatedAt` with the same
+ *    `RUN_STALE_MS` check the server uses — `OrchestratorArchiveRun` carries no `fresh` field to trust. Fresh ends the span at `now`; stale ends it at
+ *    `updatedAt`; an unparseable `updatedAt` contributes no open span at all rather than fabricating one.
+ * 4. The open span STARTS at `max(the item's own latest parseable arrival, stageAt[item.stage])`, not at the stage stamp alone. For a re-entered stage that
+ *    stamp is stale and the interval up to the later stamp is ALREADY counted as a closed span — opening there double-counts the whole first pass.
  */
 export function runStageTotals(
   run: {

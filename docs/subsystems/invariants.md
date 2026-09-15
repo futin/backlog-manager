@@ -1106,16 +1106,19 @@ screen was never blank.
 ### A starting entry blocks what a run file blocks (bug-21)
 
 A starting entry blocks what a run file blocks, on every surface (bug-21). For the 1–5 minutes before `init` writes `run.json` the entry is the only evidence a
-run exists, and every gate read `payload.runs` alone — so a person could hand-dispatch an item the pending run was about to claim in its own worktree (the
-double execution bug-4 and bug-12 each closed), and a second Orchestrate press returned 200 and spawned a second session that died at `init` exit `4`.
+run exists. task-14 made that window visible as a strip, but every gate still read `payload.runs` alone — so a person could hand-dispatch an item the pending
+run was about to claim in its own worktree (the double execution bug-4 and bug-12 each closed), and a second Orchestrate press returned 200 and spawned a second
+session that died at `init` exit `4`.
 
 `runClaimBlock` (`shared/agent.ts`) takes `starting` as a **required third parameter, no `[]` default** — the same rule `isStale`/`leavesBoard` follow for
 `runs`, because the compile error at each of its four call sites (`BoardView`, `ArchiveView`, `plan`'s `blocked`, dispatch's 409) is the mechanism that makes
-the next caller decide instead of silently reinheriting this.
+the next caller decide instead of silently reinheriting this — all four were blind in the identical way, which is what a default would have made easy to repeat.
+(`BoardView`'s call site is its `runBlockFor` helper.)
 
 The block it produces is **project-wide and deliberately coarse**: a `StartingRun` is `{ project, requestedAt }`, and even carrying the launch's `ids` would not
 help, since what a run actually queues is `buildGatedQueue`'s verdict inside the spawned session minutes later. A wrong allow costs a duplicated execution; a
-wrong block costs a wait bounded by the run file landing. Per-item wording wins over the coarse one where both could apply.
+wrong block costs a wait bounded by the run file landing. Per-item wording wins over the coarse one where both could apply. The function's NAME was left
+unchanged when `starting` was added: a starting run is a run, and the question it answers — "why does a run forbid dispatching this item" — has not moved.
 
 The toolbar Orchestrate control **hides** on a starting entry rather than disabling — that is what preserves bug-16's `showOrchestrate` reasoning, in which a
 _rendered_ toolbar button is blocked on project visibility alone. And `POST /api/agents/orchestrate` refuses a starting project with the **same**
@@ -1124,6 +1127,23 @@ already branches on that code to close and hand the screen to the `StartingStrip
 
 `runHoldsItem` deliberately does NOT gain the parameter: its caller asks "is a run holding THIS item", which a placeholder naming no items cannot answer, and
 the window is ≤15 minutes against a 30-day staleness threshold. Pinned by a test rather than left as prose.
+
+#### Why `runClaimBlock` has to exist at all, and why it is one function
+
+It is the fourth kind of dispatch block and the only one reading something other than an item file and a dashboard status, because the two things it compares
+can never learn about each other on their own. An orchestrator run works each item inside its own git worktree and nothing reaches `main` until the item merges,
+so while a run has `task-7` at `reviewing`, the `task-7` file `/api/items` scans on `main` looks untouched — no `started:`, no `phase:`, nothing `isInProgress`
+could key off. The item is not lying; it is telling the truth about `main`. "This item is claimed by a run" therefore exists in exactly one place, the run
+payload, and every surface that needs it has to be handed it explicitly.
+
+It does the whole lookup — project match, id match and freshness filter together — rather than exposing a stage-to-reason helper each caller invokes after its
+own lookup. Those three lines are exactly the part a second copy gets subtly wrong, and `environmentBlock`, a few functions above it in the same file, records
+that having already happened once: `orchestrate()` reimplemented one of `dispatchGate`'s five lines and silently dropped the other four.
+
+It filters on `fresh`, not `status === 'running'`. A stale run has stopped reporting, and freshness is already the rule every other run-derived surface uses —
+the run strip renders nothing for a stale run, and the board's badge map is built from fresh runs only. A crashed run may still hold a worktree, so blocking on
+staleness is arguable, but that is a recovery problem `--resume` and `--abort` own, and cards dead until someone runs one of those is a worse failure than the
+double-dispatch this exists to prevent.
 
 ## Every agents POST is guarded by content-type and origin
 
@@ -1482,6 +1502,38 @@ substat still counts a crashed run under `running`, because that is a tally over
 `useOrchestratorRuns` polls while any run is `running`, fresh or not. Widened from "any run is fresh" — a crashed run's attempt counter, error text and the
 moment it goes fresh again would otherwise wait for a window focus, and the crashed strip would read as a screenshot instead of something live.
 
+#### Which object describes a run right now — the three tiers behind `pickAuthority`
+
+`pickAuthority` (`client/src/lib/run-authority.ts`) is the ONE rule for "which object describes this run right now", shared by `RunsView.tsx`'s list row and
+`RunDetail.tsx`'s persistent pane beside it. It exists because a whole-branch review found the two disagreeing about exactly that: a live-backed row printed its
+merged/total and status off a minutes-stale archive snapshot while the detail pane beside it read the 5s live poll, and a run that had just finished kept
+reporting `running` in the pane — elapsed time still climbing — because the pane fell back to that same stale snapshot the instant its `live` prop went `null`,
+instead of using the run file it had _already re-fetched_ for exactly that transition. Both defects were one root cause wearing two faces: two call sites each
+hand-rolling their own `??` chain, free to disagree about the order.
+
+Up to three views of the same run can exist at once, in _decreasing_ order of freshness:
+
+1. `live` — this run's entry from `useOrchestratorRuns`' 5s poll, present whenever the payload carries one at all. The endpoint re-reads each project's
+   `run.json` per request, so an entry exists for as long as that file is the project's current run, whatever its status and however long ago it last stamped a
+   heartbeat. The freshest thing either component can hold, by construction. This tier used to be built and documented as "present only while the server's
+   `fresh` check says the process is still being heard from", which is what bug-29 removed: freshness is a separate field on the entry, and a `running` run in a
+   long review or merge step routinely goes un-fresh while its file goes right on recording real stage stamps. Both callers now pass a possibly-stale entry here
+   on purpose — `live` is the DATA authority ("what does the newest read of the file say"), and whether anyone is still hearing from the process is a separate,
+   presentation-side question (`fresh`, `isCrashed`) that no caller asks this function to answer.
+2. `fetched` — a full run file `RunDetail` fetched on demand (`fetchArchivedRun`) for the currently-selected run. It lands strictly _after_ whatever
+   `useOrchestratorArchive` last held, being a fetch triggered by that selection and so always initiated later, which is why it is at least as fresh as the
+   archive snapshot below whenever it exists. It is also the one thing that can ever correct a run whose live entry has gone away: an entry disappears once that
+   run's `run.json` is no longer the project's current file (`init` archives it into `runs/` before writing the next run's), and a freshly re-read run file
+   still tells the truth about it.
+3. `archive` — `useOrchestratorArchive`'s own snapshot, fetched only on mount and window focus; see that hook's own doc comment for why it carries no poll of
+   its own. This can be minutes stale for a run that is still moving, or for one that moved _and finished_ since the last fetch, which is exactly the case
+   `fetched` exists to correct.
+
+`RunsView`'s list rows have no `fetched` tier at all — fetching every row's full run file just to paint a list would be the "fattening the live poll" cost the
+design doc's own API-shape decision rejected — so for them the rule collapses to `live ?? archive`. That is not a second rule; it is the same function with its
+middle argument omitted, which is exactly why both callers reach for the one function rather than writing their own two- or three-argument `??` chain. A reader
+changing the precedence has one function to change, not one function to find and one more to remember exists.
+
 ## Queue wait is not work
 
 `itemDurationMs` (`client/src/lib/run-time.ts`) is the one implementation of "how long did this item take." It measures from an item's first non-`pending`
@@ -1507,6 +1559,71 @@ nothing on top of whatever the run actually did — the run-level version of the
 A new surface that needs to answer "how long did this item take" imports `itemDurationMs` and reads its result rather than subtracting `stageAt` stamps itself.
 That is not a style preference: it is the only way the drawer, the Runs pane, and any surface built after them are guaranteed to agree with each other, the same
 guarantee `RowTime`'s move out of the run drawer and into a shared component exists to make structural rather than coincidental.
+
+### `stageAt` records first arrivals only, and what that costs the stage rollups
+
+`orchestrate.mjs` guards its `stageAt` write with `if (!(stage in item.stageAt))`, so each stage records its FIRST arrival and nothing else. The field's own doc
+comment on `RunQueueItem.stageAt` (`shared/types.ts`) states this where the shape is declared; it is restated here because `itemStageSpans` is where it actually
+bites. A fix-and-re-review loop's second or third pass through `reviewing`/`fixing` therefore never gets a stamp of its own. That time does not vanish from
+`itemStageSpans`' spans: it folds into whichever span was open when the loop happened — the span belonging to whatever stage's stamp is chronologically just
+before the NEXT stage the item reached for the first time. A `reviewing` → `fixing` → `reviewing` → `merged` item reports one `reviewing` span running from the
+first `reviewing` arrival to `merged`'s arrival; the second trip is real time spent and is indistinguishable from time spent on the first pass.
+
+This is the accepted cost of keeping `stageAt` a shape record rather than a full event log, and it is why the design doc rejected a gantt or timeline rendering
+of this data by name. A per-item stage bar still earns its place, because "which stage ate the most wall time" survives the blur; a timeline would present the
+folded span as one uninterrupted visit, which is the misleading reading. What the blur does NOT license is double-counting — folding an interval into two
+numbers that later get summed is an arithmetic error, not a blur, and the two corrections below exist to keep that distinction.
+
+### The two corrections inside `runStageTotals`
+
+Both were found in review rounds after the function first shipped, and both concern the OPEN span it adds for a still-live item on top of `itemStageSpans`'
+completed ones.
+
+**The open span is gated on the RUN, not the item.** For a run that has stopped — `done`/`aborted`/`failed` — whatever stage an item was frozen in is not "still
+happening"; it is the last thing that happened before nobody was watching. Crediting `now − stamp` to an aborted run's stranded `fixing` item adds however long
+it has been since the abort, however stale the archive is when read. That single unbounded number does not misreport one stage only: `StageBars` sums
+`runStageTotals` across every run in a selected range, so one dead item's ever-growing span keeps inflating a range total that should be fixed forever once
+every run in it has stopped, and the per-run bar — which scales each segment to the largest value in the set — flattens every real stage into a sliver beside
+it. The spec's reasoning for the open span ("so the row for the stage it is in grows as the pane ticks") is about a live run specifically; an archived stopped
+run was an omission in that reasoning rather than something it argued for. `status` is a REQUIRED field of the parameter rather than optional with a default,
+because every real caller has it on hand — `RunDetail`'s resolved `source` and Task 7's `pickAuthority(...)` result both carry a `status` — and an optional
+field is exactly the gap a future caller falls through silently, passing archived data without its `status` and resolving to whatever the default happened to be
+instead of failing to compile.
+
+**`status === 'running'` is not sufficient on its own, because a crashed run keeps it forever.** `init` refuses to overwrite a run file already at that status,
+fresh or stale — recovery is `--resume`/`--abort` only, per "One run per project, checked twice" — so `status` alone cannot separate a run being worked from one
+whose process died days ago. `GET /api/orchestrator/archive` serves that frozen file verbatim, reaching this function through the one door the `status` gate
+left open, and via `sumStageTotals` the wide tile summing every run in scope. When this was found the LIVE path could not reach that door, because `RunsView`'s
+merge dropped un-fresh entries and `pickAuthority` could never pick one; bug-29 removed that filter, so a stale-but-arriving live entry is now exactly what this
+function receives during a long review or merge. That changed nothing about the fix and everything about how load-bearing it is — the door is now the main one
+rather than a side entrance.
+
+The fix mirrors `runElapsedMs` (`run-time.ts`), which forks on the same distinction for the live board. This function cannot read the same `fresh` flag —
+`OrchestratorArchiveRun` carries no `fresh` field at all, live-backed or archived — so freshness is DERIVED here, by the same `RUN_STALE_MS` heartbeat check the
+server performs once for the live payload, measured directly against `updatedAt`. While fresh the open span still ends at `now`; once stale it ends at
+`updatedAt`, frozen at the run's own last confirmed heartbeat rather than at whatever instant the archive happened to be read.
+
+**The open span's START is corrected too, and this is the double-count case.** `stageAt[item.stage]` is a first arrival, so an item that re-entered its current
+stage after a fix loop has a current-stage stamp that is STALE. An item that went `reviewing` → `fixing` → back to `reviewing` has no fresh `stageAt.reviewing`
+key for the second visit, so that stamp points at the first visit, which precedes a LATER stamp (`fixing`'s own arrival) already recorded on the item. Opening
+the span there would credit the whole interval from the first `reviewing` arrival to `now`, and the first-arrival-to-`fixing` portion is ALREADY counted once as
+the closed `reviewing` span `itemStageSpans` produces from those same two stamps. The span therefore opens at
+`max(the item's own latest parseable arrival across every stamp it has, stageAt[item.stage])`. For an item that never re-entered its current stage that max is a
+no-op, because the current stage's arrival already IS the latest stamp, so no existing case's numbers move; for a re-entered stage it resolves to the later
+stamp the item picked up on its way through the loop, which is exactly where the closed span stopped counting, leaving the open span measuring only the
+genuinely uncounted tail.
+
+An `updatedAt` that will not parse is treated as NOT fresh — an unparseable heartbeat is not evidence a process is alive — but it also leaves no honest instant
+to freeze the span at, so such an item's open span contributes nothing at all beyond its already-summed closed spans. That is this module's "skip rather than
+fabricate" rule, not either extreme a less careful reading reaches for: crediting `now` anyway silently un-fixes the bug, and throwing fails on exactly the
+hand-editable input the module exists to survive.
+
+**The terminal-stage filter is a guarantee, not a redundancy.** A span labelled by a terminal stage (`merged`, `parked`, …) is dropped by the same
+`MACHINE_STAGES.includes(span.stage)` filter that drops `pending`, and a reader who believes the weaker claim could delete it. What is true, but only of files
+the orchestrator itself writes, is that a terminal arrival is the last recorded stamp and `itemStageSpans` opens no span from the last stamp — an ordering
+convention, not a structural invariant. `parsedArrivals` sorts by TIME, and a hand-edited or corrupt file is the input this module exists to survive, so a
+terminal stamp that is not chronologically last WILL open a span and the filter is what stops it counting. The open-span step is guarded separately, by
+`isTerminalStage`.
 
 ## A session's cost is recorded per transcript, and a transcript's identity is its file name
 

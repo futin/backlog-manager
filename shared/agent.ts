@@ -399,74 +399,18 @@ export function dispatchBlock(item: BacklogItem, status: AgentsStatus): string |
 }
 
 /**
- * Why an orchestrator run forbids dispatching this item right now, or null
- * when none does.
+ * Why an orchestrator run forbids dispatching this item right now, or null when none does. The fourth kind of dispatch block, and the only one reading
+ * something other than an item file and a dashboard status — a run works each item in its own worktree, so the copy of that item on `main` looks untouched and
+ * the claim exists only in the run payload. Why that is, why the project/id/freshness lookup is one function rather than a helper each caller calls after its
+ * own lookup, and why it filters on `fresh` rather than `status === 'running'` are all in
+ * docs/subsystems/invariants.md#why-runclaimblock-has-to-exist-at-all-and-why-it-is-one-function; the `starting` half, the required-third-parameter rule and
+ * the coarseness of the project-wide block are in the section above it, #a-starting-entry-blocks-what-a-run-file-blocks-bug-21.
  *
- * The fourth kind of dispatch block, and the only one that reads something
- * other than an item file and a dashboard status. It exists because the two
- * things it compares can never learn about each other on their own: an
- * orchestrator run works each item inside its own git worktree and nothing
- * reaches `main` until the item merges, so while a run has `task-7` at
- * `reviewing`, the `task-7` file `/api/items` scans on `main` looks untouched
- * — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item
- * is not lying; it is telling the truth about `main`. "This item is claimed by
- * a run" therefore exists in exactly one place, the run payload, and every
- * surface that needs it has to be handed it explicitly.
+ * `runs` is the payload shape `GET /api/orchestrator/runs` answers with, which is what both callers already hold: the board from `useOrchestratorRuns`, the
+ * server from `OrchestratorService.runs()`. `starting` is the second half of that same payload, which is why this takes two lists rather than one.
  *
- * ONE function doing the whole lookup — the project match, the id match and
- * the freshness filter together — rather than a stage-to-reason helper each
- * caller invokes after its own lookup. Those three lines are exactly the part
- * a second copy gets subtly wrong, and `environmentBlock` above records that
- * having already happened once in this very file: `orchestrate()` once
- * reimplemented one of `dispatchGate`'s five lines and silently dropped the
- * other four.
- *
- * `fresh`, not `status === 'running'`: a stale run has stopped reporting, and
- * freshness is already the rule every other run-derived surface uses (the run
- * strip renders nothing for a stale run, and the board's badge map is built
- * from fresh runs only). A crashed run may still hold a worktree, so blocking
- * on staleness is arguable — but that is a recovery problem `--resume` and
- * `--abort` own, and cards dead until someone runs one of those is a worse
- * failure than the double-dispatch this exists to prevent.
- *
- * `runs` is the payload shape `GET /api/orchestrator/runs` answers with, which
- * is what both callers already hold: the board from `useOrchestratorRuns`, the
- * server from `OrchestratorService.runs()`.
- *
- * `starting` (bug-21) is the SECOND half of that same payload, and the reason
- * this function takes two lists rather than one. A run is invisible to `runs`
- * for the 1–5 minutes between the dashboard spawn and `orchestrate.mjs init`
- * writing the first `run.json` (SKILL.md §2) — task-14 made that window
- * visible as a strip, but every gate in the app still read `runs` alone, so
- * for the whole window a person could hand-dispatch an item the pending run
- * was about to claim, and the hand session would work it in the main tree
- * while the run's own worktree worked it. That is precisely the double
- * execution bug-4 and bug-12 each closed for the run-file case.
- *
- * **Third parameter, required, no `[]` default** — the same rule
- * `isStale`/`leavesBoard` follow for `runs`, and for the same reason: the
- * compile error at every call site is the mechanism that makes the next
- * caller decide, where a default is what lets them silently reinherit this
- * bug. All four callers (the board's `runBlockFor`, Archive's, the `plan`
- * payload's `blocked`, and dispatch's own 409) were blind in the identical
- * way, which is what a default would have made easy to repeat.
- *
- * **The starting clause is project-wide and deliberately coarse.** A
- * `StartingRun` is `{ project, requestedAt }` and nothing else, so no block
- * derived from it CAN be per-item — and the server could not name the items
- * even if the placeholder carried the launch's `ids`, because which open bugs
- * and tasks a run actually queues is `buildGatedQueue`'s verdict inside the
- * spawned session, over `<base>`, minutes later. The asymmetry settles it: a
- * wrong allow costs a duplicated execution, a wrong block costs a wait
- * bounded by the run file landing (or `RUN_STALE_MS` at the very worst).
- *
- * Per-item first, coarse second. Once `StartingRunsService`'s third eviction
- * rule lands the two are mutually exclusive — a project whose run file reads
- * `running` has no placeholder — but if they ever are not, the wording naming
- * the stage is the one that tells a reader where to look.
- *
- * Name unchanged: a starting run is a run, and the question this answers
- * ("why does a run forbid dispatching this item") has not moved.
+ * Per-item first, coarse second, in the order below. Once `StartingRunsService`'s third eviction rule lands the two are mutually exclusive — a project whose
+ * run file reads `running` has no placeholder — but if they ever are not, the wording naming the stage is the one that tells a reader where to look.
  */
 export function runClaimBlock(item: BacklogItem, runs: OrchestratorRunsPayload['runs'], starting: OrchestratorRunsPayload['starting']): string | null {
   const claimed = runEntryAt(item, runs, RUN_CLAIMED_STAGES);
