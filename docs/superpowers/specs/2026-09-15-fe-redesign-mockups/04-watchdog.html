@@ -105,18 +105,18 @@
     <div class="wrow">
       <div class="h"><i class="dot live"></i><div class="pn"><span>backlog-manager</span><span class="meta">run-20260915-094112</span></div><span class="g live">● ok</span></div>
       <div class="it">last reported <b>bug-34</b> · dispatched</div>
-      <div class="beat"><div class="bar thin"><i style="width:2%"></i></div><span class="lb">heartbeat 12s ago</span><span class="lb">stale at 10m</span></div>
+      <div class="beat"><div class="bar thin"><i style="width:2%"></i></div><span class="lb">heartbeat 12s ago</span><span class="lb">stale at 15m</span></div>
     </div>
     <div class="wrow">
       <div class="h"><i class="dot crash"></i><div class="pn"><span>guide-manager</span><span class="meta">run-20260915-071502</span></div><span class="g bad">⚠ crashed</span></div>
       <div class="it">last reported <b>bug-1</b> · dispatched</div>
-      <div class="beat"><div class="bar thin"><i class="amber" style="width:100%"></i></div><span class="lb">heartbeat 38m ago</span><span class="lb">past the 10m stale line</span></div>
+      <div class="beat"><div class="bar thin"><i class="amber" style="width:100%"></i></div><span class="lb">heartbeat 38m ago</span><span class="lb">past the 15m stale line</span></div>
       <div class="wd"><span class="att" aria-label="attempt 3 of 3"><i class="on"></i><i class="on"></i><i class="on"></i></span><span>watchdog: exhausted after 3 — resume by hand</span><span class="sess">→ session 8f3c21e0</span><span class="chip sm">Resume now</span></div>
     </div>
     <div class="wrow" style="cursor:default">
       <div class="h"><i class="dot live"></i><div class="pn"><span>ixray</span><span class="meta">run-20260915-105601</span><span class="skew">· not yet watched</span></div><span class="g live">● ok</span></div>
       <div class="it">between items</div>
-      <div class="beat"><div class="bar thin"><i style="width:1%"></i></div><span class="lb">heartbeat 4s ago</span><span class="lb">stale at 10m</span></div>
+      <div class="beat"><div class="bar thin"><i style="width:1%"></i></div><span class="lb">heartbeat 4s ago</span><span class="lb">stale at 15m</span></div>
     </div>
     <div class="orphan">run-20260915-050000 — not in the runs payload</div>
     </div></div>
@@ -134,8 +134,8 @@
 <ul class="legend">
   <li><b>Band subtitle</b> is <code style="font-family:inherit">stateLine</code> verbatim — <b>armed — watching &lt;ids&gt;, next check in Ns</b>, <b>idle — no running run</b>, <b>off — &lt;reason&gt;</b>, each with <b>· resume disabled</b> appended when the switch is off. Off hides the Watching sheet and reads <b>—</b> / <b>nothing is watched while off</b> in the tile; the sweep meter draws only while armed.</li>
   <li><b>Watching tile</b> line is today's: <b>N crashed</b> (⚠ when &gt; 0) · <b>N fresh</b> · <b>N not yet watched</b> when the runs payload is a tick ahead of the sweeper.</li>
-  <li><b>Watching row</b> = the run's project, id, skew note, verdict (<b>● ok</b> / <b>⚠ crashed</b>), <b>last reported &lt;id&gt; · &lt;stage&gt;</b> or <b>between items</b>, the heartbeat meter (age against <code style="font-family:inherit">RUN_STALE_MS</code>, amber once past it) with its two labels; a crashed row adds attempts dots, the <code style="font-family:inherit">watchdogClause</code> sentence, <b>→ session &lt;id&gt;</b> and <b>leave alone Nm more</b> while in grace. The row opens the run (today: jumps to History and selects it; here: the run modal).</li>
-  <li><b>Resume now</b> is drawn only when <code style="font-family:inherit">watchdogStoodDown</code> — exhausted or switched off — and never while the sweeper still has attempts, whatever the grace clock says. Same gate, same one function, as the Runs live card.</li>
+  <li><b>Watching row</b> = the run's project, id, skew note, verdict (<b>● ok</b> / <b>⚠ crashed</b>), <b>last reported &lt;id&gt; · &lt;stage&gt;</b> or <b>between items</b>, the heartbeat meter (age against <code style="font-family:inherit">RUN_STALE_MS</code>, amber once past it) with its two labels; a crashed row adds attempts dots, the <code style="font-family:inherit">watchdogClause</code> sentence, <b>→ session &lt;id&gt;</b> and <b>leave alone Nm more</b> while in grace. The row opens the run: it jumps to History and selects it there, which is what the app already does and what option D keeps — there is no run modal.</li>
+  <li><b>Resume now</b> is drawn only when <code style="font-family:inherit">watchdogStoodDown</code> — exhausted or switched off — and never while the sweeper still has attempts, whatever the grace clock says. Same gate, same one function, as the Runs live row and its detail sheet.</li>
   <li><b>Orphan</b> line: a watched id with no run in the payload, rendered rather than hidden. Empty sheet reads <b>no running run</b> (idle) or <b>nothing running in the runs payload yet</b> (armed).</li>
   <li><b>Activity</b> keeps its five columns and full run ids; kinds are the seven of <code style="font-family:inherit">WATCHDOG_KIND_GLYPH</code>, toned by <code style="font-family:inherit">WATCHDOG_KIND_TONE</code>. Empty reads <b>nothing since the server started</b>. The unreachable-API state (<b>Could not reach the watchdog — …</b>) replaces the whole page below the band.</li>
 </ul>
@@ -207,7 +207,7 @@
 
 <h3 style="margin-top:36px">Pick one</h3>
 <div class="options">
-  <div class="option" data-choice="a" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Own page</h3><p>Today's structure in the new language. Rail gains a Runs sub-nav. Watching duplicates the live cards one section away.</p></div></div>
+  <div class="option" data-choice="a" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Own page</h3><p>Today's structure in the new language. Rail gains a Runs sub-nav. Watching duplicates the Live sheet's rows one section away.</p></div></div>
   <div class="option" data-choice="b" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Folded into Runs</h3><p>Verdict beside Resume on one card. No sub-view, no rail tree. Activity feed lives under History; the sweeper's state is a chip in the band.</p></div></div>
   <div class="option" data-choice="c" onclick="toggleSelect(this)"><div class="letter">C</div><div class="content"><h3>Aside on Runs</h3><p>Sweeper and feed always in view beside the runs. Main column loses 316 px; folds under 1100.</p></div></div>
 </div>

@@ -497,7 +497,8 @@ Today's `WatchdogMonitor`, redrawn:
    right — the policy is edited there and nowhere else.
 2. **Three-figure strip.** Sweeper (phase as a 24/700 word, a 6 px sweep
    meter under it in `--fill-progress` hatched, `next sweep in … · every
-   10m`); Watching (count of running runs, `1 crashed · 1 heartbeating`);
+   10m`); Watching (count of running runs, `N crashed · N fresh · N not
+   yet watched` — the words the tile actually prints);
    Policy (`check every / leave alone for / give up after` as three
    label-over-value pairs, 12 over 14/500, and the enabled switch's state
    as the 12 px line).
@@ -507,8 +508,9 @@ Today's `WatchdogMonitor`, redrawn:
    watched` for the skew case, the verdict as glyph + word (`● ok` /
    `⚠ crashed`), `last reported <id> · <stage>` or `between items`, the
    heartbeat meter — age against `RUN_STALE_MS`, amber once past it, with
-   its two labels `heartbeat Ns ago` and `stale at 10m` / `past the 10m
-   stale line` — and for a crashed run the attempts dots, the
+   its two labels `heartbeat Ns ago` and `stale at <RUN_STALE_MS>` /
+   `past the <RUN_STALE_MS> stale line`, both printed from the constant
+   and never a typed numeral — and for a crashed run the attempts dots, the
    `watchdogClause` sentence, `→ session <id>` and `leave alone Nm more`
    while in grace; a `Resume now` chip **only** when `watchdogStoodDown`
    allows — never while the sweeper still has attempts, whatever the grace
