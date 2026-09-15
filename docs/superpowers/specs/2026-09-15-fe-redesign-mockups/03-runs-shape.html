@@ -149,38 +149,127 @@
 </div>
 
 <!-- ═════════════ C ═════════════ -->
-<h3 style="margin-top:36px">C · Live first, history under</h3>
-<p class="lbl">Each live run is its own card at the top — progress row, controls, and the current item's stage track — because the Board sends you here for exactly those. Then the figures, then history as a ledger whose row opens the run in a modal (§8.6 shell).</p>
+<style>
+/* 2026-09-15 revision — additions the functionality audit needed (see 00-functionality-audit.md) */
+.bm .chip.flat{border-color:transparent;background:transparent;color:var(--ink2)}
+.bm .chip.dis{color:var(--ink3);border-style:dashed}
+.bm .pill.r{color:var(--r500)}
+.bm .pill.st{display:inline-flex;align-items:center;gap:5px}
+.bm .dot.starting{background:var(--o400);box-shadow:0 0 0 3px rgba(245,161,92,.25)}
+.bm .node.stalled i{background:var(--o400);box-shadow:none}
+.bm .node.stalled .dur{color:#b8801f}
+.bm .liveline{font-size:13px;color:var(--ink2);margin-top:10px}.bm .liveline b{color:var(--ink);font-weight:500}
+.bm .crashnote{font-size:13px;color:#b8801f;margin-top:10px}
+.bm .wdclause{font-size:13px;color:var(--ink2);margin-top:6px}
+.bm .hair{border-top:1px solid var(--border);margin-top:14px}
+.bm .ctlnote{font-size:12px;color:var(--ink2);text-align:right;max-width:150px}
+.bm .variant{background:var(--bg-subtle);border-radius:12px;padding:10px 16px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--ink2);margin-top:-8px}
+.bm .variant .k{font-weight:500;color:var(--ink3);flex:none}
+.bm .figs.six{grid-template-columns:repeat(5,1fr)}
+.bm .fig.wide{grid-column:1 / -1}
+.bm .fig .sub{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:var(--ink2);margin-top:4px}
+.bm .fig .sub b{font-weight:500;color:var(--ink)}
+.bm .fig .head{display:flex;align-items:baseline;gap:12px}.bm .fig .head .k{flex:1}.bm .fig .head .d{margin:0}
+.bm .bars{display:grid;grid-template-columns:90px minmax(0,1fr) 64px;gap:6px 12px;align-items:center;margin-top:12px}
+.bm .bars .l{font-size:12px;color:var(--ink2)}
+.bm .bars .tr{height:10px;border-radius:8px;background:var(--bg-track);overflow:hidden}
+.bm .bars .tr i{display:block;height:100%;border-radius:8px;background:var(--g500)}
+.bm .bars .v{font-size:12px;font-weight:500;text-align:right}.bm .bars .v.none{color:var(--ink3);font-weight:400}
+.bm .st{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;white-space:nowrap;width:76px;flex:none}
+.bm .st.done{color:var(--ink2)}.bm .st.bad{color:var(--r500)}.bm .st.warn{color:#b8801f}
+.bm .row .cost{font-size:12px;color:var(--ink3);white-space:nowrap}
+.bm .loadmore{display:flex;justify-content:center;padding:12px 0 0;border-top:1px solid var(--border)}
+.bm .legend{font-size:12px;color:var(--ink2);margin:10px 0 0;padding-left:18px;line-height:1.55}
+.bm .legend li{margin:2px 0}.bm .legend b{font-weight:500;color:var(--ink)}
+</style>
+<h3 style="margin-top:36px">C · Live first, history under <span class="pill g" style="vertical-align:middle">picked</span></h3>
+<p class="lbl">Each live run is its own card at the top — progress row, controls, and the current item's stage track — because the Board sends you here for exactly those. Then the figures, then history as a ledger whose row opens the run in a modal (§8.7 shell). <b style="font-weight:500;color:var(--ink)">Revised 2026-09-15</b> after auditing this drawing against <code style="font-family:inherit">RunsView</code>/<code style="font-family:inherit">RunDetail</code>/<code style="font-family:inherit">RunControls</code>/<code style="font-family:inherit">RunStrip</code>: every figure, control and reading the section has today is now drawn, and nothing the code cannot derive is (the audit beside these files lists each change). A and B above are kept exactly as they were picked against.</p>
 <div class="frame">
-  <div class="band"><h1>Runs</h1><span class="sub">2 live · 29 past</span><div class="ctl"><span class="chip">All projects ▾</span><span class="chip">Last 30 days ▾</span></div></div>
+  <div class="band"><h1>Runs</h1><span class="sub">3 live · 1 starting · 28 past</span>
+    <div class="ctl"><span class="chip">All projects ▾</span><span class="seg"><span>Today</span><span>This week</span><span>This month</span><span class="on">All</span></span></div></div>
+
+  <!-- live, fresh -->
   <div class="sheet livecard">
-    <div><div class="dh" style="align-items:center"><i class="dot live"></i><h2>backlog-manager</h2><span class="meta">run-20260915-104412 · started 10:44</span><span class="pill">merge</span></div>
-      <div class="liveprog"><div class="bar"><i class="hatch" style="width:40%"></i></div><span class="n">2<span> / 5</span></span><span class="meta">12m · live</span></div>
-      <div class="item" style="padding-bottom:0"><div class="ih" style="margin-top:14px"><span class="id">bug-34</span><span class="t">question-mode prompt-composition test flakes with a 400 under the full suite</span><span class="pill o">executing · 12m</span></div>
-        <div class="track"><div class="node now"><i></i><span class="nm">dispatched</span><span class="dur">12m</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur meta">—</span></div></div></div></div>
-    <div class="ctl" style="display:flex;flex-direction:column;gap:8px"><span class="chip sm">Pause</span><span class="chip sm danger">Cancel</span><span class="chip sm">Open ›</span></div>
+    <div><div class="dh" style="align-items:center"><i class="dot live"></i><h2>backlog-manager</h2><span class="meta">run-20260915-094112 · started 09:41</span><span class="pill">merge</span></div>
+      <div class="liveprog"><div class="bar"><i class="hatch" style="width:20%"></i></div><span class="n">1<span> / 5</span></span><span class="meta">1h 15m · heartbeat live</span><span class="meta" style="color:#b8801f">1 needs attention</span><span class="meta">$6.40 · 52 turns · 4 sessions</span></div>
+      <div class="hair"></div>
+      <div class="item" style="padding-bottom:0"><div class="ih" style="margin-top:14px"><span class="id">bug-34</span><span class="t">question-mode prompt-composition test flakes with a 400 under the full suite</span><span class="pill o">● dispatched</span><span class="meta">12m 04s elapsed</span></div>
+        <div class="meta" style="margin-top:6px">queue 1h 02m · preflight 22s</div>
+        <div class="track"><div class="node now"><i></i><span class="nm">dispatched</span><span class="dur">12m 04s</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur meta">—</span></div></div></div></div>
+    <div class="ctl" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"><span class="chip sm" title="pause after the current item">Pause</span><span class="chip sm">Open ›</span></div>
   </div>
+  <div class="variant"><span class="k">same card, pause requested →</span><span>progress row gains <b style="color:var(--ink);font-weight:500">pausing · finishes bug-34</b>; the controls column reads <b style="color:var(--ink);font-weight:500">Pausing after bug-34</b> with one chip,</span><span class="chip sm">Cancel</span><span>— which withdraws the pause request. There is no control that stops a run; abort is the terminal's.</span></div>
+
+  <!-- paused -->
   <div class="sheet livecard">
-    <div><div class="dh" style="align-items:center"><i class="dot paused"></i><h2>claude-agents-dashboard</h2><span class="meta">run-20260915-093010 · paused after task-24</span><span class="pill o">paused</span></div>
-      <div class="liveprog"><div class="bar"><i class="hatch" style="width:50%"></i></div><span class="n">1<span> / 2</span></span><span class="meta">1h 04m</span></div></div>
-    <div class="ctl" style="display:flex;flex-direction:column;gap:8px"><span class="chip sm">Resume</span><span class="chip sm danger">Cancel</span><span class="chip sm">Open ›</span></div>
+    <div><div class="dh" style="align-items:center"><i class="dot paused"></i><h2>claude-agents-dashboard</h2><span class="meta">run-20260915-093010 · started 09:30</span><span class="pill o">paused</span><span class="pill">branch mode</span></div>
+      <div class="liveprog"><div class="bar"><i class="hatch" style="width:50%"></i></div><span class="n">1<span> / 2</span></span><span class="meta">1h 04m</span><span class="meta">$3.10 · 21 turns · 1 session</span></div>
+      <div class="liveline">paused after <b>task-24</b> · task-25 waits</div></div>
+    <div class="ctl" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"><span class="chip sm">Resume run</span><span class="chip sm">Open ›</span></div>
   </div>
-  <div class="figs">
-    <div class="fig"><div class="k">Runs</div><div class="v">29</div><div class="d"><b>+4</b> vs prior 30 days</div></div>
-    <div class="fig"><div class="k">Completed / queued</div><div class="v">41 <small>/ 44</small></div><div class="d">3 parked</div></div>
+
+  <!-- crashed -->
+  <div class="sheet livecard">
+    <div><div class="dh" style="align-items:center"><i class="dot crash"></i><h2>guide-manager</h2><span class="meta">run-20260915-071502 · started 07:15</span><span class="pill r">⚠ crashed</span></div>
+      <div class="liveprog"><div class="bar"><i class="hatch" style="width:0%"></i></div><span class="n">0<span> / 3</span></span><span class="meta">3h 03m · no heartbeat for 38m</span><span class="meta">$1.20 · 6 turns · 1 session</span></div>
+      <div class="crashnote">last heartbeat 10:18 · every stage below is last reported, not current</div>
+      <div class="liveline">last reported <b>bug-1</b> at <b>dispatched</b></div>
+      <div class="wdclause">watchdog: exhausted after 3 — resume by hand</div>
+      <div class="hair"></div>
+      <div class="item" style="padding-bottom:0"><div class="ih" style="margin-top:14px"><span class="id">bug-1</span><span class="t">progress suite intermittently gets 401 from a route with no guard</span><span class="pill o">● dispatched</span><span class="meta">3h 02m elapsed</span></div>
+        <div class="meta" style="margin-top:6px">queue 0s · preflight 41s</div>
+        <div class="track"><div class="node stalled"><i></i><span class="nm">dispatched</span><span class="dur">3h 02m</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur meta">—</span></div></div></div></div>
+    <div class="ctl" style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"><span class="chip sm">Resume run</span><span class="chip sm">Open ›</span><span class="ctlnote">drawn because the watchdog stood down (exhausted). While it still has attempts, this column holds only Open ›.</span></div>
+  </div>
+
+  <!-- starting -->
+  <div class="sheet livecard">
+    <div><div class="dh" style="align-items:center"><i class="dot starting"></i><h2>ixray</h2><span class="meta">starting… · 8s</span></div></div>
+    <div class="ctl"></div>
+  </div>
+
+  <!-- figure strip: six cells, one sheet the ground divides -->
+  <div class="figs six">
+    <div class="fig"><div class="k">Runs</div><div class="v">31</div><div class="sub"><span>● <b>2</b> running</span><span>‖ <b>1</b> paused</span><span>✓ <b>25</b> done</span><span>⚠ <b>2</b> aborted</span><span>✕ <b>1</b> failed</span></div></div>
+    <div class="fig"><div class="k">Completed / queued</div><div class="v">41 <small>/ 52</small></div><div class="d">merged or branched</div></div>
     <div class="fig"><div class="k">Avg item work</div><div class="v">38m</div><div class="d">queue wait excluded</div></div>
-    <div class="fig"><div class="k">Rework / completed</div><div class="v">6 <small>/ 41</small></div><div class="d"><b class="o">15%</b> fix loops</div></div>
-    <div class="fig"><div class="k">Verify pass</div><div class="v">97%</div><div class="d">1 red of 41</div></div>
+    <div class="fig" title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."><div class="k">Rework / completed</div><div class="v">0.1</div><div class="d">fix loops per completed item</div></div>
+    <div class="fig"><div class="k">Verify pass</div><div class="v">97%</div><div class="d">of every verification run</div></div>
+    <div class="fig wide"><div class="head"><div class="k">Machine time by stage</div><div class="d">all runs · queue wait excluded</div></div>
+      <div class="bars">
+        <span class="l">preflight</span><span class="tr"><i style="width:0.7%"></i></span><span class="v">9m</span>
+        <span class="l">dispatched</span><span class="tr"><i style="width:100%"></i></span><span class="v">21h 40m</span>
+        <span class="l">inspecting</span><span class="tr"><i style="width:5.5%"></i></span><span class="v">1h 12m</span>
+        <span class="l">reviewing</span><span class="tr"><i style="width:18.8%"></i></span><span class="v">4h 05m</span>
+        <span class="l">fixing</span><span class="tr"><i style="width:11.6%"></i></span><span class="v">2h 31m</span>
+        <span class="l">verifying</span><span class="tr"><i style="width:8.3%"></i></span><span class="v">1h 48m</span>
+        <span class="l">merging</span><span class="tr"><i style="width:1.1%"></i></span><span class="v">14m</span>
+      </div></div>
   </div>
+
+  <!-- history -->
   <div class="sheet">
-    <h2>History</h2><div class="sub">29 runs · last 30 days · a row opens the run</div>
-    <div class="kick">Sep 13</div>
-    <div class="row"><i class="dot done"></i><div class="pn"><span>backlog-manager</span></div><span class="n">task-34, task-35</span><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="pill">merge</span><span class="meta">›</span></div>
-    <div class="kick">Sep 8</div>
-    <div class="row"><i class="dot done"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n">task-23 · 1 fix loop</span><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span><span class="pill">merge</span><span class="meta">›</span></div>
-    <div class="row"><i class="dot crash"></i><div class="pn"><span>guide-manager</span></div><span class="n">crashed at <b>bug-1</b></span><span class="n"><b>0</b> / 3</span><span class="meta">2h 40m</span><span class="pill" style="color:var(--r500)">crashed</span><span class="chip sm">Resume</span></div>
+    <h2>History</h2><div class="sub">28 runs · all · a row opens the run</div>
+    <div class="kick">sat 13 sep</div>
+    <div class="row"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>backlog-manager</span></div><span class="n">task-34, task-35</span><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="cost">$4.80</span><span class="meta">›</span></div>
+    <div class="kick">mon 8 sep</div>
+    <div class="row"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>claude-agents-dashboard</span></div><span class="n">task-23 · 1 fix loop</span><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span><span class="cost">$2.95</span><span class="pill">branch mode</span><span class="meta">›</span></div>
+    <div class="row"><i class="dot crash"></i><span class="st bad">✕ failed</span><div class="pn"><span>guide-manager</span></div><span class="n">bug-1</span><span class="n"><b>0</b> / 1</span><span class="meta">24m</span><span class="cost">$0.90</span><span class="meta">›</span></div>
+    <div class="kick">fri 5 sep</div>
+    <div class="row"><i class="dot paused"></i><span class="st warn">⚠ aborted</span><div class="pn"><span>backlog-manager</span></div><span class="n">task-17</span><span class="n"><b>0</b> / 1</span><span class="meta">9m</span><span class="meta">›</span></div>
+    <div class="loadmore"><span class="chip sm flat">load more (24 older)</span></div>
   </div>
 </div>
+<ul class="legend">
+  <li><b>Range</b> is today's four — Today · This week · This month · All. There is no "last 30 days"; the figure strip and the History subtitle both name the range in force.</li>
+  <li><b>Controls</b> are exactly <code style="font-family:inherit">RunControls</code>: running + fresh → Pause; pause requested → the note and Cancel (cancels the request); paused → Resume run, hidden when the environment cannot spawn, disabled with its reason as the title when the project is not visible, <b>Resuming…</b> while in flight. Crashed → Resume run only when <code style="font-family:inherit">watchdogStoodDown</code>. Open › is new and opens the run modal.</li>
+  <li><b>Live card readings</b> are the strip's and the row's: heartbeat (<b>live</b> or its age), elapsed, count, cost · turns · sessions when usage exists, <b>N needs attention</b> when the run has attention entries, mode pill only for <b>branch mode</b> / <b>branch mode (downgraded)</b> (a merge-mode run draws no badge today; the <b>merge</b> pill on the first card is optional).</li>
+  <li><b>Item head</b> keeps the stage chip word — a real stage, glyph first — and the item's elapsed reading; the 12 px line under it is today's lead (<b>queue … · preflight …</b>). A stalled node (crashed run) is the current node's tone with no ring and no pulse.</li>
+  <li><b>Figures</b> are today's six: the status breakdown under Runs is a real reading (five statuses, glyph + count); "completed" means merged or branched; rework is the one-decimal ratio with its long sentence as the title; verify pass counts verification runs, not items. The sixth cell is <code style="font-family:inherit">StageBars</code> — always seven rows in pipeline order, <b>—</b> for a stage never recorded.</li>
+  <li><b>History rows</b> carry the status word beside the dot because a dot alone cannot tell done from aborted from failed; cost when usage exists; branch-mode pill; the items the run touched (new, derived from the queue). Starting entries and live runs are cards, never rows.</li>
+  <li><b>Empty states</b> unchanged: <b>no runs yet</b> (nothing anywhere) and <b>no runs in this range</b> (range or project filter empties the list) — the latter under the band, the figure strip hidden with it as today.</li>
+</ul>
+
 
 </div>
 

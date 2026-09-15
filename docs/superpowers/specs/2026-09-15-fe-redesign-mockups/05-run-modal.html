@@ -1,0 +1,169 @@
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+.bm{--bg-app:#F4F4F3;--bg-surface:#fff;--bg-subtle:#F2F2F1;--bg-track:#EDEDEC;--border:#EAEAE8;--border2:#DCDCDA;
+  --ink:#131313;--ink2:#6E6E6E;--ink3:#A0A0A0;--inv:#111;--scrim:rgba(19,19,19,.28);--shadow2:rgba(0,0,0,.1);
+  --g600:#5FA92C;--g500:#7DC242;--g200:#CDE8A8;--y400:#F2E635;--o400:#F5A15C;--o300:#F9C79A;--r500:#E0533F;
+  --p1:#a83a56;--p2:#2a5fae;--p3:#1c7a4e;
+  font-family:"Hanken Grotesk",Helvetica,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;line-height:1.4;font-size:14px}
+.bm *{box-sizing:border-box;margin:0;padding:0}
+.bm .lbl{font-size:12px;color:var(--ink2);margin:2px 0 10px}
+.bm .hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.30) 0 1px,rgba(255,255,255,0) 1px 4px)}
+.bm .dot{display:inline-block;width:8px;height:8px;border-radius:999px;flex:none}
+.bm .pill{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;background:var(--bg-subtle);color:var(--ink2);white-space:nowrap}
+.bm .pill.o{background:var(--o300);color:var(--ink)}.bm .pill.g{background:var(--g200);color:var(--ink)}.bm .pill.w{color:#b8801f}.bm .pill.m{color:var(--ink3)}
+.bm .meta{font-size:12px;color:var(--ink3);white-space:nowrap}
+.bm .chip{height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:10px;background:var(--bg-surface);font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:var(--ink);white-space:nowrap}
+.bm .chip.flat{border-color:transparent;background:transparent;color:var(--ink2)}
+/* the stage under the modal: the Runs page, dimmed */
+.bm .stage{position:relative;display:grid;background:var(--bg-app);border-radius:16px;padding:24px;max-width:1120px;min-height:900px;overflow:hidden}
+.bm .ghost{grid-area:1/1;opacity:.35;filter:saturate(.6);display:flex;flex-direction:column;gap:16px;pointer-events:none}
+.bm .ghost .band{display:flex;align-items:center;gap:12px}.bm .ghost h1{font-size:19px;font-weight:500}.bm .ghost .sub{font-size:13px;color:var(--ink2)}
+.bm .ghost .sheet{background:var(--bg-surface);border-radius:16px;height:96px}
+.bm .scrim{grid-area:1/1;margin:-24px;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:24px}
+/* the modal — DESIGN.md §8.7 sidecar: 290 px facts | body, 16 px radius, one shell lift */
+.bm .modal{width:min(1080px,100%);background:var(--bg-surface);border-radius:16px;box-shadow:0 24px 64px var(--shadow2);display:grid;grid-template-columns:290px minmax(0,1fr);overflow:hidden}
+.bm .facts{padding:24px 24px 24px 28px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:14px;min-width:0}
+.bm .facts .close{align-self:flex-start;margin-bottom:2px}
+.bm .facts .proj{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:500}
+.bm .facts dl{display:grid;grid-template-columns:1fr;gap:10px}
+.bm .facts dt{font-size:12px;color:var(--ink2)}.bm .facts dd{font-size:14px;font-weight:500;margin-top:1px;overflow-wrap:anywhere}
+.bm .facts dd .meta{display:block;white-space:normal;font-weight:400;margin-top:2px}
+.bm .facts .note{font-size:12px;color:var(--ink2);font-weight:400;margin-top:3px;line-height:1.45}
+.bm .chips{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:2px}
+.bm .chips span{font-size:13px;color:var(--ink2)}.bm .chips b{font-weight:500;color:var(--ink);display:inline-block;min-width:18px}
+.bm .attn{border-top:1px solid var(--border);padding-top:12px;font-size:13px}
+.bm .attn .k{display:flex;gap:8px;align-items:center}.bm .attn .k .id{font-size:12px;color:var(--ink3)}.bm .attn .k .kind{font-size:12px;font-weight:500;color:#b8801f}
+.bm .attn .d{color:var(--ink2);margin-top:4px;font-size:13px}
+.bm .attn ul{margin:6px 0 0 16px;color:var(--ink2);font-size:12px;line-height:1.5}
+.bm .body{padding:24px 28px 28px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.bm .body h2{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bm .body h2 .meta{font-weight:400}
+.bm .sec{font-size:13px;font-weight:500;color:var(--ink2);padding:20px 0 8px;border-bottom:1px solid var(--border);margin-bottom:12px;display:flex;align-items:baseline;gap:10px}
+.bm .sec .meta{margin-left:auto}
+.bm .bars{display:grid;grid-template-columns:90px minmax(0,1fr) 64px;gap:6px 12px;align-items:center}
+.bm .bars .l{font-size:12px;color:var(--ink2)}
+.bm .bars .tr{height:10px;border-radius:8px;background:var(--bg-track);overflow:hidden}
+.bm .bars .tr i{display:block;height:100%;border-radius:8px;background:var(--g500)}
+.bm .bars .v{font-size:12px;font-weight:500;text-align:right}.bm .bars .v.none{color:var(--ink3);font-weight:400}
+.bm .branch{display:flex;align-items:center;gap:10px;padding:8px 0}
+.bm .branch .id{font-size:12px;color:var(--ink3)}.bm .branch .t{font-size:14px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bm code{font-family:inherit;background:var(--bg-subtle);padding:1px 6px;border-radius:4px;color:var(--ink);font-size:12px}
+.bm .item{padding:10px 0 18px;border-top:1px solid var(--border)}.bm .item:first-of-type{border-top:0}
+.bm .item .ih{display:flex;align-items:center;gap:10px;min-width:0}
+.bm .item .ih .id{font-size:12px;color:var(--ink3);flex:none}.bm .item .ih .t{font-size:14px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.bm .item .lead{font-size:12px;color:var(--ink3);margin-top:6px}
+.bm .item .usage{font-size:12px;color:var(--ink2);margin-top:10px}
+.bm .track{display:grid;grid-template-columns:repeat(7,1fr);gap:0;margin:14px 0 0;position:relative}
+.bm .track::before{content:"";position:absolute;left:7%;right:7%;top:5px;height:2px;background:var(--bg-track)}
+.bm .node{display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+.bm .node i{width:12px;height:12px;border-radius:999px;background:var(--bg-track);border:2px solid var(--bg-surface);box-shadow:0 0 0 1px var(--border2)}
+.bm .node.done i{background:var(--g500);box-shadow:none}
+.bm .node.skip i{background:var(--bg-surface);border:2px dashed var(--border2);box-shadow:none}
+.bm .node .nm{font-size:11px;color:var(--ink2)}.bm .node .dur{font-size:12px;font-weight:500}.bm .node .dur.when{color:var(--ink2)}.bm .node.skip .dur,.bm .node .dur.none{color:var(--ink3);font-weight:400}
+.bm .node .loops{position:absolute;top:-16px;font-size:11px;font-weight:500;padding:0 6px;border-radius:999px;background:var(--o300);color:var(--ink)}
+.bm .assumed{margin-top:12px;background:var(--bg-subtle);border-radius:10px;padding:10px 14px}
+.bm .assumed .k{font-size:12px;font-weight:500;color:var(--ink2);margin-bottom:6px}
+.bm .assumed dl{display:grid;grid-template-columns:1fr;gap:6px}.bm .assumed dt{font-size:13px;font-weight:500}.bm .assumed dd{font-size:13px;color:var(--ink2)}
+.bm details{margin-top:12px}
+.bm summary{list-style:none;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink2);cursor:pointer}
+.bm summary::before{content:"▸";color:var(--ink3);font-size:11px}.bm details[open] summary::before{content:"▾"}
+.bm summary .ok{color:var(--g600);font-weight:500}.bm summary .bad{color:var(--r500);font-weight:500}
+.bm .tail{margin-top:8px;padding:10px 12px;background:var(--bg-subtle);border-radius:8px;font-size:12px;color:var(--ink2);white-space:pre-wrap;line-height:1.5}
+.bm .err{font-size:12px;color:var(--r500);padding:6px 0}
+.bm .legend{font-size:12px;color:var(--ink2);margin:10px 0 0;padding-left:18px;line-height:1.55}
+.bm .legend li{margin:2px 0}.bm .legend b{font-weight:500;color:var(--ink)}
+</style>
+
+<h2>The run modal — what a History row opens</h2>
+<p class="subtitle">Spec §6.1 adopts the dashboard's sidecar modal (290 px facts column, body right, 16 px radius, one shell lift, scrim everywhere) for the run detail without drawing it. This is that drawing, holding everything <code style="font-family:inherit">RunDetail</code> renders today for a finished run, on a run chosen to exercise every reading at once: a merge-mode run the classifier downgraded to branch mode mid-queue, one item merged before the downgrade, one branched after it with a fix loop and a decided question, one parked after two fix loops with a failed verification, one skipped. Added 2026-09-15 by the functionality audit (<code style="font-family:inherit">00-functionality-audit.md</code>). Not a pick-screen — there is one shape, the dashboard's.</p>
+
+<div class="bm">
+<h3>Run modal · finished run, opened from History</h3>
+<p class="lbl">Drawn at full height so every reading is visible; in the app the body scrolls inside the shell. Max width 1080 px, <code style="font-family:inherit">calc(100vw / var(--font-scale) - 48px)</code> below; full-screen under 700 px with the facts column folding above the body. Escape and the scrim close it (<code style="font-family:inherit">useDialogEscape</code>, one owner). A live run never opens here — its card on the Runs page carries the controls — so the modal has no <code style="font-family:inherit">RunControls</code>.</p>
+<div class="stage">
+  <div class="ghost">
+    <div class="band"><h1>Runs</h1><span class="sub">3 live · 1 starting · 28 past</span></div>
+    <div class="sheet"></div><div class="sheet"></div><div class="sheet" style="height:160px"></div><div class="sheet" style="height:300px"></div>
+  </div>
+  <div class="scrim">
+    <div class="modal">
+      <aside class="facts">
+        <span class="chip flat close">‹ close</span>
+        <div class="proj"><i class="dot" style="background:var(--p1)"></i>backlog-manager</div>
+        <dl>
+          <div><dt>run</dt><dd>run-20260911-140233</dd></div>
+          <div><dt>started · finished</dt><dd>14:02 · 16:31<span class="meta">2h 29m wall · thu 11 sep</span></dd></div>
+          <div><dt>status</dt><dd><span class="pill">✓ done</span></dd></div>
+          <div><dt>mode</dt><dd><span class="pill">branch mode (downgraded)</span><div class="note">merge mode was requested; the permission classifier denied <code>git merge</code> for task-31 at 15:38, so the remaining items were staged branched — merge them by hand from the list in the body.</div></dd></div>
+          <div><dt>questions</dt><dd><span class="pill">decide</span><div class="note">headless: the executor answered its own questions and recorded them as assumptions.</div></dd></div>
+          <div><dt>cost</dt><dd>$9.60<span class="meta">84 turns · 6 sessions</span></dd></div>
+        </dl>
+        <div class="chips"><span><b>1</b> merged</span><span><b>1</b> branched</span><span><b>1</b> skipped</span><span><b>1</b> attention</span><span><b>3</b> fix loops</span></div>
+        <div class="attn">
+          <div class="k"><span class="id">bug-29</span><span class="kind">fix-exhausted</span></div>
+          <div class="d">reviewer still red after 2 fix loops: the retry budget for a flaking suite is spent</div>
+          <ul><li>Should the flaking `agents-origin-guard` case be quarantined or fixed in this item?</li><li>Is a 3rd fix loop acceptable for a bug this size?</li></ul>
+        </div>
+      </aside>
+      <section class="body">
+        <h2>backlog-manager <span class="meta">· run-20260911-140233 · 4 items</span></h2>
+
+        <div class="sec">Machine time by stage <span class="meta">queue wait excluded</span></div>
+        <div class="bars">
+          <span class="l">preflight</span><span class="tr"><i style="width:3.2%"></i></span><span class="v">1m 44s</span>
+          <span class="l">dispatched</span><span class="tr"><i style="width:100%"></i></span><span class="v">54m 10s</span>
+          <span class="l">inspecting</span><span class="tr"><i style="width:4.1%"></i></span><span class="v">2m 13s</span>
+          <span class="l">reviewing</span><span class="tr"><i style="width:31.6%"></i></span><span class="v">17m 08s</span>
+          <span class="l">fixing</span><span class="tr"><i style="width:51.2%"></i></span><span class="v">27m 45s</span>
+          <span class="l">verifying</span><span class="tr"><i style="width:19.5%"></i></span><span class="v">10m 34s</span>
+          <span class="l">merging</span><span class="tr"><i style="width:1.0%"></i></span><span class="v">31s</span>
+        </div>
+
+        <div class="sec">Branches to merge</div>
+        <div class="branch"><span class="id">task-31</span><span class="t">Single face: drop Barlow Condensed and Plex Mono</span><code>git merge --no-ff backlog/task-31</code></div>
+
+        <div class="sec">Items</div>
+        <div class="item">
+          <div class="ih"><span class="id">task-30</span><span class="t">Detect an active off-peak usage-limit boost</span><span class="pill g">✓ merged</span><span class="meta">27m 48s · 14:31</span></div>
+          <div class="lead">queue 0s · preflight 22s</div>
+          <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">18m 02s</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">41s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">5m 12s</span></div><div class="node skip"><i></i><span class="nm">fixing</span><span class="dur">—</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">3m 02s</span></div><div class="node done"><i></i><span class="nm">merging</span><span class="dur">31s</span></div><div class="node done"><i></i><span class="nm">merged</span><span class="dur when">14:31</span></div></div>
+          <div class="usage">$2.10 · 19 turns</div>
+          <details><summary><code>pnpm test</code><span class="ok">ok</span></summary><div class="tail">Tests: 1,204 passed, 1,204 total
+# tests 96 · # pass 96 · # fail 0</div></details>
+        </div>
+        <div class="item">
+          <div class="ih"><span class="id">task-31</span><span class="t">Single face: drop Barlow Condensed and Plex Mono</span><span class="pill g">✓ branched</span><span class="meta">1h 08m · 15:40</span></div>
+          <div class="lead">queue 29m 10s · preflight 31s</div>
+          <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">24m 30s</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">48s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">6m 40s</span></div><div class="node done"><span class="loops" role="img" aria-label="1 fix loop">×1</span><i></i><span class="nm">fixing</span><span class="dur">8m 40s</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">4m 01s</span></div><div class="node done"><i></i><span class="nm">merging</span><span class="dur">—</span></div><div class="node done"><i></i><span class="nm">branched</span><span class="dur when">15:40</span></div></div>
+          <div class="usage">$4.30 · 38 turns · 3 sessions</div>
+          <div class="assumed"><div class="k">assumed</div><dl><div><dt>Keep <code>--mono</code> as an alias or delete it?</dt><dd>Deleted, not aliased — a stale var(--mono) must fall back to the inherited face rather than keep Plex (spec §2.3).</dd></div></dl></div>
+          <details><summary><code>pnpm test</code><span class="ok">ok</span></summary><div class="tail">Tests: 1,209 passed, 1,209 total</div></details>
+        </div>
+        <div class="item">
+          <div class="ih"><span class="id">bug-29</span><span class="t">progress suite intermittently gets 401 from a route with no guard</span><span class="pill w">⚠ parked</span><span class="meta">52m 10s · 16:20</span></div>
+          <div class="lead">queue 1h 37m · preflight 26s</div>
+          <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">11m 38s</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">44s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">5m 16s</span></div><div class="node done"><span class="loops" role="img" aria-label="2 fix loops">×2</span><i></i><span class="nm">fixing</span><span class="dur">19m 05s</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">branched</span><span class="dur none">—</span></div></div>
+          <div class="usage">$3.20 · 27 turns · 2 sessions</div>
+          <details open><summary><code>pnpm run test:jest</code><span class="bad">failed</span></summary><div class="tail">FAIL test/agents-origin-guard.test.ts
+  ● POST /api/agents/dispatch › refuses a foreign Origin
+    expected 403, received 401
+Tests: 1 failed, 1,208 passed, 1,209 total</div></details>
+        </div>
+        <div class="item">
+          <div class="ih"><span class="id">task-32</span><span class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts</span><span class="pill m">– skipped</span></div>
+          <div class="lead">absent from <code>main</code> at dispatch — never entered the pipeline</div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+<ul class="legend">
+  <li><b>Facts column</b> is <code style="font-family:inherit">RunDetail</code>'s head, stacked: project (dot + name), run id, started / finished / wall (<code style="font-family:inherit">runWallMs</code>), status chip (<code style="font-family:inherit">runStatusChip</code> — a crashed run never opens here, it is a live card), mode pill only for <b>branch mode</b> / <b>branch mode (downgraded)</b> with <code style="font-family:inherit">mergeModeNote</code> under it when downgraded, question mode, <b>$ · turns · sessions</b> (<code style="font-family:inherit">runUsageTotals</code>, absent when no usage), then today's chips — merged · branched (when &gt; 0) · skipped · attention · fix loops — as a two-column list, then the attention entries with their questions. The "fifteen stage chips" spec §6.1 first described do not exist today and are not added.</li>
+  <li><b>Body order</b> is today's: Machine time by stage (<code style="font-family:inherit">StageBars</code> over <code style="font-family:inherit">runStageTotals</code> — seven rows, pipeline order, <b>—</b> for a stage never recorded), Branches to merge (one <code style="font-family:inherit">git merge --no-ff &lt;branch&gt;</code> per branched item, only when any), Items, and Attention — the last folded into the facts column here because the sidecar has one, and the questions under each entry come with it.</li>
+  <li><b>Each item</b>: id, title, stage chip (glyph + word, toned by <code style="font-family:inherit">STAGE_TONE</code>), <code style="font-family:inherit">RowTime</code> (<b>span · finish clock</b> for a terminal stage, <b>span elapsed</b> otherwise, nothing for skipped / ungroomed, <b>—</b> for pending); the <b>queue … · preflight …</b> lead; the stage track (§4.3) with its <b>×N</b> fix-loop pill and the terminal node reading the finish clock in <code style="font-family:inherit">--ink2</code>; the per-item usage line (<code style="font-family:inherit">itemUsageTotals</code>; sessions only when &gt; 1); the <b>assumed</b> list (decide mode); the <b>last</b> verification as a disclosure — command, <b>ok</b> / <b>failed</b>, its tail — open by default when failed.</li>
+  <li><b>Verification tails</b> come from the archived run file, fetched when the modal opens (<code style="font-family:inherit">fetchArchivedRun</code>); until it lands the disclosure shows the command and verdict only, and if the fetch fails a line reads <b>couldn't load verification output</b> under the facts.</li>
+  <li><b>Parked item's track</b>: the seventh node reads the run's effective exit (<b>branched</b> here, because the run was downgraded before this item) — <code style="font-family:inherit">stepperTerminal</code> answers item-first, run-mode second, so task-30's node still says <b>merged</b>.</li>
+  <li><b>Not here</b>: Pause / Cancel / Resume (live cards only), the crashed note (live card), the live-only <b>active</b> / <b>queued</b> chips.</li>
+</ul>
+</div>

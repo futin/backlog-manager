@@ -127,23 +127,41 @@
 </div>
 
 <!-- ═════════════ C ═════════════ -->
-<h3 style="margin-top:36px">C · Off the Board</h3>
-<p class="lbl">No run chrome on the Board beyond the card's own live strip and one chip in the band — dot, count, and it opens the Runs section. Facts and controls live in Runs only.</p>
+<style>
+/* 2026-09-15 revision — additions the functionality audit needed (see 00-functionality-audit.md) */
+.bm .dot.crash{background:var(--r500)}
+.bm .dot.starting{background:var(--o400);box-shadow:0 0 0 3px rgba(245,161,92,.25)}
+.bm .chipvars{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--ink2)}
+.bm .card .mrow{display:flex;align-items:center;gap:8px;min-width:0;min-height:28px}
+.bm .dchip{margin-left:auto;height:28px;padding:0 10px;border:1px solid var(--border2);border-radius:10px;background:var(--bg-surface);font-size:12px;font-weight:500;color:var(--ink);display:inline-flex;align-items:center;gap:4px;white-space:nowrap;flex:none}
+.bm .dchip.dis{color:var(--ink3);border-style:dashed}
+.bm .legend{font-size:12px;color:var(--ink2);margin:10px 0 0;padding-left:18px;line-height:1.55}
+.bm .legend li{margin:2px 0}.bm .legend b{font-weight:500;color:var(--ink)}
+</style>
+<h3 style="margin-top:36px">C · Off the Board <span class="pill" style="background:#CDE8A8;color:var(--ink);vertical-align:middle">picked</span></h3>
+<p class="lbl">No run chrome on the Board beyond the card's own live strip and one chip in the band — dot, count, and it opens the Runs section. Facts and controls live in Runs only. <b style="font-weight:500;color:var(--ink)">Revised 2026-09-15</b>: the chip names every state present (the data here has one live and one paused run), the card strip carries the item's stage word and elapsed only — a run's <b style="font-weight:500;color:var(--ink)">2 / 5</b> is the run's fact, not the card's — and Orchestrate is gone from the <b style="font-weight:500;color:var(--ink)">All projects</b> band, where it is hidden today (see 01, revised A, for the one-project band). A and B above are kept as picked against.</p>
 <div class="frame">
-  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span><span class="chip sm" style="margin-left:4px"><i class="dot live" style="width:7px;height:7px"></i>2 runs · 1 live ›</span>
-    <div class="ctl"><div class="search">Search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip ink">Orchestrate</span></div></div>
+  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span><span class="chip sm" style="margin-left:4px"><i class="dot paused" style="width:7px;height:7px"></i>2 runs · 1 live · 1 paused ›</span>
+    <div class="ctl"><div class="search">search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip">Newest first ▾</span></div></div>
+  <div class="chipvars"><span>the chip in its other states →</span><span class="chip sm"><i class="dot live" style="width:7px;height:7px"></i>1 run · live ›</span><span class="chip sm"><i class="dot crash" style="width:7px;height:7px"></i>3 runs · 1 live · 1 paused · 1 crashed ›</span><span class="chip sm"><i class="dot starting" style="width:7px;height:7px"></i>1 starting ›</span><span class="chip sm"><i class="dot paused" style="width:7px;height:7px"></i>1 run · live · 1 starting ›</span><span>— absent when nothing runs or starts</span></div>
   <div class="cols">
     <div class="col"><div class="colh"><i class="dot" style="background:var(--o400)"></i><span class="name">Refactoring</span><span class="cnt">3</span></div>
-      <div class="card"><div class="face"><div class="t">Dated probe figures in session-surfaces.md read as live numbers</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-1 · Sep 7</span></div></div></div></div>
+      <div class="card"><div class="face"><div class="t">Dated probe figures in session-surfaces.md read as live numbers</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-1 · Sep 7</span></div><div class="mrow"><span class="mk">chore</span><span class="dchip">groom ▸</span></div></div></div></div>
     <div class="col"><div class="colh"><i class="dot" style="background:var(--y400)"></i><span class="name">Ideas</span><span class="cnt">17</span></div>
-      <div class="card"><div class="face"><div class="t">Usage-aware auto-pause for orchestrator runs</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-7 · Sep 5</span></div></div></div></div>
+      <div class="card"><div class="face"><div class="t">Usage-aware auto-pause for orchestrator runs</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-7 · Sep 5</span></div><div class="mrow"><span class="dchip">groom ▸</span></div></div></div></div>
     <div class="col"><div class="colh"><i class="dot" style="background:var(--r500)"></i><span class="name">Bugs</span><span class="cnt">8</span></div>
-      <div class="card"><div class="livebar hatch">executing · 2 / 5<b>12m</b></div><div class="face"><div class="t">question-mode prompt-composition test flakes with a 400 under the full suite</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">bug-34 · Sep 7</span></div></div></div>
-      <div class="card"><div class="face"><div class="t">Graceful Stop leaves a spawned session's subagent running</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-21 · Sep 9</span></div></div></div></div>
+      <div class="card"><div class="livebar hatch">dispatched<b>12m</b></div><div class="face"><div class="t">question-mode prompt-composition test flakes with a 400 under the full suite</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">bug-34 · Sep 7</span></div><div class="mrow"><span class="mk g">groomed</span><span class="dchip dis" title="an orchestrator run holds this item (run-20260915-094112, dispatched)">execute ▸</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Graceful Stop leaves a spawned session's subagent running</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-21 · Sep 9</span></div><div class="mrow"><span class="dchip">groom ▸</span></div></div></div></div>
     <div class="col"><div class="colh"><i class="dot" style="background:var(--g500)"></i><span class="name">Tasks</span><span class="cnt">2</span></div>
-      <div class="card"><div class="face"><div class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-25 · Jul 25</span></div></div></div></div>
+      <div class="card"><div class="face"><div class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-25 · Jul 25</span></div><div class="mrow"><span class="mk s">stale</span><span class="dchip">execute ▸</span></div></div></div></div>
   </div>
 </div>
+<ul class="legend">
+  <li><b>The chip</b> renders the payload's <code style="font-family:inherit">runs</code> (running or paused) and <code style="font-family:inherit">starting</code> with no client-side filter; dot takes the worst state — crashed over paused or starting over live — and the count line names each state present. It is a <code style="font-family:inherit">&lt;button&gt;</code> calling the rail's section setter; absent when the payload has no run and no starting entry.</li>
+  <li><b>What leaves the Board</b> with the strip and drawer, and where each reading lands in Runs: heartbeat / elapsed / count / bar / current item + stage / <b>N needs attention</b> / mode badge / <b>pausing · finishes &lt;id&gt;</b> → the live card; <b>paused · N of M done</b> + Resume → the paused card; <b>crashed · no heartbeat for … · last reported … · watchdog clause</b> + Resume → the crashed card; <b>starting… · age</b> → the starting card; the drawer's queue, chips, attention → the run modal.</li>
+  <li><b>What stays on the Board</b>: <code style="font-family:inherit">useOrchestratorRuns</code> polling while any run is running, fresh or not; the card's live strip from the fresh run's queue; <code style="font-family:inherit">runClaimBlock</code> disabling dispatch for a claimed item (also on a starting project); Orchestrate hidden while the selected project has a fresh run or a starting entry.</li>
+</ul>
+
 
 </div>
 

@@ -1,0 +1,132 @@
+# Mockups — functionality audit and revision (2026-09-15)
+
+The four screens in this directory were drawn as pick-screens: three shapes
+each, one picked (01 A, 02 C, 03 C, 04 A — spec §§3–4). Picks are final and
+are not re-opened here. What this pass did is hold each **picked** drawing
+against the code it replaces — `BoardView`, `ItemCard`, `DispatchButton`,
+`RunStrip`, `StartingStrip`, `RunDrawer`, `RunsView`, `RunDetail`,
+`RunControls`, `StageBars`, `StageTrack`, `WatchdogMonitor`, and the
+derivations under `client/src/lib/run-*.ts` — and redraw the picked option so
+that every figure, control and reading the app has today is present, and
+nothing the code cannot derive is. The unpicked options are left exactly as
+they were picked against. Each revised section ends with a legend naming the
+variants the static drawing cannot show.
+
+The implementer's rule when a mock and this file disagree with the spec:
+the code is the authority on **what** must be kept, the spec on **how** it is
+drawn. Where the spec itself dropped or invented a reading, it was corrected
+in the same pass — the list is at the end — and the task-0 plan's Task 3–5
+"Read" lines and content lists were brought into line with it.
+
+A fifth screen, `05-run-modal.html`, was added: the run modal spec §6.1
+adopts from the dashboard by description had no drawing, and `RunDetail` is
+the largest surface in Runs.
+
+## 03 · Runs, option C
+
+| # | Mock as picked | Code today | Change |
+|---|---|---|---|
+| 1 | No "machine time by stage" anywhere | `runs-tile-machine`: wide tile, `StageBars` over `sumStageTotals` of the visible range, subtitle `<range> · queue wait excluded` | Sixth, full-width cell drawn with seven bars in pipeline order and `—` for a stage never recorded (spec §4.1 names it; the mock had not drawn it) |
+| 2 | Runs figure line `+4 vs prior 30 days` | `aggregates.byStatus` — five statuses with glyphs: `● running · ‖ paused · ✓ done · ⚠ aborted · ✕ failed` | Replaced: no prior-period comparison exists; the status breakdown does |
+| 3 | Completed / queued line `3 parked` | no substat; `parked` is not counted by `aggregateRuns` | Replaced with `merged or branched`, the definition of "completed" |
+| 4 | Rework / completed as `6 / 41` and `15% fix loops` | `fixLoopsPerMerged.toFixed(1)` (one-decimal ratio), long sentence as `title` | Drawn as today's `0.1`, sentence kept as the title; the mock's fraction needs two numbers the aggregate does not return |
+| 5 | Verify pass line `1 red of 41` | rate only; it counts verification **runs**, not items | Line replaced with `of every verification run`; the item count was invented and the wrong unit |
+| 6 | Range control `Last 30 days ▾` | `RUN_RANGES`: Today · This week · This month · All | Drawn as the four-way segmented chip; History subtitle names the range in force |
+| 7 | Live card controls `Pause · Cancel (red) · Open ›` | `RunControls`: running+fresh → **Pause**; pause requested → note `Pausing after <id>` + **Cancel** (withdraws the pause request); there is no control that stops a run | Cancel removed from the resting card; a variant strip shows the pause-requested state. Red is wrong for it — it is not destructive |
+| 8 | Paused card `Resume · Cancel · Open ›` | **Resume run**, hidden when `!canResume`, `aria-disabled` + reason as title when blocked, `Resuming…` in flight; no Cancel | Cancel removed; label is today's; states in the legend |
+| 9 | Crashed run drawn as a **History row** with a `Resume` chip | spec §4.1/§8: a crashed run is a **live card**; Resume gated by `watchdogStoodDown`; `RunStrip` shows `no heartbeat for <age>`, `last reported <id> at <stage>` / `all items at rest`, the `watchdogClause`; `RunDetail` shows `last heartbeat HH:MM · every stage below is last reported, not current` | Crashed live card added with all five readings; Resume run drawn only because the example is `exhausted`; the History row lost its Resume |
+| 10 | No starting card | `StartingRow`/`StartingStrip`: `starting…` + age, no controls | Starting card added |
+| 11 | No cost anywhere | `runUsageTotals` → `$ · N turns · N sessions` (head), `wall · $` (row); `itemUsageTotals` per item | Cost · turns · sessions on every live card; `$` on history rows; per-item line noted in the legend |
+| 12 | No attention count on the live card | `RunStrip`: `N needs attention` | Drawn on the first card |
+| 13 | Live card mode pill `merge` | `mergeModeLabel` returns a badge only for `branch mode` / `branch mode (downgraded)` | Paused card shows `branch mode`; the `merge` pill is marked optional in the legend |
+| 14 | Item pill `executing · 12m` | stage chip = glyph + real stage word (`dispatched` …); `RowTime` = `Xm Xs elapsed`; lead line `queue … · preflight …` | Redrawn with the real stage, the elapsed reading and the lead line |
+| 15 | Verification line with two commands | last verification only: one `cmd`, `ok`/`failed`, expandable tail, open when failed | Not drawn on a mid-flight item (none exists yet); the rule is in the legend and belongs to the run modal |
+| 16 | History rows: dot only | `runStatusChip`: glyph + word for done / aborted / failed / paused / crashed | Status word added beside the dot — a dot alone cannot tell done from aborted from failed; example rows for `failed` and `aborted` added |
+| 17 | No load-more | `load more (N older)` in pages of 25 | Flat chip at the sheet's foot |
+| 18 | Day kicker `Sep 13` | `dayLabel` → `sat 13 sep` | Today's form kept (not a functionality change; recorded so it is not re-invented) |
+| 19 | — | empty states `no runs yet` / `no runs in this range` | Legend |
+
+Unchanged and confirmed: band, live-first order, stage track geometry, the
+history row opening a modal, live runs never in the list.
+
+## 04 · Watchdog, option A
+
+| # | Mock as picked | Code today | Change |
+|---|---|---|---|
+| 1 | Crashed row `‖ in grace · resumes in 11m` **with** `Resume now` | Resume is offered exactly when `watchdogStoodDown` (exhausted or disabled) — never while the sweeper still has attempts | Example changed to `exhausted after 3`; legend states the gate. The mock as picked contradicted the resume-coupling invariant |
+| 2 | Row: heartbeat word, attempts, verdict | `WatchdogMonitor` row also has: `last reported <id> · <stage>` / `between items`; heartbeat **meter** against `RUN_STALE_MS` with `stale at 10m` / `past the 10m stale line`; `watchdogClause` verbatim; `→ session <id>`; `leave alone Nm more` in grace; the row is a button that opens the run | All drawn; orphan row (`<id> — not in the runs payload`) added |
+| 3 | Watching line `1 heartbeating` | `N fresh`, `N not yet watched` | Today's words |
+| 4 | Band subtitle `armed · next sweep in 4m 12s` | `stateLine`: `armed — watching <ids>, next check in Ns`, `· resume disabled` suffix; `idle — …`; `off — <reason>` | Verbatim form; other phases in the legend |
+| 5 | Activity `time · kind · run · detail`, run ids truncated | five columns `time · kind · project · run · what the sweeper did`, full ids; hint: last 50, in memory, restart empties | Five columns, full ids, caveat in the subtitle; `failed` and `disabled` kinds shown |
+
+## 01 · Board, option A
+
+| # | Mock as picked | Code today | Change |
+|---|---|---|---|
+| 1 | No dispatch control on any card | `DispatchButton` (`groom ▸` / `execute ▸` / `capture ▸`) on every card; three disabled reasons; spec §3.4 says **always drawn** | 28 px chip at the right end of the marker row on every card; disabled examples for a local session, a run claim |
+| 2 | `Orchestrate` beside `All projects ▾` | Orchestrate renders only with **one project selected** (`projectValue !== ALL`), visible to the dashboard, with no fresh run or starting entry for it | Removed from the All-projects band; a one-project band variant shows it |
+| 3 | Sort chip `Newest ▾` | `Newest first · By name · By project` | Label |
+| 4 | — | warnings row `unreachable: <name> — no backlog/ at <path>`; four empty states; column order rule | Warning row drawn; rest in the legend |
+| 5 | Live strip words | hand session `grooming`/`executing`/`in progress`; run stages incl. `needs-answers`/`parked` | Examples of each drawn |
+
+## 02 · Runs on the Board, option C
+
+| # | Mock as picked | Code today | Change |
+|---|---|---|---|
+| 1 | Card strip `executing · 2 / 5 · 12m` | the card's live bar is the **item's** stage word + elapsed; `2 / 5` is the run's count | `dispatched · 12m` |
+| 2 | Chip `2 runs · 1 live ›` with a live dot for one live + one paused run | spec §3.2: names each state present; dot takes the worst | `2 runs · 1 live · 1 paused ›`, paused-tone dot; the other chip states drawn beside |
+| 3 | `Orchestrate` beside `All projects ▾` | hidden there | Removed (see 01) |
+| 4 | — | every strip/drawer reading and where it lands | Legend maps each to its Runs surface |
+
+## 05 · Run modal (new)
+
+One shape, the dashboard's sidecar (§6.1), on a run chosen to exercise every
+`RunDetail` reading at once: a merge-mode run downgraded to branch mode
+mid-queue (mode note), one item merged before the downgrade, one branched
+after it with a fix loop and a decided question (assumptions), one parked
+after two fix loops with a failed verification (attention entry with
+questions, disclosure open), one skipped.
+
+| Surface | `RunDetail` today | In the drawing |
+|---|---|---|
+| Head | run id, status chip, mode badge, `RunControls`, `started HH:MM · Xm elapsed`, `$ · turns · sessions` | facts column: project, run id, started · finished · wall, status, mode pill + `mergeModeNote`, question mode, cost line. No `RunControls` — a live run is a card, never a modal |
+| Crashed note / mode note | 13 px lines | mode note under the mode pill; crashed note not here (crashed = live card) |
+| Chips | merged · branched (>0) · skipped · attention · fix loops · (live: active · queued) | two-column list in the facts column; live-only pair omitted |
+| Machine time by stage | `StageBars` over `runStageTotals`, `queue wait excluded` | first body section, seven rows |
+| Branches to merge | one `git merge --no-ff <branch>` per branched item | second body section, only when any |
+| Items | head (id, title, stage chip, `RowTime`), `queue … · preflight …` lead, `StageTrack`, usage line, `assumed` dl, last verification `<details>` open when failed | all drawn, one item per state |
+| Attention | id, kind, detail, the item's questions | folded into the facts column (the sidecar has one), questions kept |
+| Fetch failure | `couldn't load verification output` | legend |
+
+## Spec lines corrected (`2026-09-15-fe-redesign-design.md`, same pass)
+
+Each entry names what the spec said and what it says now.
+
+- §4.1 (2): "Cancel in `--red` text" → the three `RunControls` states spelled
+  out; Cancel withdraws a pause request, is present only then, takes no
+  accent. Live-card readings (heartbeat, pausing, attention, cost, mode-pill
+  rule, item lead) added; crashed card's five readings added.
+- §4.1 (4): dot tones for done / crashed / paused only → dot **and** the
+  `runStatusChip` status word, four tones, cost beside wall time.
+- §4.1 (3): "a 12 px line under" each figure → a line only where today's
+  tile has one, each figure's reading named, "nothing beyond `aggregateRuns`"
+  stated; the sixth cell's seven-row rule and range subtitle added.
+- §4.1 / §8: cost was on no Runs surface → live card, history row and run
+  modal carry it; §8 gains a row for the task-27 rule.
+- §6.1 (Run modal): lists "the fifteen stage chips as a 2-column list of
+  `stage · n`" — today's chips are merged / branched / skipped / attention /
+  fix loops (+ active / queued while live), and the per-run **Machine time by
+  stage** (`StageBars` over `runStageTotals`), the run's `$ · turns ·
+  sessions`, the per-item `queue … · preflight …` lead, the per-item usage
+  line, the crashed note, the mode-downgrade note, the questions under an
+  attention entry, and the `couldn't load verification output` error were all
+  absent from the list → the list is now today's, in today's order, and
+  points at `05-run-modal.html`.
+- §6.1 (Item modal): `tags` and `in progress since <started>` added to the
+  facts list.
+- §4.2 (3): the Watching row's readings completed (last reported item,
+  heartbeat meter, clause, session, grace), the `Resume now` gate stated as
+  exclusive, the orphan placeholder named, and the row's target fixed: it
+  opens the run modal (today it jumps to History and selects the run).
+- §4.2 (4): Activity ledger restored to today's five columns, full run ids,
+  and the in-memory caveat.

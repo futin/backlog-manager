@@ -70,28 +70,75 @@
 <div class="bm">
 
 <!-- ═════════════ A ═════════════ -->
-<h3>A · Own page, Runs › Watchdog</h3>
-<p class="lbl">Today's console redrawn: a band naming the sub-view, a three-figure strip (sweeper with its meter, watching, policy), a Watching sheet, an Activity ledger. Rail shows the tree Runs › History / Watchdog.</p>
+<style>
+/* 2026-09-15 revision — additions the functionality audit needed (see 00-functionality-audit.md) */
+.bm .wrow{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-top:1px solid var(--border);min-width:0;cursor:pointer}
+.bm .wrow:first-of-type{border-top:0}
+.bm .wrow .h{display:flex;align-items:center;gap:10px;min-width:0}
+.bm .wrow .h .pn{font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.bm .wrow .h .skew{font-size:12px;color:var(--ink3)}
+.bm .wrow .it{font-size:13px;color:var(--ink2)}.bm .wrow .it b{font-weight:500;color:var(--ink)}
+.bm .beat{display:flex;align-items:center;gap:12px;min-width:0}
+.bm .beat .bar{flex:1;max-width:320px}
+.bm .beat .bar i.amber{background:var(--o400)}
+.bm .beat .lb{font-size:12px;color:var(--ink3);white-space:nowrap}
+.bm .wd{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+.bm .wd .att{display:inline-flex;gap:3px;align-items:center}
+.bm .wd .att i{width:7px;height:7px;border-radius:999px;border:1.5px solid var(--o400)}.bm .wd .att i.on{background:var(--o400)}
+.bm .wd .sess{color:var(--ink3)}
+.bm .wd .chip{margin-left:auto}
+.bm .orphan{font-size:12px;color:var(--ink3);padding:12px 0 4px;border-top:1px solid var(--border)}
+.bm .legend{font-size:12px;color:var(--ink2);margin:10px 0 0;padding-left:18px;line-height:1.55}
+.bm .legend li{margin:2px 0}.bm .legend b{font-weight:500;color:var(--ink)}
+</style>
+<h3>A · Own page, Runs › Watchdog <span class="pill g" style="vertical-align:middle">picked</span></h3>
+<p class="lbl">Today's console redrawn: a band naming the sub-view, a three-figure strip (sweeper with its meter, watching, policy), a Watching sheet, an Activity ledger. Rail shows the tree Runs › History / Watchdog. <b style="font-weight:500;color:var(--ink)">Revised 2026-09-15</b> against <code style="font-family:inherit">WatchdogMonitor</code>: the Watching row now carries every reading it has today (last reported item, heartbeat meter against the stale line, attempts, clause, session), the Activity ledger its five columns and its memory caveat, and <b style="font-weight:500;color:var(--ink)">Resume now</b> obeys the resume coupling — it is drawn only where the sweeper has stood down. B and C below are kept as picked against.</p>
 <div class="frame">
-  <div class="band"><h1>Runs · Watchdog</h1><span class="sub">armed · next sweep in 4m 12s</span><div class="ctl"><span class="chip flat">Policy in Settings ›</span></div></div>
+  <div class="band"><h1>Runs · Watchdog</h1><span class="sub">armed — watching run-20260915-094112, run-20260915-071502, next check in 252s</span><div class="ctl"><span class="chip flat">Policy in Settings ›</span></div></div>
   <div class="figs">
-    <div class="fig"><div class="k">Sweeper</div><div class="v word">Armed</div><div class="bar thin" style="margin-top:10px"><i class="hatch" style="width:58%"></i></div><div class="d">next sweep in 4m 12s · every 10m</div></div>
-    <div class="fig"><div class="k">Watching</div><div class="v">2 <small>running runs</small></div><div class="d">1 crashed · 1 heartbeating</div></div>
+    <div class="fig"><div class="k">Sweeper</div><div class="v word">armed</div><div class="bar thin" style="margin-top:10px"><i class="hatch" style="width:42%"></i></div><div class="d">next sweep in 4m 12s · every 10m</div></div>
+    <div class="fig"><div class="k">Watching</div><div class="v">3 <small>running runs</small></div><div class="d"><span class="g warn" style="font-size:12px">⚠ 1 crashed</span> · 2 fresh · 1 not yet watched</div></div>
     <div class="fig"><div class="k">Policy</div><div class="pol"><div>check every<b>10m</b></div><div>leave alone for<b>20m</b></div><div>give up after<b>3</b></div></div><div class="d">resume spawns on · your switch, not the phase</div></div>
   </div>
-  <div class="sheet"><h2>Watching</h2><div class="sub">every run whose file says running · the sweeper's set, one tick of skew aside</div>
+  <div class="sheet"><h2>Watching</h2><div class="sub">every run whose file says running · the sweeper's set, one tick of skew aside · a row opens the run</div>
     <div style="margin-top:8px">
-    <div class="row"><i class="dot live"></i><div class="pn"><span>backlog-manager</span><span class="meta">run-20260915-104412</span></div><span class="n">heartbeat <b>live</b></span><span class="n"><b>0</b> / 3 attempts</span><span class="g muted">◉ watched · not yet needed</span></div>
-    <div class="row"><i class="dot crash"></i><div class="pn"><span>guide-manager</span><span class="meta">run-20260915-071502</span></div><span class="n">heartbeat <b>38m</b></span><span class="n"><b>1</b> / 3 attempts</span><span class="g warn">‖ in grace · resumes in 11m</span><span class="chip sm">Resume now</span></div>
+    <div class="wrow">
+      <div class="h"><i class="dot live"></i><div class="pn"><span>backlog-manager</span><span class="meta">run-20260915-094112</span></div><span class="g live">● ok</span></div>
+      <div class="it">last reported <b>bug-34</b> · dispatched</div>
+      <div class="beat"><div class="bar thin"><i style="width:2%"></i></div><span class="lb">heartbeat 12s ago</span><span class="lb">stale at 10m</span></div>
+    </div>
+    <div class="wrow">
+      <div class="h"><i class="dot crash"></i><div class="pn"><span>guide-manager</span><span class="meta">run-20260915-071502</span></div><span class="g bad">⚠ crashed</span></div>
+      <div class="it">last reported <b>bug-1</b> · dispatched</div>
+      <div class="beat"><div class="bar thin"><i class="amber" style="width:100%"></i></div><span class="lb">heartbeat 38m ago</span><span class="lb">past the 10m stale line</span></div>
+      <div class="wd"><span class="att" aria-label="attempt 3 of 3"><i class="on"></i><i class="on"></i><i class="on"></i></span><span>watchdog: exhausted after 3 — resume by hand</span><span class="sess">→ session 8f3c21e0</span><span class="chip sm">Resume now</span></div>
+    </div>
+    <div class="wrow" style="cursor:default">
+      <div class="h"><i class="dot live"></i><div class="pn"><span>ixray</span><span class="meta">run-20260915-105601</span><span class="skew">· not yet watched</span></div><span class="g live">● ok</span></div>
+      <div class="it">between items</div>
+      <div class="beat"><div class="bar thin"><i style="width:1%"></i></div><span class="lb">heartbeat 4s ago</span><span class="lb">stale at 10m</span></div>
+    </div>
+    <div class="orphan">run-20260915-050000 — not in the runs payload</div>
     </div></div>
-  <div class="sheet"><h2>Activity</h2><div class="sub">what the sweeper did · newest first</div>
-    <table style="margin-top:8px"><thead><tr><th style="width:64px">time</th><th style="width:110px">kind</th><th style="width:220px">run</th><th>detail</th></tr></thead><tbody>
-      <tr><td class="t">10:58</td><td><span class="g live">● spawned</span></td><td>guide-manager · …071502</td><td class="d">resume attempt 1 of 3 · heartbeat was 27m stale</td></tr>
-      <tr><td class="t">10:44</td><td><span class="g muted">◉ armed</span></td><td>—</td><td class="d">watching for crashed runs</td></tr>
-      <tr><td class="t">09:42</td><td><span class="g muted">○ idle</span></td><td>—</td><td class="d">no running run — standing down</td></tr>
-      <tr><td class="t">Sep 13</td><td><span class="g done">✓ recovered</span></td><td>backlog-manager · …085203</td><td class="d">heartbeat fresh again 3m after resume</td></tr>
+  <div class="sheet"><h2>Activity</h2><div class="sub">what the sweeper itself did, newest first · the last 50 only, held in the API process's memory — a restart empties it</div>
+    <table style="margin-top:8px"><thead><tr><th style="width:64px">time</th><th style="width:110px">kind</th><th style="width:170px">project</th><th style="width:190px">run</th><th>what the sweeper did</th></tr></thead><tbody>
+      <tr><td class="t">10:52</td><td><span class="g warn">⚠ exhausted</span></td><td>guide-manager</td><td>run-20260915-071502</td><td class="d">gave up after 3 attempts — resume by hand</td></tr>
+      <tr><td class="t">10:50</td><td><span class="g live">● spawned</span></td><td>guide-manager</td><td>run-20260915-071502</td><td class="d">resume attempt 3 of 3 · heartbeat was 32m stale</td></tr>
+      <tr><td class="t">10:44</td><td><span class="g muted">◉ armed</span></td><td>—</td><td>—</td><td class="d">watching for crashed runs</td></tr>
+      <tr><td class="t">10:30</td><td><span class="g bad">✕ failed</span></td><td>guide-manager</td><td>run-20260915-071502</td><td class="d">resume attempt 2 of 3 · spawn refused: dashboard unreachable</td></tr>
+      <tr><td class="t">09:42</td><td><span class="g muted">○ idle</span></td><td>—</td><td>—</td><td class="d">no running run — standing down</td></tr>
+      <tr><td class="t">09:31</td><td><span class="g done">✓ recovered</span></td><td>claude-agents-dashboard</td><td>run-20260915-093010</td><td class="d">heartbeat fresh again 3m after resume</td></tr>
+      <tr><td class="t">09:20</td><td><span class="g warn">‖ disabled</span></td><td>—</td><td>—</td><td class="d">resume spawns switched off in Settings</td></tr>
     </tbody></table></div>
 </div>
+<ul class="legend">
+  <li><b>Band subtitle</b> is <code style="font-family:inherit">stateLine</code> verbatim — <b>armed — watching &lt;ids&gt;, next check in Ns</b>, <b>idle — no running run</b>, <b>off — &lt;reason&gt;</b>, each with <b>· resume disabled</b> appended when the switch is off. Off hides the Watching sheet and reads <b>—</b> / <b>nothing is watched while off</b> in the tile; the sweep meter draws only while armed.</li>
+  <li><b>Watching tile</b> line is today's: <b>N crashed</b> (⚠ when &gt; 0) · <b>N fresh</b> · <b>N not yet watched</b> when the runs payload is a tick ahead of the sweeper.</li>
+  <li><b>Watching row</b> = the run's project, id, skew note, verdict (<b>● ok</b> / <b>⚠ crashed</b>), <b>last reported &lt;id&gt; · &lt;stage&gt;</b> or <b>between items</b>, the heartbeat meter (age against <code style="font-family:inherit">RUN_STALE_MS</code>, amber once past it) with its two labels; a crashed row adds attempts dots, the <code style="font-family:inherit">watchdogClause</code> sentence, <b>→ session &lt;id&gt;</b> and <b>leave alone Nm more</b> while in grace. The row opens the run (today: jumps to History and selects it; here: the run modal).</li>
+  <li><b>Resume now</b> is drawn only when <code style="font-family:inherit">watchdogStoodDown</code> — exhausted or switched off — and never while the sweeper still has attempts, whatever the grace clock says. Same gate, same one function, as the Runs live card.</li>
+  <li><b>Orphan</b> line: a watched id with no run in the payload, rendered rather than hidden. Empty sheet reads <b>no running run</b> (idle) or <b>nothing running in the runs payload yet</b> (armed).</li>
+  <li><b>Activity</b> keeps its five columns and full run ids; kinds are the seven of <code style="font-family:inherit">WATCHDOG_KIND_GLYPH</code>, toned by <code style="font-family:inherit">WATCHDOG_KIND_TONE</code>. Empty reads <b>nothing since the server started</b>. The unreachable-API state (<b>Could not reach the watchdog — …</b>) replaces the whole page below the band.</li>
+</ul>
 
 <!-- ═════════════ B ═════════════ -->
 <h3 style="margin-top:36px">B · Folded into Runs — no sub-view</h3>
