@@ -10,25 +10,36 @@ import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
-  id: 'bug-2', title: 'groomed bug', created: '2026-08-20', tags: ['ui'],
-  updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-  section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-  groomed: true, started: '', path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
+  id: 'bug-2',
+  title: 'groomed bug',
+  created: '2026-08-20',
+  tags: ['ui'],
+  updated: '',
+  lastCommit: '',
+  phase: '',
+  groomElapsed: 0,
+  executeElapsed: 0,
+  groomTokens: 0,
+  executeTokens: 0,
+  kind: '',
+  section: 'bugs',
+  status: 'open',
+  project: 'alpha',
+  projectPath: '/abs/alpha',
+  groomed: true,
+  started: '',
+  path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
 };
 
 /* The drawer renders whatever assignment the board hands it, so the suite
    builds one from a one-project registry rather than hard-coding a class —
    which keeps this test about the drawer and leaves the hue arithmetic to
    test/project-hue.test.ts. */
-const HUES = buildProjectHues([
-  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }
-]);
+const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
 
 describe('ItemDrawer', () => {
   beforeEach(() => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve('## Cause\n\noff by one\n') } as Response)
-    ) as jest.Mock;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('## Cause\n\noff by one\n') } as Response)) as jest.Mock;
   });
 
   // The card has room only for an elapsed reading; the drawer is where the
@@ -36,9 +47,7 @@ describe('ItemDrawer', () => {
   // "since when" and the answer is right there in the file. It prints BOTH: the
   // elapsed for reading, the raw value because that is what is on disk.
   it('names the moment an in-progress item was picked up, and says nothing when it was not', async () => {
-    const { unmount } = render(
-      <ItemDrawer item={{ ...ITEM, started: '2026-08-24' }} hues={HUES} onClose={() => {}} />
-    );
+    const { unmount } = render(<ItemDrawer item={{ ...ITEM, started: '2026-08-24' }} hues={HUES} onClose={() => {}} />);
     expect(screen.getByText(/in progress \d+d \(since 2026-08-24\)/)).toBeInTheDocument();
     unmount();
 
@@ -58,8 +67,7 @@ describe('ItemDrawer', () => {
     const threeHoursAgo = `${new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
     render(<ItemDrawer item={{ ...ITEM, started: threeHoursAgo }} hues={HUES} onClose={() => {}} />);
 
-    expect(screen.getByText(`bug-2 · 2026-08-20 · ◍ in progress 3h (since ${threeHoursAgo}) · ui`))
-      .toBeInTheDocument();
+    expect(screen.getByText(`bug-2 · 2026-08-20 · ◍ in progress 3h (since ${threeHoursAgo}) · ui`)).toBeInTheDocument();
     await screen.findByText('off by one');
   });
 
@@ -77,13 +85,7 @@ describe('ItemDrawer', () => {
    */
   describe('accumulated time', () => {
     it('shows "groomed for" with the formatted total, and hides "worked for" when execute is zero', async () => {
-      render(
-        <ItemDrawer
-          item={{ ...ITEM, groomElapsed: 3660, executeElapsed: 0 }}
-          hues={HUES}
-          onClose={() => {}}
-        />
-      );
+      render(<ItemDrawer item={{ ...ITEM, groomElapsed: 3660, executeElapsed: 0 }} hues={HUES} onClose={() => {}} />);
       expect(screen.getByText(/groomed for 1h 1m/)).toBeInTheDocument();
       expect(screen.queryByText(/worked for/)).not.toBeInTheDocument();
       await screen.findByText('off by one');
@@ -101,13 +103,7 @@ describe('ItemDrawer', () => {
     // isInProgress-gated segment already correctly opts out of for a done
     // item — this bucket must not inherit that gate by accident.
     it('shows accumulated execute time on a done item, not gated behind in-progress', async () => {
-      render(
-        <ItemDrawer
-          item={{ ...ITEM, status: 'done', executeElapsed: 90 }}
-          hues={HUES}
-          onClose={() => {}}
-        />
-      );
+      render(<ItemDrawer item={{ ...ITEM, status: 'done', executeElapsed: 90 }} hues={HUES} onClose={() => {}} />);
       expect(screen.getByText(/worked for 1m/)).toBeInTheDocument();
       await screen.findByText('off by one');
     });
@@ -115,9 +111,7 @@ describe('ItemDrawer', () => {
 
   it('fetches the body by path and renders the markdown', async () => {
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
-    expect(global.fetch).toHaveBeenCalledWith(
-      `/api/items/body?path=${encodeURIComponent(ITEM.path)}`
-    );
+    expect(global.fetch).toHaveBeenCalledWith(`/api/items/body?path=${encodeURIComponent(ITEM.path)}`);
     await waitFor(() => expect(screen.getByText('Cause')).toBeInTheDocument());
     expect(screen.getByText('off by one')).toBeInTheDocument();
   });
@@ -150,9 +144,7 @@ describe('ItemDrawer', () => {
   });
 
   it('shows an unavailable state when the body fetch fails', async () => {
-    (global.fetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve({ ok: false, status: 404 } as Response)
-    );
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: false, status: 404 } as Response));
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('item file unavailable')).toBeInTheDocument());
   });
@@ -203,9 +195,7 @@ describe('ItemDrawer', () => {
     ['newline as a named entity', '[click](java&NewLine;script:alert(1))'],
     ['reference-style definition', '[click][r]\n\n[r]: &#106;avascript:alert(1)\n']
   ])('neutralizes a javascript: scheme hidden behind an entity — %s', async (_desc, body) => {
-    (global.fetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
-    );
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
     const link = document.querySelector('.drawer-body a') as HTMLAnchorElement | null;
@@ -256,9 +246,7 @@ describe('ItemDrawer', () => {
     ['http:', '[docs](http://example.com/page)'],
     ['mailto:', '[docs](mailto:team@example.com)']
   ])('still renders an ordinary %s link as clickable', async (protocol, body) => {
-    (global.fetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
-    );
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
     const link = document.querySelector('.drawer-body a') as HTMLAnchorElement | null;
@@ -269,9 +257,7 @@ describe('ItemDrawer', () => {
     ['relative', '[docs](./other.md)', './other.md'],
     ['anchor', '[docs](#section)', '#section']
   ])('still renders an ordinary %s link with its href intact', async (_kind, body, href) => {
-    (global.fetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
-    );
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
     const link = document.querySelector('.drawer-body a');
@@ -305,9 +291,7 @@ describe('ItemDrawer', () => {
     ['backslash variant of protocol-relative', '![logo](/\\evil.example/p.png)'],
     ['reference-definition form', '![logo][r]\n\n[r]: //evil.example/p.png\n']
   ])('never requests a protocol-relative image src — %s', async (_desc, body) => {
-    (global.fetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
-    );
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     // No <img> at all — same fallback as the scheme-based cases above, and
@@ -350,9 +334,7 @@ describe('ItemDrawer', () => {
     ['leading C0 control', `![logo](<${C0_CONTROL}//evil.example/p.png>)`],
     ['leading tab, triple slash', `![logo](<${TAB}///evil.example/p.png>)`]
   ])('never requests an off-origin image src hidden behind whitespace — %s', async (_desc, body) => {
-    (global.fetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response)
-    );
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
     render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     const img = document.querySelector('.drawer-body img') as HTMLImageElement | null;

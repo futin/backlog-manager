@@ -18,13 +18,13 @@ back. It never moves, converts, or reclassifies anything that already exists —
 
 ## Classify first
 
-| Input shape | Section |
-|---|---|
-| something in shipped code behaves wrong | `bugs` |
-| future work whose shape is not settled | `ideas` |
-| future work whose plan is already known — e.g. just designed in this session | `tasks` |
-| existing code that works but should be improved | `refactors` |
-| something already analysed and decided against | `out-of-scope` |
+| Input shape                                                                  | Section        |
+| ---------------------------------------------------------------------------- | -------------- |
+| something in shipped code behaves wrong                                      | `bugs`         |
+| future work whose shape is not settled                                       | `ideas`        |
+| future work whose plan is already known — e.g. just designed in this session | `tasks`        |
+| existing code that works but should be improved                              | `refactors`    |
+| something already analysed and decided against                               | `out-of-scope` |
 
 Anything genuinely ambiguous between rows is **asked**, not guessed.
 
@@ -102,7 +102,7 @@ that is groom's job.
    untouched.
 
    **Filing several items in one request: finish each capture before starting the next.**
-   `new` derives the id by looking at the files already on disk, so it hands out the *same*
+   `new` derives the id by looking at the files already on disk, so it hands out the _same_
    id every time until step 3 has actually written one. Running `new` six times up front
    yields six paths carrying three `bug-3`s and two `idea-7`s — duplicate ids that every
    other skill then cites ambiguously. Loop `new` → write → `new` → write, one item at a
@@ -160,12 +160,12 @@ created: 2026-08-23
 
 ## Section headings, verbatim
 
-| Section | Headings |
-|---|---|
-| bug | `## Symptom`, `## Repro`, `## Affects`, `## Cause`, `## Fix` |
-| idea | `## Problem`, `## Rough shape`, `## Open questions` |
-| task | `## Goal`, `## Plan`, `## Test cases`, `## Done when` |
-| refactor | `## What exists today`, `## Why it should change`, `## Rough shape` |
+| Section      | Headings                                                                     |
+| ------------ | ---------------------------------------------------------------------------- |
+| bug          | `## Symptom`, `## Repro`, `## Affects`, `## Cause`, `## Fix`                 |
+| idea         | `## Problem`, `## Rough shape`, `## Open questions`                          |
+| task         | `## Goal`, `## Plan`, `## Test cases`, `## Done when`                        |
+| refactor     | `## What exists today`, `## Why it should change`, `## Rough shape`          |
 | out-of-scope | `## What was proposed`, `## Why rejected`, `## What would change the answer` |
 
 A refactor's headings are not an idea's with different words. `## What exists today` names

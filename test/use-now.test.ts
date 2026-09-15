@@ -56,10 +56,7 @@ describe('useNow', () => {
   });
 
   it('starts ticking when it becomes enabled and stops when it stops', () => {
-    const { result, rerender } = renderHook(
-      ({ enabled }: { enabled: boolean }) => useNow(enabled, 60_000),
-      { initialProps: { enabled: false } }
-    );
+    const { result, rerender } = renderHook(({ enabled }: { enabled: boolean }) => useNow(enabled, 60_000), { initialProps: { enabled: false } });
 
     rerender({ enabled: true });
     act(() => {

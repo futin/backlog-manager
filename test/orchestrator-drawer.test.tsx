@@ -8,10 +8,7 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import { RunDrawer } from '../client/src/components/board/RunDrawer';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type {
-  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunQueueItem, RunStage
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
 
 // Same translation orchestrator-strip.test.tsx (Task 11) already uses: the
 // fixture file is plain JSON, so without this cast its string fields widen to
@@ -39,8 +36,18 @@ function runPayload(over: Partial<OrchestratorRun & { fresh: boolean; pastRuns: 
  */
 function queueItem(id: string, stage: RunStage, over: Partial<RunQueueItem> = {}): RunQueueItem {
   return {
-    id, title: `${id} title`, stage, sessionId: null, worktree: null, branch: null,
-    permissionMode: null, fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null,
+    id,
+    title: `${id} title`,
+    stage,
+    sessionId: null,
+    worktree: null,
+    branch: null,
+    permissionMode: null,
+    fixLoops: 0,
+    stageAt: {},
+    verification: [],
+    questions: [],
+    note: null,
     assumptions: [],
     ...over
   };
@@ -190,9 +197,7 @@ describe('RunDrawer', () => {
   it('leads every chip with a glyph hidden from the accessibility tree', () => {
     render(<RunDrawer run={runPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     for (const q of fixture.queue) {
-      const glyph = screen
-        .getByTestId(`run-drawer-item-${q.id}`)
-        .querySelector('.board-card-stage-glyph');
+      const glyph = screen.getByTestId(`run-drawer-item-${q.id}`).querySelector('.board-card-stage-glyph');
       expect(glyph).not.toBeNull();
       expect((glyph as HTMLElement).textContent?.trim()).not.toEqual('');
       expect(glyph as HTMLElement).toHaveAttribute('aria-hidden', 'true');
@@ -232,9 +237,9 @@ describe('RunDrawer', () => {
     {
       ...fixture.queue.find((q) => q.id === 'bug-14')!,
       id: 'bug-99',
-      verification: [{ cmd: 'pnpm run build', ok: false, tail: 'error TS2554: wrong arity' }],
+      verification: [{ cmd: 'pnpm run build', ok: false, tail: 'error TS2554: wrong arity' }]
     },
-    ...fixture.queue.filter((q) => q.id !== 'bug-14'),
+    ...fixture.queue.filter((q) => q.id !== 'bug-14')
   ];
 
   it("collapses a passing row's tail and leaves a failing row's open", () => {
@@ -329,9 +334,7 @@ describe('RunDrawer', () => {
     // the reviewer reproduced against the old `key={a.id}`. Matched by
     // substring, not exact text: React's message is a format string with
     // the offending key value interpolated in, not this literal sentence.
-    const keyWarnings = consoleError.mock.calls.filter(
-      ([msg]) => typeof msg === 'string' && msg.includes('same key')
-    );
+    const keyWarnings = consoleError.mock.calls.filter(([msg]) => typeof msg === 'string' && msg.includes('same key'));
     expect(keyWarnings).toEqual([]);
     consoleError.mockRestore();
   });
@@ -351,14 +354,11 @@ describe('RunDrawer', () => {
 
   it('shows the no-heartbeat note for a stale run, and hides it for a fresh one', () => {
     const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-    const { unmount } = render(
-      <RunDrawer run={runPayload({ fresh: false, updatedAt: twentyMinutesAgo })} onClose={() => {}} {...CONTROL_PROPS} />
-    );
+    const { unmount } = render(<RunDrawer run={runPayload({ fresh: false, updatedAt: twentyMinutesAgo })} onClose={() => {}} {...CONTROL_PROPS} />);
     // The brief's own template, verbatim: "no heartbeat for N minutes —
     // resume or abort from the terminal" — a person reading this needs the
     // actual next step named, not just told something is wrong.
-    expect(screen.getByText(/no heartbeat for \d+ minutes? — resume or abort from the terminal/))
-      .toBeInTheDocument();
+    expect(screen.getByText(/no heartbeat for \d+ minutes? — resume or abort from the terminal/)).toBeInTheDocument();
     unmount();
 
     render(<RunDrawer run={runPayload({ fresh: true })} onClose={() => {}} {...CONTROL_PROPS} />);
@@ -374,23 +374,14 @@ describe('RunDrawer', () => {
   // parameterised assertion: they are three separate claims about three
   // separate end states, and a loop would let two of them silently vanish
   // behind a typo'd array.
-  it.each(['done', 'aborted', 'failed'] as const)(
-    'hides the no-heartbeat note for a %s run, whose heartbeat stopped because the run ended',
-    (status) => {
-      const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-      render(
-        <RunDrawer
-          run={runPayload({ status, fresh: false, updatedAt: twentyMinutesAgo })}
-          onClose={() => {}}
-        {...CONTROL_PROPS}
-        />
-      );
-      // The header still prints the status it always did — that half was
-      // never wrong, and it is what made the contradiction visible.
-      expect(screen.getByTestId('run-drawer-past')).toHaveTextContent(status);
-      expect(screen.queryByText(/no heartbeat/)).not.toBeInTheDocument();
-    }
-  );
+  it.each(['done', 'aborted', 'failed'] as const)('hides the no-heartbeat note for a %s run, whose heartbeat stopped because the run ended', (status) => {
+    const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    render(<RunDrawer run={runPayload({ status, fresh: false, updatedAt: twentyMinutesAgo })} onClose={() => {}} {...CONTROL_PROPS} />);
+    // The header still prints the status it always did — that half was
+    // never wrong, and it is what made the contradiction visible.
+    expect(screen.getByTestId('run-drawer-past')).toHaveTextContent(status);
+    expect(screen.queryByText(/no heartbeat/)).not.toBeInTheDocument();
+  });
 
   it('closes on Escape, on the close button, and on the scrim — mirroring ItemDrawer', async () => {
     const onClose = jest.fn();
@@ -425,7 +416,7 @@ describe('RunDrawer', () => {
       <RunDrawer
         run={runPayload({ queue, mergeMode: 'merge', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge on b-1' })}
         onClose={() => {}}
-      {...CONTROL_PROPS}
+        {...CONTROL_PROPS}
       />
     );
 
@@ -482,17 +473,9 @@ describe('RunDrawer', () => {
   // exactly (same helper, same construction), so this is the drawer's first
   // direct coverage of either.
   it('shows the mode badge and a branched chip for a branch-mode run, without losing the merged count', () => {
-    const queue = [
-      queueItem('m-1', 'merged'),
-      queueItem('b-1', 'branched'),
-      queueItem('b-2', 'branched')
-    ];
+    const queue = [queueItem('m-1', 'merged'), queueItem('b-1', 'branched'), queueItem('b-2', 'branched')];
     render(
-      <RunDrawer
-        run={runPayload({ queue, mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null })}
-        onClose={() => {}}
-      {...CONTROL_PROPS}
-      />
+      <RunDrawer run={runPayload({ queue, mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null })} onClose={() => {}} {...CONTROL_PROPS} />
     );
 
     expect(screen.getByTestId('run-drawer-mode')).toHaveTextContent('branch mode');
@@ -506,15 +489,12 @@ describe('RunDrawer', () => {
   // chose branch mode up front — the same distinction RunsView's row and
   // RunDetail's header already pin, now pinned on the drawer too.
   it('labels a mid-queue-denied run\'s badge "(downgraded)", distinct from a deliberately-chosen branch-mode run', () => {
-    const queue = [
-      queueItem('m-1', 'merged'),
-      queueItem('b-1', 'branched')
-    ];
+    const queue = [queueItem('m-1', 'merged'), queueItem('b-1', 'branched')];
     render(
       <RunDrawer
         run={runPayload({ queue, mergeMode: 'merge', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge on b-1' })}
         onClose={() => {}}
-      {...CONTROL_PROPS}
+        {...CONTROL_PROPS}
       />
     );
     expect(screen.getByTestId('run-drawer-mode')).toHaveTextContent('branch mode (downgraded)');
@@ -535,21 +515,45 @@ describe('RunDrawer', () => {
 
 describe('BoardView: run drawer wiring', () => {
   const PROJECTS: ProjectSummary[] = [
-    { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } }
+    {
+      name: 'alpha',
+      path: '/abs/alpha',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+    }
   ];
 
   const AGENTS_STATUS: AgentsStatus = {
-    enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-    spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: 'auto',
+    projectPaths: ['/abs/alpha']
   };
 
   function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     const base: BacklogItem = {
-      id: 'task-14', title: 'wire the heartbeat', created: '2026-08-20', started: '', tags: [],
-      updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-      section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-      groomed: true, path: '/abs/alpha/backlog/tasks/open/task-14-wire-the-heartbeat.md',
+      id: 'task-14',
+      title: 'wire the heartbeat',
+      created: '2026-08-20',
+      started: '',
+      tags: [],
+      updated: '',
+      lastCommit: '',
+      phase: '',
+      groomElapsed: 0,
+      executeElapsed: 0,
+      groomTokens: 0,
+      executeTokens: 0,
+      kind: '',
+      section: 'tasks',
+      status: 'open',
+      project: 'alpha',
+      projectPath: '/abs/alpha',
+      groomed: true,
+      path: '/abs/alpha/backlog/tasks/open/task-14-wire-the-heartbeat.md',
       ...over
     };
     return base;
@@ -564,10 +568,13 @@ describe('BoardView: run drawer wiring', () => {
   function stub(runs: Payload[], items: BacklogItem[]): jest.Mock {
     const fn = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? PROJECTS
-        : { items, errors: [] };
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/projects')
+            ? PROJECTS
+            : { items, errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
     global.fetch = fn as unknown as typeof fetch;
@@ -678,9 +685,7 @@ describe('BoardView: run drawer wiring', () => {
     });
     // A pause flips `pauseRequested` on the live entry, so the drawer has to
     // re-read rather than wait out the poll.
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/orchestrator/runs')).length)
-        .toBeGreaterThan(runsBefore));
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/orchestrator/runs')).length).toBeGreaterThan(runsBefore));
   });
 
   it('offers Cancel and the pausing note once a pause is pending', async () => {
@@ -712,15 +717,7 @@ describe('RunDrawer — the controls in its head', () => {
   const OPEN_GATE = { canResume: true, blockedReason: null };
 
   function renderDrawer(over: Partial<Payload> = {}, props: Partial<{ resuming: boolean }> = {}) {
-    render(
-      <RunDrawer
-        run={runPayload(over)}
-        onClose={() => {}}
-        gate={OPEN_GATE}
-        resuming={props.resuming ?? false}
-        onChanged={() => {}}
-      />
-    );
+    render(<RunDrawer run={runPayload(over)} onClose={() => {}} gate={OPEN_GATE} resuming={props.resuming ?? false} onChanged={() => {}} />);
     return screen.getByRole('dialog').querySelector('.drawer-head') as HTMLElement;
   }
 

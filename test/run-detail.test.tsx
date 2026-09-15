@@ -7,9 +7,7 @@ import '@testing-library/jest-dom';
 import { fetchArchivedRun } from '../client/src/lib/agents';
 import { RunDetail } from '../client/src/components/runs/RunDetail';
 import { formatClock, formatSpanCompact } from '../client/src/lib/run-time';
-import type {
-  ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage, VerificationSummary
-} from '../shared/types';
+import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage, VerificationSummary } from '../shared/types';
 
 /** What `RunDetail`'s `live` prop takes since task-17: the run plus the two
  *  annotations the runs endpoint adds, which are exactly what the
@@ -223,9 +221,7 @@ describe('RunDetail', () => {
     // finish-clock for a terminal row, so `formatClock` builds the second
     // half instead of a hand-typed HH:MM that could drift from the
     // test environment's timezone.
-    expect(screen.getByTestId('run-detail-item-time-a-1')).toHaveTextContent(
-      `8m 00s · ${formatClock('2026-09-01T09:10:00.000Z')}`
-    );
+    expect(screen.getByTestId('run-detail-item-time-a-1')).toHaveTextContent(`8m 00s · ${formatClock('2026-09-01T09:10:00.000Z')}`);
   });
 
   /*
@@ -249,9 +245,7 @@ describe('RunDetail', () => {
       const base = primarySummary();
       return {
         ...base,
-        queue: base.queue.map((q) => (
-          q.id === 'a-1' ? { ...q, assumptions } as ArchiveQueueItem : q
-        ))
+        queue: base.queue.map((q) => (q.id === 'a-1' ? ({ ...q, assumptions } as ArchiveQueueItem) : q))
       };
     }
 
@@ -418,9 +412,12 @@ describe('RunDetail', () => {
 
   it('stale fetch resolution is ignored', async () => {
     const resolvers: Record<string, (run: OrchestratorRun) => void> = {};
-    mockFetchArchivedRun.mockImplementation((_project: string, runId: string) => (
-      new Promise<OrchestratorRun>((resolve) => { resolvers[runId] = resolve; })
-    ));
+    mockFetchArchivedRun.mockImplementation(
+      (_project: string, runId: string) =>
+        new Promise<OrchestratorRun>((resolve) => {
+          resolvers[runId] = resolve;
+        })
+    );
 
     const otherSummary: OrchestratorArchiveRun = {
       ...primarySummary(),
@@ -564,9 +561,7 @@ describe('RunDetail', () => {
 
     render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
 
-    expect(screen.getByTestId('run-detail-machine-dispatched')).toHaveTextContent(
-      formatSpanCompact(15 * 60 * 1000)
-    );
+    expect(screen.getByTestId('run-detail-machine-dispatched')).toHaveTextContent(formatSpanCompact(15 * 60 * 1000));
     // Neither item ever recorded a `preflight` arrival, so the row must
     // read the honest "nothing recorded" dash, not a zero.
     expect(screen.getByTestId('run-detail-machine-preflight')).toHaveTextContent('—');
@@ -654,7 +649,7 @@ describe('RunDetail', () => {
    * preflight` — ~32 hours when this bug was groomed, and growing on every
    * remount and focus refetch.
    */
-  it('freezes an aborted run\'s in-flight row at the last heartbeat, no longer than the run itself', () => {
+  it("freezes an aborted run's in-flight row at the last heartbeat, no longer than the run itself", () => {
     mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
 
     const aborted: OrchestratorArchiveRun = {
@@ -663,13 +658,15 @@ describe('RunDetail', () => {
       startedAt: '2026-09-01T11:20:35.499Z',
       updatedAt: '2026-09-01T11:28:10.999Z',
       attention: [],
-      queue: [archiveItem('bug-2', 'dispatched', {
-        stageAt: {
-          pending: '2026-09-01T11:20:35.499Z',
-          preflight: '2026-09-01T11:20:46.414Z',
-          dispatched: '2026-09-01T11:21:05.935Z'
-        }
-      })]
+      queue: [
+        archiveItem('bug-2', 'dispatched', {
+          stageAt: {
+            pending: '2026-09-01T11:20:35.499Z',
+            preflight: '2026-09-01T11:20:46.414Z',
+            dispatched: '2026-09-01T11:21:05.935Z'
+          }
+        })
+      ]
     };
 
     render(<RunDetail summary={aborted} live={null} {...CONTROL_PROPS} />);
@@ -744,7 +741,7 @@ describe('RunDetail', () => {
   // deliberate-choice case, so a future change that always renders the note
   // whenever `mergeModeEffective === 'branch'` (rather than only when it
   // DIFFERS from `mergeMode`) fails exactly here.
-  it('shows a deliberately-chosen branch-mode run\'s badge with no downgrade note', () => {
+  it("shows a deliberately-chosen branch-mode run's badge with no downgrade note", () => {
     mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
 
     const summary: OrchestratorArchiveRun = {
@@ -778,10 +775,7 @@ describe('RunDetail', () => {
       mergeModeEffective: 'branch',
       mergeModeNote: null,
       questionMode: 'park',
-      queue: [
-        archiveItem('h-1', 'branched', { branch: 'backlog/h-1' }),
-        archiveItem('h-2', 'branched', { branch: 'backlog/h-2' })
-      ]
+      queue: [archiveItem('h-1', 'branched', { branch: 'backlog/h-1' }), archiveItem('h-2', 'branched', { branch: 'backlog/h-2' })]
     };
 
     render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
@@ -918,41 +912,17 @@ describe('RunDetail — the controls in its head', () => {
   // has no live entry once its file is superseded, and it is still the one
   // finished status with something to offer.
   it('offers Resume for a paused summary with no live entry', () => {
-    render(
-      <RunDetail
-        summary={{ ...primarySummary(), status: 'paused' }}
-        live={null}
-        gate={OPEN_GATE}
-        resuming={false}
-        onChanged={() => {}}
-      />
-    );
+    render(<RunDetail summary={{ ...primarySummary(), status: 'paused' }} live={null} gate={OPEN_GATE} resuming={false} onChanged={() => {}} />);
     expect(within(head()).getByTestId('run-controls-resume')).toBeInTheDocument();
   });
 
   it('shows the resuming placeholder instead of the button while a resume is in flight', () => {
-    render(
-      <RunDetail
-        summary={{ ...primarySummary(), status: 'paused' }}
-        live={null}
-        gate={OPEN_GATE}
-        resuming
-        onChanged={() => {}}
-      />
-    );
+    render(<RunDetail summary={{ ...primarySummary(), status: 'paused' }} live={null} gate={OPEN_GATE} resuming onChanged={() => {}} />);
     expect(within(head()).getByTestId('run-controls-resuming')).toHaveTextContent('Resuming…');
   });
 
   it('offers nothing for a finished run', () => {
-    render(
-      <RunDetail
-        summary={primarySummary()}
-        live={null}
-        gate={OPEN_GATE}
-        resuming={false}
-        onChanged={() => {}}
-      />
-    );
+    render(<RunDetail summary={primarySummary()} live={null} gate={OPEN_GATE} resuming={false} onChanged={() => {}} />);
     for (const testid of ['run-controls-pause', 'run-controls-cancel', 'run-controls-resume']) {
       expect(within(head()).queryByTestId(testid)).toBeNull();
     }
@@ -979,11 +949,8 @@ describe('RunDetail · crashed marker', () => {
     // freezes itself on a dead heartbeat.
     render(<RunDetail summary={primarySummary()} live={crashedLive()} {...CONTROL_PROPS} />);
 
-    expect(screen.getByTestId('run-detail-crashed')).toHaveTextContent(
-      `last heartbeat ${formatClock('2026-09-01T09:30:00.000Z')}`
-    );
-    expect(screen.getByTestId('run-detail-crashed'))
-      .toHaveTextContent('every stage below is last reported, not current');
+    expect(screen.getByTestId('run-detail-crashed')).toHaveTextContent(`last heartbeat ${formatClock('2026-09-01T09:30:00.000Z')}`);
+    expect(screen.getByTestId('run-detail-crashed')).toHaveTextContent('every stage below is last reported, not current');
   });
 
   it('still carries the qualifier when the heartbeat stamp will not parse', () => {

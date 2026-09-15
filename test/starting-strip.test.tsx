@@ -8,10 +8,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { StartingStrip } from '../client/src/components/board/StartingStrip';
 import { PROJECT_KEY } from '../client/src/lib/view-keys';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type {
-  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunWatchdog, StartingRun
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunWatchdog, StartingRun } from '../shared/types';
 
 // The same cast every suite reading this fixture makes — plain JSON widens
 // its string fields to `string` rather than the literal unions BoardView
@@ -38,12 +35,7 @@ describe('StartingStrip', () => {
   }
 
   it('names the project and says starting, with an elapsed off requestedAt', () => {
-    render(
-      <StartingStrip
-        starting={startingRun({ requestedAt: '2026-09-05T12:00:00.000Z' })}
-        now={Date.parse('2026-09-05T12:02:00.000Z')}
-      />
-    );
+    render(<StartingStrip starting={startingRun({ requestedAt: '2026-09-05T12:00:00.000Z' })} now={Date.parse('2026-09-05T12:02:00.000Z')} />);
 
     const strip = screen.getByTestId('starting-strip');
     expect(strip).toHaveTextContent('alpha');
@@ -77,23 +69,54 @@ describe('StartingStrip', () => {
 
 describe('BoardView: the starting placeholder beside real run strips', () => {
   const PROJECTS: ProjectSummary[] = [
-    { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } },
-    { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 } }
+    {
+      name: 'alpha',
+      path: '/abs/alpha',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+    },
+    {
+      name: 'beta',
+      path: '/abs/beta',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+    }
   ];
 
   const AGENTS_STATUS: AgentsStatus = {
-    enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-    spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: 'auto',
+    projectPaths: ['/abs/alpha', '/abs/beta']
   };
 
-  const ITEMS: BacklogItem[] = [{
-    id: 'task-1', title: 'wire the heartbeat', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1-wire-the-heartbeat.md'
-  }];
+  const ITEMS: BacklogItem[] = [
+    {
+      id: 'task-1',
+      title: 'wire the heartbeat',
+      created: '2026-08-20',
+      started: '',
+      tags: [],
+      updated: '',
+      lastCommit: '',
+      phase: '',
+      groomElapsed: 0,
+      executeElapsed: 0,
+      groomTokens: 0,
+      executeTokens: 0,
+      kind: '',
+      section: 'tasks',
+      status: 'open',
+      project: 'alpha',
+      projectPath: '/abs/alpha',
+      groomed: true,
+      path: '/abs/alpha/backlog/tasks/open/task-1-wire-the-heartbeat.md'
+    }
+  ];
 
   const realFetch = global.fetch;
   afterEach(() => {
@@ -109,10 +132,13 @@ describe('BoardView: the starting placeholder beside real run strips', () => {
   function stub(runs: Payload[], starting: StartingRun[]): void {
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/orchestrator/runs') ? ({ runs, starting } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? PROJECTS
-        : { items: ITEMS, errors: [] };
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/projects')
+            ? PROJECTS
+            : { items: ITEMS, errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     }) as unknown as typeof fetch;
   }
@@ -190,21 +216,47 @@ describe('BoardView: the starting placeholder beside real run strips', () => {
  */
 describe('BoardView: the starting window blocks dispatch and a second run', () => {
   const PROJECTS: ProjectSummary[] = [
-    { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } }
+    {
+      name: 'alpha',
+      path: '/abs/alpha',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+    }
   ];
 
   const AGENTS_STATUS: AgentsStatus = {
-    enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-    spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: 'auto',
+    projectPaths: ['/abs/alpha']
   };
 
-  const ITEMS: BacklogItem[] = [{
-    id: 'task-1', title: 'wire the heartbeat', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1-wire-the-heartbeat.md'
-  }];
+  const ITEMS: BacklogItem[] = [
+    {
+      id: 'task-1',
+      title: 'wire the heartbeat',
+      created: '2026-08-20',
+      started: '',
+      tags: [],
+      updated: '',
+      lastCommit: '',
+      phase: '',
+      groomElapsed: 0,
+      executeElapsed: 0,
+      groomTokens: 0,
+      executeTokens: 0,
+      kind: '',
+      section: 'tasks',
+      status: 'open',
+      project: 'alpha',
+      projectPath: '/abs/alpha',
+      groomed: true,
+      path: '/abs/alpha/backlog/tasks/open/task-1-wire-the-heartbeat.md'
+    }
+  ];
 
   const realFetch = global.fetch;
   afterEach(() => {
@@ -223,10 +275,13 @@ describe('BoardView: the starting window blocks dispatch and a second run', () =
   function stub(runs: Payload[], starting: StartingRun[]): void {
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/orchestrator/runs') ? ({ runs, starting } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? PROJECTS
-        : { items: ITEMS, errors: [] };
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/projects')
+            ? PROJECTS
+            : { items: ITEMS, errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     }) as unknown as typeof fetch;
   }
@@ -275,16 +330,19 @@ describe('BoardView: the starting window blocks dispatch and a second run', () =
     // names the item and its stage. The toolbar stays hidden — now on the
     // fresh-run half of the same condition.
     const run: Payload = {
-      ...fixture, project: '/abs/alpha', updatedAt: new Date().toISOString(),
+      ...fixture,
+      project: '/abs/alpha',
+      updatedAt: new Date().toISOString(),
       queue: [{ ...fixture.queue[0], id: 'task-1', stage: 'dispatched' }],
-      fresh: true, pastRuns: 0, pauseRequested: false
+      fresh: true,
+      pastRuns: 0,
+      pauseRequested: false
     };
     stub([run], []);
     await renderBoard();
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'execute' }))
-        .toHaveAttribute('title', 'an orchestrator run is working this item (dispatched)')
+      expect(screen.getByRole('button', { name: 'execute' })).toHaveAttribute('title', 'an orchestrator run is working this item (dispatched)')
     );
     expect(screen.queryByRole('button', { name: /orchestrate/i })).not.toBeInTheDocument();
   });

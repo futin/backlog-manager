@@ -8,8 +8,15 @@ import '@testing-library/jest-dom';
 import ArchiveView from '../client/src/components/archive/ArchiveView';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type {
-  AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunQueueItem, RunStage, StartingRun
+  AgentsStatus,
+  BacklogItem,
+  ItemsIndex,
+  OrchestratorRun,
+  OrchestratorRunsPayload,
+  ProjectSummary,
+  RunQueueItem,
+  RunStage,
+  StartingRun
 } from '../shared/types';
 
 /*
@@ -24,8 +31,7 @@ import type {
  * DIFFERENT months and therefore builds its stamps by walking backwards from
  * today — see its own comment.
  */
-const daysAgo = (days: number): string =>
-  `${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
+const daysAgo = (days: number): string => `${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
 const STALE = daysAgo(90);
 const FRESH = daysAgo(1);
 
@@ -34,12 +40,27 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // `section`/`status` widen to plain `string`. Same reasoning board.test.tsx
   // gives for its own factory.
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: '2026-01-05', started: '', tags: [],
+    id: 'bug-1',
+    title: 'a bug',
+    created: '2026-01-05',
+    started: '',
+    tags: [],
     // Stale by default — this is the Archive suite, so the interesting fixture
     // is the one that belongs here and the exceptions say so explicitly.
-    updated: STALE, lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md',
+    updated: STALE,
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1.md',
     ...over
   };
   // Derived after the spread so every fixture has a unique key — ArchiveView
@@ -48,18 +69,32 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
 }
 
 const PROJECTS: ProjectSummary[] = [
-  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 1, ideas: 1, tasks: 0, refactors: 1, 'out-of-scope': 1 } },
-  { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 } }
+  {
+    name: 'alpha',
+    path: '/abs/alpha',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 1, ideas: 1, tasks: 0, refactors: 1, 'out-of-scope': 1 }
+  },
+  {
+    name: 'beta',
+    path: '/abs/beta',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+  }
 ];
 
 // A real answer rather than an off/unreachable stand-in, so every archived card
 // gets an ENABLED dispatch control and the two promotion-path cases below are
 // asserting what a working dashboard actually produces.
 const AGENTS_STATUS: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha', '/abs/beta']
 };
 
 type RunPayload = OrchestratorRunsPayload['runs'][number];
@@ -76,7 +111,9 @@ function runHolding(id: string, stage: RunStage, over: Partial<RunPayload> = {})
 }
 
 function stubItems(
-  items: BacklogItem[], errors: string[] = [], runs: RunPayload[] = [],
+  items: BacklogItem[],
+  errors: string[] = [],
+  runs: RunPayload[] = [],
   // bug-21: the payload's second array, which Archive's dispatch block now
   // reads too. Defaulted so every existing case is untouched.
   starting: StartingRun[] = []
@@ -84,9 +121,13 @@ function stubItems(
   const index: ItemsIndex = { items, errors };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/orchestrator/runs') ? ({ runs, starting } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? PROJECTS : index;
+    const payload: unknown = url.includes('/api/agents/status')
+      ? AGENTS_STATUS
+      : url.includes('/api/orchestrator/runs')
+        ? ({ runs, starting } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/projects')
+          ? PROJECTS
+          : index;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
 }
@@ -111,10 +152,7 @@ const ITEMS: BacklogItem[] = [
  * use either — it is outside the fetch-state ladder and is on screen from the
  * first paint.
  */
-async function renderArchive(
-  items: BacklogItem[] = ITEMS, errors: string[] = [], runs: RunPayload[] = [],
-  starting: StartingRun[] = []
-) {
+async function renderArchive(items: BacklogItem[] = ITEMS, errors: string[] = [], runs: RunPayload[] = [], starting: StartingRun[] = []) {
   stubItems(items, errors, runs, starting);
   render(<ArchiveView />);
   await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
@@ -135,15 +173,19 @@ beforeEach(() => {
 });
 
 describe('ArchiveView', () => {
-  it('titles itself Archive and renders the design\'s four columns in order', async () => {
+  it("titles itself Archive and renders the design's four columns in order", async () => {
     await renderArchive();
     // Refactoring · Ideas · Bugs · Out of scope — three of the Board's sections
     // seen from the far side of the window, plus the one it has no column for.
     // No Tasks column: a task never leaves the Board, so one here could only
     // ever be empty.
     expect(screen.getByText('Archive')).toHaveClass('board-title');
-    expect(screen.getAllByTestId('archive-col').map((c) => within(c).getByTestId('col-name').textContent))
-      .toEqual(['Refactoring', 'Ideas', 'Bugs', 'Out of scope']);
+    expect(screen.getAllByTestId('archive-col').map((c) => within(c).getByTestId('col-name').textContent)).toEqual([
+      'Refactoring',
+      'Ideas',
+      'Bugs',
+      'Out of scope'
+    ]);
   });
 
   it('renders an out-of-scope item in its own column and in no other', async () => {
@@ -182,8 +224,7 @@ describe('ArchiveView', () => {
    */
   it('drops a stale bug a fresh run holds', async () => {
     await renderArchive(ITEMS, [], [runHolding('bug-1', 'dispatched')]);
-    await waitFor(() =>
-      expect(within(column('Bugs')).queryByText('stale bug')).not.toBeInTheDocument());
+    await waitFor(() => expect(within(column('Bugs')).queryByText('stale bug')).not.toBeInTheDocument());
     // The other stale sections are untouched — this is one item's run, not a
     // blanket "some run exists, empty the surface".
     expect(within(column('Ideas')).getByText('stale idea')).toBeInTheDocument();
@@ -206,7 +247,7 @@ describe('ArchiveView', () => {
      equivalent was not. That is the half-fixed state Archive's own
      `runBlockFor` comment already records having been added to close, one
      window earlier. */
-  it('disables a card\'s dispatch control while its project has a run starting', async () => {
+  it("disables a card's dispatch control while its project has a run starting", async () => {
     await renderArchive(ITEMS, [], [], [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }]);
 
     const card = within(column('Bugs')).getByText('stale bug').closest('.board-card') as HTMLElement;
@@ -219,7 +260,7 @@ describe('ArchiveView', () => {
      the block uses. Without this, a block applied to every card regardless
      would still pass the case above — and `beta`'s bug is the one card here
      that can tell the difference. */
-  it('leaves another project\'s card alone while one project is starting', async () => {
+  it("leaves another project's card alone while one project is starting", async () => {
     await renderArchive(ITEMS, [], [], [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }]);
 
     const card = within(column('Bugs')).getByText('stale beta bug').closest('.board-card') as HTMLElement;
@@ -249,8 +290,7 @@ describe('ArchiveView', () => {
   it('counts what each column actually holds', async () => {
     await renderArchive();
     // refactors 1, ideas 1, bugs 2 (alpha's stale one and beta's), oos 1.
-    expect(screen.getAllByTestId('archive-col').map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['1', '1', '2', '1']);
+    expect(screen.getAllByTestId('archive-col').map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['1', '1', '2', '1']);
   });
 
   it('offers project and search, and neither a status nor a sort select', async () => {
@@ -281,14 +321,19 @@ describe('ArchiveView', () => {
     ];
     await renderArchive(items);
 
-    const headings = within(column('Bugs')).getAllByTestId('archive-month').map((h) => h.textContent);
+    const headings = within(column('Bugs'))
+      .getAllByTestId('archive-month')
+      .map((h) => h.textContent);
     expect(headings).toHaveLength(3);
     // Three distinct months, and the cards under them in the same descending
     // order — a heading order that was right while the cards underneath were
     // shuffled would pass a headings-only assertion.
     expect(new Set(headings).size).toBe(3);
-    expect(within(column('Bugs')).getAllByText(/newest|middle|oldest/).map((c) => c.textContent))
-      .toEqual(['newest', 'middle', 'oldest']);
+    expect(
+      within(column('Bugs'))
+        .getAllByText(/newest|middle|oldest/)
+        .map((c) => c.textContent)
+    ).toEqual(['newest', 'middle', 'oldest']);
   });
 
   it('sorts an item with no dates at all into an "undated" group, last', async () => {
@@ -306,13 +351,18 @@ describe('ArchiveView', () => {
     ];
     await renderArchive(items);
 
-    const headings = within(column('Out of scope')).getAllByTestId('archive-month').map((h) => h.textContent);
+    const headings = within(column('Out of scope'))
+      .getAllByTestId('archive-month')
+      .map((h) => h.textContent);
     expect(headings).toHaveLength(2);
     // Last, though '' sorts FIRST as a string — the rule groupByMonth has to
     // apply by hand.
     expect(headings[1]).toBe('undated');
-    expect(within(column('Out of scope')).getAllByText(/no stamps at all|dated rejection/).map((c) => c.textContent))
-      .toEqual(['dated rejection', 'no stamps at all']);
+    expect(
+      within(column('Out of scope'))
+        .getAllByText(/no stamps at all|dated rejection/)
+        .map((c) => c.textContent)
+    ).toEqual(['dated rejection', 'no stamps at all']);
   });
 
   it('offers groom on a stale card — the path that brings it back to the Board', async () => {
@@ -368,7 +418,7 @@ describe('ArchiveView', () => {
     expect(screen.getByText('nothing registered yet')).toBeInTheDocument();
   });
 
-  it('reports the registry\'s own warnings, since Archive can be the landing section', async () => {
+  it("reports the registry's own warnings, since Archive can be the landing section", async () => {
     await renderArchive(ITEMS, ['/abs/alpha/backlog/ideas/open/idea-9-broken.md: frontmatter has no closing --- line']);
     expect(within(screen.getByTestId('board-warn')).getByText(/idea-9-broken/)).toBeInTheDocument();
   });

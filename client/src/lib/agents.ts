@@ -1,7 +1,19 @@
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeMode,
-  OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
-  PauseResult, PermissionMode, QuestionMode, StartingRun, WatchdogConfig, WatchdogStatus
+  AgentDispatchRequest,
+  AgentDispatchResult,
+  AgentPlan,
+  AgentsStatus,
+  MergeMode,
+  OrchestratorArchivePayload,
+  OrchestratorArchiveRun,
+  OrchestratorRun,
+  OrchestratorRunsPayload,
+  PauseResult,
+  PermissionMode,
+  QuestionMode,
+  StartingRun,
+  WatchdogConfig,
+  WatchdogStatus
 } from '../../../shared/types';
 
 /**
@@ -42,7 +54,11 @@ import type {
  * into a wider error taxonomy no other route asked for.
  */
 export class ApiError extends Error {
-  constructor(message: string, public readonly status: number, public readonly code?: string) {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string
+  ) {
     super(message);
     this.name = 'ApiError';
   }
@@ -83,7 +99,8 @@ async function unwrap<T>(res: Response): Promise<T> {
  */
 function isAgentsStatus(data: unknown): data is AgentsStatus {
   return (
-    typeof data === 'object' && data !== null &&
+    typeof data === 'object' &&
+    data !== null &&
     typeof (data as AgentsStatus).enabled === 'boolean' &&
     typeof (data as AgentsStatus).reachable === 'boolean' &&
     typeof (data as AgentsStatus).spawnAvailable === 'boolean' &&
@@ -108,19 +125,23 @@ export async function fetchAgentsStatus(): Promise<AgentsStatus> {
 /** POST, not GET: the argument is an absolute path on someone's disk, and a
  *  query string puts it in history and in logs. */
 export async function fetchAgentPlan(itemPath: string): Promise<AgentPlan> {
-  return unwrap<AgentPlan>(await fetch('/api/agents/plan', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ itemPath })
-  }));
+  return unwrap<AgentPlan>(
+    await fetch('/api/agents/plan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ itemPath })
+    })
+  );
 }
 
 export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDispatchResult> {
-  return unwrap<AgentDispatchResult>(await fetch('/api/agents/dispatch', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(req)
-  }));
+  return unwrap<AgentDispatchResult>(
+    await fetch('/api/agents/dispatch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(req)
+    })
+  );
 }
 
 /**
@@ -158,21 +179,18 @@ function isStartingRuns(value: unknown): boolean {
   if (value === undefined) return true;
   return (
     Array.isArray(value) &&
-    value.every((s) => (
-      typeof s === 'object' && s !== null &&
-      typeof (s as StartingRun).project === 'string' &&
-      typeof (s as StartingRun).requestedAt === 'string'
-    ))
+    value.every(
+      (s) => typeof s === 'object' && s !== null && typeof (s as StartingRun).project === 'string' && typeof (s as StartingRun).requestedAt === 'string'
+    )
   );
 }
 
 function isOrchestratorRunsPayload(data: unknown): data is OrchestratorRunsPayload {
   return (
-    typeof data === 'object' && data !== null &&
+    typeof data === 'object' &&
+    data !== null &&
     Array.isArray((data as OrchestratorRunsPayload).runs) &&
-    (data as OrchestratorRunsPayload).runs.every(
-      (run) => typeof run === 'object' && run !== null && typeof (run as { fresh?: unknown }).fresh === 'boolean'
-    ) &&
+    (data as OrchestratorRunsPayload).runs.every((run) => typeof run === 'object' && run !== null && typeof (run as { fresh?: unknown }).fresh === 'boolean') &&
     isStartingRuns((data as Partial<OrchestratorRunsPayload>).starting)
   );
 }
@@ -210,15 +228,18 @@ export async function fetchOrchestratorRuns(): Promise<OrchestratorRunsPayload> 
  */
 function isOrchestratorArchivePayload(data: unknown): data is OrchestratorArchivePayload {
   return (
-    typeof data === 'object' && data !== null &&
+    typeof data === 'object' &&
+    data !== null &&
     Array.isArray((data as OrchestratorArchivePayload).runs) &&
-    (data as OrchestratorArchivePayload).runs.every((run) => (
-      typeof run === 'object' && run !== null &&
-      typeof (run as OrchestratorArchiveRun).runId === 'string' &&
-      typeof (run as OrchestratorArchiveRun).project === 'string' &&
-      typeof (run as OrchestratorArchiveRun).current === 'boolean' &&
-      Array.isArray((run as OrchestratorArchiveRun).queue)
-    ))
+    (data as OrchestratorArchivePayload).runs.every(
+      (run) =>
+        typeof run === 'object' &&
+        run !== null &&
+        typeof (run as OrchestratorArchiveRun).runId === 'string' &&
+        typeof (run as OrchestratorArchiveRun).project === 'string' &&
+        typeof (run as OrchestratorArchiveRun).current === 'boolean' &&
+        Array.isArray((run as OrchestratorArchiveRun).queue)
+    )
   );
 }
 
@@ -259,9 +280,7 @@ export async function fetchOrchestratorArchive(): Promise<OrchestratorArchivePay
  * nothing that response didn't already hand the client.
  */
 export async function fetchArchivedRun(project: string, runId: string): Promise<OrchestratorRun> {
-  return unwrap<OrchestratorRun>(await fetch(
-    `/api/orchestrator/archive/run?project=${encodeURIComponent(project)}&runId=${encodeURIComponent(runId)}`
-  ));
+  return unwrap<OrchestratorRun>(await fetch(`/api/orchestrator/archive/run?project=${encodeURIComponent(project)}&runId=${encodeURIComponent(runId)}`));
 }
 
 /**
@@ -324,11 +343,13 @@ export interface StartOrchestrateRequest {
  * a query string puts it in history and in logs.
  */
 export async function startOrchestrate(req: StartOrchestrateRequest): Promise<AgentDispatchResult> {
-  return unwrap<AgentDispatchResult>(await fetch('/api/agents/orchestrate', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(req)
-  }));
+  return unwrap<AgentDispatchResult>(
+    await fetch('/api/agents/orchestrate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(req)
+    })
+  );
 }
 
 /**
@@ -346,22 +367,26 @@ export async function startOrchestrate(req: StartOrchestrateRequest): Promise<Ag
  * directions throws away something a person asked for.
  */
 export async function pauseOrchestrate(project: string): Promise<PauseResult> {
-  return unwrap<PauseResult>(await fetch('/api/agents/pause', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ project })
-  }));
+  return unwrap<PauseResult>(
+    await fetch('/api/agents/pause', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project })
+    })
+  );
 }
 
 /** The withdrawal half of `pauseOrchestrate` above — `cancel: true` is the
  *  only form the server honours (a string `'true'` is read as a pause), so
  *  it is a literal here rather than anything derived from a caller. */
 export async function cancelPauseOrchestrate(project: string): Promise<PauseResult> {
-  return unwrap<PauseResult>(await fetch('/api/agents/pause', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ project, cancel: true })
-  }));
+  return unwrap<PauseResult>(
+    await fetch('/api/agents/pause', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project, cancel: true })
+    })
+  );
 }
 
 /**
@@ -373,11 +398,13 @@ export async function cancelPauseOrchestrate(project: string): Promise<PauseResu
  * nothing to widen the way `StartOrchestrateRequest` above does.
  */
 export async function resumeOrchestrate(project: string): Promise<AgentDispatchResult> {
-  return unwrap<AgentDispatchResult>(await fetch('/api/agents/resume', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ project })
-  }));
+  return unwrap<AgentDispatchResult>(
+    await fetch('/api/agents/resume', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project })
+    })
+  );
 }
 
 /**
@@ -446,16 +473,15 @@ export interface MergeCheckResult {
  */
 function isMergeCheckResult(data: unknown): data is MergeCheckResult {
   return (
-    typeof data === 'object' && data !== null &&
+    typeof data === 'object' &&
+    data !== null &&
     typeof (data as MergeCheckResult).covered === 'boolean' &&
     (typeof (data as MergeCheckResult).source === 'string' || (data as MergeCheckResult).source === null)
   );
 }
 
 export async function fetchMergeCheck(project: string): Promise<MergeCheckResult> {
-  const data = await unwrap<MergeCheckResult>(
-    await fetch(`/api/agents/merge-check?project=${encodeURIComponent(project)}`)
-  );
+  const data = await unwrap<MergeCheckResult>(await fetch(`/api/agents/merge-check?project=${encodeURIComponent(project)}`));
   // Thrown, not returned-anyway, mirroring fetchAgentsStatus /
   // fetchOrchestratorRuns above: a caller gets a clean rejection rather
   // than a payload that looks real until the render that reads `.covered`
@@ -511,7 +537,8 @@ export interface UncommittedItems {
  */
 function isUncommittedItems(data: unknown): data is UncommittedItems {
   return (
-    typeof data === 'object' && data !== null &&
+    typeof data === 'object' &&
+    data !== null &&
     Array.isArray((data as UncommittedItems).paths) &&
     (data as UncommittedItems).paths.every((p) => typeof p === 'string') &&
     typeof (data as UncommittedItems).known === 'boolean'
@@ -519,9 +546,7 @@ function isUncommittedItems(data: unknown): data is UncommittedItems {
 }
 
 export async function fetchUncommitted(project: string): Promise<UncommittedItems> {
-  const data = await unwrap<UncommittedItems>(
-    await fetch(`/api/items/uncommitted?project=${encodeURIComponent(project)}`)
-  );
+  const data = await unwrap<UncommittedItems>(await fetch(`/api/items/uncommitted?project=${encodeURIComponent(project)}`));
   if (!isUncommittedItems(data)) {
     throw new Error('malformed /api/items/uncommitted response');
   }
@@ -551,7 +576,8 @@ function isWatchdogStatus(data: unknown): data is WatchdogStatus {
     (s.phase === 'off' || s.phase === 'idle' || s.phase === 'armed') &&
     Array.isArray(s.watching) &&
     Array.isArray(s.events) &&
-    typeof s.config === 'object' && s.config !== null &&
+    typeof s.config === 'object' &&
+    s.config !== null &&
     typeof s.config.enabled === 'boolean' &&
     typeof s.config.tickMs === 'number' &&
     typeof s.config.graceMs === 'number' &&
@@ -586,11 +612,13 @@ export async function fetchWatchdog(): Promise<WatchdogStatus> {
  * typed controls, which cannot produce a field this type doesn't have.
  */
 export async function updateWatchdogConfig(patch: Partial<WatchdogConfig>): Promise<WatchdogStatus> {
-  const data = await unwrap<WatchdogStatus>(await fetch('/api/agents/watchdog/config', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(patch)
-  }));
+  const data = await unwrap<WatchdogStatus>(
+    await fetch('/api/agents/watchdog/config', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch)
+    })
+  );
   if (!isWatchdogStatus(data)) {
     throw new Error('malformed /api/agents/watchdog/config response');
   }

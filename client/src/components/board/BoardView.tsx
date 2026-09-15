@@ -46,7 +46,10 @@ type SortKey = 'created' | 'name' | 'project';
  *  and every entry in `stripRuns` below are typed off this alias, and both
  *  get handed straight to `RunStrip`, which does. */
 type RunPayload = OrchestratorRun & {
-  fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog;
+  fresh: boolean;
+  pastRuns: number;
+  pauseRequested: boolean;
+  watchdog?: RunWatchdog;
 };
 
 /**
@@ -132,11 +135,7 @@ const liveRank = (item: BacklogItem, stage: RunStage | undefined): 0 | 1 | 2 => 
  * comment for why), so the primary key can no longer be a pure function of one
  * item and the lookup has to come from the caller that holds the run payload.
  */
-function sortItems(
-  items: BacklogItem[],
-  sort: SortKey,
-  stageFor: (item: BacklogItem) => RunStage | undefined
-): BacklogItem[] {
+function sortItems(items: BacklogItem[], sort: SortKey, stageFor: (item: BacklogItem) => RunStage | undefined): BacklogItem[] {
   const out = [...items];
   /* The `??` is not defensive noise, and the `SortKey` type is not a promise
      that it can't fire. `sort` arrives from localStorage through
@@ -339,13 +338,9 @@ export default function BoardView() {
      RunDrawer) it carries exactly what a card can render. */
   const runEntriesByProject = new Map<string, Map<string, RunCardState>>();
   for (const run of freshRuns) {
-    runEntriesByProject.set(
-      run.project,
-      new Map(run.queue.map((q) => [q.id, { stage: q.stage, stageAt: q.stageAt }]))
-    );
+    runEntriesByProject.set(run.project, new Map(run.queue.map((q) => [q.id, { stage: q.stage, stageAt: q.stageAt }])));
   }
-  const runEntryFor = (item: BacklogItem): RunCardState | undefined =>
-    runEntriesByProject.get(item.projectPath)?.get(item.id);
+  const runEntryFor = (item: BacklogItem): RunCardState | undefined => runEntriesByProject.get(item.projectPath)?.get(item.id);
   /** The rank's and the filter's half of the same lookup — neither needs `stageAt`. */
   const runStageFor = (item: BacklogItem): RunStage | undefined => runEntryFor(item)?.stage;
 
@@ -374,9 +369,7 @@ export default function BoardView() {
        for. Expressed as the rank rather than as its own copy of the two stage
        lists so the filter and the column order can never disagree about which
        cards are live. */
-    (status === 'started'
-      ? liveRank(i, runStageFor(i)) < 2
-      : status === 'all' || i.status === status);
+    (status === 'started' ? liveRank(i, runStageFor(i)) < 2 : status === 'all' || i.status === status);
 
   /* Everything the toolbar admits, before the staleness split below. Named
      rather than inlined because `hasLive` has to be computed off THIS set —
@@ -440,10 +433,7 @@ export default function BoardView() {
   const staleFor = (item: BacklogItem): boolean => isStale(item, settings.staleDays, now, runs);
 
   const missing = registered.filter((p) => p.missing);
-  const warnings = [
-    ...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`),
-    ...(index?.errors ?? [])
-  ];
+  const warnings = [...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`), ...(index?.errors ?? [])];
 
   /*
    * Task 13's toolbar button. Four conditions, matching the brief's own
@@ -469,9 +459,7 @@ export default function BoardView() {
    *     the control has to still be there to start a fresh one once the
    *     last one has gone silent.
    */
-  const orchestrateGate = projectValue === ALL || agents === null
-    ? null
-    : projectDispatchGate(agents, projectValue);
+  const orchestrateGate = projectValue === ALL || agents === null ? null : projectDispatchGate(agents, projectValue);
   /* bug-21 widened condition 4 to cover the window BEFORE that fresh run
      exists. The server's own pre-spawn lock was blind for the same window,
      so a second press returned 200 and spawned a second session; both
@@ -484,9 +472,7 @@ export default function BoardView() {
      "a run already owns this project's whole story on the board" is one
      question, and the starting placeholder is one of the two rows that can
      be telling that story. */
-  const orchestrateBusy =
-    freshRuns.some((run) => run.project === projectValue) ||
-    starting.some((s) => s.project === projectValue);
+  const orchestrateBusy = freshRuns.some((run) => run.project === projectValue) || starting.some((s) => s.project === projectValue);
   const showOrchestrate = orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateBusy;
   const orchestrateBlockedReason = orchestrateGate?.control === 'disabled' ? orchestrateGate.reason : null;
   // The registry's own display name, for the button's title and the sheet's
@@ -528,8 +514,7 @@ export default function BoardView() {
   // every render rather than cached: this is what makes the drawer track
   // each new poll instead of freezing at whatever `runs` looked like when
   // it was opened.
-  const openRun: RunPayload | null =
-    openRunProject === null ? null : runs.find((r) => r.project === openRunProject) ?? null;
+  const openRun: RunPayload | null = openRunProject === null ? null : (runs.find((r) => r.project === openRunProject) ?? null);
 
   /*
    * Task 12 fix round 1: ItemDrawer and RunDrawer each render a
@@ -624,36 +609,23 @@ export default function BoardView() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <select
-            className="board-select"
-            aria-label="Project"
-            value={projectValue}
-            onChange={(e) => setProject(e.target.value)}
-          >
+          <select className="board-select" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
             <option value={ALL}>All projects</option>
             {/* Valued by path, labelled by name — two checkouts of one repo
                 stay two selectable options. */}
             {registered.map((p) => (
-              <option key={p.path} value={p.path}>{p.name}</option>
+              <option key={p.path} value={p.path}>
+                {p.name}
+              </option>
             ))}
           </select>
-          <select
-            className="board-select"
-            aria-label="Status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as StatusFilter)}
-          >
+          <select className="board-select" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
             <option value="open">Open</option>
             <option value="started">In progress</option>
             <option value="done">Done</option>
             <option value="all">All</option>
           </select>
-          <select
-            className="board-select"
-            aria-label="Sort"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-          >
+          <select className="board-select" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
             <option value="created">Newest first</option>
             <option value="name">By name</option>
             <option value="project">By project</option>
@@ -726,7 +698,9 @@ export default function BoardView() {
                 Orchestrate
               </button>
               {orchestrateBlockedReason !== null && (
-                <span id={orchestrateReasonId} className="sr-only">{orchestrateBlockedReason}</span>
+                <span id={orchestrateReasonId} className="sr-only">
+                  {orchestrateBlockedReason}
+                </span>
               )}
             </>
           )}
@@ -848,14 +822,20 @@ export default function BoardView() {
         <div className="board-columns">
           {COLUMNS.map((col) => {
             const colItems = sortItems(
-              visible.filter((i) => i.section === col.section), sort, runStageFor
+              visible.filter((i) => i.section === col.section),
+              sort,
+              runStageFor
             );
             return (
               <div className={`board-col board-col-${col.slug}`} key={col.section} data-testid="board-col">
                 <div className="board-col-h">
                   <span className="board-col-tick" />
-                  <span className="board-col-name" data-testid="col-name">{col.label}</span>
-                  <span className="board-col-count" data-testid="col-count">{colItems.length}</span>
+                  <span className="board-col-name" data-testid="col-name">
+                    {col.label}
+                  </span>
+                  <span className="board-col-count" data-testid="col-count">
+                    {colItems.length}
+                  </span>
                 </div>
                 <div className="board-col-cards">
                   {colItems.map((item) => (

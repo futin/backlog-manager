@@ -13,7 +13,7 @@ trigger: /backlog-execute
 
 Execute does the actual work a groomed bug or task describes, then archives it once
 verification proves it worked. It only ever works `bugs/` and `tasks/` — never `ideas/` or
-`refactors/` (neither has anything to execute: what each is waiting for is to be *promoted*
+`refactors/` (neither has anything to execute: what each is waiting for is to be _promoted_
 into a task, which is `backlog-groom`'s job) and never `out-of-scope/` (already closed). It never
 files anything new (`backlog-capture`) and never writes a plan (`backlog-groom`) — if the
 plan isn't there yet, it refuses and says so.
@@ -41,7 +41,7 @@ for as long as that marker does:
 - **The escalation channel is the final assistant message and the item's
   `## Outcome`** — those are what the run actually reads when the session
   exits. There is no better one: `orchestrate.mjs` refuses every command but
-  `init` from inside a linked worktree, so this session *cannot* park or stage
+  `init` from inside a linked worktree, so this session _cannot_ park or stage
   itself. Parking is the orchestrator's decision, made from outside, on the
   evidence this session leaves behind.
 - **Unchanged: never commits, never pushes.** The marker adds a prohibition
@@ -83,7 +83,7 @@ that prints the body, and none is needed.
 
 **That command is the only way to locate an item file, and an exit `1` from it is a stop
 condition, not a lookup problem.** `show` resolves the store by walking up from this
-session's own cwd to the nearest `.git`, so what it answers is "does *this tree* have this
+session's own cwd to the nearest `.git`, so what it answers is "does _this tree_ have this
 item" — and a worktree is a tree of its own. If it exits `1`, say the item is not in this
 tree and stop. Never `grep`, `find` or glob for the file; never work an absolute path
 belonging to another tree, even when one plainly exists and plainly holds the item you
@@ -188,8 +188,8 @@ Once the fix or the plan's steps are actually done, run
 `superpowers:verification-before-completion` — that's what turns "should work" into
 proof.
 
-Verification proves the *work* does what the item asked. Two further checks prove the
-*diff* is finished, and they are here because these two findings dominate review: a
+Verification proves the _work_ does what the item asked. Two further checks prove the
+_diff_ is finished, and they are here because these two findings dominate review: a
 2026-09-06 sweep of every fix-verdict review on this machine (29 reviews, four projects)
 put 14 on "another statement of the old contract left standing" and 5 on "a new test
 that still passes with the change reverted" — 19 of 29, against 8 genuine defects. Both
@@ -211,7 +211,7 @@ checks to the files this item actually touched, not to everything `git diff` pri
 
 **1. Contract sweep.** List every rule sentence, identifier, number, path, flag,
 command and default the diff changed or removed. For each, search the repository for
-its *old* form **outside the diff** — `CLAUDE.md`, `docs/`, `README*`, compose and env
+its _old_ form **outside the diff** — `CLAUDE.md`, `docs/`, `README*`, compose and env
 files, `skills/**/*.md`, `agents/*.md`, code comments and JSDoc, test names and test
 descriptions. `grep -rn` on the old spelling is the whole technique; the work is in
 listing what changed, not in searching for it.
@@ -226,7 +226,7 @@ ask costs the same fix loop as fixing it would have.
 production change it pins:
 
 - Copy the production file aside, revert just that change in the original (or comment
-  it out), run *that one test file*, confirm it fails, then restore from the copy.
+  it out), run _that one test file_, confirm it fails, then restore from the copy.
 - **Never `git stash` to do this.** The stash stack is shared with every other worktree
   and checkout of this repository, including sessions running right now, so a stash
   here can be popped by someone else — and theirs by you. A file copy is undoable by
@@ -260,6 +260,7 @@ Only once verification passed and both checks above have actually been run:
    specifically and treats a missing pair as an Important finding. That is the only
    thing standing between the step above and being quietly skipped in a headless run
    nobody is watching.
+
 2. Bill the session and clear the phase marker, but keep the record of when it started:
 
    ```bash

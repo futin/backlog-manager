@@ -15,7 +15,11 @@
  * immediately, and a radiogroup would promise a form submit that never comes.
  */
 export function Segmented<T extends string | number>({
-  value, options, onChange, disabled, label
+  value,
+  options,
+  onChange,
+  disabled,
+  label
 }: {
   value: T;
   options: { value: T; label: string }[];
@@ -26,7 +30,7 @@ export function Segmented<T extends string | number>({
 }) {
   return (
     <div className="ui-seg" role="group" aria-label={label}>
-      {options.map(o => (
+      {options.map((o) => (
         <button
           key={String(o.value)}
           type="button"

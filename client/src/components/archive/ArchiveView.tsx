@@ -159,9 +159,7 @@ export default function ArchiveView() {
    * rejection, however recent it is. The other arm is the whole of the
    * staleness rule, delegated — never re-decided here.
    */
-  const archived = all.filter(
-    (i) => i.section === 'out-of-scope' || leavesBoard(i, settings.staleDays, now, runs)
-  );
+  const archived = all.filter((i) => i.section === 'out-of-scope' || leavesBoard(i, settings.staleDays, now, runs));
 
   const needle = query.trim().toLowerCase();
   /* Project and search, and nothing else. No status filter, deliberately and
@@ -169,21 +167,14 @@ export default function ArchiveView() {
      not by status, so a status select here would be a control that either does
      nothing or contradicts the surface it sits on. No sort control either —
      the month grouping below IS the ordering. */
-  const visible = archived.filter(
-    (i) =>
-      (projectValue === ALL || i.projectPath === projectValue) &&
-      (needle === '' || i.title.toLowerCase().includes(needle))
-  );
+  const visible = archived.filter((i) => (projectValue === ALL || i.projectPath === projectValue) && (needle === '' || i.title.toLowerCase().includes(needle)));
 
   const missing = registered.filter((p) => p.missing);
   /* Reported here as well as on the Board. A registered path with no `backlog/`
      is a fact about the corpus rather than about a surface, and Archive can be
      the section this app opens on (Settings' `landing`), so a reader who never
      visits the Board would otherwise never be told. */
-  const warnings = [
-    ...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`),
-    ...(index?.errors ?? [])
-  ];
+  const warnings = [...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`), ...(index?.errors ?? [])];
 
   /* Why a run forbids dispatching this card, or null — the same block the
      Board's cards carry.
@@ -220,17 +211,14 @@ export default function ArchiveView() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <select
-            className="board-select"
-            aria-label="Project"
-            value={projectValue}
-            onChange={(e) => setProject(e.target.value)}
-          >
+          <select className="board-select" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
             <option value={ALL}>All projects</option>
             {/* Valued by path, labelled by name — two checkouts of one repo
                 stay two selectable options. */}
             {registered.map((p) => (
-              <option key={p.path} value={p.path}>{p.name}</option>
+              <option key={p.path} value={p.path}>
+                {p.name}
+              </option>
             ))}
           </select>
         </div>
@@ -274,8 +262,12 @@ export default function ArchiveView() {
               <div className={`board-col board-col-${col.slug}`} key={col.section} data-testid="archive-col">
                 <div className="board-col-h">
                   <span className="board-col-tick" />
-                  <span className="board-col-name" data-testid="col-name">{col.label}</span>
-                  <span className="board-col-count" data-testid="col-count">{count}</span>
+                  <span className="board-col-name" data-testid="col-name">
+                    {col.label}
+                  </span>
+                  <span className="board-col-count" data-testid="col-count">
+                    {count}
+                  </span>
                 </div>
                 <div className="board-col-cards">
                   {groups.map((group) => (
@@ -284,7 +276,9 @@ export default function ArchiveView() {
                           readable once the column is scrolled past its own
                           heading — which is the entire reason the grouping
                           earns its place here rather than being a sort. */}
-                      <div className="archive-month" data-testid="archive-month">{group.label}</div>
+                      <div className="archive-month" data-testid="archive-month">
+                        {group.label}
+                      </div>
                       {group.items.map((item) => (
                         <ItemCard
                           key={item.path}

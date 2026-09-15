@@ -17,7 +17,7 @@ trigger: /backlog-retro
 This skill is the historian of `backlog-orchestrate`. A tool sweeps every run
 file, headless session log, reviewer report and verify status on this machine
 into one deterministic JSON; you turn that JSON into a report, a short list of
-proposed backlog items, and a record the *next* sweep is compared against.
+proposed backlog items, and a record the _next_ sweep is compared against.
 
 **The tool computes and you judge, and the split is the whole design.** Cost per
 merged item, stage durations, fix-loop rate, context floor and peak are

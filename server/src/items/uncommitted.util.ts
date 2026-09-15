@@ -137,9 +137,7 @@ export function uncommittedItemPaths(projectPath: string): UncommittedItems {
     return unknown();
   }
 
-  const resolved = run(projectPath, [
-    '-C', projectPath, 'rev-parse', '--verify', '--quiet', `${UNCOMMITTED_BASE_REF}^{commit}`
-  ]);
+  const resolved = run(projectPath, ['-C', projectPath, 'rev-parse', '--verify', '--quiet', `${UNCOMMITTED_BASE_REF}^{commit}`]);
   if (resolved === null) return unknown();
 
   // Both reads are REQUIRED, and the asymmetry is the whole design: `diff`
@@ -149,13 +147,18 @@ export function uncommittedItemPaths(projectPath: string): UncommittedItems {
   // the diff printed nothing and `ls-files --others` printed the very bug the
   // 2026-09-06 sweep had recorded as skipped).
   const diffed = run(projectPath, [
-    '-C', projectPath, '-c', 'core.quotePath=false',
-    'diff', '--name-only', '--no-renames', UNCOMMITTED_BASE_REF, '--', 'backlog'
+    '-C',
+    projectPath,
+    '-c',
+    'core.quotePath=false',
+    'diff',
+    '--name-only',
+    '--no-renames',
+    UNCOMMITTED_BASE_REF,
+    '--',
+    'backlog'
   ]);
-  const untracked = run(projectPath, [
-    '-C', projectPath, '-c', 'core.quotePath=false',
-    'ls-files', '--others', '--exclude-standard', '--', 'backlog'
-  ]);
+  const untracked = run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', 'backlog']);
   // A failure of EITHER read is a failure of the question: reporting the half
   // that worked would be a confident, incomplete statement of fact.
   if (diffed === null || untracked === null) return unknown();

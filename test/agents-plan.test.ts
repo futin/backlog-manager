@@ -32,19 +32,21 @@ function stubDashboard(over: Record<string, unknown> = {}) {
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(
-        url.endsWith('/api/management')
-          ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          // `/api/spawn` answered too, for bug-21's starting-run case alone:
-          // a starting entry has exactly one writer, `POST
-          // /api/agents/orchestrate` after its own spawn resolves, so this
-          // suite cannot produce one without letting that spawn succeed.
-          // Every other case here never reaches this branch.
-          : url.endsWith('/api/spawn')
-            ? { sessionId: 'sess-1' }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits', ...over }
-      )
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          url.endsWith('/api/management')
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : // `/api/spawn` answered too, for bug-21's starting-run case alone:
+              // a starting entry has exactly one writer, `POST
+              // /api/agents/orchestrate` after its own spawn resolves, so this
+              // suite cannot produce one without letting that spawn succeed.
+              // Every other case here never reaches this branch.
+              url.endsWith('/api/spawn')
+              ? { sessionId: 'sess-1' }
+              : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits', ...over }
+        )
     } as Response);
   }) as jest.Mock;
 }
@@ -112,7 +114,9 @@ describe('POST /api/agents/plan', () => {
   }
 
   const post = (body: unknown) =>
-    request(app.getHttpServer()).post('/api/agents/plan').send(body as object);
+    request(app.getHttpServer())
+      .post('/api/agents/plan')
+      .send(body as object);
 
   const itemPath = (leaf: string, name: string) => join(projectPath, 'backlog', leaf, name);
 
@@ -149,7 +153,7 @@ describe('POST /api/agents/plan', () => {
     expect(res.body.prompt).toContain('backlog-manager:backlog-execute');
   });
 
-  it('plans a capture for an out-of-scope item — Archive\'s promotion path', async () => {
+  it("plans a capture for an out-of-scope item — Archive's promotion path", async () => {
     stubDashboard();
     const res = await post({ itemPath: itemPath('out-of-scope', 'oos-1-declined.md') }).expect(201);
     expect(res.body.action).toBe('capture');
@@ -162,8 +166,7 @@ describe('POST /api/agents/plan', () => {
     // next step, where a rejection does. This case used to be the
     // out-of-scope file, one line above.
     stubDashboard();
-    await post({ itemPath: itemPath('bugs/done', 'bug-9-a-fixed-bug.md') })
-      .expect(404, { error: 'nothing to dispatch for this item' });
+    await post({ itemPath: itemPath('bugs/done', 'bug-9-a-fixed-bug.md') }).expect(404, { error: 'nothing to dispatch for this item' });
   });
 
   it('404s a path outside every registered backlog', async () => {
@@ -179,12 +182,14 @@ describe('POST /api/agents/plan', () => {
   it('still plans, with a reason, when the dashboard cannot see the project', async () => {
     global.fetch = jest.fn((input: RequestInfo | URL) =>
       Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          String(input).endsWith('/api/management')
-            ? { projects: [{ dirName: '-x', name: 'x', path: '/somewhere/else', lastActiveMs: 1 }] }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
-        )
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            String(input).endsWith('/api/management')
+              ? { projects: [{ dirName: '-x', name: 'x', path: '/somewhere/else', lastActiveMs: 1 }] }
+              : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
+          )
       } as Response)
     ) as jest.Mock;
     const res = await post({ itemPath: itemPath('ideas/open', 'idea-1-an-idea.md') }).expect(201);
@@ -217,8 +222,7 @@ describe('POST /api/agents/plan', () => {
      the only writer of a starting entry. */
   it('reports a starting run as the reason the launch is blocked', async () => {
     stubDashboard();
-    await request(app.getHttpServer())
-      .post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
+    await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
 
     const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
     expect(res.body.blocked).toBe('an orchestrator run is starting for this project');

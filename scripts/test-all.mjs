@@ -26,7 +26,7 @@
 // suite. Its correctness was proved by hand — every runner broken in turn,
 // singly and together — and the exit codes are pasted into task-22's
 // `## Outcome`.
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process';
 
 // Delegate to the two named scripts; never re-spell their commands here.
 // That is what keeps `test:skills`'s glob pair
@@ -43,8 +43,8 @@ const RUNNERS = [
   // jest first so the top of a `pnpm test` log holds what a human's eye
   // already expects to find there.
   { name: 'jest', script: 'test:jest' },
-  { name: 'node --test (skills)', script: 'test:skills' },
-]
+  { name: 'node --test (skills)', script: 'test:skills' }
+];
 
 // Both runners always run, and neither short-circuits the other. `&&` would
 // have hidden a skill-suite break behind any jest break — and a run where
@@ -55,13 +55,13 @@ const results = RUNNERS.map(({ name, script }) => {
   // unwrapped, which is why they run sequentially rather than concurrently —
   // jest is `--runInBand` on purpose, and interleaved output from two runners
   // makes "reports both" unreadable in a real failure log.
-  const run = spawnSync('pnpm', ['run', script], { stdio: 'inherit', shell: process.platform === 'win32' })
+  const run = spawnSync('pnpm', ['run', script], { stdio: 'inherit', shell: process.platform === 'win32' });
   // A runner that could not be spawned at all (`error`) or died on a signal
   // has no exit code; both are failures, not passes.
-  const ok = !run.error && run.status === 0
-  if (run.error) console.error(`\n${name}: could not run \`pnpm run ${script}\` — ${run.error.message}`)
-  return { name, ok }
-})
+  const ok = !run.error && run.status === 0;
+  if (run.error) console.error(`\n${name}: could not run \`pnpm run ${script}\` — ${run.error.message}`);
+  return { name, ok };
+});
 
 // The summary. Without it "reports both" is true but unfindable: a failure
 // that scrolled past 2,000 lines ago is a failure nobody acts on.
@@ -75,16 +75,12 @@ const results = RUNNERS.map(({ name, script }) => {
 // suites.", handing the fix loop a red row whose own output says everything
 // passed. On stderr the summary lands after jest's report and is the last
 // thing in the tail, which is exactly where the verdict belongs.
-const failed = results.filter((r) => !r.ok)
-console.error(`\n${'─'.repeat(60)}`)
-for (const { name, ok } of results) console.error(`${ok ? 'PASS' : 'FAIL'}  ${name}`)
-console.error(
-  failed.length === 0
-    ? `\npnpm test: both runners passed.`
-    : `\npnpm test: FAILED in ${failed.map((r) => r.name).join(' and ')}.`,
-)
+const failed = results.filter((r) => !r.ok);
+console.error(`\n${'─'.repeat(60)}`);
+for (const { name, ok } of results) console.error(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
+console.error(failed.length === 0 ? `\npnpm test: both runners passed.` : `\npnpm test: FAILED in ${failed.map((r) => r.name).join(' and ')}.`);
 
 // `1` for any failure — not the sum, not the last runner's code. Callers of
 // this (a human, `resolveVerifyCommands`, any future CI) only ever ask
 // pass-or-not, and a composed code would be a number nobody can look up.
-process.exit(failed.length === 0 ? 0 : 1)
+process.exit(failed.length === 0 ? 0 : 1);

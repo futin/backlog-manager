@@ -72,9 +72,7 @@ export function StageBars({ totals, testId }: { totals: StageTotals; testId: str
                   redundant announcement to assistive tech. */}
               {ms > 0 && <span className="run-bars-fill" style={{ width: `${pct}%` }} aria-hidden="true" />}
             </span>
-            <span className={`run-bars-value${ms > 0 ? '' : ' run-bars-value-none'}`}>
-              {ms > 0 ? formatSpanCompact(ms) : '—'}
-            </span>
+            <span className={`run-bars-value${ms > 0 ? '' : ' run-bars-value-none'}`}>{ms > 0 ? formatSpanCompact(ms) : '—'}</span>
           </div>
         );
       })}

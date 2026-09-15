@@ -71,9 +71,7 @@ function trackItem(
 
 describe('StageTrack', () => {
   it('renders seven nodes, one per stepperStages entry, in pipeline order, each named for its own stage', () => {
-    const { container } = render(
-      <StageTrack item={trackItem('bug-1', 'pending', { pending: at(0) })} now={T0} live={true} mergeModeEffective="merge" />
-    );
+    const { container } = render(<StageTrack item={trackItem('bug-1', 'pending', { pending: at(0) })} now={T0} live={true} mergeModeEffective="merge" />);
 
     const nodes = Array.from(container.querySelectorAll('.run-track-node'));
     expect(nodes).toHaveLength(7);
@@ -83,9 +81,7 @@ describe('StageTrack', () => {
     // `stepperStages('merged')` because this render is merge mode
     // (`mergeModeEffective="merge"` above) — the same seven-entry list the
     // old fixed `STEPPER_STAGES` constant used to be.
-    expect(nodes.map((n) => n.getAttribute('data-testid'))).toEqual(
-      stepperStages('merged').map((stage) => `run-track-bug-1-${stage}`)
-    );
+    expect(nodes.map((n) => n.getAttribute('data-testid'))).toEqual(stepperStages('merged').map((stage) => `run-track-bug-1-${stage}`));
     nodes.forEach((node, i) => {
       expect(node.querySelector('.run-track-name')).toHaveTextContent(stepperStages('merged')[i]);
     });
@@ -110,16 +106,18 @@ describe('StageTrack', () => {
   // calls for — every other case in this file already renders in merge mode
   // implicitly, but none of them asserts the seventh node's own TEXT the way
   // these two do.
-  it('names the seventh node `merged` when the run\'s effective mode is merge', () => {
+  it("names the seventh node `merged` when the run's effective mode is merge", () => {
     const stageAt = {
-      pending: at(0), dispatched: at(10_000), inspecting: at(20_000), reviewing: at(30_000),
-      verifying: at(40_000), merging: at(50_000), merged: at(60_000)
+      pending: at(0),
+      dispatched: at(10_000),
+      inspecting: at(20_000),
+      reviewing: at(30_000),
+      verifying: at(40_000),
+      merging: at(50_000),
+      merged: at(60_000)
     };
-    render(
-      <StageTrack item={trackItem('bug-10', 'merged', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="merge" />
-    );
-    expect(screen.getByTestId('run-track-bug-10-merged').querySelector('.run-track-name'))
-      .toHaveTextContent('merged');
+    render(<StageTrack item={trackItem('bug-10', 'merged', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="merge" />);
+    expect(screen.getByTestId('run-track-bug-10-merged').querySelector('.run-track-name')).toHaveTextContent('merged');
   });
 
   // The branch-mode counterpart: same shape of run, `mergeModeEffective`
@@ -129,16 +127,18 @@ describe('StageTrack', () => {
   // comment, shared/types.ts); StageTrack has no other way to learn which
   // word to print, since the item alone cannot say what mode the run around
   // it is in.
-  it('names the seventh node `branched` when the run\'s effective mode is branch', () => {
+  it("names the seventh node `branched` when the run's effective mode is branch", () => {
     const stageAt = {
-      pending: at(0), dispatched: at(10_000), inspecting: at(20_000), reviewing: at(30_000),
-      verifying: at(40_000), merging: at(50_000), branched: at(60_000)
+      pending: at(0),
+      dispatched: at(10_000),
+      inspecting: at(20_000),
+      reviewing: at(30_000),
+      verifying: at(40_000),
+      merging: at(50_000),
+      branched: at(60_000)
     };
-    render(
-      <StageTrack item={trackItem('bug-11', 'branched', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="branch" />
-    );
-    expect(screen.getByTestId('run-track-bug-11-branched').querySelector('.run-track-name'))
-      .toHaveTextContent('branched');
+    render(<StageTrack item={trackItem('bug-11', 'branched', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="branch" />);
+    expect(screen.getByTestId('run-track-bug-11-branched').querySelector('.run-track-name')).toHaveTextContent('branched');
   });
 
   // The mixed-run disagreement a run-time review found (design §5.2): a
@@ -153,14 +153,17 @@ describe('StageTrack', () => {
   // chip elsewhere on the row still printing `merged`. This item's own
   // `stage` must win instead — filled, not hollow, and still showing when it
   // finished.
-  it('renders a merged item\'s seventh node as merged, filled with its finish time, even when the run has since moved to branch mode', () => {
+  it("renders a merged item's seventh node as merged, filled with its finish time, even when the run has since moved to branch mode", () => {
     const stageAt = {
-      pending: at(0), dispatched: at(10_000), inspecting: at(20_000), reviewing: at(30_000),
-      verifying: at(40_000), merging: at(50_000), merged: at(60_000)
+      pending: at(0),
+      dispatched: at(10_000),
+      inspecting: at(20_000),
+      reviewing: at(30_000),
+      verifying: at(40_000),
+      merging: at(50_000),
+      merged: at(60_000)
     };
-    render(
-      <StageTrack item={trackItem('bug-12', 'merged', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="branch" />
-    );
+    render(<StageTrack item={trackItem('bug-12', 'merged', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="branch" />);
 
     const node = screen.getByTestId('run-track-bug-12-merged');
     expect(node.querySelector('.run-track-name')).toHaveTextContent('merged');
@@ -176,10 +179,16 @@ describe('StageTrack', () => {
     expect(screen.queryByTestId('run-track-bug-12-branched')).not.toBeInTheDocument();
   });
 
-  it('prints each visited node\'s own stage span, the finish clock on merged, and leaves a cleanly-skipped stage hollow on a green line', () => {
+  it("prints each visited node's own stage span, the finish clock on merged, and leaves a cleanly-skipped stage hollow on a green line", () => {
     const stageAt = {
-      pending: at(0), preflight: at(15_000), dispatched: at(60_000), inspecting: at(360_000),
-      reviewing: at(380_000), verifying: at(700_000), merging: at(760_000), merged: at(772_000)
+      pending: at(0),
+      preflight: at(15_000),
+      dispatched: at(60_000),
+      inspecting: at(360_000),
+      reviewing: at(380_000),
+      verifying: at(700_000),
+      merging: at(760_000),
+      merged: at(772_000)
     };
     render(<StageTrack item={trackItem('bug-2', 'merged', stageAt)} now={T0 + 1_000_000} live={true} mergeModeEffective="merge" />);
 
@@ -209,8 +218,11 @@ describe('StageTrack', () => {
 
   it('rings the current node, ticks its value from `now`, hollows what is still ahead, and carries the fix-loop badge', () => {
     const stageAt = {
-      pending: at(0), dispatched: at(10_000), inspecting: at(20_000),
-      reviewing: at(30_000), fixing: at(40_000)
+      pending: at(0),
+      dispatched: at(10_000),
+      inspecting: at(20_000),
+      reviewing: at(30_000),
+      fixing: at(40_000)
     };
     render(<StageTrack item={trackItem('bug-3', 'fixing', stageAt, 1)} now={T0 + 684_000} live={true} mergeModeEffective="merge" />);
 
@@ -256,9 +268,7 @@ describe('StageTrack', () => {
   });
 
   it('renders a fully hollow track for a pending item, with no live segment anywhere', () => {
-    const { container } = render(
-      <StageTrack item={trackItem('bug-5', 'pending', { pending: at(0) })} now={T0} live={true} mergeModeEffective="merge" />
-    );
+    const { container } = render(<StageTrack item={trackItem('bug-5', 'pending', { pending: at(0) })} now={T0} live={true} mergeModeEffective="merge" />);
 
     expect(screen.getByTestId('run-track-bug-5')).toBeInTheDocument();
 
@@ -284,15 +294,13 @@ describe('StageTrack', () => {
     const stageAt = { pending: at(0), dispatched: at(5_000), inspecting: at(10_000) };
     const { container } = render(<StageTrack item={trackItem('bug-7', 'parked', stageAt)} now={T0 + 500_000} live={true} mergeModeEffective="merge" />);
 
-    expect(screen.getByTestId('run-track-bug-7-dispatched').querySelector('.run-track-dot'))
-      .toHaveClass('run-track-dot-filled');
+    expect(screen.getByTestId('run-track-bug-7-dispatched').querySelector('.run-track-dot')).toHaveClass('run-track-dot-filled');
     // `inspecting` is visited (filled) but, unlike bug-2's `fixing` gap, it is
     // the item's own LAST recorded arrival — nothing came after it for
     // `itemStageSpans` to measure it against, so it reads — same as a hollow
     // node despite being filled. Visited and "has a value" are not the same
     // fact, and this is the case that tells them apart.
-    expect(screen.getByTestId('run-track-bug-7-inspecting').querySelector('.run-track-dot'))
-      .toHaveClass('run-track-dot-filled');
+    expect(screen.getByTestId('run-track-bug-7-inspecting').querySelector('.run-track-dot')).toHaveClass('run-track-dot-filled');
     expect(screen.getByTestId('run-track-bug-7-inspecting-val')).toHaveTextContent('—');
     expect(container.querySelectorAll('.run-track-dot-current')).toHaveLength(0);
 
@@ -313,8 +321,13 @@ describe('StageTrack', () => {
   // uses.
   it('reads the terminal node as — with -none, not -when, when its own stamp will not parse', () => {
     const stageAt = {
-      pending: at(0), dispatched: at(10_000), inspecting: at(20_000), reviewing: at(30_000),
-      verifying: at(40_000), merging: at(50_000), merged: 'garbage'
+      pending: at(0),
+      dispatched: at(10_000),
+      inspecting: at(20_000),
+      reviewing: at(30_000),
+      verifying: at(40_000),
+      merging: at(50_000),
+      merged: 'garbage'
     };
     render(<StageTrack item={trackItem('bug-9', 'merged', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="merge" />);
 
@@ -329,7 +342,7 @@ describe('StageTrack', () => {
     expect(val).not.toHaveClass('run-track-val-when');
   });
 
-  it('reads a hollow — with -none when the current stage\'s own stamp will not parse', () => {
+  it("reads a hollow — with -none when the current stage's own stamp will not parse", () => {
     const stageAt = { dispatched: at(0), inspecting: at(10_000), reviewing: at(20_000), fixing: 'garbage' };
     render(<StageTrack item={trackItem('bug-8', 'fixing', stageAt)} now={T0 + 100_000} live={true} mergeModeEffective="merge" />);
 
@@ -355,9 +368,7 @@ describe('StageTrack', () => {
     // The clamped clock a stopped run hands down (`runClockMs`): its own last
     // heartbeat, not `now` — here 7m 24s after the item reached `dispatched`.
     const frozenClock = T0 + 30_436 + 444_000;
-    render(
-      <StageTrack item={trackItem('bug-2', 'dispatched', stageAt)} now={frozenClock} live={false} mergeModeEffective="merge" />
-    );
+    render(<StageTrack item={trackItem('bug-2', 'dispatched', stageAt)} now={frozenClock} live={false} mergeModeEffective="merge" />);
 
     const node = screen.getByTestId('run-track-bug-2-dispatched');
     expect(node.querySelector('.run-track-dot')).toHaveClass('run-track-dot-stalled');
@@ -375,17 +386,14 @@ describe('StageTrack', () => {
   // `"live"` value animates — a sweep is a claim about right now.
   it('leads into a stalled node with a static segment rather than the animated sweep', () => {
     const stageAt = { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) };
-    const { container } = render(
-      <StageTrack item={trackItem('bug-4', 'reviewing', stageAt)} now={T0 + 180_000} live={false} mergeModeEffective="merge" />
-    );
+    const { container } = render(<StageTrack item={trackItem('bug-4', 'reviewing', stageAt)} now={T0 + 180_000} live={false} mergeModeEffective="merge" />);
 
     expect(screen.getByTestId('run-track-bug-4-reviewing').getAttribute('data-in')).toBe('stalled');
     expect(container.querySelectorAll('[data-in="live"]')).toHaveLength(0);
     expect(container.querySelectorAll('.run-track-dot-current')).toHaveLength(0);
     // The two nodes it passed through are still plain green: only the stage
     // it died ON changes state, never its history.
-    expect(screen.getByTestId('run-track-bug-4-dispatched').querySelector('.run-track-dot'))
-      .toHaveClass('run-track-dot-filled');
+    expect(screen.getByTestId('run-track-bug-4-dispatched').querySelector('.run-track-dot')).toHaveClass('run-track-dot-filled');
   });
 
   // A null clock is what `runClockMs` answers for a stopped run whose own
@@ -396,8 +404,7 @@ describe('StageTrack', () => {
     const stageAt = { pending: at(0), dispatched: at(30_000) };
     render(<StageTrack item={trackItem('bug-3', 'dispatched', stageAt)} now={null} live={false} mergeModeEffective="merge" />);
 
-    expect(screen.getByTestId('run-track-bug-3-dispatched').querySelector('.run-track-dot'))
-      .toHaveClass('run-track-dot-stalled');
+    expect(screen.getByTestId('run-track-bug-3-dispatched').querySelector('.run-track-dot')).toHaveClass('run-track-dot-stalled');
     const val = screen.getByTestId('run-track-bug-3-dispatched-val');
     expect(val).toHaveTextContent('—');
     expect(val).toHaveClass('run-track-val-none');

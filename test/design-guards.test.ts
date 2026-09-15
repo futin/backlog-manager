@@ -62,7 +62,10 @@ const themeBlocks = rules(theme).filter((r) => /--board:/.test(r.body));
 describe('guard 1 — no second face is named anywhere', () => {
   it('neither stylesheet declares or reads --mono or --display', () => {
     const offenders: string[] = [];
-    for (const [name, css] of [['styles.css', styles], ['theme.css', theme]] as const) {
+    for (const [name, css] of [
+      ['styles.css', styles],
+      ['theme.css', theme]
+    ] as const) {
       for (const token of ['--mono', '--display']) {
         if (stripComments(css).includes(token)) offenders.push(`${name} still mentions ${token}`);
       }
@@ -77,7 +80,8 @@ describe('guard 2 — one --font stack, and nothing else picks a face', () => {
     for (const block of themeBlocks) {
       const decls = block.body.match(/--font: *[^;]+/g) ?? [];
       expect({ selector: block.selector, count: decls.length }).toEqual({
-        selector: block.selector, count: 1
+        selector: block.selector,
+        count: 1
       });
       expect(decls[0]).toContain("'Hanken Grotesk'");
     }
@@ -95,7 +99,8 @@ describe('guard 2 — one --font stack, and nothing else picks a face', () => {
   it('styles.css names the face once, on body, and inherits everywhere else', () => {
     const decls = styleRules.flatMap((r) =>
       (r.body.match(/font-family: *[^;}]+/g) ?? []).map((d) => ({
-        selector: r.selector, value: d.replace(/font-family: */, '').trim()
+        selector: r.selector,
+        value: d.replace(/font-family: */, '').trim()
       }))
     );
     const named = decls.filter((d) => d.value !== 'inherit');
@@ -113,12 +118,9 @@ describe('guard 3 — 11 px is the floor', () => {
    * the next person changing it will see the argument.
    */
   const NON_PX_ALLOWED: Record<string, string> = {
-    '.board-card-stage-glyph':
-      'sized off the chip’s own font (1.15em) so a ✓ matches the word beside it at any scale',
-    '.watchdog-verdict-glyph':
-      'same bargain as the stage glyph: 1.05em keeps the mark level with its row’s type',
-    '.set-control input[type=number], .set-control input[type=text]':
-      'iOS Safari’s 16 px no-zoom floor, stated in declared px by dividing out --font-scale'
+    '.board-card-stage-glyph': 'sized off the chip’s own font (1.15em) so a ✓ matches the word beside it at any scale',
+    '.watchdog-verdict-glyph': 'same bargain as the stage glyph: 1.05em keeps the mark level with its row’s type',
+    '.set-control input[type=number], .set-control input[type=text]': 'iOS Safari’s 16 px no-zoom floor, stated in declared px by dividing out --font-scale'
   };
 
   it('every px-literal font-size in styles.css is at least 11 px', () => {
@@ -133,8 +135,7 @@ describe('guard 3 — 11 px is the floor', () => {
 
   it('a non-px font-size is legal only for an allowlisted selector', () => {
     const nonPx = styleRules
-      .filter((r) => (r.body.match(/font-size: *([^;}]+)/g) ?? [])
-        .some((d) => !/^font-size: *[0-9.]+px$/.test(d.trim())))
+      .filter((r) => (r.body.match(/font-size: *([^;}]+)/g) ?? []).some((d) => !/^font-size: *[0-9.]+px$/.test(d.trim())))
       .map((r) => r.selector);
     expect(nonPx.sort()).toEqual(Object.keys(NON_PX_ALLOWED).sort());
   });
@@ -150,14 +151,28 @@ describe('guard 4 — one rule uppercases anything', () => {
 describe('guard 5 — the daylight palette and the two fill tokens', () => {
   /** The design spec's §2.2 table, verbatim. */
   const DAYLIGHT: Record<string, string> = {
-    '--board': '#f4f4f3', '--steel': '#ededec', '--strip': '#ffffff', '--strip-hi': '#f2f2f1',
-    '--edge': 'rgba(0,0,0,.03)', '--hairline': '#eaeae8', '--hairline2': '#dcdcda',
-    '--ink': '#131313', '--ink2': '#6e6e6e', '--ink3': '#a0a0a0',
-    '--green': '#5fa92c', '--amber': '#c4761f', '--mustard': '#9a8712', '--cyan': '#3f8f14',
-    '--red': '#b03b28', '--magenta': '#6b52a8',
-    '--on-accent': '#ffffff', '--scrim': 'rgba(19,19,19,.28)',
-    '--shadow': 'rgba(0,0,0,.06)', '--shadow2': 'rgba(0,0,0,.1)',
-    '--fill-live': '#F5A15C', '--fill-progress': '#7DC242'
+    '--board': '#f4f4f3',
+    '--steel': '#ededec',
+    '--strip': '#ffffff',
+    '--strip-hi': '#f2f2f1',
+    '--edge': 'rgba(0,0,0,.03)',
+    '--hairline': '#eaeae8',
+    '--hairline2': '#dcdcda',
+    '--ink': '#131313',
+    '--ink2': '#6e6e6e',
+    '--ink3': '#a0a0a0',
+    '--green': '#5fa92c',
+    '--amber': '#c4761f',
+    '--mustard': '#9a8712',
+    '--cyan': '#3f8f14',
+    '--red': '#b03b28',
+    '--magenta': '#6b52a8',
+    '--on-accent': '#ffffff',
+    '--scrim': 'rgba(19,19,19,.28)',
+    '--shadow': 'rgba(0,0,0,.06)',
+    '--shadow2': 'rgba(0,0,0,.1)',
+    '--fill-live': '#F5A15C',
+    '--fill-progress': '#7DC242'
   };
 
   it('the daylight block carries §2.2’s values exactly', () => {
@@ -185,7 +200,8 @@ describe('guard 5 — the daylight palette and the two fill tokens', () => {
 describe('guard 6 — one font package, four weights', () => {
   const main = readFileSync(MAIN, 'utf8');
   const pkg = JSON.parse(readFileSync(PACKAGE, 'utf8')) as {
-    dependencies: Record<string, string>; devDependencies: Record<string, string>;
+    dependencies: Record<string, string>;
+    devDependencies: Record<string, string>;
   };
 
   it('main.tsx imports Hanken Grotesk at 400/500/600/700 and no other @fontsource', () => {
@@ -199,8 +215,7 @@ describe('guard 6 — one font package, four weights', () => {
   });
 
   it('package.json lists exactly one @fontsource package', () => {
-    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
-      .filter((d) => d.startsWith('@fontsource'));
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((d) => d.startsWith('@fontsource'));
     expect(deps).toEqual(['@fontsource/hanken-grotesk']);
   });
 });
@@ -213,9 +228,19 @@ describe('guard 7 — one home per primitive', () => {
    * `Sheet` is not a thing, and neither is a `Figure` outside a `FigureStrip`.
    */
   const FAMILIES = [
-    '.ui-band', '.ui-sheet', '.ui-figure', '.ui-chip', '.ui-pill', '.ui-dot',
-    '.ui-marker', '.ui-progress', '.ui-ledger', '.ui-seg', '.ui-select',
-    '.ui-number', '.ui-switch'
+    '.ui-band',
+    '.ui-sheet',
+    '.ui-figure',
+    '.ui-chip',
+    '.ui-pill',
+    '.ui-dot',
+    '.ui-marker',
+    '.ui-progress',
+    '.ui-ledger',
+    '.ui-seg',
+    '.ui-select',
+    '.ui-number',
+    '.ui-switch'
   ];
 
   const HEADER = '/* ── ui primitives';
@@ -241,8 +266,7 @@ describe('guard 7 — one home per primitive', () => {
     for (const family of FAMILIES) {
       const bare = styleRules.filter((r) => r.selector === family);
       expect({ family, count: bare.length }).toEqual({ family, count: 1 });
-      expect({ family, inside: inside(styles.indexOf(`\n${family} {`)) })
-        .toEqual({ family, inside: true });
+      expect({ family, inside: inside(styles.indexOf(`\n${family} {`)) }).toEqual({ family, inside: true });
     }
   });
 

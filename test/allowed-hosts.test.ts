@@ -31,12 +31,9 @@ describe('isAllowedHost', () => {
      to send `Host: 203.0.113.5` here the packet would have to route to that
      address. It is also the shape supertest sends, which is why the existing
      suites stay green without one header being added to them. */
-  it.each(['127.0.0.1:4322', '127.0.0.1:53492', '127.0.0.1', '203.0.113.5:4322'])(
-    'allows the IP literal %s',
-    (host) => {
-      expect(isAllowedHost(host, {})).toBe(true);
-    }
-  );
+  it.each(['127.0.0.1:4322', '127.0.0.1:53492', '127.0.0.1', '203.0.113.5:4322'])('allows the IP literal %s', (host) => {
+    expect(isAllowedHost(host, {})).toBe(true);
+  });
 
   /* new URL('http://[::1]:4322').hostname is '[::1]' — brackets included — and
      net.isIP says no to that, so the brackets have to come off first. */
@@ -74,12 +71,12 @@ describe('isAllowedHost', () => {
   /* HTTP/1.1 requires the header and every browser and curl sends it, so
      defaulting an absent one to "allowed" would reopen the hole to a
      hand-rolled client. */
-  it.each<[string, string | undefined]>([['empty', ''], ['absent', undefined]])(
-    'refuses an %s Host',
-    (_label, host) => {
-      expect(isAllowedHost(host, {})).toBe(false);
-    }
-  );
+  it.each<[string, string | undefined]>([
+    ['empty', ''],
+    ['absent', undefined]
+  ])('refuses an %s Host', (_label, host) => {
+    expect(isAllowedHost(host, {})).toBe(false);
+  });
 
   it('refuses a Host the URL parser cannot parse', () => {
     expect(isAllowedHost('not a host:4322', {})).toBe(false);
@@ -136,14 +133,16 @@ function recordFetches(): string[] {
     const url = String(input);
     sent.push(url);
     return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(
-        url.endsWith('/api/management')
-          ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : url.endsWith('/api/spawn')
-            ? { sessionId: 'sess-1' }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-      )
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          url.endsWith('/api/management')
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : url.endsWith('/api/spawn')
+              ? { sessionId: 'sess-1' }
+              : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+        )
     } as Response);
   }) as jest.Mock;
   return sent;
@@ -155,9 +154,7 @@ describe('the Host gate, over the whole app', () => {
   const realFetch = global.fetch;
 
   beforeEach(async () => {
-    projectPath = makeProject('alpha', [
-      { leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG }
-    ]);
+    projectPath = makeProject('alpha', [{ leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG }]);
     process.env.BM_AGENTS = 'on';
     process.env.BM_AGENTS_URL = 'http://dash.test:4173';
     delete process.env.BM_ALLOWED_HOSTS;
@@ -205,19 +202,12 @@ describe('the Host gate, over the whole app', () => {
      straight off disk, which is precisely what the loopback bind exists to
      protect. */
   it('403s a rebound read of an item body, disclosing none of the file', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/items/body')
-      .query({ path: bugPath() })
-      .set('host', 'evil.test:4322')
-      .expect(403);
+    const res = await request(app.getHttpServer()).get('/api/items/body').query({ path: bugPath() }).set('host', 'evil.test:4322').expect(403);
     expect(res.text).not.toContain(SECRET_LINE);
   });
 
   it('403s a rebound GET /api/health — the gate is a property of the server, not of /api/agents', async () => {
-    await request(app.getHttpServer())
-      .get('/api/health')
-      .set('host', 'evil.test:4322')
-      .expect(403);
+    await request(app.getHttpServer()).get('/api/health').set('host', 'evil.test:4322').expect(403);
   });
 
   /* The documented remote path has to keep working, and over both schemes: a
@@ -237,10 +227,7 @@ describe('the Host gate, over the whole app', () => {
 
   it('lets an operator name their own host through BM_ALLOWED_HOSTS', async () => {
     process.env.BM_ALLOWED_HOSTS = 'board.example';
-    await request(app.getHttpServer())
-      .get('/api/health')
-      .set('host', 'board.example:4322')
-      .expect(200);
+    await request(app.getHttpServer()).get('/api/health').set('host', 'board.example:4322').expect(200);
   });
 });
 
@@ -276,18 +263,12 @@ describe('the Host gate against the static handler', () => {
   });
 
   it('403s a rebound GET / ahead of the file being streamed', async () => {
-    const res = await request(page.getHttpServer())
-      .get('/')
-      .set('host', 'evil.test:5177')
-      .expect(403);
+    const res = await request(page.getHttpServer()).get('/').set('host', 'evil.test:5177').expect(403);
     expect(res.text).not.toContain('<div id="root"></div>');
   });
 
   it('still serves the page to an allowed Host', async () => {
-    const res = await request(page.getHttpServer())
-      .get('/')
-      .set('host', 'localhost:5177')
-      .expect(200);
+    const res = await request(page.getHttpServer()).get('/').set('host', 'localhost:5177').expect(200);
     expect(res.text).toContain('<div id="root"></div>');
   });
 });

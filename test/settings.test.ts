@@ -1,29 +1,45 @@
 import { SECTIONS } from '../client/src/components/SideRail';
-import {
-  DEFAULT_SETTINGS, FONT_SCALES, LIMITS, STALE_WINDOWS, THEMES, clampSettings
-} from '../client/src/lib/settings';
+import { DEFAULT_SETTINGS, FONT_SCALES, LIMITS, STALE_WINDOWS, THEMES, clampSettings } from '../client/src/lib/settings';
 import { EFFORTS, MODELS } from '../shared/agent';
 
 describe('clampSettings', () => {
   it('passes a valid object through', () => {
     const s = clampSettings({
-      theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14,
-      orchestrateDefaultMergeMode: 'branch', orchestrateDefaultQuestionMode: 'decide'
+      theme: 'daylight',
+      density: 'compact',
+      fontScale: 110,
+      landing: 'board',
+      dispatchDefaultModel: 'sonnet',
+      dispatchDefaultEffort: 'high',
+      staleDays: 14,
+      orchestrateDefaultMergeMode: 'branch',
+      orchestrateDefaultQuestionMode: 'decide'
     });
     expect(s).toEqual({
-      theme: 'daylight', density: 'compact', fontScale: 110, landing: 'board',
+      theme: 'daylight',
+      density: 'compact',
+      fontScale: 110,
+      landing: 'board',
       linkBase: 'http://127.0.0.1:5174',
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'high', staleDays: 14,
-      orchestrateDefaultMergeMode: 'branch', orchestrateDefaultQuestionMode: 'decide'
+      dispatchDefaultModel: 'sonnet',
+      dispatchDefaultEffort: 'high',
+      staleDays: 14,
+      orchestrateDefaultMergeMode: 'branch',
+      orchestrateDefaultQuestionMode: 'decide'
     });
   });
 
   it('falls back per field, independently', () => {
     const s = clampSettings({
-      theme: 'neon', density: 7, fontScale: 'big', landing: 'guides',
-      dispatchDefaultModel: 'gpt', dispatchDefaultEffort: 7, staleDays: 'soon',
-      orchestrateDefaultMergeMode: 'rebase', orchestrateDefaultQuestionMode: 'auto'
+      theme: 'neon',
+      density: 7,
+      fontScale: 'big',
+      landing: 'guides',
+      dispatchDefaultModel: 'gpt',
+      dispatchDefaultEffort: 7,
+      staleDays: 'soon',
+      orchestrateDefaultMergeMode: 'rebase',
+      orchestrateDefaultQuestionMode: 'auto'
     });
     expect(s).toEqual(DEFAULT_SETTINGS);
   });
@@ -88,15 +104,12 @@ describe('linkBase', () => {
   });
 
   it('keeps an http(s) origin and drops a trailing slash', () => {
-    expect(clampSettings({ linkBase: 'https://box.ts.net:5174/' }).linkBase)
-      .toBe('https://box.ts.net:5174');
+    expect(clampSettings({ linkBase: 'https://box.ts.net:5174/' }).linkBase).toBe('https://box.ts.net:5174');
   });
 
   it('refuses a non-http scheme — this value becomes an href', () => {
-    expect(clampSettings({ linkBase: 'javascript:alert(1)' }).linkBase)
-      .toBe('http://127.0.0.1:5174');
-    expect(clampSettings({ linkBase: 'not a url' }).linkBase)
-      .toBe('http://127.0.0.1:5174');
+    expect(clampSettings({ linkBase: 'javascript:alert(1)' }).linkBase).toBe('http://127.0.0.1:5174');
+    expect(clampSettings({ linkBase: 'not a url' }).linkBase).toBe('http://127.0.0.1:5174');
     expect(clampSettings({ linkBase: 42 }).linkBase).toBe('http://127.0.0.1:5174');
   });
 });
@@ -141,23 +154,20 @@ describe('dispatch defaults', () => {
  * right failure mode rather than an error nobody watching a board would see.
  */
 describe('orchestrateDefaultMergeMode', () => {
-  it('defaults to merge — today\'s behaviour for a board that has never touched this setting', () => {
+  it("defaults to merge — today's behaviour for a board that has never touched this setting", () => {
     expect(clampSettings({}).orchestrateDefaultMergeMode).toBe('merge');
   });
 
   it('keeps a real merge mode', () => {
-    expect(clampSettings({ orchestrateDefaultMergeMode: 'branch' }).orchestrateDefaultMergeMode)
-      .toBe('branch');
+    expect(clampSettings({ orchestrateDefaultMergeMode: 'branch' }).orchestrateDefaultMergeMode).toBe('branch');
   });
 
   it('clamps an unrecognised string to the default, rather than passing it on', () => {
-    expect(clampSettings({ orchestrateDefaultMergeMode: 'nonsense' }).orchestrateDefaultMergeMode)
-      .toBe('merge');
+    expect(clampSettings({ orchestrateDefaultMergeMode: 'nonsense' }).orchestrateDefaultMergeMode).toBe('merge');
   });
 
   it('clamps a non-string to the default', () => {
-    expect(clampSettings({ orchestrateDefaultMergeMode: 7 }).orchestrateDefaultMergeMode)
-      .toBe('merge');
+    expect(clampSettings({ orchestrateDefaultMergeMode: 7 }).orchestrateDefaultMergeMode).toBe('merge');
   });
 });
 
@@ -176,26 +186,21 @@ describe('orchestrateDefaultMergeMode', () => {
  * rule.
  */
 describe('orchestrateDefaultQuestionMode', () => {
-  it("defaults to park — what every run did before the mode existed", () => {
+  it('defaults to park — what every run did before the mode existed', () => {
     expect(clampSettings({}).orchestrateDefaultQuestionMode).toBe('park');
   });
 
   it('keeps either real question mode', () => {
-    expect(clampSettings({ orchestrateDefaultQuestionMode: 'decide' }).orchestrateDefaultQuestionMode)
-      .toBe('decide');
-    expect(clampSettings({ orchestrateDefaultQuestionMode: 'park' }).orchestrateDefaultQuestionMode)
-      .toBe('park');
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 'decide' }).orchestrateDefaultQuestionMode).toBe('decide');
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 'park' }).orchestrateDefaultQuestionMode).toBe('park');
   });
 
   it('clamps an unrecognised string to the default', () => {
-    expect(clampSettings({ orchestrateDefaultQuestionMode: 'auto' }).orchestrateDefaultQuestionMode)
-      .toBe('park');
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 'auto' }).orchestrateDefaultQuestionMode).toBe('park');
   });
 
   it('clamps a non-string and a null to the default', () => {
-    expect(clampSettings({ orchestrateDefaultQuestionMode: 42 }).orchestrateDefaultQuestionMode)
-      .toBe('park');
-    expect(clampSettings({ orchestrateDefaultQuestionMode: null }).orchestrateDefaultQuestionMode)
-      .toBe('park');
+    expect(clampSettings({ orchestrateDefaultQuestionMode: 42 }).orchestrateDefaultQuestionMode).toBe('park');
+    expect(clampSettings({ orchestrateDefaultQuestionMode: null }).orchestrateDefaultQuestionMode).toBe('park');
   });
 });

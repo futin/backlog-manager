@@ -61,7 +61,7 @@ function oneLine(text: string): string {
 const COMMIT_RULE =
   'When the job is done, commit the work: stage only the files this session ' +
   'changed, never `git add -A` or `git add .` — the tree may hold unrelated ' +
-  'uncommitted work of the user\'s. Do not push.';
+  "uncommitted work of the user's. Do not push.";
 
 export function composePrompt(item: BacklogItem, action: AgentAction): string {
   const head = `Use the ${SKILL[action]} skill on ${item.id} — "${oneLine(item.title)}" — in this repo's backlog.`;

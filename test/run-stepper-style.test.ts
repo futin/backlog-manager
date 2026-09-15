@@ -17,13 +17,7 @@ describe('run stepper stylesheet rules', () => {
   const css = readStyles();
 
   it('has a rule for the track and for each of the three dot states', () => {
-    for (const selector of [
-      '.run-stepper',
-      '.run-stepper-dot',
-      '.run-stepper-dot-filled',
-      '.run-stepper-dot-current',
-      '.run-stepper-dot-hollow'
-    ]) {
+    for (const selector of ['.run-stepper', '.run-stepper-dot', '.run-stepper-dot-filled', '.run-stepper-dot-current', '.run-stepper-dot-hollow']) {
       const block = ruleBlock(css, selector);
       expect(block).not.toBeNull();
       expect((block as string).trim()).not.toEqual('');

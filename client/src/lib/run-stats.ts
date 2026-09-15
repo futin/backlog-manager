@@ -1,7 +1,5 @@
 import { isTerminalStage, itemDurationMs, runIsLive } from './run-time';
-import type {
-  OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage
-} from '../../../shared/types';
+import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../../../shared/types';
 
 /**
  * The statistics behind the Runs section's stat tiles (Task 6) and per-item
@@ -111,10 +109,7 @@ function parseStamp(iso: string | undefined): number | null {
  * same question of the LIVE payload, which carries the server's own `fresh`
  * flag as a field, so it reads that flag instead of deriving anything.
  */
-function heartbeat(
-  run: Pick<OrchestratorArchiveRun, 'status' | 'updatedAt'>,
-  now: number
-): { updated: number | null; live: boolean } {
+function heartbeat(run: Pick<OrchestratorArchiveRun, 'status' | 'updatedAt'>, now: number): { updated: number | null; live: boolean } {
   return { updated: parseStamp(run.updatedAt), live: runIsLive(run, now) };
 }
 
@@ -234,10 +229,7 @@ export function itemStageSpans(item: Pick<RunQueueItem, 'stageAt'>): StageSpan[]
  * time to report) — a comment that covered only finished runs and simply
  * becomes true of `running` ones too.
  */
-export function runWallMs(
-  run: Pick<OrchestratorArchiveRun, 'status' | 'startedAt' | 'updatedAt'>,
-  now: number
-): number | null {
+export function runWallMs(run: Pick<OrchestratorArchiveRun, 'status' | 'startedAt' | 'updatedAt'>, now: number): number | null {
   const started = parseStamp(run.startedAt);
   if (started === null) return null;
 
@@ -273,9 +265,7 @@ export function runWallMs(
  * `merged` already was, so the sentence that always excluded one success
  * exit already covered both without changing a word of its reasoning.
  */
-export const MACHINE_STAGES: readonly RunStage[] = [
-  'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
-];
+export const MACHINE_STAGES: readonly RunStage[] = ['preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
 
 /** A run's (or several runs', via `sumStageTotals`) per-stage machine-time total, keyed by `RunStage`. */
 export type StageTotals = Partial<Record<RunStage, number>>;
@@ -710,9 +700,7 @@ export function aggregateRuns(
     }
   }
 
-  const avgItemWorkMs = mergedWorkTimes.length === 0
-    ? null
-    : mergedWorkTimes.reduce((sum, ms) => sum + ms, 0) / mergedWorkTimes.length;
+  const avgItemWorkMs = mergedWorkTimes.length === 0 ? null : mergedWorkTimes.reduce((sum, ms) => sum + ms, 0) / mergedWorkTimes.length;
 
   const fixLoopsPerMerged = itemsMerged === 0 ? null : totalFixLoops / itemsMerged;
   const verifyPassRate = verifyTotal === 0 ? null : verifyOk / verifyTotal;
@@ -810,9 +798,7 @@ export function itemUsageTotals(item: Pick<RunQueueItem, 'usage'>): UsageTotals 
  * it with no cast at the call site — the same reason `aggregateRuns` above
  * names only the fields it reads.
  */
-export function runUsageTotals(
-  run: { queue: readonly Pick<RunQueueItem, 'usage'>[] }
-): UsageTotals | null {
+export function runUsageTotals(run: { queue: readonly Pick<RunQueueItem, 'usage'>[] }): UsageTotals | null {
   return foldUsage(run.queue.flatMap((item) => item.usage ?? []));
 }
 
@@ -878,10 +864,7 @@ export function dayKey(iso: string): string | null {
  * while this one is read against LOCAL month/day, so the two are answering
  * different questions even where the twelve strings happen to be identical.
  */
-const MONTHS = [
-  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
-  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'
-];
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 /** `Date#getDay()` order — index 0 is Sunday, matching the platform's own convention rather than an ISO week starting Monday. */
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];

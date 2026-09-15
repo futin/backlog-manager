@@ -10,13 +10,7 @@ import { applySecurityMiddleware } from './security';
 import { clientDistModules } from './static';
 
 @Module({
-  imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    ItemsModule,
-    AgentsModule,
-    OrchestratorModule,
-    ...clientDistModules()
-  ],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ItemsModule, AgentsModule, OrchestratorModule, ...clientDistModules()],
   controllers: [HealthController]
 })
 export class AppModule implements NestModule {

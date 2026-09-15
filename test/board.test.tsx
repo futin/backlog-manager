@@ -9,10 +9,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type {
-  AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunQueueItem, RunStage
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
 
 // `path` is derived after the spread rather than hard-coded: every other field
 // here is a shared default that `over` may or may not touch, but `path` must be
@@ -35,8 +32,7 @@ import type {
  * start asserting the wrong string on 1 January.
  */
 const agoISO = (ms: number): string => `${new Date(Date.now() - ms).toISOString().slice(0, 19)}Z`;
-const daysAgoDate = (days: number): string =>
-  new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const daysAgoDate = (days: number): string => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const CREATED = `${new Date().getUTCFullYear()}-08-20`;
 
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
@@ -44,7 +40,11 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // literal's `section`/`status` widen to plain `string` and fail against
   // `Section`/`ItemStatus` below — the annotation is what keeps them narrowed.
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: CREATED, started: '', tags: [],
+    id: 'bug-1',
+    title: 'a bug',
+    created: CREATED,
+    started: '',
+    tags: [],
     // Fresh by default, and RELATIVE, so Task 5's staleness split leaves this
     // suite's fixtures on the Board whatever day it runs. `created` stays the
     // fixed `aug 20` the meta-line assertion needs, and an `updated` stamp is
@@ -52,9 +52,20 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     // fixture here once the calendar passes the window — the fallback to
     // `created` is a real rule (see item-stale.test.ts), just not one this
     // suite's shared fixture should be sitting on.
-    updated: agoISO(0), lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
+    updated: agoISO(0),
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over
   };
   return { ...base, path: over.path ?? `${base.projectPath}/backlog/${base.section}/${base.status}/${base.id}.md` };
@@ -78,12 +89,27 @@ const ITEMS: ItemsIndex = {
 };
 
 const PROJECTS: ProjectSummary[] = [
-  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 2, ideas: 1, tasks: 0, refactors: 0, 'out-of-scope': 1 } },
-  { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } },
-  { name: 'ghost', path: '/abs/ghost', createdAt: '2026-08-26T00:00:00.000Z', missing: true,
-    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 } }
+  {
+    name: 'alpha',
+    path: '/abs/alpha',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 2, ideas: 1, tasks: 0, refactors: 0, 'out-of-scope': 1 }
+  },
+  {
+    name: 'beta',
+    path: '/abs/beta',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+  },
+  {
+    name: 'ghost',
+    path: '/abs/ghost',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: true,
+    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+  }
 ];
 
 // A real answer, not a stand-in: this suite predates dispatch and never had
@@ -98,8 +124,12 @@ const PROJECTS: ProjectSummary[] = [
 // stub matches what a working dashboard would actually say instead of
 // papering over the endpoint with an off/unreachable stand-in.
 const AGENTS_STATUS: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha', '/abs/beta']
 };
 
 /*
@@ -127,9 +157,13 @@ beforeEach(() => {
   localStorage.clear();
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
-    const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/orchestrator/runs') ? NO_RUNS
-        : url.includes('/api/projects') ? PROJECTS : ITEMS;
+    const payload = url.includes('/api/agents/status')
+      ? AGENTS_STATUS
+      : url.includes('/api/orchestrator/runs')
+        ? NO_RUNS
+        : url.includes('/api/projects')
+          ? PROJECTS
+          : ITEMS;
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
 });
@@ -170,9 +204,13 @@ async function renderBoardWithSettings() {
 function stubItems(items: BacklogItem[], runs: RunPayload[] = []) {
   (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
     const url = String(input);
-    const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-      : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? PROJECTS : { items, errors: [] };
+    const payload: unknown = url.includes('/api/agents/status')
+      ? AGENTS_STATUS
+      : url.includes('/api/orchestrator/runs')
+        ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/projects')
+          ? PROJECTS
+          : { items, errors: [] };
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   });
 }
@@ -193,11 +231,9 @@ describe('BoardView', () => {
     const cols = screen.getAllByTestId('board-col');
     // The design's order, and exactly four of them: out-of-scope has no
     // column on this surface at all any more — it belongs to Archive.
-    expect(cols.map((c) => within(c).getByTestId('col-name').textContent))
-      .toEqual(['Refactoring', 'Ideas', 'Bugs', 'Tasks']);
+    expect(cols.map((c) => within(c).getByTestId('col-name').textContent)).toEqual(['Refactoring', 'Ideas', 'Bugs', 'Tasks']);
     // done task-9 and done ref-2 hidden by the default open filter
-    expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['1', '1', '2', '1']);
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['1', '1', '2', '1']);
     // col-count renders colItems.length, an array length — assert the DOM
     // actually holds that many cards so a key-driven card omission would fail
     // this test instead of passing unnoticed behind a correct-looking number.
@@ -214,8 +250,7 @@ describe('BoardView', () => {
     // busiest one: the reorder moved which index each section sits at, and a
     // per-column check is what makes a header land on the wrong stack of
     // cards fail here rather than somewhere downstream.
-    expect(cols.map((c) => String(c.querySelectorAll('.board-card').length)))
-      .toEqual(cols.map((c) => within(c).getByTestId('col-count').textContent));
+    expect(cols.map((c) => String(c.querySelectorAll('.board-card').length))).toEqual(cols.map((c) => within(c).getByTestId('col-count').textContent));
     expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
@@ -230,8 +265,7 @@ describe('BoardView', () => {
     expect(groomed.closest('.board-card-foot')).not.toBeNull();
     // The pill carries the project — not the type, which the column already
     // states — and the meta line carries what is left.
-    expect(within(card).getByText('alpha'))
-      .toHaveClass('pill', buildProjectHues(PROJECTS).classFor('alpha'));
+    expect(within(card).getByText('alpha')).toHaveClass('pill', buildProjectHues(PROJECTS).classFor('alpha'));
     // Short, not the stored YYYY-MM-DD: the meta line is nowrap-with-ellipsis
     // in ~118px and the full date left no room for the id beside it, which is
     // the clipping this format exists to fix.
@@ -244,16 +278,16 @@ describe('BoardView', () => {
   it('drops the separator on a card whose created date is empty', async () => {
     (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/projects') ? PROJECTS
+      const payload = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/projects')
+          ? PROJECTS
           : { items: [fakeItem({ id: 'bug-4', title: 'undated bug', created: '' })], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
     await renderBoard();
 
-    const meta = screen
-      .getByText('undated bug').closest('.board-card')!
-      .querySelector('.board-card-meta') as HTMLElement;
+    const meta = screen.getByText('undated bug').closest('.board-card')!.querySelector('.board-card-meta') as HTMLElement;
     expect(meta.textContent).toBe('bug-4');
   });
 
@@ -314,8 +348,7 @@ describe('BoardView', () => {
     ]);
     await renderBoard();
 
-    const kindOf = (title: string): HTMLElement | null =>
-      screen.getByText(title).closest('.board-card')!.querySelector('.board-card-kind');
+    const kindOf = (title: string): HTMLElement | null => screen.getByText(title).closest('.board-card')!.querySelector('.board-card-kind');
 
     expect(kindOf('a chore')).toHaveTextContent('chore');
     expect(kindOf('some debt')).toHaveTextContent('debt');
@@ -350,27 +383,26 @@ describe('BoardView', () => {
     ]);
     await renderBoard();
 
-    const groomingBar = screen.getByText('being groomed').closest('.board-card')!
-      .querySelector('.board-card-live-bar') as HTMLElement;
+    const groomingBar = screen.getByText('being groomed').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
     expect(within(groomingBar).getByText('grooming')).toBeInTheDocument();
 
-    const plainBar = screen.getByText('plain live').closest('.board-card')!
-      .querySelector('.board-card-live-bar') as HTMLElement;
+    const plainBar = screen.getByText('plain live').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
     expect(within(plainBar).getByText('in progress')).toBeInTheDocument();
   });
 
   it('reads the elapsed time in minutes for work picked up this hour', async () => {
     (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/projects') ? PROJECTS
+      const payload = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/projects')
+          ? PROJECTS
           : { items: [fakeItem({ id: 'bug-5', title: 'just started', started: agoISO(20 * 60 * 1000) })], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
     await renderBoard();
 
-    const bar = screen.getByText('just started').closest('.board-card')!
-      .querySelector('.board-card-live-bar') as HTMLElement;
+    const bar = screen.getByText('just started').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
     expect(within(bar).getByText('20m')).toBeInTheDocument();
   });
 
@@ -380,15 +412,16 @@ describe('BoardView', () => {
   it('ages a legacy date-only started value in days', async () => {
     (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/projects') ? PROJECTS
+      const payload = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/projects')
+          ? PROJECTS
           : { items: [fakeItem({ id: 'bug-6', title: 'legacy start', started: daysAgoDate(1) })], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
     await renderBoard();
 
-    const bar = screen.getByText('legacy start').closest('.board-card')!
-      .querySelector('.board-card-live-bar') as HTMLElement;
+    const bar = screen.getByText('legacy start').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
     expect(within(bar).getByText('1d')).toBeInTheDocument();
   });
 
@@ -398,8 +431,10 @@ describe('BoardView', () => {
   it('renders the bar without an elapsed reading when started cannot be parsed', async () => {
     (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/projects') ? PROJECTS
+      const payload = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/projects')
+          ? PROJECTS
           : { items: [fakeItem({ id: 'bug-8', title: 'hand edited', started: 'soon' })], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
@@ -450,8 +485,7 @@ describe('BoardView', () => {
     await renderBoard();
     await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
     const cols = screen.getAllByTestId('board-col');
-    expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['1', '0', '0', '1']);
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['1', '0', '0', '1']);
     // ref-2 in Refactoring, task-9 in Tasks — not pooled into one "done" list.
     expect(within(cols[0]).getByText('oddly classified')).toBeInTheDocument();
     expect(within(cols[3]).getByText('finished task')).toBeInTheDocument();
@@ -461,7 +495,9 @@ describe('BoardView', () => {
   it('status select offers open, in progress, done and all, in that order', async () => {
     await renderBoard();
     const select = screen.getByLabelText('Status') as HTMLSelectElement;
-    const labels = within(select).getAllByRole('option').map((o) => o.textContent);
+    const labels = within(select)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
     expect(labels).toEqual(['Open', 'In progress', 'Done', 'All']);
   });
 
@@ -471,8 +507,7 @@ describe('BoardView', () => {
     // Only bug-2 ("groomed bug") is open with a started stamp; task-9 is
     // started but done, and everything else carries no stamp at all.
     const cols = screen.getAllByTestId('board-col');
-    expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['0', '0', '1', '0']);
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['0', '0', '1', '0']);
     expect(screen.getByText('groomed bug')).toBeInTheDocument();
     expect(screen.queryByText('a bug')).not.toBeInTheDocument();
     // task-9 is done but carries a started stamp — "started but no longer
@@ -609,9 +644,7 @@ describe('BoardView', () => {
   // so one rotting for months is a fact to be made to look at rather than one
   // to tidy away. It keeps its column and says so on its face.
   it('keeps a stale task on the board and marks it', async () => {
-    stubItems([
-      fakeItem({ id: 'task-7', title: 'old task', section: 'tasks', groomed: true, updated: STALE_STAMP })
-    ]);
+    stubItems([fakeItem({ id: 'task-7', title: 'old task', section: 'tasks', groomed: true, updated: STALE_STAMP })]);
     await renderBoard();
     const card = screen.getByText('old task').closest('.board-card') as HTMLElement;
     const marker = within(card).getByText('stale');
@@ -623,9 +656,7 @@ describe('BoardView', () => {
   });
 
   it('marks no fresh task', async () => {
-    stubItems([
-      fakeItem({ id: 'task-8', title: 'new task', section: 'tasks', groomed: true, updated: FRESH_STAMP })
-    ]);
+    stubItems([fakeItem({ id: 'task-8', title: 'new task', section: 'tasks', groomed: true, updated: FRESH_STAMP })]);
     await renderBoard();
     expect(screen.queryByText('stale')).not.toBeInTheDocument();
   });
@@ -635,8 +666,12 @@ describe('BoardView', () => {
   it('keeps an in-progress item with a stale stamp, unmarked', async () => {
     stubItems([
       fakeItem({
-        id: 'idea-8', title: 'live idea', section: 'ideas', groomed: null,
-        updated: STALE_STAMP, started: agoISO(30 * 60 * 1000)
+        id: 'idea-8',
+        title: 'live idea',
+        section: 'ideas',
+        groomed: null,
+        updated: STALE_STAMP,
+        started: agoISO(30 * 60 * 1000)
       })
     ]);
     await renderBoard();
@@ -655,18 +690,14 @@ describe('BoardView', () => {
    */
   it('keeps a stale bug a fresh run holds, at the top of its column', async () => {
     stubItems(
-      [
-        fakeItem({ id: 'bug-7', title: 'old bug', updated: STALE_STAMP }),
-        fakeItem({ id: 'bug-8', title: 'recent bug', updated: FRESH_STAMP })
-      ],
+      [fakeItem({ id: 'bug-7', title: 'old bug', updated: STALE_STAMP }), fakeItem({ id: 'bug-8', title: 'recent bug', updated: FRESH_STAMP })],
       [runHolding('bug-7', 'dispatched')]
     );
     await renderBoard();
     // Index 2: Bugs is the third column — Refactoring · Ideas · Bugs · Tasks.
     const bugsCol = screen.getAllByTestId('board-col')[2];
     await waitFor(() => {
-      const titles = Array.from(bugsCol.querySelectorAll('.board-card-title'))
-        .map((el) => el.textContent);
+      const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
       expect(titles).toEqual(['old bug', 'recent bug']);
     });
   });
@@ -677,18 +708,13 @@ describe('BoardView', () => {
      Archive. Same fixture, same stage, one flag different. */
   it('sends that same bug to Archive when the run holding it has gone stale', async () => {
     stubItems(
-      [
-        fakeItem({ id: 'bug-7', title: 'old bug', updated: STALE_STAMP }),
-        fakeItem({ id: 'bug-8', title: 'recent bug', updated: FRESH_STAMP })
-      ],
+      [fakeItem({ id: 'bug-7', title: 'old bug', updated: STALE_STAMP }), fakeItem({ id: 'bug-8', title: 'recent bug', updated: FRESH_STAMP })],
       [runHolding('bug-7', 'dispatched', { fresh: false })]
     );
     await renderBoard();
     // The poll has to have actually landed before an absence means anything —
     // otherwise this passes on a board that has not read the payload yet.
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/orchestrator/runs')
-    ));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/orchestrator/runs')));
     expect(screen.getByText('recent bug')).toBeInTheDocument();
     expect(screen.queryByText('old bug')).not.toBeInTheDocument();
   });
@@ -717,10 +743,8 @@ describe('BoardView', () => {
   // surfaces" half of the task's own done-when, asserted at the seam where
   // the setting reaches the filter.
   const TEN_DAYS = agoISO(10 * 24 * 60 * 60 * 1000);
-  const tenDayFixture = () => stubItems([
-    fakeItem({ id: 'bug-10', title: 'ten days quiet', updated: TEN_DAYS }),
-    fakeItem({ id: 'bug-13', title: 'yesterday', updated: FRESH_STAMP })
-  ]);
+  const tenDayFixture = () =>
+    stubItems([fakeItem({ id: 'bug-10', title: 'ten days quiet', updated: TEN_DAYS }), fakeItem({ id: 'bug-13', title: 'yesterday', updated: FRESH_STAMP })]);
 
   it('keeps a ten-day-old bug under the default window', async () => {
     tenDayFixture();

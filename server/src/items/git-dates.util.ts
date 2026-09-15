@@ -126,10 +126,7 @@ export function lastCommitDates(projectPath: string): Map<string, string> {
   }
 
   const dates = new Map<string, string>();
-  const out = run(projectPath, [
-    '-c', 'core.quotePath=false',
-    'log', '--format=%x00%cI', '--name-only', '--relative', '--', 'backlog'
-  ]);
+  const out = run(projectPath, ['-c', 'core.quotePath=false', 'log', '--format=%x00%cI', '--name-only', '--relative', '--', 'backlog']);
 
   if (out !== null) {
     let date = '';

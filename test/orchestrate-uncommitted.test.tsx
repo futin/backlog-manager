@@ -22,25 +22,45 @@ import type { BacklogItem } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
-    id: 'task-1', title: 'a task', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0,
-    groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md'
+    id: 'task-1',
+    title: 'a task',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'tasks',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: true,
+    path: '/abs/alpha/backlog/tasks/open/task-1.md'
   };
   return { ...base, ...over };
 }
 
 /** Three groomed, open, queueable rows — one of which the cases below flag. */
 const BUG_1 = fakeItem({
-  id: 'bug-1', title: 'Groomed bug', section: 'bugs',
+  id: 'bug-1',
+  title: 'Groomed bug',
+  section: 'bugs',
   path: '/abs/alpha/backlog/bugs/open/bug-1.md'
 });
 const TASK_2 = fakeItem({
-  id: 'task-2', title: 'Groomed task two', path: '/abs/alpha/backlog/tasks/open/task-2.md'
+  id: 'task-2',
+  title: 'Groomed task two',
+  path: '/abs/alpha/backlog/tasks/open/task-2.md'
 });
 const TASK_3 = fakeItem({
-  id: 'task-3', title: 'Groomed task three', path: '/abs/alpha/backlog/tasks/open/task-3.md'
+  id: 'task-3',
+  title: 'Groomed task three',
+  path: '/abs/alpha/backlog/tasks/open/task-3.md'
 });
 const THREE = [BUG_1, TASK_2, TASK_3];
 
@@ -74,19 +94,21 @@ function stub(answer: UncommittedAnswer): { url: string; body: unknown }[] {
       // outcome rather than the guard. `paths: 5` is what the guard alone
       // catches: without it that value reaches `new Set(...)`, which throws
       // on a non-iterable and takes the whole sheet's render with it.
-      const body = answer === 'malformed' ? { known: true }
-        : answer === 'malformed-type' ? { known: true, paths: 5 }
-        : answer;
+      const body = answer === 'malformed' ? { known: true } : answer === 'malformed-type' ? { known: true, paths: 5 } : answer;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
     }
     if (url.includes('/api/agents/merge-check')) {
       return Promise.resolve({
-        ok: true, status: 200, json: () => Promise.resolve({ covered: true, source: null })
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ covered: true, source: null })
       } as Response);
     }
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     return Promise.resolve({
-      ok: true, status: 201, json: () => Promise.resolve({ sessionId: 'sess-1' })
+      ok: true,
+      status: 201,
+      json: () => Promise.resolve({ sessionId: 'sess-1' })
     } as Response);
   }) as jest.Mock;
   return calls;
@@ -97,14 +119,7 @@ function renderSheet(items: BacklogItem[] = THREE) {
   const refresh = jest.fn();
   render(
     <SettingsProvider>
-      <OrchestrateSheet
-        project="/abs/alpha"
-        projectName="alpha"
-        items={items}
-        spawnMaxPermission="acceptEdits"
-        onClose={onClose}
-        refresh={refresh}
-      />
+      <OrchestrateSheet project="/abs/alpha" projectName="alpha" items={items} spawnMaxPermission="acceptEdits" onClose={onClose} refresh={refresh} />
     </SettingsProvider>
   );
   return { onClose, refresh };
@@ -212,8 +227,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
   it('says "item differs" for one row and "items differ" for two', async () => {
     stub({ paths: [BUG_1.path], known: true });
     renderSheet();
-    expect(await screen.findByTestId('orchestrate-uncommitted-note'))
-      .toHaveTextContent('1 item differs from main');
+    expect(await screen.findByTestId('orchestrate-uncommitted-note')).toHaveTextContent('1 item differs from main');
   });
 
   /**
@@ -230,7 +244,10 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
    */
   it('case 17c: does not call a flagged-and-ungroomed row groomed', async () => {
     const UNGROOMED = fakeItem({
-      id: 'bug-9', title: 'Ungroomed bug', section: 'bugs', groomed: false,
+      id: 'bug-9',
+      title: 'Ungroomed bug',
+      section: 'bugs',
+      groomed: false,
       path: '/abs/alpha/backlog/bugs/open/bug-9.md'
     });
     stub({ paths: [UNGROOMED.path], known: true });
@@ -263,7 +280,10 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park'
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park'
     });
     expect(Object.keys(calls[0].body as object)).not.toContain('ids');
   });
@@ -289,7 +309,10 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     // Queue order — bugs before tasks — not the payload's order and not the
     // order the button happened to walk.
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park',
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
       ids: ['bug-1', 'task-3']
     });
   });
@@ -425,9 +448,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     await userEvent.click(screen.getByRole('button', { name: 'next' }));
 
     const spy = global.fetch as unknown as jest.Mock;
-    const asked = spy.mock.calls
-      .map(([input]) => String(input))
-      .filter((url) => url.includes('/api/items/uncommitted'));
+    const asked = spy.mock.calls.map(([input]) => String(input)).filter((url) => url.includes('/api/items/uncommitted'));
     expect(asked).toHaveLength(1);
     // The URL carries the project, encoded — the same contract
     // `fetchMergeCheck` has.

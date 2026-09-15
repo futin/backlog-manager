@@ -41,9 +41,7 @@ function payload(overrides: Partial<OrchestratorArchiveRun> = {}): OrchestratorA
  *  every call answers the same body, for cases that only care about how many
  *  times fetch was called in one unchanging world. */
 function stubFetch(body: OrchestratorArchivePayload): jest.Mock {
-  const fn = jest.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response)
-  );
+  const fn = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
   global.fetch = fn as unknown as typeof fetch;
   return fn;
 }

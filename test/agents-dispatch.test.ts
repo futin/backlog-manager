@@ -26,7 +26,10 @@ const DONE_BUG = item('bug-9', 'a fixed bug', '## Symptom\n\nx\n\n## Cause\n\na 
 
 let projectPath: string;
 
-interface Sent { url: string; init?: RequestInit }
+interface Sent {
+  url: string;
+  init?: RequestInit;
+}
 
 /* The two shapes a rejected `fetch` actually arrives as, measured on Node 22
    while grooming bug-26 — a connection failure is a `TypeError` whose own
@@ -49,9 +52,7 @@ const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeo
  * one path where a rejection escapes `spawn()` itself had no case at all,
  * which is exactly how the unmapped 500 shipped.
  */
-function stubDashboard(
-  spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {}
-) {
+function stubDashboard(spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {}) {
   const sent: Sent[] = [];
   const ok = spawn.ok ?? true;
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -60,17 +61,20 @@ function stubDashboard(
     if (url.endsWith('/api/spawn')) {
       if ('reject' in spawn) return Promise.reject(spawn.reject);
       return Promise.resolve({
-        ok, status: spawn.status ?? (ok ? 200 : 429),
+        ok,
+        status: spawn.status ?? (ok ? 200 : 429),
         json: () => Promise.resolve(spawn.body ?? { sessionId: 'sess-1' })
       } as Response);
     }
     return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(
-        url.endsWith('/api/management')
-          ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-      )
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          url.endsWith('/api/management')
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+        )
     } as Response);
   }) as jest.Mock;
   return sent;
@@ -146,7 +150,9 @@ describe('POST /api/agents/dispatch', () => {
 
   const bugPath = (name: string) => join(projectPath, 'backlog', 'bugs/open', name);
   const post = (body: unknown) =>
-    request(app.getHttpServer()).post('/api/agents/dispatch').send(body as object);
+    request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send(body as object);
 
   const good = {
     itemPath: '',
@@ -189,7 +195,9 @@ describe('POST /api/agents/dispatch', () => {
   it('clamps a mode above the ceiling instead of forwarding it', async () => {
     const sent = stubDashboard();
     await post({
-      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), permissionMode: 'bypassPermissions'
+      ...good,
+      itemPath: bugPath('bug-2-a-known-bug.md'),
+      permissionMode: 'bypassPermissions'
     }).expect(201);
     const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
     expect(body.permissionMode).toBe('acceptEdits');
@@ -203,14 +211,12 @@ describe('POST /api/agents/dispatch', () => {
 
   it('400s an empty prompt', async () => {
     stubDashboard();
-    await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md'), prompt: '   ' })
-      .expect(400, { error: 'prompt is required' });
+    await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md'), prompt: '   ' }).expect(400, { error: 'prompt is required' });
   });
 
   it('passes the dashboard error through verbatim', async () => {
     stubDashboard({ ok: false, status: 429, body: { error: 'too many launches in flight' } });
-    await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') })
-      .expect(429, { error: 'too many launches in flight' });
+    await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(429, { error: 'too many launches in flight' });
   });
 
   it('refuses when the dashboard has remote answers off, without spawning', async () => {
@@ -219,12 +225,14 @@ describe('POST /api/agents/dispatch', () => {
       const url = String(input);
       sent.push(url);
       return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          url.endsWith('/api/management')
-            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-            : { ok: true, remoteAnswer: false, spawnAvailable: true, spawnMaxPermission: 'auto' }
-        )
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            url.endsWith('/api/management')
+              ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+              : { ok: true, remoteAnswer: false, spawnAvailable: true, spawnMaxPermission: 'auto' }
+          )
       } as Response);
     }) as jest.Mock;
     const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
@@ -267,7 +275,9 @@ describe('POST /api/agents/dispatch', () => {
   it('400s a prompt over the cap', async () => {
     stubDashboard();
     const res = await post({
-      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), prompt: 'x'.repeat(9_000)
+      ...good,
+      itemPath: bugPath('bug-2-a-known-bug.md'),
+      prompt: 'x'.repeat(9_000)
     }).expect(400, { error: 'prompt is too long' });
     expect(res.body.error).toBe('prompt is too long');
   });
@@ -275,7 +285,9 @@ describe('POST /api/agents/dispatch', () => {
   it('treats a stringy "true" as off, not on, for remoteControl', async () => {
     const sent = stubDashboard();
     await post({
-      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), remoteControl: 'true'
+      ...good,
+      itemPath: bugPath('bug-2-a-known-bug.md'),
+      remoteControl: 'true'
     }).expect(201);
     const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
     expect(body.remoteControl).toBe(false);
@@ -294,12 +306,13 @@ describe('POST /api/agents/dispatch', () => {
     // step now (capture), and only history has none.
     stubDashboard();
     const res = await post({
-      ...good, itemPath: join(projectPath, 'backlog', 'bugs/done', 'bug-9-a-fixed-bug.md')
+      ...good,
+      itemPath: join(projectPath, 'backlog', 'bugs/done', 'bug-9-a-fixed-bug.md')
     }).expect(409);
     expect(res.body.error).toBe('nothing to dispatch for this item');
   });
 
-  it('spawns a capture for an out-of-scope item — the rejection\'s way back', async () => {
+  it("spawns a capture for an out-of-scope item — the rejection's way back", async () => {
     const sent = stubDashboard();
     await post({
       ...good,
@@ -313,7 +326,7 @@ describe('POST /api/agents/dispatch', () => {
     expect(JSON.parse(String(spawn?.init?.body)).prompt).toContain('backlog-manager:backlog-capture');
   });
 
-  it('refuses a groom request when the item\'s actual next step is capture', async () => {
+  it("refuses a groom request when the item's actual next step is capture", async () => {
     // The derive-never-accept rule, exercised on the new action: the client
     // said groom, the file says the item is rejected, and the file wins.
     stubDashboard();
@@ -328,22 +341,29 @@ describe('POST /api/agents/dispatch', () => {
   it('400s an action outside the vocabulary, naming all three', async () => {
     stubDashboard();
     const res = await post({
-      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), action: 'archive'
+      ...good,
+      itemPath: bugPath('bug-2-a-known-bug.md'),
+      action: 'archive'
     }).expect(400);
     expect(res.body.error).toBe('action must be groom, execute or capture');
   });
 
-  it('refuses a groom request when the item\'s actual next step is execute', async () => {
+  it("refuses a groom request when the item's actual next step is execute", async () => {
     stubDashboard();
     const res = await post({
-      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), action: 'groom'
+      ...good,
+      itemPath: bugPath('bug-2-a-known-bug.md'),
+      action: 'groom'
     }).expect(409);
     expect(res.body.error).toContain('execute');
   });
   it('forwards a picked model and effort to the dashboard', async () => {
     const sent = stubDashboard();
     await post({
-      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), model: 'sonnet', effort: 'high'
+      ...good,
+      itemPath: bugPath('bug-2-a-known-bug.md'),
+      model: 'sonnet',
+      effort: 'high'
     }).expect(201);
     const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
     expect(body.model).toBe('sonnet');
@@ -370,7 +390,10 @@ describe('POST /api/agents/dispatch', () => {
   it('drops an unrecognised model or effort instead of refusing the launch', async () => {
     const sent = stubDashboard();
     await post({
-      ...good, itemPath: bugPath('bug-2-a-known-bug.md'), model: 'gpt', effort: 'ludicrous'
+      ...good,
+      itemPath: bugPath('bug-2-a-known-bug.md'),
+      model: 'gpt',
+      effort: 'ludicrous'
     }).expect(201);
     const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
     expect(body.model).toBeUndefined();
@@ -434,8 +457,7 @@ describe('POST /api/agents/dispatch', () => {
      unkept for any caller that is not this board. */
   it('refuses to dispatch an item whose project has a run starting, with no run file at all', async () => {
     const sent = stubDashboard();
-    await request(app.getHttpServer())
-      .post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
+    await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
 
     const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
     expect(res.body.error).toBe('an orchestrator run is starting for this project');
@@ -455,11 +477,12 @@ describe('POST /api/agents/dispatch', () => {
      inside the spawned session minutes later. */
   it('refuses a second item in the same starting project', async () => {
     stubDashboard();
-    await request(app.getHttpServer())
-      .post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
+    await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: projectPath }).expect(201);
 
     const res = await post({
-      ...good, action: 'groom', itemPath: bugPath('bug-1-a-fresh-bug.md'),
+      ...good,
+      action: 'groom',
+      itemPath: bugPath('bug-1-a-fresh-bug.md'),
       prompt: 'Use the backlog-manager:backlog-groom skill on bug-1.'
     }).expect(409);
     expect(res.body.error).toBe('an orchestrator run is starting for this project');
@@ -471,12 +494,14 @@ describe('POST /api/agents/dispatch', () => {
   it('reports the dashboard block, not the run claim, when both apply', async () => {
     global.fetch = jest.fn((input: RequestInfo | URL) =>
       Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          String(input).endsWith('/api/management')
-            ? { projects: [] }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-        )
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            String(input).endsWith('/api/management')
+              ? { projects: [] }
+              : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+          )
       } as Response)
     ) as jest.Mock;
     writeRun('reviewing');

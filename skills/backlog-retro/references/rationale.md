@@ -37,7 +37,7 @@ So the tool never labels, and the skill never recomputes.
 Four labels — `drift`, `red-proof`, `defect`, `other` — and `record` exits `1`
 naming the first value outside them.
 
-The point of a label is the *next* sweep. "19 of 27 fix verdicts were drift or
+The point of a label is the _next_ sweep. "19 of 27 fix verdicts were drift or
 red-proof" is only a finding if the sweep after it can say "11 of 24, after
 task-28 landed", and that comparison is arithmetic over the recorded strings. A
 single `nit`, `Drift` or `red proof` silently becomes a fifth category that
@@ -53,7 +53,7 @@ of token counts and contains no cost.
 
 A hard-coded price table would answer that, and would go stale silently the day
 pricing moved or the account changed tier. Instead the tool fits four per-token
-rates by ordinary least squares over the sessions that *did* report a cost, and
+rates by ordinary least squares over the sessions that _did_ report a cost, and
 prices the driver with them. It requires at least eight measured sessions, ships
 `maxResidualUsd` so a reader can see how well the fit did, and marks every
 figure derived from it `estimated: true` in JSON and `est.` in text — every
@@ -67,21 +67,21 @@ The figures below are the tool's own, scoped to runs that started at or before
 `2026-09-06T21:03:30Z` — the moment of the hand sweep. They are what the first
 record's deltas should be read against.
 
-| measure | 2026-09-06 |
-|---|---|
-| runs | 27 |
-| items queued | 83 |
-| items dispatched | 66 |
-| merged (incl. `branched`) | 59 |
-| headless sessions | 92 |
-| measured spend | **$540.71** |
-| rework spend (`fix` + `retry` sessions) | $114.52 — 21.2% of measured |
-| fix loops | 29 loops on 26 of 66 dispatched items (39%) |
-| reviews | 91 — 64 `approve`, 27 `fix` |
-| first-pass reviews | 63 — 25 came back `fix` (40%) |
-| median merged item, wall | 37.4 min (27.5 without a fix loop, 60.4 with) |
-| fitted rates | cache read $0.50/M, cache creation $10.00/M, output $24.85/M |
-| max fit residual | $8.83, on the one session that crossed the long-context tier |
+| measure                                 | 2026-09-06                                                   |
+| --------------------------------------- | ------------------------------------------------------------ |
+| runs                                    | 27                                                           |
+| items queued                            | 83                                                           |
+| items dispatched                        | 66                                                           |
+| merged (incl. `branched`)               | 59                                                           |
+| headless sessions                       | 92                                                           |
+| measured spend                          | **$540.71**                                                  |
+| rework spend (`fix` + `retry` sessions) | $114.52 — 21.2% of measured                                  |
+| fix loops                               | 29 loops on 26 of 66 dispatched items (39%)                  |
+| reviews                                 | 91 — 64 `approve`, 27 `fix`                                  |
+| first-pass reviews                      | 63 — 25 came back `fix` (40%)                                |
+| median merged item, wall                | 37.4 min (27.5 without a fix loop, 60.4 with)                |
+| fitted rates                            | cache read $0.50/M, cache creation $10.00/M, output $24.85/M |
+| max fit residual                        | $8.83, on the one session that crossed the long-context tier |
 
 Two figures the hand sweep reported that this tool deliberately does **not**
 reproduce, and why:
@@ -89,7 +89,7 @@ reproduce, and why:
 - **"≈$800 all-in", of which ≈$249 was orchestrator sessions.** No run at that
   cutoff carried a driver lease — bug-19 introduced it on 2026-09-07 — so every
   pre-lease run reads `no-lease` and its orchestrating session is reported as
-  *unmeasured*, not as free. The hand sweep found those transcripts by
+  _unmeasured_, not as free. The hand sweep found those transcripts by
   searching; this tool opens exactly one transcript per run, by recorded session
   id, which is what keeps it inside its own "no walk over transcripts" limit.
   The consequence is that the all-in figure only becomes meaningful for runs

@@ -28,11 +28,11 @@
 // Anywhere this file re-derives something backlog.mjs already has, the
 // function's own comment says so and says why.
 
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 // --- errors -------------------------------------------------------------
 // Carries the intended process exit code so `main`'s one try/catch (see the
@@ -52,9 +52,9 @@ import { fileURLToPath } from 'node:url'
 // intentional, not a collision this file failed to notice.
 export class OrchestrateError extends Error {
   constructor(message, code) {
-    super(message)
-    this.name = 'OrchestrateError'
-    this.code = code
+    super(message);
+    this.name = 'OrchestrateError';
+    this.code = code;
   }
 }
 
@@ -69,14 +69,14 @@ export class OrchestrateError extends Error {
 // constant without the other fails a test immediately rather than months
 // later when a run gets declared stale nine minutes early or nine minutes
 // late.
-export const RUN_STALE_MS = 15 * 60 * 1000
+export const RUN_STALE_MS = 15 * 60 * 1000;
 
 // True when `updatedAt` is within RUN_STALE_MS of `now` — the one freshness
 // check every "is this run still alive" decision in this file reads,
 // rather than five call sites each re-deriving the comparison.
 function isFresh(updatedAt, now = Date.now()) {
-  const t = Date.parse(updatedAt)
-  return Number.isFinite(t) && now - t < RUN_STALE_MS
+  const t = Date.parse(updatedAt);
+  return Number.isFinite(t) && now - t < RUN_STALE_MS;
 }
 
 // --- timestamps -------------------------------------------------------------
@@ -91,7 +91,7 @@ function isFresh(updatedAt, now = Date.now()) {
 // occasionally colliding on the same whole second and breaking anything
 // that compares two heartbeats to prove time actually passed.
 function nowISO() {
-  return new Date().toISOString()
+  return new Date().toISOString();
 }
 
 // The run id's own shape, `run-YYYYMMDD-HHMMSS` — matches
@@ -105,9 +105,9 @@ function nowISO() {
 // in the same second is not a case this tool needs to defend against (the
 // lock already prevents two runs existing for one project at once).
 function makeRunId(stamp) {
-  const d = new Date(stamp)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `run-${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}-${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`
+  const d = new Date(stamp);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `run-${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}-${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
 }
 
 // --- where state lives ---------------------------------------------------
@@ -118,7 +118,7 @@ function makeRunId(stamp) {
 // escape hatch backlog.mjs's own BM_REGISTRY_FILE provides for the
 // registry.
 export function orchHome() {
-  return process.env.BM_ORCH_HOME || path.join(os.homedir(), '.backlog-manager', 'orchestrator')
+  return process.env.BM_ORCH_HOME || path.join(os.homedir(), '.backlog-manager', 'orchestrator');
 }
 
 // Project key = encodeURIComponent(<abs project path>) — reversible with
@@ -131,7 +131,7 @@ export function orchHome() {
 // project's entire directory structure underneath `root`, which is not
 // what "one directory per project" means here.
 export function projectDir(root, project) {
-  return path.join(root, encodeURIComponent(project))
+  return path.join(root, encodeURIComponent(project));
 }
 
 // --- the pause request (task-17) -----------------------------------------
@@ -159,10 +159,7 @@ export function projectDir(root, project) {
 // does: so a test process never reads (or writes) a real machine's control
 // directory and pauses somebody's actual run.
 export function controlHome() {
-  return (
-    process.env.BM_ORCH_CONTROL_HOME ||
-    path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control')
-  )
+  return process.env.BM_ORCH_CONTROL_HOME || path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control');
 }
 
 // One flat file per project, keyed the same reversible encodeURIComponent
@@ -173,7 +170,7 @@ export function controlHome() {
 // the same reason `orchHome()` is duplicated there (a skill's `tools/` may
 // never import from the server, and vice versa).
 export function controlFilePath(root, project) {
-  return path.join(root, `${encodeURIComponent(project)}.json`)
+  return path.join(root, `${encodeURIComponent(project)}.json`);
 }
 
 // Reads this project's pause request, or `null` for every way there isn't
@@ -184,17 +181,17 @@ export function controlFilePath(root, project) {
 // same posture `readRun` takes toward an unparseable run.json, minus the
 // refusal: a missing pause request is the normal case, not an error.
 export function readPauseRequest(project) {
-  let text
+  let text;
   try {
-    text = fs.readFileSync(controlFilePath(controlHome(), project), 'utf8')
+    text = fs.readFileSync(controlFilePath(controlHome(), project), 'utf8');
   } catch {
-    return null
+    return null;
   }
   try {
-    const parsed = JSON.parse(text)
-    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+    const parsed = JSON.parse(text);
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -219,22 +216,22 @@ export function readPauseRequest(project) {
 // Every malformed input answers `false`: a request this function cannot
 // understand is not one a run should stop for.
 export function pauseRequestEffective(control, run) {
-  if (control === null || control === undefined || typeof control !== 'object') return false
-  if (typeof control.runId !== 'string' || typeof control.requestedAt !== 'string') return false
-  if (control.runId !== run.runId) return false
+  if (control === null || control === undefined || typeof control !== 'object') return false;
+  if (typeof control.runId !== 'string' || typeof control.requestedAt !== 'string') return false;
+  if (control.runId !== run.runId) return false;
 
-  const requestedAt = Date.parse(control.requestedAt)
-  const since = Date.parse(typeof run.unpausedAt === 'string' ? run.unpausedAt : run.startedAt)
-  if (!Number.isFinite(requestedAt) || !Number.isFinite(since)) return false
-  return requestedAt > since
+  const requestedAt = Date.parse(control.requestedAt);
+  const since = Date.parse(typeof run.unpausedAt === 'string' ? run.unpausedAt : run.startedAt);
+  if (!Number.isFinite(requestedAt) || !Number.isFinite(since)) return false;
+  return requestedAt > since;
 }
 
 function runFilePath(dir) {
-  return path.join(dir, 'run.json')
+  return path.join(dir, 'run.json');
 }
 
 function runsArchiveDir(dir) {
-  return path.join(dir, 'runs')
+  return path.join(dir, 'runs');
 }
 
 // Picks the archive STEM for a finished run — `<runId>` unless
@@ -267,11 +264,11 @@ function runsArchiveDir(dir) {
 // completes the rename. Widening the check would instead split one run's
 // evidence across `<stem>/` and `<stem>-2.json` permanently.
 export function archiveStem(archiveDir, runId) {
-  let stem = runId
+  let stem = runId;
   for (let suffix = 2; fs.existsSync(path.join(archiveDir, `${stem}.json`)); suffix++) {
-    stem = `${runId}-${suffix}`
+    stem = `${runId}-${suffix}`;
   }
-  return stem
+  return stem;
 }
 
 // Moves a finished run's SIDECAR artefacts out of the flat, project-scoped
@@ -298,28 +295,28 @@ export function archiveStem(archiveDir, runId) {
 // real run over evidence bookkeeping would trade the run for a filing
 // error. Every failure warns to stderr naming the entry and continues.
 function archiveSidecars(dir, destDir) {
-  let entries
+  let entries;
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
+    entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch (err) {
-    process.stderr.write(`warning: could not read ${dir} to archive its sidecars: ${err.message}\n`)
-    return
+    process.stderr.write(`warning: could not read ${dir} to archive its sidecars: ${err.message}\n`);
+    return;
   }
 
-  const movable = entries.filter((entry) => entry.name !== 'run.json' && entry.name !== 'runs')
+  const movable = entries.filter((entry) => entry.name !== 'run.json' && entry.name !== 'runs');
   // Created only when there is something to put in it. An unconditional
   // mkdir would leave an empty `runs/<stem>/` after every init, and an
   // empty directory claims evidence exists where none does.
-  if (movable.length === 0) return
+  if (movable.length === 0) return;
   try {
-    fs.mkdirSync(destDir, { recursive: true })
+    fs.mkdirSync(destDir, { recursive: true });
   } catch (err) {
-    process.stderr.write(`warning: could not create ${destDir} to archive sidecars: ${err.message}\n`)
-    return
+    process.stderr.write(`warning: could not create ${destDir} to archive sidecars: ${err.message}\n`);
+    return;
   }
 
   for (const entry of movable) {
-    const target = path.join(destDir, entry.name)
+    const target = path.join(destDir, entry.name);
     // Reachable only through the interrupted-archive path (sidecars already
     // moved, run.json not renamed yet, a live run since recreating the same
     // name). renameSync onto an existing name is an error on some platforms
@@ -327,13 +324,13 @@ function archiveSidecars(dir, destDir) {
     // thing to do to archived evidence, so the newer copy is left flat and
     // says so rather than being merged in over the top.
     if (fs.existsSync(target)) {
-      process.stderr.write(`warning: ${target} already exists — leaving ${entry.name} where it is rather than overwriting archived evidence\n`)
-      continue
+      process.stderr.write(`warning: ${target} already exists — leaving ${entry.name} where it is rather than overwriting archived evidence\n`);
+      continue;
     }
     try {
-      fs.renameSync(path.join(dir, entry.name), target)
+      fs.renameSync(path.join(dir, entry.name), target);
     } catch (err) {
-      process.stderr.write(`warning: could not archive ${entry.name} into ${destDir}: ${err.message}\n`)
+      process.stderr.write(`warning: could not archive ${entry.name} into ${destDir}: ${err.message}\n`);
     }
   }
 }
@@ -371,49 +368,49 @@ function archiveSidecars(dir, destDir) {
 // a bare main repo has no working tree to name, and refusing while naming
 // only the worktree and its gitdir still beats answering wrongly.
 export function linkedWorktreeInfo(dir) {
-  const gitEntry = path.join(dir, '.git')
-  let stat
+  const gitEntry = path.join(dir, '.git');
+  let stat;
   try {
-    stat = fs.statSync(gitEntry)
+    stat = fs.statSync(gitEntry);
   } catch {
-    return null
+    return null;
   }
-  if (!stat.isFile()) return null
+  if (!stat.isFile()) return null;
 
-  let pointer
+  let pointer;
   try {
-    pointer = fs.readFileSync(gitEntry, 'utf8')
+    pointer = fs.readFileSync(gitEntry, 'utf8');
   } catch {
-    return null
+    return null;
   }
-  const match = /^gitdir:\s*(.+?)\s*$/m.exec(pointer)
-  if (!match) return null
-  const gitdir = path.resolve(dir, match[1])
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(pointer);
+  if (!match) return null;
+  const gitdir = path.resolve(dir, match[1]);
 
-  let commonRaw
+  let commonRaw;
   try {
-    commonRaw = fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim()
+    commonRaw = fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim();
   } catch {
     // No commondir — a submodule (or a gitdir this process cannot read, in
     // which case refusing on a guess would be worse than the status quo).
-    return null
+    return null;
   }
-  const commonDir = path.resolve(gitdir, commonRaw)
+  const commonDir = path.resolve(gitdir, commonRaw);
 
   // The main tree is the common git dir's parent, but only when that common
   // dir actually IS a `.git` directory inside a working tree. A bare main
   // repo's common dir is the repository itself (`/srv/foo.git`), whose
   // parent is not a checkout of anything.
-  let projectRoot = null
+  let projectRoot = null;
   if (path.basename(commonDir) === '.git') {
     try {
-      if (fs.statSync(commonDir).isDirectory()) projectRoot = path.dirname(commonDir)
+      if (fs.statSync(commonDir).isDirectory()) projectRoot = path.dirname(commonDir);
     } catch {
-      projectRoot = null
+      projectRoot = null;
     }
   }
 
-  return { worktree: dir, gitdir, projectRoot }
+  return { worktree: dir, gitdir, projectRoot };
 }
 
 // The one refusal message, shared by the two entry points that can arrive
@@ -431,11 +428,11 @@ export function linkedWorktreeInfo(dir) {
 function refuseLinkedWorktree(info) {
   const where = info.projectRoot
     ? `its project root is ${info.projectRoot} — re-run this command from there`
-    : `its shared git dir is ${info.gitdir}, whose main working tree could not be determined (a bare main repo?) — re-run this command from the project root`
+    : `its shared git dir is ${info.gitdir}, whose main working tree could not be determined (a bare main repo?) — re-run this command from the project root`;
   throw new OrchestrateError(
     `${info.worktree} is a linked git worktree, not a project root; ${where}. orchestrate.mjs keys a run under the project's own path, so a worktree would write to a location nothing else ever reads`,
-    1,
-  )
+    1
+  );
 }
 
 // Walks up from `startDir` looking for a `.git` entry, exactly the git-root
@@ -480,22 +477,22 @@ function refuseLinkedWorktree(info) {
 // the very mechanism that keeps this tool's own cwd in the main tree — so
 // the check belongs on cwd-derived and `--project`-derived roots only.
 export function resolveProjectRoot(startDir = process.cwd()) {
-  const resolvedStart = path.resolve(startDir)
-  let dir = resolvedStart
+  const resolvedStart = path.resolve(startDir);
+  let dir = resolvedStart;
   for (;;) {
     if (fs.existsSync(path.join(dir, '.git'))) {
-      const worktree = linkedWorktreeInfo(dir)
-      if (worktree) refuseLinkedWorktree(worktree)
-      return dir
+      const worktree = linkedWorktreeInfo(dir);
+      if (worktree) refuseLinkedWorktree(worktree);
+      return dir;
     }
-    const parent = path.dirname(dir)
+    const parent = path.dirname(dir);
     if (parent === dir) {
       throw new OrchestrateError(
         `no .git found in ${resolvedStart} or any parent directory — orchestrate.mjs resolves "which project" from its own cwd for every command except init, so this must run from inside the project being orchestrated`,
-        1,
-      )
+        1
+      );
     }
-    dir = parent
+    dir = parent;
   }
 }
 
@@ -514,23 +511,20 @@ export function resolveProjectRoot(startDir = process.cwd()) {
 // and refusing cleanly beats crashing on a JSON.parse exception with a
 // bare stack trace.)
 export function readRun(dir) {
-  const file = runFilePath(dir)
-  let text
+  const file = runFilePath(dir);
+  let text;
   try {
-    text = fs.readFileSync(file, 'utf8')
+    text = fs.readFileSync(file, 'utf8');
   } catch (e) {
     if (e.code === 'ENOENT') {
-      throw new OrchestrateError(
-        'no run exists for this project — run `orchestrate.mjs init --project <path>` first',
-        3,
-      )
+      throw new OrchestrateError('no run exists for this project — run `orchestrate.mjs init --project <path>` first', 3);
     }
-    throw e
+    throw e;
   }
   try {
-    return JSON.parse(text)
+    return JSON.parse(text);
   } catch (e) {
-    throw new OrchestrateError(`${file}: exists but does not parse as JSON (${e.message}) — nothing this tool can act on`, 3)
+    throw new OrchestrateError(`${file}: exists but does not parse as JSON (${e.message}) — nothing this tool can act on`, 3);
   }
 }
 
@@ -547,11 +541,11 @@ export function readRun(dir) {
 // racing inside the same process across two commands run back to back in a
 // test, where the pid alone is constant.
 function writeRunAtomic(dir, run) {
-  fs.mkdirSync(dir, { recursive: true })
-  const file = runFilePath(dir)
-  const tmp = path.join(dir, `.run.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
-  fs.writeFileSync(tmp, JSON.stringify(run, null, 2) + '\n')
-  fs.renameSync(tmp, file)
+  fs.mkdirSync(dir, { recursive: true });
+  const file = runFilePath(dir);
+  const tmp = path.join(dir, `.run.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(run, null, 2) + '\n');
+  fs.renameSync(tmp, file);
 }
 
 // --- the driver lease (bug-19) ---------------------------------------------
@@ -584,7 +578,7 @@ function writeRunAtomic(dir, run) {
 // Exit code for "another session has taken this run over". Its own number
 // rather than a `1` for `6`'s reason: the reaction is not "fix this call and
 // retry", it is STOP — write nothing more and exit.
-const EXIT_FOREIGN_DRIVER = 7
+const EXIT_FOREIGN_DRIVER = 7;
 
 // This session's identity, or `null` when there is none.
 //
@@ -594,9 +588,9 @@ const EXIT_FOREIGN_DRIVER = 7
 // identity on every command and the run would lock itself out of its own file
 // on the second one.
 function sessionIdentity() {
-  const raw = process.env.CLAUDE_CODE_SESSION_ID
-  const trimmed = typeof raw === 'string' ? raw.trim() : ''
-  return trimmed === '' ? null : trimmed
+  const raw = process.env.CLAUDE_CODE_SESSION_ID;
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  return trimmed === '' ? null : trimmed;
 }
 
 // The lease a run file carries, or `null` for one that carries none.
@@ -604,9 +598,9 @@ function sessionIdentity() {
 // feature existed lacks the key, and a missing field must never be able to
 // strand a run.
 function runDriver(run) {
-  const driver = run.driver
-  if (!driver || typeof driver !== 'object') return null
-  return typeof driver.sessionId === 'string' && driver.sessionId !== '' ? driver : null
+  const driver = run.driver;
+  if (!driver || typeof driver !== 'object') return null;
+  return typeof driver.sessionId === 'string' && driver.sessionId !== '' ? driver : null;
 }
 
 // Refuses a mutating command whose run is leased to a DIFFERENT session.
@@ -625,30 +619,30 @@ function runDriver(run) {
 // whole length of a dispatch. The fact does not change within a process — the
 // env var is read at every call and cannot appear mid-run — so saying it again
 // only buries whatever else that session wrote to stderr.
-let leaseWarned = false
+let leaseWarned = false;
 
 function assertDriver(run) {
-  const me = sessionIdentity()
-  const driver = runDriver(run)
+  const me = sessionIdentity();
+  const driver = runDriver(run);
   if (me === null) {
     if (!leaseWarned) {
-      leaseWarned = true
+      leaseWarned = true;
       console.error(
-        'warning: CLAUDE_CODE_SESSION_ID is not set, so this run\'s driver lease cannot be enforced for this command' +
-          (driver ? ` (run.json names ${driver.sessionId} as its driver)` : ''),
-      )
+        "warning: CLAUDE_CODE_SESSION_ID is not set, so this run's driver lease cannot be enforced for this command" +
+          (driver ? ` (run.json names ${driver.sessionId} as its driver)` : '')
+      );
     }
-    return
+    return;
   }
-  if (driver === null || driver.sessionId === me) return
+  if (driver === null || driver.sessionId === me) return;
   throw new OrchestrateError(
     `this run is being driven by session ${driver.sessionId} (since ${driver.at}), not this one — another session has ` +
       'taken it over. Stop immediately: write nothing more, and exit. See references/recovery.md.',
-    EXIT_FOREIGN_DRIVER,
-  )
+    EXIT_FOREIGN_DRIVER
+  );
 }
 
-const CLAIM_USAGE = 'usage: orchestrate.mjs claim'
+const CLAIM_USAGE = 'usage: orchestrate.mjs claim';
 
 // `claim` — take this run over, and heartbeat it in the same write.
 //
@@ -688,47 +682,42 @@ const CLAIM_USAGE = 'usage: orchestrate.mjs claim'
 // whose it is — pause it first (a pause is server-side and needs no lease),
 // then abort the paused run.
 function takeOverRun(dir, run) {
-  const me = sessionIdentity()
-  const driver = runDriver(run)
-  if (
-    driver !== null &&
-    driver.sessionId !== me &&
-    run.status === 'running' &&
-    isFresh(run.updatedAt)
-  ) {
+  const me = sessionIdentity();
+  const driver = runDriver(run);
+  if (driver !== null && driver.sessionId !== me && run.status === 'running' && isFresh(run.updatedAt)) {
     throw new OrchestrateError(
       `run ${run.runId} is alive (last heartbeat ${run.updatedAt}) and driven by session ${driver.sessionId} — ` +
         'nothing to take over. Stop immediately: write nothing, and exit.',
-      EXIT_FOREIGN_DRIVER,
-    )
+      EXIT_FOREIGN_DRIVER
+    );
   }
 
   // One clock reading for both stamps, the same rule `unpause` follows: the
   // lease's `at` and the heartbeat are the same instant, so nothing can land
   // between them and be judged against the wrong one.
-  const at = nowISO()
+  const at = nowISO();
   // `null` for an unidentified caller rather than a placeholder string: a
   // hand-run terminal cannot hold a lease, and writing a made-up id would let
   // it lock out the very session that comes to recover the run afterwards.
-  run.driver = me === null ? null : { sessionId: me, at }
-  run.updatedAt = at
-  writeRunAtomic(dir, run)
+  run.driver = me === null ? null : { sessionId: me, at };
+  run.updatedAt = at;
+  writeRunAtomic(dir, run);
   if (me === null) {
-    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run is now unclaimed, and the lease cannot be enforced')
+    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run is now unclaimed, and the lease cannot be enforced');
   }
-  return at
+  return at;
 }
 
 function cmdClaim(argv) {
   if (argv.length > 0) {
-    throw new OrchestrateError(CLAIM_USAGE, 1)
+    throw new OrchestrateError(CLAIM_USAGE, 1);
   }
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
 
-  const at = takeOverRun(dir, run)
-  console.log(JSON.stringify({ runId: run.runId, driver: run.driver, updatedAt: at }))
-  return 0
+  const at = takeOverRun(dir, run);
+  console.log(JSON.stringify({ runId: run.runId, driver: run.driver, updatedAt: at }));
+  return 0;
 }
 
 // --- queue items -------------------------------------------------------
@@ -742,10 +731,22 @@ function cmdClaim(argv) {
 // per MergeMode, and a queue item reaches exactly one of the two, never
 // both.
 const RUN_STAGES = [
-  'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing',
-  'fixing', 'verifying', 'merging', 'merged', 'branched',
-  'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked',
-]
+  'pending',
+  'preflight',
+  'dispatched',
+  'inspecting',
+  'reviewing',
+  'fixing',
+  'verifying',
+  'merging',
+  'merged',
+  'branched',
+  'failed',
+  'skipped',
+  'needs-answers',
+  'ungroomed',
+  'parked'
+];
 
 // The MergeMode vocabulary, verbatim from shared/types.ts's own MergeMode
 // union and its MERGE_MODES const — duplicated for the exact same
@@ -760,7 +761,7 @@ const RUN_STAGES = [
 // than a hand-written `=== 'merge' || === 'branch'` chain, for the same
 // "one copy of the vocabulary" reason RUN_STAGES is a list and not a
 // scattered set of string literals.
-const MERGE_MODES = ['merge', 'branch']
+const MERGE_MODES = ['merge', 'branch'];
 
 // The QuestionMode vocabulary, verbatim from shared/types.ts's own
 // QuestionMode union and its QUESTION_MODES const — the same standalone
@@ -775,7 +776,7 @@ const MERGE_MODES = ['merge', 'branch']
 // under it. `init --question-mode` validates against this exact list rather
 // than a hand-written `=== 'decide' || === 'park'` chain, for the "one copy
 // of the vocabulary" reason MERGE_MODES' own comment gives.
-const QUESTION_MODES = ['decide', 'park']
+const QUESTION_MODES = ['decide', 'park'];
 
 // Builds one full RunQueueItem from just an id and a title, with every
 // other field at the shape's own documented default: `pending` is the
@@ -812,8 +813,8 @@ function makeQueueItem(id, title, stamp) {
     // the run file's contract (see this function's own comment above), and
     // a field that appeared only on some items would make every reader
     // branch on its absence rather than on its emptiness.
-    assumptions: [],
-  }
+    assumptions: []
+  };
 }
 
 // --- the gate: deciding which items are executable -------------------------
@@ -847,14 +848,14 @@ function makeQueueItem(id, title, stamp) {
 // backlog-execute has no third case in its own gate: an id from any other
 // section is simply never a candidate, the same way that skill's own "Pick
 // an item" step turns one away before its refusal gate ever runs.
-const GATE_SECTIONS = { bugs: 'bug', tasks: 'task' }
+const GATE_SECTIONS = { bugs: 'bug', tasks: 'task' };
 
 // The placeholder backlog-capture writes for a bug nobody has diagnosed yet
 // (`## Cause`/`## Fix` both start as this), and the value a task's own
 // `## Plan` is treated as equivalent to "nothing here" when it's all that is
 // present — matching the brief's own wording for the task rule ("non-empty
 // content ... that is not just unknown/whitespace").
-const PLACEHOLDER = 'unknown'
+const PLACEHOLDER = 'unknown';
 
 // Every open item in one section (bugs or tasks), each as its id, its
 // numeric id (for the oldest-first sort below — ids are minted as a
@@ -868,16 +869,16 @@ const PLACEHOLDER = 'unknown'
 // candidates to gate, not an error; `plan`/`init` both read that as "nothing
 // here yet," never as a reason to fail the whole command.
 function listOpenItems(backlogDir, section) {
-  const dir = path.join(backlogDir, section, 'open')
-  if (!fs.existsSync(dir)) return []
-  const prefix = GATE_SECTIONS[section]
-  const idPattern = new RegExp(`^(${prefix}-(\\d+))-`)
-  const items = []
+  const dir = path.join(backlogDir, section, 'open');
+  if (!fs.existsSync(dir)) return [];
+  const prefix = GATE_SECTIONS[section];
+  const idPattern = new RegExp(`^(${prefix}-(\\d+))-`);
+  const items = [];
   for (const name of fs.readdirSync(dir)) {
-    const m = idPattern.exec(name)
-    if (m) items.push({ id: m[1], num: Number(m[2]), section, path: path.join(dir, name) })
+    const m = idPattern.exec(name);
+    if (m) items.push({ id: m[1], num: Number(m[2]), section, path: path.join(dir, name) });
   }
-  return items
+  return items;
 }
 
 // A narrow read: `title` and the `runner-fix:` marker off the frontmatter
@@ -891,7 +892,7 @@ function listOpenItems(backlogDir, section) {
 // ungroomed by construction (no recognizable `## Plan`/`## Fix` will ever be
 // found in a body of `''`).
 function readItemForGate(absPath) {
-  return parseItemForGate(fs.readFileSync(absPath, 'utf8'))
+  return parseItemForGate(fs.readFileSync(absPath, 'utf8'));
 }
 
 // The same narrow read, applied to bytes that never came off the working
@@ -918,21 +919,26 @@ function readItemForGate(absPath) {
 // human meant to write, and reading one of them as "hoist" would be the
 // mistake in the direction that actually reorders a run.
 function parseItemForGate(text) {
-  const lines = text.split('\n')
-  if (lines[0] !== '---') return { title: '', body: '', runnerFix: false }
-  let i = 1
-  let title = ''
-  let runnerFix = false
+  const lines = text.split('\n');
+  if (lines[0] !== '---') return { title: '', body: '', runnerFix: false };
+  let i = 1;
+  let title = '';
+  let runnerFix = false;
   for (; i < lines.length; i++) {
-    if (lines[i] === '---') break
-    const sep = lines[i].indexOf(':')
-    if (sep === -1) continue
-    const key = lines[i].slice(0, sep).trim()
-    if (key === 'title') title = lines[i].slice(sep + 1).trim()
-    else if (key === 'runner-fix') runnerFix = lines[i].slice(sep + 1).trim().toLowerCase() !== 'false'
+    if (lines[i] === '---') break;
+    const sep = lines[i].indexOf(':');
+    if (sep === -1) continue;
+    const key = lines[i].slice(0, sep).trim();
+    if (key === 'title') title = lines[i].slice(sep + 1).trim();
+    else if (key === 'runner-fix')
+      runnerFix =
+        lines[i]
+          .slice(sep + 1)
+          .trim()
+          .toLowerCase() !== 'false';
   }
-  if (i === lines.length) return { title, body: '', runnerFix }
-  return { title, body: lines.slice(i + 1).join('\n'), runnerFix }
+  if (i === lines.length) return { title, body: '', runnerFix };
+  return { title, body: lines.slice(i + 1).join('\n'), runnerFix };
 }
 
 // Finds one `## <heading>` section's own content: everything between that
@@ -943,12 +949,12 @@ function parseItemForGate(text) {
 // gate below, and backlog-execute's own prose calls out both ("the heading
 // is missing entirely, ... or if all that's there is a placeholder").
 function extractSection(body, heading) {
-  const lines = body.split('\n')
-  const idx = lines.findIndex((l) => l.trim() === `## ${heading}`)
-  if (idx === -1) return undefined
-  const rest = lines.slice(idx + 1)
-  const end = rest.findIndex((l) => l.trimStart().startsWith('## '))
-  return (end === -1 ? rest : rest.slice(0, end)).join('\n')
+  const lines = body.split('\n');
+  const idx = lines.findIndex((l) => l.trim() === `## ${heading}`);
+  if (idx === -1) return undefined;
+  const rest = lines.slice(idx + 1);
+  const end = rest.findIndex((l) => l.trimStart().startsWith('## '));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
 }
 
 // The task half of the gate: `## Plan` must exist and hold something beyond
@@ -959,18 +965,18 @@ function extractSection(body, heading) {
 // below, so that function never has to re-derive "which section did this
 // item's own gate actually look at."
 function gateTask(body) {
-  const plan = extractSection(body, 'Plan')
+  const plan = extractSection(body, 'Plan');
   if (plan === undefined) {
-    return { reasons: ['## Plan heading is missing — nothing for backlog-execute to work'], questionSection: undefined }
+    return { reasons: ['## Plan heading is missing — nothing for backlog-execute to work'], questionSection: undefined };
   }
-  const trimmed = plan.trim()
+  const trimmed = plan.trim();
   if (trimmed === '') {
-    return { reasons: ['## Plan has no content under it — it is still empty'], questionSection: plan }
+    return { reasons: ['## Plan has no content under it — it is still empty'], questionSection: plan };
   }
   if (trimmed === PLACEHOLDER) {
-    return { reasons: [`## Plan is still the "${PLACEHOLDER}" placeholder`], questionSection: plan }
+    return { reasons: [`## Plan is still the "${PLACEHOLDER}" placeholder`], questionSection: plan };
   }
-  return { reasons: [], questionSection: plan }
+  return { reasons: [], questionSection: plan };
 }
 
 // The bug half: `## Fix` must not be exactly the `unknown` placeholder.
@@ -981,14 +987,14 @@ function gateTask(body) {
 // than silently read as "ready," since there is equally nothing there for
 // backlog-execute to work.
 function gateBug(body) {
-  const fix = extractSection(body, 'Fix')
+  const fix = extractSection(body, 'Fix');
   if (fix === undefined) {
-    return { reasons: ['## Fix heading is missing'], questionSection: undefined }
+    return { reasons: ['## Fix heading is missing'], questionSection: undefined };
   }
   if (fix.trim() === PLACEHOLDER) {
-    return { reasons: [`## Fix is still the "${PLACEHOLDER}" placeholder — nobody has diagnosed this yet`], questionSection: fix }
+    return { reasons: [`## Fix is still the "${PLACEHOLDER}" placeholder — nobody has diagnosed this yet`], questionSection: fix };
   }
-  return { reasons: [], questionSection: fix }
+  return { reasons: [], questionSection: fix };
 }
 
 // Pulls each command line out of a fenced code block under `## Done when` —
@@ -1003,18 +1009,18 @@ function gateBug(body) {
 // one shape in this section that unambiguously means "here is something to
 // run."
 function extractDoneWhenCommands(doneWhenText) {
-  const commands = []
-  let inFence = false
+  const commands = [];
+  let inFence = false;
   for (const line of doneWhenText.split('\n')) {
-    const t = line.trim()
+    const t = line.trim();
     if (t.startsWith('```')) {
-      inFence = !inFence
-      continue
+      inFence = !inFence;
+      continue;
     }
-    if (!inFence || t === '') continue
-    commands.push(t.startsWith('$ ') ? t.slice(2).trim() : t)
+    if (!inFence || t === '') continue;
+    commands.push(t.startsWith('$ ') ? t.slice(2).trim() : t);
   }
-  return commands
+  return commands;
 }
 
 // Resolves each `## Done when` command against the same two places Task 5's
@@ -1026,31 +1032,31 @@ function extractDoneWhenCommands(doneWhenText) {
 // see (this tool's own fixtures/store/ is exactly that), and the whole point
 // of this check is a soft warning, never a reason to fail the command.
 function findUnresolvedCommands(doneWhenText, projectRoot) {
-  const commands = extractDoneWhenCommands(doneWhenText)
-  if (commands.length === 0) return []
+  const commands = extractDoneWhenCommands(doneWhenText);
+  if (commands.length === 0) return [];
 
-  let verifyCommands = []
+  let verifyCommands = [];
   try {
-    const verifyJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'backlog', 'verify.json'), 'utf8'))
-    if (Array.isArray(verifyJson.commands)) verifyCommands = verifyJson.commands
+    const verifyJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'backlog', 'verify.json'), 'utf8'));
+    if (Array.isArray(verifyJson.commands)) verifyCommands = verifyJson.commands;
   } catch {
     // no backlog/verify.json here, or it doesn't parse — package.json
     // scripts (below) is the only other place a command can be "known"
   }
 
-  let scripts = {}
+  let scripts = {};
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
-    if (pkg.scripts && typeof pkg.scripts === 'object') scripts = pkg.scripts
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+    if (pkg.scripts && typeof pkg.scripts === 'object') scripts = pkg.scripts;
   } catch {
     // no package.json here, or it doesn't parse
   }
 
   return commands.filter((cmd) => {
-    if (verifyCommands.includes(cmd)) return false
-    const m = /^(?:pnpm|npm|yarn)\s+(?:run\s+)?([\w:-]+)$/.exec(cmd)
-    return !(m && scripts[m[1]] !== undefined)
-  })
+    if (verifyCommands.includes(cmd)) return false;
+    const m = /^(?:pnpm|npm|yarn)\s+(?:run\s+)?([\w:-]+)$/.exec(cmd);
+    return !(m && scripts[m[1]] !== undefined);
+  });
 }
 
 // Layers the "needs-answers" overlay on top of an otherwise-ready item: a
@@ -1071,23 +1077,23 @@ function findUnresolvedCommands(doneWhenText, projectRoot) {
 //      WARNING only: it can only ever add a question, never a reason, so it
 //      can never by itself turn a ready item into an ungroomed one.
 function detectQuestions(body, questionSection, projectRoot) {
-  const questions = []
+  const questions = [];
   if (body.includes('TBD')) {
-    questions.push('There is a TBD in this item — what still needs deciding before it can run?')
+    questions.push('There is a TBD in this item — what still needs deciding before it can run?');
   }
   if (questionSection) {
     for (const line of questionSection.split('\n')) {
-      const t = line.trim()
-      if (t.endsWith('?')) questions.push(t)
+      const t = line.trim();
+      if (t.endsWith('?')) questions.push(t);
     }
   }
-  const doneWhen = extractSection(body, 'Done when')
+  const doneWhen = extractSection(body, 'Done when');
   if (doneWhen !== undefined) {
     for (const cmd of findUnresolvedCommands(doneWhen, projectRoot)) {
-      questions.push(`## Done when references \`${cmd}\` — is that command actually runnable (not found in verify.json or package.json)?`)
+      questions.push(`## Done when references \`${cmd}\` — is that command actually runnable (not found in verify.json or package.json)?`);
     }
   }
-  return questions
+  return questions;
 }
 
 // One item's full gate result: `reasons` is non-empty only for `ungroomed`,
@@ -1096,15 +1102,15 @@ function detectQuestions(body, questionSection, projectRoot) {
 // its plan or fix isn't real yet, so whether it ALSO contains a TBD is not
 // the more useful thing to tell whoever is looking at this queue.
 function gateItem(section, body, projectRoot) {
-  const { reasons, questionSection } = section === 'tasks' ? gateTask(body) : gateBug(body)
+  const { reasons, questionSection } = section === 'tasks' ? gateTask(body) : gateBug(body);
   if (reasons.length > 0) {
-    return { gate: 'ungroomed', reasons, questions: [] }
+    return { gate: 'ungroomed', reasons, questions: [] };
   }
-  const questions = detectQuestions(body, questionSection, projectRoot)
+  const questions = detectQuestions(body, questionSection, projectRoot);
   if (questions.length > 0) {
-    return { gate: 'needs-answers', reasons: [], questions }
+    return { gate: 'needs-answers', reasons: [], questions };
   }
-  return { gate: 'ready', reasons: [], questions: [] }
+  return { gate: 'ready', reasons: [], questions: [] };
 }
 
 // Comma-separated --ids, trimmed — the one flag `plan` and `init` both
@@ -1117,8 +1123,11 @@ function gateItem(section, body, projectRoot) {
 // instead of "give me nothing," the opposite of what a caller building this
 // flag from a possibly-empty list would expect.
 function parseIdsArg(idsArg) {
-  if (idsArg === undefined) return undefined
-  return idsArg.split(',').map((s) => s.trim()).filter((s) => s !== '')
+  if (idsArg === undefined) return undefined;
+  return idsArg
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '');
 }
 
 // The ref a worktree is created from, and therefore the ref the gate reads.
@@ -1128,13 +1137,13 @@ function parseIdsArg(idsArg) {
 // workable. Deliberately NOT recorded in run.json: that would be a
 // shared/types.ts schema change for a value the loop can just pass on each
 // `plan` call.
-const BASE_REF_DEFAULT = 'main'
+const BASE_REF_DEFAULT = 'main';
 
 // Generous, because the failure mode of the default 1MB is a truncated blob
 // silently gating as ungroomed rather than a loud error. An item file this
 // size would be pathological; the ceiling exists so that if one ever is, the
 // gate still reads all of it.
-const GIT_BLOB_MAX_BUFFER = 16 * 1024 * 1024
+const GIT_BLOB_MAX_BUFFER = 16 * 1024 * 1024;
 
 // Returns a `(repo-relative path) => string | null` reader for `<base>`, or
 // null when this projectRoot has no usable git view to read from at all — in
@@ -1157,23 +1166,23 @@ const GIT_BLOB_MAX_BUFFER = 16 * 1024 * 1024
 // index or the working tree, which is what keeps `plan`'s "writes nothing"
 // guarantee true now that it covers git state too.
 function blobReaderAt(projectRoot, base) {
-  const top = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' })
-  if (top.status !== 0) return null
-  let toplevel
-  let root
+  const top = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  if (top.status !== 0) return null;
+  let toplevel;
+  let root;
   try {
-    toplevel = fs.realpathSync(top.stdout.trim())
-    root = fs.realpathSync(projectRoot)
+    toplevel = fs.realpathSync(top.stdout.trim());
+    root = fs.realpathSync(projectRoot);
   } catch {
-    return null
+    return null;
   }
-  if (toplevel !== root) return null
-  const resolved = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' })
-  if (resolved.status !== 0) return null
+  if (toplevel !== root) return null;
+  const resolved = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' });
+  if (resolved.status !== 0) return null;
   return (relPath) => {
-    const shown = spawnSync('git', ['-C', projectRoot, 'show', `${base}:${relPath}`], { encoding: 'utf8', maxBuffer: GIT_BLOB_MAX_BUFFER })
-    return shown.status === 0 ? shown.stdout : null
-  }
+    const shown = spawnSync('git', ['-C', projectRoot, 'show', `${base}:${relPath}`], { encoding: 'utf8', maxBuffer: GIT_BLOB_MAX_BUFFER });
+    return shown.status === 0 ? shown.stdout : null;
+  };
 }
 
 // The queue builder itself: reads every open bug and task under
@@ -1187,20 +1196,20 @@ function blobReaderAt(projectRoot, base) {
 // only for an --ids entry that names nothing this store has, which is a
 // usage error regardless of which caller asked.
 function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DEFAULT } = {}) {
-  const backlogDir = path.join(projectRoot, 'backlog')
-  const bugs = listOpenItems(backlogDir, 'bugs').sort((a, b) => a.num - b.num)
-  const tasks = listOpenItems(backlogDir, 'tasks').sort((a, b) => a.num - b.num)
-  const byId = new Map([...bugs, ...tasks].map((item) => [item.id, item]))
+  const backlogDir = path.join(projectRoot, 'backlog');
+  const bugs = listOpenItems(backlogDir, 'bugs').sort((a, b) => a.num - b.num);
+  const tasks = listOpenItems(backlogDir, 'tasks').sort((a, b) => a.num - b.num);
+  const byId = new Map([...bugs, ...tasks].map((item) => [item.id, item]));
 
-  let ordered
+  let ordered;
   if (ids !== undefined) {
     ordered = ids.map((id) => {
-      const found = byId.get(id)
-      if (!found) throw new OrchestrateError(`unknown item id: ${id}`, 1)
-      return found
-    })
+      const found = byId.get(id);
+      if (!found) throw new OrchestrateError(`unknown item id: ${id}`, 1);
+      return found;
+    });
   } else {
-    ordered = [...bugs, ...tasks]
+    ordered = [...bugs, ...tasks];
   }
 
   // `readyCount` is read BEFORE it is possibly incremented for the item
@@ -1241,14 +1250,14 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
   // The title for a missing blob comes off the working copy, the only copy
   // that exists; for a present one it comes off the blob, so that everything
   // this function reports about an item describes the same bytes.
-  const readBlob = blobReaderAt(projectRoot, base)
+  const readBlob = blobReaderAt(projectRoot, base);
   const gateEntry = (entry) => {
     if (readBlob === null) {
-      const { title, body, runnerFix } = readItemForGate(entry.path)
-      return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) }
+      const { title, body, runnerFix } = readItemForGate(entry.path);
+      return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) };
     }
-    const relPath = path.relative(projectRoot, entry.path).split(path.sep).join('/')
-    const committed = readBlob(relPath)
+    const relPath = path.relative(projectRoot, entry.path).split(path.sep).join('/');
+    const committed = readBlob(relPath);
     if (committed === null) {
       return {
         title: readItemForGate(entry.path).title,
@@ -1260,19 +1269,19 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
         hoisted: false,
         gate: 'ungroomed',
         reasons: [`not committed on ${base} — the worktree this run creates from ${base} would not contain ${relPath}`],
-        questions: [],
-      }
+        questions: []
+      };
     }
-    const { title, body, runnerFix } = parseItemForGate(committed)
-    return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) }
-  }
+    const { title, body, runnerFix } = parseItemForGate(committed);
+    return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) };
+  };
 
   // Gate everything first, THEN reorder, THEN count the cap. The marker is
   // one of the things gateEntry reads off the item, so it cannot be known
   // before this walk; and `--max` has to be counted over the hoisted order
   // rather than the natural one, which is most of the point — a runner fix
   // that was going to fall outside the cap now lands inside it.
-  const gated = ordered.map((entry) => ({ id: entry.id, ...gateEntry(entry) }))
+  const gated = ordered.map((entry) => ({ id: entry.id, ...gateEntry(entry) }));
 
   // A stable partition, not a sort: every item keeps its relative position
   // inside its own half, so the hoisted items stay bugs-before-tasks and
@@ -1295,16 +1304,16 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
   // therefore hoists too and appears first in the preview labelled
   // `ungroomed` — "the thing that would fix your runner is not groomed" is
   // information, and the top of the list is where it will be read.
-  const hoistedOrder = [...gated.filter((item) => item.hoisted), ...gated.filter((item) => !item.hoisted)]
+  const hoistedOrder = [...gated.filter((item) => item.hoisted), ...gated.filter((item) => !item.hoisted)];
 
   // `readyCount` is read BEFORE it is possibly incremented for the item
   // currently being examined — see the long comment above gateEntry.
-  let readyCount = 0
+  let readyCount = 0;
   return hoistedOrder.map(({ id, title, gate, reasons, questions, hoisted }) => {
-    const beyondMax = maxItems !== null && readyCount >= maxItems
-    if (gate === 'ready') readyCount++
-    return { id, title, gate, reasons, questions, beyondMax, hoisted }
-  })
+    const beyondMax = maxItems !== null && readyCount >= maxItems;
+    if (gate === 'ready') readyCount++;
+    return { id, title, gate, reasons, questions, beyondMax, hoisted };
+  });
 }
 
 // --- shared queue-item lookup + field application ---------------------
@@ -1320,21 +1329,21 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
 // different points in their own control flow.
 
 function findQueueItem(run, itemId) {
-  const item = run.queue.find((q) => q.id === itemId)
+  const item = run.queue.find((q) => q.id === itemId);
   if (!item) {
-    throw new OrchestrateError(`unknown item id: ${itemId}`, 1)
+    throw new OrchestrateError(`unknown item id: ${itemId}`, 1);
   }
-  return item
+  return item;
 }
 
 function applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop = false } = {}) {
   if (stage !== undefined) {
-    item.stage = stage
+    item.stage = stage;
     // First-arrival only — see shared/types.ts's own RunQueueItem.stageAt
     // comment: a fix-and-re-review loop revisiting `reviewing`/`fixing`
     // must not move that stage's timestamp forward a second time.
     if (!(stage in item.stageAt)) {
-      item.stageAt[stage] = nowISO()
+      item.stageAt[stage] = nowISO();
     }
   }
   // `fixLoops` is the ONLY counter in a queue item, and this is the only
@@ -1356,13 +1365,13 @@ function applyQueueItemFields(item, { stage, session, worktree, branch, note, pe
     // anywhere, and this is the one arithmetic site where it could sneak in
     // from a run.json that reached us some other way (a hand-edit, a
     // restored backup).
-    item.fixLoops = Number.isInteger(item.fixLoops) ? item.fixLoops + 1 : 1
+    item.fixLoops = Number.isInteger(item.fixLoops) ? item.fixLoops + 1 : 1;
   }
-  if (session !== undefined) item.sessionId = session
-  if (worktree !== undefined) item.worktree = worktree
-  if (branch !== undefined) item.branch = branch
-  if (permissionMode !== undefined) item.permissionMode = permissionMode
-  if (note !== undefined) item.note = note
+  if (session !== undefined) item.sessionId = session;
+  if (worktree !== undefined) item.worktree = worktree;
+  if (branch !== undefined) item.branch = branch;
+  if (permissionMode !== undefined) item.permissionMode = permissionMode;
+  if (note !== undefined) item.note = note;
 }
 
 // --- Task 5 shared helpers: item files inside a worktree, git plumbing ----
@@ -1384,16 +1393,16 @@ function applyQueueItemFields(item, { stage, session, worktree, branch, note, pe
 // "no item file here" is a normal thing for a crashed or pre-dispatch item
 // to report, not an error.
 function findItemFilePath(dir, itemId) {
-  const idPattern = new RegExp(`^${itemId}-`)
+  const idPattern = new RegExp(`^${itemId}-`);
   for (const section of ['bugs', 'tasks']) {
     for (const state of ['open', 'done']) {
-      const sectionDir = path.join(dir, 'backlog', section, state)
-      if (!fs.existsSync(sectionDir)) continue
-      const found = fs.readdirSync(sectionDir).find((name) => idPattern.test(name))
-      if (found) return { path: path.join(sectionDir, found), section, state }
+      const sectionDir = path.join(dir, 'backlog', section, state);
+      if (!fs.existsSync(sectionDir)) continue;
+      const found = fs.readdirSync(sectionDir).find((name) => idPattern.test(name));
+      if (found) return { path: path.join(sectionDir, found), section, state };
     }
   }
-  return null
+  return null;
 }
 
 // True when the item file at `absPath` carries a `<key>:` line inside its
@@ -1403,15 +1412,15 @@ function findItemFilePath(dir, itemId) {
 // see itemHasPhaseMarker's own comment for why the two are not
 // interchangeable).
 function itemFrontmatterHasKey(absPath, key) {
-  const lines = fs.readFileSync(absPath, 'utf8').split('\n')
-  if (lines[0] !== '---') return false
+  const lines = fs.readFileSync(absPath, 'utf8').split('\n');
+  if (lines[0] !== '---') return false;
   for (let i = 1; i < lines.length; i++) {
-    if (lines[i] === '---') break
-    const sep = lines[i].indexOf(':')
-    if (sep === -1) continue
-    if (lines[i].slice(0, sep).trim() === key) return true
+    if (lines[i] === '---') break;
+    const sep = lines[i].indexOf(':');
+    if (sep === -1) continue;
+    if (lines[i].slice(0, sep).trim() === key) return true;
   }
-  return false
+  return false;
 }
 
 // Deliberately `phase:` alone, not `started:` too, even though CLAUDE.md's
@@ -1426,7 +1435,7 @@ function itemFrontmatterHasKey(absPath, key) {
 // the thing reconcile/abort need to tell apart from "finished cleanly, the
 // orchestrator just hasn't gotten to it yet."
 function itemHasPhaseMarker(absPath) {
-  return itemFrontmatterHasKey(absPath, 'phase')
+  return itemFrontmatterHasKey(absPath, 'phase');
 }
 
 // `git show-ref` rather than `git branch --list` — a plumbing command with
@@ -1437,8 +1446,8 @@ function itemHasPhaseMarker(absPath) {
 // branch in the SAME repository, visible from the main tree regardless of
 // whether the worktree directory itself still exists on disk.
 function branchExists(projectRoot, branch) {
-  if (!branch) return false
-  return spawnSync('git', ['-C', projectRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0
+  if (!branch) return false;
+  return spawnSync('git', ['-C', projectRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0;
 }
 
 // --- commands ----------------------------------------------------------
@@ -1450,16 +1459,17 @@ function branchExists(projectRoot, branch) {
 // command style, so the contract for "what does `stage` do" lives entirely
 // inside cmdStage and not spread across a bigger switch.
 
-const INIT_USAGE = 'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch>] [--question-mode <decide|park>]'
+const INIT_USAGE =
+  'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch>] [--question-mode <decide|park>]';
 
 function cmdInit(argv) {
-  let project
-  let idsArg
-  let maxArg
+  let project;
+  let idsArg;
+  let maxArg;
   // Defaulted at the flag rather than left undefined for buildGatedQueue to
   // fill in, so that `--base ''` is a base ref of '' (which resolves to
   // nothing and takes the fallback) rather than silently meaning `main`.
-  let base = BASE_REF_DEFAULT
+  let base = BASE_REF_DEFAULT;
   // Same reasoning as `base` above: defaulted right here so an absent flag
   // reads as the literal value 'merge' everywhere below rather than as
   // undefined needing its own fallback later — and so this run's very
@@ -1467,20 +1477,20 @@ function cmdInit(argv) {
   // started before this flag existed at all (design §2.5: "a new key must
   // not silently change the behaviour of a board that has been working for
   // a fortnight").
-  let mergeMode = 'merge'
+  let mergeMode = 'merge';
   // Same defaulting reasoning as `mergeMode` directly above, with the
   // default inverted: 'park' is what every run did before this flag
   // existed, so an absent flag has to read as the literal 'park' here for a
   // board that has been working for a fortnight to keep behaving the way it
   // always has.
-  let questionMode = 'park'
+  let questionMode = 'park';
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--project') project = argv[++i]
-    else if (argv[i] === '--ids') idsArg = argv[++i]
-    else if (argv[i] === '--max') maxArg = argv[++i]
-    else if (argv[i] === '--base') base = argv[++i]
-    else if (argv[i] === '--merge-mode') mergeMode = argv[++i]
-    else if (argv[i] === '--question-mode') questionMode = argv[++i]
+    if (argv[i] === '--project') project = argv[++i];
+    else if (argv[i] === '--ids') idsArg = argv[++i];
+    else if (argv[i] === '--max') maxArg = argv[++i];
+    else if (argv[i] === '--base') base = argv[++i];
+    else if (argv[i] === '--merge-mode') mergeMode = argv[++i];
+    else if (argv[i] === '--question-mode') questionMode = argv[++i];
   }
 
   // Validated before anything else touches disk: an unusable --project is a
@@ -1492,7 +1502,7 @@ function cmdInit(argv) {
   // exactly the same string — a relative path here would key a run under a
   // string no other command could ever reproduce from its own cwd.
   if (!project || !path.isAbsolute(project)) {
-    throw new OrchestrateError(INIT_USAGE, 1)
+    throw new OrchestrateError(INIT_USAGE, 1);
   }
 
   // The same worktree refusal resolveProjectRoot applies to a cwd-derived
@@ -1503,8 +1513,8 @@ function cmdInit(argv) {
   // command (correctly resolving the real project root) would report exit 3
   // for a run that was written successfully. Checked here, before --max is
   // even parsed, so the "nothing written when init refuses" guarantee holds.
-  const projectWorktree = linkedWorktreeInfo(project)
-  if (projectWorktree) refuseLinkedWorktree(projectWorktree)
+  const projectWorktree = linkedWorktreeInfo(project);
+  if (projectWorktree) refuseLinkedWorktree(projectWorktree);
 
   // Validated in this SAME block, immediately after the two checks above —
   // the task-3 brief pins this exact ordering, and the reason is the same
@@ -1520,10 +1530,7 @@ function cmdInit(argv) {
   // !== 'branch'` for the "one copy of the vocabulary" reason that
   // constant's own comment gives.
   if (!MERGE_MODES.includes(mergeMode)) {
-    throw new OrchestrateError(
-      `--merge-mode must be one of ${MERGE_MODES.join(', ')} (got ${mergeMode === undefined ? 'no value' : mergeMode})`,
-      1,
-    )
+    throw new OrchestrateError(`--merge-mode must be one of ${MERGE_MODES.join(', ')} (got ${mergeMode === undefined ? 'no value' : mergeMode})`, 1);
   }
 
   // Checked in the same pre-write block, immediately after --merge-mode,
@@ -1538,17 +1545,17 @@ function cmdInit(argv) {
   if (!QUESTION_MODES.includes(questionMode)) {
     throw new OrchestrateError(
       `--question-mode must be one of ${QUESTION_MODES.join(', ')} (got ${questionMode === undefined ? 'no value' : questionMode})`,
-      1,
-    )
+      1
+    );
   }
 
-  let maxItems = null
+  let maxItems = null;
   if (maxArg !== undefined) {
-    const n = Number(maxArg)
+    const n = Number(maxArg);
     if (!Number.isInteger(n) || n < 0) {
-      throw new OrchestrateError(`--max must be a non-negative integer: ${maxArg}`, 1)
+      throw new OrchestrateError(`--max must be a non-negative integer: ${maxArg}`, 1);
     }
-    maxItems = n
+    maxItems = n;
   }
 
   // The queue is built — and, critically, FULLY VALIDATED — before this
@@ -1569,7 +1576,7 @@ function cmdInit(argv) {
   // means a bad call can never destroy or hide state that already existed;
   // the failure is confined to "nothing written," the same guarantee every
   // other error path in this file already gives.
-  const stamp = nowISO()
+  const stamp = nowISO();
   // buildGatedQueue is the exact function `plan` (below) calls to preview a
   // run — see its own comment for the ordering/gate/max rules, kept in one
   // place. init deliberately does NOT carry an ungroomed or needs-answers
@@ -1584,17 +1591,17 @@ function cmdInit(argv) {
   // loop. Every item that makes the cut starts exactly like every queue
   // item always has: `pending`, via the same makeQueueItem every other
   // caller already uses.
-  const gated = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base })
-  const queue = gated.filter((item) => !item.beyondMax).map((item) => makeQueueItem(item.id, item.title, stamp))
+  const gated = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base });
+  const queue = gated.filter((item) => !item.beyondMax).map((item) => makeQueueItem(item.id, item.title, stamp));
 
-  const root = orchHome()
-  const dir = projectDir(root, project)
+  const root = orchHome();
+  const dir = projectDir(root, project);
 
-  const file = runFilePath(dir)
-  let existing = null
+  const file = runFilePath(dir);
+  let existing = null;
   if (fs.existsSync(file)) {
     try {
-      existing = JSON.parse(fs.readFileSync(file, 'utf8'))
+      existing = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
       // A run.json that exists but doesn't parse is left alone rather than
       // silently clobbered: this tool is the file's only writer, so a
@@ -1605,7 +1612,7 @@ function cmdInit(argv) {
       // cannot proceed as given) rather than code 4 (lock held) — this is
       // not a running lock refusing a legitimate overwrite, it is a file
       // this tool cannot make sense of at all.
-      throw new OrchestrateError(`${file} exists but does not parse as JSON — resolve or remove it by hand before running init again: ${e.message}`, 1)
+      throw new OrchestrateError(`${file} exists but does not parse as JSON — resolve or remove it by hand before running init again: ${e.message}`, 1);
     }
   }
 
@@ -1650,11 +1657,8 @@ function cmdInit(argv) {
   if (existing && existing.status === 'running') {
     const reason = isFresh(existing.updatedAt)
       ? `a run is already in progress for this project (last heartbeat ${existing.updatedAt})`
-      : `this project's run.json is still marked "running" but its last heartbeat (${existing.updatedAt}) is stale — this looks like a crashed run, not an active lock`
-    throw new OrchestrateError(
-      `${reason}. Use \`orchestrate.mjs status\` to inspect it, then --resume or --abort (never plain init) to take it over.`,
-      4,
-    )
+      : `this project's run.json is still marked "running" but its last heartbeat (${existing.updatedAt}) is stale — this looks like a crashed run, not an active lock`;
+    throw new OrchestrateError(`${reason}. Use \`orchestrate.mjs status\` to inspect it, then --resume or --abort (never plain init) to take it over.`, 4);
   }
 
   // A non-running existing run (done/aborted/failed) is archived rather
@@ -1669,9 +1673,9 @@ function cmdInit(argv) {
   // only to be followed by a throw that leaves the project without any
   // run.json at all.
   if (existing) {
-    const archiveDir = runsArchiveDir(dir)
-    fs.mkdirSync(archiveDir, { recursive: true })
-    const stem = archiveStem(archiveDir, existing.runId)
+    const archiveDir = runsArchiveDir(dir);
+    fs.mkdirSync(archiveDir, { recursive: true });
+    const stem = archiveStem(archiveDir, existing.runId);
     // Sidecars FIRST, run.json LAST, and the order is the design. A crash
     // between the two leaves the sidecars under `runs/<stem>/` with
     // run.json still flat and still `done` — so the next init resolves the
@@ -1681,14 +1685,14 @@ function cmdInit(argv) {
     // renaming run.json first and crashing leaves `existing === null` next
     // time, so this whole block never runs again and the sidecars are
     // overwritten by the very run that was supposed to preserve them.
-    archiveSidecars(dir, path.join(archiveDir, stem))
-    fs.renameSync(file, path.join(archiveDir, `${stem}.json`))
+    archiveSidecars(dir, path.join(archiveDir, stem));
+    fs.renameSync(file, path.join(archiveDir, `${stem}.json`));
   }
 
-  const runId = makeRunId(stamp)
+  const runId = makeRunId(stamp);
   // Read once for the one field it fills — two reads of one env var for one
   // value is two chances for them to disagree, however small.
-  const initDriver = sessionIdentity()
+  const initDriver = sessionIdentity();
   const newRun = {
     runId,
     project,
@@ -1725,23 +1729,23 @@ function cmdInit(argv) {
     // this process has no identity to record (a hand-run terminal), which
     // reads as "unclaimed" everywhere the lease is checked — see
     // `runDriver`/`assertDriver` above.
-    driver: initDriver === null ? null : { sessionId: initDriver, at: stamp },
-  }
+    driver: initDriver === null ? null : { sessionId: initDriver, at: stamp }
+  };
 
-  writeRunAtomic(dir, newRun)
+  writeRunAtomic(dir, newRun);
   // bug-19: said out loud rather than left to be inferred from a `null` in the
   // file. A run started without an identity can never enforce its own driver
   // lease, and the one place that is worth knowing is here — at the start,
   // where whoever launched it is still watching — not three hours later when a
   // second `--resume` session walks in and nothing refuses it.
   if (newRun.driver === null) {
-    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run records no driver, so its lease cannot be enforced')
+    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run records no driver, so its lease cannot be enforced');
   }
-  console.log(JSON.stringify({ runId, dir }))
-  return 0
+  console.log(JSON.stringify({ runId, dir }));
+  return 0;
 }
 
-const PLAN_USAGE = 'usage: orchestrate.mjs plan --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--json]'
+const PLAN_USAGE = 'usage: orchestrate.mjs plan --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--json]';
 
 // Previews a run without starting one: the exact queue `init` would build
 // for these flags, printed rather than written. This is what lets a human
@@ -1750,17 +1754,17 @@ const PLAN_USAGE = 'usage: orchestrate.mjs plan --project <abs path> [--ids a,b,
 // committing to a run — and what lets `init` itself stay a thin wrapper
 // around buildGatedQueue instead of duplicating its own copy of the gate.
 function cmdPlan(argv) {
-  let project
-  let idsArg
-  let maxArg
-  let base = BASE_REF_DEFAULT
-  let json = false
+  let project;
+  let idsArg;
+  let maxArg;
+  let base = BASE_REF_DEFAULT;
+  let json = false;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--project') project = argv[++i]
-    else if (argv[i] === '--ids') idsArg = argv[++i]
-    else if (argv[i] === '--max') maxArg = argv[++i]
-    else if (argv[i] === '--base') base = argv[++i]
-    else if (argv[i] === '--json') json = true
+    if (argv[i] === '--project') project = argv[++i];
+    else if (argv[i] === '--ids') idsArg = argv[++i];
+    else if (argv[i] === '--max') maxArg = argv[++i];
+    else if (argv[i] === '--base') base = argv[++i];
+    else if (argv[i] === '--json') json = true;
   }
 
   // Same absolute-path requirement as init, for the same reason: whatever
@@ -1769,16 +1773,16 @@ function cmdPlan(argv) {
   // directory than the one a human typing the same string into `init`
   // right after would get.
   if (!project || !path.isAbsolute(project)) {
-    throw new OrchestrateError(PLAN_USAGE, 1)
+    throw new OrchestrateError(PLAN_USAGE, 1);
   }
 
-  let maxItems = null
+  let maxItems = null;
   if (maxArg !== undefined) {
-    const n = Number(maxArg)
+    const n = Number(maxArg);
     if (!Number.isInteger(n) || n < 0) {
-      throw new OrchestrateError(`--max must be a non-negative integer: ${maxArg}`, 1)
+      throw new OrchestrateError(`--max must be a non-negative integer: ${maxArg}`, 1);
     }
-    maxItems = n
+    maxItems = n;
   }
 
   // Side-effect free by construction, not just by convention: everything
@@ -1788,61 +1792,61 @@ function cmdPlan(argv) {
   // writing. That is what lets a caller (a UI's queue preview, or a human
   // sanity-checking a run before committing to it) call this as many times
   // as it wants without ever risking a run's own state.
-  const queue = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base })
+  const queue = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base });
 
   if (json) {
-    console.log(JSON.stringify(queue))
+    console.log(JSON.stringify(queue));
   } else {
     for (const item of queue) {
       // Two independent suffixes that concatenate rather than exclude each
       // other: `--max 0` puts even a hoisted item beyond the cap, and a row
       // that was moved to the front AND will not be dispatched needs to say
       // both. Hoist first, because it explains why this row is where it is.
-      const hoist = item.hoisted ? '  (runner fix — hoisted)' : ''
-      const flag = item.beyondMax ? '  (beyond --max)' : ''
-      console.log(`${item.gate.padEnd(13)} ${item.id}  ${item.title}${hoist}${flag}`)
-      for (const reason of item.reasons) console.log(`    - ${reason}`)
-      for (const question of item.questions) console.log(`    ? ${question}`)
+      const hoist = item.hoisted ? '  (runner fix — hoisted)' : '';
+      const flag = item.beyondMax ? '  (beyond --max)' : '';
+      console.log(`${item.gate.padEnd(13)} ${item.id}  ${item.title}${hoist}${flag}`);
+      for (const reason of item.reasons) console.log(`    - ${reason}`);
+      for (const question of item.questions) console.log(`    ? ${question}`);
     }
   }
-  return 0
+  return 0;
 }
 
-const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop]'
+const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop]';
 
 function cmdStage(argv) {
-  const itemId = argv[0]
-  const stage = argv[1]
-  let session
-  let worktree
-  let branch
-  let note
-  let permissionMode
+  const itemId = argv[0];
+  const stage = argv[1];
+  let session;
+  let worktree;
+  let branch;
+  let note;
+  let permissionMode;
   // The one valueless flag on this command: it consumes no argv slot, so it
   // never does the `argv[++i]` step the four above all take.
-  let fixLoop = false
+  let fixLoop = false;
   for (let i = 2; i < argv.length; i++) {
-    if (argv[i] === '--session') session = argv[++i]
-    else if (argv[i] === '--worktree') worktree = argv[++i]
-    else if (argv[i] === '--branch') branch = argv[++i]
-    else if (argv[i] === '--permission-mode') permissionMode = argv[++i]
-    else if (argv[i] === '--note') note = argv[++i]
-    else if (argv[i] === '--fix-loop') fixLoop = true
+    if (argv[i] === '--session') session = argv[++i];
+    else if (argv[i] === '--worktree') worktree = argv[++i];
+    else if (argv[i] === '--branch') branch = argv[++i];
+    else if (argv[i] === '--permission-mode') permissionMode = argv[++i];
+    else if (argv[i] === '--note') note = argv[++i];
+    else if (argv[i] === '--fix-loop') fixLoop = true;
   }
 
   if (!itemId || !stage) {
-    throw new OrchestrateError(STAGE_USAGE, 1)
+    throw new OrchestrateError(STAGE_USAGE, 1);
   }
   // Validated before the run is even read: an unrecognized stage name is a
   // problem with the command line itself, independent of whether a run
   // exists at all, so it is refused the same way regardless of run state.
   if (!RUN_STAGES.includes(stage)) {
-    throw new OrchestrateError(`unknown stage: ${stage} (expected one of ${RUN_STAGES.join(', ')})`, 1)
+    throw new OrchestrateError(`unknown stage: ${stage} (expected one of ${RUN_STAGES.join(', ')})`, 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  assertDriver(run)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
 
   // Design §3: enforcement lives in the TOOL, not in SKILL.md's prose — a
   // prose reminder has to survive several hundred turns of a headless
@@ -1864,11 +1868,11 @@ function cmdStage(argv) {
   if (stage === 'merged' && run.mergeModeEffective === 'branch') {
     throw new OrchestrateError(
       `this run's merge mode is 'branch' — an item cannot be staged 'merged' under branch mode. Use \`stage ${itemId} branched\` instead.`,
-      1,
-    )
+      1
+    );
   }
 
-  const item = findQueueItem(run, itemId)
+  const item = findQueueItem(run, itemId);
 
   // task-17's dispatch gate, in the tool for the same reason the branch-mode
   // `merged` refusal one screen up is: SKILL.md is re-read on every one of a
@@ -1893,29 +1897,25 @@ function cmdStage(argv) {
   // Placed after `findQueueItem` (the gate needs the item's current stage)
   // and before `applyQueueItemFields`, so a refusal leaves run.json
   // byte-identical like every other refusal in this function.
-  if (
-    (stage === 'preflight' || stage === 'dispatched') &&
-    item.stage !== stage &&
-    pauseRequestEffective(readPauseRequest(run.project), run)
-  ) {
+  if ((stage === 'preflight' || stage === 'dispatched') && item.stage !== stage && pauseRequestEffective(readPauseRequest(run.project), run)) {
     throw new OrchestrateError(
       `a pause was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. Finish the run with \`finish --status paused\` (SKILL.md §10, "Pausing").`,
-      6,
-    )
+      6
+    );
   }
 
-  applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop })
+  applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop });
 
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
   // The new count is echoed back only when this call actually incremented it,
   // so the caller enforcing the two-loop ceiling reads it straight off the
   // command that spent the loop rather than making a second `status --json`
   // round trip (and rather than counting in its own head, which a crash and
   // a `--resume` would reset). Every other stage call keeps the exact
   // two-key line it has always printed.
-  console.log(JSON.stringify(fixLoop ? { id: itemId, stage, fixLoops: item.fixLoops } : { id: itemId, stage }))
-  return 0
+  console.log(JSON.stringify(fixLoop ? { id: itemId, stage, fixLoops: item.fixLoops } : { id: itemId, stage }));
+  return 0;
 }
 
 // Records the one degrade design §5.2 allows: a run that started (or was
@@ -1943,10 +1943,10 @@ function cmdStage(argv) {
 // null afterwards" — letting a second call silently overwrite an existing
 // note would erase the very post-mortem detail this field exists to keep.
 function cmdMergeMode(argv) {
-  const target = argv[0]
-  let note
+  const target = argv[0];
+  let note;
   for (let i = 1; i < argv.length; i++) {
-    if (argv[i] === '--note') note = argv[++i]
+    if (argv[i] === '--note') note = argv[++i];
   }
 
   // Validated before the run is even read, same "a problem with THIS call"
@@ -1959,72 +1959,69 @@ function cmdMergeMode(argv) {
   // the call was wrong but not WHICH of the two required pieces of argv was
   // the problem, unlike every other validation failure in this file.
   if (!MERGE_MODES.includes(target)) {
-    throw new OrchestrateError(
-      `merge-mode target must be one of ${MERGE_MODES.join(', ')} (got ${target === undefined ? 'no value' : target})`,
-      1,
-    )
+    throw new OrchestrateError(`merge-mode target must be one of ${MERGE_MODES.join(', ')} (got ${target === undefined ? 'no value' : target})`, 1);
   }
   if (note === undefined) {
-    throw new OrchestrateError('merge-mode requires --note <text> (got no value)', 1)
+    throw new OrchestrateError('merge-mode requires --note <text> (got no value)', 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  assertDriver(run)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
 
   if (!(run.mergeModeEffective === 'merge' && target === 'branch')) {
     throw new OrchestrateError(
       `merge mode cannot move from '${run.mergeModeEffective}' to '${target}' — the only move this command ever allows is merge -> branch, and only once per run`,
-      1,
-    )
+      1
+    );
   }
 
-  run.mergeModeEffective = target
-  run.mergeModeNote = note
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
-  console.log(JSON.stringify({ mergeModeEffective: run.mergeModeEffective, mergeModeNote: run.mergeModeNote }))
-  return 0
+  run.mergeModeEffective = target;
+  run.mergeModeNote = note;
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  console.log(JSON.stringify({ mergeModeEffective: run.mergeModeEffective, mergeModeNote: run.mergeModeNote }));
+  return 0;
 }
 
 function cmdHeartbeat() {
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  assertDriver(run)
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
-  console.log(run.updatedAt)
-  return 0
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  console.log(run.updatedAt);
+  return 0;
 }
 
-const ATTENTION_USAGE = 'usage: orchestrate.mjs attention <itemId> --kind <needs-answers|parked|fix-exhausted> --detail <text> [--questions-json <file>]'
-const ATTENTION_KINDS = ['needs-answers', 'parked', 'fix-exhausted']
+const ATTENTION_USAGE = 'usage: orchestrate.mjs attention <itemId> --kind <needs-answers|parked|fix-exhausted> --detail <text> [--questions-json <file>]';
+const ATTENTION_KINDS = ['needs-answers', 'parked', 'fix-exhausted'];
 
 function cmdAttention(argv) {
-  const itemId = argv[0]
-  let kind
-  let detail
-  let questionsJsonFile
+  const itemId = argv[0];
+  let kind;
+  let detail;
+  let questionsJsonFile;
   for (let i = 1; i < argv.length; i++) {
-    if (argv[i] === '--kind') kind = argv[++i]
-    else if (argv[i] === '--detail') detail = argv[++i]
-    else if (argv[i] === '--questions-json') questionsJsonFile = argv[++i]
+    if (argv[i] === '--kind') kind = argv[++i];
+    else if (argv[i] === '--detail') detail = argv[++i];
+    else if (argv[i] === '--questions-json') questionsJsonFile = argv[++i];
   }
 
   if (!itemId || !kind || detail === undefined) {
-    throw new OrchestrateError(ATTENTION_USAGE, 1)
+    throw new OrchestrateError(ATTENTION_USAGE, 1);
   }
   if (!ATTENTION_KINDS.includes(kind)) {
-    throw new OrchestrateError(`unknown kind: ${kind} (expected one of ${ATTENTION_KINDS.join(', ')})`, 1)
+    throw new OrchestrateError(`unknown kind: ${kind} (expected one of ${ATTENTION_KINDS.join(', ')})`, 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  assertDriver(run)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
 
-  const item = run.queue.find((q) => q.id === itemId)
+  const item = run.queue.find((q) => q.id === itemId);
   if (!item) {
-    throw new OrchestrateError(`unknown item id: ${itemId}`, 1)
+    throw new OrchestrateError(`unknown item id: ${itemId}`, 1);
   }
 
   // --questions-json only ever means something for kind needs-answers — the
@@ -2033,32 +2030,32 @@ function cmdAttention(argv) {
   // --fix-exhausted call carrying the flag anyway is read and validated
   // (a bad file should still fail loudly) but its content is deliberately
   // never applied — see the `kind === 'needs-answers'` guard below.
-  let questions
+  let questions;
   if (questionsJsonFile !== undefined) {
-    let parsed
+    let parsed;
     try {
-      parsed = JSON.parse(fs.readFileSync(questionsJsonFile, 'utf8'))
+      parsed = JSON.parse(fs.readFileSync(questionsJsonFile, 'utf8'));
     } catch (e) {
-      throw new OrchestrateError(`--questions-json ${questionsJsonFile}: ${e.message}`, 1)
+      throw new OrchestrateError(`--questions-json ${questionsJsonFile}: ${e.message}`, 1);
     }
     if (!Array.isArray(parsed) || !parsed.every((q) => typeof q === 'string')) {
-      throw new OrchestrateError(`--questions-json must be a JSON array of strings: ${questionsJsonFile}`, 1)
+      throw new OrchestrateError(`--questions-json must be a JSON array of strings: ${questionsJsonFile}`, 1);
     }
-    questions = parsed
+    questions = parsed;
   }
 
-  run.attention.push({ id: itemId, kind, detail })
+  run.attention.push({ id: itemId, kind, detail });
   if (kind === 'needs-answers' && questions !== undefined) {
-    item.questions = questions
+    item.questions = questions;
   }
 
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
-  console.log(JSON.stringify({ id: itemId, kind }))
-  return 0
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  console.log(JSON.stringify({ id: itemId, kind }));
+  return 0;
 }
 
-const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{question, answer}, …]>'
+const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{question, answer}, …]>';
 
 // The one writer of RunQueueItem.assumptions — what this run decided on its
 // own for an item whose pre-flight questions nobody was there to answer.
@@ -2075,19 +2072,19 @@ const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{q
 // convention for the same reason: the content is prose the run composed,
 // and prose does not survive shell quoting intact.
 function cmdAssume(argv) {
-  const itemId = argv[0]
-  let jsonFile
+  const itemId = argv[0];
+  let jsonFile;
   for (let i = 1; i < argv.length; i++) {
-    if (argv[i] === '--json') jsonFile = argv[++i]
+    if (argv[i] === '--json') jsonFile = argv[++i];
   }
 
   if (!itemId || jsonFile === undefined) {
-    throw new OrchestrateError(ASSUME_USAGE, 1)
+    throw new OrchestrateError(ASSUME_USAGE, 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  assertDriver(run)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
 
   // Checked BEFORE the file is opened, let alone parsed, so a refused call
   // reports exactly one thing: that this run parks its unanswerable items.
@@ -2110,37 +2107,37 @@ function cmdAssume(argv) {
       `assume is refused: this run's questionMode is '${run.questionMode ?? 'park'}', so an item whose questions ` +
         `nobody answered is parked, not decided — record it with ` +
         `\`attention ${itemId} --kind needs-answers --questions-json <file>\` and stage it 'needs-answers' instead`,
-      1,
-    )
+      1
+    );
   }
 
   // Through the shared lookup rather than a second `run.queue.find`, which
   // is what that helper exists for: a new writer must not become a second
   // code path that can drift from the one `stage` and `watch` already use.
-  const item = findQueueItem(run, itemId)
+  const item = findQueueItem(run, itemId);
 
-  let parsed
+  let parsed;
   try {
-    parsed = JSON.parse(fs.readFileSync(jsonFile, 'utf8'))
+    parsed = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
   } catch (e) {
-    throw new OrchestrateError(`--json ${jsonFile}: ${e.message}`, 1)
+    throw new OrchestrateError(`--json ${jsonFile}: ${e.message}`, 1);
   }
   if (!Array.isArray(parsed)) {
-    throw new OrchestrateError(`--json must be a JSON array of {question, answer} objects: ${jsonFile}`, 1)
+    throw new OrchestrateError(`--json must be a JSON array of {question, answer} objects: ${jsonFile}`, 1);
   }
   for (const entry of parsed) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new OrchestrateError(`--json entries must be {question, answer} objects: ${jsonFile}`, 1)
+      throw new OrchestrateError(`--json entries must be {question, answer} objects: ${jsonFile}`, 1);
     }
     // Named individually rather than as one "malformed entry" message: the
     // pair is the whole point of the field (shared/types.ts spells out why
     // half of it is useless), so a caller that wrote only one of the two
     // keys needs to be told WHICH one it left out.
     if (typeof entry.question !== 'string') {
-      throw new OrchestrateError(`--json entry is missing a string 'question' key: ${jsonFile}`, 1)
+      throw new OrchestrateError(`--json entry is missing a string 'question' key: ${jsonFile}`, 1);
     }
     if (typeof entry.answer !== 'string') {
-      throw new OrchestrateError(`--json entry is missing a string 'answer' key: ${jsonFile}`, 1)
+      throw new OrchestrateError(`--json entry is missing a string 'answer' key: ${jsonFile}`, 1);
     }
   }
 
@@ -2151,39 +2148,39 @@ function cmdAssume(argv) {
   //
   // `?? []` covers a queue item written before this field existed, which a
   // `--resume` against an older run file can genuinely produce.
-  item.assumptions = [...(item.assumptions ?? []), ...parsed]
+  item.assumptions = [...(item.assumptions ?? []), ...parsed];
 
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
-  console.log(JSON.stringify({ id: itemId, assumptions: item.assumptions.length }))
-  return 0
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  console.log(JSON.stringify({ id: itemId, assumptions: item.assumptions.length }));
+  return 0;
 }
 
 // `paused` (task-17) is a finish like any other as far as this command is
 // concerned — the run stops writing, the file stops being `running`, and
 // `init` will archive it. What makes it different is only that it has an
 // exit: `unpause` below, which no other finished status has.
-const FINISH_USAGE = 'usage: orchestrate.mjs finish --status <done|aborted|failed|paused>'
-const FINISH_STATUSES = ['done', 'aborted', 'failed', 'paused']
+const FINISH_USAGE = 'usage: orchestrate.mjs finish --status <done|aborted|failed|paused>';
+const FINISH_STATUSES = ['done', 'aborted', 'failed', 'paused'];
 
 function cmdFinish(argv) {
-  let status
+  let status;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--status') status = argv[++i]
+    if (argv[i] === '--status') status = argv[++i];
   }
   if (!FINISH_STATUSES.includes(status)) {
-    throw new OrchestrateError(FINISH_USAGE, 1)
+    throw new OrchestrateError(FINISH_USAGE, 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  assertDriver(run)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
 
-  run.status = status
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
-  console.log(JSON.stringify({ status }))
-  return 0
+  run.status = status;
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  console.log(JSON.stringify({ status }));
+  return 0;
 }
 
 // The one exit a `paused` run has, and a `--resume` session's FIRST write
@@ -2223,28 +2220,28 @@ function cmdFinish(argv) {
 // holds the lease until the other's `claim` takes it, and then last-writer-wins
 // settles it exactly as it does for two resumers of a crashed run.
 function cmdUnpause() {
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
 
   if (run.status !== 'paused') {
-    throw new OrchestrateError(`this run is ${run.status}, not paused — nothing to unpause`, 1)
+    throw new OrchestrateError(`this run is ${run.status}, not paused — nothing to unpause`, 1);
   }
 
-  const at = nowISO()
-  const me = sessionIdentity()
-  run.status = 'running'
-  run.unpausedAt = at
-  run.updatedAt = at
+  const at = nowISO();
+  const me = sessionIdentity();
+  run.status = 'running';
+  run.unpausedAt = at;
+  run.updatedAt = at;
   // Same single clock reading as the two stamps above, and the same rule
   // `takeOverRun` follows for an unidentified caller: no id, no lease, rather
   // than a made-up one that would lock out the session that comes next.
-  run.driver = me === null ? null : { sessionId: me, at }
-  writeRunAtomic(dir, run)
+  run.driver = me === null ? null : { sessionId: me, at };
+  writeRunAtomic(dir, run);
   if (me === null) {
-    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run is now unclaimed, and the lease cannot be enforced')
+    console.error('warning: CLAUDE_CODE_SESSION_ID is not set — this run is now unclaimed, and the lease cannot be enforced');
   }
-  console.log(JSON.stringify({ status: 'running', unpausedAt: at, driver: run.driver }))
-  return 0
+  console.log(JSON.stringify({ status: 'running', unpausedAt: at, driver: run.driver }));
+  return 0;
 }
 
 // The human-readable "queue: N/M merged" line's mode-aware replacement.
@@ -2264,42 +2261,42 @@ function cmdUnpause() {
 // complains about. So whichever count is not the mode's own headline is
 // still named, in parentheses, whenever it is nonzero.
 function queueSummaryLine(run) {
-  const total = run.queue.length
-  const merged = run.queue.filter((q) => q.stage === 'merged').length
-  const branched = run.queue.filter((q) => q.stage === 'branched').length
+  const total = run.queue.length;
+  const merged = run.queue.filter((q) => q.stage === 'merged').length;
+  const branched = run.queue.filter((q) => q.stage === 'branched').length;
 
   if (run.mergeModeEffective === 'branch') {
-    const mergedBefore = merged > 0 ? ` (${merged} merged before the mode changed)` : ''
-    return `${branched}/${total} branched${mergedBefore}`
+    const mergedBefore = merged > 0 ? ` (${merged} merged before the mode changed)` : '';
+    return `${branched}/${total} branched${mergedBefore}`;
   }
-  const branchedSince = branched > 0 ? ` (${branched} branched)` : ''
-  return `${merged}/${total} merged${branchedSince}`
+  const branchedSince = branched > 0 ? ` (${branched} branched)` : '';
+  return `${merged}/${total} merged${branchedSince}`;
 }
 
 function cmdStatus(argv) {
-  const json = argv.includes('--json')
+  const json = argv.includes('--json');
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
 
   if (json) {
-    console.log(JSON.stringify(run))
+    console.log(JSON.stringify(run));
   } else {
-    console.log(`${run.runId}  ${run.project}  ${run.status}`)
-    console.log(`updated: ${run.updatedAt}`)
+    console.log(`${run.runId}  ${run.project}  ${run.status}`);
+    console.log(`updated: ${run.updatedAt}`);
     // Only when EFFECTIVE, not merely present: a stale control file naming a
     // previous run would otherwise make every `status` call of the next run
     // read as "about to pause", which is the opposite of what it means.
     // `--json` above deliberately says nothing about it — that branch is a
     // verbatim print of the run file, and the request is not part of the run.
-    const control = readPauseRequest(run.project)
+    const control = readPauseRequest(run.project);
     if (pauseRequestEffective(control, run)) {
-      console.log(`pause requested at ${control.requestedAt}`)
+      console.log(`pause requested at ${control.requestedAt}`);
     }
-    console.log(`queue: ${queueSummaryLine(run)}`)
-    console.log(`attention: ${run.attention.length}`)
+    console.log(`queue: ${queueSummaryLine(run)}`);
+    console.log(`attention: ${run.attention.length}`);
   }
-  return 0
+  return 0;
 }
 
 // --- watch ------------------------------------------------------------
@@ -2328,7 +2325,7 @@ function cmdStatus(argv) {
 // other command here, at the cost of genuinely blocking the process for
 // `ms` — which is exactly what a dedicated watch-loop child process is FOR.
 function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 // A zombie (defunct — already exited, but not yet reaped by its parent)
@@ -2346,7 +2343,7 @@ function sleepSync(ms) {
 // STRING CHECK itself is right; see this file's test suite for where that
 // trade-off is made explicitly.
 export function isZombieStatState(stat) {
-  return stat.trim().startsWith('Z')
+  return stat.trim().startsWith('Z');
 }
 
 // `process.kill(pid, 0)` sends no signal at all, just probes whether the
@@ -2382,13 +2379,13 @@ export function isZombieStatState(stat) {
 // occupied by a real process," not "is the claude session making progress."
 function pidAlive(pid) {
   try {
-    process.kill(pid, 0)
+    process.kill(pid, 0);
   } catch (e) {
-    return e.code !== 'ESRCH'
+    return e.code !== 'ESRCH';
   }
-  const probe = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' })
-  if (probe.error || probe.status !== 0 || !probe.stdout) return true
-  return !isZombieStatState(probe.stdout)
+  const probe = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' });
+  if (probe.error || probe.status !== 0 || !probe.stdout) return true;
+  return !isZombieStatState(probe.stdout);
 }
 
 // Pulls the session id out of the FIRST `{"type":"system","subtype":
@@ -2407,22 +2404,22 @@ function pidAlive(pid) {
 // (see the caller, which is the thing that decides what counts as a wedge)
 // is different from a bad line and is never swallowed here.
 function findSessionIdInJsonl(file) {
-  const text = fs.readFileSync(file, 'utf8')
-  const completeLines = text.split('\n').slice(0, -1)
+  const text = fs.readFileSync(file, 'utf8');
+  const completeLines = text.split('\n').slice(0, -1);
   for (const line of completeLines) {
-    const trimmed = line.trim()
-    if (trimmed === '') continue
-    let event
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    let event;
     try {
-      event = JSON.parse(trimmed)
+      event = JSON.parse(trimmed);
     } catch {
-      continue
+      continue;
     }
     if (event && event.type === 'system' && event.subtype === 'init' && typeof event.session_id === 'string') {
-      return event.session_id
+      return event.session_id;
     }
   }
-  return null
+  return null;
 }
 
 // Pulls `permission_denials` off the LAST `{"type":"result",...}` event in
@@ -2455,50 +2452,50 @@ function findSessionIdInJsonl(file) {
 // swallowed — see cmdDenials, which turns it into an exit 1 rather than
 // letting "unreadable" masquerade as "clean".
 export function readPermissionDenials(file) {
-  const text = fs.readFileSync(file, 'utf8')
-  const completeLines = text.split('\n').slice(0, -1)
-  let denials = []
+  const text = fs.readFileSync(file, 'utf8');
+  const completeLines = text.split('\n').slice(0, -1);
+  let denials = [];
   for (const line of completeLines) {
-    const trimmed = line.trim()
-    if (trimmed === '') continue
-    let event
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    let event;
     try {
-      event = JSON.parse(trimmed)
+      event = JSON.parse(trimmed);
     } catch {
-      continue
+      continue;
     }
     if (event && event.type === 'result') {
-      denials = Array.isArray(event.permission_denials) ? event.permission_denials : []
+      denials = Array.isArray(event.permission_denials) ? event.permission_denials : [];
     }
   }
-  return denials
+  return denials;
 }
 
-const DENIALS_USAGE = 'usage: orchestrate.mjs denials --jsonl <file>'
+const DENIALS_USAGE = 'usage: orchestrate.mjs denials --jsonl <file>';
 
 // Deliberately run-independent: it takes no item id, reads no run.json, and
 // needs no lock. A crashed run whose run file is in whatever state a crash
 // left it in must still be able to answer "did the session get refused
 // anything?", and the transcript on disk is the whole of the evidence.
 function cmdDenials(argv) {
-  let jsonlFile
+  let jsonlFile;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--jsonl') jsonlFile = argv[++i]
+    if (argv[i] === '--jsonl') jsonlFile = argv[++i];
   }
   if (jsonlFile === undefined) {
-    throw new OrchestrateError(DENIALS_USAGE, 1)
+    throw new OrchestrateError(DENIALS_USAGE, 1);
   }
-  let denials
+  let denials;
   try {
-    denials = readPermissionDenials(jsonlFile)
+    denials = readPermissionDenials(jsonlFile);
   } catch (e) {
     // An unreadable transcript answering "no denials" would be
     // indistinguishable from a clean run, and step 5 merges on clean. Exit
     // 1 instead, so the caller has to look.
-    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1)
+    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1);
   }
-  console.log(JSON.stringify({ count: denials.length, denials }))
-  return 0
+  console.log(JSON.stringify({ count: denials.length, denials }));
+  return 0;
 }
 
 // --- task-27: what each dispatched session cost --------------------------
@@ -2519,40 +2516,40 @@ function cmdDenials(argv) {
 // leaves a hole rather than a `0`, because a `0` would claim the session was
 // free (shared/types.ts, RunSessionUsage's own doc comment).
 function finiteOrNull(value) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 export function readSessionUsage(file) {
-  const text = fs.readFileSync(file, 'utf8')
-  const completeLines = text.split('\n').slice(0, -1)
-  let result = null
+  const text = fs.readFileSync(file, 'utf8');
+  const completeLines = text.split('\n').slice(0, -1);
+  let result = null;
   // The init event's session id is the fallback for a result event that
   // carries none — read in the same pass rather than by a second call to
   // findSessionIdInJsonl, which would re-read and re-parse the whole file
   // (these transcripts run to tens of megabytes).
-  let initSessionId = null
+  let initSessionId = null;
   for (const line of completeLines) {
-    const trimmed = line.trim()
-    if (trimmed === '') continue
-    let event
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    let event;
     try {
-      event = JSON.parse(trimmed)
+      event = JSON.parse(trimmed);
     } catch {
-      continue
+      continue;
     }
-    if (!event || typeof event !== 'object') continue
+    if (!event || typeof event !== 'object') continue;
     if (event.type === 'system' && event.subtype === 'init' && typeof event.session_id === 'string' && initSessionId === null) {
-      initSessionId = event.session_id
+      initSessionId = event.session_id;
     }
-    if (event.type === 'result') result = event
+    if (event.type === 'result') result = event;
   }
-  if (result === null) return null
+  if (result === null) return null;
 
-  const usage = result.usage && typeof result.usage === 'object' ? result.usage : {}
+  const usage = result.usage && typeof result.usage === 'object' ? result.usage : {};
   // One key -> that model; several -> all of them joined, since a session
   // that spanned two models is honestly described by neither alone. No key
   // at all -> null, the same hole every numeric field leaves.
-  const models = result.modelUsage && typeof result.modelUsage === 'object' ? Object.keys(result.modelUsage) : []
+  const models = result.modelUsage && typeof result.modelUsage === 'object' ? Object.keys(result.modelUsage) : [];
 
   return {
     sessionId: typeof result.session_id === 'string' ? result.session_id : initSessionId,
@@ -2563,8 +2560,8 @@ export function readSessionUsage(file) {
     cacheReadTokens: finiteOrNull(usage.cache_read_input_tokens),
     cacheCreationTokens: finiteOrNull(usage.cache_creation_input_tokens),
     durationMs: finiteOrNull(result.duration_ms),
-    model: models.length === 0 ? null : models.join(', '),
-  }
+    model: models.length === 0 ? null : models.join(', ')
+  };
 }
 
 // Which dispatch a transcript belongs to, from its FILE NAME and never from
@@ -2579,13 +2576,13 @@ export function readSessionUsage(file) {
 // realistic way to get here is passing ANOTHER item's transcript, and a
 // silent default would file that item's cost against this one forever.
 function transcriptSlot(itemId, file) {
-  const base = path.basename(file).replace(/\.jsonl$/, '')
-  if (base === itemId) return { kind: 'execute' }
-  const retry = new RegExp(`^${escapeForRegExp(itemId)}-retry-(\\d+)$`).exec(base)
-  if (retry) return { kind: 'retry', loop: Number(retry[1]) }
-  const fix = new RegExp(`^${escapeForRegExp(itemId)}-fix-(\\d+)$`).exec(base)
-  if (fix) return { kind: 'fix', loop: Number(fix[1]) }
-  return null
+  const base = path.basename(file).replace(/\.jsonl$/, '');
+  if (base === itemId) return { kind: 'execute' };
+  const retry = new RegExp(`^${escapeForRegExp(itemId)}-retry-(\\d+)$`).exec(base);
+  if (retry) return { kind: 'retry', loop: Number(retry[1]) };
+  const fix = new RegExp(`^${escapeForRegExp(itemId)}-fix-(\\d+)$`).exec(base);
+  if (fix) return { kind: 'fix', loop: Number(fix[1]) };
+  return null;
 }
 
 // Item ids are `^[a-z]+-\d+$` (backlog.mjs enforces it), so nothing that
@@ -2593,20 +2590,20 @@ function transcriptSlot(itemId, file) {
 // alternative is a regex whose safety depends on a rule enforced in another
 // tool's file.
 function escapeForRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // An entry's identity: the transcript slot, not the session id. See
 // transcriptSlot above and RunSessionUsage's own doc comment for why the
 // obvious key does not work.
 function usageSlotKey(entry) {
-  return `${entry.kind}#${entry.loop ?? ''}`
+  return `${entry.kind}#${entry.loop ?? ''}`;
 }
 
 // Named `usage` for the command, which collides awkwardly with this file's
 // `<CMD>_USAGE` convention for help strings. Kept anyway: the command name a
 // person types matters more than the constant name nobody does.
-const USAGE_USAGE = 'usage: orchestrate.mjs usage <itemId> --jsonl <file>'
+const USAGE_USAGE = 'usage: orchestrate.mjs usage <itemId> --jsonl <file>';
 
 // The one writer of RunQueueItem.usage. Run at inspect time (SKILL.md §5),
 // on the same Bash invocation as `stage <id> inspecting`, so it costs the
@@ -2619,41 +2616,41 @@ const USAGE_USAGE = 'usage: orchestrate.mjs usage <itemId> --jsonl <file>'
 // run must still be able to answer "was anything refused", this one WRITES
 // the run file — so it is exactly as bound by the lease as `stage` is.
 function cmdUsage(argv) {
-  const itemId = argv[0]
-  let jsonlFile
+  const itemId = argv[0];
+  let jsonlFile;
   for (let i = 1; i < argv.length; i++) {
-    if (argv[i] === '--jsonl') jsonlFile = argv[++i]
+    if (argv[i] === '--jsonl') jsonlFile = argv[++i];
   }
   if (!itemId || jsonlFile === undefined) {
-    throw new OrchestrateError(USAGE_USAGE, 1)
+    throw new OrchestrateError(USAGE_USAGE, 1);
   }
 
   // Before the run file is opened: a bad file name is a problem with this
   // call, and the caller has to be told which of the three shapes it should
   // have used rather than being told the item is fine and the entry landed.
-  const slot = transcriptSlot(itemId, jsonlFile)
+  const slot = transcriptSlot(itemId, jsonlFile);
   if (slot === null) {
     throw new OrchestrateError(
       `--jsonl ${jsonlFile}: a transcript for ${itemId} must be named ` +
         `${itemId}.jsonl, ${itemId}-retry-<n>.jsonl or ${itemId}-fix-<n>.jsonl — ` +
         `the file name is what says which dispatch this is, and the transcript itself cannot`,
-      1,
-    )
+      1
+    );
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
-  const run = readRun(dir)
-  assertDriver(run)
-  const item = findQueueItem(run, itemId)
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
+  const item = findQueueItem(run, itemId);
 
-  let parsed
+  let parsed;
   try {
-    parsed = readSessionUsage(jsonlFile)
+    parsed = readSessionUsage(jsonlFile);
   } catch (e) {
     // An unreadable transcript is exit 1 for cmdDenials' reason restated:
     // "could not read it" must never be recorded as, or mistaken for, "there
     // was nothing to record".
-    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1)
+    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1);
   }
 
   // A killed session: the transcript stops mid-flight and never reaches its
@@ -2663,12 +2660,12 @@ function cmdUsage(argv) {
   // nothing wrong and has nothing to retry: the inspect step that follows is
   // already about to notice the session died.
   if (parsed === null) {
-    console.error(`no result event in ${jsonlFile}: nothing recorded for ${itemId} (the session did not finish)`)
-    return 0
+    console.error(`no result event in ${jsonlFile}: nothing recorded for ${itemId} (the session did not finish)`);
+    return 0;
   }
 
-  const entry = { ...parsed, kind: slot.kind, endedAt: nowISO() }
-  if (slot.loop !== undefined) entry.loop = slot.loop
+  const entry = { ...parsed, kind: slot.kind, endedAt: nowISO() };
+  if (slot.loop !== undefined) entry.loop = slot.loop;
 
   // `?? []` covers a queue item written before this field existed, which a
   // `--resume` against an older run file genuinely produces. Replace-by-slot
@@ -2676,97 +2673,97 @@ function cmdUsage(argv) {
   // transcript it already recorded (references/recovery.md) leaves one entry
   // rather than two; every OTHER slot is copied through untouched, which is
   // what keeps a fix loop's entry beside the first session's.
-  const existing = item.usage ?? []
-  const key = usageSlotKey(entry)
-  const replaced = existing.some((e) => usageSlotKey(e) === key)
-  item.usage = replaced ? existing.map((e) => (usageSlotKey(e) === key ? entry : e)) : [...existing, entry]
+  const existing = item.usage ?? [];
+  const key = usageSlotKey(entry);
+  const replaced = existing.some((e) => usageSlotKey(e) === key);
+  item.usage = replaced ? existing.map((e) => (usageSlotKey(e) === key ? entry : e)) : [...existing, entry];
 
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
-  console.log(JSON.stringify({ id: itemId, usage: entry }))
-  return 0
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  console.log(JSON.stringify({ id: itemId, usage: entry }));
+  return 0;
 }
 
-const WATCH_USAGE = 'usage: orchestrate.mjs watch <itemId> --pid <p> --jsonl <file> [--interval-ms 30000] [--budget-ms 540000]'
+const WATCH_USAGE = 'usage: orchestrate.mjs watch <itemId> --pid <p> --jsonl <file> [--interval-ms 30000] [--budget-ms 540000]';
 
 function cmdWatch(argv) {
-  const itemId = argv[0]
-  let pidArg
-  let jsonlFile
-  let intervalMs = 30_000
-  let budgetMs = 540_000
+  const itemId = argv[0];
+  let pidArg;
+  let jsonlFile;
+  let intervalMs = 30_000;
+  let budgetMs = 540_000;
   for (let i = 1; i < argv.length; i++) {
-    if (argv[i] === '--pid') pidArg = argv[++i]
-    else if (argv[i] === '--jsonl') jsonlFile = argv[++i]
-    else if (argv[i] === '--interval-ms') intervalMs = Number(argv[++i])
-    else if (argv[i] === '--budget-ms') budgetMs = Number(argv[++i])
+    if (argv[i] === '--pid') pidArg = argv[++i];
+    else if (argv[i] === '--jsonl') jsonlFile = argv[++i];
+    else if (argv[i] === '--interval-ms') intervalMs = Number(argv[++i]);
+    else if (argv[i] === '--budget-ms') budgetMs = Number(argv[++i]);
   }
 
   if (!itemId || pidArg === undefined || jsonlFile === undefined) {
-    throw new OrchestrateError(WATCH_USAGE, 1)
+    throw new OrchestrateError(WATCH_USAGE, 1);
   }
-  const pid = Number(pidArg)
+  const pid = Number(pidArg);
   if (!Number.isInteger(pid) || pid <= 0) {
-    throw new OrchestrateError(`--pid must be a positive integer: ${pidArg}`, 1)
+    throw new OrchestrateError(`--pid must be a positive integer: ${pidArg}`, 1);
   }
   if (!Number.isInteger(intervalMs) || intervalMs <= 0) {
-    throw new OrchestrateError(`--interval-ms must be a positive integer: ${intervalMs}`, 1)
+    throw new OrchestrateError(`--interval-ms must be a positive integer: ${intervalMs}`, 1);
   }
   if (!Number.isInteger(budgetMs) || budgetMs <= 0) {
-    throw new OrchestrateError(`--budget-ms must be a positive integer: ${budgetMs}`, 1)
+    throw new OrchestrateError(`--budget-ms must be a positive integer: ${budgetMs}`, 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const dir = projectDir(orchHome(), resolveProjectRoot());
 
   // Fail fast, before any sleeping happens: an unknown item (or no run at
   // all — readRun's own code-3 "no run exists") is a problem with THIS
   // call, independent of how long the loop below would otherwise run.
-  findQueueItem(readRun(dir), itemId)
+  findQueueItem(readRun(dir), itemId);
 
-  let sessionId = null
-  let elapsed = 0
-  let checks = 0
+  let sessionId = null;
+  let elapsed = 0;
+  let checks = 0;
   for (;;) {
-    const jsonlExists = fs.existsSync(jsonlFile)
-    let newlyFoundSessionId = null
+    const jsonlExists = fs.existsSync(jsonlFile);
+    let newlyFoundSessionId = null;
     if (jsonlExists) {
       if (sessionId === null) {
         try {
-          newlyFoundSessionId = findSessionIdInJsonl(jsonlFile)
+          newlyFoundSessionId = findSessionIdInJsonl(jsonlFile);
         } catch (e) {
           // Anything but ENOENT here (existsSync above already ruled that
           // out) — e.g. `--jsonl` naming a directory — is the "parse
           // wedge" the exit-code contract names: fatal on whichever check
           // hits it, unlike a merely MISSING file below, which gets one
           // interval of grace.
-          throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message}) — this is a parse wedge, not a transient miss`, 1)
+          throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message}) — this is a parse wedge, not a transient miss`, 1);
         }
-        if (newlyFoundSessionId !== null) sessionId = newlyFoundSessionId
+        if (newlyFoundSessionId !== null) sessionId = newlyFoundSessionId;
       }
     } else if (checks > 0) {
-      throw new OrchestrateError(`--jsonl file not found after the first interval: ${jsonlFile}`, 1)
+      throw new OrchestrateError(`--jsonl file not found after the first interval: ${jsonlFile}`, 1);
     }
-    checks++
+    checks++;
 
     // One read-modify-write per tick: the heartbeat's updatedAt bump and a
     // freshly-discovered session id (if any) land in the SAME write, via
     // applyQueueItemFields — the exact function `stage --session` itself
     // uses (see that function's own header comment for why that reuse
     // matters, not just that it is convenient).
-    const run = readRun(dir)
-    assertDriver(run)
+    const run = readRun(dir);
+    assertDriver(run);
     if (newlyFoundSessionId !== null) {
-      applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId })
+      applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId });
     }
-    run.updatedAt = nowISO()
-    writeRunAtomic(dir, run)
+    run.updatedAt = nowISO();
+    writeRunAtomic(dir, run);
 
-    if (!pidAlive(pid)) return 0
+    if (!pidAlive(pid)) return 0;
 
-    elapsed += intervalMs
-    if (elapsed >= budgetMs) return 3
+    elapsed += intervalMs;
+    if (elapsed >= budgetMs) return 3;
 
-    sleepSync(intervalMs)
+    sleepSync(intervalMs);
   }
 }
 
@@ -2787,8 +2784,8 @@ function cmdWatch(argv) {
 // inside the worktree the way a naive port of `stage`'s style might do.
 
 function isPnpmManaged(cwd, pkg) {
-  if (fs.existsSync(path.join(cwd, 'pnpm-lock.yaml'))) return true
-  return typeof pkg.packageManager === 'string' && pkg.packageManager.startsWith('pnpm')
+  if (fs.existsSync(path.join(cwd, 'pnpm-lock.yaml'))) return true;
+  return typeof pkg.packageManager === 'string' && pkg.packageManager.startsWith('pnpm');
 }
 
 // The "obvious" package.json scripts, in the fixed order the brief names:
@@ -2796,15 +2793,15 @@ function isPnpmManaged(cwd, pkg) {
 // a project with just a `test` script gets exactly one command, never two
 // more that are guaranteed to fail as "missing script."
 function packageJsonVerifyCommands(cwd) {
-  let pkg
+  let pkg;
   try {
-    pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'))
+    pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
   } catch {
-    return []
+    return [];
   }
-  const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
-  const runner = isPnpmManaged(cwd, pkg) ? 'pnpm run' : 'npm run'
-  return ['test', 'typecheck', 'build'].filter((name) => scripts[name] !== undefined).map((name) => `${runner} ${name}`)
+  const scripts = pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {};
+  const runner = isPnpmManaged(cwd, pkg) ? 'pnpm run' : 'npm run';
+  return ['test', 'typecheck', 'build'].filter((name) => scripts[name] !== undefined).map((name) => `${runner} ${name}`);
 }
 
 // The item's own `## Done when` fenced commands, read from `cwd`'s copy of
@@ -2814,12 +2811,12 @@ function packageJsonVerifyCommands(cwd) {
 // error — mirroring findUnresolvedCommands' own tolerant style in the gate
 // section above.
 function itemDoneWhenCommands(cwd, itemId) {
-  const found = findItemFilePath(cwd, itemId)
-  if (!found) return []
-  const { body } = readItemForGate(found.path)
-  const doneWhen = extractSection(body, 'Done when')
-  if (doneWhen === undefined) return []
-  return extractDoneWhenCommands(doneWhen)
+  const found = findItemFilePath(cwd, itemId);
+  if (!found) return [];
+  const { body } = readItemForGate(found.path);
+  const doneWhen = extractSection(body, 'Done when');
+  if (doneWhen === undefined) return [];
+  return extractDoneWhenCommands(doneWhen);
 }
 
 // Base commands (verify.json's own `commands` array when it resolves to
@@ -2830,10 +2827,10 @@ function itemDoneWhenCommands(cwd, itemId) {
 // command twice would only double the wall-clock cost of every verify call
 // for zero extra proof.
 function resolveVerifyCommands(cwd, itemId) {
-  let base
-  const verifyJsonPath = path.join(cwd, 'backlog', 'verify.json')
+  let base;
+  const verifyJsonPath = path.join(cwd, 'backlog', 'verify.json');
   try {
-    const parsed = JSON.parse(fs.readFileSync(verifyJsonPath, 'utf8'))
+    const parsed = JSON.parse(fs.readFileSync(verifyJsonPath, 'utf8'));
     if (Array.isArray(parsed.commands)) {
       // Every entry must be a string BEFORE it ever reaches runVerifyCommand
       // below — that function hands `cmd` straight to `spawnSync(cmd, ...)`,
@@ -2845,33 +2842,33 @@ function resolveVerifyCommands(cwd, itemId) {
       // malformed project file. Same "validate before mutate" ordering as
       // everywhere else in this file: this check runs before verify has
       // touched run.json at all, so a bad verify.json still writes nothing.
-      const badEntry = parsed.commands.find((c) => typeof c !== 'string')
+      const badEntry = parsed.commands.find((c) => typeof c !== 'string');
       if (badEntry !== undefined) {
-        throw new OrchestrateError(`${verifyJsonPath}: "commands" must be an array of strings, found ${JSON.stringify(badEntry)}`, 1)
+        throw new OrchestrateError(`${verifyJsonPath}: "commands" must be an array of strings, found ${JSON.stringify(badEntry)}`, 1);
       }
-      base = parsed.commands
+      base = parsed.commands;
     } else {
-      base = packageJsonVerifyCommands(cwd)
+      base = packageJsonVerifyCommands(cwd);
     }
   } catch (e) {
     // Our OWN deliberate throw above must escape this catch untouched — it
     // is not "verify.json doesn't parse," it is "verify.json parses fine
     // and is wrong," and those two need different outcomes (a clean error
     // vs. a silent fallback to package.json).
-    if (e instanceof OrchestrateError) throw e
+    if (e instanceof OrchestrateError) throw e;
     // no backlog/verify.json here, or it doesn't parse at all — package.json
     // scripts is the only other place a baseline command can come from.
-    base = packageJsonVerifyCommands(cwd)
+    base = packageJsonVerifyCommands(cwd);
   }
 
-  const seen = new Set()
-  const all = []
+  const seen = new Set();
+  const all = [];
   for (const cmd of [...base, ...itemDoneWhenCommands(cwd, itemId)]) {
-    if (seen.has(cmd)) continue
-    seen.add(cmd)
-    all.push(cmd)
+    if (seen.has(cmd)) continue;
+    seen.add(cmd);
+    all.push(cmd);
   }
-  return all
+  return all;
 }
 
 // 64 MiB, against Node's own 1 MiB default — see runVerifyCommand for the
@@ -2879,7 +2876,7 @@ function resolveVerifyCommands(cwd, itemId) {
 // unbounded on purpose: a bound this far past any real test suite's console
 // output still stops a runaway command from taking this process's memory
 // down with it, which `maxBuffer: Infinity` would not.
-const VERIFY_MAX_BUFFER = 64 * 1024 * 1024
+const VERIFY_MAX_BUFFER = 64 * 1024 * 1024;
 
 // "Last 20 lines" stops bounding anything when a command emits no newlines —
 // a progress bar rewriting itself with \r, or a single enormous JSON blob, is
@@ -2889,7 +2886,7 @@ const VERIFY_MAX_BUFFER = 64 * 1024 * 1024
 // words are the diagnostic ones). 8 KiB is roughly 20 lines of very long
 // output — wide enough that no realistic 20-line tail is touched by this,
 // narrow enough that run.json stays a state file rather than a log.
-const VERIFY_TAIL_MAX_CHARS = 8 * 1024
+const VERIFY_TAIL_MAX_CHARS = 8 * 1024;
 
 // Runs one command through a shell (so a plain string like `pnpm run test`
 // or a `## Done when` line works exactly as typed, with no argv-splitting
@@ -2922,41 +2919,41 @@ const VERIFY_TAIL_MAX_CHARS = 8 * 1024
 // shut for either — but the recorded row now says which one happened, so
 // nobody is sent to debug a suite that never executed.
 function runVerifyCommand(cmd, cwd) {
-  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', maxBuffer: VERIFY_MAX_BUFFER })
-  const combined = `${result.stdout ?? ''}${result.stderr ?? ''}`
-  const lines = combined.split('\n')
-  const trimmedLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines
-  const tail = trimmedLines.slice(-20).join('\n').slice(-VERIFY_TAIL_MAX_CHARS)
+  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', maxBuffer: VERIFY_MAX_BUFFER });
+  const combined = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  const lines = combined.split('\n');
+  const trimmedLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+  const tail = trimmedLines.slice(-20).join('\n').slice(-VERIFY_TAIL_MAX_CHARS);
   if (result.error) {
-    const why = `could not run this command (${result.error.code ?? 'spawn failed'}): ${result.error.message}`
-    return { cmd, ok: false, tail: tail === '' ? why : `${why}\n${tail}` }
+    const why = `could not run this command (${result.error.code ?? 'spawn failed'}): ${result.error.message}`;
+    return { cmd, ok: false, tail: tail === '' ? why : `${why}\n${tail}` };
   }
-  return { cmd, ok: result.status === 0, tail }
+  return { cmd, ok: result.status === 0, tail };
 }
 
-const VERIFY_USAGE = 'usage: orchestrate.mjs verify <itemId> --cwd <dir> [--json]'
+const VERIFY_USAGE = 'usage: orchestrate.mjs verify <itemId> --cwd <dir> [--json]';
 
 function cmdVerify(argv) {
-  const itemId = argv[0]
-  let cwd
-  let json = false
+  const itemId = argv[0];
+  let cwd;
+  let json = false;
   for (let i = 1; i < argv.length; i++) {
-    if (argv[i] === '--cwd') cwd = argv[++i]
-    else if (argv[i] === '--json') json = true
+    if (argv[i] === '--cwd') cwd = argv[++i];
+    else if (argv[i] === '--json') json = true;
   }
   if (!itemId || cwd === undefined) {
-    throw new OrchestrateError(VERIFY_USAGE, 1)
+    throw new OrchestrateError(VERIFY_USAGE, 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot())
+  const dir = projectDir(orchHome(), resolveProjectRoot());
   // Validated here and the object then DISCARDED: no run at all (readRun's
   // code 3) and an unknown item id (findQueueItem's code 1) must both fail
   // before a single command is spawned, exactly like every other command in
   // this file — but nothing is held across the suite. See the re-read below
   // for why that distinction is not pedantry.
-  findQueueItem(readRun(dir), itemId)
+  findQueueItem(readRun(dir), itemId);
 
-  const commands = resolveVerifyCommands(cwd, itemId)
+  const commands = resolveVerifyCommands(cwd, itemId);
   if (commands.length === 0) {
     // Exit 5: nothing this tool could find to prove the item works — no
     // backlog/verify.json, no package.json test/typecheck/build script, and
@@ -2964,15 +2961,15 @@ function cmdVerify(argv) {
     // written: an item that cannot prove itself has nothing to record, and
     // the caller (the orchestrator loop) parks it rather than merging code
     // nobody has verified — see the design spec's own "Verify" step.
-    if (json) console.log(JSON.stringify([]))
-    else console.log('nothing to verify: no backlog/verify.json, no package.json test/typecheck/build script, and no fenced command under ## Done when')
-    return 5
+    if (json) console.log(JSON.stringify([]));
+    else console.log('nothing to verify: no backlog/verify.json, no package.json test/typecheck/build script, and no fenced command under ## Done when');
+    return 5;
   }
 
   // Every command runs regardless of an earlier one failing — a red first
   // command must never hide a second, independent failure. The overall
   // exit is 1 the moment any row is red, computed after every row has run.
-  const rows = commands.map((cmd) => runVerifyCommand(cmd, cwd))
+  const rows = commands.map((cmd) => runVerifyCommand(cmd, cwd));
 
   // Re-read HERE, after the commands, instead of reusing the object from the
   // validation above. `verify` is the one command in this tool whose middle
@@ -2985,19 +2982,19 @@ function cmdVerify(argv) {
   // Still one atomic write of all the rows at once, never a row at a time:
   // an interrupted verify must leave the run file exactly as it found it, so
   // the merge gate can never read a half-written verification.
-  const run = readRun(dir)
-  assertDriver(run)
-  const item = findQueueItem(run, itemId)
-  item.verification = item.verification.concat(rows)
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
+  const run = readRun(dir);
+  assertDriver(run);
+  const item = findQueueItem(run, itemId);
+  item.verification = item.verification.concat(rows);
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
 
   if (json) {
-    console.log(JSON.stringify(rows))
+    console.log(JSON.stringify(rows));
   } else {
-    for (const row of rows) console.log(`${row.ok ? 'PASS' : 'FAIL'}  ${row.cmd}`)
+    for (const row of rows) console.log(`${row.ok ? 'PASS' : 'FAIL'}  ${row.cmd}`);
   }
-  return rows.every((row) => row.ok) ? 0 : 1
+  return rows.every((row) => row.ok) ? 0 : 1;
 }
 
 // --- reconcile ----------------------------------------------------------
@@ -3028,7 +3025,7 @@ function cmdVerify(argv) {
 // would read an already-delivered branch as unfinished work and dispatch
 // straight back into it — redoing an item whose result is already sitting
 // on disk as the deliverable.
-const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'])
+const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked']);
 
 // The fixed suggestion vocabulary the brief names, in priority order:
 //   1. Neither the worktree directory nor the branch survive at all —
@@ -3051,33 +3048,33 @@ const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'branched', 'failed', 'skip
 //      itself died before committing/reviewing/merging. Reconcile cannot
 //      tell those two apart from the outside, so a human looks (`inspect`).
 function suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId }) {
-  if (!worktreeExists && !itemBranchExists) return 'park'
-  if (!worktreeExists) return 'inspect'
-  if (marker) return sessionId ? 'resume-session' : 'redispatch-after-stop'
-  return 'inspect'
+  if (!worktreeExists && !itemBranchExists) return 'park';
+  if (!worktreeExists) return 'inspect';
+  if (marker) return sessionId ? 'resume-session' : 'redispatch-after-stop';
+  return 'inspect';
 }
 
 function cmdReconcile(argv) {
-  const json = argv.includes('--json')
+  const json = argv.includes('--json');
 
-  const projectRoot = resolveProjectRoot()
-  const dir = projectDir(orchHome(), projectRoot)
-  const run = readRun(dir) // never written back — see this function's own header comment
+  const projectRoot = resolveProjectRoot();
+  const dir = projectDir(orchHome(), projectRoot);
+  const run = readRun(dir); // never written back — see this function's own header comment
 
   const report = run.queue
     .filter((item) => !RECONCILE_TERMINAL_STAGES.has(item.stage))
     .map((item) => {
-      const worktreeExists = !!item.worktree && fs.existsSync(item.worktree)
-      const itemBranchExists = branchExists(projectRoot, item.branch)
-      let itemFileLocation = null
-      let started = false
-      let marker = false
+      const worktreeExists = !!item.worktree && fs.existsSync(item.worktree);
+      const itemBranchExists = branchExists(projectRoot, item.branch);
+      let itemFileLocation = null;
+      let started = false;
+      let marker = false;
       if (worktreeExists) {
-        const found = findItemFilePath(item.worktree, item.id)
+        const found = findItemFilePath(item.worktree, item.id);
         if (found) {
-          itemFileLocation = `${found.section}/${found.state}`
-          started = itemFrontmatterHasKey(found.path, 'started')
-          marker = itemHasPhaseMarker(found.path)
+          itemFileLocation = `${found.section}/${found.state}`;
+          started = itemFrontmatterHasKey(found.path, 'started');
+          marker = itemHasPhaseMarker(found.path);
         }
       }
       return {
@@ -3089,21 +3086,21 @@ function cmdReconcile(argv) {
         started,
         marker,
         sessionId: item.sessionId,
-        suggestion: suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId: item.sessionId }),
-      }
-    })
+        suggestion: suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId: item.sessionId })
+      };
+    });
 
   if (json) {
-    console.log(JSON.stringify(report))
+    console.log(JSON.stringify(report));
   } else {
     for (const row of report) {
       console.log(
         `${row.id}  stage=${row.stage}  worktree=${row.worktreeExists}  branch=${row.branchExists}  ` +
-          `marker=${row.marker}  session=${row.sessionId ?? '(none)'}  -> ${row.suggestion}`,
-      )
+          `marker=${row.marker}  session=${row.sessionId ?? '(none)'}  -> ${row.suggestion}`
+      );
     }
   }
-  return 0
+  return 0;
 }
 
 // --- abort ----------------------------------------------------------------
@@ -3176,25 +3173,25 @@ function cmdReconcile(argv) {
 // and the exact `backlog.mjs stop <id>` command a human (or a resumed
 // skill run — Task 7) needs, so nothing is left silently untracked either.
 function cmdAbort() {
-  const projectRoot = resolveProjectRoot()
-  const dir = projectDir(orchHome(), projectRoot)
-  const run = readRun(dir)
+  const projectRoot = resolveProjectRoot();
+  const dir = projectDir(orchHome(), projectRoot);
+  const run = readRun(dir);
   // A takeover, not an assertion — see `takeOverRun` for why abort of all
   // commands may not be refused on a dead session's lease. It also has to be a
   // real write rather than an in-memory pass: `cmdFinish` below re-reads the
   // file and runs `assertDriver` on what it finds, so a takeover that never
   // landed on disk would refuse this run's own ending.
-  takeOverRun(dir, run)
+  takeOverRun(dir, run);
 
-  const removedIds = []
-  const preservedIds = []
-  const keptBranchIds = []
+  const removedIds = [];
+  const preservedIds = [];
+  const keptBranchIds = [];
 
   for (const item of run.queue) {
-    let marker = false
+    let marker = false;
     if (item.worktree && fs.existsSync(item.worktree)) {
-      const found = findItemFilePath(item.worktree, item.id)
-      marker = !!(found && itemHasPhaseMarker(found.path))
+      const found = findItemFilePath(item.worktree, item.id);
+      marker = !!(found && itemHasPhaseMarker(found.path));
     }
 
     if (marker) {
@@ -3213,10 +3210,10 @@ function cmdAbort() {
           `since removing it would destroy uncommitted work this tool has no way to save first. Run ` +
           `\`backlog.mjs stop ${item.id}\` in ${item.worktree} to bill the dead interval and clear the marker, ` +
           `then remove the worktree (\`git -C ${projectRoot} worktree remove ${item.worktree}\`) and branch ` +
-          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand or via a fresh abort.`,
-      })
-      preservedIds.push(item.id)
-      continue
+          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand or via a fresh abort.`
+      });
+      preservedIds.push(item.id);
+      continue;
     }
 
     if (item.worktree) {
@@ -3228,7 +3225,7 @@ function cmdAbort() {
       // uncommitted modifications, a risk `worktree remove`/`branch -D`
       // (which only ever touch THIS item's own worktree/branch, never the
       // main tree's own working copy) simply do not carry.
-      spawnSync('git', ['-C', projectRoot, 'worktree', 'remove', '--force', item.worktree])
+      spawnSync('git', ['-C', projectRoot, 'worktree', 'remove', '--force', item.worktree]);
     }
     if (item.branch) {
       if (item.stage === 'branched') {
@@ -3249,23 +3246,23 @@ function cmdAbort() {
             `branch mode's own terminal stage (design §5.3), so its branch is the deliverable and was never ` +
             `merged into main. The worktree at ${item.worktree ?? '(none recorded)'} was still removed since it ` +
             `serves no further purpose once the branch exists as a ref; the branch itself needs no action — it ` +
-            `is simply waiting to be reviewed or merged by hand.`,
-        })
-        keptBranchIds.push(item.id)
+            `is simply waiting to be reviewed or merged by hand.`
+        });
+        keptBranchIds.push(item.id);
       } else {
         // Every other terminal (or non-terminal) stage's branch is
         // genuinely disposable here — most notably `merged`, whose branch
         // was already deleted by the run itself at merge time (§9), which
         // makes this call a harmless no-op for that stage rather than a
         // second case needing its own guard.
-        spawnSync('git', ['-C', projectRoot, 'branch', '-D', item.branch])
+        spawnSync('git', ['-C', projectRoot, 'branch', '-D', item.branch]);
       }
     }
-    if (item.worktree || (item.branch && item.stage !== 'branched')) removedIds.push(item.id)
+    if (item.worktree || (item.branch && item.stage !== 'branched')) removedIds.push(item.id);
   }
 
-  run.updatedAt = nowISO()
-  writeRunAtomic(dir, run)
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
 
   // A one-line human-readable summary, printed BEFORE cmdFinish's own
   // `{"status":"aborted"}` JSON line, so a human watching this run does not
@@ -3280,10 +3277,10 @@ function cmdAbort() {
   console.log(
     `abort: removed ${removedIds.length} item(s)${removedIds.length ? ` (${removedIds.join(', ')})` : ''}; ` +
       `kept ${keptBranchIds.length} branch(es) already staged 'branched'${keptBranchIds.length ? ` (${keptBranchIds.join(', ')} — see attention)` : ''}; ` +
-      `left ${preservedIds.length} in place with an in-progress marker${preservedIds.length ? ` (${preservedIds.join(', ')} — see attention)` : ''}`,
-  )
+      `left ${preservedIds.length} in place with an in-progress marker${preservedIds.length ? ` (${preservedIds.join(', ')} — see attention)` : ''}`
+  );
 
-  return cmdFinish(['--status', 'aborted'])
+  return cmdFinish(['--status', 'aborted']);
 }
 
 const USAGE = `usage: orchestrate.mjs <command>
@@ -3305,7 +3302,7 @@ commands:
   usage        record what one dispatched session cost, from its transcript
   verify       run the project's proof commands and record them
   reconcile    read-only crash-recovery report
-  abort        tear down worktrees/branches and end the run`
+  abort        tear down worktrees/branches and end the run`;
 
 // --- CLI dispatch --------------------------------------------------------
 // Thin by design (see the "commands" section comment above): main only maps
@@ -3358,31 +3355,31 @@ commands:
 //      write nothing more and exit (references/recovery.md). `unpause` is the
 //      one writing command exempt from it; see cmdUnpause for why.
 export function main(argv) {
-  const [cmd, ...rest] = argv
+  const [cmd, ...rest] = argv;
   try {
-    if (cmd === 'init') return cmdInit(rest)
-    if (cmd === 'claim') return cmdClaim(rest)
-    if (cmd === 'plan') return cmdPlan(rest)
-    if (cmd === 'stage') return cmdStage(rest)
-    if (cmd === 'merge-mode') return cmdMergeMode(rest)
-    if (cmd === 'heartbeat') return cmdHeartbeat(rest)
-    if (cmd === 'attention') return cmdAttention(rest)
-    if (cmd === 'assume') return cmdAssume(rest)
-    if (cmd === 'finish') return cmdFinish(rest)
-    if (cmd === 'unpause') return cmdUnpause()
-    if (cmd === 'status') return cmdStatus(rest)
-    if (cmd === 'watch') return cmdWatch(rest)
-    if (cmd === 'denials') return cmdDenials(rest)
-    if (cmd === 'usage') return cmdUsage(rest)
-    if (cmd === 'verify') return cmdVerify(rest)
-    if (cmd === 'reconcile') return cmdReconcile(rest)
-    if (cmd === 'abort') return cmdAbort()
-    console.error(`unknown command: ${cmd ?? '(none)'}\n\n${USAGE}`)
-    return 1
+    if (cmd === 'init') return cmdInit(rest);
+    if (cmd === 'claim') return cmdClaim(rest);
+    if (cmd === 'plan') return cmdPlan(rest);
+    if (cmd === 'stage') return cmdStage(rest);
+    if (cmd === 'merge-mode') return cmdMergeMode(rest);
+    if (cmd === 'heartbeat') return cmdHeartbeat(rest);
+    if (cmd === 'attention') return cmdAttention(rest);
+    if (cmd === 'assume') return cmdAssume(rest);
+    if (cmd === 'finish') return cmdFinish(rest);
+    if (cmd === 'unpause') return cmdUnpause();
+    if (cmd === 'status') return cmdStatus(rest);
+    if (cmd === 'watch') return cmdWatch(rest);
+    if (cmd === 'denials') return cmdDenials(rest);
+    if (cmd === 'usage') return cmdUsage(rest);
+    if (cmd === 'verify') return cmdVerify(rest);
+    if (cmd === 'reconcile') return cmdReconcile(rest);
+    if (cmd === 'abort') return cmdAbort();
+    console.error(`unknown command: ${cmd ?? '(none)'}\n\n${USAGE}`);
+    return 1;
   } catch (e) {
-    if (!(e instanceof OrchestrateError)) throw e
-    console.error(e.message)
-    return e.code
+    if (!(e instanceof OrchestrateError)) throw e;
+    console.error(e.message);
+    return e.code;
   }
 }
 
@@ -3403,5 +3400,5 @@ export function main(argv) {
 // close it rather than restore `process.exit()`, which would bring the
 // truncation back with it.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exitCode = main(process.argv.slice(2))
+  process.exitCode = main(process.argv.slice(2));
 }

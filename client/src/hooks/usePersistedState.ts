@@ -13,9 +13,7 @@ export function usePersistedState<T>(key: string, fallback: T): [T, (v: T) => vo
       const raw = localStorage.getItem(key);
       if (!raw) return fallback;
       const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? { ...fallback, ...parsed }
-        : parsed;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...fallback, ...parsed } : parsed;
     } catch {
       return fallback;
     }

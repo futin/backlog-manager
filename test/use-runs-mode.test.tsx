@@ -49,18 +49,25 @@ describe('useRunsMode', () => {
     section must never have is rendering neither surface, so an unrecognised
     value reads as `runs` rather than as itself.
   */
-  it.each([['"banana"', 'a word outside the union'], ['7', 'a number'], ['not json', 'not JSON at all']])(
-    'clamps %s (%s) back to runs', (raw) => {
-      localStorage.setItem(RUNS_MODE_KEY, raw);
+  it.each([
+    ['"banana"', 'a word outside the union'],
+    ['7', 'a number'],
+    ['not json', 'not JSON at all']
+  ])('clamps %s (%s) back to runs', (raw) => {
+    localStorage.setItem(RUNS_MODE_KEY, raw);
 
-      render(<Reader id="a" />);
+    render(<Reader id="a" />);
 
-      expect(screen.getByRole('button', { name: 'a:runs' })).toBeInTheDocument();
-    }
-  );
+    expect(screen.getByRole('button', { name: 'a:runs' })).toBeInTheDocument();
+  });
 
   it('carries one reader’s write to every other mounted reader', async () => {
-    render(<><Reader id="a" /><Reader id="b" /></>);
+    render(
+      <>
+        <Reader id="a" />
+        <Reader id="b" />
+      </>
+    );
 
     await userEvent.click(screen.getByRole('button', { name: 'a:runs' }));
 

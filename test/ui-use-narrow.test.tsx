@@ -16,8 +16,12 @@ function installMatchMedia(matches: boolean) {
   const mql = {
     matches,
     media: NARROW_QUERY,
-    addEventListener: (_: string, l: (e: MediaQueryListEvent) => void) => { listeners.add(l); },
-    removeEventListener: (_: string, l: (e: MediaQueryListEvent) => void) => { listeners.delete(l); }
+    addEventListener: (_: string, l: (e: MediaQueryListEvent) => void) => {
+      listeners.add(l);
+    },
+    removeEventListener: (_: string, l: (e: MediaQueryListEvent) => void) => {
+      listeners.delete(l);
+    }
   };
   const impl = jest.fn(() => mql);
   Object.defineProperty(window, 'matchMedia', { value: impl, configurable: true, writable: true });

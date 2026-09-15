@@ -56,22 +56,27 @@ function ago(ms: number): string {
 function queueItem(over: Partial<RunQueueItem> & { id: string; stage: RunStage }): RunQueueItem {
   return {
     title: 'a queue item',
-    sessionId: null, worktree: null, branch: null, permissionMode: null,
-    fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null, assumptions: [],
+    sessionId: null,
+    worktree: null,
+    branch: null,
+    permissionMode: null,
+    fixLoops: 0,
+    stageAt: {},
+    verification: [],
+    questions: [],
+    note: null,
+    assumptions: [],
     ...over
   };
 }
 
 /** The state class the stepper puts on one row's dot for one stage. */
 function dotState(itemId: string, stage: RunStage): string {
-  const dot = screen
-    .getByTestId(`run-drawer-stepper-${itemId}`)
-    .querySelector(`[data-stage="${stage}"]`) as HTMLElement | null;
+  const dot = screen.getByTestId(`run-drawer-stepper-${itemId}`).querySelector(`[data-stage="${stage}"]`) as HTMLElement | null;
   if (dot === null) throw new Error(`no ${stage} dot on row ${itemId}`);
   // `stalled` joined the three original states with bug-15 — the stage a
   // stopped run died on, which is neither "here right now" nor "left behind".
-  const state = ['filled', 'current', 'stalled', 'hollow']
-    .find((s) => dot.classList.contains(`run-stepper-dot-${s}`));
+  const state = ['filled', 'current', 'stalled', 'hollow'].find((s) => dot.classList.contains(`run-stepper-dot-${s}`));
   if (state === undefined) throw new Error(`${stage} dot on ${itemId} carries no state class`);
   return state;
 }
@@ -112,12 +117,7 @@ describe('RunStrip run elapsed', () => {
   it('freezes a finished run at what it actually took, not at time since it started', () => {
     const startedAt = ago(6 * 60 * 60_000);
     const updatedAt = new Date(Date.parse(startedAt) + 552_000).toISOString();
-    render(
-      <RunStrip
-        run={runPayload({ status: 'done', fresh: true, startedAt, updatedAt })}
-        onOpen={() => {}}
-      />
-    );
+    render(<RunStrip run={runPayload({ status: 'done', fresh: true, startedAt, updatedAt })} onOpen={() => {}} />);
     expect(screen.getByTestId('run-strip-elapsed')).toHaveTextContent('9m');
   });
 });
@@ -146,13 +146,7 @@ describe('RunDrawer meta time', () => {
   });
 
   it('renders nothing rather than a dangling separator when neither stamp parses', () => {
-    render(
-      <RunDrawer
-        run={runPayload({ status: 'done', fresh: false, startedAt: 'nope', updatedAt: 'nope' })}
-        onClose={() => {}}
-      {...CONTROL_PROPS}
-      />
-    );
+    render(<RunDrawer run={runPayload({ status: 'done', fresh: false, startedAt: 'nope', updatedAt: 'nope' })} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-drawer-time')).not.toBeInTheDocument();
   });
 });
@@ -197,10 +191,13 @@ describe('RunDrawer row times', () => {
 
   it('reads an active row as elapsed rather than finished', () => {
     const run = runPayload({
-      queue: [queueItem({
-        id: 'task-14', stage: 'reviewing',
-        stageAt: { pending: ago(3_000_000), dispatched: ago(300_000), reviewing: ago(120_000) }
-      })]
+      queue: [
+        queueItem({
+          id: 'task-14',
+          stage: 'reviewing',
+          stageAt: { pending: ago(3_000_000), dispatched: ago(300_000), reviewing: ago(120_000) }
+        })
+      ]
     });
     render(<RunDrawer run={run} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.getByTestId('run-drawer-time-task-14')).toHaveTextContent('5m 00s elapsed');
@@ -241,10 +238,13 @@ describe('RunDrawer stage stepper', () => {
 
   it('captions an active row with the stage it is in and how long it has been there', () => {
     const run = runPayload({
-      queue: [queueItem({
-        id: 'task-14', stage: 'reviewing',
-        stageAt: { dispatched: ago(300_000), reviewing: ago(120_000) }
-      })]
+      queue: [
+        queueItem({
+          id: 'task-14',
+          stage: 'reviewing',
+          stageAt: { dispatched: ago(300_000), reviewing: ago(120_000) }
+        })
+      ]
     });
     render(<RunDrawer run={run} onClose={() => {}} {...CONTROL_PROPS} />);
     const note = screen.getByTestId('run-drawer-stage-note-task-14');
@@ -354,18 +354,20 @@ describe('RunDrawer rows of a run that stopped', () => {
       fresh: false,
       startedAt: iso(900_000),
       updatedAt: stopped,
-      queue: [queueItem({
-        id: 'task-14',
-        stage: 'reviewing',
-        stageAt: { pending: iso(900_000), dispatched: iso(504_000), reviewing: iso(444_000) }
-      })]
+      queue: [
+        queueItem({
+          id: 'task-14',
+          stage: 'reviewing',
+          stageAt: { pending: iso(900_000), dispatched: iso(504_000), reviewing: iso(444_000) }
+        })
+      ]
     });
   }
 
   // dispatched → the run's last heartbeat = 504_000ms, 8m 24s. Not the ~24h
   // `now − dispatched` this row printed before the fix, and identical on
   // every re-render since nothing in the reading touches the wall clock.
-  it('freezes an in-flight row at the run\'s last heartbeat instead of counting to now', () => {
+  it("freezes an in-flight row at the run's last heartbeat instead of counting to now", () => {
     render(<RunDrawer run={abortedPayload()} onClose={() => {}} {...CONTROL_PROPS} />);
     const time = screen.getByTestId('run-drawer-time-task-14');
     expect(time).toHaveTextContent('8m 24s elapsed');
@@ -413,11 +415,13 @@ describe('RunDrawer rows of a run that stopped', () => {
       status: 'failed',
       fresh: false,
       updatedAt: 'nope',
-      queue: [queueItem({
-        id: 'task-14',
-        stage: 'reviewing',
-        stageAt: { pending: ago(900_000), dispatched: ago(504_000), reviewing: ago(444_000) }
-      })]
+      queue: [
+        queueItem({
+          id: 'task-14',
+          stage: 'reviewing',
+          stageAt: { pending: ago(900_000), dispatched: ago(504_000), reviewing: ago(444_000) }
+        })
+      ]
     });
     render(<RunDrawer run={unreadable} onClose={() => {}} {...CONTROL_PROPS} />);
     expect(screen.queryByTestId('run-drawer-time-task-14')).not.toBeInTheDocument();

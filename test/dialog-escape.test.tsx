@@ -26,36 +26,56 @@ import { useState } from 'react';
 import ArchiveView from '../client/src/components/archive/ArchiveView';
 import BoardView from '../client/src/components/board/BoardView';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
-import type {
-  AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 
 const READY: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha']
 };
 
 /* Archive shows an item only once it is stale, Board only while it is fresh —
    the same corpus therefore cannot serve both hosts, so each gets its own
    `updated` stamp. Relative to now for the reason archive.test.tsx states: a
    literal date changes meaning as the calendar moves past it. */
-const daysAgo = (days: number): string =>
-  `${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
+const daysAgo = (days: number): string => `${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
-    id: 'task-1', title: 'a task', created: '2026-08-20', started: '', tags: [],
-    updated: daysAgo(1), lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0,
-    groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md'
+    id: 'task-1',
+    title: 'a task',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: daysAgo(1),
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'tasks',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: true,
+    path: '/abs/alpha/backlog/tasks/open/task-1.md'
   };
   return { ...base, ...over };
 }
 
 const PROJECTS: ProjectSummary[] = [
-  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } }
+  {
+    name: 'alpha',
+    path: '/abs/alpha',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+  }
 ];
 
 const realFetch = global.fetch;
@@ -71,13 +91,21 @@ function stubFetch(items: BacklogItem[]): void {
     if (url.includes('/api/items/body')) {
       return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') } as Response);
     }
-    const payload: unknown = url.includes('/api/agents/status') ? READY
-      : url.includes('/api/orchestrator/runs') ? ({ runs: [], starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/agents/plan') ? {
-          action: 'execute', prompt: 'do it', project: 'alpha',
-          allowedModes: ['plan', 'acceptEdits'], defaultMode: 'acceptEdits'
-        }
-          : url.includes('/api/projects') ? PROJECTS : index;
+    const payload: unknown = url.includes('/api/agents/status')
+      ? READY
+      : url.includes('/api/orchestrator/runs')
+        ? ({ runs: [], starting: [] } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/agents/plan')
+          ? {
+              action: 'execute',
+              prompt: 'do it',
+              project: 'alpha',
+              allowedModes: ['plan', 'acceptEdits'],
+              defaultMode: 'acceptEdits'
+            }
+          : url.includes('/api/projects')
+            ? PROJECTS
+            : index;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
 }
@@ -111,9 +139,7 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
 
     await userEvent.keyboard('{Escape}');
 
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument());
     expect(screen.getByRole('dialog', { name: 'a task' })).toBeInTheDocument();
   });
 
@@ -123,14 +149,10 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
     await openDrawerThenSheet();
 
     await userEvent.keyboard('{Escape}');
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument());
     await userEvent.keyboard('{Escape}');
 
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'a task' })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'a task' })).not.toBeInTheDocument());
   });
 
   /* The case that catches a registration effect keyed on `[onClose]`. Both
@@ -149,9 +171,7 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
 
     await userEvent.keyboard('{Escape}');
 
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument());
     expect(screen.getByRole('dialog', { name: 'a task' })).toBeInTheDocument();
   });
 
@@ -169,9 +189,7 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
 
     await userEvent.keyboard('{Escape}');
 
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: /dispatch bug-1/ })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /dispatch bug-1/ })).not.toBeInTheDocument());
     expect(screen.getByRole('dialog', { name: 'a task' })).toBeInTheDocument();
   });
 });

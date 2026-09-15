@@ -135,11 +135,7 @@ function segmentState(
   state: StepperDot['state'],
   total: number
 ): { in: 'none' | 'done' | 'live' | 'stalled' | 'idle'; out: 'none' | 'done' | 'idle' } {
-  const into = i === 0
-    ? 'none'
-    : i <= lastVisited
-      ? state === 'current' ? 'live' : state === 'stalled' ? 'stalled' : 'done'
-      : 'idle';
+  const into = i === 0 ? 'none' : i <= lastVisited ? (state === 'current' ? 'live' : state === 'stalled' ? 'stalled' : 'done') : 'idle';
   const out = i === total - 1 ? 'none' : i < lastVisited ? 'done' : 'idle';
   return { in: into, out };
 }
@@ -203,7 +199,12 @@ function trackValue(
   return { text: '—', modifier: 'none' };
 }
 
-export function StageTrack({ item, now, live, mergeModeEffective }: {
+export function StageTrack({
+  item,
+  now,
+  live,
+  mergeModeEffective
+}: {
   item: Pick<RunQueueItem, 'id' | 'stage' | 'stageAt' | 'fixLoops'>;
   now: number | null;
   live: boolean;
@@ -227,18 +228,10 @@ export function StageTrack({ item, now, live, mergeModeEffective }: {
       {dots.map((dot, i) => {
         const { in: dataIn, out: dataOut } = segmentState(i, lastVisited, dot.state, dots.length);
         const value = trackValue(dot, item, now, spans, terminal);
-        const valueClass = ['run-track-val', value.modifier !== null && `run-track-val-${value.modifier}`]
-          .filter(Boolean)
-          .join(' ');
+        const valueClass = ['run-track-val', value.modifier !== null && `run-track-val-${value.modifier}`].filter(Boolean).join(' ');
 
         return (
-          <div
-            key={dot.stage}
-            className="run-track-node"
-            data-testid={`run-track-${item.id}-${dot.stage}`}
-            data-in={dataIn}
-            data-out={dataOut}
-          >
+          <div key={dot.stage} className="run-track-node" data-testid={`run-track-${item.id}-${dot.stage}`} data-in={dataIn} data-out={dataOut}>
             <span className={`run-track-dot run-track-dot-${dot.state}`} aria-hidden="true" />
             {dot.stage === 'fixing' && item.fixLoops > 0 && (
               <span

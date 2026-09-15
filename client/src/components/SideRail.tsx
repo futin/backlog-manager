@@ -87,56 +87,58 @@ export function SideRail({ section, onChange }: Props) {
 
   return (
     <nav className="rail" aria-label="Sections" data-hidden={hidden ? 'true' : undefined}>
-      {narrow
-        ? (
-          <div className="rail-bar">
-            {brand}
-            <button
-              type="button"
-              className="rail-menu"
-              aria-label="Menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((o) => !o)}
-            >
-              ☰
-            </button>
-          </div>
-        )
-        : brand}
-
-      {(!narrow || menuOpen) && TABS.map((t) => (
-        <div key={t.id}>
-          {t.id === 'settings' && <div className="rail-rule" aria-hidden="true" />}
-          <button
-            className={section === t.id ? 'rail-link on' : 'rail-link'}
-            aria-current={section === t.id ? 'page' : undefined}
-            onClick={() => { onChange(t.id); setMenuOpen(false); }}
-          >
-            <RailIcon section={t.id} />
-            {t.label}
+      {narrow ? (
+        <div className="rail-bar">
+          {brand}
+          <button type="button" className="rail-menu" aria-label="Menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
+            ☰
           </button>
-          {t.id === 'runs' && treeOpen('runs') && (
-            /* `aria-current="true"` on the open tree entry, not `"page"`: the
+        </div>
+      ) : (
+        brand
+      )}
+
+      {(!narrow || menuOpen) &&
+        TABS.map((t) => (
+          <div key={t.id}>
+            {t.id === 'settings' && <div className="rail-rule" aria-hidden="true" />}
+            <button
+              className={section === t.id ? 'rail-link on' : 'rail-link'}
+              aria-current={section === t.id ? 'page' : undefined}
+              onClick={() => {
+                onChange(t.id);
+                setMenuOpen(false);
+              }}
+            >
+              <RailIcon section={t.id} />
+              {t.label}
+            </button>
+            {t.id === 'runs' && treeOpen('runs') && (
+              /* `aria-current="true"` on the open tree entry, not `"page"`: the
                section row above it is what holds `page`, and two elements
                claiming to be the current page would leave a reader with two
                answers to one question. The tree entry is the current ITEM
                within that page, which is what the bare `true` means. */
-            <div className="rail-sub" role="group" aria-label="Runs views">
-              {RUNS_MODES.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={runsMode === m && section === 'runs' ? 'rail-sublink on' : 'rail-sublink'}
-                  aria-current={runsMode === m && section === 'runs' ? 'true' : undefined}
-                  onClick={() => { setRunsMode(m); onChange('runs'); setMenuOpen(false); }}
-                >
-                  {RAIL_SUB_LABEL[m]}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+              <div className="rail-sub" role="group" aria-label="Runs views">
+                {RUNS_MODES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={runsMode === m && section === 'runs' ? 'rail-sublink on' : 'rail-sublink'}
+                    aria-current={runsMode === m && section === 'runs' ? 'true' : undefined}
+                    onClick={() => {
+                      setRunsMode(m);
+                      onChange('runs');
+                      setMenuOpen(false);
+                    }}
+                  >
+                    {RAIL_SUB_LABEL[m]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
     </nav>
   );
 }
@@ -154,7 +156,10 @@ function useRailHidden(narrow: boolean, menuOpen: boolean): boolean {
   const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
-    if (!narrow || menuOpen) { setHidden(false); return; }
+    if (!narrow || menuOpen) {
+      setHidden(false);
+      return;
+    }
     let last = window.scrollY;
     const onScroll = (): void => {
       const y = window.scrollY;
@@ -180,9 +185,16 @@ function useRailHidden(narrow: boolean, menuOpen: boolean): boolean {
 function RailIcon({ section }: { section: Section }) {
   return (
     <svg
-      className="rail-ic" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"
-      fill="none" stroke="currentColor" strokeWidth="1.5"
-      strokeLinecap="round" strokeLinejoin="round"
+      className="rail-ic"
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       {ICON_PATHS[section]}
     </svg>
@@ -205,11 +217,31 @@ const RAIL_SUB_LABEL: Record<RunsMode, string> = {
 
 const ICON_PATHS: Record<Section, ReactNode> = {
   // Three columns — the board's own shape.
-  board: <><path d="M2.5 2.5h3v11h-3zM6.5 2.5h3v7h-3zM10.5 2.5h3v11h-3z" /></>,
+  board: (
+    <>
+      <path d="M2.5 2.5h3v11h-3zM6.5 2.5h3v7h-3zM10.5 2.5h3v11h-3z" />
+    </>
+  ),
   // A play triangle inside a circle: a run is something that is going.
-  runs: <><circle cx="8" cy="8" r="5.75" /><path d="M6.75 5.75 10.5 8l-3.75 2.25z" /></>,
+  runs: (
+    <>
+      <circle cx="8" cy="8" r="5.75" />
+      <path d="M6.75 5.75 10.5 8l-3.75 2.25z" />
+    </>
+  ),
   // A lidded box.
-  archive: <><path d="M2 4.5h12v2.5H2zM3 7v6.5h10V7" /><path d="M6.5 9.5h3" /></>,
+  archive: (
+    <>
+      <path d="M2 4.5h12v2.5H2zM3 7v6.5h10V7" />
+      <path d="M6.5 9.5h3" />
+    </>
+  ),
   // A slider row — two tracks, two handles.
-  settings: <><path d="M2.5 5.5h11M2.5 10.5h11" /><circle cx="6" cy="5.5" r="1.75" /><circle cx="10.5" cy="10.5" r="1.75" /></>
+  settings: (
+    <>
+      <path d="M2.5 5.5h11M2.5 10.5h11" />
+      <circle cx="6" cy="5.5" r="1.75" />
+      <circle cx="10.5" cy="10.5" r="1.75" />
+    </>
+  )
 };

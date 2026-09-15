@@ -126,12 +126,7 @@ function ageInDays(stamp: string, now: number): number | null {
  * `useNow`, every test pins a fixed instant), so nothing changed but the
  * signature.
  */
-export function isStale(
-  item: BacklogItem,
-  windowDays: number,
-  now: number,
-  runs: OrchestratorRunsPayload['runs']
-): boolean {
+export function isStale(item: BacklogItem, windowDays: number, now: number, runs: OrchestratorRunsPayload['runs']): boolean {
   if (item.status !== 'open') return false;
   if (isInProgress(item) || runHoldsItem(item, runs)) return false;
 
@@ -157,11 +152,6 @@ export function isStale(
  * needs the plain staleness answer for a task that this function deliberately
  * keeps on the board.
  */
-export function leavesBoard(
-  item: BacklogItem,
-  windowDays: number,
-  now: number,
-  runs: OrchestratorRunsPayload['runs']
-): boolean {
+export function leavesBoard(item: BacklogItem, windowDays: number, now: number, runs: OrchestratorRunsPayload['runs']): boolean {
   return item.section !== 'tasks' && isStale(item, windowDays, now, runs);
 }

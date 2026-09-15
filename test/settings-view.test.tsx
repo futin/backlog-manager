@@ -21,16 +21,24 @@ import type { AgentsStatus } from '../shared/types';
 // `describe('the Claude Agents group', …)` cases below override this stub
 // per case to exercise the other states.
 const DEFAULT_AGENTS_STATUS: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: []
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: []
 };
 
 describe('SettingsView', () => {
   beforeEach(() => {
     localStorage.clear();
-    global.fetch = jest.fn(() => Promise.resolve({
-      ok: true, status: 200, json: () => Promise.resolve(DEFAULT_AGENTS_STATUS)
-    } as Response)) as jest.Mock;
+    global.fetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(DEFAULT_AGENTS_STATUS)
+      } as Response)
+    ) as jest.Mock;
   });
 
   function renderView() {
@@ -92,8 +100,11 @@ describe('SettingsView', () => {
   it('offers every rail section as a landing choice, plus Last used', async () => {
     renderView();
     const picker = screen.getByLabelText('Opens on');
-    expect(within(picker).getAllByRole('option').map((o) => o.textContent))
-      .toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Settings']);
+    expect(
+      within(picker)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Settings']);
 
     // Archive rather than Board, because Board is what an unrecognised value
     // resolves to anyway — picking it could pass on a picker that stored
@@ -126,12 +137,21 @@ describe('SettingsView', () => {
     });
 
     it('reports a healthy dashboard and the project count', async () => {
-      global.fetch = jest.fn(() => Promise.resolve({
-        ok: true, status: 200, json: () => Promise.resolve({
-          enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-          spawnMaxPermission: 'auto', projectPaths: ['/a', '/b']
-        })
-      } as Response)) as jest.Mock;
+      global.fetch = jest.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              enabled: true,
+              reachable: true,
+              remoteAnswer: true,
+              spawnAvailable: true,
+              spawnMaxPermission: 'auto',
+              projectPaths: ['/a', '/b']
+            })
+        } as Response)
+      ) as jest.Mock;
 
       renderView();
       expect(await screen.findByText(/connected/)).toBeInTheDocument();
@@ -142,12 +162,21 @@ describe('SettingsView', () => {
     });
 
     it('shows the setup steps when dispatch is off', async () => {
-      global.fetch = jest.fn(() => Promise.resolve({
-        ok: true, status: 200, json: () => Promise.resolve({
-          enabled: false, reachable: false, remoteAnswer: false, spawnAvailable: false,
-          spawnMaxPermission: null, projectPaths: []
-        })
-      } as Response)) as jest.Mock;
+      global.fetch = jest.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              enabled: false,
+              reachable: false,
+              remoteAnswer: false,
+              spawnAvailable: false,
+              spawnMaxPermission: null,
+              projectPaths: []
+            })
+        } as Response)
+      ) as jest.Mock;
 
       renderView();
       expect(await screen.findByText(/BM_AGENTS=on/)).toBeInTheDocument();
@@ -155,20 +184,28 @@ describe('SettingsView', () => {
     });
 
     it('stores an edited dashboard link and refuses a bad scheme', async () => {
-      global.fetch = jest.fn(() => Promise.resolve({
-        ok: true, status: 200, json: () => Promise.resolve({
-          enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-          spawnMaxPermission: 'auto', projectPaths: []
-        })
-      } as Response)) as jest.Mock;
+      global.fetch = jest.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              enabled: true,
+              reachable: true,
+              remoteAnswer: true,
+              spawnAvailable: true,
+              spawnMaxPermission: 'auto',
+              projectPaths: []
+            })
+        } as Response)
+      ) as jest.Mock;
 
       renderView();
       const field = await screen.findByLabelText('Dashboard link');
       await userEvent.clear(field);
       await userEvent.type(field, 'https://box.ts.net:5174/');
       await userEvent.tab();
-      expect(JSON.parse(localStorage.getItem('backlog-manager.settings') ?? '{}').linkBase)
-        .toBe('https://box.ts.net:5174');
+      expect(JSON.parse(localStorage.getItem('backlog-manager.settings') ?? '{}').linkBase).toBe('https://box.ts.net:5174');
 
       // The input carries `key={settings.linkBase}` (SettingsView.tsx) so it
       // re-seeds from the clamped value on every commit — here, the
@@ -182,8 +219,7 @@ describe('SettingsView', () => {
       await userEvent.clear(fieldAfterSlashStrip);
       await userEvent.type(fieldAfterSlashStrip, 'javascript:alert(1)');
       await userEvent.tab();
-      expect(JSON.parse(localStorage.getItem('backlog-manager.settings') ?? '{}').linkBase)
-        .toBe('http://127.0.0.1:5174');
+      expect(JSON.parse(localStorage.getItem('backlog-manager.settings') ?? '{}').linkBase).toBe('http://127.0.0.1:5174');
 
       // Same guarantee on the refusal path: storage falls back to the
       // default, and the box must show that fallback too — not the
@@ -195,14 +231,12 @@ describe('SettingsView', () => {
 
     it('offers a default model and effort, both starting on the CLI default', async () => {
       renderView();
-      const model = await screen.findByLabelText('Default model') as HTMLSelectElement;
+      const model = (await screen.findByLabelText('Default model')) as HTMLSelectElement;
       const effort = screen.getByLabelText('Default effort') as HTMLSelectElement;
       expect(model.value).toBe('');
       expect(effort.value).toBe('');
-      expect([...model.options].map((o) => o.textContent))
-        .toEqual(['CLI default', 'opus', 'sonnet', 'haiku', 'fable']);
-      expect([...effort.options].map((o) => o.textContent))
-        .toEqual(['CLI default', 'low', 'medium', 'high', 'xhigh', 'max']);
+      expect([...model.options].map((o) => o.textContent)).toEqual(['CLI default', 'opus', 'sonnet', 'haiku', 'fable']);
+      expect([...effort.options].map((o) => o.textContent)).toEqual(['CLI default', 'low', 'medium', 'high', 'xhigh', 'max']);
     });
 
     it('persists a picked default under the backlog-manager key', async () => {
@@ -223,7 +257,7 @@ describe('SettingsView', () => {
     // touched the setting.
     it('offers a default merge mode, starting on merge, and persists a pick', async () => {
       renderView();
-      const select = await screen.findByLabelText('Default merge mode') as HTMLSelectElement;
+      const select = (await screen.findByLabelText('Default merge mode')) as HTMLSelectElement;
       expect(select.value).toBe('merge');
       expect([...select.options].map((o) => o.value)).toEqual(['merge', 'branch']);
 
@@ -247,8 +281,7 @@ describe('SettingsView', () => {
      *  renders its title as an `.mdetail-label` div, which has no ARIA role
      *  to query by, so this reads the class the component actually uses. */
     function groupTitles(): string[] {
-      return [...document.querySelectorAll('.set-group > .mdetail-label')]
-        .map((el) => el.textContent ?? '');
+      return [...document.querySelectorAll('.set-group > .mdetail-label')].map((el) => el.textContent ?? '');
     }
 
     it('renders above the watchdog group', async () => {
@@ -265,8 +298,7 @@ describe('SettingsView', () => {
     /** The rows inside one named group, by their visible name — how this
      *  suite tells "moved into the new group" apart from "rendered twice". */
     function rowNamesIn(title: string): string[] {
-      const group = [...document.querySelectorAll('.set-group')]
-        .find((el) => el.querySelector('.mdetail-label')?.textContent === title);
+      const group = [...document.querySelectorAll('.set-group')].find((el) => el.querySelector('.mdetail-label')?.textContent === title);
       if (!group) throw new Error(`no settings group titled ${title}`);
       return [...group.querySelectorAll('.set-name')].map((el) => el.textContent ?? '');
     }
@@ -275,8 +307,7 @@ describe('SettingsView', () => {
       renderView();
       await screen.findByLabelText('Default question mode');
 
-      expect(rowNamesIn('Orchestrator · this device'))
-        .toEqual(expect.arrayContaining(['Default merge mode', 'Default question mode']));
+      expect(rowNamesIn('Orchestrator · this device')).toEqual(expect.arrayContaining(['Default merge mode', 'Default question mode']));
 
       const agents = rowNamesIn('Claude Agents · this machine');
       expect(agents).not.toContain('Default merge mode');
@@ -289,7 +320,7 @@ describe('SettingsView', () => {
     // and absent already means one of the two server-side.
     it('offers a default question mode, starting on park, and persists a pick', async () => {
       renderView();
-      const select = await screen.findByLabelText('Default question mode') as HTMLSelectElement;
+      const select = (await screen.findByLabelText('Default question mode')) as HTMLSelectElement;
       expect(select.value).toBe('park');
       expect([...select.options].map((o) => o.value)).toEqual(['decide', 'park']);
 
@@ -300,7 +331,7 @@ describe('SettingsView', () => {
 
     it('still persists a merge-mode pick from its new home', async () => {
       renderView();
-      const select = await screen.findByLabelText('Default merge mode') as HTMLSelectElement;
+      const select = (await screen.findByLabelText('Default merge mode')) as HTMLSelectElement;
       await userEvent.selectOptions(select, 'branch');
       const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
       expect(stored.orchestrateDefaultMergeMode).toBe('branch');

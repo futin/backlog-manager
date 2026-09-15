@@ -60,7 +60,9 @@ export function useOrchestratorArchive(): { runs: OrchestratorArchiveRun[]; refr
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const refresh = useCallback(() => {

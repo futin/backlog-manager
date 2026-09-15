@@ -19,7 +19,10 @@ import type { OrchestratorRun } from '../shared/types';
 // (`RunStage`, `MergeMode`, etc).
 const fixture = rawFixture as OrchestratorRun;
 
-interface Sent { url: string; init?: RequestInit }
+interface Sent {
+  url: string;
+  init?: RequestInit;
+}
 
 let projectPath: string;
 
@@ -31,26 +34,27 @@ let projectPath: string;
  * answers (/api/health, /api/management, /api/spawn) are every call
  * AgentsService.orchestrate can make.
  */
-function stubDashboard(
-  spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true }
-): Sent[] {
+function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true }): Sent[] {
   const sent: Sent[] = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     sent.push({ url, init });
     if (url.endsWith('/api/spawn')) {
       return Promise.resolve({
-        ok: spawn.ok, status: spawn.status ?? (spawn.ok ? 200 : 429),
+        ok: spawn.ok,
+        status: spawn.status ?? (spawn.ok ? 200 : 429),
         json: () => Promise.resolve(spawn.body ?? { sessionId: 'sess-1' })
       } as Response);
     }
     return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(
-        url.endsWith('/api/management')
-          ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-      )
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          url.endsWith('/api/management')
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+        )
     } as Response);
   }) as jest.Mock;
   return sent;
@@ -125,7 +129,9 @@ describe('POST /api/agents/orchestrate — mergeMode', () => {
   });
 
   const post = (body: unknown) =>
-    request(app.getHttpServer()).post('/api/agents/orchestrate').send(body as object);
+    request(app.getHttpServer())
+      .post('/api/agents/orchestrate')
+      .send(body as object);
 
   /** The prompt the dashboard was asked to start, or undefined if nothing
    *  was spawned at all — the same helper orchestrator-start.test.ts's own

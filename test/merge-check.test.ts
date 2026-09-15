@@ -137,7 +137,12 @@ describe('GET /api/agents/merge-check', () => {
     process.env.HOME = homePath;
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
-      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }, { name: 'beta', path: otherPath }]))
+      .useValue(
+        makeRegistry([
+          { name: 'alpha', path: projectPath },
+          { name: 'beta', path: otherPath }
+        ])
+      )
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -154,10 +159,7 @@ describe('GET /api/agents/merge-check', () => {
   });
 
   it('case 11: 200s with the covered/source shape for a registered project', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/agents/merge-check')
-      .query({ project: projectPath })
-      .expect(200);
+    const res = await request(app.getHttpServer()).get('/api/agents/merge-check').query({ project: projectPath }).expect(200);
     expect(res.body).toEqual({ covered: false, source: null });
   });
 
@@ -170,18 +172,13 @@ describe('GET /api/agents/merge-check', () => {
     // case is for (see the brief's own framing of case 12).
     const unregistered = join(tmpdir(), 'bm-merge-check-unregistered-never-created');
     const spy = jest.spyOn(fs, 'readFileSync');
-    await request(app.getHttpServer())
-      .get('/api/agents/merge-check')
-      .query({ project: unregistered })
-      .expect(404, { error: 'not found' });
+    await request(app.getHttpServer()).get('/api/agents/merge-check').query({ project: unregistered }).expect(404, { error: 'not found' });
     const touchedUnregisteredPath = spy.mock.calls.some(([path]) => String(path).startsWith(unregistered));
     expect(touchedUnregisteredPath).toBe(false);
   });
 
   it('case 13: 400s when project is absent', async () => {
-    await request(app.getHttpServer())
-      .get('/api/agents/merge-check')
-      .expect(400, { error: 'project is required' });
+    await request(app.getHttpServer()).get('/api/agents/merge-check').expect(400, { error: 'project is required' });
   });
 
   // --- Cases 14-15: prove the ROUTE wires the util correctly, not just that
@@ -199,7 +196,7 @@ describe('GET /api/agents/merge-check', () => {
   // with the matching `source`, which only happens if the service handed the
   // util the right project path in the right argument slot.
 
-  it('case 14: threads the registered project\'s own path into the util as the PROJECT argument, not the home one', async () => {
+  it("case 14: threads the registered project's own path into the util as the PROJECT argument, not the home one", async () => {
     // Written to settings.local.json specifically, not settings.json: that
     // file is the util's project-side tier ONLY — it is never consulted as
     // the home-side candidate under any argument order — so if
@@ -214,10 +211,7 @@ describe('GET /api/agents/merge-check', () => {
     // catch that swap, because settings.json IS one of the swapped call's
     // real candidates.
     const file = writeAllow(projectPath, 'settings.local.json', ['Bash(git merge:*)']);
-    const res = await request(app.getHttpServer())
-      .get('/api/agents/merge-check')
-      .query({ project: projectPath })
-      .expect(200);
+    const res = await request(app.getHttpServer()).get('/api/agents/merge-check').query({ project: projectPath }).expect(200);
     expect(res.body).toEqual({ covered: true, source: file });
   });
 
@@ -231,10 +225,7 @@ describe('GET /api/agents/merge-check', () => {
     // assertion would catch that: it would see `covered: false` where
     // `covered: true` is expected.
     const file = writeAllow(otherPath, 'settings.local.json', ['Bash(git merge:*)']);
-    const res = await request(app.getHttpServer())
-      .get('/api/agents/merge-check')
-      .query({ project: otherPath })
-      .expect(200);
+    const res = await request(app.getHttpServer()).get('/api/agents/merge-check').query({ project: otherPath }).expect(200);
     expect(res.body).toEqual({ covered: true, source: file });
 
     // The other half of the same proof, run against the same fixture: asking
@@ -242,10 +233,7 @@ describe('GET /api/agents/merge-check', () => {
     // back contaminated with beta's coverage — the failure mode a
     // registry-wide "does ANY project cover this" bug would produce instead
     // of "does THIS project cover this".
-    const alphaRes = await request(app.getHttpServer())
-      .get('/api/agents/merge-check')
-      .query({ project: projectPath })
-      .expect(200);
+    const alphaRes = await request(app.getHttpServer()).get('/api/agents/merge-check').query({ project: projectPath }).expect(200);
     expect(alphaRes.body).toEqual({ covered: false, source: null });
   });
 });

@@ -12,9 +12,7 @@ import { projectDispatchGate } from '../shared/agent';
 import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import {
-  pauseRequestEffective, readPauseRequest, writePauseRequest
-} from '../server/src/orchestrator/pause-control.util';
+import { pauseRequestEffective, readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../shared/types';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import type { AgentsStatus, OrchestratorRun } from '../shared/types';
@@ -26,7 +24,10 @@ const fixture = rawFixture as OrchestratorRun;
 
 let projectPath: string;
 
-interface Sent { url: string; init?: RequestInit }
+interface Sent {
+  url: string;
+  init?: RequestInit;
+}
 
 /* The two shapes a rejected `fetch` actually arrives as, measured on Node 22
    while grooming bug-26: a connection failure is a `TypeError` whose message
@@ -46,10 +47,7 @@ const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeo
  * /api/management, /api/spawn) are every call AgentsService.resume can make,
  * same as orchestrate.
  */
-function stubDashboard(
-  spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {},
-  ceiling: string = 'acceptEdits'
-) {
+function stubDashboard(spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {}, ceiling: string = 'acceptEdits') {
   const sent: Sent[] = [];
   const ok = spawn.ok ?? true;
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -61,17 +59,20 @@ function stubDashboard(
       // rejects every fetch and so never reaches spawn() at all.
       if ('reject' in spawn) return Promise.reject(spawn.reject);
       return Promise.resolve({
-        ok, status: spawn.status ?? (ok ? 200 : 429),
+        ok,
+        status: spawn.status ?? (ok ? 200 : 429),
         json: () => Promise.resolve(spawn.body ?? { sessionId: 'sess-1' })
       } as Response);
     }
     return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(
-        url.endsWith('/api/management')
-          ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: ceiling }
-      )
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          url.endsWith('/api/management')
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: ceiling }
+        )
     } as Response);
   }) as jest.Mock;
   return sent;
@@ -142,7 +143,9 @@ describe('POST /api/agents/resume', () => {
   });
 
   const post = (body: unknown) =>
-    request(app.getHttpServer()).post('/api/agents/resume').send(body as object);
+    request(app.getHttpServer())
+      .post('/api/agents/resume')
+      .send(body as object);
 
   // --- Case 1: a missing/blank project is a 400, no outbound call ----------
 
@@ -186,24 +189,28 @@ describe('POST /api/agents/resume', () => {
   // owner (shared/agent.ts), and it is exactly the copy that would go stale
   // the next time that wording changes.
 
-  it('refuses a project the dashboard cannot see, with projectDispatchGate\'s own wording', async () => {
+  it("refuses a project the dashboard cannot see, with projectDispatchGate's own wording", async () => {
     const sent: Sent[] = [];
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       sent.push({ url, init });
       return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          url.endsWith('/api/management')
-            ? { projects: [] }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-        )
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            url.endsWith('/api/management') ? { projects: [] } : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+          )
       } as Response);
     }) as jest.Mock;
 
     const visibleStatus: AgentsStatus = {
-      enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-      spawnMaxPermission: 'acceptEdits', projectPaths: []
+      enabled: true,
+      reachable: true,
+      remoteAnswer: true,
+      spawnAvailable: true,
+      spawnMaxPermission: 'acceptEdits',
+      projectPaths: []
     };
     const gate = projectDispatchGate(visibleStatus, projectPath);
     if (gate.control !== 'disabled') throw new Error('test setup: expected a disabled gate');
@@ -250,7 +257,9 @@ describe('POST /api/agents/resume', () => {
   it('resumes a stale running run — one spawn, the constant prompt, the resume name, auto clamped to auto', async () => {
     const sent = stubDashboard({ ok: true }, 'auto');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
@@ -273,7 +282,9 @@ describe('POST /api/agents/resume', () => {
   it('clamps the resume spawn down to a stricter ceiling', async () => {
     const sent = stubDashboard({ ok: true }, 'acceptEdits');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
@@ -295,7 +306,9 @@ describe('POST /api/agents/resume', () => {
   it('502s with the connection detail when the resume spawn fetch is refused', async () => {
     stubDashboard({ reject: CONN_REFUSED });
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
@@ -307,7 +320,9 @@ describe('POST /api/agents/resume', () => {
   it('502s naming the timeout budget when the resume spawn fetch times out', async () => {
     stubDashboard({ reject: SPAWN_TIMED_OUT });
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
@@ -323,12 +338,17 @@ describe('POST /api/agents/resume', () => {
   it('drops a caller-supplied prompt, ids and model — only the constant prompt reaches the dashboard', async () => {
     const sent = stubDashboard({ ok: true }, 'auto');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
     await post({
-      project: projectPath, prompt: 'rm -rf /', ids: ['x'], model: 'opus'
+      project: projectPath,
+      prompt: 'rm -rf /',
+      ids: ['x'],
+      model: 'opus'
     }).expect(201);
 
     const spawn = sent.find((s) => s.url.endsWith('/api/spawn'));
@@ -347,21 +367,19 @@ describe('POST /api/agents/resume', () => {
 
   it('403s a cross-origin JSON POST without any outbound call', async () => {
     const sent = stubDashboard();
-    const res = await request(app.getHttpServer())
-      .post('/api/agents/resume')
-      .set('origin', 'http://evil.example')
-      .send({ project: projectPath })
-      .expect(403);
+    const res = await request(app.getHttpServer()).post('/api/agents/resume').set('origin', 'http://evil.example').send({ project: projectPath }).expect(403);
     expect(res.body.error).toMatch(/cross-origin/);
     expect(sent).toEqual([]);
   });
 
   // --- Case 12: the dashboard's own spawn rejection is relayed verbatim ----
 
-  it('relays a busy dashboard\'s 429 verbatim', async () => {
+  it("relays a busy dashboard's 429 verbatim", async () => {
     const sent = stubDashboard({ ok: false, status: 429, body: { error: 'busy' } }, 'auto');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
@@ -379,7 +397,9 @@ describe('POST /api/agents/resume', () => {
   it('names the session "watchdog resume <basename>" when the service is called with origin "watchdog"', async () => {
     const sent = stubDashboard({ ok: true }, 'auto');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
@@ -439,10 +459,12 @@ describe('POST /api/agents/resume', () => {
      resumed session is what honours it, by exiting `6` at its first gate
      (design §4.4). Deleting it here would silently drain the whole queue
      against a pause somebody explicitly asked for. */
-  it('leaves a crashed run\'s pause request in place — the resumed session is what honours it', async () => {
+  it("leaves a crashed run's pause request in place — the resumed session is what honours it", async () => {
     stubDashboard({ ok: true }, 'auto');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
     writePauseRequest(projectPath, fixture.runId, new Date(), controlRoot);
@@ -453,9 +475,13 @@ describe('POST /api/agents/resume', () => {
     expect(survived).not.toBeNull();
     // Still EFFECTIVE, not merely present: a file left on disk that the
     // predicate would refuse is the same failure with an extra step.
-    expect(pauseRequestEffective(survived, {
-      runId: fixture.runId, startedAt: fixture.startedAt, unpausedAt: undefined
-    })).toBe(true);
+    expect(
+      pauseRequestEffective(survived, {
+        runId: fixture.runId,
+        startedAt: fixture.startedAt,
+        unpausedAt: undefined
+      })
+    ).toBe(true);
   });
 
   it('leaves the pause request in place when the spawn fails', async () => {
@@ -511,17 +537,15 @@ describe('POST /api/agents/resume', () => {
   it('serializes concurrent resumes of one crashed run — one spawn, the rest an uncoded 409', async () => {
     const sent = stubDashboard({ ok: true }, 'auto');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
 
     // Occurrence 1's own shape: three clicks, none of them awaiting the
     // previous answer.
-    const responses = await Promise.all([
-      post({ project: projectPath }),
-      post({ project: projectPath }),
-      post({ project: projectPath })
-    ]);
+    const responses = await Promise.all([post({ project: projectPath }), post({ project: projectPath }), post({ project: projectPath })]);
 
     expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
 
@@ -546,7 +570,9 @@ describe('POST /api/agents/resume', () => {
     // the dashboard was briefly down.
     stubDashboard({ reject: CONN_REFUSED });
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
     await post({ project: projectPath }).expect(502);
@@ -556,10 +582,12 @@ describe('POST /api/agents/resume', () => {
     expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
   });
 
-  it('stops locking RUN_STALE_MS after the stamp — the app\'s one freshness number, not a second one', async () => {
+  it("stops locking RUN_STALE_MS after the stamp — the app's one freshness number, not a second one", async () => {
     const first = stubDashboard({ ok: true }, 'auto');
     writeRun({
-      ...fixture, project: projectPath, status: 'running',
+      ...fixture,
+      project: projectPath,
+      status: 'running',
       updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     });
     await post({ project: projectPath }).expect(201);
@@ -582,17 +610,14 @@ describe('POST /api/agents/resume', () => {
     expect(second.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
   });
 
-  it('serializes a paused run\'s resumes too — the lock is per run, not per crash', async () => {
+  it("serializes a paused run's resumes too — the lock is per run, not per crash", async () => {
     // Two tabs on the Runs view, both showing the same paused run: the
     // per-component `busy` guard cannot see across them, so this is the only
     // layer that can refuse the second click.
     const sent = stubDashboard({ ok: true }, 'auto');
     writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
 
-    const responses = await Promise.all([
-      post({ project: projectPath }),
-      post({ project: projectPath })
-    ]);
+    const responses = await Promise.all([post({ project: projectPath }), post({ project: projectPath })]);
     expect(sent.filter((s) => s.url.endsWith('/api/spawn'))).toHaveLength(1);
     expect(responses.filter((r) => r.status === 201)).toHaveLength(1);
     expect(responses.filter((r) => r.status === 409)).toHaveLength(1);

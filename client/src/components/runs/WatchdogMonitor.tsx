@@ -2,10 +2,7 @@ import { useNow } from '../../hooks/useNow';
 import { useWatchdog } from '../../hooks/useWatchdog';
 import { projectLabel } from '../../lib/project-label';
 import { formatClock, formatSpanCompact, freshnessFraction, lastReportedEntry } from '../../lib/run-time';
-import {
-  graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause,
-  WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE
-} from '../../lib/run-watchdog';
+import { graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../../lib/run-watchdog';
 import { RUN_STALE_MS, WATCHDOG_EVENT_CAP } from '../../../../shared/types';
 import type { OrchestratorRunsPayload, RunWatchdog } from '../../../../shared/types';
 
@@ -74,10 +71,7 @@ import type { OrchestratorRunsPayload, RunWatchdog } from '../../../../shared/ty
  * kind-badged feed: the same facts, in shapes that can be read without
  * being parsed.
  */
-export function WatchdogMonitor({ runs, onSelectRun }: {
-  runs: OrchestratorRunsPayload['runs'];
-  onSelectRun: (project: string, runId: string) => void;
-}) {
+export function WatchdogMonitor({ runs, onSelectRun }: { runs: OrchestratorRunsPayload['runs']; onSelectRun: (project: string, runId: string) => void }) {
   const { status, error } = useWatchdog();
 
   // Every `running` run, fresh or crashed alike — a crashed run is exactly
@@ -114,8 +108,7 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
       <div className="watchdog-monitor" data-testid="watchdog-monitor">
         <div className="watchdog-state" data-testid="watchdog-state">
           <span className="watchdog-hint">
-            Could not reach the watchdog{error ? ` — ${error}` : ''}. This view will fill
-            in once the API answers <code>GET /api/agents/watchdog</code> again.
+            Could not reach the watchdog{error ? ` — ${error}` : ''}. This view will fill in once the API answers <code>GET /api/agents/watchdog</code> again.
           </span>
         </div>
       </div>
@@ -126,9 +119,7 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
   const watching = new Set(status.watching);
   // The other half of the skew: ids the sweeper claims to be watching that
   // no `running` run in this payload accounts for.
-  const orphans = status.watching.filter(
-    (id) => !running.some((r) => r.runId === id)
-  );
+  const orphans = status.watching.filter((id) => !running.some((r) => r.runId === id));
 
   // The three counts the watching tile states once so nobody has to count
   // chips on the cards below it. All three are derived from the same
@@ -185,9 +176,7 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
                 zero would read as a healthy count taken by a sweeper that is
                 actually not running. */}
             <span data-testid="watchdog-watching">{status.phase === 'off' ? '—' : running.length}</span>
-            {status.phase !== 'off' && (
-              <small className="watchdog-tile-unit">{running.length === 1 ? 'running run' : 'running runs'}</small>
-            )}
+            {status.phase !== 'off' && <small className="watchdog-tile-unit">{running.length === 1 ? 'running run' : 'running runs'}</small>}
           </div>
           <div className="runs-tile-label">watching</div>
           <div className="runs-tile-substat">
@@ -203,9 +192,7 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
                   {crashedCount} crashed
                 </span>
                 <span className="runs-tile-substat-item">{running.length - crashedCount} fresh</span>
-                {unwatchedCount > 0 && (
-                  <span className="runs-tile-substat-item">{unwatchedCount} not yet watched</span>
-                )}
+                {unwatchedCount > 0 && <span className="runs-tile-substat-item">{unwatchedCount} not yet watched</span>}
               </>
             )}
           </div>
@@ -243,9 +230,7 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
             const clause = crashed ? watchdogClause(run.watchdog, now) : '';
             const reported = lastReportedEntry(run.queue);
             const age = Math.max(0, now - Date.parse(run.updatedAt));
-            const beat = Number.isFinite(age)
-              ? `heartbeat ${formatSpanCompact(age)} ago`
-              : 'heartbeat unknown';
+            const beat = Number.isFinite(age) ? `heartbeat ${formatSpanCompact(age)} ago` : 'heartbeat unknown';
             // `null` for a stamp nobody can read, in which case the meter is
             // omitted rather than drawn empty — an empty track claims a
             // heartbeat this instant, the opposite of what an unreadable
@@ -253,9 +238,7 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
             const fraction = freshnessFraction(run.updatedAt, now);
             // Only ever printed on a crashed, annotated card; positive means
             // the sweeper's own grace window is still open.
-            const grace = crashed && run.watchdog !== undefined
-              ? graceRemainingMs(run.watchdog, config, now)
-              : null;
+            const grace = crashed && run.watchdog !== undefined ? graceRemainingMs(run.watchdog, config, now) : null;
             return (
               <button
                 key={`${run.project} ${run.runId}`}
@@ -267,22 +250,20 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
                 <span className="watchdog-card-head">
                   <span className="watchdog-row-project">{projectLabel(run.project)}</span>
                   <span className="watchdog-row-id">{run.runId}</span>
-                  {!watching.has(run.runId) && (
-                    <span className="watchdog-row-skew">· not yet watched</span>
-                  )}
+                  {!watching.has(run.runId) && <span className="watchdog-row-skew">· not yet watched</span>}
                   {/* The glyph is a SIBLING of the verdict, not inside it, so
                       no mark is colour alone AND the verdict element's own
                       text stays exactly the one word every reader — a person,
                       assistive tech, or a test — matches on. */}
-                  <span className="watchdog-verdict-glyph" aria-hidden="true">{crashed ? '⚠' : '●'}</span>
+                  <span className="watchdog-verdict-glyph" aria-hidden="true">
+                    {crashed ? '⚠' : '●'}
+                  </span>
                   <span className="watchdog-row-verdict" data-testid="watchdog-verdict">
                     {crashed ? 'crashed' : 'ok'}
                   </span>
                 </span>
 
-                <span className="watchdog-card-item">
-                  {reported === null ? 'between items' : `${reported.id} · ${reported.stage}`}
-                </span>
+                <span className="watchdog-card-item">{reported === null ? 'between items' : `${reported.id} · ${reported.stage}`}</span>
 
                 {fraction === null ? (
                   <span className="watchdog-card-beat">{beat}</span>
@@ -312,11 +293,7 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
                       {/* The line prints from the constant, never a typed
                           "15m": a meter labelled with a literal keeps naming
                           the old window the day RUN_STALE_MS moves. */}
-                      <span>
-                        {crashed
-                          ? `past the ${formatSpanCompact(RUN_STALE_MS)} stale line`
-                          : `stale at ${formatSpanCompact(RUN_STALE_MS)}`}
-                      </span>
+                      <span>{crashed ? `past the ${formatSpanCompact(RUN_STALE_MS)} stale line` : `stale at ${formatSpanCompact(RUN_STALE_MS)}`}</span>
                     </span>
                   </>
                 )}
@@ -343,12 +320,8 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
                       // that could disagree about one run.
                       <span data-testid="watchdog-clause">{clause}</span>
                     )}
-                    {run.watchdog.lastSessionId !== null && (
-                      <span className="watchdog-card-session">{`→ session ${run.watchdog.lastSessionId}`}</span>
-                    )}
-                    {grace !== null && grace > 0 && (
-                      <span data-testid="watchdog-grace">{`leave alone ${formatSpanCompact(grace)} more`}</span>
-                    )}
+                    {run.watchdog.lastSessionId !== null && <span className="watchdog-card-session">{`→ session ${run.watchdog.lastSessionId}`}</span>}
+                    {grace !== null && grace > 0 && <span data-testid="watchdog-grace">{`leave alone ${formatSpanCompact(grace)} more`}</span>}
                   </span>
                 )}
               </button>
@@ -373,9 +346,8 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
       <div className="watchdog-activity">
         <span className="watchdog-activity-name">Activity</span>
         <span className="watchdog-hint" data-testid="watchdog-events-hint">
-          Newest first — what the sweeper itself did (armed, spawned a resume, gave up),
-          not the run's own stage track. The last {WATCHDOG_EVENT_CAP} only, held in the
-          API process's memory: an API restart empties it.
+          Newest first — what the sweeper itself did (armed, spawned a resume, gave up), not the run's own stage track. The last {WATCHDOG_EVENT_CAP} only, held
+          in the API process's memory: an API restart empties it.
         </span>
         {status.events.length === 0 ? (
           // Replaces the table rather than heading an empty one: a header row
@@ -402,7 +374,9 @@ export function WatchdogMonitor({ runs, onSelectRun }: {
               <tbody>
                 {status.events.map((event, i) => (
                   <tr key={`${event.runId ?? 'none'}-${event.at}-${i}`}>
-                    <td><time dateTime={event.at}>{formatClock(event.at) ?? '—:—'}</time></td>
+                    <td>
+                      <time dateTime={event.at}>{formatClock(event.at) ?? '—:—'}</time>
+                    </td>
                     <td>
                       {/* The column the payload always carried and this feed
                           never printed: a `failed` line and a `recovered` one

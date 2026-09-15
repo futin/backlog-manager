@@ -60,12 +60,12 @@ export const STAGE_TONE: Record<RunStage, StageTone> = {
  * bring its own palette and blow the chip's 9.5px line box open.
  */
 const TONE_GLYPH: Record<StageTone, string> = {
-  active: '●',  // ● — filled: something is happening
-  done: '✓',    // ✓
-  bad: '✕',     // ✕
-  warn: '⚠',    // ⚠
-  idle: '○',    // ○ — hollow: the same dot, not yet filled in
-  muted: '–'    // – — an en dash: nothing happened here
+  active: '●', // ● — filled: something is happening
+  done: '✓', // ✓
+  bad: '✕', // ✕
+  warn: '⚠', // ⚠
+  idle: '○', // ○ — hollow: the same dot, not yet filled in
+  muted: '–' // – — an en dash: nothing happened here
 };
 
 export function stageGlyph(stage: RunStage): string {

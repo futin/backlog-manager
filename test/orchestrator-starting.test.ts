@@ -22,11 +22,7 @@ function runAt(project: string, startedAt: string): OrchestratorRun {
  *  `project`/`startedAt`, so it needs a builder that can vary it — and every
  *  case below pairs the status with a `startedAt` BEFORE the mark, which is
  *  precisely where rule 1 does not fire and only rule 3 can decide. */
-function runWithStatus(
-  project: string,
-  startedAt: string,
-  status: OrchestratorRun['status']
-): OrchestratorRun {
+function runWithStatus(project: string, startedAt: string, status: OrchestratorRun['status']): OrchestratorRun {
   return { ...fixture, project, startedAt, status };
 }
 

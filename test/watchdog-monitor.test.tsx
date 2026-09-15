@@ -8,15 +8,10 @@ import '@testing-library/jest-dom';
 import { WatchdogMonitor } from '../client/src/components/runs/WatchdogMonitor';
 import { projectLabel } from '../client/src/lib/project-label';
 import { formatClock, formatSpanCompact } from '../client/src/lib/run-time';
-import {
-  watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE
-} from '../client/src/lib/run-watchdog';
+import { watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../client/src/lib/run-watchdog';
 import { RUN_STALE_MS } from '../shared/types';
 import { DEFAULT_WATCHDOG_CONFIG, WATCHDOG_EVENT_CAP } from '../shared/types';
-import type {
-  OrchestratorRunsPayload, RunQueueItem, RunStage, RunWatchdog, WatchdogEvent,
-  WatchdogEventKind, WatchdogStatus
-} from '../shared/types';
+import type { OrchestratorRunsPayload, RunQueueItem, RunStage, RunWatchdog, WatchdogEvent, WatchdogEventKind, WatchdogStatus } from '../shared/types';
 
 /**
  * `WatchdogMonitor` (task-18, spec §3) driven standalone on its own two
@@ -95,7 +90,9 @@ function stubFetch(watchdog: WatchdogStatus | 'reject'): jest.Mock {
     if (url.endsWith('/api/agents/watchdog')) {
       if (watchdog === 'reject') return Promise.reject(new Error('watchdog unreachable'));
       return Promise.resolve({
-        ok: true, status: 200, json: () => Promise.resolve(watchdog)
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(watchdog)
       } as unknown as Response);
     }
     return Promise.reject(new Error(`watchdog-monitor.test.tsx: unexpected fetch ${url}`));
@@ -139,8 +136,7 @@ describe('WatchdogMonitor', () => {
   it('renders only the unavailable notice when the watchdog cannot be reached', async () => {
     await renderMonitor('reject');
 
-    expect(screen.getByText(/Could not reach the watchdog — watchdog unreachable/))
-      .toBeInTheDocument();
+    expect(screen.getByText(/Could not reach the watchdog — watchdog unreachable/)).toBeInTheDocument();
     // A monitor whose whole job is to report on the watchdog must not fall
     // back to a default that looks like a reading — no state line, no rows,
     // no feed.
@@ -198,17 +194,15 @@ describe('WatchdogMonitor', () => {
 
   it('reads the one-tick-skew line when armed with nothing in the payload', async () => {
     await renderMonitor(watchdogStatus({ phase: 'armed', watching: [] }), []);
-    expect(screen.getByTestId('watchdog-rows-empty'))
-      .toHaveTextContent('nothing running in the runs payload yet');
+    expect(screen.getByTestId('watchdog-rows-empty')).toHaveTextContent('nothing running in the runs payload yet');
   });
 
   // --- 5: one fresh, watched run -------------------------------------------
 
   it('renders a fresh watched run with its project tail, item, heartbeat and ok verdict', async () => {
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ queue: [queueItem('bug-16', 'dispatched'), queueItem('task-13', 'pending')] })]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [
+      liveRun({ queue: [queueItem('bug-16', 'dispatched'), queueItem('task-13', 'pending')] })
+    ]);
 
     const rows = screen.getAllByTestId('watchdog-row');
     expect(rows).toHaveLength(1);
@@ -245,17 +239,16 @@ describe('WatchdogMonitor', () => {
   // --- 6: nothing in flight -------------------------------------------------
 
   it('reads "between items" when every queue entry has exited or not started', async () => {
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ queue: [queueItem('bug-16', 'merged'), queueItem('task-13', 'pending')] })]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [
+      liveRun({ queue: [queueItem('bug-16', 'merged'), queueItem('task-13', 'pending')] })
+    ]);
 
     expect(screen.getByTestId('watchdog-row')).toHaveTextContent('between items');
   });
 
   // --- 7: crashed, annotated ------------------------------------------------
 
-  it('prints the strip\'s own watchdog clause for a crashed run', async () => {
+  it("prints the strip's own watchdog clause for a crashed run", async () => {
     const annotation: RunWatchdog = {
       enabled: true,
       attempts: 1,
@@ -282,10 +275,8 @@ describe('WatchdogMonitor', () => {
     // the whole reason the monitor reads that function is that the strip and
     // this surface must not be able to disagree, and a hand-copied string
     // here would let them. The `watchdog:` prefix stays for the same reason.
-    expect(within(row).getByTestId('watchdog-clause'))
-      .toHaveTextContent(watchdogClause(annotation, NOW));
-    expect(within(row).getByTestId('watchdog-attempts'))
-      .toHaveAttribute('aria-label', 'attempt 1 of 2');
+    expect(within(row).getByTestId('watchdog-clause')).toHaveTextContent(watchdogClause(annotation, NOW));
+    expect(within(row).getByTestId('watchdog-attempts')).toHaveAttribute('aria-label', 'attempt 1 of 2');
     expect(within(row).getByTestId('watchdog-grace')).toHaveTextContent('leave alone 8m more');
     expect(row).toHaveTextContent('session sess-1');
     expect(row).toHaveTextContent(`past the ${formatSpanCompact(RUN_STALE_MS)} stale line`);
@@ -308,10 +299,9 @@ describe('WatchdogMonitor', () => {
       lastError: null,
       exhausted: false
     };
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString(), watchdog: annotation })]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [
+      liveRun({ fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString(), watchdog: annotation })
+    ]);
 
     const row = screen.getByTestId('watchdog-row');
     expect(within(row).getByTestId('watchdog-clause')).toBeInTheDocument();
@@ -321,10 +311,7 @@ describe('WatchdogMonitor', () => {
   // --- 8: crashed, not yet annotated ---------------------------------------
 
   it('reads a bare "crashed" for a run the server has not annotated yet', async () => {
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ fresh: false, updatedAt: new Date(NOW - 130_000).toISOString() })]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [liveRun({ fresh: false, updatedAt: new Date(NOW - 130_000).toISOString() })]);
 
     // Exactly `crashed`, with no dangling separator behind it — the empty
     // clause `watchdogClause(undefined)` returns must not print as `crashed ·`.
@@ -360,10 +347,7 @@ describe('WatchdogMonitor', () => {
   // --- 11: two projects, one runId -----------------------------------------
 
   it('renders one row per project when two runs share a runId', async () => {
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ project: '/abs/alpha' }), liveRun({ project: '/abs/beta' })]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [liveRun({ project: '/abs/alpha' }), liveRun({ project: '/abs/beta' })]);
 
     const rows = screen.getAllByTestId('watchdog-row');
     expect(rows).toHaveLength(2);
@@ -378,22 +362,15 @@ describe('WatchdogMonitor', () => {
   // --- 12: only running runs are rows --------------------------------------
 
   it('ignores a finished run in the payload', async () => {
-    await renderMonitor(
-      watchdogStatus({ phase: 'idle' }),
-      [liveRun({ status: 'done', fresh: false })]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'idle' }), [liveRun({ status: 'done', fresh: false })]);
     expect(screen.queryAllByTestId('watchdog-row')).toHaveLength(0);
   });
 
   // --- 13: the click-through -----------------------------------------------
 
-  it('calls onSelectRun with the row\'s own project and runId', async () => {
+  it("calls onSelectRun with the row's own project and runId", async () => {
     const onSelectRun = jest.fn();
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ queue: [queueItem('bug-16', 'dispatched')] })],
-      onSelectRun
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [liveRun({ queue: [queueItem('bug-16', 'dispatched')] })], onSelectRun);
 
     // `userEvent` installs its own timer plumbing; under fake timers it has
     // to be told, or its internal delay never resolves.
@@ -419,35 +396,40 @@ describe('WatchdogMonitor', () => {
     const rows = within(screen.getByTestId('watchdog-events')).getAllByRole('row');
     expect(rows).toHaveLength(4);
 
-    const headers = within(rows[0]).getAllByRole('columnheader').map((c) => c.textContent);
+    const headers = within(rows[0])
+      .getAllByRole('columnheader')
+      .map((c) => c.textContent);
     expect(headers).toEqual(['time', 'kind', 'project', 'run', 'what the sweeper did']);
 
     const cells = (row: HTMLElement): (string | null)[] =>
-      within(row).getAllByRole('cell').map((c) => c.textContent);
+      within(row)
+        .getAllByRole('cell')
+        .map((c) => c.textContent);
 
     expect(cells(rows[1])).toEqual([
-      formatClock(events[0].at), `${WATCHDOG_KIND_GLYPH.spawned}${events[0].kind}`,
-      projectLabel('/abs/alpha'), 'run-a', events[0].detail
+      formatClock(events[0].at),
+      `${WATCHDOG_KIND_GLYPH.spawned}${events[0].kind}`,
+      projectLabel('/abs/alpha'),
+      'run-a',
+      events[0].detail
     ]);
     expect(cells(rows[2])).toEqual([
-      formatClock(events[1].at), `${WATCHDOG_KIND_GLYPH.idle}${events[1].kind}`,
-      projectLabel('/abs/beta'), '—', events[1].detail
+      formatClock(events[1].at),
+      `${WATCHDOG_KIND_GLYPH.idle}${events[1].kind}`,
+      projectLabel('/abs/beta'),
+      '—',
+      events[1].detail
     ]);
     // A sweeper-level event (arming, which is about no one run) prints an
     // em dash in both keyed cells rather than leaving them blank — a blank
     // cell reads as missing data, a dash as "not applicable".
-    expect(cells(rows[3])).toEqual([
-      formatClock(events[2].at), `${WATCHDOG_KIND_GLYPH.armed}${events[2].kind}`,
-      '—', '—', events[2].detail
-    ]);
+    expect(cells(rows[3])).toEqual([formatClock(events[2].at), `${WATCHDOG_KIND_GLYPH.armed}${events[2].kind}`, '—', '—', events[2].detail]);
   });
 
   // --- 14b: the badge is the column the feed always carried and never drew --
 
   it('badges each event by kind, with its glyph and tone', async () => {
-    const kinds: WatchdogEventKind[] = [
-      'armed', 'idle', 'spawned', 'failed', 'exhausted', 'recovered', 'disabled'
-    ];
+    const kinds: WatchdogEventKind[] = ['armed', 'idle', 'spawned', 'failed', 'exhausted', 'recovered', 'disabled'];
     const events: WatchdogEvent[] = kinds.map((kind, i) => ({
       at: `2026-09-05T09:0${i}:00Z`,
       project: '/abs/alpha',
@@ -474,9 +456,7 @@ describe('WatchdogMonitor', () => {
   // --- 14c: an unreadable stamp is still a row ------------------------------
 
   it('renders an unparsable event stamp as an em-dash clock', async () => {
-    const events: WatchdogEvent[] = [
-      { at: 'garbage', project: null, runId: null, kind: 'armed', detail: 'watching for crashed runs' }
-    ];
+    const events: WatchdogEvent[] = [{ at: 'garbage', project: null, runId: null, kind: 'armed', detail: 'watching for crashed runs' }];
     await renderMonitor(watchdogStatus({ events }), []);
 
     const rows = within(screen.getByTestId('watchdog-events')).getAllByRole('row');
@@ -489,9 +469,7 @@ describe('WatchdogMonitor', () => {
   // --- 14d: the hint is a preamble, not a footnote --------------------------
 
   it('keeps the hint above the table', async () => {
-    const events: WatchdogEvent[] = [
-      { at: '2026-09-05T09:00:00Z', project: null, runId: null, kind: 'armed', detail: 'watching' }
-    ];
+    const events: WatchdogEvent[] = [{ at: '2026-09-05T09:00:00Z', project: null, runId: null, kind: 'armed', detail: 'watching' }];
     await renderMonitor(watchdogStatus({ events }), []);
 
     const hint = screen.getByTestId('watchdog-events-hint');
@@ -511,8 +489,7 @@ describe('WatchdogMonitor', () => {
     // The events are the server's own memory: capped, and lost on restart.
     // A reader who does not know both will misread a short list as a quiet
     // watchdog.
-    expect(screen.getByTestId('watchdog-events-hint'))
-      .toHaveTextContent(String(WATCHDOG_EVENT_CAP));
+    expect(screen.getByTestId('watchdog-events-hint')).toHaveTextContent(String(WATCHDOG_EVENT_CAP));
     expect(screen.getByTestId('watchdog-events-hint')).toHaveTextContent(/restart/i);
     // The empty copy REPLACES the table rather than heading an empty one:
     // a header row over nothing reads as a list that failed to load.
@@ -522,10 +499,7 @@ describe('WatchdogMonitor', () => {
   // --- 16: the heartbeat is a clock, not a screenshot -----------------------
 
   it('ages the heartbeat on its own, with no new payload', async () => {
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [liveRun({ queue: [queueItem('bug-16', 'dispatched')] })]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [liveRun({ queue: [queueItem('bug-16', 'dispatched')] })]);
     expect(screen.getByTestId('watchdog-row')).toHaveTextContent('heartbeat 4s ago');
     expect(screen.getByTestId('watchdog-meter')).toHaveAttribute('aria-valuenow', '4');
 
@@ -562,8 +536,7 @@ describe('WatchdogMonitor', () => {
     // `Math.round`, matching `stateLine`'s own countdown: the bar and the
     // sentence beside it must agree to the second.
     expect(screen.getByTestId('watchdog-sweep')).toHaveAttribute('aria-valuenow', '42');
-    expect(screen.getByTestId('watchdog-sweep'))
-      .toHaveAttribute('aria-valuemax', String(DEFAULT_WATCHDOG_CONFIG.tickMs / 1000));
+    expect(screen.getByTestId('watchdog-sweep')).toHaveAttribute('aria-valuemax', String(DEFAULT_WATCHDOG_CONFIG.tickMs / 1000));
     // Premise of the case, stated so a future fixture edit cannot quietly
     // turn it into case 5 with extra steps: there is no row here to have
     // enabled the clock.
@@ -582,14 +555,11 @@ describe('WatchdogMonitor', () => {
   // --- 18: the watching tile counts what the cards below it show ------------
 
   it('counts crashed, fresh and unwatched runs in the watching tile', async () => {
-    await renderMonitor(
-      watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
-      [
-        liveRun(),
-        liveRun({ runId: 'run-2', project: '/abs/beta', fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString() }),
-        liveRun({ runId: 'run-3', project: '/abs/gamma' })
-      ]
-    );
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [
+      liveRun(),
+      liveRun({ runId: 'run-2', project: '/abs/beta', fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString() }),
+      liveRun({ runId: 'run-3', project: '/abs/gamma' })
+    ]);
 
     const tile = screen.getByTestId('watchdog-watching').closest('.runs-tile') as HTMLElement;
     expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('3');

@@ -1,7 +1,7 @@
 # backlog-orchestrate — why the rules are what they are
 
 Every rule in `SKILL.md` still states itself there, in full, as a rule. What
-lives here is the *evidence*: the run that broke, the command that was measured,
+lives here is the _evidence_: the run that broke, the command that was measured,
 the failure that was watched happening. None of it changes what you type.
 
 Read a section of this file when you are about to argue with the rule it
@@ -15,8 +15,8 @@ Headings match the section of `SKILL.md` the rule lives in.
 
 ## Where commands run
 
-**The run that appeared to vanish.** The tool resolves *which project it is
-acting on* by walking up from its own cwd to the first `.git` it finds. A linked
+**The run that appeared to vanish.** The tool resolves _which project it is
+acting on_ by walking up from its own cwd to the first `.git` it finds. A linked
 worktree has its own `.git` (a file, not a directory), so a worktree cwd used to
 resolve to the worktree itself and key the run file under a directory nothing
 else ever reads. `status` then reported "no run exists" for a run that was very
@@ -26,7 +26,7 @@ Since bug-2 the tool refuses that outright rather than resolving it. The failure
 is loud now, but the rule is unchanged and still yours to keep — a refusal
 mid-run is still a run that stopped.
 
-**The scope is wider than the `cd`s this file prescribes.** *Anything* that
+**The scope is wider than the `cd`s this file prescribes.** _Anything_ that
 leaves the shell inside a worktree arms it. The run that surfaced this was
 broken by a one-off `pnpm exec jest --version` probe — not by any command the
 skill told anyone to run.
@@ -52,7 +52,7 @@ $ printf '' | claude -p --output-format stream-json --input-format stream-json
 Error: When using --print, --output-format=stream-json requires --verbose
 ```
 
-In `-p` mode `--verbose` is also what *produces* the event stream at all, so the
+In `-p` mode `--verbose` is also what _produces_ the event stream at all, so the
 one flag does both jobs.
 
 Leaving it off is the quietest failure in the whole skill, and it fires on the
@@ -74,7 +74,7 @@ that must come back green; and the **merge is the only door back to `main`**,
 walked by this skill, never by the session. Remove any one of those four and
 dispatching unattended stops being defensible at any rung.
 
-Those four walls are what the run is safe *because of*. They were never an
+Those four walls are what the run is safe _because of_. They were never an
 argument for reaching the top of the ladder specifically, and `auto` already
 clears an execute session's entire real workload. Measured on this machine
 against CLI 2.1.250: of twelve probed actions under headless `auto`, eleven ran
@@ -106,8 +106,8 @@ which is why step 5 reads it before it judges anything else.
 ### Why "tighten it to `dontAsk` plus an allowlist" is dead on arrival
 
 It was probed. Under `--permission-mode dontAsk` with no allowlist, `pnpm test`
-was refused outright — *"Permission to use Bash has been denied because Claude
-Code is running in don't ask mode"* — and the run still finished
+was refused outright — _"Permission to use Bash has been denied because Claude
+Code is running in don't ask mode"_ — and the run still finished
 `subtype: "success"`. Making it work means enumerating every command the session
 will ever need before the work starts, which is the one thing a session doing
 unenumerated work cannot have. Tighter is not better when the tightening has to
@@ -131,7 +131,7 @@ built to be re-called.
 
 ### Why `rm -f` is a merge-gate rule rather than housekeeping
 
-`<dir>` belongs to the *run*, not to the attempt: nothing removes those three
+`<dir>` belongs to the _run_, not to the attempt: nothing removes those three
 files afterwards, and `finish` does not clean `<dir>` at all — so a second
 attempt on the same item would inherit the first attempt's `.status` verbatim.
 Both "the verification did not finish" branches are predicated on that file
@@ -139,12 +139,12 @@ being **absent**, so from the second attempt onward neither of them could fire.
 
 The failure that produces is precise, and it is the worst one this skill can
 produce: attempt one passes and writes `0`; attempt two is killed mid-suite and
-writes nothing; the probe reads the stale `0`; the section says *merge*. A green
+writes nothing; the probe reads the stale `0`; the section says _merge_. A green
 merge gate on a verification that never finished — the one thing this whole
 design exists to make impossible.
 
 It is reachable unattended without anybody doing anything unusual. §9 parks an
-item *after* a green verify when the main tree is not on `main` or the merge
+item _after_ a green verify when the main tree is not on `main` or the merge
 conflicts; the item stays open with its branch; the next run resumes it at
 Inspect — where its verify is the second attempt.
 
@@ -184,7 +184,7 @@ touches it, which is why step 4's line uses it directly.
 
 Proved empirically before this skill was written, not reasoned out.
 `reset --hard` resets the working tree and index in full, and it silently
-discarded an *unrelated, uncommitted* modification in the main tree along with
+discarded an _unrelated, uncommitted_ modification in the main tree along with
 the merge it was meant to undo — with no reflog recovery, because that
 modification had never been staged or committed. The identical scenario undone
 with `git revert -m 1 --no-edit <merge-sha>` left that modification
@@ -217,25 +217,25 @@ three cases the test
 `git worktree remove: ignored build output alone removes cleanly, and a failed
 delete deregisters first` re-measures on every run of `pnpm run test:skills`:
 
-| Worktree contents | `git worktree remove` | After it |
-|---|---|---|
-| Nothing but an ignored `dist/` | exit `0` | directory gone, `dist/` deleted with it |
-| An untracked or modified file | exit `128`, `fatal: '<path>' contains modified or untracked files, use --force to delete it` | nothing deleted, still registered |
-| Tracked, unmodified, one child git cannot unlink | exit `255`, `error: failed to delete '<path>': <errno>` | admin entry already gone, directory partly deleted |
+| Worktree contents                                | `git worktree remove`                                                                        | After it                                           |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Nothing but an ignored `dist/`                   | exit `0`                                                                                     | directory gone, `dist/` deleted with it            |
+| An untracked or modified file                    | exit `128`, `fatal: '<path>' contains modified or untracked files, use --force to delete it` | nothing deleted, still registered                  |
+| Tracked, unmodified, one child git cannot unlink | exit `255`, `error: failed to delete '<path>': <errno>`                                      | admin entry already gone, directory partly deleted |
 
 Three consequences, in the order §9 needs them:
 
 - **Ignored build output never refuses**, so `--force` was a fix for a failure
   that has not happened here. The reported occurrences were the third row.
 - **The clean check and the delete are different failures with opposite
-  preconditions.** The first fires *before* anything is touched and means
+  preconditions.** The first fires _before_ anything is touched and means
   something in there was never committed — the one state in which `--force`
-  both works and destroys. The second fires *after* git certified the tree
+  both works and destroys. The second fires _after_ git certified the tree
   clean, so nothing uncommitted can be in what survives.
 - **After the third row the worktree is not a worktree any more.** git removes
   `.git/worktrees/<id>` first and the directory second, so `git worktree list`
   no longer names it, `git worktree remove --force` answers `fatal: '<path>' is
-  not a working tree` (exit `128`), and `git worktree prune` prunes nothing.
+not a working tree` (exit `128`), and `git worktree prune` prunes nothing.
   Both recorded attention details told a human to run `prune`; both were
   no-ops. That is why the prose names all three dead ends explicitly rather
   than leaving a session to discover them.
@@ -243,7 +243,7 @@ Three consequences, in the order §9 needs them:
 Why only `dist/` survived in those two runs is the ordinary shape of a
 half-finished recursive delete, not a property of ignored files: git walks the
 tree and ends with `rmdir` on the root, which reports `ENOTEMPTY` for whatever
-the walk missed or could not unlink. In the reproduction here a *tracked*
+the walk missed or could not unlink. In the reproduction here a _tracked_
 `src/` survived. So the response keys on git's message, which is exact, and
 never on inspecting the leftovers, which carry no information.
 
@@ -260,7 +260,7 @@ anything.
 
 Not a crash. A session dropped into a worktree with no item file does not fail:
 `backlog.mjs show` exits `1` there, the session reads that as a lookup problem,
-searches, finds the one copy that *does* exist — in the main tree — and works
+searches, finds the one copy that _does_ exist — in the main tree — and works
 **that** one. The branch ends up carrying code with no lifecycle move on it, the
 item gets archived as a loose uncommitted change in somebody else's tree, and
 every stage of the run reports success.
@@ -276,7 +276,7 @@ between the gate and the checkout, and any future drift between the ref
 ### Why `info/exclude`, `--git-common-dir`, and a check before the append
 
 - **`--git-common-dir`, and the check-before-append.** `info/exclude` lives in
-  the repository's *shared common* git directory — one file for the repo and
+  the repository's _shared common_ git directory — one file for the repo and
   every worktree of it, not one per worktree. Appending blindly on each item
   would grow duplicate lines in a file the user owns, and change `git status`
   output repo-wide, including in their main tree.
@@ -301,20 +301,20 @@ Permission for this action was denied by the Claude Code auto mode
 classifier. Reason: Blocked by classifier.
 ```
 
-| Run | Project | `permissions.allow` present | Merge |
-|---|---|---|---|
-| 2026-09-01 18:57 | claude-agents-dashboard | none | allowed ×3 |
-| 2026-09-03 11:26 | backlog-manager | none | allowed ×4 |
-| 2026-09-03 18:49 | claude-agents-dashboard | none | **denied ×4** |
+| Run              | Project                 | `permissions.allow` present | Merge         |
+| ---------------- | ----------------------- | --------------------------- | ------------- |
+| 2026-09-01 18:57 | claude-agents-dashboard | none                        | allowed ×3    |
+| 2026-09-03 11:26 | backlog-manager         | none                        | allowed ×4    |
+| 2026-09-03 18:49 | claude-agents-dashboard | none                        | **denied ×4** |
 
 All three were board-spawned (`custom-title: "orchestrate <project>"`),
 headless, `claude -p --permission-mode auto`, issuing the identical
 `git -C "$PWD" merge --no-ff --no-edit backlog/<id>`. The dashboard's
 `.claude/settings.json` carrying `Bash(git merge:*)` is dated 2026-09-03
-22:34 — written *after* the failure, staged, never committed. **Nothing about
+22:34 — written _after_ the failure, staged, never committed. **Nothing about
 permissions differed between the runs that merged and the run that did not.**
 
-*(2026-09-04 note: the skill has since dropped the `-C "$PWD"` clause from
+_(2026-09-04 note: the skill has since dropped the `-C "$PWD"` clause from
 both this command and the merge-mode probe (SKILL.md §2) — a no-op removed,
 since the session's cwd was already the project root at every call site.
 Claude Code's `permissions.allow` grammar matches an entry against the
@@ -322,10 +322,10 @@ literal command line by prefix, so `Bash(git merge:*)` — the very rule the
 dashboard staged above — would not actually have matched the line quoted
 above; it starts `git -C`, not `git merge`. Dropping the clause is what
 makes that rule genuinely cover the command SKILL.md issues today. The
-quote itself is left exactly as these three runs issued it.)*
+quote itself is left exactly as these three runs issued it.)_
 
 The denied run's own notes diagnosed that missing `Bash(git merge:*)` rule.
-It is a valid *remedy* and a wrong *explanation*: an `allow` rule takes the
+It is a valid _remedy_ and a wrong _explanation_: an `allow` rule takes the
 classifier out of the path for matching commands, so it is worth having and
 worth telling the user about, but it is not what differed between these three
 runs. Auto mode is a per-call model classifier, and its verdict on an
@@ -335,7 +335,7 @@ Two things follow, and they are the whole of merge mode:
 
 1. Merging is a **choice**, not the only outcome. A run that stops at four
    reviewed branches is a successful run.
-2. A run that *wanted* to merge and was refused **degrades to that outcome**
+2. A run that _wanted_ to merge and was refused **degrades to that outcome**
    rather than parking work that is perfectly good.
 
 **What the probe buys, and what it does not.** It cannot promise the merge —
@@ -346,7 +346,7 @@ item one. That is all of it, and it is enough on its own.
 
 **Why a denial is not a park, and not a fourth attention kind.**
 `ATTENTION_KINDS` stays the closed set of three (`needs-answers`, `parked`,
-`fix-exhausted`). The attention list means "a human must look at *this item*",
+`fix-exhausted`). The attention list means "a human must look at _this item_",
 and a green, reviewed branch does not qualify — four green branches reported
 as four parks is exactly what made 2026-09-03 read as a failed run. One
 classifier verdict is one run-level fact and is recorded once, in
@@ -371,12 +371,12 @@ Measured 2026-09-06, across every fix-verdict review this machine had produced
 by then — 27 first passes and 2 second passes, four projects — each finding
 classified by what it actually was:
 
-| Finding class | Count | Examples |
-|---|---|---|
-| another statement of the old contract left standing | 14 | `CLAUDE.md:227` and `docs/subsystems/invariants.md:408` (bug-4), `CLAUDE.md:522` (task-20), a JSDoc on `RUN_IN_PROGRESS_CODE` (bug-21, twice), `README:12` (task-4), docker-compose `MAX_SESSIONS=10` (dashboard bug-4), `docs/overview.md` (dashboard task-11) |
-| a new test that still passes with the change reverted | 5 | a `styles.css` rule invisible to the suite (bug-16), a conditional `TZ` pin (task-15), a dedupe test that cannot tell pre- from post-slice (dashboard bug-15), `bookingDate` never pinned (finance task-4) |
-| a genuine defect | 8 | pause cleared on watchdog resume (task-17), a NUL byte in a source file (task-18), the lease bricking `--abort` (bug-19) |
-| other | 2 | |
+| Finding class                                         | Count | Examples                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| another statement of the old contract left standing   | 14    | `CLAUDE.md:227` and `docs/subsystems/invariants.md:408` (bug-4), `CLAUDE.md:522` (task-20), a JSDoc on `RUN_IN_PROGRESS_CODE` (bug-21, twice), `README:12` (task-4), docker-compose `MAX_SESSIONS=10` (dashboard bug-4), `docs/overview.md` (dashboard task-11) |
+| a new test that still passes with the change reverted | 5     | a `styles.css` rule invisible to the suite (bug-16), a conditional `TZ` pin (task-15), a dedupe test that cannot tell pre- from post-slice (dashboard bug-15), `bookingDate` never pinned (finance task-4)                                                      |
+| a genuine defect                                      | 8     | pause cleared on watchdog resume (task-17), a NUL byte in a source file (task-18), the lease bricking `--abort` (bug-19)                                                                                                                                        |
+| other                                                 | 2     |                                                                                                                                                                                                                                                                 |
 
 Nineteen of 29 were the first two rows, and both are mechanical checks over a
 diff the executing session already has open — not judgement calls the reviewer

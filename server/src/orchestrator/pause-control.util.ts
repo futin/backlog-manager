@@ -134,10 +134,7 @@ export function readPauseRequest(project: string, root: string = controlHome()):
  * the answer depend on anything but these three fields — the tool's copy has
  * only these three to work with.
  */
-export function pauseRequestEffective(
-  request: PauseRequest | null,
-  run: Pick<OrchestratorRun, 'runId' | 'startedAt' | 'unpausedAt'>
-): boolean {
+export function pauseRequestEffective(request: PauseRequest | null, run: Pick<OrchestratorRun, 'runId' | 'startedAt' | 'unpausedAt'>): boolean {
   if (request === null) return false;
   if (request.runId !== run.runId) return false;
 
@@ -164,12 +161,7 @@ export function pauseRequestEffective(
  * a test needs one reading it controls, and the stamp is compared against a
  * run's own timestamps rather than merely displayed.
  */
-export function writePauseRequest(
-  project: string,
-  runId: string,
-  now: Date = new Date(),
-  root: string = controlHome()
-): PauseRequest {
+export function writePauseRequest(project: string, runId: string, now: Date = new Date(), root: string = controlHome()): PauseRequest {
   const request: PauseRequest = { runId, requestedAt: now.toISOString() };
   const file = controlFile(project, root);
   const dir = dirname(file);

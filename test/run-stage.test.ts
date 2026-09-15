@@ -1,6 +1,4 @@
-import {
-  RUN_STATUS_CLASS, RUN_STATUS_GLYPH, STAGE_TONE, runStatusChip, stageChipClass, stageGlyph
-} from '../client/src/lib/run-stage';
+import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, STAGE_TONE, runStatusChip, stageChipClass, stageGlyph } from '../client/src/lib/run-stage';
 import type { OrchestratorRun, RunStage } from '../shared/types';
 
 /** Sorted, so `Object.keys(...).sort()` can be compared against it directly
@@ -17,9 +15,21 @@ const ALL_RUN_STATUSES = ['aborted', 'done', 'failed', 'paused', 'running'];
  * -bad variant was introduced to fix once already.
  */
 const ALL_STAGES: RunStage[] = [
-  'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing',
-  'fixing', 'verifying', 'merging', 'merged', 'branched',
-  'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
+  'pending',
+  'preflight',
+  'dispatched',
+  'inspecting',
+  'reviewing',
+  'fixing',
+  'verifying',
+  'merging',
+  'merged',
+  'branched',
+  'failed',
+  'skipped',
+  'needs-answers',
+  'ungroomed',
+  'parked'
 ];
 
 describe('run stage tones', () => {
@@ -167,13 +177,17 @@ describe('runStatusChip', () => {
     // recorded status is still `running`. Nothing here can tell whether that
     // process is alive, so nothing here may reclassify it.
     expect(runStatusChip('running', null)).toEqual({
-      label: 'running', glyph: RUN_STATUS_GLYPH.running, className: RUN_STATUS_CLASS.running
+      label: 'running',
+      glyph: RUN_STATUS_GLYPH.running,
+      className: RUN_STATUS_CLASS.running
     });
   });
 
   it('reads the run status verbatim while the live entry is fresh', () => {
     expect(runStatusChip('running', { status: 'running', fresh: true })).toEqual({
-      label: 'running', glyph: RUN_STATUS_GLYPH.running, className: RUN_STATUS_CLASS.running
+      label: 'running',
+      glyph: RUN_STATUS_GLYPH.running,
+      className: RUN_STATUS_CLASS.running
     });
   });
 

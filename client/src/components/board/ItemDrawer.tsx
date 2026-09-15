@@ -27,10 +27,7 @@ const ALLOWED_LINK_SCHEMES = new Set(['http', 'https', 'mailto']);
 const ALLOWED_IMAGE_SCHEMES = new Set<string>();
 
 /** How a browser will read a rendered href/src. */
-type Target =
-  | { kind: 'relative' }
-  | { kind: 'protocol-relative' }
-  | { kind: 'scheme'; scheme: string };
+type Target = { kind: 'relative' } | { kind: 'protocol-relative' } | { kind: 'scheme'; scheme: string };
 
 /**
  * Classify an href the way the *browser's* URL parser will — the only
@@ -94,7 +91,11 @@ function isAllowedTarget(href: string, allowed: ReadonlySet<string>): boolean {
  * exactly as real, so all five characters get escaped together.
  */
 const HTML_ESCAPES: Record<string, string> = {
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
 };
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
@@ -181,33 +182,39 @@ marked.use({
  * refetched on every window focus, and shipping every body every time would
  * make that refresh pay for content nobody is looking at.
  */
-export function ItemDrawer(
-  { item, hues, onClose, agents, onDispatch, runBlock, reverify }: {
-    item: BacklogItem;
-    hues: ProjectHues;
-    onClose: () => void;
-    /** null until the status probe answers; absent when the board is rendered
-     *  without dispatch at all (older tests, and any future read-only view). */
-    agents?: AgentsStatus | null;
-    onDispatch?: () => void;
-    /**
-     * Why an orchestrator run forbids dispatching this item, or null/undefined
-     * when none does — passed straight through to `DispatchButton`, and looked
-     * up by BoardView from the same run payload the card's own copy of this
-     * prop comes from. Both render sites need it: they render two independent
-     * buttons for one item, and a drawer chip that stayed live while the card
-     * tab went dead is half of the bug this exists to fix.
-     */
-    runBlock?: string | null;
-    /** Re-ask the dashboard status, resolving to the fresh answer — passed
-     *  straight through to `DispatchButton` (bug-13). Both render sites need
-     *  it for the same reason they both need `runBlock`: the drawer chip and
-     *  the card tab are two independent buttons for one item, and a chip that
-     *  stayed unrecoverably disabled while the tab could clear itself would be
-     *  the same contradiction on two surfaces. */
-    reverify?: () => Promise<AgentsStatus>;
-  }
-) {
+export function ItemDrawer({
+  item,
+  hues,
+  onClose,
+  agents,
+  onDispatch,
+  runBlock,
+  reverify
+}: {
+  item: BacklogItem;
+  hues: ProjectHues;
+  onClose: () => void;
+  /** null until the status probe answers; absent when the board is rendered
+   *  without dispatch at all (older tests, and any future read-only view). */
+  agents?: AgentsStatus | null;
+  onDispatch?: () => void;
+  /**
+   * Why an orchestrator run forbids dispatching this item, or null/undefined
+   * when none does — passed straight through to `DispatchButton`, and looked
+   * up by BoardView from the same run payload the card's own copy of this
+   * prop comes from. Both render sites need it: they render two independent
+   * buttons for one item, and a drawer chip that stayed live while the card
+   * tab went dead is half of the bug this exists to fix.
+   */
+  runBlock?: string | null;
+  /** Re-ask the dashboard status, resolving to the fresh answer — passed
+   *  straight through to `DispatchButton` (bug-13). Both render sites need
+   *  it for the same reason they both need `runBlock`: the drawer chip and
+   *  the card tab are two independent buttons for one item, and a chip that
+   *  stayed unrecoverably disabled while the tab could clear itself would be
+   *  the same contradiction on two surfaces. */
+  reverify?: () => Promise<AgentsStatus>;
+}) {
   const [body, setBody] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -269,13 +276,10 @@ export function ItemDrawer(
               the id's prefix on the meta line below still does. */}
           <span className={`pill ${hues.classFor(item.project)}`}>{item.project}</span>
           <span className="drawer-title">{item.title}</span>
-          {onDispatch && (
-            <DispatchButton
-              item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock}
-              reverify={reverify}
-            />
-          )}
-          <button className="drawer-close" onClick={onClose}>close</button>
+          {onDispatch && <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} />}
+          <button className="drawer-close" onClick={onClose}>
+            close
+          </button>
         </div>
         <div className="drawer-meta">
           <span>
@@ -292,9 +296,7 @@ export function ItemDrawer(
                 and the verbatim value rather than printing NaN.
                 Gated on status the same way the card is, so an archived item
                 reads as done rather than as still being worked. */}
-            {inProgress
-              ? ` · ◍ in progress${elapsed === null ? '' : ` ${elapsed}`} (since ${item.started})`
-              : ''}
+            {inProgress ? ` · ◍ in progress${elapsed === null ? '' : ` ${elapsed}`} (since ${item.started})` : ''}
             {item.status === 'done' ? ' · done' : ''}
             {item.tags.length > 0 ? ` · ${item.tags.join(', ')}` : ''}
             {/* Accumulated time, unlike the in-progress segment above, is NOT

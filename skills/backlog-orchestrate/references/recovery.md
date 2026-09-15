@@ -29,7 +29,7 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stat
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" claim
 ```
 
-`claim` *is* the heartbeat this step used to stamp — it writes `updatedAt`
+`claim` _is_ the heartbeat this step used to stamp — it writes `updatedAt`
 from the same clock reading — and it also records that **this** session is the
 one driving the run. Do not follow it with a separate `heartbeat`.
 
@@ -45,7 +45,7 @@ past this point both stage-write one `run.json` and both end in a merge to
 works if the loser stops on the first refusal instead of retrying.
 
 **`paused`** — this run was not crashed, it was stopped on purpose at an item
-boundary (SKILL.md §10, *Pausing*). Put it back to `running` first:
+boundary (SKILL.md §10, _Pausing_). Put it back to `running` first:
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" unpause
@@ -92,7 +92,7 @@ whole job then is to stop.
 Then re-derive the runner-fix switch, before the first item is taken over.
 A run that picked up its own merged fix (§9, "After a runner-fix item lands")
 switched to following this repo's copy of `SKILL.md` and `orchestrate.mjs`
-for the rest of the run — but that switch is *session* state, and this is a
+for the rest of the run — but that switch is _session_ state, and this is a
 fresh session, handed the installed copy again exactly as the crashed one
 was. Nothing on disk carries the switch itself; the note does. So read the
 queue and look for any item staged `merged` or `branched` whose note says the
@@ -106,7 +106,7 @@ If one is there, take the switch again — **both halves or neither**, per §9:
 re-read `skills/backlog-orchestrate/SKILL.md` from this repo's working tree
 and invoke the repo's `orchestrate.mjs` for the rest of this run. If none is,
 change nothing. Doing this here rather than later matters because the whole
-value of the marker is that the *remaining* queue is not executed by the
+value of the marker is that the _remaining_ queue is not executed by the
 broken version, and a crash is most likely at precisely the moment the runner
 is broken.
 
@@ -145,8 +145,9 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   line reads its prompt out of that file and refuses to spawn at all when the
   file is missing or empty (§4's rule that prose the run did not compose never
   rides a command line; bug-31). A resume that skips the write gets a `test
-  -s` that fails, a pid that is dead within a second, and a reconcile that
+-s` that fails, a pid that is dead within a second, and a reconcile that
   looks exactly like the crash it was recovering from.
+
 - **`redispatch-after-stop`** — same, but no session id was ever recorded, so
   there is nothing to resume. **Clear the dead marker first**, and this is the
   one command in this skill that runs with the worktree as its cwd, because
@@ -175,6 +176,7 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   same worktree and branch, from the project root — **step 4's dispatch line
   unchanged**, `--verbose` included, for the reason `resume-session` above
   gives.
+
 - **`inspect`** — either the worktree is gone but the branch survives, or the
   worktree is there with no marker at all (it may have finished cleanly just
   before the crash, or never started). Reconcile cannot tell those apart from
@@ -188,6 +190,7 @@ task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2�
   worktree on the run" — `stage <id> dispatched --worktree … --branch …` onto
   the existing pair — and dispatch. Not a leftover to ask about, and not a
   worktree to unwind: the pre-flight answer in it is the reason it was kept.
+
 - **`park`** — neither worktree nor branch survives. Nothing to resume:
 
   ```bash
@@ -256,7 +259,7 @@ does this item's worktree copy still carry an in-progress `phase:` marker?
   today's behaviour: the run already deleted that branch at the merge, so the
   `-D` is a harmless no-op.
 - **Marker present** → it leaves that item **completely alone**, worktree
-  *and* branch, and pushes an `attention` entry naming the absolute worktree
+  _and_ branch, and pushes an `attention` entry naming the absolute worktree
   path, the exact `backlog.mjs stop <id>` to run, and the exact
   `worktree remove` / `branch -D` commands to finish with afterwards.
 
@@ -264,7 +267,7 @@ Then it sets the run to `aborted` and prints a one-line summary of three
 counts: what it removed, how many branches it kept because their items were
 `branched`, and what it left in place with a marker.
 
-**That marker is the signal, and clearing markers *before* `abort` destroys
+**That marker is the signal, and clearing markers _before_ `abort` destroys
 it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
 marker, classifies the item as safe, and `worktree remove --force`s a
 directory whose session was still working: `--force` deletes the working
@@ -295,6 +298,7 @@ For each preserved item, in this order:
    family — the backlog skills — and it is not one of them. That is why abort
    preserves rather than cleans, instead of clearing the marker and carrying
    on.
+
 2. **Look inside the worktree before deleting it.** `git -C <worktree> status`
    and `git -C <worktree> diff`: a marker means a session was mid-flight, so
    whatever is uncommitted in there is the work nobody has seen. If any of it
@@ -310,12 +314,12 @@ For each preserved item, in this order:
 
    Plain `remove` again, for the reason it is plain everywhere else in this
    file: a `contains modified or untracked files` refusal means something is
-   still uncommitted in there, and this is the one path where that is *likely*
-   rather than surprising. git's *other* removal failure — it began the delete
+   still uncommitted in there, and this is the one path where that is _likely_
+   rather than surprising. git's _other_ removal failure — it began the delete
    and could not finish it — is not that, and SKILL.md §9's removal branch is
    the one home for telling them apart and for what to do about each. `-D` on the
    branch, unlike the merge path's `-d`: an aborted branch was never merged
-   anywhere, so a safe delete would always refuse it. These are the *preserved*
+   anywhere, so a safe delete would always refuse it. These are the _preserved_
    items only — never run `-D` on a branch abort reported as **kept**, which is
    a finished `branched` item's whole deliverable.
 

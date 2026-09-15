@@ -171,10 +171,13 @@ describe('OrchestratorService.archive', () => {
 
   it('strips verification tails but keeps cmd and ok', () => {
     const project = '/abs/project-b';
-    writeCurrent(orchHome, makeRun({
-      project,
-      queue: [queueItem({ verification: [{ cmd: 'pnpm test', ok: true, tail: 'BIG' }] })]
-    }));
+    writeCurrent(
+      orchHome,
+      makeRun({
+        project,
+        queue: [queueItem({ verification: [{ cmd: 'pnpm test', ok: true, tail: 'BIG' }] })]
+      })
+    );
 
     const result = service.archive();
     const entry = result.runs[0].queue[0].verification[0];
@@ -182,7 +185,7 @@ describe('OrchestratorService.archive', () => {
     expect('tail' in entry).toBe(false);
   });
 
-  it('sorts a project\'s runs newest first including suffix collisions', () => {
+  it("sorts a project's runs newest first including suffix collisions", () => {
     const project = '/abs/project-c';
     writeCurrent(orchHome, makeRun({ project, runId: 'run-20260901-150701' }));
     writeArchived(orchHome, project, 'a.json', makeRun({ project, runId: 'run-20260901-112815' }));
@@ -190,12 +193,7 @@ describe('OrchestratorService.archive', () => {
     writeArchived(orchHome, project, 'c.json', makeRun({ project, runId: 'run-20260901-073202' }));
 
     const result = service.archive();
-    expect(result.runs.map((r) => r.runId)).toEqual([
-      'run-20260901-150701',
-      'run-20260901-112815-2',
-      'run-20260901-112815',
-      'run-20260901-073202'
-    ]);
+    expect(result.runs.map((r) => r.runId)).toEqual(['run-20260901-150701', 'run-20260901-112815-2', 'run-20260901-112815', 'run-20260901-073202']);
   });
 
   it('skips an unreadable archived file without failing the payload', () => {
@@ -237,7 +235,7 @@ describe('OrchestratorService.archive', () => {
   // as "unreadable or not valid JSON, skipping" — once per archived run, per
   // request, on a route the Runs view fetches on mount and on every window
   // focus. The payload staying correct is necessary but not sufficient.
-  it('ignores a run\'s archived sidecar directory sitting beside its run file, silently', () => {
+  it("ignores a run's archived sidecar directory sitting beside its run file, silently", () => {
     const project = '/abs/project-g';
     const runId = 'run-20260901-090000';
     writeCurrent(orchHome, makeRun({ project, runId: 'run-20260902-100000', status: 'running' }));

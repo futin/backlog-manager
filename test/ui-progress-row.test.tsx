@@ -75,9 +75,7 @@ describe('ProgressRow', () => {
     expect(document.querySelector('.ui-progress-head')).toBeNull();
     expect(document.querySelector('.ui-progress-caption')).toBeNull();
 
-    rerender(
-      <ProgressRow value={1} max={2} name="Housing" valueText="1 / 2" caption="left to save" />
-    );
+    rerender(<ProgressRow value={1} max={2} name="Housing" valueText="1 / 2" caption="left to save" />);
     expect(screen.getByText('Housing')).toHaveClass('ui-progress-name');
     expect(screen.getByText('1 / 2')).toHaveClass('ui-progress-value');
     expect(screen.getByText('left to save')).toHaveClass('ui-progress-caption');

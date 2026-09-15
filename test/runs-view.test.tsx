@@ -6,16 +6,29 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import {
-  fetchAgentsStatus, fetchArchivedRun, fetchOrchestratorArchive, fetchOrchestratorRuns,
-  fetchWatchdog, pauseOrchestrate
+  fetchAgentsStatus,
+  fetchArchivedRun,
+  fetchOrchestratorArchive,
+  fetchOrchestratorRuns,
+  fetchWatchdog,
+  pauseOrchestrate
 } from '../client/src/lib/agents';
 import RunsView, { RUNS_PAGE_SIZE } from '../client/src/components/runs/RunsView';
 import { RUN_RANGES } from '../client/src/lib/run-range';
 import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type {
-  AgentsStatus, ArchiveQueueItem, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun,
-  OrchestratorRunsPayload, RunQueueItem, RunSessionUsage, RunStage, RunVerification, StartingRun,
+  AgentsStatus,
+  ArchiveQueueItem,
+  OrchestratorArchivePayload,
+  OrchestratorArchiveRun,
+  OrchestratorRun,
+  OrchestratorRunsPayload,
+  RunQueueItem,
+  RunSessionUsage,
+  RunStage,
+  RunVerification,
+  StartingRun,
   VerificationSummary,
   WatchdogStatus
 } from '../shared/types';
@@ -53,7 +66,11 @@ jest.mock('../client/src/lib/agents', () => ({
   cancelPauseOrchestrate: jest.fn(),
   resumeOrchestrate: jest.fn(),
   ApiError: class ApiError extends Error {
-    constructor(message: string, public readonly status: number, public readonly code?: string) {
+    constructor(
+      message: string,
+      public readonly status: number,
+      public readonly code?: string
+    ) {
       super(message);
       this.name = 'ApiError';
     }
@@ -70,8 +87,12 @@ const mockWatchdog = fetchWatchdog as jest.Mock;
  *  monitor's own suite carries. */
 function watchdogStatus(over: Partial<WatchdogStatus> = {}): WatchdogStatus {
   return {
-    phase: 'idle', nextTickAt: null, config: DEFAULT_WATCHDOG_CONFIG,
-    watching: [], events: [], ...over
+    phase: 'idle',
+    nextTickAt: null,
+    config: DEFAULT_WATCHDOG_CONFIG,
+    watching: [],
+    events: [],
+    ...over
   };
 }
 
@@ -138,10 +159,18 @@ function liveQueueItem(
   };
 }
 
-function run(over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun, 'runId' | 'project' | 'status' | 'startedAt' | 'updatedAt' | 'queue'>): OrchestratorArchiveRun {
+function run(
+  over: Partial<OrchestratorArchiveRun> & Pick<OrchestratorArchiveRun, 'runId' | 'project' | 'status' | 'startedAt' | 'updatedAt' | 'queue'>
+): OrchestratorArchiveRun {
   return {
-    maxItems: null, mergeMode: 'merge', mergeModeEffective: 'merge', mergeModeNote: null,
-    questionMode: 'park', attention: [], current: false, ...over
+    maxItems: null,
+    mergeMode: 'merge',
+    mergeModeEffective: 'merge',
+    mergeModeNote: null,
+    questionMode: 'park',
+    attention: [],
+    current: false,
+    ...over
   };
 }
 
@@ -434,8 +463,12 @@ beforeEach(() => {
   // gate states that for itself. Same "inert but valid default" shape as the
   // archived-run stub above.
   (fetchAgentsStatus as jest.Mock).mockResolvedValue({
-    enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-    spawnMaxPermission: 'auto', projectPaths: [RUN_LIVE.project, RUN_DONE_BETA.project]
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: 'auto',
+    projectPaths: [RUN_LIVE.project, RUN_DONE_BETA.project]
   } satisfies AgentsStatus);
 });
 
@@ -455,8 +488,7 @@ describe('RunsView', () => {
     const headings = Array.from(container.querySelectorAll('.runs-day-heading')).map((el) => el.textContent);
     expect(headings[0]).toBe('live');
 
-    const rowIds = Array.from(container.querySelectorAll('.runs-row'))
-      .map((el) => el.getAttribute('data-testid'));
+    const rowIds = Array.from(container.querySelectorAll('.runs-row')).map((el) => el.getAttribute('data-testid'));
     expect(rowIds[0]).toBe(`runs-row-${RUN_LIVE.runId}`);
 
     expect(screen.getByTestId('run-detail-slot')).toHaveTextContent(RUN_LIVE.runId);
@@ -476,8 +508,7 @@ describe('RunsView', () => {
     // runId) is pinned out of history entirely.
     expect(headings).toEqual(['live', dayLabel(RUN_DONE_ALPHA.startedAt), dayLabel(RUN_DONE_BETA.startedAt)]);
 
-    const rowIds = Array.from(container.querySelectorAll('.runs-row'))
-      .map((el) => el.getAttribute('data-testid'));
+    const rowIds = Array.from(container.querySelectorAll('.runs-row')).map((el) => el.getAttribute('data-testid'));
     expect(rowIds).toEqual([
       `runs-row-${RUN_LIVE.runId}`,
       `runs-row-${RUN_DONE_ALPHA.runId}`,
@@ -625,22 +656,23 @@ describe('RunsView', () => {
   // nobody could have written a deterministic assertion against the OLD
   // formula for a fixed-past fixture like this one.
   it("freezes the wide tile's open span at a stale run's last heartbeat, not real time", async () => {
-    const staleLive: OrchestratorRunsPayload['runs'] = [{
-      ...LIVE_RUNS[0],
-      fresh: false,
-      queue: [
-        liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
-        liveQueueItem('a-2', 'reviewing', {
-          fixLoops: 2,
-          stageAt: { pending: '2026-08-25T09:00:00.000Z', reviewing: '2026-08-25T12:05:00.000Z' }
-        })
-      ]
-    }];
+    const staleLive: OrchestratorRunsPayload['runs'] = [
+      {
+        ...LIVE_RUNS[0],
+        fresh: false,
+        queue: [
+          liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
+          liveQueueItem('a-2', 'reviewing', {
+            fixLoops: 2,
+            stageAt: { pending: '2026-08-25T09:00:00.000Z', reviewing: '2026-08-25T12:05:00.000Z' }
+          })
+        ]
+      }
+    ];
 
     await renderRunsView(ARCHIVE_RUNS, staleLive);
 
-    const reviewingValue = screen.getByTestId('runs-tile-machine-bars-reviewing')
-      .querySelector('.run-bars-value')?.textContent;
+    const reviewingValue = screen.getByTestId('runs-tile-machine-bars-reviewing').querySelector('.run-bars-value')?.textContent;
     expect(reviewingValue).toBe('144h 00m');
   });
 
@@ -750,7 +782,7 @@ describe('RunsView', () => {
   // `running`) and the live entry deliberately AHEAD of it (2/2 merged,
   // `done`), so a row still reading the archive would print `1/2` and
   // `running` where the fix makes it print `2/2` and `done`.
-  it("a live-backed row reads its merged/total and status off the live entry, not the stale archive snapshot", async () => {
+  it('a live-backed row reads its merged/total and status off the live entry, not the stale archive snapshot', async () => {
     const archiveEntry = run({
       runId: 'run-20260901-090000',
       project: '/abs/gamma',
@@ -780,7 +812,8 @@ describe('RunsView', () => {
         liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
       ],
       fresh: true,
-      pastRuns: 0, pauseRequested: false
+      pastRuns: 0,
+      pauseRequested: false
     };
 
     await renderRunsView([archiveEntry], [liveEntry]);
@@ -837,7 +870,8 @@ describe('RunsView', () => {
         liveQueueItem('g-2', 'merged') // live: g-2 has ALSO merged now (2/2), unlike the archive's 1/2
       ],
       fresh: true,
-      pastRuns: 0, pauseRequested: false
+      pastRuns: 0,
+      pauseRequested: false
     };
 
     await renderRunsView([archiveEntry], [liveEntry]);
@@ -920,7 +954,8 @@ describe('RunsView', () => {
         queue: [],
         attention: [],
         fresh: true,
-        pastRuns: 0, pauseRequested: false
+        pastRuns: 0,
+        pauseRequested: false
       };
 
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
@@ -932,7 +967,9 @@ describe('RunsView', () => {
       // a real microtask-queue drain without any fake time actually
       // elapsing, the same technique test/orchestrator-hook.test.tsx uses
       // for the identical reason.
-      await act(async () => { await jest.advanceTimersByTimeAsync(0); });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(0);
+      });
 
       const archiveCallsAfterMount = mockArchive.mock.calls.length;
       // `useOrchestratorRuns`' own polling interval is armed here (a fresh
@@ -952,11 +989,14 @@ describe('RunsView', () => {
         queue: [],
         attention: [],
         fresh: true,
-        pastRuns: 0, pauseRequested: false
+        pastRuns: 0,
+        pauseRequested: false
       };
       mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [] } satisfies OrchestratorRunsPayload);
 
-      await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5_000);
+      });
 
       // The archive listing was re-fetched strictly because the live poll's
       // OWN set of fresh runs changed — no focus event fired anywhere in
@@ -1028,9 +1068,7 @@ describe('RunsView', () => {
     // offers both projects — `projects` derives from `merged`, never from
     // the range/project-filtered list, so a range that empties a project
     // must not also remove the option that would switch back to it.
-    const optionValues = Array.from(
-      screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')
-    ).map((o) => o.getAttribute('value'));
+    const optionValues = Array.from(screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')).map((o) => o.getAttribute('value'));
     expect(optionValues).toEqual(expect.arrayContaining([RUN_A.project, RUN_B.project]));
   });
 
@@ -1040,12 +1078,10 @@ describe('RunsView', () => {
     // All seven MACHINE_STAGES rows always render, in pipeline order,
     // whether or not this fixture recorded a millisecond in every one of
     // them — StageBars.tsx's own "always seven, always ordered" contract.
-    const barRowIds = Array.from(container.querySelectorAll('[data-testid^="runs-tile-machine-bars-"]'))
-      .map((el) => el.getAttribute('data-testid'));
+    const barRowIds = Array.from(container.querySelectorAll('[data-testid^="runs-tile-machine-bars-"]')).map((el) => el.getAttribute('data-testid'));
     expect(barRowIds).toEqual(MACHINE_STAGES.map((stage) => `runs-tile-machine-bars-${stage}`));
 
-    const dispatchedValue = () =>
-      screen.getByTestId('runs-tile-machine-bars-dispatched').querySelector('.run-bars-value')?.textContent;
+    const dispatchedValue = () => screen.getByTestId('runs-tile-machine-bars-dispatched').querySelector('.run-bars-value')?.textContent;
 
     // A's own `dispatched` span is 5 minutes, B's is 10 (see their shared
     // fixture comment above). Summed under `all` (both runs in scope):
@@ -1132,7 +1168,7 @@ describe('RunsView', () => {
   // "legible at a glance in history" half of design §7; the full
   // `mergeModeNote` prose is the detail pane's job, pinned separately in
   // run-detail.test.tsx.
-  it('marks a downgraded run\'s row distinctly from a deliberately-chosen branch-mode one', async () => {
+  it("marks a downgraded run's row distinctly from a deliberately-chosen branch-mode one", async () => {
     const downgraded = run({
       runId: 'run-20260901-100000',
       project: '/abs/alpha',
@@ -1237,23 +1273,27 @@ describe('RunsView history paging (task-16)', () => {
 
   /** One archived, done run per timestamp, ids ordered so `runs-row-paged-000` is always the one at index 0 of the fixture as written. */
   function pagedRuns(startedAts: readonly string[], project: string = PAGED_PROJECT): OrchestratorArchiveRun[] {
-    return startedAts.map((startedAt, i) => run({
-      runId: `paged-${project === PAGED_PROJECT ? '' : 'o-'}${String(i).padStart(3, '0')}`,
-      project,
-      status: 'done',
-      startedAt,
-      updatedAt: startedAt,
-      queue: [item(`p-${i}`, 'merged')]
-    }));
+    return startedAts.map((startedAt, i) =>
+      run({
+        runId: `paged-${project === PAGED_PROJECT ? '' : 'o-'}${String(i).padStart(3, '0')}`,
+        project,
+        status: 'done',
+        startedAt,
+        updatedAt: startedAt,
+        queue: [item(`p-${i}`, 'merged')]
+      })
+    );
   }
 
   /** `count` runs, newest first, one minute apart — the plain "a lot of history" fixture. */
   function minuteSeries(count: number, project: string = PAGED_PROJECT): OrchestratorArchiveRun[] {
-    return pagedRuns(Array.from({ length: count }, (_, i) => minutesAgo(i + 1)), project);
+    return pagedRuns(
+      Array.from({ length: count }, (_, i) => minutesAgo(i + 1)),
+      project
+    );
   }
 
-  const historyRows = (container: HTMLElement): Element[] =>
-    Array.from(container.querySelectorAll('.runs-day:not([data-testid="runs-day-live"]) .runs-row'));
+  const historyRows = (container: HTMLElement): Element[] => Array.from(container.querySelectorAll('.runs-day:not([data-testid="runs-day-live"]) .runs-row'));
 
   it('renders one page of history with a counted load-more control', async () => {
     const { container } = await renderRunsView(minuteSeries(RUNS_PAGE_SIZE + 5));
@@ -1333,7 +1373,8 @@ describe('RunsView history paging (task-16)', () => {
       queue: [liveQueueItem('pl-1', 'dispatched')],
       attention: [],
       fresh: true,
-      pastRuns: 0, pauseRequested: false
+      pastRuns: 0,
+      pauseRequested: false
     };
 
     const { container } = await renderRunsView([live, ...minuteSeries(RUNS_PAGE_SIZE + 5)], [liveEntry]);
@@ -1511,8 +1552,12 @@ describe('RunsView history paging (task-16)', () => {
 
   it('offers no Resume when the dashboard is off', async () => {
     (fetchAgentsStatus as jest.Mock).mockResolvedValue({
-      enabled: false, reachable: false, remoteAnswer: false, spawnAvailable: false,
-      spawnMaxPermission: 'auto', projectPaths: []
+      enabled: false,
+      reachable: false,
+      remoteAnswer: false,
+      spawnAvailable: false,
+      spawnMaxPermission: 'auto',
+      projectPaths: []
     } satisfies AgentsStatus);
     const paused = pausedRun();
     await renderRunsView([...ARCHIVE_RUNS, paused], []);
@@ -1621,10 +1666,13 @@ describe('RunsView history paging (task-16)', () => {
   // The one link between the two modes: a row in the monitor IS a run in the
   // list, so clicking it lands on that run's detail rather than leaving a
   // person to find it again by hand.
-  it('lands on a run\'s detail when its monitor row is clicked', async () => {
-    mockWatchdog.mockResolvedValue(watchdogStatus({
-      phase: 'armed', watching: [RUN_LIVE.runId]
-    }));
+  it("lands on a run's detail when its monitor row is clicked", async () => {
+    mockWatchdog.mockResolvedValue(
+      watchdogStatus({
+        phase: 'armed',
+        watching: [RUN_LIVE.runId]
+      })
+    );
     await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
 
     await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
@@ -1646,12 +1694,9 @@ describe('RunsView history paging (task-16)', () => {
 
     expect(tools.lastElementChild).toBe(screen.getByTestId('runs-mode'));
     const order = Array.from(tools.children);
-    expect(order.indexOf(screen.getByTestId('runs-range')))
-      .toBeLessThan(order.indexOf(screen.getByLabelText('Project')));
-    expect(order.indexOf(screen.getByLabelText('Project')))
-      .toBeLessThan(order.indexOf(screen.getByTestId('runs-tools-divider')));
-    expect(order.indexOf(screen.getByTestId('runs-tools-divider')))
-      .toBeLessThan(order.indexOf(screen.getByTestId('runs-mode')));
+    expect(order.indexOf(screen.getByTestId('runs-range'))).toBeLessThan(order.indexOf(screen.getByLabelText('Project')));
+    expect(order.indexOf(screen.getByLabelText('Project'))).toBeLessThan(order.indexOf(screen.getByTestId('runs-tools-divider')));
+    expect(order.indexOf(screen.getByTestId('runs-tools-divider'))).toBeLessThan(order.indexOf(screen.getByTestId('runs-mode')));
 
     await userEvent.click(screen.getByTestId('runs-mode-watchdog'));
     expect(tools.lastElementChild).toBe(screen.getByTestId('runs-mode'));
@@ -1660,8 +1705,7 @@ describe('RunsView history paging (task-16)', () => {
     await userEvent.click(screen.getByTestId('runs-mode-runs'));
     const back = Array.from(tools.children);
     expect(tools.lastElementChild).toBe(screen.getByTestId('runs-mode'));
-    expect(back.indexOf(screen.getByTestId('runs-range')))
-      .toBeLessThan(back.indexOf(screen.getByTestId('runs-mode')));
+    expect(back.indexOf(screen.getByTestId('runs-range'))).toBeLessThan(back.indexOf(screen.getByTestId('runs-mode')));
   });
 
   // The divider groups: two controls that scope history, one that picks the
@@ -1715,16 +1759,15 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
    *  different, hand-checkable number. */
   const STALE_LIVE: OrchestratorRunsPayload['runs'] = [{ ...LIVE_RUNS[0], fresh: false }];
 
-  it('keeps the stale live entry as the row\'s data authority instead of falling back to the archive', async () => {
+  it("keeps the stale live entry as the row's data authority instead of falling back to the archive", async () => {
     await renderRunsView(ARCHIVE_RUNS, STALE_LIVE);
 
     // 2/2 is the LIVE queue (a-1 and a-2 both merged); the archive snapshot
     // beside it still says 1/2. Pre-fix this row read the archive.
-    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-row-count')?.textContent)
-      .toBe('2/2');
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-row-count')?.textContent).toBe('2/2');
   });
 
-  it('freezes the row wall time at the stale live entry\'s own last heartbeat', async () => {
+  it("freezes the row wall time at the stale live entry's own last heartbeat", async () => {
     // The live entry is ahead of the archive on `updatedAt` too, so this
     // number can only come from the live entry — and it must stay frozen
     // there rather than climbing toward the real `Date.now()`, which is
@@ -1738,31 +1781,32 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
       current: true,
       queue: [item('d-1', 'reviewing')]
     });
-    const staleLive: OrchestratorRunsPayload['runs'] = [{
-      runId: archiveEntry.runId,
-      project: archiveEntry.project,
-      status: 'running',
-      startedAt: archiveEntry.startedAt,
-      updatedAt: '2026-09-01T09:42:00.000Z',
-      maxItems: null,
-      mergeMode: 'merge',
-      mergeModeEffective: 'merge',
-      questionMode: 'park',
-      mergeModeNote: null,
-      queue: [liveQueueItem('d-1', 'reviewing')],
-      attention: [],
-      fresh: false,
-      pastRuns: 0,
-      pauseRequested: false
-    }];
+    const staleLive: OrchestratorRunsPayload['runs'] = [
+      {
+        runId: archiveEntry.runId,
+        project: archiveEntry.project,
+        status: 'running',
+        startedAt: archiveEntry.startedAt,
+        updatedAt: '2026-09-01T09:42:00.000Z',
+        maxItems: null,
+        mergeMode: 'merge',
+        mergeModeEffective: 'merge',
+        questionMode: 'park',
+        mergeModeNote: null,
+        queue: [liveQueueItem('d-1', 'reviewing')],
+        attention: [],
+        fresh: false,
+        pastRuns: 0,
+        pauseRequested: false
+      }
+    ];
 
     await renderRunsView([archiveEntry], staleLive);
 
-    expect(screen.getByTestId(`runs-row-${archiveEntry.runId}`).querySelector('.runs-row-wall')?.textContent)
-      .toBe('42m');
+    expect(screen.getByTestId(`runs-row-${archiveEntry.runId}`).querySelector('.runs-row-wall')?.textContent).toBe('42m');
   });
 
-  it('advances the detail pane\'s stage readout on every live poll, with no archive refetch', async () => {
+  it("advances the detail pane's stage readout on every live poll, with no archive refetch", async () => {
     // The whole bug, end to end. Pre-fix the pane sat on `inspecting`
     // through four polls that each reported something different, because
     // `live` was `null` and `RunDetail`'s one-shot `fetchArchivedRun`
@@ -1779,23 +1823,25 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
         queue: [item('e-1', 'inspecting')]
       });
       const staleAt = (stage: RunStage): OrchestratorRunsPayload => ({
-        runs: [{
-          runId: archiveEntry.runId,
-          project: archiveEntry.project,
-          status: 'running',
-          startedAt: archiveEntry.startedAt,
-          updatedAt: '2026-09-01T10:01:00.000Z',
-          maxItems: null,
-          mergeMode: 'merge',
-          mergeModeEffective: 'merge',
-          questionMode: 'park',
-          mergeModeNote: null,
-          queue: [liveQueueItem('e-1', stage)],
-          attention: [],
-          fresh: false,
-          pastRuns: 0,
-          pauseRequested: false
-        }],
+        runs: [
+          {
+            runId: archiveEntry.runId,
+            project: archiveEntry.project,
+            status: 'running',
+            startedAt: archiveEntry.startedAt,
+            updatedAt: '2026-09-01T10:01:00.000Z',
+            maxItems: null,
+            mergeMode: 'merge',
+            mergeModeEffective: 'merge',
+            questionMode: 'park',
+            mergeModeNote: null,
+            queue: [liveQueueItem('e-1', stage)],
+            attention: [],
+            fresh: false,
+            pastRuns: 0,
+            pauseRequested: false
+          }
+        ],
         starting: []
       });
 
@@ -1803,14 +1849,15 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
       mockRuns.mockResolvedValue(staleAt('inspecting'));
 
       render(<RunsView />);
-      await act(async () => { await jest.advanceTimersByTimeAsync(0); });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(0);
+      });
 
       // Read off the item HEAD's own stage chip, not the whole row: the
       // seven-node `StageTrack` below it prints every stage name on every
       // render by construction, so a whole-row assertion would match
       // `inspecting` forever no matter what the item's actual stage is.
-      const stageChip = (): string => screen.getByTestId('run-detail-item-e-1')
-        .querySelector('.run-drawer-item-head')?.textContent ?? '';
+      const stageChip = (): string => screen.getByTestId('run-detail-item-e-1').querySelector('.run-drawer-item-head')?.textContent ?? '';
 
       expect(stageChip()).toContain('inspecting');
 
@@ -1818,7 +1865,9 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
       // keeps polling a `running` run whether or not it is fresh, so this
       // tick fires without any focus event or remount.
       mockRuns.mockResolvedValue(staleAt('merging'));
-      await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5_000);
+      });
 
       expect(stageChip()).toContain('merging');
       expect(stageChip()).not.toContain('inspecting');
@@ -1837,10 +1886,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
 
     await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
 
-    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-status')?.textContent)
-      .toContain('crashed');
-    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent)
-      .toContain('crashed');
+    expect(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`).querySelector('.runs-status')?.textContent).toContain('crashed');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent).toContain('crashed');
   });
 
   it('reads running on both status badges while the live entry is fresh', async () => {
@@ -1851,11 +1898,10 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
     const row = screen.getByTestId(`runs-row-${RUN_LIVE.runId}`);
     expect(row.querySelector('.runs-status')?.textContent).toContain('running');
     expect(row.querySelector('.runs-status')?.textContent).not.toContain('crashed');
-    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent)
-      .toContain('running');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent).toContain('running');
   });
 
-  it('leaves an archive-only row\'s recorded running status alone on both badges', async () => {
+  it("leaves an archive-only row's recorded running status alone on both badges", async () => {
     // A run whose file is gone or superseded: it appears in the archive at
     // `status: "running"` and in no live payload at all. There is no
     // heartbeat here to judge, so nothing may reclassify it — the case that
@@ -1872,10 +1918,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
 
     await renderRunsView([orphan], []);
 
-    expect(screen.getByTestId(`runs-row-${orphan.runId}`).querySelector('.runs-status')?.textContent)
-      .toContain('running');
-    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent)
-      .toContain('running');
+    expect(screen.getByTestId(`runs-row-${orphan.runId}`).querySelector('.runs-status')?.textContent).toContain('running');
+    expect(screen.getByTestId('run-detail-slot').querySelector('.runs-status')?.textContent).toContain('running');
   });
 
   it('drops the active and queued chips for a stale live entry and marks the pane crashed', async () => {
@@ -2006,8 +2050,7 @@ describe('RunsView · a starting run (task-21)', () => {
     // by construction, so it cannot sit under a day heading.
     const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS, [STARTING_ALPHA]);
 
-    const groupIds = Array.from(container.querySelectorAll('.runs-day'))
-      .map((el) => el.getAttribute('data-testid'));
+    const groupIds = Array.from(container.querySelectorAll('.runs-day')).map((el) => el.getAttribute('data-testid'));
     expect(groupIds[0]).toBe('runs-day-starting');
     expect(groupIds[1]).toBe('runs-day-live');
 
@@ -2032,9 +2075,7 @@ describe('RunsView · a starting run (task-21)', () => {
     // everything including the row that put the option there.
     await renderRunsView([RUN_A, RUN_B], [], [STARTING_ALPHA]);
 
-    const optionValues = Array.from(
-      screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')
-    ).map((o) => o.getAttribute('value'));
+    const optionValues = Array.from(screen.getByRole('combobox', { name: 'Project' }).querySelectorAll('option')).map((o) => o.getAttribute('value'));
     expect(optionValues).toEqual(['all', RUN_A.project, RUN_B.project]);
   });
 
@@ -2056,9 +2097,8 @@ describe('RunsView · a starting run (task-21)', () => {
     // whether a starting entry rides along. Every tile — including the wide
     // machine-time one — has to read identically, because a placeholder
     // contributes no run, no queue and no stage span to sum.
-    const tileText = (): string[] => Array.from(
-      document.querySelectorAll('[data-testid^="runs-tile-"]')
-    ).map((el) => `${el.getAttribute('data-testid')}=${el.textContent}`);
+    const tileText = (): string[] =>
+      Array.from(document.querySelectorAll('[data-testid^="runs-tile-"]')).map((el) => `${el.getAttribute('data-testid')}=${el.textContent}`);
 
     // RUN_A/RUN_B are both `done`, so every span these tiles sum is closed and
     // two renders taken milliseconds apart cannot disagree.
@@ -2167,7 +2207,7 @@ describe('session usage', () => {
     expect(await screen.findByTestId('run-detail-usage')).toHaveTextContent('$5.25 · 48 turns · 3 sessions');
   });
 
-  it('prints each item\'s own total, with a session count only where there was more than one', async () => {
+  it("prints each item's own total, with a session count only where there was more than one", async () => {
     await renderRunsView([runWithUsage()]);
 
     await userEvent.click(screen.getByTestId('runs-row-run-20260831-140000'));

@@ -1,7 +1,4 @@
-import {
-  graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause,
-  WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE
-} from '../client/src/lib/run-watchdog';
+import { graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../client/src/lib/run-watchdog';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 import type { RunWatchdog, WatchdogEventKind, WatchdogStatus } from '../shared/types';
 
@@ -14,8 +11,13 @@ import type { RunWatchdog, WatchdogEventKind, WatchdogStatus } from '../shared/t
  */
 function watchdog(over: Partial<RunWatchdog> = {}): RunWatchdog {
   return {
-    enabled: true, attempts: 0, maxAttempts: 2, lastSpawnAt: null,
-    lastSessionId: null, lastError: null, exhausted: false,
+    enabled: true,
+    attempts: 0,
+    maxAttempts: 2,
+    lastSpawnAt: null,
+    lastSessionId: null,
+    lastError: null,
+    exhausted: false,
     ...over
   };
 }
@@ -80,33 +82,28 @@ describe('watchdogClause', () => {
     // failed call ("a refused spawn started no session") — so this is a
     // real state, not a contradiction, and the failure must still win over
     // the "waiting for next check" reading attempts: 0 would otherwise imply.
-    expect(watchdogClause(watchdog({ attempts: 0, lastError: 'dashboard down' })))
-      .toBe('watchdog: resume failed: dashboard down');
+    expect(watchdogClause(watchdog({ attempts: 0, lastError: 'dashboard down' }))).toBe('watchdog: resume failed: dashboard down');
   });
 
   it('reads "exhausted after N — resume by hand" once the cap is reached', () => {
-    expect(watchdogClause(watchdog({ attempts: 2, maxAttempts: 2, exhausted: true })))
-      .toBe('watchdog: exhausted after 2 — resume by hand');
+    expect(watchdogClause(watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }))).toBe('watchdog: exhausted after 2 — resume by hand');
   });
 
   it('reads "off — resume by hand" when disabled, even with a live attempt count', () => {
     // `enabled: false` must win over a live "attempt 1/2" reading — see
     // run-watchdog.ts's own header comment on why "off" outranks a pending
     // attempt.
-    expect(watchdogClause(watchdog({ enabled: false, attempts: 1, lastSpawnAt: '2026-09-03T15:14:07Z' })))
-      .toBe('watchdog: off — resume by hand');
+    expect(watchdogClause(watchdog({ enabled: false, attempts: 1, lastSpawnAt: '2026-09-03T15:14:07Z' }))).toBe('watchdog: off — resume by hand');
   });
 
   it('reads "off — resume by hand" over a pending lastError too', () => {
-    expect(watchdogClause(watchdog({ enabled: false, lastError: 'busy' })))
-      .toBe('watchdog: off — resume by hand');
+    expect(watchdogClause(watchdog({ enabled: false, lastError: 'busy' }))).toBe('watchdog: off — resume by hand');
   });
 
   it('reads "exhausted" even when the sweeper has since been disabled', () => {
     // Exhaustion outranks everything, including `off` — re-enabling the
     // toggle would not resume trying, since the CAP is what stopped it.
-    expect(watchdogClause(watchdog({ enabled: false, attempts: 2, maxAttempts: 2, exhausted: true })))
-      .toBe('watchdog: exhausted after 2 — resume by hand');
+    expect(watchdogClause(watchdog({ enabled: false, attempts: 2, maxAttempts: 2, exhausted: true }))).toBe('watchdog: exhausted after 2 — resume by hand');
   });
 });
 
@@ -140,8 +137,7 @@ describe('stateLine', () => {
   const now = Date.parse('2026-09-05T12:00:00.000Z');
 
   it('names the off reason', () => {
-    expect(stateLine(watchdogStatus({ phase: 'off', reason: 'BM_WATCHDOG off' }), now))
-      .toBe('off — BM_WATCHDOG off');
+    expect(stateLine(watchdogStatus({ phase: 'off', reason: 'BM_WATCHDOG off' }), now)).toBe('off — BM_WATCHDOG off');
   });
 
   it('degrades a reasonless off to "unknown" rather than printing undefined', () => {
@@ -153,40 +149,53 @@ describe('stateLine', () => {
   });
 
   it('appends the resume-disabled suffix to idle', () => {
-    expect(stateLine(
-      watchdogStatus({ phase: 'idle', config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false } }),
-      now
-    )).toBe('idle — no running run · resume disabled');
+    expect(stateLine(watchdogStatus({ phase: 'idle', config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false } }), now)).toBe(
+      'idle — no running run · resume disabled'
+    );
   });
 
   it('lists every watched run id and counts down to the next tick', () => {
-    expect(stateLine(watchdogStatus({
-      phase: 'armed',
-      watching: ['run-a', 'run-b'],
-      nextTickAt: new Date(now + 42_000).toISOString()
-    }), now)).toBe('armed — watching run-a, run-b, next check in 42s');
+    expect(
+      stateLine(
+        watchdogStatus({
+          phase: 'armed',
+          watching: ['run-a', 'run-b'],
+          nextTickAt: new Date(now + 42_000).toISOString()
+        }),
+        now
+      )
+    ).toBe('armed — watching run-a, run-b, next check in 42s');
   });
 
   it('appends the resume-disabled suffix to armed too', () => {
-    expect(stateLine(watchdogStatus({
-      phase: 'armed',
-      watching: ['run-a', 'run-b'],
-      nextTickAt: new Date(now + 42_000).toISOString(),
-      config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false }
-    }), now)).toBe('armed — watching run-a, run-b, next check in 42s · resume disabled');
+    expect(
+      stateLine(
+        watchdogStatus({
+          phase: 'armed',
+          watching: ['run-a', 'run-b'],
+          nextTickAt: new Date(now + 42_000).toISOString(),
+          config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false }
+        }),
+        now
+      )
+    ).toBe('armed — watching run-a, run-b, next check in 42s · resume disabled');
   });
 
   it('reads 0s rather than NaN when armed with no nextTickAt', () => {
-    expect(stateLine(watchdogStatus({ phase: 'armed', watching: ['run-a'], nextTickAt: null }), now))
-      .toBe('armed — watching run-a, next check in 0s');
+    expect(stateLine(watchdogStatus({ phase: 'armed', watching: ['run-a'], nextTickAt: null }), now)).toBe('armed — watching run-a, next check in 0s');
   });
 
   it('clamps a nextTickAt already in the past to 0s, never a negative countdown', () => {
-    expect(stateLine(watchdogStatus({
-      phase: 'armed',
-      watching: ['run-a'],
-      nextTickAt: new Date(now - 5_000).toISOString()
-    }), now)).toBe('armed — watching run-a, next check in 0s');
+    expect(
+      stateLine(
+        watchdogStatus({
+          phase: 'armed',
+          watching: ['run-a'],
+          nextTickAt: new Date(now - 5_000).toISOString()
+        }),
+        now
+      )
+    ).toBe('armed — watching run-a, next check in 0s');
   });
 });
 
@@ -210,8 +219,7 @@ describe('sweepFraction', () => {
   }
 
   it('is the share of the tick still to come', () => {
-    expect(sweepFraction(armed(new Date(now + 42_000).toISOString(), 60_000), now))
-      .toBeCloseTo(0.7, 10);
+    expect(sweepFraction(armed(new Date(now + 42_000).toISOString(), 60_000), now)).toBeCloseTo(0.7, 10);
   });
 
   // A tick the server owes us but has not run yet: the bar sits empty rather
@@ -245,15 +253,13 @@ describe('graceRemainingMs', () => {
   const config = { graceMs: 600_000 };
 
   it('counts down from the last spawn attempt', () => {
-    expect(graceRemainingMs(watchdog({ lastSpawnAt: new Date(now - 120_000).toISOString() }), config, now))
-      .toBe(480_000);
+    expect(graceRemainingMs(watchdog({ lastSpawnAt: new Date(now - 120_000).toISOString() }), config, now)).toBe(480_000);
   });
 
   // Floored, never negative: a window that closed eight minutes ago is
   // simply closed, and the caller renders nothing at 0.
   it('floors an elapsed window at 0', () => {
-    expect(graceRemainingMs(watchdog({ lastSpawnAt: new Date(now - 720_000).toISOString() }), config, now))
-      .toBe(0);
+    expect(graceRemainingMs(watchdog({ lastSpawnAt: new Date(now - 720_000).toISOString() }), config, now)).toBe(0);
   });
 
   // No attempt has been made, so no window has opened — distinct from 0,
@@ -272,8 +278,13 @@ describe('the kind records', () => {
   // `Record<WatchdogEventKind, true>` literal fails to compile the day an
   // eighth kind is added, so this suite cannot silently stop covering one.
   const every: Record<WatchdogEventKind, true> = {
-    armed: true, idle: true, spawned: true, failed: true,
-    exhausted: true, recovered: true, disabled: true
+    armed: true,
+    idle: true,
+    spawned: true,
+    failed: true,
+    exhausted: true,
+    recovered: true,
+    disabled: true
   };
   const kinds = Object.keys(every) as WatchdogEventKind[];
 

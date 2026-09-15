@@ -13,9 +13,11 @@ describe('RegistryService', () => {
   }
 
   it('loads a well-formed registry', () => {
-    const file = tmpFile(JSON.stringify({
-      projects: [{ name: 'p1', path: '/abs/p1', createdAt: '2026-08-26T00:00:00.000Z' }]
-    }));
+    const file = tmpFile(
+      JSON.stringify({
+        projects: [{ name: 'p1', path: '/abs/p1', createdAt: '2026-08-26T00:00:00.000Z' }]
+      })
+    );
     expect(new RegistryService(file).load().projects).toHaveLength(1);
   });
 
@@ -32,27 +34,30 @@ describe('RegistryService', () => {
     // The shape that used to survive: Array.isArray(projects) held, so
     // {name: 1, path: 2} reached join(2, 'backlog') in ItemsService and 500'd
     // the whole board — which the client rendered as "nothing registered yet".
-    const file = tmpFile(JSON.stringify({
-      projects: [
-        { name: 1, path: 2 },
-        { name: 'ok', path: '/abs/ok', createdAt: '2026-08-26T00:00:00.000Z' },
-        { name: 'no-createdAt', path: '/abs/x' },
-        'not an object',
-        null
-      ]
-    }));
-    expect(new RegistryService(file).load().projects).toEqual([
-      { name: 'ok', path: '/abs/ok', createdAt: '2026-08-26T00:00:00.000Z' }
-    ]);
+    const file = tmpFile(
+      JSON.stringify({
+        projects: [
+          { name: 1, path: 2 },
+          { name: 'ok', path: '/abs/ok', createdAt: '2026-08-26T00:00:00.000Z' },
+          { name: 'no-createdAt', path: '/abs/x' },
+          'not an object',
+          null
+        ]
+      })
+    );
+    expect(new RegistryService(file).load().projects).toEqual([{ name: 'ok', path: '/abs/ok', createdAt: '2026-08-26T00:00:00.000Z' }]);
   });
 
   it('re-reads the file per call — a project registered mid-session appears', () => {
     const file = tmpFile(JSON.stringify({ projects: [] }));
     const service = new RegistryService(file);
     expect(service.load().projects).toHaveLength(0);
-    writeFileSync(file, JSON.stringify({
-      projects: [{ name: 'late', path: '/abs/late', createdAt: '2026-08-26T00:00:00.000Z' }]
-    }));
+    writeFileSync(
+      file,
+      JSON.stringify({
+        projects: [{ name: 'late', path: '/abs/late', createdAt: '2026-08-26T00:00:00.000Z' }]
+      })
+    );
     expect(service.load().projects).toHaveLength(1);
   });
 

@@ -168,9 +168,7 @@ describe('GET /api/orchestrator/runs', () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect(res.body.runs[0].mergeMode).toBe('merge');
     expect(res.body.runs[0].mergeModeEffective).toBe('branch');
-    expect(res.body.runs[0].mergeModeNote).toBe(
-      'merge classifier denied the merge for bug-14; falling back to branch for the rest of the queue'
-    );
+    expect(res.body.runs[0].mergeModeNote).toBe('merge classifier denied the merge for bug-14; falling back to branch for the rest of the queue');
   });
 
   it('defaults mergeMode/mergeModeEffective to merge and mergeModeNote to null for a run file written before this feature existed', async () => {
@@ -266,7 +264,7 @@ describe('GET /api/orchestrator/runs', () => {
   // pastRuns is the count a person actually reads — RunDrawer prints
   // "<n> past run(s)" straight off it — so counting a run's evidence folder
   // as a second run doubles that number on every archived run.
-  it('counts run FILES under runs/ as pastRuns, not a run\'s archived sidecar directory', async () => {
+  it("counts run FILES under runs/ as pastRuns, not a run's archived sidecar directory", async () => {
     const run: OrchestratorRun = { ...fixture, updatedAt: new Date().toISOString() };
     const dir = projectDir(run.project);
     writeRun(run);
@@ -452,5 +450,4 @@ describe('GET /api/orchestrator/runs', () => {
 
     expect(starting.list([])).toEqual([]);
   });
-
 });

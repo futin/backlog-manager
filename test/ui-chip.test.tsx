@@ -53,13 +53,21 @@ describe('Chip', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Go' }));
     expect(onClick).toHaveBeenCalledTimes(1);
 
-    rerender(<Chip onClick={onClick} disabled>Go</Chip>);
+    rerender(
+      <Chip onClick={onClick} disabled>
+        Go
+      </Chip>
+    );
     await userEvent.click(screen.getByRole('button', { name: 'Go' }));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it('renders a label element under as="label", with no toggle state on it', () => {
-    render(<Chip as="label" pressed>Only mine</Chip>);
+    render(
+      <Chip as="label" pressed>
+        Only mine
+      </Chip>
+    );
 
     const chip = screen.getByText('Only mine');
     expect(chip.tagName).toBe('LABEL');

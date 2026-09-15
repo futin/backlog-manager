@@ -10,10 +10,25 @@ import { SettingsProvider } from '../client/src/hooks/useSettings';
 import type { AgentPlan, BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
-  id: 'task-12', title: 'Add CSP', created: '2026-08-20', started: '', tags: [],
-  updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-  section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-  groomed: true, path: '/abs/alpha/backlog/tasks/open/task-12.md'
+  id: 'task-12',
+  title: 'Add CSP',
+  created: '2026-08-20',
+  started: '',
+  tags: [],
+  updated: '',
+  lastCommit: '',
+  phase: '',
+  groomElapsed: 0,
+  executeElapsed: 0,
+  groomTokens: 0,
+  executeTokens: 0,
+  kind: '',
+  section: 'tasks',
+  status: 'open',
+  project: 'alpha',
+  projectPath: '/abs/alpha',
+  groomed: true,
+  path: '/abs/alpha/backlog/tasks/open/task-12.md'
 };
 
 const PLAN: AgentPlan = {
@@ -94,8 +109,11 @@ describe('LaunchSheet', () => {
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/dispatch'))).toBe(true));
     const sent = calls.find((c) => c.url.endsWith('/dispatch'))?.body as Record<string, unknown>;
     expect(sent).toEqual({
-      itemPath: ITEM.path, action: 'execute', prompt: 'do it my way',
-      permissionMode: 'acceptEdits', remoteControl: true
+      itemPath: ITEM.path,
+      action: 'execute',
+      prompt: 'do it my way',
+      permissionMode: 'acceptEdits',
+      remoteControl: true
     });
   });
 
@@ -179,10 +197,8 @@ describe('LaunchSheet', () => {
     const effort = screen.getByLabelText('Effort') as HTMLSelectElement;
     expect(model.value).toBe('');
     expect(effort.value).toBe('');
-    expect([...model.options].map((o) => o.textContent))
-      .toEqual(['default', 'opus', 'sonnet', 'haiku', 'fable']);
-    expect([...effort.options].map((o) => o.textContent))
-      .toEqual(['default', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect([...model.options].map((o) => o.textContent)).toEqual(['default', 'opus', 'sonnet', 'haiku', 'fable']);
+    expect([...effort.options].map((o) => o.textContent)).toEqual(['default', 'low', 'medium', 'high', 'xhigh', 'max']);
   });
 
   it('omits both fields from the dispatch when neither was picked', async () => {
@@ -196,9 +212,13 @@ describe('LaunchSheet', () => {
   });
 
   it('preselects the stored defaults, and sends them without a pick', async () => {
-    localStorage.setItem('backlog-manager.settings', JSON.stringify({
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'low'
-    }));
+    localStorage.setItem(
+      'backlog-manager.settings',
+      JSON.stringify({
+        dispatchDefaultModel: 'sonnet',
+        dispatchDefaultEffort: 'low'
+      })
+    );
     const calls = stub({});
     await openSheet();
     expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('sonnet');
@@ -211,9 +231,13 @@ describe('LaunchSheet', () => {
   });
 
   it('lets a per-launch pick override the stored default', async () => {
-    localStorage.setItem('backlog-manager.settings', JSON.stringify({
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'low'
-    }));
+    localStorage.setItem(
+      'backlog-manager.settings',
+      JSON.stringify({
+        dispatchDefaultModel: 'sonnet',
+        dispatchDefaultEffort: 'low'
+      })
+    );
     const calls = stub({});
     await openSheet();
     await userEvent.selectOptions(screen.getByLabelText('Model'), 'opus');

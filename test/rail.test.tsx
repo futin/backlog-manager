@@ -52,8 +52,11 @@ describe('SideRail · the sub-nav tree', () => {
   it('names the two views History and Watchdog', () => {
     renderRail('runs');
 
-    expect(within(tree() as HTMLElement).getAllByRole('button').map((b) => b.textContent))
-      .toEqual(['History', 'Watchdog']);
+    expect(
+      within(tree() as HTMLElement)
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual(['History', 'Watchdog']);
   });
 
   /*

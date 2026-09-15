@@ -31,8 +31,7 @@ describe('Select', () => {
   it('renders one option per entry, in the order given', () => {
     render(<Select value="all" options={OPTIONS} onChange={jest.fn()} label="Project" />);
 
-    expect(screen.getAllByRole('option').map((o) => o.textContent))
-      .toEqual(['All projects', 'backlog-manager']);
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['All projects', 'backlog-manager']);
   });
 
   it('reports the chosen value', async () => {

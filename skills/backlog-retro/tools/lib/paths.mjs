@@ -18,28 +18,28 @@
 // The four homes are all env-overridable for one reason: a test process
 // must never be able to read, and `record` must never be able to write,
 // a real machine's state.
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // Twin: orchestrate.mjs's `orchHome()` and the server's own copy in
 // server/src/orchestrator/. Read-only from here — this tool never writes a
 // byte under the run-state directory (spec §3.6).
 export function orchHome() {
-  return process.env.BM_ORCH_HOME || path.join(os.homedir(), '.backlog-manager', 'orchestrator')
+  return process.env.BM_ORCH_HOME || path.join(os.homedir(), '.backlog-manager', 'orchestrator');
 }
 
 // The one directory this tool owns, and `record` is its only writer — the
 // same relationship `registry.json` has with backlog.mjs and `run.json`
 // has with orchestrate.mjs. `sweep` opens it read-only, for deltas.
 export function retroHome() {
-  return process.env.BM_RETRO_HOME || path.join(os.homedir(), '.backlog-manager', 'retro')
+  return process.env.BM_RETRO_HOME || path.join(os.homedir(), '.backlog-manager', 'retro');
 }
 
 // Twin: backlog.mjs's registry path. Read-only, and only ever to put a
 // human-readable name beside a project path in the report.
 export function registryFile() {
-  return process.env.BM_REGISTRY_FILE || path.join(os.homedir(), '.backlog-manager', 'registry.json')
+  return process.env.BM_REGISTRY_FILE || path.join(os.homedir(), '.backlog-manager', 'registry.json');
 }
 
 // Claude Code's own transcript root. The ONLY transcript this tool opens is
@@ -47,7 +47,7 @@ export function registryFile() {
 // execute transcripts are a non-goal — their headless logs already carry
 // cost.
 export function claudeProjectsRoot() {
-  return process.env.BM_CLAUDE_PROJECTS || path.join(os.homedir(), '.claude', 'projects')
+  return process.env.BM_CLAUDE_PROJECTS || path.join(os.homedir(), '.claude', 'projects');
 }
 
 // Twin: orchestrate.mjs's `projectDir()`, and the same keying the server
@@ -57,7 +57,7 @@ export function claudeProjectsRoot() {
 // raw path would recreate the project's whole directory tree under `root`
 // instead.
 export function projectDir(root, project) {
-  return path.join(root, encodeURIComponent(project))
+  return path.join(root, encodeURIComponent(project));
 }
 
 // The inverse, so a run-state directory whose project is not registered is
@@ -66,9 +66,9 @@ export function projectDir(root, project) {
 // stray directory under the home must not throw the sweep.
 export function decodeProjectDir(name) {
   try {
-    return decodeURIComponent(name)
+    return decodeURIComponent(name);
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -79,7 +79,7 @@ export function decodeProjectDir(name) {
 // observed on this machine rather than from documentation, so if Claude
 // Code's own scheme ever changes this is the one line to correct.
 export function claudeProjectKey(absPath) {
-  return absPath.replace(/[/.]/g, '-')
+  return absPath.replace(/[/.]/g, '-');
 }
 
 // path -> name, for every registered project. A missing, unreadable or
@@ -87,20 +87,20 @@ export function claudeProjectKey(absPath) {
 // are decoration, and a broken registry must never stop a sweep that has
 // perfectly good run state to report.
 export function readRegistryNames(file) {
-  const names = new Map()
-  let parsed
+  const names = new Map();
+  let parsed;
   try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
-    return names
+    return names;
   }
-  if (!parsed || !Array.isArray(parsed.projects)) return names
+  if (!parsed || !Array.isArray(parsed.projects)) return names;
   for (const entry of parsed.projects) {
     if (entry && typeof entry.path === 'string' && typeof entry.name === 'string') {
-      names.set(entry.path, entry.name)
+      names.set(entry.path, entry.name);
     }
   }
-  return names
+  return names;
 }
 
 // Every directory under one project's run state that may hold sidecars —
@@ -125,18 +125,18 @@ export function readRegistryNames(file) {
 // Ordered project-directory-first so a caller that de-duplicates by
 // basename prefers the live run's copy.
 export function sidecarRoots(projectDirPath) {
-  const roots = [projectDirPath]
-  const runsDir = path.join(projectDirPath, 'runs')
-  let entries
+  const roots = [projectDirPath];
+  const runsDir = path.join(projectDirPath, 'runs');
+  let entries;
   try {
-    entries = fs.readdirSync(runsDir, { withFileTypes: true })
+    entries = fs.readdirSync(runsDir, { withFileTypes: true });
   } catch {
-    return roots
+    return roots;
   }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isDirectory()) roots.push(path.join(runsDir, entry.name))
+    if (entry.isDirectory()) roots.push(path.join(runsDir, entry.name));
   }
-  return roots
+  return roots;
 }
 
 // Every `<root>/<sub>/<file>` across `sidecarRoots`, as
@@ -145,21 +145,21 @@ export function sidecarRoots(projectDirPath) {
 // what keys a session, because two archives can each hold a `bug-1.jsonl`
 // and a bare basename would collapse them into one row.
 export function sidecarFiles(projectDirPath, sub, predicate) {
-  const found = []
+  const found = [];
   for (const root of sidecarRoots(projectDirPath)) {
-    const dir = path.join(root, sub)
-    let entries
+    const dir = path.join(root, sub);
+    let entries;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true })
+      entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
-      continue
+      continue;
     }
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isFile()) continue
-      if (predicate && !predicate(entry.name)) continue
-      const file = path.join(dir, entry.name)
-      found.push({ file, rel: path.relative(projectDirPath, file), name: entry.name })
+      if (!entry.isFile()) continue;
+      if (predicate && !predicate(entry.name)) continue;
+      const file = path.join(dir, entry.name);
+      found.push({ file, rel: path.relative(projectDirPath, file), name: entry.name });
     }
   }
-  return found
+  return found;
 }

@@ -89,10 +89,7 @@ export function elapsedSince(started: string, now: number = Date.now()): string 
  * different month name per machine is the same problem one size up. Imported
  * rather than copied so the locale decision above is stated once.
  */
-export const MONTHS = [
-  'jan', 'feb', 'mar', 'apr', 'may', 'jun',
-  'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
-];
+export const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 /**
  * A `created` date short enough to share the card's foot with the item id:

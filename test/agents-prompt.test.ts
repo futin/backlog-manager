@@ -5,10 +5,25 @@ import type { BacklogItem } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md'
+    id: 'bug-1',
+    title: 'a bug',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1.md'
   };
   return { ...base, ...over };
 }
@@ -16,7 +31,9 @@ function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
 describe('readAgentsConfig', () => {
   it('is off with no env at all', () => {
     expect(readAgentsConfig({})).toEqual({
-      enabled: false, url: 'http://127.0.0.1:4173', token: ''
+      enabled: false,
+      url: 'http://127.0.0.1:4173',
+      token: ''
     });
   });
 
@@ -90,10 +107,8 @@ describe('composePrompt', () => {
    * dispatched session that leaves them loose in the working tree has produced
    * nothing that survives on its own.
    */
-  it.each(['groom', 'execute', 'capture'] as const)('asks %s to commit, narrowly, and never to push', action => {
-    const item = action === 'capture'
-      ? fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null })
-      : fakeItem();
+  it.each(['groom', 'execute', 'capture'] as const)('asks %s to commit, narrowly, and never to push', (action) => {
+    const item = action === 'capture' ? fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null }) : fakeItem();
     const p = composePrompt(item, action);
     expect(p).toMatch(/commit the work/i);
     // The scope is the load-bearing half: a dispatched session runs in the
@@ -157,8 +172,7 @@ describe('composePrompt', () => {
     // The capture arm included: the item file that settled this action wrote it
     // as "spawns /backlog-capture", which names the skill and does not license
     // the slash spelling — this module's own rule wins.
-    expect(composePrompt(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null }), 'capture'))
-      .not.toContain('/backlog');
+    expect(composePrompt(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null }), 'capture')).not.toContain('/backlog');
   });
 
   it('collapses a title that would break the one-line quoting', () => {
@@ -173,7 +187,7 @@ describe('composePrompt', () => {
   // nothing proved composePrompt's OWN output is path-free — and this is the
   // string that would carry it, since the item's absolute path is right there
   // on the object being formatted.
-  it('never puts the item\'s absolute path in the prompt', () => {
+  it("never puts the item's absolute path in the prompt", () => {
     for (const item of [
       fakeItem(),
       fakeItem({ section: 'ideas', groomed: null }),
@@ -265,19 +279,16 @@ describe('resumeSessionName', () => {
 describe('dashboardError', () => {
   it('names the call and its budget for an abort, since the exception names neither', () => {
     const timedOut = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
-    expect(dashboardError(timedOut, 'the dashboard spawn call', 10_000))
-      .toBe('the dashboard spawn call timed out after 10000ms');
+    expect(dashboardError(timedOut, 'the dashboard spawn call', 10_000)).toBe('the dashboard spawn call timed out after 10000ms');
     // A caller-side abort reads the same to a reader: nothing came back.
-    expect(dashboardError(Object.assign(new Error('aborted'), { name: 'AbortError' }), 'x', 5))
-      .toBe('x timed out after 5ms');
+    expect(dashboardError(Object.assign(new Error('aborted'), { name: 'AbortError' }), 'x', 5)).toBe('x timed out after 5ms');
   });
 
   it('reaches into .cause, where a connection failure keeps its only detail', () => {
     const refused = Object.assign(new TypeError('fetch failed'), {
       cause: { code: 'ECONNREFUSED', message: 'connect ECONNREFUSED 127.0.0.1:4173' }
     });
-    expect(dashboardError(refused, 'the dashboard project list', 15_000))
-      .toBe('the dashboard project list failed: ECONNREFUSED');
+    expect(dashboardError(refused, 'the dashboard project list', 15_000)).toBe('the dashboard project list failed: ECONNREFUSED');
     // No `code` — some causes carry only a message, and that is still more
     // than the bare `fetch failed` the outer error offers.
     const dns = Object.assign(new TypeError('fetch failed'), { cause: { message: 'getaddrinfo ENOTFOUND dash' } });
@@ -287,8 +298,7 @@ describe('dashboardError', () => {
   it('leaves anything else exactly as message() reads it', () => {
     // The shape `get()` throws for a non-ok answer: already a sentence, and
     // re-wording it would only lose the status it carries.
-    expect(dashboardError(new Error('/api/management answered 500'), 'x', 1))
-      .toBe('/api/management answered 500');
+    expect(dashboardError(new Error('/api/management answered 500'), 'x', 1)).toBe('/api/management answered 500');
     expect(dashboardError('a bare string', 'x', 1)).toBe('a bare string');
     expect(dashboardError(null, 'x', 1)).toBe('null');
   });

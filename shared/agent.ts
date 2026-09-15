@@ -1,8 +1,5 @@
 import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
-import type {
-  AgentsStatus, BacklogItem, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode,
-  RunQueueItem, RunStage
-} from './types';
+import type { AgentsStatus, BacklogItem, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
 
 /**
  * agent.ts — what a card's button does, decided once for both sides.
@@ -141,9 +138,7 @@ export function actionLabel(_item: BacklogItem, action: AgentAction): string {
 }
 
 /** Lowest to highest. Order is the whole meaning — do not sort this. */
-export const PERMISSION_LADDER: readonly PermissionMode[] = [
-  'plan', 'acceptEdits', 'auto', 'bypassPermissions'
-];
+export const PERMISSION_LADDER: readonly PermissionMode[] = ['plan', 'acceptEdits', 'auto', 'bypassPermissions'];
 
 /**
  * The `--model` names the dashboard's spawn accepts, mirroring its
@@ -252,10 +247,7 @@ export function clampMode(want: string, ceiling: PermissionMode | null): Permiss
  * than a symptom of it: with BM_AGENTS off there is nothing to say about
  * reachability.
  */
-export type DispatchGate =
-  | { control: 'enabled' }
-  | { control: 'hidden'; reason: string }
-  | { control: 'disabled'; reason: string };
+export type DispatchGate = { control: 'enabled' } | { control: 'hidden'; reason: string } | { control: 'disabled'; reason: string };
 
 /**
  * The four ENVIRONMENT-level dispatch blockers — dispatchGate's `hidden`
@@ -372,10 +364,7 @@ export function projectDispatchGate(status: AgentsStatus, projectPath: string): 
  * make a paused run's Resume button depend on a watchdog state that has
  * nothing to say about it.
  */
-export function resumeGate(
-  status: AgentsStatus | null,
-  projectPath: string
-): { canResume: boolean; blockedReason: string | null } {
+export function resumeGate(status: AgentsStatus | null, projectPath: string): { canResume: boolean; blockedReason: string | null } {
   // A status that has not landed yet is an unknown, not a block: render
   // nothing rather than a disabled control whose reason we cannot state.
   if (status === null) return { canResume: false, blockedReason: null };
@@ -479,20 +468,14 @@ export function dispatchBlock(item: BacklogItem, status: AgentsStatus): string |
  * Name unchanged: a starting run is a run, and the question this answers
  * ("why does a run forbid dispatching this item") has not moved.
  */
-export function runClaimBlock(
-  item: BacklogItem,
-  runs: OrchestratorRunsPayload['runs'],
-  starting: OrchestratorRunsPayload['starting']
-): string | null {
+export function runClaimBlock(item: BacklogItem, runs: OrchestratorRunsPayload['runs'], starting: OrchestratorRunsPayload['starting']): string | null {
   const claimed = runEntryAt(item, runs, RUN_CLAIMED_STAGES);
   if (claimed !== null) return `an orchestrator run is working this item (${claimed.stage})`;
   // The same absolute-registry-path compare `runEntryAt` documents — never a
   // display name, never anything derived from `item.path`. Ids are only
   // sequential within one project's store, so two checkouts can both hold
   // `bug-1` and only the path tells them apart.
-  return starting.some((s) => s.project === item.projectPath)
-    ? 'an orchestrator run is starting for this project'
-    : null;
+  return starting.some((s) => s.project === item.projectPath) ? 'an orchestrator run is starting for this project' : null;
 }
 
 /**
@@ -513,11 +496,7 @@ export function runClaimBlock(
  * they parameterise themselves, which would be the vocabulary leaking back out
  * one level.
  */
-function runEntryAt(
-  item: BacklogItem,
-  runs: OrchestratorRunsPayload['runs'],
-  stages: readonly RunStage[]
-): RunQueueItem | null {
+function runEntryAt(item: BacklogItem, runs: OrchestratorRunsPayload['runs'], stages: readonly RunStage[]): RunQueueItem | null {
   for (const run of runs) {
     // The registry's absolute path on both sides — `OrchestratorRun.project`
     // and `BacklogItem.projectPath` are documented as the same string. Never
@@ -576,10 +555,7 @@ const RUN_HELD_STAGES: readonly RunStage[] = [...RUN_CLAIMED_STAGES, ...ATTENTIO
  * `--resume`/`--abort`'s job. An item held by a crashed run goes back to being
  * as stale as its file says it is, which is the honest answer.
  */
-export function runHoldsItem(
-  item: BacklogItem,
-  runs: OrchestratorRunsPayload['runs']
-): boolean {
+export function runHoldsItem(item: BacklogItem, runs: OrchestratorRunsPayload['runs']): boolean {
   return runEntryAt(item, runs, RUN_HELD_STAGES) !== null;
 }
 

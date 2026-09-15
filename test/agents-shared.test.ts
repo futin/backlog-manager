@@ -1,28 +1,60 @@
 import {
-  AGENT_ACTIONS, EFFORTS, MODELS, PERMISSION_LADDER, actionLabel, clampMode, deriveAction,
-  dispatchBlock, dispatchGate, isAgentAction, isItemId, isMergeMode, isQuestionMode, modesUpTo,
-  pickFrom, projectDispatchGate, resumeGate, runClaimBlock, runHoldsItem
+  AGENT_ACTIONS,
+  EFFORTS,
+  MODELS,
+  PERMISSION_LADDER,
+  actionLabel,
+  clampMode,
+  deriveAction,
+  dispatchBlock,
+  dispatchGate,
+  isAgentAction,
+  isItemId,
+  isMergeMode,
+  isQuestionMode,
+  modesUpTo,
+  pickFrom,
+  projectDispatchGate,
+  resumeGate,
+  runClaimBlock,
+  runHoldsItem
 } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
-import type {
-  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem,
-  RunStage, StartingRun
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem, RunStage, StartingRun } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md'
+    id: 'bug-1',
+    title: 'a bug',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1.md'
   };
   return { ...base, ...over };
 }
 
 const OK: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha']
 };
 
 describe('deriveAction', () => {
@@ -63,8 +95,7 @@ describe('deriveAction', () => {
     // A rejection has a next step where a done item does not: reviving it is a
     // NEW item citing `from: oos-1`, never a move out of out-of-scope, which
     // `moveItem` refuses.
-    expect(deriveAction(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null })))
-      .toBe('capture');
+    expect(deriveAction(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null }))).toBe('capture');
   });
 });
 
@@ -118,8 +149,8 @@ describe('the question mode vocabulary', () => {
     // value is a 400 rather than a clamp, so this guard is the only thing
     // standing between a typo and a mode nobody asked for in the archive.
     for (const mode of QUESTION_MODES) expect(isQuestionMode(mode)).toBe(true);
-    expect(isQuestionMode('Decide')).toBe(false);   // case matters; the value is written verbatim
-    expect(isQuestionMode('merge')).toBe(false);    // a MergeMode member is not a QuestionMode one
+    expect(isQuestionMode('Decide')).toBe(false); // case matters; the value is written verbatim
+    expect(isQuestionMode('merge')).toBe(false); // a MergeMode member is not a QuestionMode one
     expect(isQuestionMode('')).toBe(false);
     expect(isQuestionMode(null)).toBe(false);
     expect(isQuestionMode(undefined)).toBe(false);
@@ -296,14 +327,12 @@ describe('resumeGate', () => {
   // four is `canResume: false` with a null reason — the reason exists (the
   // gate computed one) but nothing renders it, exactly as the dispatch
   // control's environment-level block shows no disabled button either.
-  it.each([
-    [{ enabled: false }],
-    [{ reachable: false, error: 'ECONNREFUSED' }],
-    [{ spawnAvailable: false }],
-    [{ remoteAnswer: false }]
-  ])('withholds the control for an environment-level block (%p)', (over) => {
-    expect(resumeGate({ ...OK, ...over }, '/abs/alpha')).toEqual({ canResume: false, blockedReason: null });
-  });
+  it.each([[{ enabled: false }], [{ reachable: false, error: 'ECONNREFUSED' }], [{ spawnAvailable: false }], [{ remoteAnswer: false }]])(
+    'withholds the control for an environment-level block (%p)',
+    (over) => {
+      expect(resumeGate({ ...OK, ...over }, '/abs/alpha')).toEqual({ canResume: false, blockedReason: null });
+    }
+  );
 
   // The one block that keeps its button: a project the dashboard cannot see
   // is the stale-answer case (bug-13/bug-16), so the control renders disabled
@@ -355,8 +384,7 @@ describe('dispatchBlock', () => {
 
   it('reports each gate, most-fundamental first', () => {
     expect(dispatchBlock(fakeItem(), { ...OK, enabled: false })).toMatch(/BM_AGENTS/);
-    expect(dispatchBlock(fakeItem(), { ...OK, reachable: false, error: 'ECONNREFUSED' }))
-      .toMatch(/unreachable.*ECONNREFUSED/);
+    expect(dispatchBlock(fakeItem(), { ...OK, reachable: false, error: 'ECONNREFUSED' })).toMatch(/unreachable.*ECONNREFUSED/);
     expect(dispatchBlock(fakeItem(), { ...OK, spawnAvailable: false })).toMatch(/CLAUDE_BIN/);
     expect(dispatchBlock(fakeItem(), { ...OK, remoteAnswer: false })).toMatch(/remote answers/);
   });
@@ -538,9 +566,7 @@ function startingFor(project: string = '/abs/alpha'): StartingRun {
  * the item at, and a human dispatching it by hand is the intended next move
  * for either.
  */
-const TERMINAL_STAGES: readonly RunStage[] = [
-  'merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'
-];
+const TERMINAL_STAGES: readonly RunStage[] = ['merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked'];
 
 /*
  * The five stages a run has truly EXITED an item at — the complement of
@@ -599,7 +625,7 @@ describe('runClaimBlock', () => {
     expect(runClaimBlock(fakeItem(), [runWith('reviewing', { project: '/abs/other' })], [])).toBeNull();
   });
 
-  it('allows dispatch when the right project\'s fresh run does not mention this item', () => {
+  it("allows dispatch when the right project's fresh run does not mention this item", () => {
     expect(runClaimBlock(fakeItem({ id: 'task-99' }), [runWith('reviewing')], [])).toBeNull();
   });
 
@@ -615,8 +641,7 @@ describe('runClaimBlock', () => {
      closed for the run-file case, reopened for the window before the run
      file exists. */
   it('blocks dispatch for a project a run is starting for, with no run file at all', () => {
-    expect(runClaimBlock(fakeItem(), [], [startingFor()]))
-      .toBe('an orchestrator run is starting for this project');
+    expect(runClaimBlock(fakeItem(), [], [startingFor()])).toBe('an orchestrator run is starting for this project');
   });
 
   /* Ruling 1, stated as a test: the block is project-wide and deliberately
@@ -654,9 +679,21 @@ describe('runClaimBlock', () => {
      one of the two lists rather than into neither. */
   it('partitions every RunStage member into exactly one of claimed or terminal', () => {
     const everyStage: Record<RunStage, true> = {
-      pending: true, preflight: true, dispatched: true, inspecting: true, reviewing: true,
-      fixing: true, verifying: true, merging: true, merged: true, branched: true, failed: true,
-      skipped: true, 'needs-answers': true, ungroomed: true, parked: true
+      pending: true,
+      preflight: true,
+      dispatched: true,
+      inspecting: true,
+      reviewing: true,
+      fixing: true,
+      verifying: true,
+      merging: true,
+      merged: true,
+      branched: true,
+      failed: true,
+      skipped: true,
+      'needs-answers': true,
+      ungroomed: true,
+      parked: true
     };
     const all = Object.keys(everyStage) as RunStage[];
 
@@ -734,7 +771,7 @@ describe('runHoldsItem', () => {
     expect(runHoldsItem(fakeItem(), [runWith('reviewing', { project: '/abs/other' })])).toBe(false);
   });
 
-  it('releases an item the right project\'s fresh run does not mention', () => {
+  it("releases an item the right project's fresh run does not mention", () => {
     expect(runHoldsItem(fakeItem({ id: 'task-99' }), [runWith('reviewing')])).toBe(false);
   });
 

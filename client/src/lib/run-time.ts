@@ -228,10 +228,7 @@ export function runElapsedMs(run: RunTiming, now: number = Date.now()): number |
  * stale on another. An unparseable `updatedAt` is never live: a heartbeat
  * nobody can read is not evidence a process is alive.
  */
-export function runIsLive(
-  run: Pick<OrchestratorRun, 'status' | 'updatedAt'>,
-  now: number
-): boolean {
+export function runIsLive(run: Pick<OrchestratorRun, 'status' | 'updatedAt'>, now: number): boolean {
   if (run.status !== 'running') return false;
   const updated = parseStamp(run.updatedAt);
   return updated !== null && now - updated < RUN_STALE_MS;
@@ -287,10 +284,7 @@ export function freshnessFraction(updatedAt: string, now: number): number | null
  * against, and `now` is the one value that is always wrong for a stopped run.
  * Every reading that takes this clock already renders a `null` as nothing.
  */
-export function runClockMs(
-  run: Pick<OrchestratorRun, 'status' | 'updatedAt'>,
-  now: number
-): number | null {
+export function runClockMs(run: Pick<OrchestratorRun, 'status' | 'updatedAt'>, now: number): number | null {
   if (runIsLive(run, now)) return now;
   return parseStamp(run.updatedAt);
 }
@@ -366,10 +360,7 @@ function lastArrivalMs(item: Pick<RunQueueItem, 'stageAt'>): number | null {
  * terminal one never reads the clock in the first place, so a null must not
  * blank a span the item's own stamps already prove.
  */
-export function itemDurationMs(
-  item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
-  now: number | null
-): number | null {
+export function itemDurationMs(item: Pick<RunQueueItem, 'stage' | 'stageAt'>, now: number | null): number | null {
   const started = startedAtMs(item);
   if (started === null) return null;
 
@@ -443,10 +434,7 @@ export function itemDoneClock(item: Pick<RunQueueItem, 'stage' | 'stageAt'>): st
  * here that can survive a `null` one: every reading this makes is "until
  * when", and a stopped run with no provable instant has no answer to that.
  */
-export function inStageMs(
-  item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
-  now: number | null
-): number | null {
+export function inStageMs(item: Pick<RunQueueItem, 'stage' | 'stageAt'>, now: number | null): number | null {
   if (now === null) return null;
   const at = parseStamp(item.stageAt[item.stage]);
   if (at === null) return null;
@@ -501,10 +489,7 @@ export interface StepperDot {
  * merged when it did not" — read in the other direction: a run must not
  * claim an item did NOT merge when it did, either.
  */
-export function stepperTerminal(
-  item: Pick<RunQueueItem, 'stage'>,
-  mergeModeEffective: MergeMode
-): 'merged' | 'branched' {
+export function stepperTerminal(item: Pick<RunQueueItem, 'stage'>, mergeModeEffective: MergeMode): 'merged' | 'branched' {
   if (item.stage === 'merged' || item.stage === 'branched') return item.stage;
   return mergeModeEffective === 'branch' ? 'branched' : 'merged';
 }
@@ -562,11 +547,7 @@ export function stepperTerminal(
  * hollow-between-filled reading above depends on a filled node meaning the
  * item went through that stage cleanly. It never left this one.
  */
-export function stepperDots(
-  item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
-  live: boolean,
-  terminal: 'merged' | 'branched'
-): StepperDot[] {
+export function stepperDots(item: Pick<RunQueueItem, 'stage' | 'stageAt'>, live: boolean, terminal: 'merged' | 'branched'): StepperDot[] {
   return stepperStages(terminal).map((stage) => {
     const at = formatClock(item.stageAt[stage]);
     const visited = stage in item.stageAt;

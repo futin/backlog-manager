@@ -32,7 +32,8 @@ function fakeRun(
     queue: [],
     attention: [],
     fresh: true,
-    pastRuns: 0, pauseRequested: false,
+    pastRuns: 0,
+    pauseRequested: false,
     ...overrides
   };
 }

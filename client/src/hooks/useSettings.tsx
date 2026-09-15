@@ -1,9 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 
 import { usePersistedState } from './usePersistedState';
-import {
-  DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY, clampSettings, type Settings
-} from '../lib/settings';
+import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY, clampSettings, type Settings } from '../lib/settings';
 
 interface SettingsControl {
   settings: Settings;
@@ -25,10 +23,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [stored, setStored] = usePersistedState<Settings>(SETTINGS_STORAGE_KEY, DEFAULT_SETTINGS);
   const settings = useMemo(() => clampSettings(stored), [stored]);
 
-  const update = useCallback(
-    (patch: Partial<Settings>) => setStored(clampSettings({ ...settings, ...patch })),
-    [settings, setStored]
-  );
+  const update = useCallback((patch: Partial<Settings>) => setStored(clampSettings({ ...settings, ...patch })), [settings, setStored]);
 
   // Theme, density and text scale are all pure CSS: everything downstream keys
   // off these three root values, so no component re-renders when they change.

@@ -17,10 +17,7 @@ export interface FixtureItem {
 
 export function makeProject(name: string, items: FixtureItem[]): string {
   const root = mkdtempSync(join(tmpdir(), `bm-${name}-`));
-  for (const leaf of [
-    'bugs/open', 'bugs/done', 'ideas/open', 'ideas/done', 'tasks/open', 'tasks/done',
-    'refactors/open', 'refactors/done', 'out-of-scope'
-  ]) {
+  for (const leaf of ['bugs/open', 'bugs/done', 'ideas/open', 'ideas/done', 'tasks/open', 'tasks/done', 'refactors/open', 'refactors/done', 'out-of-scope']) {
     mkdirSync(join(root, 'backlog', leaf), { recursive: true });
   }
   for (const item of items) {
@@ -32,9 +29,12 @@ export function makeProject(name: string, items: FixtureItem[]): string {
 export function makeRegistry(projects: { name: string; path: string }[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'bm-registry-'));
   const file = join(dir, 'registry.json');
-  writeFileSync(file, JSON.stringify({
-    projects: projects.map((p) => ({ ...p, createdAt: '2026-08-26T00:00:00.000Z' }))
-  }));
+  writeFileSync(
+    file,
+    JSON.stringify({
+      projects: projects.map((p) => ({ ...p, createdAt: '2026-08-26T00:00:00.000Z' }))
+    })
+  );
   return file;
 }
 

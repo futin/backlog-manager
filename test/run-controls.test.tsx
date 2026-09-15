@@ -46,20 +46,16 @@ function runFor(over: Partial<RunControlsRun> = {}): RunControlsRun {
   };
 }
 
-function renderControls(over: Partial<RunControlsRun> = {}, props: Partial<{
-  gate: { canResume: boolean; blockedReason: string | null };
-  resuming: boolean;
-  onChanged: (kind: 'pause' | 'cancel' | 'resume') => void;
-}> = {}) {
+function renderControls(
+  over: Partial<RunControlsRun> = {},
+  props: Partial<{
+    gate: { canResume: boolean; blockedReason: string | null };
+    resuming: boolean;
+    onChanged: (kind: 'pause' | 'cancel' | 'resume') => void;
+  }> = {}
+) {
   const onChanged = props.onChanged ?? jest.fn();
-  render(
-    <RunControls
-      run={runFor(over)}
-      gate={props.gate ?? OPEN_GATE}
-      resuming={props.resuming ?? false}
-      onChanged={onChanged}
-    />
-  );
+  render(<RunControls run={runFor(over)} gate={props.gate ?? OPEN_GATE} resuming={props.resuming ?? false} onChanged={onChanged} />);
   return onChanged;
 }
 
@@ -99,9 +95,7 @@ describe('RunControls — what renders, by run', () => {
     ['an aborted run', { status: 'aborted' as const, fresh: false }],
     ['a failed run', { status: 'failed' as const, fresh: false }]
   ])('renders nothing at all for %s', (_label, over) => {
-    const { container } = render(
-      <RunControls run={runFor(over)} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />
-    );
+    const { container } = render(<RunControls run={runFor(over)} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
     expect(container.firstChild).toBeNull();
   });
 
@@ -118,19 +112,17 @@ describe('RunControls — what renders, by run', () => {
       status: 'running',
       fresh: true,
       pauseRequested: true,
-      queue: [{ id: 'a-1', stage: 'merged' }, { id: 'a-2', stage: 'pending' }]
+      queue: [
+        { id: 'a-1', stage: 'merged' },
+        { id: 'a-2', stage: 'pending' }
+      ]
     });
     expect(screen.getByTestId('run-controls-note')).toHaveTextContent('Pausing at the next boundary');
   });
 
   it('renders no control for a paused run the environment ladder blocks', () => {
     const { container } = render(
-      <RunControls
-        run={runFor({ status: 'paused', fresh: false })}
-        gate={{ canResume: false, blockedReason: null }}
-        resuming={false}
-        onChanged={jest.fn()}
-      />
+      <RunControls run={runFor({ status: 'paused', fresh: false })} gate={{ canResume: false, blockedReason: null }} resuming={false} onChanged={jest.fn()} />
     );
     expect(container.firstChild).toBeNull();
   });
@@ -214,7 +206,17 @@ describe('inFlightItemId', () => {
   });
 
   it('is null for an all-pending queue and for an all-terminal one', () => {
-    expect(inFlightItemId([{ id: 'a', stage: 'pending' }, { id: 'b', stage: 'pending' }])).toBeNull();
-    expect(inFlightItemId([{ id: 'a', stage: 'merged' }, { id: 'b', stage: 'branched' }])).toBeNull();
+    expect(
+      inFlightItemId([
+        { id: 'a', stage: 'pending' },
+        { id: 'b', stage: 'pending' }
+      ])
+    ).toBeNull();
+    expect(
+      inFlightItemId([
+        { id: 'a', stage: 'merged' },
+        { id: 'b', stage: 'branched' }
+      ])
+    ).toBeNull();
   });
 });

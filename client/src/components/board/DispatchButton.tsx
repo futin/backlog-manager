@@ -52,57 +52,62 @@ import { progressBlock } from '../../lib/item-progress';
  * differs. The tone class, though, is the action itself, so both shapes are
  * coloured by the same rules in styles.css.
  */
-export function DispatchButton(
-  { item, status, onDispatch, variant = 'chip', runBlock = null, reverify }: {
-    item: BacklogItem;
-    status: AgentsStatus | null;
-    onDispatch: () => void;
-    /** Which shape to render — see the two blocks in styles.css. `tab` is the
-     *  card's tear-off edge and needs the card to be a flex row around it;
-     *  `chip` stands on its own anywhere, which is why it is the default. */
-    variant?: 'tab' | 'chip';
-    /**
-     * Why an orchestrator run forbids dispatching this item right now, or null.
-     *
-     * A prop rather than a derivation, unlike every other state this component
-     * decides for itself: the answer lives in the run payload alone
-     * (`GET /api/orchestrator/runs`), which this leaf has no access to and no
-     * business fetching forty times per board. `runClaimBlock`
-     * (shared/agent.ts) is what produces the string, once, from the run list
-     * the board already holds — see its doc comment for why the item file
-     * cannot carry this fact at all.
-     *
-     * Optional and defaulted so every caller that has no run data to give
-     * (the older tests, any future read-only view) behaves exactly as before.
-     */
-    runBlock?: string | null;
-    /**
-     * Re-ask the dashboard status and resolve to the fresh answer — the board's
-     * own `useAgents().reload`, threaded down.
-     *
-     * bug-13. `useAgents` refetches on mount and window focus only, and that
-     * cadence is deliberate (see its own comment). It is also, for one of the
-     * three per-item blocks, unrecoverable: a board whose window never loses
-     * focus keeps whatever `projectPaths` it last fetched, and while a stale
-     * *enable* self-corrects (the click opens the sheet, whose `plan()`
-     * re-derives the block server-side), a stale *disable* cannot — the sheet
-     * that would correct it sits behind the control the stale answer just
-     * made inert. So the click asks the question itself.
-     *
-     * Scoped to the project-visibility block alone, and the two exclusions are
-     * the reasons, not exceptions to them. `runBlock` is fed by
-     * `useOrchestratorRuns`, which polls every 5s for as long as any run is
-     * fresh, so it is never stale in this way — and a claimed item genuinely
-     * must not be hand-dispatched. `progressBlock` is derived from the very
-     * item file this board is rendering, so no status refetch could move it.
-     *
-     * Optional, like `runBlock`: a caller with no status to re-ask (the older
-     * tests, any future read-only view) leaves the click inert exactly as it
-     * was before this existed.
-     */
-    reverify?: () => Promise<AgentsStatus>;
-  }
-) {
+export function DispatchButton({
+  item,
+  status,
+  onDispatch,
+  variant = 'chip',
+  runBlock = null,
+  reverify
+}: {
+  item: BacklogItem;
+  status: AgentsStatus | null;
+  onDispatch: () => void;
+  /** Which shape to render — see the two blocks in styles.css. `tab` is the
+   *  card's tear-off edge and needs the card to be a flex row around it;
+   *  `chip` stands on its own anywhere, which is why it is the default. */
+  variant?: 'tab' | 'chip';
+  /**
+   * Why an orchestrator run forbids dispatching this item right now, or null.
+   *
+   * A prop rather than a derivation, unlike every other state this component
+   * decides for itself: the answer lives in the run payload alone
+   * (`GET /api/orchestrator/runs`), which this leaf has no access to and no
+   * business fetching forty times per board. `runClaimBlock`
+   * (shared/agent.ts) is what produces the string, once, from the run list
+   * the board already holds — see its doc comment for why the item file
+   * cannot carry this fact at all.
+   *
+   * Optional and defaulted so every caller that has no run data to give
+   * (the older tests, any future read-only view) behaves exactly as before.
+   */
+  runBlock?: string | null;
+  /**
+   * Re-ask the dashboard status and resolve to the fresh answer — the board's
+   * own `useAgents().reload`, threaded down.
+   *
+   * bug-13. `useAgents` refetches on mount and window focus only, and that
+   * cadence is deliberate (see its own comment). It is also, for one of the
+   * three per-item blocks, unrecoverable: a board whose window never loses
+   * focus keeps whatever `projectPaths` it last fetched, and while a stale
+   * *enable* self-corrects (the click opens the sheet, whose `plan()`
+   * re-derives the block server-side), a stale *disable* cannot — the sheet
+   * that would correct it sits behind the control the stale answer just
+   * made inert. So the click asks the question itself.
+   *
+   * Scoped to the project-visibility block alone, and the two exclusions are
+   * the reasons, not exceptions to them. `runBlock` is fed by
+   * `useOrchestratorRuns`, which polls every 5s for as long as any run is
+   * fresh, so it is never stale in this way — and a claimed item genuinely
+   * must not be hand-dispatched. `progressBlock` is derived from the very
+   * item file this board is rendering, so no status refetch could move it.
+   *
+   * Optional, like `runBlock`: a caller with no status to re-ask (the older
+   * tests, any future read-only view) leaves the click inert exactly as it
+   * was before this existed.
+   */
+  reverify?: () => Promise<AgentsStatus>;
+}) {
   // Stable per mounted button, and unique across the forty of them a board can
   // hold — `item.id` is not, since two projects can both own `task-1`, and the
   // drawer renders a second button for an item the card already rendered one
@@ -254,12 +259,16 @@ export function DispatchButton(
           <span className="dispatch-tab-in">
             <span className="dispatch-word">{actionLabel(item, action)}</span>
             {/* aria-hidden: the accessible name is the action word alone. */}
-            <span className="dispatch-mark" aria-hidden="true">▸</span>
+            <span className="dispatch-mark" aria-hidden="true">
+              ▸
+            </span>
           </span>
         ) : (
           <>
             {actionLabel(item, action)}
-            <span className="dispatch-mark" aria-hidden="true">▸</span>
+            <span className="dispatch-mark" aria-hidden="true">
+              ▸
+            </span>
           </>
         )}
       </button>
@@ -276,7 +285,11 @@ export function DispatchButton(
           prints an elapsed rather than a reason not to dispatch.) Rendered as a sibling rather
           than a child so its text stays out of the button's accessible
           name. */}
-      {blocked !== null && <span id={reasonId} className="sr-only">{blocked}</span>}
+      {blocked !== null && (
+        <span id={reasonId} className="sr-only">
+          {blocked}
+        </span>
+      )}
     </>
   );
 }

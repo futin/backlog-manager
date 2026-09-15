@@ -8,7 +8,12 @@
  * refusal handing back the stored figure).
  */
 export function NumberField({
-  value, min, max, unit, onCommit, label
+  value,
+  min,
+  max,
+  unit,
+  onCommit,
+  label
 }: {
   value: number;
   min: number;
@@ -27,8 +32,10 @@ export function NumberField({
         min={min}
         max={max}
         key={value} /* re-seed when the value changes from elsewhere (e.g. Reset) */
-        onBlur={e => onCommit(Number(e.currentTarget.value))}
-        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        onBlur={(e) => onCommit(Number(e.currentTarget.value))}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
       />
       {unit && <span className="ui-number-unit">{unit}</span>}
     </>

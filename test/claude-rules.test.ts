@@ -150,9 +150,7 @@ function escapeLiteral(text: string): string {
 
 /** Every tracked file, repo-relative — the universe case 3 matches globs against. */
 function trackedFiles(): string[] {
-  return execFileSync('git', ['ls-files'], { cwd: REPO_ROOT, encoding: 'utf8' })
-    .split('\n')
-    .filter(Boolean);
+  return execFileSync('git', ['ls-files'], { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
 }
 
 describe('.claude/rules', () => {

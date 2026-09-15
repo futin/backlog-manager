@@ -27,11 +27,40 @@ client/index.html
 # round-trips puts a second writer on files that are documented as having exactly one.
 backlog/
 
-# The plugin's publish surface. SKILL.md prose is asserted line-by-line by skills/backlog/tools/backlog.test.mjs (the groom stamp order, the closing
-# "Groomed on disk only" line, the reviewer/execute pair), and an install is a copy of the pushed HEAD — so a cosmetic edit here ships.
-skills/
+# skills/ WAS excluded here, on the theory that SKILL.md prose is asserted line-by-line by skills/backlog/tools/backlog.test.mjs (the groom stamp
+# order, the closing "Groomed on disk only" line, the reviewer/execute pair) and would go red on contact. Measured 2026-09-15 rather than assumed: a
+# full prettier pass over skills/ left both runners green — 538 skill tests and 1708 jest tests — because every one of those assertions matches a
+# substring, not a whole line. The exclusion was protecting against a failure that cannot happen, so it is gone and skills/ is formatted like the rest
+# of the tree.
+#
+# What the measurement DID surface, none of it caught by a test, is the reason to read a skills/ diff more carefully than a server/ one: this is the
+# plugin's publish surface, so a cosmetic commit here means push + `pnpm run plugin:sync` and a reship of all six skills for no behaviour change;
+# SKILL.md prose is a prompt a model reads rather than documentation a person reads, and the pass rewrote 105 emphasis spans from *word* to _word_,
+# which is identical markdown and different tokens; and prettier stripped two trailing blank lines from the orchestrate fixture item below, which is
+# exactly the byte class that fixture exists to prove backlog.mjs round-trips. Only that last one is walled off below, because it is the only one a
+# rule can catch: the fixture directory holds item files, which are data under test rather than source. Note the ordering it depends on — this entry
+# excludes a DIRECTORY, and the `!skills/**/*.md` re-inclusion at the foot of this file cannot reach back inside an excluded directory, so the fixture
+# item stays untouched while every other skills/ markdown file is formatted.
+skills/*/tools/fixtures/
 
 # Design artifacts: the mockups carry deliberately minified one-line CSS so a screen's whole style block reads at a glance. Prettier would explode each
 # of those into hundreds of lines and lose the thing they were drawn for.
 docs/superpowers/specs/*.html
 docs/superpowers/specs/**/*.html
+
+# Markdown, everywhere except the skills. A repo-wide pass over the 51 tracked .md files outside skills/ changes +3223/-2611 lines and every one of
+# those changes is *em* -> _em_ or a table's pipes re-padded — proseWrap: preserve governs prose line breaks only, never emphasis characters, list
+# markers or table cells. That is the whole diff: no line gets shorter, nothing gets more readable, and `git blame` on docs/subsystems/invariants.md
+# stops pointing at the person who worked out each invariant. The skills are the deliberate exception (see the block above), so they are re-included
+# below rather than being left to fall under this rule.
+*.md
+!skills/**/*.md
+
+# The two stylesheets, byte-pinned the same way client/index.html is, just verified by source-text regex instead of a hash. Three suites read these
+# files as TEXT rather than parsing them — test/project-hue.test.ts matches the literal selector `:root,[data-theme="midnight"]` to collect a theme's
+# blocks, test/design-guards.test.ts checks §2.2's daylight values and the 11px type floor, and test/run-track-style.test.ts reads the reduced-motion
+# and stalled rules. Measured 2026-09-15: a prettier pass turned that selector into `:root,\n[data-theme='midnight']` — a line break and single quotes
+# — and took all three suites red, 12 cases in total, for no change to a single rendered pixel. The alternative was loosening three behaviour guards to
+# tolerate whitespace, which trades a real check for a cosmetic diff; excluding the files keeps the guards strict and costs nothing.
+shared/theme.css
+client/src/styles.css

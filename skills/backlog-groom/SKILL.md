@@ -64,21 +64,21 @@ Promote or Plan the fix, so it isn't listed here with the two above.
 
 ## Three verdicts — choose one with the user
 
-| The item is... | Verdict |
-|---|---|
-| an idea whose shape is now settled enough to plan | **Promote** — becomes a new task |
-| a refactor whose shape is now settled enough to plan | **Promote** — becomes a new task |
-| a bug whose cause and fix are now known (or worth chasing now) | **Plan the fix** — filled in place |
-| an open bug, idea, refactor, or task that shouldn't happen | **Reject** — moved to `out-of-scope/` |
+| The item is...                                                 | Verdict                               |
+| -------------------------------------------------------------- | ------------------------------------- |
+| an idea whose shape is now settled enough to plan              | **Promote** — becomes a new task      |
+| a refactor whose shape is now settled enough to plan           | **Promote** — becomes a new task      |
+| a bug whose cause and fix are now known (or worth chasing now) | **Plan the fix** — filled in place    |
+| an open bug, idea, refactor, or task that shouldn't happen     | **Reject** — moved to `out-of-scope/` |
 
-A refactor and an idea take the *same* verdict for the same reason: neither has a groomed
+A refactor and an idea take the _same_ verdict for the same reason: neither has a groomed
 state of its own, so the only thing grooming can do for either is turn it into a task with
 a plan. That is why the board never shows a refactor as groomed or ungroomed — being
 promoted is the state it's waiting for.
 
 Say which verdict you think applies and why, then wait for the user to confirm or pick a
 different one. Don't infer a verdict silently and act on it — grooming is a decision made
-*with* the user, not a classification you run on their behalf.
+_with_ the user, not a classification you run on their behalf.
 
 ### Mark it in progress
 
@@ -87,10 +87,10 @@ the three verdicts below touches the file:
 
 **Usually they were confirmed before this session started.** A prompt that already named
 the item and the verdict — "groom bug-23, fill in Cause and Fix, leave it in `bugs/open/`",
-or "reject task 5" — *is* that confirmation, and there is nothing left to wait for: run
+or "reject task 5" — _is_ that confirmation, and there is nothing left to wait for: run
 `start` now, as the very next command after `show`, before any investigation. A directed
 groom is the ordinary case, not an exception to the rule above. The gate is about
-*consent*, never about *sequence*, and a prompt is allowed to satisfy it in one turn.
+_consent_, never about _sequence_, and a prompt is allowed to satisfy it in one turn.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as groom
@@ -104,7 +104,7 @@ only mutex an item has, so every minute before the stamp leaves the item unlocke
 second groom or a `backlog-execute` to claim, and shows nobody on it on the board — while
 `groom-elapsed:` and `groom-tokens:` both bill from `started:`, so that same window is
 invisible in two counters that are permanent, accumulating and have no supported repair
-after the fact. A bug whose `## Cause` and `## Fix` *are* the investigation is where too
+after the fact. A bug whose `## Cause` and `## Fix` _are_ the investigation is where too
 late bites hardest: hold the stamp until the verdict is written and you have billed the
 cheapest minute of the session while leaving the expensive part unlocked and unrecorded.
 Nothing sits between `show` and `start` but the verdict decision itself.
@@ -125,7 +125,7 @@ Exit `1` here is one of two very different things:
 
 ### "Already in progress" — find out whose marker it is first
 
-`started:` records *when*, never *who*, so that one message covers three genuinely
+`started:` records _when_, never _who_, so that one message covers three genuinely
 different situations:
 
 1. **Another session is on this item right now** — a `backlog-execute` mid-fix, or
@@ -137,7 +137,7 @@ different situations:
 
 Case 1 is not yours to touch. Cases 2 and 3 are stamps that nothing will clear on its
 own if you decline to: a person can always hand-run `backlog.mjs stop <id>` — that is
-how case 3 got there in the first place — but no *skill* reaches for one it did not set,
+how case 3 got there in the first place — but no _skill_ reaches for one it did not set,
 so nothing will do it unprompted. Until somebody does, the board shows a permanent false
 "someone is on this" and every later
 `backlog-execute start <id>` refuses on behalf of a session that stopped existing days
@@ -158,7 +158,7 @@ whole days — such a value is old by definition, and worth saying so. Give the 
 stamp and its age, say which of the three you think it is and why (minutes old usually
 means live; hours or days old on an item nobody mentions working usually means
 abandoned), and let them decide. This is the same rule as the verdict itself: grooming
-is a decision made *with* the user, and "whose marker is this" is exactly the kind of
+is a decision made _with_ the user, and "whose marker is this" is exactly the kind of
 question only they can answer.
 
 Then, by their answer:
@@ -179,7 +179,7 @@ Then, by their answer:
 
   Both lines, in that order. `start` refuses to re-stamp a file that already carries a
   stamp, so the clear has to come first; and the point of the second line is that from
-  here on this is an ordinary groom session — the marker is *yours*, every `stop` below
+  here on this is an ordinary groom session — the marker is _yours_, every `stop` below
   applies exactly as written, and if this session is itself interrupted the abandonment
   section clears it like any other. Clearing without re-taking would leave the item
   unmarked while you actively work it, which is the same lie as a stale stamp with the
@@ -193,6 +193,7 @@ Then, by their answer:
   permanently, since neither total is ever reset. `--abandon` clears `started:`
   and `phase:` and stamps `updated:` exactly as a plain `stop` does; it just skips the
   billing that would otherwise turn a stale marker into fabricated history.
+
 - **They know a session is live and want to proceed anyway.** Their call, and the only
   case in which you work an item whose marker isn't yours. Give the verdict below as
   normal, but skip every `stop` it ends with: clearing that marker would tell the board
@@ -220,11 +221,12 @@ called out in the steps themselves — there is exactly one such place, step 1's
    A refactor has no `## Open questions` to settle — its headings are
    `## What exists today` / `## Why it should change` / `## Rough shape`. Read the first
    two as the brief instead: they already name the code and the cost being paid, which is
-   what an idea's open questions exist to establish. Brainstorm when the *shape* of the
+   what an idea's open questions exist to establish. Brainstorm when the _shape_ of the
    change is genuinely unsettled (three call sites or thirty, one commit or a migration),
    not merely because a refactor touches existing code. Its `kind:` line stays on the
    refactor and is deliberately NOT copied to the task: `chore` and `debt` describe why
    the work was owed, and once there is a plan the work is simply planned work.
+
 2. Turn whatever came out of step 1 into a plan, written directly into the new task's
    `## Plan` section — **that section is the plan artifact; there is no separate plan
    document to produce.** Which route you take follows brainstorming's own
@@ -244,6 +246,7 @@ called out in the steps themselves — there is exactly one such place, step 1's
    an under-planned promote doesn't fail here, it fails later, in execute, and the user
    won't know why. That's what keeps this requirement non-negotiable even after the
    shortest brainstorm.
+
 3. Create the new task:
 
    ```bash
@@ -253,6 +256,7 @@ called out in the steps themselves — there is exactly one such place, step 1's
    This prints the new task's path and frontmatter, already carrying `from: idea-N`. The
    title doesn't have to match the idea's own — use whatever fits the plan from step 2,
    whether or not writing-plans was the one that produced it.
+
 4. Write that file: keep the printed frontmatter block exactly as printed, then add all
    four task headings — `## Goal`, `## Plan`, `## Test cases`, `## Done when` — filled in
    for real. `## Plan` is the one heading `backlog-execute` gates on, but a task that's
@@ -278,6 +282,7 @@ called out in the steps themselves — there is exactly one such place, step 1's
    judgement, which is why it is asked here and not derived from paths: most `skills/`
    edits do not affect a running orchestrator, and a dispatch-route fix that does need
    not name any of those paths.
+
 5. Only now edit the idea: add a `promoted-to: task-N` line inside its existing
    frontmatter block, before the closing `---`, leaving every other line untouched.
 6. Release the marker on the idea — not on the task step 3 just created; nobody has
@@ -293,12 +298,14 @@ called out in the steps themselves — there is exactly one such place, step 1's
    this line entirely in one case only: you are working over another session's live
    marker because the user chose to — see "Already in progress" above. If you re-took a
    stale stamp there, the marker is this session's own and this line runs as written.
+
 7. Move the idea:
 
    ```bash
    node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move idea-N done
    ```
-8. Print the **Groomed on disk only** line (below), naming the *new task's* path from
+
+8. Print the **Groomed on disk only** line (below), naming the _new task's_ path from
    step 3 — not the idea's. The task is what a run would pick up; the idea is done.
 
 If you're resuming this after an interruption, `show` the idea first and check whether a
@@ -329,6 +336,7 @@ task carrying `from: idea-N` already exists before creating a second one.
    judgement, which is why it is asked here and not derived from paths: most `skills/`
    edits do not affect a running orchestrator, and a dispatch-route fix that does need
    not name any of those paths.
+
 3. Release the marker:
 
    ```bash
@@ -338,6 +346,7 @@ task carrying `from: idea-N` already exists before creating a second one.
    Skip this only if you are working over another session's live marker at the user's
    explicit request — see "Already in progress" above; that marker belongs to another
    session, not this one. A stale stamp you re-took is your own, so this line runs.
+
 4. Print the **Groomed on disk only** line (below), naming the bug's own path — the one
    `show` printed; it hasn't moved.
 
@@ -351,7 +360,7 @@ last command rather than something to place before a move — the bug stays in
 Check the global Refusals above first (unknown id, already-terminal). Then this refusal,
 which belongs to Reject alone: **refuse anything already in `done/`, in any section.**
 
-Reject replaces the item's *entire* body (step 2 below) — and a done item's body is a
+Reject replaces the item's _entire_ body (step 2 below) — and a done item's body is a
 record, not a draft. An idea's record is `promoted-to:`, naming the task it became. A
 bug's or task's record is `## Outcome`, naming what was done and the command output that
 proved it. Rejecting a done item would silently destroy whichever of those it holds, and
@@ -389,6 +398,7 @@ Otherwise, for an open bug, idea, refactor, or task:
    you are working over another session's live marker at the user's explicit request —
    see "Already in progress" above; that marker belongs to another session, not this one.
    A stale stamp you re-took is your own, so this line runs.
+
 5. Move it:
 
    ```bash
@@ -460,7 +470,7 @@ out-of-scope item: you never took a marker, and `stop` is permissive enough to s
 `started:` an archived item keeps as history, which is a real record erased for nothing.
 So is having never reached `start` at all.
 
-The one case where this section *does* apply after a refusal is a stale stamp you
+The one case where this section _does_ apply after a refusal is a stale stamp you
 re-took with `stop` then `start` — the marker is this session's own from that point on,
 and everything here holds for it in full.
 

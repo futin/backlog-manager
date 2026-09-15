@@ -10,9 +10,7 @@ import { OrchestrateSheet } from '../client/src/components/board/OrchestrateShee
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
-import type {
-  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 
 // Same translation every other orchestrator suite (Task 8/10/11/12) already
 // applies: the fixture is plain JSON, so without this cast its string fields
@@ -22,22 +20,46 @@ type RunPayload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseReq
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
-    id: 'task-1', title: 'a task', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md'
+    id: 'task-1',
+    title: 'a task',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'tasks',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: true,
+    path: '/abs/alpha/backlog/tasks/open/task-1.md'
   };
   return { ...base, ...over };
 }
 
 const READY: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'acceptEdits', projectPaths: ['/abs/alpha']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'acceptEdits',
+  projectPaths: ['/abs/alpha']
 };
 
 const PROJECTS: ProjectSummary[] = [
-  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } }
+  {
+    name: 'alpha',
+    path: '/abs/alpha',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+  }
 ];
 
 // Two projects, for the run-drawer exclusion case below: it needs a FRESH
@@ -47,8 +69,13 @@ const PROJECTS: ProjectSummary[] = [
 // be no button left to click at all.
 const PROJECTS_TWO: ProjectSummary[] = [
   ...PROJECTS,
-  { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 } }
+  {
+    name: 'beta',
+    path: '/abs/beta',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+  }
 ];
 
 // =====================================================================
@@ -83,9 +110,7 @@ describe('toolbar Orchestrate button', () => {
 
   /** Same URL-branching shape board.test.tsx / orchestrator-strip.test.tsx
    *  already use, with every endpoint BoardView now calls on mount. */
-  function stub(
-    opts: { agents?: AgentsStatus; runs?: RunPayload[]; items?: BacklogItem[]; projects?: ProjectSummary[] }
-  ): jest.Mock {
+  function stub(opts: { agents?: AgentsStatus; runs?: RunPayload[]; items?: BacklogItem[]; projects?: ProjectSummary[] }): jest.Mock {
     AGENTS = opts.agents ?? READY;
     const runs = opts.runs ?? [];
     const items = opts.items ?? [];
@@ -114,27 +139,37 @@ describe('toolbar Orchestrate button', () => {
       // Settings' own well-configured case — nothing here is testing the
       // hint itself (that is `stubOrchestrate`'s job, below) — so no hint
       // renders and no test in this block gets a surprise DOM node.
-      const payload: unknown = url.includes('/api/agents/status') ? AGENTS
-        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/agents/merge-check') ? { covered: true, source: null }
-        // task-32: the sheet fires this on mount, unconditionally (unlike
-        // merge-check, no mode gates it). Its own branch rather than the
-        // `/api/items` catch-all below for exactly the reason merge-check's
-        // exists — that shape has no `paths`, so `fetchUncommitted`'s guard
-        // would reject it, which happens to render the same "no chip" as this
-        // does but for the wrong reason, and this stub's job is to describe
-        // what each real endpoint answers. `known: true` with an empty list is
-        // the clean-tree answer: nothing flagged, so no test in this block
-        // gets a surprise DOM node. Note the ORDER — `/api/items/uncommitted`
-        // also contains `/api/items`, so this branch has to precede it.
-        : url.includes('/api/items/uncommitted') ? { paths: [], known: true }
-        : url.includes('/api/agents/plan') ? {
-          action: 'execute', prompt: 'do it', project: 'alpha',
-          allowedModes: ['plan', 'acceptEdits'], defaultMode: 'acceptEdits'
-        }
-        : url.includes('/api/agents/dispatch') ? { sessionId: 'sess-1' }
-        : url.includes('/api/projects') ? projects
-        : { items, errors: [] };
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/agents/merge-check')
+            ? { covered: true, source: null }
+            : // task-32: the sheet fires this on mount, unconditionally (unlike
+              // merge-check, no mode gates it). Its own branch rather than the
+              // `/api/items` catch-all below for exactly the reason merge-check's
+              // exists — that shape has no `paths`, so `fetchUncommitted`'s guard
+              // would reject it, which happens to render the same "no chip" as this
+              // does but for the wrong reason, and this stub's job is to describe
+              // what each real endpoint answers. `known: true` with an empty list is
+              // the clean-tree answer: nothing flagged, so no test in this block
+              // gets a surprise DOM node. Note the ORDER — `/api/items/uncommitted`
+              // also contains `/api/items`, so this branch has to precede it.
+              url.includes('/api/items/uncommitted')
+              ? { paths: [], known: true }
+              : url.includes('/api/agents/plan')
+                ? {
+                    action: 'execute',
+                    prompt: 'do it',
+                    project: 'alpha',
+                    allowedModes: ['plan', 'acceptEdits'],
+                    defaultMode: 'acceptEdits'
+                  }
+                : url.includes('/api/agents/dispatch')
+                  ? { sessionId: 'sess-1' }
+                  : url.includes('/api/projects')
+                    ? projects
+                    : { items, errors: [] };
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) } as Response);
     });
     global.fetch = fn as unknown as typeof fetch;
@@ -220,8 +255,7 @@ describe('toolbar Orchestrate button', () => {
   /** How many times this stub has been asked for the dashboard status. The
    *  re-ask is scoped to the blocked path, and "asked nothing extra" is only
    *  a claim you can make by counting. */
-  const statusCalls = (fn: jest.Mock): number =>
-    fn.mock.calls.filter(([input]) => String(input).includes('/api/agents/status')).length;
+  const statusCalls = (fn: jest.Mock): number => fn.mock.calls.filter(([input]) => String(input).includes('/api/agents/status')).length;
 
   /** Hold `/api/agents/status` open until the test releases it by hand,
    *  delegating every other URL to the stub already installed. The controlled
@@ -282,7 +316,9 @@ describe('toolbar Orchestrate button', () => {
     await userEvent.click(btn);
     expect(btn).toHaveAttribute('aria-busy', 'true');
 
-    await act(async () => { held.release(); });
+    await act(async () => {
+      held.release();
+    });
     expect(btn).toHaveAttribute('aria-busy', 'false');
   });
 
@@ -296,7 +332,9 @@ describe('toolbar Orchestrate button', () => {
     await userEvent.click(btn);
     expect(held.statusCalls()).toBe(1);
 
-    await act(async () => { held.release(); });
+    await act(async () => {
+      held.release();
+    });
   });
 
   it('asks nothing extra when the button is not blocked at all', async () => {
@@ -530,7 +568,9 @@ describe('OrchestrateSheet', () => {
       // exercised.
       if (url.includes('/api/items/uncommitted')) {
         return Promise.resolve({
-          ok: true, status: 200, json: () => Promise.resolve({ paths: [], known: true })
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ paths: [], known: true })
         } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
@@ -541,9 +581,13 @@ describe('OrchestrateSheet', () => {
 
   // --- Test case 5 -------------------------------------------------------
   it('seeds model, effort and permission mode from settings and the ceiling, never a previous launch', async () => {
-    localStorage.setItem('backlog-manager.settings', JSON.stringify({
-      dispatchDefaultModel: 'sonnet', dispatchDefaultEffort: 'low'
-    }));
+    localStorage.setItem(
+      'backlog-manager.settings',
+      JSON.stringify({
+        dispatchDefaultModel: 'sonnet',
+        dispatchDefaultEffort: 'low'
+      })
+    );
     renderSheet({ spawnMaxPermission: 'acceptEdits' });
     await toModes();
 
@@ -576,27 +620,46 @@ describe('OrchestrateSheet', () => {
     // items here would collide `queue`'s own `key={item.path}` six ways.
     const items = [
       fakeItem({
-        id: 'task-1', title: 'Groomed task', section: 'tasks', groomed: true,
+        id: 'task-1',
+        title: 'Groomed task',
+        section: 'tasks',
+        groomed: true,
         path: '/abs/alpha/backlog/tasks/open/task-1.md'
       }),
       fakeItem({
-        id: 'bug-1', title: 'Ungroomed bug', section: 'bugs', groomed: false,
+        id: 'bug-1',
+        title: 'Ungroomed bug',
+        section: 'bugs',
+        groomed: false,
         path: '/abs/alpha/backlog/bugs/open/bug-1.md'
       }),
       fakeItem({
-        id: 'idea-1', title: 'Fresh idea', section: 'ideas', groomed: null,
+        id: 'idea-1',
+        title: 'Fresh idea',
+        section: 'ideas',
+        groomed: null,
         path: '/abs/alpha/backlog/ideas/open/idea-1.md'
       }),
       fakeItem({
-        id: 'refactor-1', title: 'Tidy the thing', section: 'refactors', groomed: null,
+        id: 'refactor-1',
+        title: 'Tidy the thing',
+        section: 'refactors',
+        groomed: null,
         path: '/abs/alpha/backlog/refactors/open/refactor-1.md'
       }),
       fakeItem({
-        id: 'task-2', title: 'Already done', status: 'done', groomed: true,
+        id: 'task-2',
+        title: 'Already done',
+        status: 'done',
+        groomed: true,
         path: '/abs/alpha/backlog/tasks/done/task-2.md'
       }),
       fakeItem({
-        id: 'oos-1', title: 'Rejected', section: 'out-of-scope', status: 'terminal', groomed: null,
+        id: 'oos-1',
+        title: 'Rejected',
+        section: 'out-of-scope',
+        status: 'terminal',
+        groomed: null,
         path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
       })
     ];
@@ -650,7 +713,12 @@ describe('OrchestrateSheet', () => {
     // for the cases that pin ITS behaviour; this assertion only has to keep
     // proving it rides along unconditionally, same as every other body here.
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', model: 'opus', effort: 'high', permissionMode: 'plan', mergeMode: 'merge', questionMode: 'park'
+      project: '/abs/alpha',
+      model: 'opus',
+      effort: 'high',
+      permissionMode: 'plan',
+      mergeMode: 'merge',
+      questionMode: 'park'
     });
     expect(onClose).toHaveBeenCalled();
   });
@@ -675,7 +743,8 @@ describe('OrchestrateSheet', () => {
   // error prose.
   it('shows the already-running message and closes into the strip world after refresh on a 409 conflict', async () => {
     stubOrchestrate({
-      ok: false, status: 409,
+      ok: false,
+      status: 409,
       body: { error: 'a run is already in progress for this project (run-9)', code: RUN_IN_PROGRESS_CODE }
     });
     const { onClose, refresh } = renderSheet();
@@ -699,7 +768,8 @@ describe('OrchestrateSheet', () => {
   // prose.
   it('closes on a coded 409, regardless of the message wording', async () => {
     stubOrchestrate({
-      ok: false, status: 409,
+      ok: false,
+      status: 409,
       body: { error: 'nope, not right now', code: RUN_IN_PROGRESS_CODE }
     });
     const { onClose, refresh } = renderSheet();
@@ -725,7 +795,8 @@ describe('OrchestrateSheet', () => {
   // (nothing was ever started).
   it('leaves the sheet open and shows the server message for an uncoded 409 — a capability or visibility conflict, not the lock', async () => {
     stubOrchestrate({
-      ok: false, status: 409,
+      ok: false,
+      status: 409,
       body: { error: 'the dashboard does not list /abs/alpha — most likely no Claude session there inside its LOOKBACK_HOURS' }
     });
     const { onClose, refresh } = renderSheet();
@@ -779,8 +850,7 @@ describe('OrchestrateSheet', () => {
     fakeItem({ id: 'task-2', title: 'Another task', section: 'tasks', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-2.md' })
   ];
 
-  const boxFor = (id: string): HTMLInputElement =>
-    screen.getByRole('checkbox', { name: new RegExp(id) }) as HTMLInputElement;
+  const boxFor = (id: string): HTMLInputElement => screen.getByRole('checkbox', { name: new RegExp(id) }) as HTMLInputElement;
 
   /* Everything checked on open, and this is the case that keeps the control
      from changing what the sheet MEANS. Someone who opens Orchestrate and
@@ -825,7 +895,11 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', ids: ['bug-1', 'task-2']
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      ids: ['bug-1', 'task-2']
     });
   });
 
@@ -864,7 +938,11 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', ids: ['task-2']
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      ids: ['task-2']
     });
   });
 
@@ -899,7 +977,10 @@ describe('OrchestrateSheet', () => {
       items: [
         ...THREE,
         fakeItem({
-          id: 'bug-2', title: 'Ungroomed bug', section: 'bugs', groomed: false,
+          id: 'bug-2',
+          title: 'Ungroomed bug',
+          section: 'bugs',
+          groomed: false,
           path: '/abs/alpha/backlog/bugs/open/bug-2.md'
         })
       ]
@@ -913,7 +994,11 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', ids: ['bug-2']
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
+      ids: ['bug-2']
     });
   });
 
@@ -1067,7 +1152,12 @@ describe('OrchestrateSheet', () => {
   // `<code>...settings.local.json</code>` node instead of its absence.
   it('shows no hint when merge-check answers 200 with the wrong shape', async () => {
     let settle: (value: Response) => void = () => {};
-    global.fetch = jest.fn(() => new Promise<Response>((resolve) => { settle = resolve; })) as jest.Mock;
+    global.fetch = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          settle = resolve;
+        })
+    ) as jest.Mock;
     renderSheet();
     // Step 3 is where the hint lives since task-20, so the absence claim
     // below has to be made from there — asserted on step 1 it would pass for
@@ -1100,7 +1190,12 @@ describe('OrchestrateSheet', () => {
   // "marks itself busy while the re-ask is in flight" case already uses.
   it('shows no hint once merge-check reports coverage', async () => {
     let settle: (value: Response) => void = () => {};
-    global.fetch = jest.fn(() => new Promise<Response>((resolve) => { settle = resolve; })) as jest.Mock;
+    global.fetch = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          settle = resolve;
+        })
+    ) as jest.Mock;
     renderSheet();
     // Step 3 is where the hint lives since task-20, so the absence claim
     // below has to be made from there — asserted on step 1 it would pass for
@@ -1109,7 +1204,8 @@ describe('OrchestrateSheet', () => {
 
     await act(async () => {
       settle({
-        ok: true, status: 200,
+        ok: true,
+        status: 200,
         json: () => Promise.resolve({ covered: true, source: '/abs/alpha/.claude/settings.json' })
       } as Response);
     });
@@ -1164,19 +1260,25 @@ describe('OrchestrateSheet', () => {
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/agents/merge-check')) {
-        return new Promise<Response>((_resolve, rej) => { reject = rej; });
+        return new Promise<Response>((_resolve, rej) => {
+          reject = rej;
+        });
       }
       // task-32's own on-mount read, answered clean and kept out of `calls`
       // for `stubOrchestrate`'s reason: `calls` is this case's evidence that
       // exactly one launch went out, and this is not it.
       if (url.includes('/api/items/uncommitted')) {
         return Promise.resolve({
-          ok: true, status: 200, json: () => Promise.resolve({ paths: [], known: true })
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ paths: [], known: true })
         } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       return Promise.resolve({
-        ok: true, status: 201, json: () => Promise.resolve({ sessionId: 'sess-9' })
+        ok: true,
+        status: 201,
+        json: () => Promise.resolve({ sessionId: 'sess-9' })
       } as Response);
     }) as jest.Mock;
     const { onClose, refresh } = renderSheet();
@@ -1313,7 +1415,10 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'decide'
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'decide'
     });
   });
 
@@ -1370,7 +1475,10 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park',
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
       ids: ['task-1', 'bug-1', 'task-2']
     });
   });
@@ -1395,7 +1503,10 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park'
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park'
     });
   });
 
@@ -1415,10 +1526,7 @@ describe('OrchestrateSheet', () => {
 
     // task-1 is gone (merged, say) and task-3 has just been groomed.
     rerender({
-      items: [
-        THREE[0], THREE[2],
-        fakeItem({ id: 'task-3', title: 'A third task', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-3.md' })
-      ]
+      items: [THREE[0], THREE[2], fakeItem({ id: 'task-3', title: 'A third task', groomed: true, path: '/abs/alpha/backlog/tasks/open/task-3.md' })]
     });
 
     expect(orderRows()).toEqual(['bug-1', 'task-2', 'task-3']);
@@ -1428,7 +1536,10 @@ describe('OrchestrateSheet', () => {
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toEqual({
-      project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park',
+      project: '/abs/alpha',
+      permissionMode: 'acceptEdits',
+      mergeMode: 'merge',
+      questionMode: 'park',
       ids: ['bug-1', 'task-2', 'task-3']
     });
   });

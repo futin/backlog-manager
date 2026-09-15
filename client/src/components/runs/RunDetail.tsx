@@ -4,22 +4,16 @@ import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
 import { mergeModeLabel, runStatusChip, stageChipClass, stageGlyph } from '../../lib/run-stage';
-import {
-  formatTurns, formatUsd, itemStageSpans, itemUsageTotals, runStageTotals, runUsageTotals, runWallMs
-} from '../../lib/run-stats';
+import { formatTurns, formatUsd, itemStageSpans, itemUsageTotals, runStageTotals, runUsageTotals, runWallMs } from '../../lib/run-stats';
 import { isCrashed } from '../../lib/run-watchdog';
-import {
-  formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive
-} from '../../lib/run-time';
+import { formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive } from '../../lib/run-time';
 import { RunControls } from '../RunControls';
 import type { RunControlsChange } from '../RunControls';
 import { ACTIVE_RUN_STAGES } from '../board/ItemCard';
 import { RowTime } from '../board/RunRowTime';
 import { StageBars } from './StageBars';
 import { StageTrack } from './StageTrack';
-import type {
-  ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage
-} from '../../../../shared/types';
+import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../../../../shared/types';
 
 /**
  * The Runs section's persistent right-hand pane (RunsView.tsx, Task 6) — the
@@ -145,8 +139,13 @@ function rowsFromArchive(queue: readonly ArchiveQueueItem[]): DetailRow[] {
   return queue.map((q) => {
     const last = q.verification.length === 0 ? null : q.verification[q.verification.length - 1];
     return {
-      id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
-      fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
+      id: q.id,
+      title: q.title,
+      stage: q.stage,
+      stageAt: q.stageAt,
+      fixLoops: q.fixLoops,
+      questions: q.questions,
+      branch: q.branch,
       assumptions: q.assumptions ?? [],
       usage: q.usage,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: null }
@@ -158,8 +157,13 @@ function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
   return queue.map((q) => {
     const last = q.verification.length === 0 ? null : q.verification[q.verification.length - 1];
     return {
-      id: q.id, title: q.title, stage: q.stage, stageAt: q.stageAt,
-      fixLoops: q.fixLoops, questions: q.questions, branch: q.branch,
+      id: q.id,
+      title: q.title,
+      stage: q.stage,
+      stageAt: q.stageAt,
+      fixLoops: q.fixLoops,
+      questions: q.questions,
+      branch: q.branch,
       assumptions: q.assumptions ?? [],
       usage: q.usage,
       verify: last === null ? null : { cmd: last.cmd, ok: last.ok, tail: last.tail }
@@ -167,25 +171,29 @@ function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
   });
 }
 
-export function RunDetail(
-  { summary, live, gate, resuming, onChanged }: {
-    summary: OrchestratorArchiveRun;
-    /** The live poll's own entry for this runId — the whole payload entry
-     *  (task-17), not a bare `OrchestratorRun`: `RunControls` below decides
-     *  from `fresh` and `pauseRequested`, and both are annotations the
-     *  endpoint adds rather than fields the run file carries. Named as
-     *  exactly those two rather than the whole payload entry, so this prop
-     *  states what it READS: `pastRuns` and `watchdog` ride the same entry
-     *  and are none of this pane's business. */
-    live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean }) | null;
-    /** task-17: the same three props `RunDrawer` takes, from the same
-     *  `resumeGate` call — the two hosts of `RunControls` are deliberately
-     *  symmetric, so neither can drift into deriving its own gate. */
-    gate: { canResume: boolean; blockedReason: string | null };
-    resuming: boolean;
-    onChanged: (kind: RunControlsChange) => void;
-  }
-): JSX.Element {
+export function RunDetail({
+  summary,
+  live,
+  gate,
+  resuming,
+  onChanged
+}: {
+  summary: OrchestratorArchiveRun;
+  /** The live poll's own entry for this runId — the whole payload entry
+   *  (task-17), not a bare `OrchestratorRun`: `RunControls` below decides
+   *  from `fresh` and `pauseRequested`, and both are annotations the
+   *  endpoint adds rather than fields the run file carries. Named as
+   *  exactly those two rather than the whole payload entry, so this prop
+   *  states what it READS: `pastRuns` and `watchdog` ride the same entry
+   *  and are none of this pane's business. */
+  live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean }) | null;
+  /** task-17: the same three props `RunDrawer` takes, from the same
+   *  `resumeGate` call — the two hosts of `RunControls` are deliberately
+   *  symmetric, so neither can drift into deriving its own gate. */
+  gate: { canResume: boolean; blockedReason: string | null };
+  resuming: boolean;
+  onChanged: (kind: RunControlsChange) => void;
+}): JSX.Element {
   // Holds the tail-bearing run this pane fetched for an ARCHIVED selection —
   // null before the fetch lands (or when this selection is live-backed and
   // never needs one at all). Never holds anything for the live-backed case:
@@ -230,7 +238,9 @@ export function RunDetail(
         if (cancelled) return;
         setFetchFailed(true);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [summary.project, summary.runId, live !== null]);
 
   // One clock reading for this render, matching RunDrawer.tsx's own rule
@@ -326,11 +336,7 @@ export function RunDetail(
   // forever. Reading the whole row set off `fetchedRun` once it exists
   // fixes that: every field on a fetched-authority row is as fresh as the
   // header stamps built from the same object.
-  const rows: DetailRow[] = live !== null
-    ? rowsFromLive(live.queue)
-    : fetchedRun !== null
-      ? rowsFromLive(fetchedRun.queue)
-      : rowsFromArchive(summary.queue);
+  const rows: DetailRow[] = live !== null ? rowsFromLive(live.queue) : fetchedRun !== null ? rowsFromLive(fetchedRun.queue) : rowsFromArchive(summary.queue);
 
   const merged = rows.filter((r) => r.stage === 'merged').length;
   // Which rows reached RunStage's OTHER success exit (one per MergeMode),
@@ -449,7 +455,9 @@ export function RunDetail(
           {statusChip.label}
         </span>
         {modeLabel !== null && (
-          <span className="run-mode-badge" data-testid="run-detail-mode">{modeLabel}</span>
+          <span className="run-mode-badge" data-testid="run-detail-mode">
+            {modeLabel}
+          </span>
         )}
         {/* task-17. `live` when there is one — it already carries `fresh` and
             `pauseRequested`, the two fields the controls decide from — and a
@@ -462,13 +470,15 @@ export function RunDetail(
             control exists for. `RunControls` renders nothing for every other
             finished status regardless. */}
         <RunControls
-          run={live ?? {
-            status: source.status,
-            project: summary.project,
-            queue: source.queue,
-            fresh: false,
-            pauseRequested: false
-          }}
+          run={
+            live ?? {
+              status: source.status,
+              project: summary.project,
+              queue: source.queue,
+              fresh: false,
+              pauseRequested: false
+            }
+          }
           gate={gate}
           resuming={resuming}
           onChanged={onChanged}
@@ -479,10 +489,9 @@ export function RunDetail(
             say when it began even with no honest wall time to report. */}
         {(startedClock !== null || wall !== null) && (
           <span className="run-detail-time" data-testid="run-detail-time">
-            {[
-              startedClock === null ? null : `started ${startedClock}`,
-              wall === null ? null : `${formatSpanCompact(wall)} elapsed`
-            ].filter((part) => part !== null).join(' · ')}
+            {[startedClock === null ? null : `started ${startedClock}`, wall === null ? null : `${formatSpanCompact(wall)} elapsed`]
+              .filter((part) => part !== null)
+              .join(' · ')}
           </span>
         )}
         {/* task-27: what the whole run cost, summed off the per-transcript
@@ -501,7 +510,9 @@ export function RunDetail(
               runUsage.costUsd === null ? null : formatUsd(runUsage.costUsd),
               runUsage.turns === null ? null : formatTurns(runUsage.turns),
               `${runUsage.sessions} session${runUsage.sessions === 1 ? '' : 's'}`
-            ].filter((part) => part !== null).join(' · ')}
+            ]
+              .filter((part) => part !== null)
+              .join(' · ')}
           </span>
         )}
       </div>
@@ -536,7 +547,9 @@ export function RunDetail(
         // downgraded run's whole point (design §7: "legible at a glance in
         // history") is lost if the explanation sits below four count chips
         // a skimming reader may never reach.
-        <div className="run-detail-mode-note" data-testid="run-detail-mode-note">{modeNote}</div>
+        <div className="run-detail-mode-note" data-testid="run-detail-mode-note">
+          {modeNote}
+        </div>
       )}
 
       <div className="run-drawer-chips" data-testid="run-detail-chips">
@@ -588,7 +601,9 @@ export function RunDetail(
         // leave them standing — this note says only that one thing behind
         // them (a still-collapsed or still-open `<details>`) may never
         // gain a tail.
-        <div className="run-detail-error" data-testid="run-detail-error">couldn't load verification output</div>
+        <div className="run-detail-error" data-testid="run-detail-error">
+          couldn't load verification output
+        </div>
       )}
 
       {/* The run-level "machine time by stage" rollup (Task 6) — the same
@@ -637,9 +652,7 @@ export function RunDetail(
                     hand-edited or corrupted run file, never a real
                     orchestrator-produced one) rather than trusting the
                     field outright the way every other reader of it could. */}
-                <code className="run-detail-branch-cmd">
-                  git merge --no-ff {row.branch ?? `backlog/${row.id}`}
-                </code>
+                <code className="run-detail-branch-cmd">git merge --no-ff {row.branch ?? `backlog/${row.id}`}</code>
               </div>
             ))}
           </div>
@@ -668,7 +681,9 @@ export function RunDetail(
                     the strip, and the drawer — an item's stage reads the
                     same everywhere in this app. */}
                 <span className={stageChipClass(row.stage)}>
-                  <span className="board-card-stage-glyph" aria-hidden="true">{stageGlyph(row.stage)}</span>
+                  <span className="board-card-stage-glyph" aria-hidden="true">
+                    {stageGlyph(row.stage)}
+                  </span>
                   {row.stage}
                 </span>
                 {/* The shared `RowTime` (board/RunRowTime.tsx), not a
@@ -700,7 +715,9 @@ export function RunDetail(
                   {[
                     queueWait === null ? null : `queue ${formatSpanCompact(queueWait)}`,
                     preflightSpan === undefined ? null : `preflight ${formatSpan(preflightSpan.ms)}`
-                  ].filter((part) => part !== null).join(' · ')}
+                  ]
+                    .filter((part) => part !== null)
+                    .join(' · ')}
                 </div>
               )}
 
@@ -761,10 +778,7 @@ export function RunDetail(
                   length rather than the key, because every item of every
                   `park` run carries an empty list. */}
               {row.assumptions.length > 0 && (
-                <div
-                  className="run-drawer-item-assumptions"
-                  data-testid={`run-detail-assumptions-${row.id}`}
-                >
+                <div className="run-drawer-item-assumptions" data-testid={`run-detail-assumptions-${row.id}`}>
                   <div className="run-drawer-assumptions-label">assumed</div>
                   <dl className="run-drawer-assumptions-list">
                     {row.assumptions.map((a, i) => (
@@ -786,16 +800,10 @@ export function RunDetail(
                 // still the proof the command ran; what has to stay legible
                 // without expanding (what ran, whether it passed) is
                 // already on the summary line above it.
-                <details
-                  className="run-drawer-item-verify"
-                  data-testid={`run-detail-verify-${row.id}`}
-                  open={!row.verify.ok}
-                >
+                <details className="run-drawer-item-verify" data-testid={`run-detail-verify-${row.id}`} open={!row.verify.ok}>
                   <summary className="run-drawer-item-verify-summary">
                     <span className="run-drawer-item-verify-cmd">{row.verify.cmd}</span>
-                    <span className={row.verify.ok ? 'run-drawer-item-verify-ok' : 'run-drawer-item-verify-bad'}>
-                      {row.verify.ok ? 'ok' : 'failed'}
-                    </span>
+                    <span className={row.verify.ok ? 'run-drawer-item-verify-ok' : 'run-drawer-item-verify-bad'}>{row.verify.ok ? 'ok' : 'failed'}</span>
                   </summary>
                   <span className="run-drawer-item-verify-tail">{row.verify.tail ?? ''}</span>
                 </details>
@@ -816,11 +824,7 @@ export function RunDetail(
         attention.map((a, i) => {
           const row = rows.find((r) => r.id === a.id);
           return (
-            <div
-              key={`${a.id}-${a.kind}-${i}`}
-              className="run-drawer-attn"
-              data-testid={`run-detail-attention-${a.id}`}
-            >
+            <div key={`${a.id}-${a.kind}-${i}`} className="run-drawer-attn" data-testid={`run-detail-attention-${a.id}`}>
               <div className="run-drawer-attn-head">
                 <span className="run-drawer-item-id">{a.id}</span>
                 <span className="run-drawer-attn-kind">{a.kind}</span>
@@ -828,7 +832,9 @@ export function RunDetail(
               <div className="run-drawer-attn-detail">{a.detail}</div>
               {row !== undefined && row.questions.length > 0 && (
                 <ul className="run-drawer-questions">
-                  {row.questions.map((question) => <li key={question}>{question}</li>)}
+                  {row.questions.map((question) => (
+                    <li key={question}>{question}</li>
+                  ))}
                 </ul>
               )}
             </div>

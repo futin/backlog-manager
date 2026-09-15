@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react';
 
-import {
-  ApiError, fetchMergeCheck, fetchUncommitted, startOrchestrate,
-  type MergeCheckResult, type UncommittedItems
-} from '../../lib/agents';
-import {
-  EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction
-} from '../../../../shared/agent';
+import { ApiError, fetchMergeCheck, fetchUncommitted, startOrchestrate, type MergeCheckResult, type UncommittedItems } from '../../lib/agents';
+import { EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
 import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { useSettings } from '../../hooks/useSettings';
 import { MERGE_MODES, QUESTION_MODES, RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
@@ -120,36 +115,41 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
  * used to bind their own unguarded `window` listener, so a press with two of
  * them open closed both.
  */
-export function OrchestrateSheet(
-  { project, projectName, items, spawnMaxPermission, onClose, refresh }: {
-    /** Registry path — the same string `StartOrchestrateRequest.project` and
-     *  `BacklogItem.projectPath` both use. */
-    project: string;
-    /** Display name for the header; the registry's own name, not a path. */
-    projectName: string;
-    /** This project's items, unfiltered by the board's own search/status/sort
-     *  — the preview below applies its own, narrower filter (see `queue`). */
-    items: BacklogItem[];
-    /** `AgentsStatus.spawnMaxPermission` — just the one field this sheet
-     *  actually reads, taken directly rather than the whole status object so
-     *  this component cannot be tempted to re-run `dispatchGate`'s own
-     *  checks a second time. Those checks already happened once to decide
-     *  whether the toolbar button that opens this sheet was even clickable,
-     *  and the server re-runs the same check (`projectDispatchGate`,
-     *  shared/agent.ts — one implementation, shared with `dispatchGate` and
-     *  BoardView's own toolbar gate since Task 13's fix round 1) the instant
-     *  Start is pressed — a second client-side copy here would be one more
-     *  place for the two to drift apart, buying nothing the submit's own
-     *  error path doesn't already cover. */
-    spawnMaxPermission: PermissionMode | null;
-    onClose: () => void;
-    /** `useOrchestratorRuns()`'s own refresh — called after both a
-     *  successful start (so the strip has the new run before the next
-     *  5s poll would have found it on its own) and a 409 conflict (so the
-     *  strip has the run that WON the race, per `start`'s own comment). */
-    refresh: () => void;
-  }
-) {
+export function OrchestrateSheet({
+  project,
+  projectName,
+  items,
+  spawnMaxPermission,
+  onClose,
+  refresh
+}: {
+  /** Registry path — the same string `StartOrchestrateRequest.project` and
+   *  `BacklogItem.projectPath` both use. */
+  project: string;
+  /** Display name for the header; the registry's own name, not a path. */
+  projectName: string;
+  /** This project's items, unfiltered by the board's own search/status/sort
+   *  — the preview below applies its own, narrower filter (see `queue`). */
+  items: BacklogItem[];
+  /** `AgentsStatus.spawnMaxPermission` — just the one field this sheet
+   *  actually reads, taken directly rather than the whole status object so
+   *  this component cannot be tempted to re-run `dispatchGate`'s own
+   *  checks a second time. Those checks already happened once to decide
+   *  whether the toolbar button that opens this sheet was even clickable,
+   *  and the server re-runs the same check (`projectDispatchGate`,
+   *  shared/agent.ts — one implementation, shared with `dispatchGate` and
+   *  BoardView's own toolbar gate since Task 13's fix round 1) the instant
+   *  Start is pressed — a second client-side copy here would be one more
+   *  place for the two to drift apart, buying nothing the submit's own
+   *  error path doesn't already cover. */
+  spawnMaxPermission: PermissionMode | null;
+  onClose: () => void;
+  /** `useOrchestratorRuns()`'s own refresh — called after both a
+   *  successful start (so the strip has the new run before the next
+   *  5s poll would have found it on its own) and a 409 conflict (so the
+   *  strip has the run that WON the race, per `start`'s own comment). */
+  refresh: () => void;
+}) {
   const { settings } = useSettings();
   const allowedModes = modesUpTo(spawnMaxPermission);
   // Same rule LaunchSheet's own defaultMode gets from the server
@@ -468,9 +468,7 @@ export function OrchestrateSheet(
    * below has to hand `setSelected` the same currency `toggle` does.
    */
   const uncommittedPaths = new Set(uncommitted?.known === true ? uncommitted.paths : []);
-  const uncommittedIds = queue
-    .filter(({ item }) => uncommittedPaths.has(item.path))
-    .map(({ item }) => item.id);
+  const uncommittedIds = queue.filter(({ item }) => uncommittedPaths.has(item.path)).map(({ item }) => item.id);
   /** Only the flagged rows that are still ticked — the control's own count,
    *  so pressing it once disables it rather than leaving a button that claims
    *  there is still something to deselect. */
@@ -521,9 +519,7 @@ export function OrchestrateSheet(
    * a preference nobody expressed. An id that vanishes just fails the
    * filter.
    */
-  const arranged = order === null
-    ? selectedIds
-    : [...order.filter((id) => selectedIds.includes(id)), ...selectedIds.filter((id) => !order.includes(id))];
+  const arranged = order === null ? selectedIds : [...order.filter((id) => selectedIds.includes(id)), ...selectedIds.filter((id) => !order.includes(id))];
 
   /**
    * Move one row, by index into `arranged` — never by index into the queue,
@@ -655,7 +651,9 @@ export function OrchestrateSheet(
         <div className="sheet-head">
           <span className="sheet-kicker">orchestrate</span>
           <span className="sheet-title">{projectName}</span>
-          <button className="drawer-close" onClick={onClose}>close</button>
+          <button className="drawer-close" onClick={onClose}>
+            close
+          </button>
         </div>
 
         <div className="sheet-body">
@@ -666,11 +664,7 @@ export function OrchestrateSheet(
               reader already knows how to announce for exactly this. */}
           <ol className="orchestrate-steps" aria-label="orchestrate steps">
             {STEPS.map((word, i) => (
-              <li
-                key={word}
-                className={`orchestrate-step${i + 1 === step ? ' current' : ''}`}
-                aria-current={i + 1 === step ? 'step' : undefined}
-              >
+              <li key={word} className={`orchestrate-step${i + 1 === step ? ' current' : ''}`} aria-current={i + 1 === step ? 'step' : undefined}>
                 {i + 1} · {word}
               </li>
             ))}
@@ -679,9 +673,7 @@ export function OrchestrateSheet(
           {step === 1 && (
             <div className="orchestrate-step-body" data-testid="orchestrate-step-items">
               <div className="sheet-note">
-                preview — the run re-gates every item itself the moment it
-                starts, so this list is not the final word on what actually
-                runs.
+                preview — the run re-gates every item itself the moment it starts, so this list is not the final word on what actually runs.
                 {/* The disclaimer above promises the run may re-gate an item
                     to a different VERDICT. It says nothing about the run
                     skipping most of the list, so a narrowed selection needs
@@ -689,7 +681,10 @@ export function OrchestrateSheet(
                     unattended operation, and "I thought it was draining
                     everything" is not something anyone finds out cheaply. */}
                 {narrowed && selectedIds.length > 0 && (
-                  <> only the {selectedIds.length} selected {selectedIds.length === 1 ? 'item' : 'items'} will run.</>
+                  <>
+                    {' '}
+                    only the {selectedIds.length} selected {selectedIds.length === 1 ? 'item' : 'items'} will run.
+                  </>
                 )}
               </div>
 
@@ -735,12 +730,9 @@ export function OrchestrateSheet(
                   bytes the run gates are not the bytes on this screen". */}
               {uncommittedIds.length > 0 && (
                 <div className="sheet-note" data-testid="orchestrate-uncommitted-note">
-                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item differs' : 'items differ'} from
-                  main — the run reads main's copy rather than the file here ("groomed on
-                  disk only", in the usual case). One missing from main altogether is
-                  skipped ("not committed on main"); one present but stale there is gated
-                  and run on main's bytes, so a plan written since the last commit is not
-                  the plan that runs.
+                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item differs' : 'items differ'} from main — the run reads main's copy rather than the
+                  file here ("groomed on disk only", in the usual case). One missing from main altogether is skipped ("not committed on main"); one present but
+                  stale there is gated and run on main's bytes, so a plan written since the last commit is not the plan that runs.
                 </div>
               )}
 
@@ -757,21 +749,13 @@ export function OrchestrateSheet(
                       request, and only "select all" can get back to the
                       first. */}
                   <div className="orchestrate-select-actions">
-                    <span className="sheet-note">{selectedIds.length} of {queueIds.length} selected</span>
-                    <button
-                      type="button"
-                      className="drawer-close"
-                      onClick={() => setSelected(null)}
-                      disabled={!narrowed}
-                    >
+                    <span className="sheet-note">
+                      {selectedIds.length} of {queueIds.length} selected
+                    </span>
+                    <button type="button" className="drawer-close" onClick={() => setSelected(null)} disabled={!narrowed}>
                       select all
                     </button>
-                    <button
-                      type="button"
-                      className="drawer-close"
-                      onClick={() => setSelected(new Set())}
-                      disabled={selectedIds.length === 0}
-                    >
+                    <button type="button" className="drawer-close" onClick={() => setSelected(new Set())} disabled={selectedIds.length === 0}>
                       select none
                     </button>
                     {/* Rendered only when there is something to deselect, the
@@ -783,11 +767,7 @@ export function OrchestrateSheet(
                         pressing it once retires the control rather than
                         leaving it claiming work it has already done. */}
                     {uncommittedSelected.length > 0 && (
-                      <button
-                        type="button"
-                        className="drawer-close"
-                        onClick={deselectUncommitted}
-                      >
+                      <button type="button" className="drawer-close" onClick={deselectUncommitted}>
                         deselect uncommitted ({uncommittedSelected.length})
                       </button>
                     )}
@@ -836,9 +816,7 @@ export function OrchestrateSheet(
                               the chip means, and a row whose CHANGES are the
                               uncommitted part is covered by that sentence
                               rather than left to the chip to say alone. */}
-                          {uncommittedPaths.has(item.path) && (
-                            <span className="orchestrate-preview-flag">uncommitted</span>
-                          )}
+                          {uncommittedPaths.has(item.path) && <span className="orchestrate-preview-flag">uncommitted</span>}
                         </div>
                       </div>
                     ))}
@@ -855,9 +833,7 @@ export function OrchestrateSheet(
                   `start`: the two are the same refusal one screen apart, and
                   blocking it here means the state can never reach a screen
                   that would have to explain itself all over again. */}
-              {emptySelection && (
-                <div className="sheet-note">pick at least one item, or select all to drain the queue.</div>
-              )}
+              {emptySelection && <div className="sheet-note">pick at least one item, or select all to drain the queue.</div>}
             </div>
           )}
 
@@ -872,9 +848,8 @@ export function OrchestrateSheet(
                   is the step that causes it, and the reset control that
                   undoes it is on this screen too. */}
               <div className="sheet-note">
-                arranging the queue pins this run to these items — anything
-                groomed after now will not join it. Reset to leave the run
-                draining whatever the gate finds.
+                arranging the queue pins this run to these items — anything groomed after now will not join it. Reset to leave the run draining whatever the
+                gate finds.
               </div>
 
               <div className="orchestrate-select-actions">
@@ -917,13 +892,7 @@ export function OrchestrateSheet(
                             the accessible name names the row being moved
                             rather than describing the arrow. */}
                         <span className="orchestrate-move">
-                          <button
-                            type="button"
-                            className="drawer-close"
-                            aria-label={`move ${id} up`}
-                            onClick={() => move(i, -1)}
-                            disabled={i === 0}
-                          >
+                          <button type="button" className="drawer-close" aria-label={`move ${id} up`} onClick={() => move(i, -1)} disabled={i === 0}>
                             ↑
                           </button>
                           <button
@@ -942,9 +911,7 @@ export function OrchestrateSheet(
                 })}
               </div>
 
-              {arranged.length === 0 && (
-                <div className="drawer-empty">nothing to arrange — this run will drain whatever the gate finds</div>
-              )}
+              {arranged.length === 0 && <div className="drawer-empty">nothing to arrange — this run will drain whatever the gate finds</div>}
 
               {/* §7.4. The note must NOT claim to know which item hoists:
                   this preview is client-side off `BacklogItem`, which carries
@@ -954,10 +921,8 @@ export function OrchestrateSheet(
                   yet committed. Same posture as the preview disclaimer on
                   step 1: honest that this screen is an approximation. */}
               <div className="sheet-note">
-                an item marked <code>runner-fix:</code> is still hoisted to
-                the front, above this order. This screen cannot tell you which
-                one — the marker is read from the committed item, not the copy
-                on disk.
+                an item marked <code>runner-fix:</code> is still hoisted to the front, above this order. This screen cannot tell you which one — the marker is
+                read from the committed item, not the copy on disk.
               </div>
             </div>
           )}
@@ -970,13 +935,11 @@ export function OrchestrateSheet(
               <div className="sheet-row">
                 <label className="sheet-field">
                   <span className="set-name">Permission mode</span>
-                  <select
-                    aria-label="Permission mode"
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value as PermissionMode)}
-                  >
+                  <select aria-label="Permission mode" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
                     {allowedModes.map((m) => (
-                      <option key={m} value={m}>{m}</option>
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -986,7 +949,9 @@ export function OrchestrateSheet(
                   <select aria-label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
                     <option value="">default</option>
                     {MODELS.map((m) => (
-                      <option key={m} value={m}>{m}</option>
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -996,33 +961,31 @@ export function OrchestrateSheet(
                   <select aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
                     <option value="">default</option>
                     {EFFORTS.map((f) => (
-                      <option key={f} value={f}>{f}</option>
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
                     ))}
                   </select>
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Merge mode</span>
-                  <select
-                    aria-label="Merge mode"
-                    value={mergeMode}
-                    onChange={(e) => setMergeMode(e.target.value as MergeMode)}
-                  >
+                  <select aria-label="Merge mode" value={mergeMode} onChange={(e) => setMergeMode(e.target.value as MergeMode)}>
                     {MERGE_MODES.map((m) => (
-                      <option key={m} value={m}>{MERGE_MODE_LABELS[m]}</option>
+                      <option key={m} value={m}>
+                        {MERGE_MODE_LABELS[m]}
+                      </option>
                     ))}
                   </select>
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Question mode</span>
-                  <select
-                    aria-label="Question mode"
-                    value={questionMode}
-                    onChange={(e) => setQuestionMode(e.target.value as QuestionMode)}
-                  >
+                  <select aria-label="Question mode" value={questionMode} onChange={(e) => setQuestionMode(e.target.value as QuestionMode)}>
                     {QUESTION_MODES.map((q) => (
-                      <option key={q} value={q}>{QUESTION_MODE_LABELS[q]}</option>
+                      <option key={q} value={q}>
+                        {QUESTION_MODE_LABELS[q]}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -1038,11 +1001,8 @@ export function OrchestrateSheet(
                   because the sentence is about the choice rather than about
                   either option. */}
               <div className="sheet-note">
-                what a run does with an item's open questions when nobody can
-                answer them. Want control over a question, start the run from
-                a harness that has <code>AskUserQuestion</code>; start it from
-                here and you are choosing between skipping the item and
-                letting the runner answer.
+                what a run does with an item's open questions when nobody can answer them. Want control over a question, start the run from a harness that has{' '}
+                <code>AskUserQuestion</code>; start it from here and you are choosing between skipping the item and letting the runner answer.
               </div>
 
               {/* The setup hint (§6) — shown only under `merge` mode, and only
@@ -1071,17 +1031,10 @@ export function OrchestrateSheet(
               {mergeMode === 'merge' && mergeCoverage !== null && !mergeCoverage.covered && (
                 <div className="sheet-note orchestrate-merge-hint">
                   <p>
-                    <code>{project}/.claude/settings.local.json</code> has no{' '}
-                    <code>git merge</code> allow rule. This is the per-user file,
-                    so the rule stays out of the shared{' '}
-                    <code>settings.json</code> your team commits — put it there
-                    instead if you want everyone to inherit it. The run may still
-                    merge without one, but not reliably — the auto-mode
-                    classifier's verdict on that exact command varies between
-                    runs. Add this to the file, creating it if it does not exist
-                    yet (or merge the one entry into an existing{' '}
-                    <code>permissions.allow</code> list rather than replacing
-                    it):
+                    <code>{project}/.claude/settings.local.json</code> has no <code>git merge</code> allow rule. This is the per-user file, so the rule stays
+                    out of the shared <code>settings.json</code> your team commits — put it there instead if you want everyone to inherit it. The run may still
+                    merge without one, but not reliably — the auto-mode classifier's verdict on that exact command varies between runs. Add this to the file,
+                    creating it if it does not exist yet (or merge the one entry into an existing <code>permissions.allow</code> list rather than replacing it):
                   </p>
                   <pre className="orchestrate-merge-hint-json">{MERGE_ALLOW_SNIPPET}</pre>
                 </div>
@@ -1096,13 +1049,11 @@ export function OrchestrateSheet(
               control in three positions, so a reader's eye never has to find
               a differently-placed button after each transition. */}
           <div className="sheet-actions">
-            <button className="drawer-close" onClick={onClose}>cancel</button>
+            <button className="drawer-close" onClick={onClose}>
+              cancel
+            </button>
             {step > 1 && (
-              <button
-                type="button"
-                className="drawer-close"
-                onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
-              >
+              <button type="button" className="drawer-close" onClick={() => setStep((s) => (s === 3 ? 2 : 1))}>
                 back
               </button>
             )}

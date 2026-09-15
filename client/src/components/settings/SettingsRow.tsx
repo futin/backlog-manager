@@ -10,9 +10,7 @@ import type { ReactNode } from 'react';
 */
 
 /** One labelled setting: name + explanation on the left, the control on the right. */
-export function SettingsRow({
-  name, hint, children
-}: { name: string; hint?: ReactNode; children: ReactNode }) {
+export function SettingsRow({ name, hint, children }: { name: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <div className="set-row">
       <div className="set-label">

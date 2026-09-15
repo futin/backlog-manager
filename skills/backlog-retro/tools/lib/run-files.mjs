@@ -6,18 +6,18 @@
 // call, never writing, never caching — and it is deliberately forgiving
 // about what it finds there, because a historian that stops at the first
 // corrupt archive reports nothing about the twenty-six good ones beside it.
-import fs from 'node:fs'
-import path from 'node:path'
+import fs from 'node:fs';
+import path from 'node:path';
 
-import { RetroError } from './errors.mjs'
-import { decodeProjectDir } from './paths.mjs'
+import { RetroError } from './errors.mjs';
+import { decodeProjectDir } from './paths.mjs';
 
 // The `pending` stamp is queue wait — time the item spent waiting for the
 // runner, which is not work anybody did. CLAUDE.md's own invariant on
 // `itemDurationMs` states the same rule for the board ("queue wait is not
 // work"), and this is that rule applied to the historian: `pending` is
 // reported, separately, and never summed into pipeline time.
-const QUEUE_STAGE = 'pending'
+const QUEUE_STAGE = 'pending';
 
 // `stageAt` -> per-stage minutes. Entries are sorted BY TIMESTAMP rather
 // than by key order, because JSON key order is whatever the writer happened
@@ -33,50 +33,50 @@ export function stageSpans(stageAt) {
   const entries = Object.entries(stageAt || {})
     .map(([stage, iso]) => [stage, Date.parse(iso)])
     .filter(([, ms]) => Number.isFinite(ms))
-    .sort((a, b) => a[1] - b[1])
+    .sort((a, b) => a[1] - b[1]);
 
-  const stages = {}
-  let queueWaitMin = null
+  const stages = {};
+  let queueWaitMin = null;
   for (let i = 0; i < entries.length - 1; i += 1) {
-    const [stage, ms] = entries[i]
-    const minutes = Math.round(((entries[i + 1][1] - ms) / 60000) * 100) / 100
-    if (stage === QUEUE_STAGE) queueWaitMin = (queueWaitMin ?? 0) + minutes
-    else stages[stage] = (stages[stage] ?? 0) + minutes
+    const [stage, ms] = entries[i];
+    const minutes = Math.round(((entries[i + 1][1] - ms) / 60000) * 100) / 100;
+    if (stage === QUEUE_STAGE) queueWaitMin = (queueWaitMin ?? 0) + minutes;
+    else stages[stage] = (stages[stage] ?? 0) + minutes;
   }
-  return { stages, queueWaitMin }
+  return { stages, queueWaitMin };
 }
 
 // Jest and tsc both colour their output, and a run file's `tail` is
 // captured verbatim — so the escapes are in the stored bytes and every
 // pattern below would miss without this first.
-const ANSI = /\x1b\[[0-9;]*m/g
+const ANSI = /\x1b\[[0-9;]*m/g;
 
 // Words that mark a line worth quoting in a report. Deliberately a small
 // closed list rather than a cleverer heuristic: the point is to put three
 // lines in front of a person, not to classify the failure.
-const ERROR_HINTS = [/error/i, /Cannot/, /ENOENT/, /not found/, /Timeout/i, /timed out/, /exceeded/]
+const ERROR_HINTS = [/error/i, /Cannot/, /ENOENT/, /not found/, /Timeout/i, /timed out/, /exceeded/];
 
-const MAX_TEST_NAME = 120
+const MAX_TEST_NAME = 120;
 
 // A failing verification entry's tail -> the three things a report cites.
 // Kept as extraction rather than judgement: it never decides WHY something
 // failed, only which file, which test and which line said so.
 export function verificationFailures(tail) {
-  const text = String(tail || '').replace(ANSI, '')
-  const files = []
-  for (const m of text.matchAll(/FAIL\s+(\S+)/g)) files.push(m[1])
-  const tests = []
+  const text = String(tail || '').replace(ANSI, '');
+  const files = [];
+  for (const m of text.matchAll(/FAIL\s+(\S+)/g)) files.push(m[1]);
+  const tests = [];
   for (const m of text.matchAll(/●\s*(.*)$/gm)) {
-    const name = m[1].trim()
-    if (name) tests.push(name.length > MAX_TEST_NAME ? name.slice(0, MAX_TEST_NAME) : name)
+    const name = m[1].trim();
+    if (name) tests.push(name.length > MAX_TEST_NAME ? name.slice(0, MAX_TEST_NAME) : name);
   }
-  const errors = []
+  const errors = [];
   for (const line of text.split('\n')) {
-    if (errors.length >= 3) break
-    const trimmed = line.trim()
-    if (trimmed && ERROR_HINTS.some((re) => re.test(trimmed))) errors.push(trimmed)
+    if (errors.length >= 3) break;
+    const trimmed = line.trim();
+    if (trimmed && ERROR_HINTS.some((re) => re.test(trimmed))) errors.push(trimmed);
   }
-  return { files, tests, errors }
+  return { files, tests, errors };
 }
 
 // `verification` verbatim, reduced to `{cmd, ok}` plus — for a FAILING
@@ -84,16 +84,16 @@ export function verificationFailures(tail) {
 // checks `'failures' in entry`, never `failures === null`, so a passing
 // command can never be misread as a failure with nothing extracted.
 function readVerification(raw) {
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw)) return [];
   return raw.map((entry) => {
-    const out = { cmd: entry?.cmd ?? null, ok: entry?.ok === true }
-    if (!out.ok) out.failures = verificationFailures(entry?.tail)
-    return out
-  })
+    const out = { cmd: entry?.cmd ?? null, ok: entry?.ok === true };
+    if (!out.ok) out.failures = verificationFailures(entry?.tail);
+    return out;
+  });
 }
 
 function readItem(run, raw) {
-  const { stages, queueWaitMin } = stageSpans(raw?.stageAt)
+  const { stages, queueWaitMin } = stageSpans(raw?.stageAt);
   return {
     runId: run.runId ?? null,
     project: run.project ?? null,
@@ -119,8 +119,8 @@ function readItem(run, raw) {
     // Filled by the session join; empty here so the shape never changes
     // between a sweep that found logs and one that did not.
     sessionKeys: [],
-    verifyStatus: null,
-  }
+    verifyStatus: null
+  };
 }
 
 function readRun(file, current, raw) {
@@ -139,8 +139,8 @@ function readRun(file, current, raw) {
     file,
     current,
     attention: Array.isArray(raw?.attention) ? raw.attention : [],
-    itemCount: Array.isArray(raw?.queue) ? raw.queue.length : 0,
-  }
+    itemCount: Array.isArray(raw?.queue) ? raw.queue.length : 0
+  };
 }
 
 // One project directory's run files, current first. An unparsable file
@@ -148,22 +148,22 @@ function readRun(file, current, raw) {
 // a corrupt archive is a fact about one file, and stopping the sweep over
 // it would lose every good run beside it.
 function runFilesIn(dir) {
-  const files = []
-  const current = path.join(dir, 'run.json')
-  if (fs.existsSync(current)) files.push({ file: current, current: true })
-  const runsDir = path.join(dir, 'runs')
-  let entries = []
+  const files = [];
+  const current = path.join(dir, 'run.json');
+  if (fs.existsSync(current)) files.push({ file: current, current: true });
+  const runsDir = path.join(dir, 'runs');
+  let entries = [];
   try {
-    entries = fs.readdirSync(runsDir, { withFileTypes: true })
+    entries = fs.readdirSync(runsDir, { withFileTypes: true });
   } catch {
-    entries = []
+    entries = [];
   }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.isFile() && entry.name.endsWith('.json')) {
-      files.push({ file: path.join(runsDir, entry.name), current: false })
+      files.push({ file: path.join(runsDir, entry.name), current: false });
     }
   }
-  return files
+  return files;
 }
 
 // The whole run-state home -> `{ projects, runs, items }`.
@@ -172,60 +172,60 @@ function runFilesIn(dir) {
 // same and labelled by its decoded path, because the registry is a
 // convenience for the report and not an allowlist for the sweep.
 export function readRunFiles(home, names) {
-  let dirEntries
+  let dirEntries;
   try {
-    dirEntries = fs.readdirSync(home, { withFileTypes: true })
+    dirEntries = fs.readdirSync(home, { withFileTypes: true });
   } catch (e) {
     // ENOENT is "no runs yet", which is an answer; anything else (a regular
     // file in the home's place, a permissions problem) is a usage error the
     // caller must see rather than read as an empty machine.
-    if (e && e.code === 'ENOENT') return { projects: [], runs: [], items: [] }
-    throw new RetroError(`unreadable run-state home: ${home}`, 1)
+    if (e && e.code === 'ENOENT') return { projects: [], runs: [], items: [] };
+    throw new RetroError(`unreadable run-state home: ${home}`, 1);
   }
 
-  const projects = []
-  const runs = []
-  const items = []
+  const projects = [];
+  const runs = [];
+  const items = [];
   for (const entry of dirEntries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory()) continue
-    const project = decodeProjectDir(entry.name)
-    if (project === null) continue
-    const dir = path.join(home, entry.name)
-    const files = runFilesIn(dir)
+    if (!entry.isDirectory()) continue;
+    const project = decodeProjectDir(entry.name);
+    if (project === null) continue;
+    const dir = path.join(home, entry.name);
+    const files = runFilesIn(dir);
     // A directory with neither a `run.json` nor a `runs/` holding one is
     // skipped silently — it is litter, not a project with no history.
-    if (files.length === 0) continue
+    if (files.length === 0) continue;
 
-    let runCount = 0
-    let itemCount = 0
+    let runCount = 0;
+    let itemCount = 0;
     for (const { file, current } of files) {
-      let raw
+      let raw;
       try {
-        raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+        raw = JSON.parse(fs.readFileSync(file, 'utf8'));
       } catch {
-        console.error(`skipping unreadable run file: ${file}`)
-        continue
+        console.error(`skipping unreadable run file: ${file}`);
+        continue;
       }
-      const run = readRun(file, current, raw)
+      const run = readRun(file, current, raw);
       // The run file's own `project` is authoritative where present; the
       // decoded directory name is the fallback, so a hand-copied home still
       // reports something rather than `null`.
-      if (!run.project) run.project = project
-      runs.push(run)
-      runCount += 1
+      if (!run.project) run.project = project;
+      runs.push(run);
+      runCount += 1;
       for (const rawItem of Array.isArray(raw?.queue) ? raw.queue : []) {
-        items.push(readItem(run, rawItem))
-        itemCount += 1
+        items.push(readItem(run, rawItem));
+        itemCount += 1;
       }
     }
-    if (runCount === 0) continue
+    if (runCount === 0) continue;
     projects.push({
       path: project,
       name: names.get(project) ?? null,
       dir: entry.name,
       runs: runCount,
-      items: itemCount,
-    })
+      items: itemCount
+    });
   }
-  return { projects, runs, items }
+  return { projects, runs, items };
 }

@@ -35,9 +35,7 @@ describe('StageBars', () => {
     // stays comparable at a glance if `fixing` sits at the same position in
     // both, which this pins by checking the exact id sequence, not just that
     // the seven expected ids exist somewhere in the document.
-    expect(rows.map((row) => row.getAttribute('data-testid'))).toEqual(
-      MACHINE_STAGES.map((stage) => `stage-bars-${stage}`)
-    );
+    expect(rows.map((row) => row.getAttribute('data-testid'))).toEqual(MACHINE_STAGES.map((stage) => `stage-bars-${stage}`));
 
     rows.forEach((row, i) => {
       expect(row).toHaveClass('run-bars-row');
