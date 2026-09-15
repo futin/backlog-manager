@@ -81,6 +81,13 @@ console. Those are this document's job.
    The rail gains its first sub-nav tree, Runs › History / Watchdog.
    Rejected: folding the sweeper's facts onto the live run cards, and a
    300 px aside on Runs.
+8. **The language is built as reusable components with one home** (§12),
+   at the user's ask. The dashboard built its language as components too,
+   but by area — `usage/Sheet.tsx`, `settings/SettingsRow.tsx`,
+   `sessions/atoms.tsx` — and already carries two Bands (`Band`,
+   `SettingsBand`) over two class families. Here every shared pattern is
+   one component under `client/src/components/ui/`, the same rule `lib/`
+   has for derivations.
 
 ## Non-goals
 
@@ -149,6 +156,12 @@ are two points apart), and a raised control means a state, not a button.
 ## 2. Foundation (task 1)
 
 The whole app reads in the new face after this task; no layout changes.
+This task also lands the `ui/` primitives every later task composes
+(§12) — Band, Sheet, SheetHead, FigureStrip, Chip, Pill, Dot, Marker,
+ProgressRow, Ledger, the control family moved out of `settings/`, and
+`useNarrow` — each with its CSS family and its component test, used by
+nothing yet but the rail. Landing them first means tasks 2–5 compose and
+never invent.
 
 ### 2.1 Font
 
@@ -368,7 +381,8 @@ Top to bottom:
    dot (`--ink3` done, `--red` crashed, `--fill-live` paused), project
    14/500, the items it touched at 13 `--ink2`, `2 / 2` two-tone, wall
    time at 12 `--ink3`, mode pill, a `›`. Load-more stays as a flat chip
-   at the sheet's foot. A row opens the **run modal** (§6.2). Live runs are
+   at the sheet's foot. A row opens the **run modal** (§6.1) — which is why
+   the `Modal` primitive lands in this task, not in task 5. Live runs are
    not in this list — they are the cards above.
 
 ### 4.2 Watchdog — option A of `04-watchdog.html`
@@ -520,6 +534,14 @@ deleted.
      block declares `--fill-live` and `--fill-progress`;
   6. `main.tsx` imports `@fontsource/hanken-grotesk` weights 400/500/600/700
      and no other `@fontsource` package; `package.json` lists none other.
+  7. **one home per primitive**: each `ui/` class family (§12's table) is
+     declared in `styles.css` exactly once as a bare base selector, inside
+     the block headed `/* ── ui primitives`, and no selector outside that
+     block starts with one of those names — a page may lay a `.chip` out,
+     never restyle it.
+- **Every `ui/` primitive has a component suite**, `test/ui-<name>.test.tsx`,
+  pinning its role, its accessible name, and that each variant prop lands
+  as its documented class — the shape `SettingsRow`'s suite already has.
 - **`test/csp.test.ts` is untouched** and must stay green: the pre-paint
   script does not change.
 - **Component suites** keep their assertions where the DOM keeps its role
@@ -566,8 +588,67 @@ Order agreed with the user:
 - `CLAUDE.md` Layout, under `client/src/`: one line naming
   `.claude/DESIGN.md` as the visual language and where §8 applies it.
 - `docs/overview.md` map: one row for `.claude/DESIGN.md`.
-- `docs/subsystems/board.md`: rewritten in task 6 (§7).
+- `docs/subsystems/board.md`: rewritten in task 6 (§7), gaining a
+  "Primitives" section that is §12's table kept current.
 - `docs/subsystems/invariants.md`: the §8 rows edited in place, in the
   task that moves each surface.
 - A memory note recording the four companion picks, so the next session
   does not redraw them.
+
+## 12. Components — one home per pattern
+
+### 12.1 The rule
+
+Every DESIGN.md §7 pattern, and every §8 shape drawn by more than one
+surface, is **one React component in `client/src/components/ui/`**, which
+owns its CSS class family in one block of `styles.css` headed
+`/* ── ui primitives`. Page CSS lays primitives out — grid, gap, width —
+and never restates their look; a surface that needs a variant adds a
+prop, never a second class family. Same rule, same reason as `lib/`:
+"every derivation has one home" so two surfaces cannot disagree about the
+same thing. Pinned by guard 7 (§9).
+
+What this repo has today is the drift in embryo: `SettingsGroup`,
+`Segmented`, `NumberField` under `settings/`, `RunControls` and
+`RunRowTime` at the top level, `.pill` and `.run-mode-badge` declared as
+board classes and read by Runs. Task 1 moves the first three and gives
+the rest a home.
+
+### 12.2 The primitives
+
+| component | DESIGN.md | props | composed by |
+|---|---|---|---|
+| `Band` | §8.2 "the page header is a band, not a card" | `title`, `sub`, `children` (right slot) | Board, Runs History, Runs Watchdog, Archive, Settings |
+| `Sheet`, `SheetHead` | §8.2 card; §7 title + one-line subtitle, right slot for one control | `Sheet{children, as?}`; `SheetHead{title, sub?, right?}` | live run card, History, Watching, Activity, Settings groups, the modals' facts blocks |
+| `FigureStrip`, `Figure` | §8.4 "one card the ground divides" | `Figure{label, value, unit?, line?, tone?}`; strip wraps 5→3→2 | Runs History (six, the sixth wide), Watchdog (three) |
+| `Chip` | §7 filter chip; the 32 px control | `variant: outline \| ink \| flat \| danger`, `size: 32 \| 28`, `pressed?`, `as: button \| label`, `icon?` | every band and control row, `RunControls`, `DispatchButton`, load-more |
+| `Pill` | §1 status micro-label at 11/500, 999 px | `tone: neutral \| live \| warn \| bad \| done` | count, mode, stage, `crashed`, `paused`, `uncommitted` |
+| `Dot` | §7 legend dot | `tone: live \| paused \| crashed \| done \| ramp-<col>`, or `hue: 1–8`; `size: 8 \| 10`; `breathe?` | card foot, column header, rows, the run chip, the rail wordmark |
+| `Marker` | §8.3 marker row word | `tone: groomed \| kind \| done \| stale` | card, Archive card |
+| `ProgressRow` | §7 progress row | `value`, `max`, `caption?`, `hatch?`, `height: 10 \| 6`, `fill: progress \| ink` | live run card, sweep meter, `StageBars` rows |
+| `Ledger`, `DayKicker` | §8.4 "every table scrolls inside its own sheet" | `Ledger{columns, children}` owns the `overflow-x` box | History, Activity |
+| `Modal` | dashboard §8.6 sidecar | `label`, `facts`, `children`, `onClose`; scrim, `useDialogEscape`, full-screen under `useNarrow` | item modal, run modal |
+| `FormSheet` | dashboard §8.7 sheet | `title`, `steps?`, `footer`, `children`, `onClose` | `LaunchSheet`, `OrchestrateSheet` |
+| `Segmented`, `Select`, `NumberField`, `Switch` | §8.2 36 px control family, pill switch | as today, moved from `settings/SettingsRow.tsx` | Settings rows, the sheets' pickers |
+| `useNarrow` (hook) | the one place JS knows the 700 px breakpoint | — | `Modal`, `FormSheet`, `SideRail` |
+
+`SettingsRow` and `SettingsGroup` stay under `settings/`: they are the
+Settings card's composition of `Sheet` + rows, not a primitive. `Dot`'s
+`hue` prop resolves through `project-hue.ts` exactly as `.pill-proj-N`
+does today — the class stays in the stylesheet, never a `style` attribute.
+
+### 12.3 Compositions
+
+Everything else is a page-level composition of the table above and stays
+in its section's directory: `ItemCard`, `BoardColumn`, `RunChip` (board);
+`LiveRunCard`, `HistoryRow`, `RunModal`, `StageTrack`, `StageBars`,
+`WatchingRow`, `ActivityLedger` (runs); `SettingsRow`, `SettingsGroup`,
+`WatchdogGroup` (settings); `ItemModal` (board). `RunControls` stays
+top-level, composing `Chip`, for the reason its header gives — two lazy
+chunks read it.
+
+### 12.4 When each lands
+
+Task 1: everything in the table but `Modal` and `FormSheet`. Task 3:
+`Modal` (History needs it). Task 5: `FormSheet`. A task never adds a
+primitive the table does not list without amending this section first.
