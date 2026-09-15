@@ -25,9 +25,20 @@ describe('the orchestrator-run fixture', () => {
   // (or a future member added to RunStage) drifted from the type, which is
   // exactly the failure this test exists to catch.
   const KNOWN_STAGES = [
-    'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing',
-    'verifying', 'merging', 'merged', 'failed', 'skipped', 'needs-answers',
-    'ungroomed', 'parked'
+    'pending',
+    'preflight',
+    'dispatched',
+    'inspecting',
+    'reviewing',
+    'fixing',
+    'verifying',
+    'merging',
+    'merged',
+    'failed',
+    'skipped',
+    'needs-answers',
+    'ungroomed',
+    'parked'
   ];
 
   it('gives every queue item a stage from the known RunStage set', () => {

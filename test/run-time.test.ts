@@ -1,7 +1,20 @@
 import {
-  formatClock, formatSpan, formatSpanCompact, freshnessFraction, inStageMs, isTerminalStage,
-  itemDoneClock, itemDurationMs, itemQueueWaitMs, lastReportedEntry, runClockMs, runElapsedMs, runIsLive,
-  stepperDots, stepperStages, stepperTerminal
+  formatClock,
+  formatSpan,
+  formatSpanCompact,
+  freshnessFraction,
+  inStageMs,
+  isTerminalStage,
+  itemDoneClock,
+  itemDurationMs,
+  itemQueueWaitMs,
+  lastReportedEntry,
+  runClockMs,
+  runElapsedMs,
+  runIsLive,
+  stepperDots,
+  stepperStages,
+  stepperTerminal
 } from '../client/src/lib/run-time';
 import { runWallMs } from '../client/src/lib/run-stats';
 import { RUN_STALE_MS } from '../shared/types';
@@ -332,7 +345,7 @@ describe('itemDurationMs', () => {
  * the bug was groomed, growing on every render — beside a pane header
  * correctly printing the run's own 7m 35s.
  */
-describe('an aborted run\'s frozen item (bug-15 regression)', () => {
+describe("an aborted run's frozen item (bug-15 regression)", () => {
   const abortedRun = {
     status: 'aborted' as const,
     startedAt: '2026-09-01T11:20:35.499Z',
@@ -457,32 +470,32 @@ describe('stepperStages', () => {
   // Merge mode must render exactly as it does today — this is one of the
   // two cases this task pins specifically to prove that.
   it('is the seven pipeline stages ending `merged` for merge mode, unchanged from before this task', () => {
-    expect(stepperStages('merged')).toEqual([
-      'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'merged'
-    ]);
+    expect(stepperStages('merged')).toEqual(['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'merged']);
   });
 
   // The same six pipeline stages, but the seventh — the run's own success
   // exit — carries branch mode's word instead.
   it('is the same seven stages, ending `branched`, for branch mode', () => {
-    expect(stepperStages('branched')).toEqual([
-      'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'branched'
-    ]);
+    expect(stepperStages('branched')).toEqual(['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', 'branched']);
   });
 });
 
 describe('stepperDots', () => {
   it('covers the seven pipeline stages in order, and nothing else', () => {
-    expect(stepperDots(queueItem('pending', {}), true, 'merged').map((d) => d.stage))
-      .toEqual([...stepperStages('merged')]);
+    expect(stepperDots(queueItem('pending', {}), true, 'merged').map((d) => d.stage)).toEqual([...stepperStages('merged')]);
   });
 
   it('rings the current stage of an active row, fills what it visited, leaves the rest hollow', () => {
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
     const byStage = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.state]));
     expect(byStage).toEqual({
-      dispatched: 'filled', inspecting: 'filled', reviewing: 'current',
-      fixing: 'hollow', verifying: 'hollow', merging: 'hollow', merged: 'hollow'
+      dispatched: 'filled',
+      inspecting: 'filled',
+      reviewing: 'current',
+      fixing: 'hollow',
+      verifying: 'hollow',
+      merging: 'hollow',
+      merged: 'hollow'
     });
   });
 
@@ -493,8 +506,12 @@ describe('stepperDots', () => {
    */
   it('leaves a skipped stage hollow between filled neighbours rather than backfilling it', () => {
     const item = queueItem('merged', {
-      dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000),
-      verifying: at(180_000), merging: at(240_000), merged: at(300_000)
+      dispatched: at(0),
+      inspecting: at(60_000),
+      reviewing: at(120_000),
+      verifying: at(180_000),
+      merging: at(240_000),
+      merged: at(300_000)
     });
     const byStage = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.state]));
     expect(byStage.fixing).toBe('hollow');
@@ -534,8 +551,13 @@ describe('stepperDots', () => {
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
     const byStage = Object.fromEntries(stepperDots(item, false, 'merged').map((d) => [d.stage, d.state]));
     expect(byStage).toEqual({
-      dispatched: 'filled', inspecting: 'filled', reviewing: 'stalled',
-      fixing: 'hollow', verifying: 'hollow', merging: 'hollow', merged: 'hollow'
+      dispatched: 'filled',
+      inspecting: 'filled',
+      reviewing: 'stalled',
+      fixing: 'hollow',
+      verifying: 'hollow',
+      merging: 'hollow',
+      merged: 'hollow'
     });
   });
 
@@ -544,8 +566,12 @@ describe('stepperDots', () => {
   // as they always have.
   it('marks nothing stalled on a row that finished before the run stopped', () => {
     const item = queueItem('merged', {
-      dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000),
-      verifying: at(180_000), merging: at(240_000), merged: at(300_000)
+      dispatched: at(0),
+      inspecting: at(60_000),
+      reviewing: at(120_000),
+      verifying: at(180_000),
+      merging: at(240_000),
+      merged: at(300_000)
     });
     expect(stepperDots(item, false, 'merged').map((d) => d.state)).not.toContain('stalled');
   });
@@ -559,8 +585,13 @@ describe('stepperDots', () => {
   // per MergeMode, never both on the same item).
   it('produces seven dots for an item at the branch-mode success exit, the last one named branched', () => {
     const item = queueItem('branched', {
-      pending: at(0), dispatched: at(10_000), inspecting: at(60_000), reviewing: at(120_000),
-      verifying: at(180_000), merging: at(240_000), branched: at(300_000)
+      pending: at(0),
+      dispatched: at(10_000),
+      inspecting: at(60_000),
+      reviewing: at(120_000),
+      verifying: at(180_000),
+      merging: at(240_000),
+      branched: at(300_000)
     });
     const dots = stepperDots(item, true, 'branched');
     expect(dots).toHaveLength(7);
@@ -573,10 +604,15 @@ describe('stepperDots', () => {
   // reviewing row is at reviewing. `filled`, not `current` and not `hollow`,
   // is simultaneously "visited" and "not current" in one assertion, the same
   // way the `merged` case above pins it.
-  it('marks a branched item\'s last dot visited but never current', () => {
+  it("marks a branched item's last dot visited but never current", () => {
     const item = queueItem('branched', {
-      pending: at(0), dispatched: at(10_000), inspecting: at(60_000), reviewing: at(120_000),
-      verifying: at(180_000), merging: at(240_000), branched: at(300_000)
+      pending: at(0),
+      dispatched: at(10_000),
+      inspecting: at(60_000),
+      reviewing: at(120_000),
+      verifying: at(180_000),
+      merging: at(240_000),
+      branched: at(300_000)
     });
     const dots = stepperDots(item, true, 'branched');
     expect(dots[6].state).toBe('filled');
@@ -590,7 +626,7 @@ describe('stepperTerminal', () => {
   // `stage: 'merged'` under the old mode. That item's own exit must win, not
   // the run's current field, or its seventh dot would read `branched` — a
   // key `stageAt` never got — and lose its finish time to a false hollow.
-  it('reads a merged item\'s own stage, not the run\'s branch-mode field, once it has already exited', () => {
+  it("reads a merged item's own stage, not the run's branch-mode field, once it has already exited", () => {
     expect(stepperTerminal(queueItem('merged', { merged: at(0) }), 'branch')).toBe('merged');
   });
 
@@ -601,7 +637,7 @@ describe('stepperTerminal', () => {
   // own doc comment, shared/types.ts) but the function's rule is symmetric,
   // and pinning both directions is what proves it is actually symmetric
   // rather than merge-mode being special-cased.
-  it('reads a branched item\'s own stage, not the run\'s merge-mode field, once it has already exited', () => {
+  it("reads a branched item's own stage, not the run's merge-mode field, once it has already exited", () => {
     expect(stepperTerminal(queueItem('branched', { branched: at(0) }), 'merge')).toBe('branched');
   });
 
@@ -609,7 +645,7 @@ describe('stepperTerminal', () => {
   // `branched` stage of its own to read at all, so the run's own effective
   // mode is the only available answer — the pre-fix behaviour, preserved for
   // the one case it was always correct for.
-  it('falls back to the run\'s effective mode for an item that has not exited yet', () => {
+  it("falls back to the run's effective mode for an item that has not exited yet", () => {
     expect(stepperTerminal(queueItem('reviewing', { reviewing: at(0) }), 'branch')).toBe('branched');
     expect(stepperTerminal(queueItem('reviewing', { reviewing: at(0) }), 'merge')).toBe('merged');
   });
@@ -620,7 +656,7 @@ describe('stepperTerminal', () => {
   // row's own rendering (neither `merged` nor `branched` will be in its
   // `stageAt`), but the function must not throw or misread `parked` as one
   // of the two success stages it is choosing between.
-  it('falls back to the run\'s effective mode for a failure exit too', () => {
+  it("falls back to the run's effective mode for a failure exit too", () => {
     expect(stepperTerminal(queueItem('parked', { parked: at(0) }), 'branch')).toBe('branched');
   });
 });
@@ -653,11 +689,7 @@ function fullQueueItem(id: string, stage: RunStage): RunQueueItem {
 
 describe('lastReportedEntry', () => {
   it('names the one entry between the exits behind it and the pending tail ahead', () => {
-    const queue = [
-      fullQueueItem('a-1', 'merged'),
-      fullQueueItem('a-2', 'dispatched'),
-      fullQueueItem('a-3', 'pending')
-    ];
+    const queue = [fullQueueItem('a-1', 'merged'), fullQueueItem('a-2', 'dispatched'), fullQueueItem('a-3', 'pending')];
     expect(lastReportedEntry(queue)?.id).toBe('a-2');
   });
 
@@ -666,22 +698,12 @@ describe('lastReportedEntry', () => {
   // non-pending entries is reporting on the LATER one — queue order is
   // dispatch order, so anything before it has already been left behind.
   it('takes the LAST in-flight entry, not the first', () => {
-    const queue = [
-      fullQueueItem('a-1', 'merged'),
-      fullQueueItem('a-2', 'fixing'),
-      fullQueueItem('a-3', 'verifying'),
-      fullQueueItem('a-4', 'pending')
-    ];
+    const queue = [fullQueueItem('a-1', 'merged'), fullQueueItem('a-2', 'fixing'), fullQueueItem('a-3', 'verifying'), fullQueueItem('a-4', 'pending')];
     expect(lastReportedEntry(queue)?.id).toBe('a-3');
   });
 
   it('reads null for a queue that is nothing but exits and a pending tail', () => {
-    const queue = [
-      fullQueueItem('a-1', 'merged'),
-      fullQueueItem('a-2', 'branched'),
-      fullQueueItem('a-3', 'pending'),
-      fullQueueItem('a-4', 'pending')
-    ];
+    const queue = [fullQueueItem('a-1', 'merged'), fullQueueItem('a-2', 'branched'), fullQueueItem('a-3', 'pending'), fullQueueItem('a-4', 'pending')];
     expect(lastReportedEntry(queue)).toBeNull();
   });
 

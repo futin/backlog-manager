@@ -25,14 +25,16 @@ function recordFetches(): string[] {
     const url = String(input);
     sent.push(url);
     return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(
-        url.endsWith('/api/management')
-          ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : url.endsWith('/api/spawn')
-            ? { sessionId: 'sess-1' }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-      )
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          url.endsWith('/api/management')
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : url.endsWith('/api/spawn')
+              ? { sessionId: 'sess-1' }
+              : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+        )
     } as Response);
   }) as jest.Mock;
   return sent;
@@ -53,9 +55,7 @@ describe('the agents POST guard', () => {
   const realFetch = global.fetch;
 
   beforeEach(async () => {
-    projectPath = makeProject('alpha', [
-      { leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG }
-    ]);
+    projectPath = makeProject('alpha', [{ leaf: 'bugs/open', filename: 'bug-2-a-known-bug.md', content: GROOMED_BUG }]);
     process.env.BM_AGENTS = 'on';
     process.env.BM_AGENTS_URL = 'http://dash.test:4173';
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -89,11 +89,7 @@ describe('the agents POST guard', () => {
   // needs a route-aware body rather than body() itself, which stays exactly
   // as every pre-existing plan/dispatch call site here already uses it.
   const bodyFor = (route: string): Record<string, unknown> =>
-    route === 'orchestrate' || route === 'resume' || route === 'pause'
-      ? { project: projectPath }
-      : route === 'watchdog/config'
-        ? { enabled: true }
-        : body();
+    route === 'orchestrate' || route === 'resume' || route === 'pause' ? { project: projectPath } : route === 'watchdog/config' ? { enabled: true } : body();
 
   // This array, not a count in CLAUDE.md's prose, is where the guarded set
   // actually lives — `pause` (task-17) is the fifth member.
@@ -168,10 +164,7 @@ describe('the agents POST guard', () => {
 
   it('still plans for a JSON POST with no origin header at all — curl, and every other suite here', async () => {
     recordFetches();
-    const res = await request(app.getHttpServer())
-      .post('/api/agents/plan')
-      .send({ itemPath: bugPath() })
-      .expect(201);
+    const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: bugPath() }).expect(201);
     expect(res.body.action).toBe('execute');
   });
 
@@ -190,9 +183,6 @@ describe('the agents POST guard', () => {
      this app is open by the same posture, and a status probe starts nothing. */
   it('leaves GET /api/agents/status open', async () => {
     recordFetches();
-    await request(app.getHttpServer())
-      .get('/api/agents/status')
-      .set('origin', 'http://evil.example')
-      .expect(200);
+    await request(app.getHttpServer()).get('/api/agents/status').set('origin', 'http://evil.example').expect(200);
   });
 });

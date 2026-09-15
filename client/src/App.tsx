@@ -57,9 +57,7 @@ function AppShell() {
   const { settings } = useSettings();
   // Remembered across loads: reopening on the section you left is what you want
   // from a board you come back to.
-  const [stored, setStored] = usePersistedState<Section>(
-    'backlog-manager.section', FALLBACK_SECTION
-  );
+  const [stored, setStored] = usePersistedState<Section>('backlog-manager.section', FALLBACK_SECTION);
   /*
     A `landing` other than 'last' pins the opening section. Resolved once, in the
     initializer, so there is no flash of the previously-open section — and only
@@ -73,9 +71,7 @@ function AppShell() {
     renders is always a real section" true by construction here, instead of true
     only as long as two files keep agreeing about it.
   */
-  const [section, setSection] = useState<Section>(() =>
-    resolveSection(settings.landing === 'last' ? stored : settings.landing)
-  );
+  const [section, setSection] = useState<Section>(() => resolveSection(settings.landing === 'last' ? stored : settings.landing));
 
   const change = (s: Section): void => {
     setSection(s);

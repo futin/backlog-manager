@@ -6,15 +6,11 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import SettingsView from '../client/src/components/settings/SettingsView';
-import {
-  ATTEMPT_LADDER, GRACE_LADDER, TICK_LADDER, saveErrorSlot
-} from '../client/src/components/settings/WatchdogGroup';
+import { ATTEMPT_LADDER, GRACE_LADDER, TICK_LADDER, saveErrorSlot } from '../client/src/components/settings/WatchdogGroup';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
 import { formatSpanCompact } from '../client/src/lib/run-time';
-import {
-  DEFAULT_WATCHDOG_CONFIG, WATCHDOG_LIMITS
-} from '../shared/types';
+import { DEFAULT_WATCHDOG_CONFIG, WATCHDOG_LIMITS } from '../shared/types';
 import type { AgentsStatus, WatchdogStatus } from '../shared/types';
 
 /**
@@ -28,8 +24,12 @@ import type { AgentsStatus, WatchdogStatus } from '../shared/types';
  */
 
 const AGENTS_STATUS: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: []
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: []
 };
 
 /** A full `WatchdogStatus`, defaults everywhere a case does not care. */
@@ -67,10 +67,7 @@ function jsonOk(body: unknown): Promise<Response> {
  */
 type PostFailure = 'reject' | { status: number; body: unknown };
 
-function stubFetch(opts: {
-  watchdog: WatchdogStatus | 'reject';
-  onConfigPost?: (patch: Record<string, unknown>) => WatchdogStatus | PostFailure;
-}): jest.Mock {
+function stubFetch(opts: { watchdog: WatchdogStatus | 'reject'; onConfigPost?: (patch: Record<string, unknown>) => WatchdogStatus | PostFailure }): jest.Mock {
   const fn = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
 
@@ -207,7 +204,7 @@ describe('WatchdogGroup', () => {
     stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
     renderView();
 
-    const tick = await screen.findByLabelText('Check every') as HTMLSelectElement;
+    const tick = (await screen.findByLabelText('Check every')) as HTMLSelectElement;
     const grace = screen.getByLabelText('Leave a resumed run alone for') as HTMLSelectElement;
     const attempts = screen.getByLabelText('Give up after') as HTMLSelectElement;
 
@@ -263,7 +260,7 @@ describe('WatchdogGroup', () => {
       });
       renderView();
 
-      const select = await screen.findByLabelText(label) as HTMLSelectElement;
+      const select = (await screen.findByLabelText(label)) as HTMLSelectElement;
       expect(select.options[select.selectedIndex].textContent).toBe(expectedText);
       expect(select.value).toBe(expectedValue);
     }
@@ -281,15 +278,13 @@ describe('WatchdogGroup', () => {
     });
     renderView();
 
-    const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
 
     // The "before" half of the Minor finding's call-count assertion: taken
     // only once `findByLabelText` above has resolved, i.e. only once the
     // MOUNT fetch's own promise has already settled — otherwise that GET
     // itself could be miscounted as one the save below triggers.
-    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(
-      ([u]) => String(u).endsWith('/api/agents/watchdog')
-    ).length;
+    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog')).length;
     const getsBeforeSave = getsToWatchdog();
 
     await userEvent.selectOptions(attempts, '3');
@@ -298,9 +293,7 @@ describe('WatchdogGroup', () => {
       const posts = fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog/config'));
       expect(posts).toHaveLength(1);
     });
-    const [, init] = fetchMock.mock.calls.find(
-      ([u]) => String(u).endsWith('/api/agents/watchdog/config')
-    ) as [string, RequestInit];
+    const [, init] = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/agents/watchdog/config')) as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ maxAttempts: 3 });
 
     await waitFor(() => {
@@ -330,14 +323,12 @@ describe('WatchdogGroup', () => {
     });
     renderView();
 
-    const checkbox = await screen.findByLabelText('Enabled') as HTMLInputElement;
+    const checkbox = (await screen.findByLabelText('Enabled')) as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
 
     // Same "before" snapshot as case 7's — see that case's comment for why
     // it is taken only after the mount fetch has already settled.
-    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(
-      ([u]) => String(u).endsWith('/api/agents/watchdog')
-    ).length;
+    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog')).length;
     const getsBeforeSave = getsToWatchdog();
 
     await userEvent.click(checkbox);
@@ -346,9 +337,7 @@ describe('WatchdogGroup', () => {
       const posts = fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog/config'));
       expect(posts).toHaveLength(1);
     });
-    const [, init] = fetchMock.mock.calls.find(
-      ([u]) => String(u).endsWith('/api/agents/watchdog/config')
-    ) as [string, RequestInit];
+    const [, init] = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/agents/watchdog/config')) as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ enabled: false });
 
     // Same call-count proof as case 7's, for the checkbox's own save path.
@@ -394,9 +383,7 @@ describe('WatchdogGroup', () => {
       await jest.advanceTimersByTimeAsync(0);
     });
 
-    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(
-      ([u]) => String(u).endsWith('/api/agents/watchdog')
-    ).length;
+    const getsToWatchdog = (): number => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog')).length;
     expect(getsToWatchdog()).toBe(1);
 
     // `armed` is the exact phase that USED to install a 5s interval here.
@@ -419,14 +406,11 @@ describe('WatchdogGroup', () => {
 
     // Scoped to this group alone: `SettingsView` renders several others
     // above it, all of which use the same `.set-name` class.
-    const group = container.querySelector('[data-testid="settings-group-orchestrator-watchdog"]')
-      ?? Array.from(container.querySelectorAll('.set-group')).find(
-        (el) => el.textContent?.includes(GROUP_TITLE)
-      );
+    const group =
+      container.querySelector('[data-testid="settings-group-orchestrator-watchdog"]') ??
+      Array.from(container.querySelectorAll('.set-group')).find((el) => el.textContent?.includes(GROUP_TITLE));
     const names = Array.from(group?.querySelectorAll('.set-name') ?? []).map((el) => el.textContent);
-    expect(names).toEqual([
-      'Live view', 'Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after'
-    ]);
+    expect(names).toEqual(['Live view', 'Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after']);
   });
   // --- bug-24: a refused save says so, beside the control that was changed --
   //
@@ -451,7 +435,7 @@ describe('WatchdogGroup', () => {
     stubRefusedSave();
     renderView();
 
-    const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
     await userEvent.selectOptions(attempts, '3');
 
     const alert = await screen.findByRole('alert');
@@ -470,11 +454,11 @@ describe('WatchdogGroup', () => {
     expect(screen.queryByText(/Could not reach the watchdog/)).not.toBeInTheDocument();
   });
 
-  it('places the message in the failing control\'s own row', async () => {
+  it("places the message in the failing control's own row", async () => {
     stubRefusedSave();
     renderView();
 
-    const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
     await userEvent.selectOptions(attempts, '3');
 
     // This is the assertion a group-level banner fails, which is what makes
@@ -487,7 +471,7 @@ describe('WatchdogGroup', () => {
     stubRefusedSave();
     renderView();
 
-    const checkbox = await screen.findByLabelText('Enabled') as HTMLInputElement;
+    const checkbox = (await screen.findByLabelText('Enabled')) as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
     await userEvent.click(checkbox);
 
@@ -506,7 +490,7 @@ describe('WatchdogGroup', () => {
     });
     renderView();
 
-    const attempts = await screen.findByLabelText('Give up after') as HTMLSelectElement;
+    const attempts = (await screen.findByLabelText('Give up after')) as HTMLSelectElement;
     await userEvent.selectOptions(attempts, '3');
     expect(await screen.findByRole('alert')).toBeInTheDocument();
 

@@ -44,10 +44,7 @@ import type { NextFunction, Request, Response } from 'express';
  * gain, since an attacker's page must already reach our socket to matter at
  * all.
  */
-export function isAllowedHost(
-  hostHeader: string | undefined,
-  env: NodeJS.ProcessEnv = process.env
-): boolean {
+export function isAllowedHost(hostHeader: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
   const hostname = parseHostname(hostHeader);
   if (hostname === null) return false;
 

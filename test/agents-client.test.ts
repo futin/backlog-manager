@@ -1,10 +1,23 @@
 import {
-  ApiError, dispatchAgent, fetchAgentPlan, fetchAgentsStatus, fetchArchivedRun, fetchOrchestratorArchive,
-  fetchOrchestratorRuns, cancelPauseOrchestrate, pauseOrchestrate, sessionUrl, startOrchestrate
+  ApiError,
+  dispatchAgent,
+  fetchAgentPlan,
+  fetchAgentsStatus,
+  fetchArchivedRun,
+  fetchOrchestratorArchive,
+  fetchOrchestratorRuns,
+  cancelPauseOrchestrate,
+  pauseOrchestrate,
+  sessionUrl,
+  startOrchestrate
 } from '../client/src/lib/agents';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type {
-  AgentDispatchRequest, OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload,
+  AgentDispatchRequest,
+  OrchestratorArchivePayload,
+  OrchestratorArchiveRun,
+  OrchestratorRun,
+  OrchestratorRunsPayload,
   VerificationSummary
 } from '../shared/types';
 
@@ -44,15 +57,21 @@ function stub(res: { ok: boolean; status?: number; body: unknown }) {
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     return Promise.resolve({
-      ok: res.ok, status: res.status ?? 200, json: () => Promise.resolve(res.body)
+      ok: res.ok,
+      status: res.status ?? 200,
+      json: () => Promise.resolve(res.body)
     } as Response);
   }) as jest.Mock;
   return calls;
 }
 
 const AGENTS_STATUS_BODY = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha']
 };
 
 // Captured once and handed back after every case, the way
@@ -105,14 +124,12 @@ describe('the agents client', () => {
   });
 
   it('throws the server error string, not the status code', async () => {
-    stub({ ok: false, status: 409, body: { error: 'this item\'s next step is groom, not execute' } });
+    stub({ ok: false, status: 409, body: { error: "this item's next step is groom, not execute" } });
     await expect(dispatchAgent(REQ)).rejects.toThrow('next step is groom');
   });
 
   it('falls back to the status when the error body is unusable', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({ ok: false, status: 500, json: () => Promise.reject(new Error('not json')) } as Response)
-    ) as jest.Mock;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.reject(new Error('not json')) } as Response)) as jest.Mock;
     await expect(dispatchAgent(REQ)).rejects.toThrow('500');
   });
 
@@ -137,9 +154,7 @@ describe('the agents client', () => {
   // from `res.status` — the real status is still attached even when the
   // body could not be parsed into an `{ error }` string at all.
   it('preserves the response status even when the error body is unusable', async () => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({ ok: false, status: 500, json: () => Promise.reject(new Error('not json')) } as Response)
-    ) as jest.Mock;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.reject(new Error('not json')) } as Response)) as jest.Mock;
     const err = await dispatchAgent(REQ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(500);
@@ -155,7 +170,8 @@ describe('the agents client', () => {
   // already do.
   it('carries an optional code through from the error body when present', async () => {
     stub({
-      ok: false, status: 409,
+      ok: false,
+      status: 409,
       body: { error: 'a run is already in progress for this project (run-9)', code: 'run-in-progress' }
     });
     const err = await startOrchestrate({ project: '/abs/alpha' }).catch((e: unknown) => e);
@@ -340,8 +356,7 @@ describe('the orchestrator archive calls', () => {
 
 describe('sessionUrl', () => {
   it('builds the dashboard deep link', () => {
-    expect(sessionUrl('http://127.0.0.1:5174', 'sess-1'))
-      .toBe('http://127.0.0.1:5174/?session=sess-1');
+    expect(sessionUrl('http://127.0.0.1:5174', 'sess-1')).toBe('http://127.0.0.1:5174/?session=sess-1');
   });
 
   it('tolerates a trailing slash on the base', () => {

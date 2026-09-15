@@ -10,18 +10,34 @@ import { scanProject } from '../items/scan.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
-  clampMode, deriveAction, dispatchBlock, isItemId, isMergeMode, isQuestionMode, modesUpTo,
-  pickFrom, projectDispatchGate, runClaimBlock, EFFORTS, MODELS, PERMISSION_LADDER
+  clampMode,
+  deriveAction,
+  dispatchBlock,
+  isItemId,
+  isMergeMode,
+  isQuestionMode,
+  modesUpTo,
+  pickFrom,
+  projectDispatchGate,
+  runClaimBlock,
+  EFFORTS,
+  MODELS,
+  PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
-import {
-  clearPauseRequest, pauseRequestEffective, readPauseRequest, writePauseRequest
-} from '../orchestrator/pause-control.util';
+import { clearPauseRequest, pauseRequestEffective, readPauseRequest, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, BacklogItem, MergeMode,
-  PauseResult, PermissionMode, QuestionMode
+  AgentDispatchRequest,
+  AgentDispatchResult,
+  AgentPlan,
+  AgentsStatus,
+  BacklogItem,
+  MergeMode,
+  PauseResult,
+  PermissionMode,
+  QuestionMode
 } from '../../../shared/types';
 
 /**
@@ -229,8 +245,12 @@ export class AgentsService {
   async status(): Promise<AgentsStatus> {
     const cfg = readAgentsConfig();
     const off: AgentsStatus = {
-      enabled: false, reachable: false, remoteAnswer: false,
-      spawnAvailable: false, spawnMaxPermission: null, projectPaths: []
+      enabled: false,
+      reachable: false,
+      remoteAnswer: false,
+      spawnAvailable: false,
+      spawnMaxPermission: null,
+      projectPaths: []
     };
     // The short-circuit is the feature's off switch: no fetch, so no egress,
     // so nothing to report about a dashboard we never contacted.
@@ -310,9 +330,7 @@ export class AgentsService {
       // writes it, and this is the field the launch sheet renders its refusal
       // from — a sheet that offers a launch button for an item the dispatch
       // route below is about to 409 is the half-fixed state.
-      blocked: dispatchBlock(item, status)
-        ?? runClaimBlock(item, runs, starting)
-        ?? undefined
+      blocked: dispatchBlock(item, status) ?? runClaimBlock(item, runs, starting) ?? undefined
     };
   }
 
@@ -560,10 +578,7 @@ export class AgentsService {
        one. That is also why the block it produces everywhere else is
        project-wide rather than per-item (see `runClaimBlock`). */
     if (starting.some((s) => s.project === req.project)) {
-      throw new HttpException(
-        { error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE },
-        409
-      );
+      throw new HttpException({ error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE }, 409);
     }
 
     const cfg = readAgentsConfig();
@@ -657,10 +672,7 @@ export class AgentsService {
       // for the most a host allows is how a convenience becomes an incident.
       // The ceiling still clamps this down on a stricter dashboard, so this
       // can never widen what a host permits.
-      permissionMode: clampMode(
-        req.permissionMode === undefined || req.permissionMode === '' ? 'auto' : req.permissionMode,
-        status.spawnMaxPermission
-      ),
+      permissionMode: clampMode(req.permissionMode === undefined || req.permissionMode === '' ? 'auto' : req.permissionMode, status.spawnMaxPermission),
       model: pickFrom(req.model, MODELS),
       effort: pickFrom(req.effort, EFFORTS)
       // No `remoteControl`. That flag is what gives a spawned session's
@@ -834,11 +846,7 @@ export class AgentsService {
     // sweeper's bookkeeping; without this clause it would newly refuse a
     // perfectly legitimate resume of the OTHER project for up to RUN_STALE_MS,
     // which is a collision upgraded from a wrong number into a wrong answer.
-    if (
-      entry.project === run.project &&
-      entry.resumeSpawnAt !== null &&
-      now - Date.parse(entry.resumeSpawnAt) < RUN_STALE_MS
-    ) {
+    if (entry.project === run.project && entry.resumeSpawnAt !== null && now - Date.parse(entry.resumeSpawnAt) < RUN_STALE_MS) {
       const ageSec = Math.round((now - Date.parse(entry.resumeSpawnAt)) / 1000);
       throw new HttpException(
         {
@@ -1038,10 +1046,7 @@ export class AgentsService {
     } catch (e) {
       // 502 for the reason the `!res.ok` branch below already gives: nothing
       // came back, so this is an upstream fault this app cannot vouch for.
-      throw new HttpException(
-        { error: dashboardError(e, 'the dashboard spawn call', SPAWN_TIMEOUT_MS) },
-        502
-      );
+      throw new HttpException({ error: dashboardError(e, 'the dashboard spawn call', SPAWN_TIMEOUT_MS) }, 502);
     }
 
     const body = (await res.json().catch(() => null)) as { sessionId?: unknown; error?: unknown } | null;
@@ -1092,10 +1097,7 @@ export class AgentsService {
     try {
       data = await this.get<DashboardManagement>(cfg, '/api/management', MANAGEMENT_TIMEOUT_MS);
     } catch (e) {
-      throw new HttpException(
-        { error: dashboardError(e, 'the dashboard project list', MANAGEMENT_TIMEOUT_MS) },
-        502
-      );
+      throw new HttpException({ error: dashboardError(e, 'the dashboard project list', MANAGEMENT_TIMEOUT_MS) }, 502);
     }
     const map = new Map<string, string>();
     for (const p of data.projects ?? []) {
@@ -1155,10 +1157,7 @@ export class AgentsService {
       // box on the board into a full unattended drain of their backlog —
       // the exact inversion `parseIdsArg`'s own comment (orchestrate.mjs)
       // exists to prevent one layer down.
-      throw new HttpException(
-        { error: 'ids must name at least one item — omit ids entirely to run the whole queue' },
-        400
-      );
+      throw new HttpException({ error: 'ids must name at least one item — omit ids entirely to run the whole queue' }, 400);
     }
     for (const id of ids) {
       if (!isItemId(id)) {
@@ -1451,9 +1450,7 @@ function samePath(a: string, b: string): boolean {
  * cannot know where an unknown string sits on the ladder.
  */
 function asMode(value: unknown): PermissionMode | null {
-  return typeof value === 'string' && (PERMISSION_LADDER as readonly string[]).includes(value)
-    ? (value as PermissionMode)
-    : null;
+  return typeof value === 'string' && (PERMISSION_LADDER as readonly string[]).includes(value) ? (value as PermissionMode) : null;
 }
 
 export function message(e: unknown): string {

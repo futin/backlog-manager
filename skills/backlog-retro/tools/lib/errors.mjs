@@ -8,8 +8,8 @@
 // number means and why 2 and 3 are not 1.
 export class RetroError extends Error {
   constructor(message, code) {
-    super(message)
-    this.name = 'RetroError'
-    this.code = code
+    super(message);
+    this.name = 'RetroError';
+    this.code = code;
   }
 }

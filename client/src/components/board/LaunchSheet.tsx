@@ -97,8 +97,12 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
       <div className="sheet" role="dialog" aria-label={`dispatch ${item.id}`}>
         <div className="sheet-head">
           <span className="sheet-kicker">{plan === null ? 'dispatch' : plan.action}</span>
-          <span className="sheet-title">{item.id} · {item.title}</span>
-          <button className="drawer-close" onClick={onClose}>close</button>
+          <span className="sheet-title">
+            {item.id} · {item.title}
+          </span>
+          <button className="drawer-close" onClick={onClose}>
+            close
+          </button>
         </div>
 
         {sessionId !== null ? (
@@ -109,16 +113,16 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <a className="sheet-link" href={sessionUrl(settings.linkBase, sessionId)} target="_blank" rel="noreferrer">
               open in dashboard ↗
             </a>
-            <div className="sheet-note">
-              Its questions appear there — and on your phone, if the dashboard's hooks are installed.
-            </div>
+            <div className="sheet-note">Its questions appear there — and on your phone, if the dashboard's hooks are installed.</div>
           </div>
         ) : blocked !== null && blocked !== undefined ? (
           <div className="sheet-body">
             <div className="sheet-blocked">{blocked}</div>
           </div>
         ) : plan === null ? (
-          <div className="sheet-body"><div className="drawer-empty">loading…</div></div>
+          <div className="sheet-body">
+            <div className="drawer-empty">loading…</div>
+          </div>
         ) : (
           <div className="sheet-body">
             <label className="sheet-field">
@@ -128,13 +132,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
 
             <label className="sheet-field">
               <span className="set-name">Prompt</span>
-              <textarea
-                aria-label="Prompt"
-                className="sheet-prompt"
-                rows={5}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-              />
+              <textarea aria-label="Prompt" className="sheet-prompt" rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
             </label>
 
             {/* One row, three controls: "how should this run" is a single
@@ -144,16 +142,14 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <div className="sheet-row">
               <label className="sheet-field">
                 <span className="set-name">Permission mode</span>
-                <select
-                  aria-label="Permission mode"
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value as PermissionMode)}
-                >
+                <select aria-label="Permission mode" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
                   {/* Only what the host's ceiling can actually deliver: offering
                       a mode the dashboard would clamp is a promise this app
                       cannot keep. */}
                   {plan.allowedModes.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -168,7 +164,9 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 <select aria-label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
                   <option value="">default</option>
                   {MODELS.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -178,25 +176,25 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 <select aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
                   <option value="">default</option>
                   {EFFORTS.map((f) => (
-                    <option key={f} value={f}>{f}</option>
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
                   ))}
                 </select>
               </label>
             </div>
 
             <label className="sheet-check">
-              <input
-                type="checkbox"
-                checked={remoteControl}
-                onChange={(e) => setRemoteControl(e.target.checked)}
-              />
+              <input type="checkbox" checked={remoteControl} onChange={(e) => setRemoteControl(e.target.checked)} />
               <span>remote control — the Claude phone app can see and drive it</span>
             </label>
 
             {error !== null && <div className="sheet-error">{error}</div>}
 
             <div className="sheet-actions">
-              <button className="drawer-close" onClick={onClose}>cancel</button>
+              <button className="drawer-close" onClick={onClose}>
+                cancel
+              </button>
               <button className="sheet-launch" onClick={launch} disabled={busy || prompt.trim() === ''}>
                 {busy ? 'launching…' : 'launch'}
               </button>

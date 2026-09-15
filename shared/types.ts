@@ -448,9 +448,21 @@ export const QUESTION_MODES: readonly QuestionMode[] = ['decide', 'park'];
  * counts as one of the exits and not one of the claims.
  */
 export type RunStage =
-  | 'pending' | 'preflight' | 'dispatched' | 'inspecting' | 'reviewing'
-  | 'fixing' | 'verifying' | 'merging' | 'merged' | 'branched'
-  | 'failed' | 'skipped' | 'needs-answers' | 'ungroomed' | 'parked';
+  | 'pending'
+  | 'preflight'
+  | 'dispatched'
+  | 'inspecting'
+  | 'reviewing'
+  | 'fixing'
+  | 'verifying'
+  | 'merging'
+  | 'merged'
+  | 'branched'
+  | 'failed'
+  | 'skipped'
+  | 'needs-answers'
+  | 'ungroomed'
+  | 'parked';
 
 /**
  * The stages at which a run still OWNS the item — the eight non-terminal
@@ -485,10 +497,7 @@ export type RunStage =
  * on for the fraction of a poll cycle preflight takes is noise). They overlap
  * by six members today and are answering different questions.
  */
-export const RUN_CLAIMED_STAGES: readonly RunStage[] = [
-  'pending', 'preflight', 'dispatched', 'inspecting', 'reviewing',
-  'fixing', 'verifying', 'merging'
-];
+export const RUN_CLAIMED_STAGES: readonly RunStage[] = ['pending', 'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
 
 /**
  * The two `RunStage` values that mean the run has STOPPED and will not restart
@@ -1073,14 +1082,7 @@ export type WatchdogPhase = 'off' | 'idle' | 'armed';
  * situation where the sweeper is doing everything BUT the one thing anyone
  * actually wants from it, and that is worth surfacing on its own.
  */
-export type WatchdogEventKind =
-  | 'armed'
-  | 'idle'
-  | 'spawned'
-  | 'failed'
-  | 'exhausted'
-  | 'recovered'
-  | 'disabled';
+export type WatchdogEventKind = 'armed' | 'idle' | 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled';
 
 /**
  * One line of the watchdog's own history — entirely separate from a run

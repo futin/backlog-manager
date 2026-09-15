@@ -8,11 +8,26 @@ import type { BacklogItem } from '../shared/types';
  */
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
-    ...over,
+    id: 'bug-1',
+    title: 'a bug',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
+    ...over
   };
   return base;
 }
@@ -66,23 +81,19 @@ describe('isInProgress', () => {
  */
 describe('progressLabel', () => {
   it('reads "grooming" for an open item a groom session currently holds', () => {
-    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'groom' })))
-      .toBe('grooming');
+    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'groom' }))).toBe('grooming');
   });
 
   it('reads "executing" for an open item an execute session currently holds', () => {
-    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'execute' })))
-      .toBe('executing');
+    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'execute' }))).toBe('executing');
   });
 
   it('falls back to "in progress" for an open, started item with no phase recorded', () => {
-    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: '' })))
-      .toBe('in progress');
+    expect(progressLabel(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: '' }))).toBe('in progress');
   });
 
   it('reads "in progress" for a done item, even though it still carries phase: groom as history', () => {
-    expect(progressLabel(fakeItem({ status: 'done', started: '2026-08-28T14:03:07Z', phase: 'groom' })))
-      .toBe('in progress');
+    expect(progressLabel(fakeItem({ status: 'done', started: '2026-08-28T14:03:07Z', phase: 'groom' }))).toBe('in progress');
   });
 });
 
@@ -118,25 +129,20 @@ describe('progressBlock', () => {
   });
 
   it('names the activity and the stamp for an item an execute session holds', () => {
-    const reason = progressBlock(
-      fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'execute' })
-    );
+    const reason = progressBlock(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'execute' }));
     expect(reason).toContain('executing');
     expect(reason).toContain('2026-08-28T14:03:07Z');
   });
 
   it('names grooming for an item a groom session holds', () => {
-    expect(progressBlock(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'groom' })))
-      .toContain('grooming');
+    expect(progressBlock(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: 'groom' }))).toContain('grooming');
   });
 
   it('stays grammatical with no phase recorded, falling back to the generic wording', () => {
-    expect(progressBlock(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: '' })))
-      .toContain('in progress');
+    expect(progressBlock(fakeItem({ status: 'open', started: '2026-08-28T14:03:07Z', phase: '' }))).toContain('in progress');
   });
 
   it('is null for a done item, whose started stamp is history rather than a claim', () => {
-    expect(progressBlock(fakeItem({ status: 'done', started: '2026-08-28T14:03:07Z', phase: 'execute' })))
-      .toBeNull();
+    expect(progressBlock(fakeItem({ status: 'done', started: '2026-08-28T14:03:07Z', phase: 'execute' }))).toBeNull();
   });
 });

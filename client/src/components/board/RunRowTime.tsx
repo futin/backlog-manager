@@ -89,7 +89,11 @@ export const TIMELESS_STAGES: readonly RunStage[] = ['ungroomed', 'skipped'];
  * is no instant to measure the elapsed time TO, and a stopped run with an
  * unreadable heartbeat is exactly that case.
  */
-export function RowTime({ item, now, testIdPrefix = 'run-drawer-time' }: {
+export function RowTime({
+  item,
+  now,
+  testIdPrefix = 'run-drawer-time'
+}: {
   item: Pick<RunQueueItem, 'id' | 'stage' | 'stageAt'>;
   now: number | null;
   testIdPrefix?: string;
@@ -97,7 +101,11 @@ export function RowTime({ item, now, testIdPrefix = 'run-drawer-time' }: {
   if (TIMELESS_STAGES.includes(item.stage)) return null;
 
   if (item.stage === 'pending') {
-    return <span className="run-drawer-item-time" data-testid={`${testIdPrefix}-${item.id}`}>—</span>;
+    return (
+      <span className="run-drawer-item-time" data-testid={`${testIdPrefix}-${item.id}`}>
+        —
+      </span>
+    );
   }
 
   const duration = itemDurationMs(item, now);
@@ -105,10 +113,12 @@ export function RowTime({ item, now, testIdPrefix = 'run-drawer-time' }: {
   const terminal = isTerminalStage(item.stage);
   const done = terminal ? itemDoneClock(item) : null;
 
-  const text = terminal
-    ? [span, done].filter((part) => part !== null).join(' · ')
-    : span === null ? '' : `${span} elapsed`;
+  const text = terminal ? [span, done].filter((part) => part !== null).join(' · ') : span === null ? '' : `${span} elapsed`;
 
   if (text === '') return null;
-  return <span className="run-drawer-item-time" data-testid={`${testIdPrefix}-${item.id}`}>{text}</span>;
+  return (
+    <span className="run-drawer-item-time" data-testid={`${testIdPrefix}-${item.id}`}>
+      {text}
+    </span>
+  );
 }

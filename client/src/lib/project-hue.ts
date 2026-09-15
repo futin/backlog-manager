@@ -103,9 +103,7 @@ export interface ProjectHues {
  * happened to leave first.
  */
 export function buildProjectHues(projects: readonly RegistryProject[]): ProjectHues {
-  const order = [...projects].sort(
-    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.path.localeCompare(b.path)
-  );
+  const order = [...projects].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.path.localeCompare(b.path));
 
   const assigned = new Map<string, number>();
   const taken = new Set<number>();

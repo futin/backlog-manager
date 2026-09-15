@@ -65,11 +65,12 @@ describe('the two watchdog routes', () => {
       return {
         ok: true,
         status: 200,
-        json: () => Promise.resolve(
-          url.endsWith('/api/management')
-            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
-        )
+        json: () =>
+          Promise.resolve(
+            url.endsWith('/api/management')
+              ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+              : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
+          )
       } as Response;
     }) as jest.Mock;
     return { spawns: () => sent.filter((s) => s.url.endsWith('/api/spawn')) };
@@ -185,10 +186,7 @@ describe('the two watchdog routes', () => {
     stubDashboard();
     await createApp();
 
-    const res = await request(app!.getHttpServer())
-      .post('/api/agents/watchdog/config')
-      .send({ graceMs: 1 })
-      .expect(200);
+    const res = await request(app!.getHttpServer()).post('/api/agents/watchdog/config').send({ graceMs: 1 }).expect(200);
 
     expect(res.body.config.graceMs).toBe(300_000);
     expect((readConfigFile() as { graceMs: number }).graceMs).toBe(300_000);
@@ -200,10 +198,7 @@ describe('the two watchdog routes', () => {
     stubDashboard();
     await createApp();
 
-    const res = await request(app!.getHttpServer())
-      .post('/api/agents/watchdog/config')
-      .send({ enabled: false })
-      .expect(200);
+    const res = await request(app!.getHttpServer()).post('/api/agents/watchdog/config').send({ enabled: false }).expect(200);
 
     expect(res.body.config).toEqual({ ...DEFAULT_WATCHDOG_CONFIG, enabled: false });
 
@@ -217,10 +212,7 @@ describe('the two watchdog routes', () => {
     stubDashboard();
     await createApp();
 
-    await request(app!.getHttpServer())
-      .post('/api/agents/watchdog/config')
-      .send({ unknownKey: 1 })
-      .expect(200);
+    await request(app!.getHttpServer()).post('/api/agents/watchdog/config').send({ unknownKey: 1 }).expect(200);
 
     const onDisk = readConfigFile() as Record<string, unknown>;
     expect(onDisk.unknownKey).toBeUndefined();
@@ -269,7 +261,7 @@ describe('the two watchdog routes', () => {
     expect(existsSync(configFile)).toBe(false);
   });
 
-  it('400s (from Express\'s own strict JSON parser, before Nest routing) a bare string body, and never touches the file', async () => {
+  it("400s (from Express's own strict JSON parser, before Nest routing) a bare string body, and never touches the file", async () => {
     stubDashboard();
     await createApp();
 
@@ -287,7 +279,7 @@ describe('the two watchdog routes', () => {
     expect(existsSync(configFile)).toBe(false);
   });
 
-  it('400s (from Express\'s own strict JSON parser, before Nest routing) a bare null body, and never touches the file', async () => {
+  it("400s (from Express's own strict JSON parser, before Nest routing) a bare null body, and never touches the file", async () => {
     stubDashboard();
     await createApp();
 
@@ -350,10 +342,7 @@ describe('the two watchdog routes', () => {
     await svc().tick();
     expect(dash.spawns()).toHaveLength(0);
 
-    const res = await request(app!.getHttpServer())
-      .post('/api/agents/watchdog/config')
-      .send({ enabled: true })
-      .expect(200);
+    const res = await request(app!.getHttpServer()).post('/api/agents/watchdog/config').send({ enabled: true }).expect(200);
 
     expect(res.body.phase).toBe('armed');
 
@@ -373,22 +362,18 @@ describe('the two watchdog routes', () => {
 
   // --- 8: the guard rejects a cross-origin POST, and the file stays untouched
 
-  it("rejects a cross-origin POST via SameOriginPostGuard, and never touches the file", async () => {
+  it('rejects a cross-origin POST via SameOriginPostGuard, and never touches the file', async () => {
     stubDashboard();
     await createApp();
 
-    await request(app!.getHttpServer())
-      .post('/api/agents/watchdog/config')
-      .set('origin', 'http://evil.example')
-      .send({ enabled: false })
-      .expect(403);
+    await request(app!.getHttpServer()).post('/api/agents/watchdog/config').set('origin', 'http://evil.example').send({ enabled: false }).expect(403);
 
     expect(existsSync(configFile)).toBe(false);
   });
 
   // --- 9: events[0].kind is 'spawned' after a resume spawn -------------------
 
-  it("reports the spawned event first, after a resume spawn", async () => {
+  it('reports the spawned event first, after a resume spawn', async () => {
     const dash = stubDashboard();
     await createApp();
     writeRun(crashedRun(projectPath));
@@ -416,10 +401,7 @@ describe('the two watchdog routes', () => {
     svc().disarm();
     expect(svc().armed).toBe(false);
 
-    await request(app!.getHttpServer())
-      .post('/api/agents/resume')
-      .send({ project: projectPath })
-      .expect(201);
+    await request(app!.getHttpServer()).post('/api/agents/resume').send({ project: projectPath }).expect(201);
 
     // RULING R3: the controller calls `arm()` right after the successful
     // spawn above, and `arm()` drives a tick synchronously as far as its own

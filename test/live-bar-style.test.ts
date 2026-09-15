@@ -58,7 +58,9 @@ describe('live bar run-tone stylesheet rules', () => {
     const rule = /(^|\n)\s*\.board-card-live-bar-run\s*\{([^}]*)\}/.exec(css);
     expect(rule).not.toBeNull();
     const props = (rule as RegExpExecArray)[2]
-      .split(';').map((d) => d.split(':')[0].trim()).filter((p) => p !== '');
+      .split(';')
+      .map((d) => d.split(':')[0].trim())
+      .filter((p) => p !== '');
     expect(props).toEqual(['background']);
   });
 
@@ -66,10 +68,8 @@ describe('live bar run-tone stylesheet rules', () => {
   // on a person both read as "a human is involved here", which is the legend
   // entry the cyan modifier deliberately does NOT touch.
   it('leaves the base bar and base live border amber', () => {
-    expect(ruleBlocks(css, '.board-card-live-bar')
-      .some((b) => /background\s*:\s*var\(--amber\)/.test(b))).toBe(true);
-    expect(ruleBlocks(css, '.board-card-live')
-      .some((b) => /border-color\s*:\s*var\(--amber\)/.test(b))).toBe(true);
+    expect(ruleBlocks(css, '.board-card-live-bar').some((b) => /background\s*:\s*var\(--amber\)/.test(b))).toBe(true);
+    expect(ruleBlocks(css, '.board-card-live').some((b) => /border-color\s*:\s*var\(--amber\)/.test(b))).toBe(true);
   });
 
   // The palette itself, read rather than assumed: `--cyan` already exists in

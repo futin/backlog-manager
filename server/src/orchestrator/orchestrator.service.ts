@@ -5,12 +5,7 @@ import { Injectable } from '@nestjs/common';
 
 import { isMergeMode } from '../../../shared/agent';
 import { RUN_STALE_MS } from '../../../shared/types';
-import type {
-  OrchestratorArchivePayload,
-  OrchestratorArchiveRun,
-  OrchestratorRun,
-  OrchestratorRunsPayload
-} from '../../../shared/types';
+import type { OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
 import { pauseRequestEffective, readPauseRequest } from './pause-control.util';
 import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
@@ -43,11 +38,7 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
   if (typeof value !== 'object' || value === null) return false;
   const r = value as Partial<OrchestratorRun>;
   return (
-    typeof r.runId === 'string' &&
-    typeof r.project === 'string' &&
-    typeof r.status === 'string' &&
-    typeof r.updatedAt === 'string' &&
-    Array.isArray(r.queue)
+    typeof r.runId === 'string' && typeof r.project === 'string' && typeof r.status === 'string' && typeof r.updatedAt === 'string' && Array.isArray(r.queue)
   );
 }
 

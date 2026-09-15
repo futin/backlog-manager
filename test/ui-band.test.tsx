@@ -34,7 +34,11 @@ describe('Band', () => {
     const { rerender } = render(<Band title="Board" />);
     expect(document.querySelector('.ui-band-right')).toBeNull();
 
-    rerender(<Band title="Board"><button>Orchestrate</button></Band>);
+    rerender(
+      <Band title="Board">
+        <button>Orchestrate</button>
+      </Band>
+    );
     const right = document.querySelector('.ui-band-right');
     expect(right).not.toBeNull();
     expect(right).toContainElement(screen.getByRole('button', { name: 'Orchestrate' }));

@@ -2,13 +2,7 @@ import { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-import {
-  clampWatchdogConfig,
-  readWatchdogConfig,
-  writeWatchdogConfig,
-  watchdogFile,
-  watchdogEnvOff
-} from '../server/src/orchestrator/watchdog-config.util';
+import { clampWatchdogConfig, readWatchdogConfig, writeWatchdogConfig, watchdogFile, watchdogEnvOff } from '../server/src/orchestrator/watchdog-config.util';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 
 // --- clampWatchdogConfig — pure, no filesystem involved --------------------

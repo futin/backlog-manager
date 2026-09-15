@@ -36,9 +36,7 @@ unknown
 
 describe('parseFrontmatter', () => {
   it('parses fields, splits tags on commas, returns the body', () => {
-    const { fm, body } = parseFrontmatter(
-      '---\nid: bug-1\ntitle: it breaks\ncreated: 2026-08-26\ntags: ui, board\n---\n\n## Symptom\n'
-    );
+    const { fm, body } = parseFrontmatter('---\nid: bug-1\ntitle: it breaks\ncreated: 2026-08-26\ntags: ui, board\n---\n\n## Symptom\n');
     expect(fm.fields.id).toBe('bug-1');
     expect(fm.fields.title).toBe('it breaks');
     expect(fm.tags).toEqual(['ui', 'board']);
@@ -92,16 +90,13 @@ describe('deriveGroomed', () => {
   // nobody writing "unknown" stops there. Both strings below are verbatim from
   // items that were showing an execute button.
   it('bug whose unknown keeps talking is still not groomed', () => {
-    const cause = '## Cause\n\nunknown — likely just that `SessionList` receives the already\n'
-      + 'filtered array.\n\n## Fix\n\nUse <=.\n';
+    const cause = '## Cause\n\nunknown — likely just that `SessionList` receives the already\n' + 'filtered array.\n\n## Fix\n\nUse <=.\n';
     expect(deriveGroomed('bugs', cause)).toBe(false);
 
-    const fix = '## Cause\n\nThe check uses < instead of <=.\n\n## Fix\n\n'
-      + '**Unknown — gated on the repro above.** Three options are on the table.\n';
+    const fix = '## Cause\n\nThe check uses < instead of <=.\n\n## Fix\n\n' + '**Unknown — gated on the repro above.** Three options are on the table.\n';
     expect(deriveGroomed('bugs', fix)).toBe(false);
 
-    expect(deriveGroomed('bugs', '## Cause\n\nunknown. Needs grooming.\n\n## Fix\n\nx\n'))
-      .toBe(false);
+    expect(deriveGroomed('bugs', '## Cause\n\nunknown. Needs grooming.\n\n## Fix\n\nx\n')).toBe(false);
     expect(deriveGroomed('bugs', '## Cause\n\n**Unknown**\n\n## Fix\n\nx\n')).toBe(false);
     expect(deriveGroomed('bugs', '## Cause\n\nunknown, so far.\n\n## Fix\n\nx\n')).toBe(false);
   });
@@ -113,24 +108,20 @@ describe('deriveGroomed', () => {
   // the word and the newline — anything else on that line is prose about the
   // word, covered by the test below.
   it('bug whose unknown is followed by a deferral paragraph is not groomed', () => {
-    const cause = '## Cause\n\nunknown\n\nThe mechanism is not in doubt \u2014 the digest covers\n'
-      + 'one of three published paths.\n\n## Fix\n\nUse <=.\n';
+    const cause = '## Cause\n\nunknown\n\nThe mechanism is not in doubt \u2014 the digest covers\n' + 'one of three published paths.\n\n## Fix\n\nUse <=.\n';
     expect(deriveGroomed('bugs', cause)).toBe(false);
 
-    const fix = '## Cause\n\nThe check uses < instead of <=.\n\n## Fix\n\nunknown\n\n'
-      + 'Worth weighing when this is groomed:\n\n- hash all of PUBLISHED_PATHS\n';
+    const fix =
+      '## Cause\n\nThe check uses < instead of <=.\n\n## Fix\n\nunknown\n\n' + 'Worth weighing when this is groomed:\n\n- hash all of PUBLISHED_PATHS\n';
     expect(deriveGroomed('bugs', fix)).toBe(false);
 
-    expect(deriveGroomed('bugs', '## Cause\n\n**Unknown**\n\nThree shapes.\n\n## Fix\n\nx\n'))
-      .toBe(false);
-    expect(deriveGroomed('bugs', '## Cause\n\nunknown   \n\nStill digging.\n\n## Fix\n\nx\n'))
-      .toBe(false);
+    expect(deriveGroomed('bugs', '## Cause\n\n**Unknown**\n\nThree shapes.\n\n## Fix\n\nx\n')).toBe(false);
+    expect(deriveGroomed('bugs', '## Cause\n\nunknown   \n\nStill digging.\n\n## Fix\n\nx\n')).toBe(false);
   });
 
   // The other side of that bias. A cause is allowed to be about the word.
   it('bug whose Cause merely opens with the word is groomed', () => {
-    const body = '## Cause\n\nUnknown option names reach renderFrontmatter and survive as\n'
-      + 'strings.\n\n## Fix\n\nDrop them.\n';
+    const body = '## Cause\n\nUnknown option names reach renderFrontmatter and survive as\n' + 'strings.\n\n## Fix\n\nDrop them.\n';
     expect(deriveGroomed('bugs', body)).toBe(true);
   });
 

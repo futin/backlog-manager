@@ -1,27 +1,33 @@
-import { test } from 'node:test'
-import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import { spawn, spawnSync } from 'node:child_process'
-import { once } from 'node:events'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  RUN_STALE_MS, archiveStem, controlFilePath, controlHome, isZombieStatState, pauseRequestEffective,
-  readPermissionDenials, readSessionUsage,
-} from './orchestrate.mjs'
+  RUN_STALE_MS,
+  archiveStem,
+  controlFilePath,
+  controlHome,
+  isZombieStatState,
+  pauseRequestEffective,
+  readPermissionDenials,
+  readSessionUsage
+} from './orchestrate.mjs';
 
-const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url))
+const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url));
 
 // Task 5's own fixtures: a realistic `claude -p --output-format stream-json`
 // transcript head that DOES carry the init event (and therefore the session
 // id), and one that never does — see watch's own test cases 1 and 3.
-const STREAM_INIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-init.jsonl')
-const STREAM_NOINIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-noinit.jsonl')
+const STREAM_INIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-init.jsonl');
+const STREAM_NOINIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-noinit.jsonl');
 // Fix round 1 (Minor): a leading line that isn't valid JSON at all, ahead of
 // a real init event — pins findSessionIdInJsonl's malformed-line-skip branch
 // (a bad line is swallowed and parsing continues, it is never a wedge).
-const STREAM_MALFORMED_THEN_INIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-malformed-then-init.jsonl')
+const STREAM_MALFORMED_THEN_INIT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-malformed-then-init.jsonl');
 
 // The jest-side fixture is the authority for the run/queue-item key set —
 // see shared/types.ts's RunStage/RunQueueItem/RunAttention/OrchestratorRun
@@ -30,7 +36,7 @@ const STREAM_MALFORMED_THEN_INIT = path.join(path.dirname(fileURLToPath(import.m
 // the moment either side is edited without touching the other; reading the
 // exact same file both suites already depend on means there is only ever
 // one fixture to keep in sync with shared/types.ts.
-const FIXTURE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'test', 'fixtures', 'orchestrator-run.json')
+const FIXTURE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'test', 'fixtures', 'orchestrator-run.json');
 
 // Every test gets its own throwaway BM_ORCH_HOME (so nothing here ever
 // touches a developer's real ~/.backlog-manager/) and its own throwaway
@@ -42,9 +48,9 @@ const FIXTURE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..
 // both directories unconditionally, so a failed assertion mid-test still
 // leaves no litter in the OS temp dir behind it.
 function orchFixture(t) {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-home-')))
-  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-project-')))
-  spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' })
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-home-')));
+  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-project-')));
+  spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' });
   // task-17: the pause-request directory, derived from `home` rather than
   // mkdtemp'd separately so `run()` below can pin it from the one argument
   // every existing call already passes — the alternative was a signature
@@ -54,14 +60,14 @@ function orchFixture(t) {
   // BM_ORCH_HOME is: this directory is one the SERVER writes for real, under
   // a developer's `~/.backlog-manager/settings/`, and a test that reached it
   // could pause a real run.
-  const control = `${home}-control`
-  fs.mkdirSync(control, { recursive: true })
+  const control = `${home}-control`;
+  fs.mkdirSync(control, { recursive: true });
   t.after(() => {
-    fs.rmSync(home, { recursive: true, force: true })
-    fs.rmSync(project, { recursive: true, force: true })
-    fs.rmSync(control, { recursive: true, force: true })
-  })
-  return { home, project, control }
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.rmSync(control, { recursive: true, force: true });
+  });
+  return { home, project, control };
 }
 
 // Spawns the real CLI as a child process with BM_ORCH_HOME pinned to this
@@ -78,15 +84,15 @@ function orchFixture(t) {
 // case is about. A shell, which is what really runs this tool, has no such
 // limit; the ceiling here exists only so the harness stops being the narrower
 // pipe of the two.
-const CLI_MAX_BUFFER = 64 * 1024 * 1024
+const CLI_MAX_BUFFER = 64 * 1024 * 1024;
 
 function run(cwd, home, ...args) {
   return spawnSync('node', [SCRIPT, ...args], {
     encoding: 'utf8',
     cwd,
     maxBuffer: CLI_MAX_BUFFER,
-    env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` },
-  })
+    env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` }
+  });
 }
 
 // Project keying is encodeURIComponent(<abs path>), reversible with
@@ -94,11 +100,11 @@ function run(cwd, home, ...args) {
 // here so every other test in this file can compute where run.json landed
 // without re-deriving the encoding itself.
 function runFile(home, project) {
-  return path.join(home, encodeURIComponent(project), 'run.json')
+  return path.join(home, encodeURIComponent(project), 'run.json');
 }
 
 function runsDir(home, project) {
-  return path.join(home, encodeURIComponent(project), 'runs')
+  return path.join(home, encodeURIComponent(project), 'runs');
 }
 
 // The control file's own path, mirroring `runFile` above: one file per
@@ -106,7 +112,7 @@ function runsDir(home, project) {
 // root rather than inside a per-project directory — there is only ever one
 // control fact per project, so there is nothing for a directory to hold.
 function controlFile(home, project) {
-  return path.join(`${home}-control`, `${encodeURIComponent(project)}.json`)
+  return path.join(`${home}-control`, `${encodeURIComponent(project)}.json`);
 }
 
 // Writes a pause request exactly as the server's `writePauseRequest` does.
@@ -115,8 +121,8 @@ function controlFile(home, project) {
 // the server), and a test that reached across for the server's writer would
 // hide a drift between them instead of catching it.
 function writeControl(home, project, body) {
-  fs.mkdirSync(`${home}-control`, { recursive: true })
-  fs.writeFileSync(controlFile(home, project), typeof body === 'string' ? body : JSON.stringify(body))
+  fs.mkdirSync(`${home}-control`, { recursive: true });
+  fs.writeFileSync(controlFile(home, project), typeof body === 'string' ? body : JSON.stringify(body));
 }
 
 // Writes one ready-gated task item straight into `project`'s own backlog/
@@ -129,27 +135,27 @@ function writeControl(home, project, body) {
 // needs-answers, or every stage/heartbeat/attention/finish test that seeds
 // one would start depending on gate behaviour it isn't testing.
 function seedReadyTask(project, id, title) {
-  const dir = path.join(project, 'backlog', 'tasks', 'open')
-  fs.mkdirSync(dir, { recursive: true })
-  const file = path.join(dir, `${id}-fixture.md`)
+  const dir = path.join(project, 'backlog', 'tasks', 'open');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${id}-fixture.md`);
   fs.writeFileSync(
     file,
-    `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-01\n---\n\n## Goal\n\nSomething worth doing.\n\n## Plan\n\nDo the actual work described here, in enough detail that it counts as groomed.\n\n## Test cases\n\n## Done when\n`,
-  )
-  return file
+    `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-01\n---\n\n## Goal\n\nSomething worth doing.\n\n## Plan\n\nDo the actual work described here, in enough detail that it counts as groomed.\n\n## Test cases\n\n## Done when\n`
+  );
+  return file;
 }
 
 // The bug twin of seedReadyTask above, for the handful of tests that seed a
 // bug id instead of a task id.
 function seedReadyBug(project, id, title) {
-  const dir = path.join(project, 'backlog', 'bugs', 'open')
-  fs.mkdirSync(dir, { recursive: true })
-  const file = path.join(dir, `${id}-fixture.md`)
+  const dir = path.join(project, 'backlog', 'bugs', 'open');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${id}-fixture.md`);
   fs.writeFileSync(
     file,
-    `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-01\n---\n\n## Symptom\n\nSomething is wrong.\n\n## Repro\n\nSteps to reproduce it.\n\n## Affects\n\nsomefile.ts\n\n## Cause\n\nThe real, diagnosed cause.\n\n## Fix\n\nThe real fix — not the placeholder.\n`,
-  )
-  return file
+    `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-01\n---\n\n## Symptom\n\nSomething is wrong.\n\n## Repro\n\nSteps to reproduce it.\n\n## Affects\n\nsomefile.ts\n\n## Cause\n\nThe real, diagnosed cause.\n\n## Fix\n\nThe real fix — not the placeholder.\n`
+  );
+  return file;
 }
 
 // --- Task 5 fixtures: real child processes and real git worktrees ----------
@@ -163,15 +169,15 @@ function seedReadyBug(project, id, title) {
 // child would have exited on its own never leaves an orphan node process
 // running past this file's own test run.
 function spawnChild(t, ms) {
-  const child = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: 'ignore' })
+  const child = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: 'ignore' });
   t.after(() => {
     try {
-      child.kill('SIGKILL')
+      child.kill('SIGKILL');
     } catch {
       // already dead — nothing to clean up
     }
-  })
-  return child
+  });
+  return child;
 }
 
 // Runs the CLI asynchronously rather than through `run()`'s blocking
@@ -188,17 +194,17 @@ function spawnChild(t, ms) {
 // … &` and `orchestrate.mjs watch` as separate, unrelated processes) would
 // never have this problem in the first place.
 async function runAsync(cwd, home, ...args) {
-  const proc = spawn('node', [SCRIPT, ...args], { cwd, env: { ...process.env, BM_ORCH_HOME: home } })
-  let stdout = ''
-  let stderr = ''
+  const proc = spawn('node', [SCRIPT, ...args], { cwd, env: { ...process.env, BM_ORCH_HOME: home } });
+  let stdout = '';
+  let stderr = '';
   proc.stdout.on('data', (d) => {
-    stdout += d
-  })
+    stdout += d;
+  });
   proc.stderr.on('data', (d) => {
-    stderr += d
-  })
-  const [status] = await once(proc, 'exit')
-  return { status, stdout, stderr }
+    stderr += d;
+  });
+  const [status] = await once(proc, 'exit');
+  return { status, stdout, stderr };
 }
 
 // `git worktree add <path> -b <branch> HEAD` needs an actual commit for HEAD
@@ -209,13 +215,11 @@ async function runAsync(cwd, home, ...args) {
 // they call this. A throwaway local identity (`-c user.email=…`) keeps this
 // independent of whatever global git config this machine happens to have.
 function commitEverything(project, message) {
-  spawnSync('git', ['-C', project, 'add', '-A'], { encoding: 'utf8' })
-  const result = spawnSync(
-    'git',
-    ['-C', project, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', message],
-    { encoding: 'utf8' },
-  )
-  if (result.status !== 0) throw new Error(`git commit failed: ${result.stderr}`)
+  spawnSync('git', ['-C', project, 'add', '-A'], { encoding: 'utf8' });
+  const result = spawnSync('git', ['-C', project, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', message], {
+    encoding: 'utf8'
+  });
+  if (result.status !== 0) throw new Error(`git commit failed: ${result.stderr}`);
 }
 
 // --- RUN_STALE_MS -----------------------------------------------------------
@@ -229,76 +233,76 @@ function commitEverything(project, message) {
 // shared/types.ts) goes red immediately instead of the mismatch surfacing
 // as a confusing staleness bug months later.
 test('RUN_STALE_MS is exactly 900000ms (15 minutes) — twin of shared/types.ts RUN_STALE_MS', () => {
-  assert.equal(RUN_STALE_MS, 900000)
-})
+  assert.equal(RUN_STALE_MS, 900000);
+});
 
 // --- Test case 1: init's shape matches the contract fixture exactly --------
 
 test('init writes a run.json whose key set matches the contract fixture exactly, for the run and for a queue item', (t) => {
-  const { home, project } = orchFixture(t)
-  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
-  seedReadyBug(project, 'bug-14', 'Fix duplicate heartbeat write on a resumed run')
+  const { home, project } = orchFixture(t);
+  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'));
+  seedReadyBug(project, 'bug-14', 'Fix duplicate heartbeat write on a resumed run');
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
 
-  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)))
-  assert.equal(written.queue.length, 1)
-  assert.deepEqual(new Set(Object.keys(written.queue[0])), new Set(Object.keys(fixture.queue[0])))
-})
+  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)));
+  assert.equal(written.queue.length, 1);
+  assert.deepEqual(new Set(Object.keys(written.queue[0])), new Set(Object.keys(fixture.queue[0])));
+});
 
 test('init prints { runId, dir } JSON on success', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  const printed = JSON.parse(out.stdout)
-  assert.match(printed.runId, /^run-\d{8}-\d{6}$/)
-  assert.equal(printed.dir, path.join(home, encodeURIComponent(project)))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const printed = JSON.parse(out.stdout);
+  assert.match(printed.runId, /^run-\d{8}-\d{6}$/);
+  assert.equal(printed.dir, path.join(home, encodeURIComponent(project)));
+});
 
 test('init with no backlog store and no --ids writes an empty queue — a run with nothing gated yet is valid', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(written.queue, [])
-  assert.deepEqual(written.attention, [])
-  assert.equal(written.status, 'running')
-  assert.equal(written.maxItems, null)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(written.queue, []);
+  assert.deepEqual(written.attention, []);
+  assert.equal(written.status, 'running');
+  assert.equal(written.maxItems, null);
+});
 
 test('init --project must be an absolute path — a relative one is a usage error, nothing written', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', 'not/absolute')
+  const out = run(project, home, 'init', '--project', 'not/absolute');
 
-  assert.equal(out.status, 1)
-  assert.equal(fs.existsSync(runFile(home, project)), false)
-})
+  assert.equal(out.status, 1);
+  assert.equal(fs.existsSync(runFile(home, project)), false);
+});
 
 // --- Test case 2: a fresh running lock refuses a second init, untouched ----
 
 test('init twice in a row: the second call exits 4 while the first is still fresh, and the first file is byte-identical after', (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const second = run(project, home, 'init', '--project', project)
+  const second = run(project, home, 'init', '--project', project);
 
-  assert.equal(second.status, 4)
+  assert.equal(second.status, 4);
   // The lock refusal must name the way forward — a stale run's recovery
   // path — so a human staring at this message is never left guessing.
-  assert.match(second.stderr, /--resume/)
-  assert.match(second.stderr, /--abort/)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json changed even though init was refused')
-})
+  assert.match(second.stderr, /--resume/);
+  assert.match(second.stderr, /--abort/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json changed even though init was refused');
+});
 
 // Fix round 1 (Important #1): the fresh-lock case above was the only lock
 // coverage — the stale branch (a crashed run: status still "running" but
@@ -308,62 +312,65 @@ test('init twice in a row: the second call exits 4 while the first is still fres
 // RUN_STALE_MS while leaving status "running", exactly the shape a killed
 // orchestrator process would leave behind.
 test('init over a stale "running" run also refuses (exit 4), names --resume/--abort, and leaves the file and directory untouched', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const file = runFile(home, project)
-  const stale = JSON.parse(fs.readFileSync(file, 'utf8'))
-  stale.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString()
-  fs.writeFileSync(file, JSON.stringify(stale, null, 2) + '\n')
-  const before = fs.readFileSync(file)
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const file = runFile(home, project);
+  const stale = JSON.parse(fs.readFileSync(file, 'utf8'));
+  stale.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString();
+  fs.writeFileSync(file, JSON.stringify(stale, null, 2) + '\n');
+  const before = fs.readFileSync(file);
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 4)
-  assert.match(out.stderr, /--resume/)
-  assert.match(out.stderr, /--abort/)
-  assert.match(out.stderr, /stale|crash/i)
-  assert.ok(before.equals(fs.readFileSync(file)), 'a stale-but-running run.json was modified even though init was refused')
-  const dir = path.join(home, encodeURIComponent(project))
-  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp')), [])
-})
+  assert.equal(out.status, 4);
+  assert.match(out.stderr, /--resume/);
+  assert.match(out.stderr, /--abort/);
+  assert.match(out.stderr, /stale|crash/i);
+  assert.ok(before.equals(fs.readFileSync(file)), 'a stale-but-running run.json was modified even though init was refused');
+  const dir = path.join(home, encodeURIComponent(project));
+  assert.deepEqual(
+    fs.readdirSync(dir).filter((name) => name.endsWith('.tmp')),
+    []
+  );
+});
 
 // --- Test case 3: init over a done run archives it and starts fresh --------
 
 test('init over a status:"done" run archives the old file to runs/<runId>.json and writes a fresh running run', (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const firstRunId = JSON.parse(first.stdout).runId
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRunId = JSON.parse(first.stdout).runId;
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  const second = run(project, home, 'init', '--project', project)
+  const second = run(project, home, 'init', '--project', project);
 
-  assert.equal(second.status, 0, second.stderr)
-  const archived = fs.readdirSync(runsDir(home, project))
-  assert.deepEqual(archived, [`${firstRunId}.json`])
-  const archivedRun = JSON.parse(fs.readFileSync(path.join(runsDir(home, project), `${firstRunId}.json`), 'utf8'))
-  assert.equal(archivedRun.status, 'done')
+  assert.equal(second.status, 0, second.stderr);
+  const archived = fs.readdirSync(runsDir(home, project));
+  assert.deepEqual(archived, [`${firstRunId}.json`]);
+  const archivedRun = JSON.parse(fs.readFileSync(path.join(runsDir(home, project), `${firstRunId}.json`), 'utf8'));
+  assert.equal(archivedRun.status, 'done');
 
-  const current = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(current.status, 'running')
-})
+  const current = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(current.status, 'running');
+});
 
 // A second archive after the resumed run also finishes proves pastRuns is
 // counted off the archive directory, not carried on the run file itself.
 // (Since task-31 that count is the listing filtered to `.json`; no sidecars
 // are seeded here, so this case's runs/ holds two files and nothing else.)
 test('a second done-then-init cycle grows runs/ to two archived files', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'finish', '--status', 'aborted').status, 0)
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'aborted').status, 0);
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.readdirSync(runsDir(home, project)).length, 2)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.readdirSync(runsDir(home, project)).length, 2);
+});
 
 // --- task-31: a run's SIDECAR directories are archived beside its run file --
 //
@@ -380,17 +387,17 @@ test('a second done-then-init cycle grows runs/ to two archived files', (t) => {
 // The per-project state directory itself — the parent `runFile`/`runsDir`
 // above both point into. Sidecar seeding needs the parent, not either child.
 function projStateDir(home, project) {
-  return path.join(home, encodeURIComponent(project))
+  return path.join(home, encodeURIComponent(project));
 }
 
 // Writes one sidecar file at `<dir>/<rel>`, creating its parents. `rel` is
 // a POSIX-ish relative path ('logs/bug-1.jsonl'); joined a segment at a time
 // so this reads the same on any platform the suite runs on.
 function seedSidecar(home, project, rel, body) {
-  const target = path.join(projStateDir(home, project), ...rel.split('/'))
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(target, body)
-  return target
+  const target = path.join(projStateDir(home, project), ...rel.split('/'));
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, body);
+  return target;
 }
 
 // Two runs in the same wall-clock second get the SAME runId (makeRunId is
@@ -401,32 +408,32 @@ function seedSidecar(home, project, rel, body) {
 // the second rather than asserting against two names that turn out to be
 // one. Only the cases that name both ids pay this second; nothing else does.
 function sleepPastRunIdSecond() {
-  return new Promise((resolve) => setTimeout(resolve, 1100))
+  return new Promise((resolve) => setTimeout(resolve, 1100));
 }
 
-test('init archives the previous run\'s sidecar directories into runs/<runId>/ beside its run file', (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const firstRunId = JSON.parse(first.stdout).runId
-  seedSidecar(home, project, 'logs/bug-1.jsonl', 'first')
-  seedSidecar(home, project, 'reviews/bug-1-1.md', '# review')
-  seedSidecar(home, project, 'verify/bug-1.out', 'ok')
-  seedSidecar(home, project, 'questions/bug-1.json', '[]')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+test("init archives the previous run's sidecar directories into runs/<runId>/ beside its run file", (t) => {
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRunId = JSON.parse(first.stdout).runId;
+  seedSidecar(home, project, 'logs/bug-1.jsonl', 'first');
+  seedSidecar(home, project, 'reviews/bug-1-1.md', '# review');
+  seedSidecar(home, project, 'verify/bug-1.out', 'ok');
+  seedSidecar(home, project, 'questions/bug-1.json', '[]');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  const second = run(project, home, 'init', '--project', project)
-  assert.equal(second.status, 0, second.stderr)
+  const second = run(project, home, 'init', '--project', project);
+  assert.equal(second.status, 0, second.stderr);
 
-  const archived = path.join(runsDir(home, project), firstRunId)
-  assert.equal(fs.readFileSync(path.join(archived, 'logs', 'bug-1.jsonl'), 'utf8'), 'first')
-  assert.equal(fs.readFileSync(path.join(archived, 'reviews', 'bug-1-1.md'), 'utf8'), '# review')
-  assert.equal(fs.readFileSync(path.join(archived, 'verify', 'bug-1.out'), 'utf8'), 'ok')
-  assert.equal(fs.readFileSync(path.join(archived, 'questions', 'bug-1.json'), 'utf8'), '[]')
+  const archived = path.join(runsDir(home, project), firstRunId);
+  assert.equal(fs.readFileSync(path.join(archived, 'logs', 'bug-1.jsonl'), 'utf8'), 'first');
+  assert.equal(fs.readFileSync(path.join(archived, 'reviews', 'bug-1-1.md'), 'utf8'), '# review');
+  assert.equal(fs.readFileSync(path.join(archived, 'verify', 'bug-1.out'), 'utf8'), 'ok');
+  assert.equal(fs.readFileSync(path.join(archived, 'questions', 'bug-1.json'), 'utf8'), '[]');
   // Nothing but the fresh run file and the archive folder is left flat —
   // the whole point is that the new run starts with empty sidecar paths.
-  assert.deepEqual(fs.readdirSync(projStateDir(home, project)).sort(), ['run.json', 'runs'])
-})
+  assert.deepEqual(fs.readdirSync(projStateDir(home, project)).sort(), ['run.json', 'runs']);
+});
 
 // The case that fails against any ALLOWLIST implementation. `prompts/` is
 // real: one driver on this machine invented it unprompted, and bug-31 then
@@ -435,115 +442,113 @@ test('init archives the previous run\'s sidecar directories into runs/<runId>/ b
 // <dir> is open by construction, so the archiver names only what it must NOT
 // move.
 test('init archives sidecar names the tool has never heard of, including a stray top-level file', (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const firstRunId = JSON.parse(first.stdout).runId
-  seedSidecar(home, project, 'prompts/bug-1-fix-1.txt', 'findings')
-  seedSidecar(home, project, 'notes.txt', 'scratch')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRunId = JSON.parse(first.stdout).runId;
+  seedSidecar(home, project, 'prompts/bug-1-fix-1.txt', 'findings');
+  seedSidecar(home, project, 'notes.txt', 'scratch');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const archived = path.join(runsDir(home, project), firstRunId)
-  assert.equal(fs.readFileSync(path.join(archived, 'prompts', 'bug-1-fix-1.txt'), 'utf8'), 'findings')
-  assert.equal(fs.readFileSync(path.join(archived, 'notes.txt'), 'utf8'), 'scratch')
-  assert.deepEqual(fs.readdirSync(projStateDir(home, project)).sort(), ['run.json', 'runs'])
-})
+  const archived = path.join(runsDir(home, project), firstRunId);
+  assert.equal(fs.readFileSync(path.join(archived, 'prompts', 'bug-1-fix-1.txt'), 'utf8'), 'findings');
+  assert.equal(fs.readFileSync(path.join(archived, 'notes.txt'), 'utf8'), 'scratch');
+  assert.deepEqual(fs.readdirSync(projStateDir(home, project)).sort(), ['run.json', 'runs']);
+});
 
 // The denylist is exactly two names, and both halves matter: sweeping
 // `runs/` into itself would bury every earlier run inside the latest one,
 // and sweeping `run.json` would archive the file twice under two names.
 test('the archive never sweeps runs/ into itself and never sweeps run.json', async (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const firstRunId = JSON.parse(first.stdout).runId
-  seedSidecar(home, project, 'logs/bug-1.jsonl', 'one')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
-  await sleepPastRunIdSecond()
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRunId = JSON.parse(first.stdout).runId;
+  seedSidecar(home, project, 'logs/bug-1.jsonl', 'one');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
+  await sleepPastRunIdSecond();
 
-  const second = run(project, home, 'init', '--project', project)
-  assert.equal(second.status, 0, second.stderr)
-  const secondRunId = JSON.parse(second.stdout).runId
-  assert.notEqual(secondRunId, firstRunId)
-  seedSidecar(home, project, 'logs/bug-1.jsonl', 'two')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const second = run(project, home, 'init', '--project', project);
+  assert.equal(second.status, 0, second.stderr);
+  const secondRunId = JSON.parse(second.stdout).runId;
+  assert.notEqual(secondRunId, firstRunId);
+  seedSidecar(home, project, 'logs/bug-1.jsonl', 'two');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const secondArchive = path.join(runsDir(home, project), secondRunId)
-  assert.equal(fs.existsSync(path.join(secondArchive, 'runs')), false, 'runs/ was swept into its own archive')
+  const secondArchive = path.join(runsDir(home, project), secondRunId);
+  assert.equal(fs.existsSync(path.join(secondArchive, 'runs')), false, 'runs/ was swept into its own archive');
   for (const runId of [firstRunId, secondRunId]) {
-    assert.equal(fs.existsSync(path.join(runsDir(home, project), runId, 'run.json')), false,
-      `run.json was swept into runs/${runId}/`)
+    assert.equal(fs.existsSync(path.join(runsDir(home, project), runId, 'run.json')), false, `run.json was swept into runs/${runId}/`);
   }
-  assert.equal(fs.statSync(path.join(runsDir(home, project), `${firstRunId}.json`)).isFile(), true,
-    'the first run\'s archived file left the top of runs/')
-})
+  assert.equal(fs.statSync(path.join(runsDir(home, project), `${firstRunId}.json`)).isFile(), true, "the first run's archived file left the top of runs/");
+});
 
 // The whole point of the item, stated as one assertion: two runs that both
 // dispatch the same item each keep their own transcript. Against the
 // pre-change tool the first one is simply gone.
-test('a second run cannot overwrite the first run\'s evidence for the same item', async (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const run1 = JSON.parse(first.stdout).runId
-  seedSidecar(home, project, 'logs/bug-2.jsonl', 'first')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
-  await sleepPastRunIdSecond()
+test("a second run cannot overwrite the first run's evidence for the same item", async (t) => {
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const run1 = JSON.parse(first.stdout).runId;
+  seedSidecar(home, project, 'logs/bug-2.jsonl', 'first');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
+  await sleepPastRunIdSecond();
 
-  const second = run(project, home, 'init', '--project', project)
-  assert.equal(second.status, 0, second.stderr)
-  const run2 = JSON.parse(second.stdout).runId
-  assert.notEqual(run2, run1)
-  seedSidecar(home, project, 'logs/bug-2.jsonl', 'second')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const second = run(project, home, 'init', '--project', project);
+  assert.equal(second.status, 0, second.stderr);
+  const run2 = JSON.parse(second.stdout).runId;
+  assert.notEqual(run2, run1);
+  seedSidecar(home, project, 'logs/bug-2.jsonl', 'second');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  assert.equal(fs.readFileSync(path.join(runsDir(home, project), run1, 'logs', 'bug-2.jsonl'), 'utf8'), 'first')
-  assert.equal(fs.readFileSync(path.join(runsDir(home, project), run2, 'logs', 'bug-2.jsonl'), 'utf8'), 'second')
-})
+  assert.equal(fs.readFileSync(path.join(runsDir(home, project), run1, 'logs', 'bug-2.jsonl'), 'utf8'), 'first');
+  assert.equal(fs.readFileSync(path.join(runsDir(home, project), run2, 'logs', 'bug-2.jsonl'), 'utf8'), 'second');
+});
 
 // An empty `runs/<runId>/` would claim evidence exists where none does, and
 // would break every existing case in this file that asserts the exact
 // listing of runs/. The directory is created only when there is something
 // to put in it.
 test('a run with no sidecars leaves no empty runs/<runId>/ behind', (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const firstRunId = JSON.parse(first.stdout).runId
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRunId = JSON.parse(first.stdout).runId;
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  assert.deepEqual(fs.readdirSync(runsDir(home, project)), [`${firstRunId}.json`])
-})
+  assert.deepEqual(fs.readdirSync(runsDir(home, project)), [`${firstRunId}.json`]);
+});
 
 // The exit-4 lock is what makes moving a live child's pid file safe at all:
 // a crashed run still reads status "running", so `init` refuses it outright
 // and the sidecars a --resume session is about to read stay exactly where
 // that session expects them. Same stale-lock setup as the case above.
 test('an init refused by the stale "running" lock (exit 4) moves no sidecars at all', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const file = runFile(home, project)
-  const stale = JSON.parse(fs.readFileSync(file, 'utf8'))
-  stale.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString()
-  fs.writeFileSync(file, JSON.stringify(stale, null, 2) + '\n')
-  const logPid = seedSidecar(home, project, 'logs/bug-1.pid', '4242')
-  const verifyPid = seedSidecar(home, project, 'verify/bug-1.pid', '4243')
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const file = runFile(home, project);
+  const stale = JSON.parse(fs.readFileSync(file, 'utf8'));
+  stale.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString();
+  fs.writeFileSync(file, JSON.stringify(stale, null, 2) + '\n');
+  const logPid = seedSidecar(home, project, 'logs/bug-1.pid', '4242');
+  const verifyPid = seedSidecar(home, project, 'verify/bug-1.pid', '4243');
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 4)
-  assert.equal(fs.readFileSync(logPid, 'utf8'), '4242')
-  assert.equal(fs.readFileSync(verifyPid, 'utf8'), '4243')
-  assert.equal(fs.existsSync(runsDir(home, project)), false, 'a refused init created runs/')
-})
+  assert.equal(out.status, 4);
+  assert.equal(fs.readFileSync(logPid, 'utf8'), '4242');
+  assert.equal(fs.readFileSync(verifyPid, 'utf8'), '4243');
+  assert.equal(fs.existsSync(runsDir(home, project)), false, 'a refused init created runs/');
+});
 
 // --- archiveStem, unit --------------------------------------------------
 //
@@ -553,78 +558,78 @@ test('an init refused by the stale "running" lock (exit 4) moves no sidecars at 
 // from an interrupted archive does NOT push the run file to `<stem>-2.json`
 // and split one run's evidence across two names forever.
 test('archiveStem bumps past a taken <stem>.json but ignores a bare <stem>/ directory', (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-stem-'))
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-stem-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000')
+  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000');
 
-  fs.writeFileSync(path.join(dir, 'run-20260101-000000.json'), '{}')
-  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000-2')
+  fs.writeFileSync(path.join(dir, 'run-20260101-000000.json'), '{}');
+  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000-2');
 
-  fs.writeFileSync(path.join(dir, 'run-20260101-000000-2.json'), '{}')
-  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000-3')
+  fs.writeFileSync(path.join(dir, 'run-20260101-000000-2.json'), '{}');
+  assert.equal(archiveStem(dir, 'run-20260101-000000'), 'run-20260101-000000-3');
 
   // The repair case: a directory under the unsuffixed name, with that name's
   // .json free — an archive interrupted between its two moves. Reusing the
   // stem is the fix, not a collision.
-  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-stem-'))
-  t.after(() => fs.rmSync(dir2, { recursive: true, force: true }))
-  fs.mkdirSync(path.join(dir2, 'run-20260101-000000'))
-  assert.equal(archiveStem(dir2, 'run-20260101-000000'), 'run-20260101-000000')
-})
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-stem-'));
+  t.after(() => fs.rmSync(dir2, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir2, 'run-20260101-000000'));
+  assert.equal(archiveStem(dir2, 'run-20260101-000000'), 'run-20260101-000000');
+});
 
 // The crash window between the two moves, simulated by hand: sidecars
 // already under runs/<runId>/, run.json still flat and still done, more
 // sidecars still flat. The next init must finish the job into the SAME
 // directory rather than mint a <runId>-2 sibling.
 test('an archive interrupted between its two moves is repaired into one directory, not split', (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const firstRunId = JSON.parse(first.stdout).runId
-  seedSidecar(home, project, 'logs/a.jsonl', 'log bytes')
-  seedSidecar(home, project, 'reviews/a-1.md', 'review bytes')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRunId = JSON.parse(first.stdout).runId;
+  seedSidecar(home, project, 'logs/a.jsonl', 'log bytes');
+  seedSidecar(home, project, 'reviews/a-1.md', 'review bytes');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
   // Hand-simulate the interruption: logs/ moved, run.json and reviews/ not.
-  const partial = path.join(runsDir(home, project), firstRunId)
-  fs.mkdirSync(partial, { recursive: true })
-  fs.renameSync(path.join(projStateDir(home, project), 'logs'), path.join(partial, 'logs'))
+  const partial = path.join(runsDir(home, project), firstRunId);
+  fs.mkdirSync(partial, { recursive: true });
+  fs.renameSync(path.join(projStateDir(home, project), 'logs'), path.join(partial, 'logs'));
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.readFileSync(path.join(partial, 'logs', 'a.jsonl'), 'utf8'), 'log bytes')
-  assert.equal(fs.readFileSync(path.join(partial, 'reviews', 'a-1.md'), 'utf8'), 'review bytes')
-  assert.equal(fs.existsSync(path.join(runsDir(home, project), `${firstRunId}.json`)), true)
-  assert.deepEqual(fs.readdirSync(runsDir(home, project)).sort(), [firstRunId, `${firstRunId}.json`])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.readFileSync(path.join(partial, 'logs', 'a.jsonl'), 'utf8'), 'log bytes');
+  assert.equal(fs.readFileSync(path.join(partial, 'reviews', 'a-1.md'), 'utf8'), 'review bytes');
+  assert.equal(fs.existsSync(path.join(runsDir(home, project), `${firstRunId}.json`)), true);
+  assert.deepEqual(fs.readdirSync(runsDir(home, project)).sort(), [firstRunId, `${firstRunId}.json`]);
+});
 
 // Reachable only through that same interrupted-archive path, and the one
 // thing the mover must never do: renameSync onto an existing name is an
 // error on some platforms and a silent replace on others, and neither is a
 // thing to do to archived evidence. Skip, warn, keep going, exit 0.
 test('a sidecar name already present in the archive is skipped with a warning, never overwritten', (t) => {
-  const { home, project } = orchFixture(t)
-  const first = run(project, home, 'init', '--project', project)
-  assert.equal(first.status, 0, first.stderr)
-  const firstRunId = JSON.parse(first.stdout).runId
-  seedSidecar(home, project, 'logs/a.jsonl', 'original')
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const { home, project } = orchFixture(t);
+  const first = run(project, home, 'init', '--project', project);
+  assert.equal(first.status, 0, first.stderr);
+  const firstRunId = JSON.parse(first.stdout).runId;
+  seedSidecar(home, project, 'logs/a.jsonl', 'original');
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  const partial = path.join(runsDir(home, project), firstRunId)
-  fs.mkdirSync(partial, { recursive: true })
-  fs.renameSync(path.join(projStateDir(home, project), 'logs'), path.join(partial, 'logs'))
+  const partial = path.join(runsDir(home, project), firstRunId);
+  fs.mkdirSync(partial, { recursive: true });
+  fs.renameSync(path.join(projStateDir(home, project), 'logs'), path.join(partial, 'logs'));
   // A flat logs/ recreated under the same name, holding different bytes.
-  seedSidecar(home, project, 'logs/a.jsonl', 'later')
+  seedSidecar(home, project, 'logs/a.jsonl', 'later');
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.readFileSync(path.join(partial, 'logs', 'a.jsonl'), 'utf8'), 'original')
-  assert.match(out.stderr, /logs/)
-  assert.equal(fs.existsSync(path.join(runsDir(home, project), `${firstRunId}.json`)), true)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.readFileSync(path.join(partial, 'logs', 'a.jsonl'), 'utf8'), 'original');
+  assert.match(out.stderr, /logs/);
+  assert.equal(fs.existsSync(path.join(runsDir(home, project), `${firstRunId}.json`)), true);
+});
 
 // --- Fix round 1 (Critical + Important #2): the validate-before-mutate
 // ordering fix, re-expressed against the real gate now that --queue-json is
@@ -638,114 +643,114 @@ test('a sidecar name already present in the archive is skipped with a warning, n
 // directory; the failure must be confined to "nothing written," full stop.
 
 test('init --ids naming an unknown item exits 1 and leaves an existing done run.json completely untouched', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'init', '--project', project, '--ids', 'ghost-1')
+  const out = run(project, home, 'init', '--project', project, '--ids', 'ghost-1');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /ghost-1/)
-  assert.equal(fs.existsSync(runFile(home, project)), true)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
-  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived')
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /ghost-1/);
+  assert.equal(fs.existsSync(runFile(home, project)), true);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified');
+  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived');
   // This is the exact symptom the critical bug produced: status wrongly
   // reporting "no run exists" because the done run had already been
   // archived away with nothing put back in its place.
-  assert.equal(run(project, home, 'status').status, 0)
-})
+  assert.equal(run(project, home, 'status').status, 0);
+});
 
 test('init --max given a negative number exits 1 and leaves an existing done run.json completely untouched', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'init', '--project', project, '--max', '-1')
+  const out = run(project, home, 'init', '--project', project, '--max', '-1');
 
-  assert.equal(out.status, 1)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified')
-  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived')
-  assert.equal(run(project, home, 'status').status, 0)
-})
+  assert.equal(out.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the done run.json was modified');
+  assert.equal(fs.existsSync(runsDir(home, project)), false, 'nothing should have been archived');
+  assert.equal(run(project, home, 'status').status, 0);
+});
 
 // Fix round 1 (Minor): confirms the reordering also kills the stray-empty-
 // directory symptom on a project with no PRIOR run at all — there is
 // nothing to archive here, so this is a distinct assertion from the two
 // above (which exercise the archive-then-throw ordering specifically).
 test('init --ids naming an unknown item on a brand-new project creates no directory at all', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--ids', 'ghost-1')
+  const out = run(project, home, 'init', '--project', project, '--ids', 'ghost-1');
 
-  assert.equal(out.status, 1)
-  assert.equal(fs.existsSync(path.join(home, encodeURIComponent(project))), false, 'a stray project directory was created despite init failing')
-})
+  assert.equal(out.status, 1);
+  assert.equal(fs.existsSync(path.join(home, encodeURIComponent(project))), false, 'a stray project directory was created despite init failing');
+});
 
 // --- Test case 4: stage sets fields, first-arrival stageAt, fresh updatedAt
 
 test('stage task-5 dispatched sets session/worktree/branch, stamps stageAt.dispatched, and strictly advances updatedAt', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
 
-  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--session', 'abc', '--worktree', '/tmp/w', '--branch', 'backlog/task-5')
+  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--session', 'abc', '--worktree', '/tmp/w', '--branch', 'backlog/task-5');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  const item = after.queue.find((q) => q.id === 'task-5')
-  assert.equal(item.sessionId, 'abc')
-  assert.equal(item.worktree, '/tmp/w')
-  assert.equal(item.branch, 'backlog/task-5')
-  assert.equal(item.stage, 'dispatched')
-  assert.ok(Number.isFinite(Date.parse(item.stageAt.dispatched)), `stageAt.dispatched did not parse: ${item.stageAt.dispatched}`)
-  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const item = after.queue.find((q) => q.id === 'task-5');
+  assert.equal(item.sessionId, 'abc');
+  assert.equal(item.worktree, '/tmp/w');
+  assert.equal(item.branch, 'backlog/task-5');
+  assert.equal(item.stage, 'dispatched');
+  assert.ok(Number.isFinite(Date.parse(item.stageAt.dispatched)), `stageAt.dispatched did not parse: ${item.stageAt.dispatched}`);
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance');
+});
 
 test('stage only stamps stageAt on first arrival — revisiting a stage does not move its timestamp', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-9', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-9', 'reviewing').status, 0)
-  const firstVisit = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stageAt.reviewing
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-9', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-9', 'reviewing').status, 0);
+  const firstVisit = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stageAt.reviewing;
 
   // A revisit must land strictly later by the clock, so this only proves
   // the first-arrival timestamp survives if it is provably NOT re-stamped —
   // i.e. it must equal firstVisit even though real time has moved on.
-  assert.equal(run(project, home, 'stage', 'task-9', 'fixing').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-9', 'reviewing').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-9', 'fixing').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-9', 'reviewing').status, 0);
 
-  const secondVisit = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stageAt.reviewing
-  assert.equal(secondVisit, firstVisit)
-})
+  const secondVisit = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stageAt.reviewing;
+  assert.equal(secondVisit, firstVisit);
+});
 
 // --- Test case 5: stage with an unknown stage string is refused whole -----
 
 test('stage task-5 nonsense exits 1 and leaves run.json byte-unchanged', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'stage', 'task-5', 'nonsense')
+  const out = run(project, home, 'stage', 'task-5', 'nonsense');
 
-  assert.equal(out.status, 1)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 test('stage with an unknown item id exits 1 and leaves run.json byte-unchanged', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'stage', 'ghost-1', 'dispatched')
+  const out = run(project, home, 'stage', 'ghost-1', 'dispatched');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /ghost-1/)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /ghost-1/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // --- Fix round 1 (Task 6+7 review): `stage --fix-loop` ---------------------
 // The SKILL enforces "at most two fix loops per item," and before this flag
@@ -758,173 +763,173 @@ test('stage with an unknown item id exits 1 and leaves run.json byte-unchanged',
 // resume" means mechanically), and it is strictly opt-in.
 
 test('stage --fix-loop increments fixLoops, accumulates across a re-read, and leaves every other field alone', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-4', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  const beforeItem = before.queue.find((q) => q.id === 'task-4')
-  assert.equal(beforeItem.fixLoops, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-4', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const beforeItem = before.queue.find((q) => q.id === 'task-4');
+  assert.equal(beforeItem.fixLoops, 0);
 
-  const out = run(project, home, 'stage', 'task-4', 'fixing', '--fix-loop')
+  const out = run(project, home, 'stage', 'task-4', 'fixing', '--fix-loop');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-4', stage: 'fixing', fixLoops: 1 })
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-4', stage: 'fixing', fixLoops: 1 });
 
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  const item = after.queue.find((q) => q.id === 'task-4')
-  assert.equal(item.fixLoops, 1)
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const item = after.queue.find((q) => q.id === 'task-4');
+  assert.equal(item.fixLoops, 1);
   // Everything else on the item is exactly as init minted it: only the three
   // fields this call is allowed to move (fixLoops, stage, and stage's own
   // first-arrival stamp) are normalized away before the comparison, so a
   // stray write to sessionId/worktree/branch/verification/questions/note
   // would fail here.
-  assert.deepEqual({ ...item, fixLoops: beforeItem.fixLoops, stage: beforeItem.stage, stageAt: beforeItem.stageAt }, beforeItem)
+  assert.deepEqual({ ...item, fixLoops: beforeItem.fixLoops, stage: beforeItem.stage, stageAt: beforeItem.stageAt }, beforeItem);
   // And nothing outside the queue moved except the heartbeat.
-  assert.deepEqual({ ...after, queue: before.queue, updatedAt: before.updatedAt }, before)
+  assert.deepEqual({ ...after, queue: before.queue, updatedAt: before.updatedAt }, before);
 
   // A second, separate process: the count is read back off disk and advanced,
   // never recomputed from scratch.
-  assert.equal(run(project, home, 'stage', 'task-4', 'fixing', '--fix-loop').status, 0)
-  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-4').fixLoops, 2)
-})
+  assert.equal(run(project, home, 'stage', 'task-4', 'fixing', '--fix-loop').status, 0);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-4').fixLoops, 2);
+});
 
 test('stage without --fix-loop never touches fixLoops, and prints its usual two-key line', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-4', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-4', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'stage', 'task-4', 'fixing')
+  const out = run(project, home, 'stage', 'task-4', 'fixing');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-4', stage: 'fixing' })
-  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-4').fixLoops, 0)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-4', stage: 'fixing' });
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-4').fixLoops, 0);
+});
 
 // --- Test case 6: no *.tmp litter survives any successful command ---------
 
 test('no *.tmp file survives in the project run dir after init, stage, heartbeat, attention, and finish all succeed', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-6', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-6', 'dispatched').status, 0)
-  assert.equal(run(project, home, 'heartbeat').status, 0)
-  assert.equal(run(project, home, 'attention', 'task-6', '--kind', 'parked', '--detail', 'merge conflict').status, 0)
-  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-6', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-6', 'dispatched').status, 0);
+  assert.equal(run(project, home, 'heartbeat').status, 0);
+  assert.equal(run(project, home, 'attention', 'task-6', '--kind', 'parked', '--detail', 'merge conflict').status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
 
-  const dir = path.join(home, encodeURIComponent(project))
-  const leftover = fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))
-  assert.deepEqual(leftover, [])
-})
+  const dir = path.join(home, encodeURIComponent(project));
+  const leftover = fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'));
+  assert.deepEqual(leftover, []);
+});
 
 // --- Test case 7: heartbeat touches updatedAt only -------------------------
 
 test('heartbeat changes updatedAt and nothing else', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-1', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
 
-  const out = run(project, home, 'heartbeat')
+  const out = run(project, home, 'heartbeat');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  const { updatedAt: beforeUpdatedAt, ...beforeRest } = before
-  const { updatedAt: afterUpdatedAt, ...afterRest } = after
-  assert.deepEqual(afterRest, beforeRest)
-  assert.ok(Date.parse(afterUpdatedAt) > Date.parse(beforeUpdatedAt))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const { updatedAt: beforeUpdatedAt, ...beforeRest } = before;
+  const { updatedAt: afterUpdatedAt, ...afterRest } = after;
+  assert.deepEqual(afterRest, beforeRest);
+  assert.ok(Date.parse(afterUpdatedAt) > Date.parse(beforeUpdatedAt));
+});
 
 test('heartbeat with no run exits 3', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'heartbeat')
+  const out = run(project, home, 'heartbeat');
 
-  assert.equal(out.status, 3)
-})
+  assert.equal(out.status, 3);
+});
 
 // --- Test case 8: attention appends and mirrors questions -------------------
 
 test('attention task-6 --kind needs-answers --detail appends an attention row and the run still parses as the contract shape', (t) => {
-  const { home, project } = orchFixture(t)
-  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
-  seedReadyTask(project, 'task-6', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'));
+  seedReadyTask(project, 'task-6', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'attention', 'task-6', '--kind', 'needs-answers', '--detail', 'which column?')
+  const out = run(project, home, 'attention', 'task-6', '--kind', 'needs-answers', '--detail', 'which column?');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(after.attention, [{ id: 'task-6', kind: 'needs-answers', detail: 'which column?' }])
-  assert.deepEqual(new Set(Object.keys(after)), new Set(Object.keys(fixture)))
-  assert.deepEqual(new Set(Object.keys(after.attention[0])), new Set(Object.keys(fixture.attention[0])))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(after.attention, [{ id: 'task-6', kind: 'needs-answers', detail: 'which column?' }]);
+  assert.deepEqual(new Set(Object.keys(after)), new Set(Object.keys(fixture)));
+  assert.deepEqual(new Set(Object.keys(after.attention[0])), new Set(Object.keys(fixture.attention[0])));
+});
 
 test('attention --kind needs-answers --questions-json mirrors the questions onto the queue item', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-21', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const questionsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-questions-')), 'questions.json')
-  fs.writeFileSync(questionsFile, JSON.stringify(['Does archiving move it to the Archive view immediately?']))
-  t.after(() => fs.rmSync(path.dirname(questionsFile), { recursive: true, force: true }))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-21', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const questionsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-questions-')), 'questions.json');
+  fs.writeFileSync(questionsFile, JSON.stringify(['Does archiving move it to the Archive view immediately?']));
+  t.after(() => fs.rmSync(path.dirname(questionsFile), { recursive: true, force: true }));
 
-  const out = run(project, home, 'attention', 'task-21', '--kind', 'needs-answers', '--detail', 'needs a decision', '--questions-json', questionsFile)
+  const out = run(project, home, 'attention', 'task-21', '--kind', 'needs-answers', '--detail', 'needs a decision', '--questions-json', questionsFile);
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(after.queue[0].questions, ['Does archiving move it to the Archive view immediately?'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(after.queue[0].questions, ['Does archiving move it to the Archive view immediately?']);
+});
 
 // A kind other than needs-answers must never pick up --questions-json, even
 // if the caller passes one — the field's whole meaning ("unanswered
 // preflight questions") only applies to that one kind.
 test('attention --kind parked ignores --questions-json entirely', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-16', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const questionsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-questions-')), 'questions.json')
-  fs.writeFileSync(questionsFile, JSON.stringify(['should never appear']))
-  t.after(() => fs.rmSync(path.dirname(questionsFile), { recursive: true, force: true }))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-16', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const questionsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-questions-')), 'questions.json');
+  fs.writeFileSync(questionsFile, JSON.stringify(['should never appear']));
+  t.after(() => fs.rmSync(path.dirname(questionsFile), { recursive: true, force: true }));
 
-  const out = run(project, home, 'attention', 'task-16', '--kind', 'parked', '--detail', 'merge conflict', '--questions-json', questionsFile)
+  const out = run(project, home, 'attention', 'task-16', '--kind', 'parked', '--detail', 'merge conflict', '--questions-json', questionsFile);
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(after.queue[0].questions, [])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(after.queue[0].questions, []);
+});
 
 test('attention with an unknown kind exits 1 and leaves run.json byte-unchanged', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-6', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-6', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'attention', 'task-6', '--kind', 'bogus', '--detail', 'x')
+  const out = run(project, home, 'attention', 'task-6', '--kind', 'bogus', '--detail', 'x');
 
-  assert.equal(out.status, 1)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // --- Test case 9: status with no run exits 3 --------------------------------
 
 test('status with no run exits 3', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'status')
+  const out = run(project, home, 'status');
 
-  assert.equal(out.status, 3)
-})
+  assert.equal(out.status, 3);
+});
 
 test('status --json prints the run file verbatim as parseable JSON', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'status', '--json')
+  const out = run(project, home, 'status', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const printed = JSON.parse(out.stdout)
-  const onDisk = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(printed, onDisk)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const printed = JSON.parse(out.stdout);
+  const onDisk = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(printed, onDisk);
+});
 
 // --- Task 3: merge mode in the run file ---------------------------------
 // Numbered per the task-3 brief's own table (task-3-brief.md, Step 1) so a
@@ -932,58 +937,58 @@ test('status --json prints the run file verbatim as parseable JSON', (t) => {
 
 // Case 1.
 test('init --merge-mode branch writes mergeMode/mergeModeEffective "branch" and a null note', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'branch')
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'branch');
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(written.mergeMode, 'branch')
-  assert.equal(written.mergeModeEffective, 'branch')
-  assert.equal(written.mergeModeNote, null)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.mergeMode, 'branch');
+  assert.equal(written.mergeModeEffective, 'branch');
+  assert.equal(written.mergeModeNote, null);
+});
 
 // Case 2 — the regression guard: a run started with no --merge-mode flag
 // must behave exactly as it does at HEAD, key set included.
 test('init with no --merge-mode flag writes "merge" for both fields and a null note, key set unchanged from the contract fixture', (t) => {
-  const { home, project } = orchFixture(t)
-  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
+  const { home, project } = orchFixture(t);
+  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'));
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(written.mergeMode, 'merge')
-  assert.equal(written.mergeModeEffective, 'merge')
-  assert.equal(written.mergeModeNote, null)
-  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.mergeMode, 'merge');
+  assert.equal(written.mergeModeEffective, 'merge');
+  assert.equal(written.mergeModeNote, null);
+  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)));
+});
 
 // Case 3 — "validate first, mutate last": an invalid --merge-mode must
 // write nothing at all, not merely exit nonzero, so this asserts the whole
 // BM_ORCH_HOME directory tree stays empty rather than just checking the
 // exit code.
 test('init --merge-mode nonsense exits 1, names the two valid values, and writes nothing at all', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'nonsense')
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'nonsense');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /merge/)
-  assert.match(out.stderr, /branch/)
-  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --merge-mode is invalid')
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /merge/);
+  assert.match(out.stderr, /branch/);
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --merge-mode is invalid');
+});
 
 // Case 4 — the same guarantee for a --merge-mode flag with no value at all
 // (the flag consumes the next argv slot; here there isn't one).
 test('init --merge-mode with no value exits 1 and writes nothing', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--merge-mode')
+  const out = run(project, home, 'init', '--project', project, '--merge-mode');
 
-  assert.equal(out.status, 1)
-  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --merge-mode has no value')
-})
+  assert.equal(out.status, 1);
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --merge-mode has no value');
+});
 
 // --- task-19: question mode in the run file -----------------------------
 // The same six-case shape the merge-mode block above uses, because the flag
@@ -994,182 +999,192 @@ test('init --merge-mode with no value exits 1 and writes nothing', (t) => {
 // neighbour's `merge`.
 
 test('init --question-mode decide writes questionMode "decide"', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--question-mode', 'decide')
+  const out = run(project, home, 'init', '--project', project, '--question-mode', 'decide');
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(written.questionMode, 'decide')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.questionMode, 'decide');
+});
 
 test('init --question-mode park writes questionMode "park"', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--question-mode', 'park')
+  const out = run(project, home, 'init', '--project', project, '--question-mode', 'park');
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(written.questionMode, 'park')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.questionMode, 'park');
+});
 
 // The regression guard, the twin of the merge-mode block's Case 2: a run
 // started with no flag at all must be the run this tool has always written,
 // key set included — and its question behaviour must be the behaviour every
 // run had before the flag existed, which is `park`.
 test('init with no --question-mode flag writes "park", key set unchanged from the contract fixture', (t) => {
-  const { home, project } = orchFixture(t)
-  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'))
+  const { home, project } = orchFixture(t);
+  const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8'));
 
-  const out = run(project, home, 'init', '--project', project)
+  const out = run(project, home, 'init', '--project', project);
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(written.questionMode, 'park')
-  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.questionMode, 'park');
+  assert.deepEqual(new Set(Object.keys(written)), new Set(Object.keys(fixture)));
+});
 
 // "Validate first, mutate last" again, and it matters more here than the
 // exit code does: `cmdInit` archives any existing run.json before it writes
 // the new one, so a validation that ran late would destroy a real run's
 // file on behalf of a call that was never going to succeed.
 test('init --question-mode auto exits 1, names both legal values, and writes nothing at all', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--question-mode', 'auto')
+  const out = run(project, home, 'init', '--project', project, '--question-mode', 'auto');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /decide/)
-  assert.match(out.stderr, /park/)
-  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --question-mode is invalid')
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /decide/);
+  assert.match(out.stderr, /park/);
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --question-mode is invalid');
+});
 
 test('init --question-mode with no value exits 1, says so, and writes nothing', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--question-mode')
+  const out = run(project, home, 'init', '--project', project, '--question-mode');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /no value/)
-  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --question-mode has no value')
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /no value/);
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when --question-mode has no value');
+});
 
 // The two flags are independent run-scoped facts and neither reads the
 // other; this is the case that would catch a parse loop where one flag's
 // argv slot swallowed the other's.
 test('init --merge-mode branch --question-mode decide sets both fields independently', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'branch', '--question-mode', 'decide')
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'branch', '--question-mode', 'decide');
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(written.mergeMode, 'branch')
-  assert.equal(written.mergeModeEffective, 'branch')
-  assert.equal(written.questionMode, 'decide')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.mergeMode, 'branch');
+  assert.equal(written.mergeModeEffective, 'branch');
+  assert.equal(written.questionMode, 'decide');
+});
 
 // --- task-19: `assume`, the one writer of RunQueueItem.assumptions -------
 // A local helper rather than a shared one: only these tests need a JSON
 // file of pairs, and the temp directory is torn down per test the same way
 // the --questions-json tests above do it.
 function assumptionsFile(t, pairs) {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-assume-')), 'assumptions.json')
-  fs.writeFileSync(file, JSON.stringify(pairs))
-  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }))
-  return file
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-assume-')), 'assumptions.json');
+  fs.writeFileSync(file, JSON.stringify(pairs));
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+  return file;
 }
 
 function decideRun(t, id = 'bug-1', title = 'An ordinary bug') {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, id, title)
-  assert.equal(run(project, home, 'init', '--project', project, '--question-mode', 'decide').status, 0)
-  return { home, project }
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, id, title);
+  assert.equal(run(project, home, 'init', '--project', project, '--question-mode', 'decide').status, 0);
+  return { home, project };
 }
 
 test('assume writes the pairs onto the queue item, in file order', (t) => {
-  const { home, project } = decideRun(t)
+  const { home, project } = decideRun(t);
   const file = assumptionsFile(t, [
     { question: 'Which column does a rejected item land in?', answer: 'Out of scope — Archive renders it there.' },
-    { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' },
-  ])
+    { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' }
+  ]);
 
-  const out = run(project, home, 'assume', 'bug-1', '--json', file)
+  const out = run(project, home, 'assume', 'bug-1', '--json', file);
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
   assert.deepEqual(after.queue.find((q) => q.id === 'bug-1').assumptions, [
     { question: 'Which column does a rejected item land in?', answer: 'Out of scope — Archive renders it there.' },
-    { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' },
-  ])
-})
+    { question: 'Does the fix need a migration?', answer: 'No; the field is derived, never stored.' }
+  ]);
+});
 
 // Appends, never replaces: an item's pre-flight can decide a second
 // question after the first has already been recorded, and a replace would
 // erase the earlier decision with no trace it ever happened.
 test('a second assume on the same item appends rather than replacing', (t) => {
-  const { home, project } = decideRun(t)
-  assert.equal(run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [
-    { question: 'q1', answer: 'a1' },
-    { question: 'q2', answer: 'a2' },
-  ])).status, 0)
+  const { home, project } = decideRun(t);
+  assert.equal(
+    run(
+      project,
+      home,
+      'assume',
+      'bug-1',
+      '--json',
+      assumptionsFile(t, [
+        { question: 'q1', answer: 'a1' },
+        { question: 'q2', answer: 'a2' }
+      ])
+    ).status,
+    0
+  );
 
-  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q3', answer: 'a3' }]))
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q3', answer: 'a3' }]));
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
   assert.deepEqual(after.queue.find((q) => q.id === 'bug-1').assumptions, [
     { question: 'q1', answer: 'a1' },
     { question: 'q2', answer: 'a2' },
-    { question: 'q3', answer: 'a3' },
-  ])
-})
+    { question: 'q3', answer: 'a3' }
+  ]);
+});
 
 test('assume with no --json exits 1 and prints the usage', (t) => {
-  const { home, project } = decideRun(t)
+  const { home, project } = decideRun(t);
 
-  const out = run(project, home, 'assume', 'bug-1')
+  const out = run(project, home, 'assume', 'bug-1');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /--json/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /--json/);
+});
 
 test('assume --json naming a file that does not exist exits 1 and names the path', (t) => {
-  const { home, project } = decideRun(t)
-  const missing = path.join(os.tmpdir(), 'bm-orch-assume-does-not-exist', 'nope.json')
+  const { home, project } = decideRun(t);
+  const missing = path.join(os.tmpdir(), 'bm-orch-assume-does-not-exist', 'nope.json');
 
-  const out = run(project, home, 'assume', 'bug-1', '--json', missing)
+  const out = run(project, home, 'assume', 'bug-1', '--json', missing);
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /nope\.json/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /nope\.json/);
+});
 
 test('assume --json holding an object rather than an array exits 1 and says an array was expected', (t) => {
-  const { home, project } = decideRun(t)
+  const { home, project } = decideRun(t);
 
-  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, {}))
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, {}));
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /array/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /array/);
+});
 
 test('assume --json holding an entry with no answer key exits 1 and names the missing key', (t) => {
-  const { home, project } = decideRun(t)
+  const { home, project } = decideRun(t);
 
-  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q' }]))
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q' }]));
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /answer/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /answer/);
+});
 
-test('assume for an id that is not in this run\'s queue exits 1', (t) => {
-  const { home, project } = decideRun(t)
+test("assume for an id that is not in this run's queue exits 1", (t) => {
+  const { home, project } = decideRun(t);
 
-  const out = run(project, home, 'assume', 'nope-9', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]))
+  const out = run(project, home, 'assume', 'nope-9', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]));
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /nope-9/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /nope-9/);
+});
 
 // THE case this whole command exists to be constrained by. A run told to
 // park an unanswerable item and found writing assumptions about it is a run
@@ -1179,124 +1194,124 @@ test('assume for an id that is not in this run\'s queue exits 1', (t) => {
 // empty": the refusal must land before any write at all, so nothing else in
 // the file can have moved either.
 test('assume is refused under a park-mode run, naming the mode, leaving run.json byte-identical', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-1', 'An ordinary bug')
-  assert.equal(run(project, home, 'init', '--project', project, '--question-mode', 'park').status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-1', 'An ordinary bug');
+  assert.equal(run(project, home, 'init', '--project', project, '--question-mode', 'park').status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]))
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]));
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /park/)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /park/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // A run started with no flag at all is a park run, and gets the same
 // refusal — the default has to be the enforced default, not just the
 // written one.
 test('assume is refused on a run started with no --question-mode flag at all', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-1', 'An ordinary bug')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-1', 'An ordinary bug');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]))
+  const out = run(project, home, 'assume', 'bug-1', '--json', assumptionsFile(t, [{ question: 'q', answer: 'a' }]));
 
-  assert.equal(out.status, 1)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // The converse is deliberately NOT enforced: `decide` is permission to
 // answer, never an obligation to invent. An item whose questions genuinely
 // cannot be answered — a plan citing a section nobody wrote, an either/or
 // between two products — must still be able to park.
 test('attention --kind needs-answers still succeeds under a decide-mode run', (t) => {
-  const { home, project } = decideRun(t)
+  const { home, project } = decideRun(t);
 
-  const out = run(project, home, 'attention', 'bug-1', '--kind', 'needs-answers', '--detail', 'genuinely undecidable')
+  const out = run(project, home, 'attention', 'bug-1', '--kind', 'needs-answers', '--detail', 'genuinely undecidable');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(after.attention, [{ id: 'bug-1', kind: 'needs-answers', detail: 'genuinely undecidable' }])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(after.attention, [{ id: 'bug-1', kind: 'needs-answers', detail: 'genuinely undecidable' }]);
+});
 
 // Case 5 — the enforcement point design §3 calls for: a tool refusal, not a
 // SKILL.md reminder, because the reminder has to survive several hundred
 // turns of a headless session re-reading its own body and the refusal
 // doesn't need to. Checked against the WHOLE file, not just the item's
 // stage, since the refusal fires before any write at all.
-test("stage <id> merged is refused under a branch-mode run, naming the mode and the stage to use, and leaves run.json byte-unchanged", (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-40', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+test('stage <id> merged is refused under a branch-mode run, naming the mode and the stage to use, and leaves run.json byte-unchanged', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-40', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'stage', 'task-40', 'merged')
+  const out = run(project, home, 'stage', 'task-40', 'merged');
 
-  assert.notEqual(out.status, 0)
-  assert.match(out.stderr, /branch/)
-  assert.match(out.stderr, /branched/)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.notEqual(out.status, 0);
+  assert.match(out.stderr, /branch/);
+  assert.match(out.stderr, /branched/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // Case 6.
 test('stage <id> branched under branch mode succeeds and stamps stageAt.branched', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-41', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-41', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0);
 
-  const out = run(project, home, 'stage', 'task-41', 'branched')
+  const out = run(project, home, 'stage', 'task-41', 'branched');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  const item = after.queue.find((q) => q.id === 'task-41')
-  assert.equal(item.stage, 'branched')
-  assert.ok(Number.isFinite(Date.parse(item.stageAt.branched)), `stageAt.branched did not parse: ${item.stageAt.branched}`)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const item = after.queue.find((q) => q.id === 'task-41');
+  assert.equal(item.stage, 'branched');
+  assert.ok(Number.isFinite(Date.parse(item.stageAt.branched)), `stageAt.branched did not parse: ${item.stageAt.branched}`);
+});
 
 // Case 7 — the converse of case 5 is deliberately NOT enforced: staging an
 // item 'branched' under plain merge mode is exactly what a merge denied
 // mid-queue degrades an item to (design §5.2), so it must stay legal here
 // even before any `merge-mode` call has moved the run's own effective mode.
 test('stage <id> branched under merge mode is legal too — the degrade path', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-42', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-42', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'stage', 'task-42', 'branched')
+  const out = run(project, home, 'stage', 'task-42', 'branched');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.queue.find((q) => q.id === 'task-42').stage, 'branched')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.queue.find((q) => q.id === 'task-42').stage, 'branched');
+});
 
 // Case 8.
 test('merge-mode branch --note records a downgrade: mergeMode stays merge, mergeModeEffective becomes branch, note stored verbatim', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'merge-mode', 'branch', '--note', 'classifier denied the merge on bug-14')
+  const out = run(project, home, 'merge-mode', 'branch', '--note', 'classifier denied the merge on bug-14');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.mergeMode, 'merge')
-  assert.equal(after.mergeModeEffective, 'branch')
-  assert.equal(after.mergeModeNote, 'classifier denied the merge on bug-14')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.mergeMode, 'merge');
+  assert.equal(after.mergeModeEffective, 'branch');
+  assert.equal(after.mergeModeNote, 'classifier denied the merge on bug-14');
+});
 
 // Case 9 — the downgrade is one-way: a run already effective-branch must
 // refuse a call trying to move it back to merge, changing nothing.
 test('merge-mode merge on a run already effective-branch is refused, changing nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'merge-mode', 'branch', '--note', 'denied once already').status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'merge-mode', 'branch', '--note', 'denied once already').status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'merge-mode', 'merge', '--note', 'x')
+  const out = run(project, home, 'merge-mode', 'merge', '--note', 'x');
 
-  assert.notEqual(out.status, 0)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.notEqual(out.status, 0);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // Task-3 review fix round (Minor) — the one-way-transition logic is covered
 // above only for a run that REACHED branch mode via a downgrade (`init`
@@ -1308,36 +1323,36 @@ test('merge-mode merge on a run already effective-branch is refused, changing no
 // effective-branch from its very first write must be refused exactly like
 // case 9's downgrade-then-re-record scenario, changing nothing.
 test('merge-mode branch on a run that started in branch mode via init is refused, changing nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'merge-mode', 'branch', '--note', 'x')
+  const out = run(project, home, 'merge-mode', 'branch', '--note', 'x');
 
-  assert.notEqual(out.status, 0)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.notEqual(out.status, 0);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // Case 10 — the status summary must not report a branch-mode run's
 // progress as "N/M merged": that wording is only true under merge mode.
 test('status reads in branch-mode wording for a branch-mode run, not "N/M merged"', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-50', 'A')
-  seedReadyTask(project, 'task-51', 'B')
-  seedReadyTask(project, 'task-52', 'C')
-  seedReadyTask(project, 'task-53', 'D')
-  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-50', 'branched').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-51', 'branched').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-52', 'branched').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-50', 'A');
+  seedReadyTask(project, 'task-51', 'B');
+  seedReadyTask(project, 'task-52', 'C');
+  seedReadyTask(project, 'task-53', 'D');
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-50', 'branched').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-51', 'branched').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-52', 'branched').status, 0);
   // task-53 is left pending, so the total stays 4.
 
-  const out = run(project, home, 'status')
+  const out = run(project, home, 'status');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.match(out.stdout, /3\/4 branched/)
-  assert.doesNotMatch(out.stdout, /3\/4 merged/)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /3\/4 branched/);
+  assert.doesNotMatch(out.stdout, /3\/4 merged/);
+});
 
 // Final whole-branch review, finding 9: case 10 above pins `queueSummaryLine`'s
 // PURE branch-mode wording (a run that started `--merge-mode branch` and never
@@ -1349,33 +1364,30 @@ test('status reads in branch-mode wording for a branch-mode run, not "N/M merged
 // either direction" — so this pins both numbers appearing together, not just
 // the headline `branched` count that case 10 already covers.
 test('status names both counts for a run that downgraded mid-queue, not just the branched headline', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-70', 'A')
-  seedReadyTask(project, 'task-71', 'B')
-  seedReadyTask(project, 'task-72', 'C')
-  seedReadyTask(project, 'task-73', 'D')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-70', 'A');
+  seedReadyTask(project, 'task-71', 'B');
+  seedReadyTask(project, 'task-72', 'C');
+  seedReadyTask(project, 'task-73', 'D');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
   // Two items merge while the run is still in `merge` mode...
-  assert.equal(run(project, home, 'stage', 'task-70', 'merged').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-71', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-70', 'merged').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-71', 'merged').status, 0);
   // ...then the classifier denies a merge, degrading the rest of the queue.
-  assert.equal(
-    run(project, home, 'merge-mode', 'branch', '--note', 'classifier denied the merge on task-72').status,
-    0
-  )
-  assert.equal(run(project, home, 'stage', 'task-72', 'branched').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-73', 'branched').status, 0)
+  assert.equal(run(project, home, 'merge-mode', 'branch', '--note', 'classifier denied the merge on task-72').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-72', 'branched').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-73', 'branched').status, 0);
 
-  const out = run(project, home, 'status')
+  const out = run(project, home, 'status');
 
-  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.status, 0, out.stderr);
   // The headline flips to `branched` (this run's own definition of
   // "finished successfully" once mergeModeEffective moved), and the two
   // items that reached `main` before the denial are still named, not
   // silently dropped from the summary a post-mortem reads.
-  assert.match(out.stdout, /2\/4 branched/)
-  assert.match(out.stdout, /2 merged before the mode changed/)
-})
+  assert.match(out.stdout, /2\/4 branched/);
+  assert.match(out.stdout, /2 merged before the mode changed/);
+});
 
 // Cleanup pass, mirroring the degraded-run case above from the other side:
 // that test covers a run that STARTED merge and DEGRADED to branch mid-queue
@@ -1396,113 +1408,113 @@ test('status names both counts for a run that downgraded mid-queue, not just the
 // before the mode changed)" wording, and previously the only one of the two
 // non-pure arms with no test at all.
 test('status names both counts for a run that stayed in merge mode but carried over a branched item', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-80', 'A')
-  seedReadyTask(project, 'task-81', 'B')
-  seedReadyTask(project, 'task-82', 'C')
-  seedReadyTask(project, 'task-83', 'D')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-80', 'A');
+  seedReadyTask(project, 'task-81', 'B');
+  seedReadyTask(project, 'task-82', 'C');
+  seedReadyTask(project, 'task-83', 'D');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
   // Two items merge, exactly as `merge` mode always allows...
-  assert.equal(run(project, home, 'stage', 'task-80', 'merged').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-81', 'merged').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-80', 'merged').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-81', 'merged').status, 0);
   // ...and a third is staged `branched` directly, with no `merge-mode`
   // call anywhere in this test: this run's own mode never degrades, it
   // simply carries an item that already finished on a branch before this
   // run reached it.
-  assert.equal(run(project, home, 'stage', 'task-82', 'branched').status, 0)
+  assert.equal(run(project, home, 'stage', 'task-82', 'branched').status, 0);
   // task-83 is left pending, so the total stays 4.
 
-  const out = run(project, home, 'status')
+  const out = run(project, home, 'status');
 
-  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.status, 0, out.stderr);
   // The headline stays `merged` — unlike the degraded-run case, this run's
   // `mergeModeEffective` never moved off `merge` — with the carried-over
   // item named alongside it rather than silently dropped.
-  assert.match(out.stdout, /2\/4 merged/)
-  assert.match(out.stdout, /1 branched/)
-  assert.doesNotMatch(out.stdout, /2\/4 branched/)
+  assert.match(out.stdout, /2\/4 merged/);
+  assert.match(out.stdout, /1 branched/);
+  assert.doesNotMatch(out.stdout, /2\/4 branched/);
 
-  const json = run(project, home, 'status', '--json')
-  assert.equal(json.status, 0, json.stderr)
+  const json = run(project, home, 'status', '--json');
+  assert.equal(json.status, 0, json.stderr);
   // Confirms this really is the non-degraded arm, not a false positive that
   // happens to print the same numbers: `mergeModeEffective` stayed `merge`
   // for this run's entire life, which is the one fact `queueSummaryLine`
   // branches on to pick this wording over the degraded run's.
-  assert.equal(JSON.parse(json.stdout).mergeModeEffective, 'merge')
-})
+  assert.equal(JSON.parse(json.stdout).mergeModeEffective, 'merge');
+});
 
 // Case 11 — ATTENTION_KINDS gains no fourth member: a green branch is not a
 // thing a human needs to look at, so `branched` must stay an unknown kind
 // exactly like any other made-up string.
 test('attention --kind branched is refused as an unknown kind — ATTENTION_KINDS gains no fourth member', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-60', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-60', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'attention', 'task-60', '--kind', 'branched', '--detail', 'x')
+  const out = run(project, home, 'attention', 'task-60', '--kind', 'branched', '--detail', 'x');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /unknown kind/)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /unknown kind/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 // --- finish ------------------------------------------------------------
 
 test('finish --status done sets run status and re-stamps updatedAt', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
 
-  const out = run(project, home, 'finish', '--status', 'done')
+  const out = run(project, home, 'finish', '--status', 'done');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'done')
-  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'done');
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt));
+});
 
 test('finish with an unrecognized --status exits 1 and leaves run.json byte-unchanged', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'finish', '--status', 'bogus')
+  const out = run(project, home, 'finish', '--status', 'bogus');
 
-  assert.equal(out.status, 1)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 test('finish with no run exits 3', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'finish', '--status', 'done')
+  const out = run(project, home, 'finish', '--status', 'done');
 
-  assert.equal(out.status, 3)
-})
+  assert.equal(out.status, 3);
+});
 
 // --- misc CLI shape ----------------------------------------------------
 
 test('an unknown command exits 1', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'bogus-command')
+  const out = run(project, home, 'bogus-command');
 
-  assert.equal(out.status, 1)
-})
+  assert.equal(out.status, 1);
+});
 
-test('stage, heartbeat, attention, finish, and status all resolve the project from cwd via the nearest .git ancestor, not from init\'s --project argument alone', (t) => {
-  const { home, project } = orchFixture(t)
-  const nested = path.join(project, 'a', 'b')
-  fs.mkdirSync(nested, { recursive: true })
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+test("stage, heartbeat, attention, finish, and status all resolve the project from cwd via the nearest .git ancestor, not from init's --project argument alone", (t) => {
+  const { home, project } = orchFixture(t);
+  const nested = path.join(project, 'a', 'b');
+  fs.mkdirSync(nested, { recursive: true });
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
   // Run from a subdirectory of the same repo — resolveProjectRoot must walk
   // up to the same root `init` was given, or this would 404 the run.
-  const out = run(nested, home, 'heartbeat')
+  const out = run(nested, home, 'heartbeat');
 
-  assert.equal(out.status, 0, out.stderr)
-})
+  assert.equal(out.status, 0, out.stderr);
+});
 
 // --- Task 4: `plan` — the queue builder + refusal gate ----------------------
 // These are the brief's own eight authoritative cases, run against the
@@ -1516,177 +1528,180 @@ test('stage, heartbeat, attention, finish, and status all resolve the project fr
 // `plan` is supposed to write nothing at all (case 8 below is exactly that
 // promise), but a bug that broke it should never be able to corrupt the
 // very fixtures this suite depends on to catch the bug in the first place.
-const FIXTURE_STORE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'store')
+const FIXTURE_STORE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'store');
 
 function planFixture(t) {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-plan-home-')))
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-plan-project-'))
-  const project = path.join(scratch, 'project')
-  fs.cpSync(FIXTURE_STORE, project, { recursive: true })
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-plan-home-')));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-plan-project-'));
+  const project = path.join(scratch, 'project');
+  fs.cpSync(FIXTURE_STORE, project, { recursive: true });
   t.after(() => {
-    fs.rmSync(home, { recursive: true, force: true })
-    fs.rmSync(scratch, { recursive: true, force: true })
-  })
-  return { home, project: fs.realpathSync(project) }
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
+  });
+  return { home, project: fs.realpathSync(project) };
 }
 
 function plan(project, home, ...extra) {
-  return run(project, home, 'plan', '--project', project, ...extra)
+  return run(project, home, 'plan', '--project', project, ...extra);
 }
 
 // A recursive {relative path -> base64 content} snapshot, used by case 8 to
 // prove `plan` really writes nothing — byte content rather than just names
 // or mtimes, so even a same-size, same-timestamp rewrite would be caught.
 function snapshotTree(dir) {
-  const entries = []
+  const entries = [];
   const walk = (d) => {
     for (const entry of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const p = path.join(d, entry.name)
-      if (entry.isDirectory()) walk(p)
-      else entries.push([path.relative(dir, p), fs.readFileSync(p).toString('base64')])
+      const p = path.join(d, entry.name);
+      if (entry.isDirectory()) walk(p);
+      else entries.push([path.relative(dir, p), fs.readFileSync(p).toString('base64')]);
     }
-  }
-  walk(dir)
-  return entries
+  };
+  walk(dir);
+  return entries;
 }
 
 // Case 1: a real ## Plan reads as ready, with nothing to complain about.
 test('plan: a task with a real ## Plan is ready, with empty reasons', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-1', '--json')
+  const out = plan(project, home, '--ids', 'task-1', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.id, 'task-1')
-  assert.equal(item.gate, 'ready')
-  assert.deepEqual(item.reasons, [])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.id, 'task-1');
+  assert.equal(item.gate, 'ready');
+  assert.deepEqual(item.reasons, []);
+});
 
 // Case 2: the heading is there, but nothing under it — ungroomed, and the
 // reason has to actually say so, not just fail silently.
 test('plan: a task whose ## Plan heading has only whitespace under it is ungroomed, and the reason names the empty Plan', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-3', '--json')
+  const out = plan(project, home, '--ids', 'task-3', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ungroomed')
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ungroomed');
   assert.ok(
     item.reasons.some((r) => /plan/i.test(r) && /empty|no content/i.test(r)),
-    `expected a reason naming the empty Plan, got ${JSON.stringify(item.reasons)}`,
-  )
-})
+    `expected a reason naming the empty Plan, got ${JSON.stringify(item.reasons)}`
+  );
+});
 
 // Case 3: no ## Plan heading at all — also ungroomed, distinct reason.
 test('plan: a task with no ## Plan heading at all is ungroomed', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-4', '--json')
+  const out = plan(project, home, '--ids', 'task-4', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ungroomed')
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ungroomed');
   assert.ok(
     item.reasons.some((r) => /plan/i.test(r) && /missing/i.test(r)),
-    `expected a reason naming the missing Plan heading, got ${JSON.stringify(item.reasons)}`,
-  )
-})
+    `expected a reason naming the missing Plan heading, got ${JSON.stringify(item.reasons)}`
+  );
+});
 
 // Case 4: a bug's ## Fix still exactly "unknown" — the backlog-capture
 // placeholder — is ungroomed.
 test('plan: a bug whose ## Fix is exactly "unknown" is ungroomed', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'bug-2', '--json')
+  const out = plan(project, home, '--ids', 'bug-2', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ungroomed')
-  assert.ok(item.reasons.some((r) => /fix/i.test(r)), `expected a reason naming ## Fix, got ${JSON.stringify(item.reasons)}`)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ungroomed');
+  assert.ok(
+    item.reasons.some((r) => /fix/i.test(r)),
+    `expected a reason naming ## Fix, got ${JSON.stringify(item.reasons)}`
+  );
+});
 
 // Case 5: a TBD in an otherwise-real Plan is needs-answers, not ungroomed —
 // and, critically, still shows up in the output rather than being dropped.
 test('plan: a task with TBD in its Plan is needs-answers, with non-empty questions, and is still listed rather than dropped', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-5', '--json')
+  const out = plan(project, home, '--ids', 'task-5', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const items = JSON.parse(out.stdout)
-  assert.equal(items.length, 1, 'a needs-answers item must still be listed, not dropped')
-  assert.equal(items[0].gate, 'needs-answers')
-  assert.ok(items[0].questions.length > 0)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const items = JSON.parse(out.stdout);
+  assert.equal(items.length, 1, 'a needs-answers item must still be listed, not dropped');
+  assert.equal(items[0].gate, 'needs-answers');
+  assert.ok(items[0].questions.length > 0);
+});
 
 // Case 6: the default order (no --ids) is bugs oldest-first then tasks
 // oldest-first, by id NUMBER — and --ids restricts and re-orders to exactly
 // the given sequence.
 test('plan orders bugs oldest-first then tasks oldest-first, by id number rather than file mtime', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const ids = JSON.parse(out.stdout).map((i) => i.id)
-  assert.deepEqual(ids, ['bug-2', 'bug-7', 'task-1', 'task-3', 'task-4', 'task-5'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const ids = JSON.parse(out.stdout).map((i) => i.id);
+  assert.deepEqual(ids, ['bug-2', 'bug-7', 'task-1', 'task-3', 'task-4', 'task-5']);
+});
 
 test('plan --ids restricts and re-orders to exactly the given sequence', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-1,bug-2', '--json')
+  const out = plan(project, home, '--ids', 'task-1,bug-2', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const ids = JSON.parse(out.stdout).map((i) => i.id)
-  assert.deepEqual(ids, ['task-1', 'bug-2'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const ids = JSON.parse(out.stdout).map((i) => i.id);
+  assert.deepEqual(ids, ['task-1', 'bug-2']);
+});
 
 test('plan --ids naming an unknown id exits 1 and names it', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-1,ghost-9', '--json')
+  const out = plan(project, home, '--ids', 'task-1,ghost-9', '--json');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /ghost-9/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /ghost-9/);
+});
 
 // Case 7: --max 2 marks everything after the 2nd READY item as beyondMax —
 // bug-2 is ungroomed and sits before either ready item, so it stays false;
 // task-3/4/5 sit after task-1 (the 2nd ready item) and are all beyond,
 // regardless of their own gate.
 test('plan --max 2 marks every item after the second ready one as beyondMax, regardless of its own gate', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--max', '2', '--json')
+  const out = plan(project, home, '--max', '2', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const byId = Object.fromEntries(JSON.parse(out.stdout).map((i) => [i.id, i.beyondMax]))
+  assert.equal(out.status, 0, out.stderr);
+  const byId = Object.fromEntries(JSON.parse(out.stdout).map((i) => [i.id, i.beyondMax]));
   assert.deepEqual(byId, {
     'bug-2': false,
     'bug-7': false,
     'task-1': false,
     'task-3': true,
     'task-4': true,
-    'task-5': true,
-  })
-})
+    'task-5': true
+  });
+});
 
 // Case 8: plan is side-effect free — the fixture store and the state dir
 // are byte-identical before and after.
 test('plan writes nothing at all: the fixture store and the state dir are byte-identical before and after', (t) => {
-  const { home, project } = planFixture(t)
-  const before = snapshotTree(project)
-  const homeBefore = fs.readdirSync(home)
+  const { home, project } = planFixture(t);
+  const before = snapshotTree(project);
+  const homeBefore = fs.readdirSync(home);
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(snapshotTree(project), before)
-  assert.deepEqual(fs.readdirSync(home), homeBefore)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(snapshotTree(project), before);
+  assert.deepEqual(fs.readdirSync(home), homeBefore);
+});
 
 // --- supplementary: the other two question-detection triggers ---------------
 // Not among the brief's eight authoritative cases (which pin TBD detection
@@ -1697,39 +1712,39 @@ test('plan writes nothing at all: the fixture store and the state dir are byte-i
 // checked-in directory to exactly the six items the brief names.
 
 test('plan: a trailing "?" line inside ## Plan triggers needs-answers, using that line verbatim as the question', (t) => {
-  const { home, project } = orchFixture(t)
-  const dir = path.join(project, 'backlog', 'tasks', 'open')
-  fs.mkdirSync(dir, { recursive: true })
+  const { home, project } = orchFixture(t);
+  const dir = path.join(project, 'backlog', 'tasks', 'open');
+  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'task-1-q.md'),
-    '---\nid: task-1\ntitle: Ask before building\ncreated: 2026-08-01\n---\n\n## Plan\n\nBuild the thing. Should it default to dark mode?\n\n## Done when\n',
-  )
+    '---\nid: task-1\ntitle: Ask before building\ncreated: 2026-08-01\n---\n\n## Plan\n\nBuild the thing. Should it default to dark mode?\n\n## Done when\n'
+  );
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'needs-answers')
-  assert.ok(item.questions.some((q) => q.includes('dark mode?')))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'needs-answers');
+  assert.ok(item.questions.some((q) => q.includes('dark mode?')));
+});
 
 test('plan: a ## Done when command not found in verify.json or package.json is a warning question, never a gate failure', (t) => {
-  const { home, project } = orchFixture(t)
-  const dir = path.join(project, 'backlog', 'tasks', 'open')
-  fs.mkdirSync(dir, { recursive: true })
+  const { home, project } = orchFixture(t);
+  const dir = path.join(project, 'backlog', 'tasks', 'open');
+  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'task-1-dw.md'),
-    '---\nid: task-1\ntitle: Ship it\ncreated: 2026-08-01\n---\n\n## Plan\n\nReal, groomed plan content with nothing left to decide.\n\n## Done when\n\n```bash\npnpm run this-script-does-not-exist\n```\n',
-  )
+    '---\nid: task-1\ntitle: Ship it\ncreated: 2026-08-01\n---\n\n## Plan\n\nReal, groomed plan content with nothing left to decide.\n\n## Done when\n\n```bash\npnpm run this-script-does-not-exist\n```\n'
+  );
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'needs-answers')
-  assert.equal(item.reasons.length, 0, 'an unresolved Done-when command is a question, never a gate failure')
-  assert.ok(item.questions.some((q) => q.includes('this-script-does-not-exist')))
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'needs-answers');
+  assert.equal(item.reasons.length, 0, 'an unresolved Done-when command is a question, never a gate failure');
+  assert.ok(item.questions.some((q) => q.includes('this-script-does-not-exist')));
+});
 
 // --- init wires the same gate in ---------------------------------------
 // Not one of the eight `plan` cases either, but the brief's whole point is
@@ -1738,15 +1753,21 @@ test('plan: a ## Done when command not found in verify.json or package.json is a
 // buildGatedQueue (e.g. reintroducing its own copy of the ordering or the
 // --max cutoff) even though every `plan`-specific case above is green.
 test('init builds its queue from the real gate: bugs oldest-first then tasks oldest-first, and --max excludes items beyond the cap', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = run(project, home, 'init', '--project', project, '--max', '2')
+  const out = run(project, home, 'init', '--project', project, '--max', '2');
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(written.queue.map((q) => q.id), ['bug-2', 'bug-7', 'task-1'])
-  assert.ok(written.queue.every((q) => q.stage === 'pending'), 'every queued item should start pending regardless of its own gate result')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(
+    written.queue.map((q) => q.id),
+    ['bug-2', 'bug-7', 'task-1']
+  );
+  assert.ok(
+    written.queue.every((q) => q.stage === 'pending'),
+    'every queued item should start pending regardless of its own gate result'
+  );
+});
 
 // --- bug-5: the gate reads the ref the worktree is built from, not the disk -
 // The defect this section pins: an item groomed but not yet committed on
@@ -1767,19 +1788,19 @@ test('init builds its queue from the real gate: bugs oldest-first then tasks old
 // NON-item file it can dirty. Every non-git `planFixture` case above stays
 // exactly as it is — those are the fallback's regression test.
 function planGitFixture(t) {
-  const { home, project } = planFixture(t)
-  spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' })
-  spawnSync('git', ['-C', project, 'symbolic-ref', 'HEAD', 'refs/heads/main'], { encoding: 'utf8' })
-  fs.writeFileSync(path.join(project, 'README.md'), 'fixture store\n')
-  commitEverything(project, 'fixture store')
-  return { home, project }
+  const { home, project } = planFixture(t);
+  spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' });
+  spawnSync('git', ['-C', project, 'symbolic-ref', 'HEAD', 'refs/heads/main'], { encoding: 'utf8' });
+  fs.writeFileSync(path.join(project, 'README.md'), 'fixture store\n');
+  commitEverything(project, 'fixture store');
+  return { home, project };
 }
 
 // The one uncommitted item cases 2, 4 and 5 share. Its repo-relative path is
 // a literal rather than something derived, because case 2 asserts the gate's
 // reason names that exact path — a derived value on both sides could agree
 // with itself while both were wrong.
-const TASK_9_REL = 'backlog/tasks/open/task-9-uncommitted-when-the-run-starts.md'
+const TASK_9_REL = 'backlog/tasks/open/task-9-uncommitted-when-the-run-starts.md';
 const TASK_9_BODY = `---
 id: task-9
 title: Uncommitted when the run starts
@@ -1789,47 +1810,47 @@ created: 2026-09-01
 ## Plan
 
 A real plan, groomed in the working copy and committed nowhere.
-`
+`;
 
 function writeTask9(project) {
-  fs.writeFileSync(path.join(project, TASK_9_REL), TASK_9_BODY)
+  fs.writeFileSync(path.join(project, TASK_9_REL), TASK_9_BODY);
 }
 
 function git(project, ...args) {
-  return spawnSync('git', ['-C', project, ...args], { encoding: 'utf8' })
+  return spawnSync('git', ['-C', project, ...args], { encoding: 'utf8' });
 }
 
 // Case 1: the ordinary path is unchanged — an item that is both committed
 // and groomed still reads ready. Without this, every case below could pass
 // on a gate that had simply started refusing everything.
 test('plan on a git store: a task committed on main with a real ## Plan is ready, with empty reasons', (t) => {
-  const { home, project } = planGitFixture(t)
+  const { home, project } = planGitFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-1', '--json')
+  const out = plan(project, home, '--ids', 'task-1', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ready')
-  assert.deepEqual(item.reasons, [])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ready');
+  assert.deepEqual(item.reasons, []);
+});
 
 // Case 2: the defect itself. A groomed item that exists only in the working
 // copy is refused, and the reason names the path the worktree would not
 // contain — that path is the whole point of the message, since "not
 // committed" alone leaves the reader guessing which of their items it means.
 test('plan on a git store: an item groomed only in the working copy is ungroomed, and the reason names the path the worktree would lack', (t) => {
-  const { home, project } = planGitFixture(t)
-  writeTask9(project)
+  const { home, project } = planGitFixture(t);
+  writeTask9(project);
 
-  const out = plan(project, home, '--ids', 'task-9', '--json')
+  const out = plan(project, home, '--ids', 'task-9', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ungroomed')
-  assert.equal(item.reasons.length, 1, `expected exactly one reason, got ${JSON.stringify(item.reasons)}`)
-  assert.match(item.reasons[0], /not committed/i)
-  assert.ok(item.reasons[0].includes(TASK_9_REL), `reason should name ${TASK_9_REL}: ${item.reasons[0]}`)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ungroomed');
+  assert.equal(item.reasons.length, 1, `expected exactly one reason, got ${JSON.stringify(item.reasons)}`);
+  assert.match(item.reasons[0], /not committed/i);
+  assert.ok(item.reasons[0].includes(TASK_9_REL), `reason should name ${TASK_9_REL}: ${item.reasons[0]}`);
+});
 
 // Case 3: the sibling defect the same root cause implies. bug-2 is committed
 // with `## Fix` still the `unknown` placeholder; grooming it in the working
@@ -1839,45 +1860,47 @@ test('plan on a git store: an item groomed only in the working copy is ungroomed
 // committed blob rather than the file on disk — the disk copy here is
 // perfectly groomed.
 test('plan on a git store: a bug groomed only in the working copy still gates on the committed placeholder', (t) => {
-  const { home, project } = planGitFixture(t)
-  const file = path.join(project, 'backlog', 'bugs', 'open', 'bug-2-settings-hue-swatch-preview-lags-one-theme-change-behind.md')
-  const groomed = fs.readFileSync(file, 'utf8').replace(
-    /## Fix\n\nunknown/,
-    '## Fix\n\nSubscribe the swatch to the theme store instead of reading the hue once at mount.',
-  )
-  assert.ok(groomed.includes('Subscribe the swatch'), 'fixture bug-2 no longer has the "## Fix\\n\\nunknown" shape this case rewrites')
-  fs.writeFileSync(file, groomed)
+  const { home, project } = planGitFixture(t);
+  const file = path.join(project, 'backlog', 'bugs', 'open', 'bug-2-settings-hue-swatch-preview-lags-one-theme-change-behind.md');
+  const groomed = fs
+    .readFileSync(file, 'utf8')
+    .replace(/## Fix\n\nunknown/, '## Fix\n\nSubscribe the swatch to the theme store instead of reading the hue once at mount.');
+  assert.ok(groomed.includes('Subscribe the swatch'), 'fixture bug-2 no longer has the "## Fix\\n\\nunknown" shape this case rewrites');
+  fs.writeFileSync(file, groomed);
 
-  const out = plan(project, home, '--ids', 'bug-2', '--json')
+  const out = plan(project, home, '--ids', 'bug-2', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ungroomed', 'the worktree would hold the committed placeholder, not the working copy')
-  assert.ok(item.reasons.some((r) => /fix/i.test(r)), `expected the ordinary placeholder reason, got ${JSON.stringify(item.reasons)}`)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ungroomed', 'the worktree would hold the committed placeholder, not the working copy');
+  assert.ok(
+    item.reasons.some((r) => /fix/i.test(r)),
+    `expected the ordinary placeholder reason, got ${JSON.stringify(item.reasons)}`
+  );
+});
 
 // Case 4: --base is honoured, and the coupling it exists for is real — the
 // same item reads differently depending on which ref the worktree would be
 // created from. task-9 is committed on `trunk` only; `main` never sees it.
 test('plan --base gates against the named ref: an item committed on trunk alone is ready there and uncommitted on main', (t) => {
-  const { home, project } = planGitFixture(t)
-  writeTask9(project)
-  assert.equal(git(project, 'checkout', '-q', '-b', 'trunk').status, 0)
-  commitEverything(project, 'task-9 on trunk only')
-  assert.equal(git(project, 'checkout', '-q', 'main').status, 0)
+  const { home, project } = planGitFixture(t);
+  writeTask9(project);
+  assert.equal(git(project, 'checkout', '-q', '-b', 'trunk').status, 0);
+  commitEverything(project, 'task-9 on trunk only');
+  assert.equal(git(project, 'checkout', '-q', 'main').status, 0);
   // `checkout main` took the file back off disk; the working copy has to
   // hold it again for it to be a candidate at all (the candidate list is a
   // directory read — only the GATE moved to the ref).
-  writeTask9(project)
+  writeTask9(project);
 
-  const onMain = plan(project, home, '--ids', 'task-9', '--json')
-  const onTrunk = plan(project, home, '--ids', 'task-9', '--base', 'trunk', '--json')
+  const onMain = plan(project, home, '--ids', 'task-9', '--json');
+  const onTrunk = plan(project, home, '--ids', 'task-9', '--base', 'trunk', '--json');
 
-  assert.equal(onMain.status, 0, onMain.stderr)
-  assert.equal(onTrunk.status, 0, onTrunk.stderr)
-  assert.equal(JSON.parse(onMain.stdout)[0].gate, 'ungroomed')
-  assert.equal(JSON.parse(onTrunk.stdout)[0].gate, 'ready')
-})
+  assert.equal(onMain.status, 0, onMain.stderr);
+  assert.equal(onTrunk.status, 0, onTrunk.stderr);
+  assert.equal(JSON.parse(onMain.stdout)[0].gate, 'ungroomed');
+  assert.equal(JSON.parse(onTrunk.stdout)[0].gate, 'ready');
+});
 
 // Case 5: init queues by membership exactly as before, and the knock-on the
 // fix has on --max is the correct one — an uncommitted item is not ready, so
@@ -1885,15 +1908,18 @@ test('plan --base gates against the named ref: an item committed on trunk alone 
 // cap instead of being pushed past it. The cap bounds how many items a run
 // will DISPATCH.
 test('init on a git store: an uncommitted item stays in the queue and no longer consumes a --max slot', (t) => {
-  const { home, project } = planGitFixture(t)
-  writeTask9(project)
+  const { home, project } = planGitFixture(t);
+  writeTask9(project);
 
-  const out = run(project, home, 'init', '--project', project, '--ids', 'task-9,task-1', '--max', '1')
+  const out = run(project, home, 'init', '--project', project, '--ids', 'task-9,task-1', '--max', '1');
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(written.queue.map((q) => q.id), ['task-9', 'task-1'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(
+    written.queue.map((q) => q.id),
+    ['task-9', 'task-1']
+  );
+});
 
 // Case 6: `plan` still writes nothing — now including git state, since the
 // gate reads git for the first time. A `cat-file`/`show` read must never
@@ -1902,52 +1928,52 @@ test('init on a git store: an uncommitted item stays in the queue and no longer 
 // reasons that have nothing to do with this tool, and `status --porcelain` +
 // `rev-parse HEAD` are the two observations that actually matter here.
 test('plan on a git store writes nothing: the store, the state dir, git status and HEAD are all unchanged', (t) => {
-  const { home, project } = planGitFixture(t)
-  writeTask9(project)
-  const before = snapshotTree(path.join(project, 'backlog'))
-  const homeBefore = fs.readdirSync(home)
-  const statusBefore = git(project, 'status', '--porcelain').stdout
-  const headBefore = git(project, 'rev-parse', 'HEAD').stdout
+  const { home, project } = planGitFixture(t);
+  writeTask9(project);
+  const before = snapshotTree(path.join(project, 'backlog'));
+  const homeBefore = fs.readdirSync(home);
+  const statusBefore = git(project, 'status', '--porcelain').stdout;
+  const headBefore = git(project, 'rev-parse', 'HEAD').stdout;
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(snapshotTree(path.join(project, 'backlog')), before)
-  assert.deepEqual(fs.readdirSync(home), homeBefore)
-  assert.equal(git(project, 'status', '--porcelain').stdout, statusBefore)
-  assert.equal(git(project, 'rev-parse', 'HEAD').stdout, headBefore)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(snapshotTree(path.join(project, 'backlog')), before);
+  assert.deepEqual(fs.readdirSync(home), homeBefore);
+  assert.equal(git(project, 'status', '--porcelain').stdout, statusBefore);
+  assert.equal(git(project, 'rev-parse', 'HEAD').stdout, headBefore);
+});
 
 // Case 7: a dirty main tree is normal, not an error. Uncommitted changes to
 // something that is not an item file say nothing about whether any item is
 // committed, and the gate must not read them as a reason to refuse.
 test('plan on a git store: an unrelated dirty tracked file changes no verdict', (t) => {
-  const { home, project } = planGitFixture(t)
-  fs.writeFileSync(path.join(project, 'README.md'), 'fixture store, edited and not committed\n')
+  const { home, project } = planGitFixture(t);
+  fs.writeFileSync(path.join(project, 'README.md'), 'fixture store, edited and not committed\n');
 
-  const out = plan(project, home, '--ids', 'task-1', '--json')
+  const out = plan(project, home, '--ids', 'task-1', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ready')
-  assert.deepEqual(item.reasons, [])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ready');
+  assert.deepEqual(item.reasons, []);
+});
 
 // Case 8: the fallback is silent. A store that is not a git work tree at all
 // (this tool's own fixtures/store is precisely that) gates the working copy
 // exactly as it always did, and says nothing about commits — otherwise every
 // non-git case above would start carrying a reason it never asked for.
 test('plan against a store that is not a git work tree falls back to the working copy and mentions no commit', (t) => {
-  const { home, project } = planFixture(t)
+  const { home, project } = planFixture(t);
 
-  const out = plan(project, home, '--ids', 'task-1', '--json')
+  const out = plan(project, home, '--ids', 'task-1', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [item] = JSON.parse(out.stdout)
-  assert.equal(item.gate, 'ready')
-  assert.deepEqual(item.reasons, [])
-  assert.ok(!/commit/i.test(out.stdout + out.stderr), `fallback should say nothing about commits: ${out.stdout}${out.stderr}`)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [item] = JSON.parse(out.stdout);
+  assert.equal(item.gate, 'ready');
+  assert.deepEqual(item.reasons, []);
+  assert.ok(!/commit/i.test(out.stdout + out.stderr), `fallback should say nothing about commits: ${out.stdout}${out.stderr}`);
+});
 
 // --- task-13: a runner-fix item is hoisted to the front of the queue -------
 // The defect this section pins: an item that repairs the machinery a run
@@ -1963,9 +1989,9 @@ test('plan against a store that is not a git work tree falls back to the working
 // seeder that took a marker would let a future reader think the marker is
 // something the fixtures own rather than something a human writes.
 function markRunnerFix(file, value = 'true') {
-  const text = fs.readFileSync(file, 'utf8')
-  assert.ok(text.startsWith('---\n'), `expected a frontmatter fence in ${file}`)
-  fs.writeFileSync(file, text.replace('---\n', `---\nrunner-fix: ${value}\n`))
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(text.startsWith('---\n'), `expected a frontmatter fence in ${file}`);
+  fs.writeFileSync(file, text.replace('---\n', `---\nrunner-fix: ${value}\n`));
 }
 
 // Case 1 of the plan's own list, and case 11 with it: orchFixture's project
@@ -1974,51 +2000,57 @@ function markRunnerFix(file, value = 'true') {
 // documented fallback, exercised by every case here that isn't explicitly a
 // planGitFixture one.
 test('plan: a runner-fix item is hoisted to the front of the default bugs-then-tasks order', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
-  seedReadyTask(project, 'task-1', 'An ordinary task')
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'));
+  seedReadyTask(project, 'task-1', 'An ordinary task');
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const queue = JSON.parse(out.stdout)
-  assert.deepEqual(queue.map((q) => q.id), ['bug-3', 'bug-2', 'task-1'])
+  assert.equal(out.status, 0, out.stderr);
+  const queue = JSON.parse(out.stdout);
   assert.deepEqual(
-    Object.fromEntries(queue.map((q) => [q.id, q.hoisted])),
-    { 'bug-3': true, 'bug-2': false, 'task-1': false },
-  )
-})
+    queue.map((q) => q.id),
+    ['bug-3', 'bug-2', 'task-1']
+  );
+  assert.deepEqual(Object.fromEntries(queue.map((q) => [q.id, q.hoisted])), { 'bug-3': true, 'bug-2': false, 'task-1': false });
+});
 
 // Case 2: a stable partition, not a sort. Both halves keep the order they
 // already had — the hoisted items stay oldest-first among themselves.
 test('plan: hoisting is stable — each half keeps the order it already had', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
-  markRunnerFix(seedReadyBug(project, 'bug-5', 'Also repairs the runner'))
-  seedReadyTask(project, 'task-1', 'An ordinary task')
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'));
+  markRunnerFix(seedReadyBug(project, 'bug-5', 'Also repairs the runner'));
+  seedReadyTask(project, 'task-1', 'An ordinary task');
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout).map((q) => q.id), ['bug-3', 'bug-5', 'bug-2', 'task-1'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((q) => q.id),
+    ['bug-3', 'bug-5', 'bug-2', 'task-1']
+  );
+});
 
 // Case 3: the partition OUTRANKS the bugs-then-tasks rule rather than
 // sorting inside it. Without this, a marked task would hoist only as far as
 // the front of the tasks — behind every bug, which is exactly the position
 // the incident this marker exists for was in.
 test('plan: a marked task hoists ahead of an unmarked bug', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyTask(project, 'task-1', 'Repairs the runner'))
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyTask(project, 'task-1', 'Repairs the runner'));
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout).map((q) => q.id), ['task-1', 'bug-2'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((q) => q.id),
+    ['task-1', 'bug-2']
+  );
+});
 
 // Case 4: `--ids` is hoisted too — a deliberate narrowing of SKILL.md §1's
 // "in the order given". OrchestrateSheet sends `ids` for any strict subset
@@ -2026,67 +2058,82 @@ test('plan: a marked task hoists ahead of an unmarked bug', (t) => {
 // exempting it would defeat the hoist on the one surface CLAUDE.md tells you
 // to start runs from. The caller's relative order survives among the rest.
 test('plan: --ids is hoisted too, and the caller order survives among the unmarked items', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
-  seedReadyTask(project, 'task-1', 'An ordinary task')
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'));
+  seedReadyTask(project, 'task-1', 'An ordinary task');
 
-  const out = plan(project, home, '--ids', 'bug-2,bug-3,task-1', '--json')
+  const out = plan(project, home, '--ids', 'bug-2,bug-3,task-1', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout).map((q) => q.id), ['bug-3', 'bug-2', 'task-1'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((q) => q.id),
+    ['bug-3', 'bug-2', 'task-1']
+  );
+});
 
 // Case 5: the hoist happens BEFORE `--max` is counted, which is most of the
 // point — a runner fix that was going to fall outside the cap now lands
 // inside it. Asserted on the written run file rather than on `plan`, so the
 // cap's effect on real queue membership is what gets pinned.
 test('init: the hoist precedes the --max cap, so a marked item inside a cap of 1 is the one item queued', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  seedReadyTask(project, 'task-1', 'An ordinary task')
-  markRunnerFix(seedReadyTask(project, 'task-5', 'Repairs the runner'))
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  seedReadyTask(project, 'task-1', 'An ordinary task');
+  markRunnerFix(seedReadyTask(project, 'task-5', 'Repairs the runner'));
 
-  const out = run(project, home, 'init', '--project', project, '--max', '1')
+  const out = run(project, home, 'init', '--project', project, '--max', '1');
 
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(written.queue.map((q) => q.id), ['task-5'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(
+    written.queue.map((q) => q.id),
+    ['task-5']
+  );
+});
 
 // Case 6: `false` is the one opt-out, because "considered, and it is not a
 // runner fix" is worth being able to write down.
 test('plan: runner-fix: false does not hoist', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyBug(project, 'bug-3', 'Considered, and not a runner fix'), 'false')
-  seedReadyTask(project, 'task-1', 'An ordinary task')
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Considered, and not a runner fix'), 'false');
+  seedReadyTask(project, 'task-1', 'An ordinary task');
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const queue = JSON.parse(out.stdout)
-  assert.deepEqual(queue.map((q) => q.id), ['bug-2', 'bug-3', 'task-1'])
-  assert.ok(queue.every((q) => q.hoisted === false), `nothing should be hoisted: ${out.stdout}`)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const queue = JSON.parse(out.stdout);
+  assert.deepEqual(
+    queue.map((q) => q.id),
+    ['bug-2', 'bug-3', 'task-1']
+  );
+  assert.ok(
+    queue.every((q) => q.hoisted === false),
+    `nothing should be hoisted: ${out.stdout}`
+  );
+});
 
 // Case 7: the typo case, and the reason presence hoists rather than the
 // literal `true`. A key that hoisted on `true` alone would let this exact
 // line silently not hoist — a queue in the wrong order with nobody told,
 // which is the failure class this marker exists to remove.
 test('plan: any non-false value hoists, so runner-fix: yes is not a silent no-op', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'), 'yes')
-  seedReadyTask(project, 'task-1', 'An ordinary task')
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'), 'yes');
+  seedReadyTask(project, 'task-1', 'An ordinary task');
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const queue = JSON.parse(out.stdout)
-  assert.deepEqual(queue.map((q) => q.id), ['bug-3', 'bug-2', 'task-1'])
-  assert.equal(queue.find((q) => q.id === 'bug-3').hoisted, true)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const queue = JSON.parse(out.stdout);
+  assert.deepEqual(
+    queue.map((q) => q.id),
+    ['bug-3', 'bug-2', 'task-1']
+  );
+  assert.equal(queue.find((q) => q.id === 'bug-3').hoisted, true);
+});
 
 // Case 8: the load-bearing half. The marker is read at `<base>`, exactly
 // like the gate verdict beside it — a `runner-fix:` present only in the
@@ -2095,112 +2142,127 @@ test('plan: any non-false value hoists, so runner-fix: yes is not a silent no-op
 // passes trivially against an implementation that never reads the marker at
 // all; it is the commit that proves the assertion has teeth.
 test('plan on a git store: the runner-fix marker is read at <base>, not off the working copy', (t) => {
-  const { home, project } = planGitFixture(t)
-  const file = path.join(project, 'backlog', 'tasks', 'open', 'task-5-let-the-run-drawer-jump-straight-to-a-parked-items-worktree.md')
-  const naturalOrder = ['bug-2', 'bug-7', 'task-1', 'task-3', 'task-4', 'task-5']
+  const { home, project } = planGitFixture(t);
+  const file = path.join(project, 'backlog', 'tasks', 'open', 'task-5-let-the-run-drawer-jump-straight-to-a-parked-items-worktree.md');
+  const naturalOrder = ['bug-2', 'bug-7', 'task-1', 'task-3', 'task-4', 'task-5'];
 
-  markRunnerFix(file)
+  markRunnerFix(file);
 
-  const uncommitted = plan(project, home, '--json')
-  assert.equal(uncommitted.status, 0, uncommitted.stderr)
-  const before = JSON.parse(uncommitted.stdout)
-  assert.deepEqual(before.map((q) => q.id), naturalOrder)
-  assert.ok(before.every((q) => q.hoisted === false), `an uncommitted marker must not hoist: ${uncommitted.stdout}`)
+  const uncommitted = plan(project, home, '--json');
+  assert.equal(uncommitted.status, 0, uncommitted.stderr);
+  const before = JSON.parse(uncommitted.stdout);
+  assert.deepEqual(
+    before.map((q) => q.id),
+    naturalOrder
+  );
+  assert.ok(
+    before.every((q) => q.hoisted === false),
+    `an uncommitted marker must not hoist: ${uncommitted.stdout}`
+  );
 
-  commitEverything(project, 'mark task-5 as a runner fix')
+  commitEverything(project, 'mark task-5 as a runner fix');
 
-  const committed = plan(project, home, '--json')
-  assert.equal(committed.status, 0, committed.stderr)
-  const after = JSON.parse(committed.stdout)
-  assert.deepEqual(after.map((q) => q.id), ['task-5', 'bug-2', 'bug-7', 'task-1', 'task-3', 'task-4'])
-  assert.equal(after.find((q) => q.id === 'task-5').hoisted, true)
-})
+  const committed = plan(project, home, '--json');
+  assert.equal(committed.status, 0, committed.stderr);
+  const after = JSON.parse(committed.stdout);
+  assert.deepEqual(
+    after.map((q) => q.id),
+    ['task-5', 'bug-2', 'bug-7', 'task-1', 'task-3', 'task-4']
+  );
+  assert.equal(after.find((q) => q.id === 'task-5').hoisted, true);
+});
 
 // Case 9: an item absent from `<base>` never hoists, even though the row's
 // TITLE does come off the working copy. An item the run cannot see the
 // content of is not an item whose frontmatter gets to reorder the queue —
 // and the existing "not committed" verdict is untouched by the marker.
 test('plan on a git store: an item absent from <base> never hoists, and still gates ungroomed naming its path', (t) => {
-  const { home, project } = planGitFixture(t)
-  fs.writeFileSync(path.join(project, TASK_9_REL), TASK_9_BODY.replace('---\nid: task-9', '---\nrunner-fix: true\nid: task-9'))
+  const { home, project } = planGitFixture(t);
+  fs.writeFileSync(path.join(project, TASK_9_REL), TASK_9_BODY.replace('---\nid: task-9', '---\nrunner-fix: true\nid: task-9'));
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const queue = JSON.parse(out.stdout)
-  const item = queue.find((q) => q.id === 'task-9')
-  assert.equal(item.hoisted, false)
-  assert.equal(item.gate, 'ungroomed')
-  assert.ok(item.reasons[0].includes(TASK_9_REL), `reason should name ${TASK_9_REL}: ${item.reasons[0]}`)
-  assert.notEqual(queue[0].id, 'task-9', 'an item the run cannot read must not be hoisted to the front')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const queue = JSON.parse(out.stdout);
+  const item = queue.find((q) => q.id === 'task-9');
+  assert.equal(item.hoisted, false);
+  assert.equal(item.gate, 'ungroomed');
+  assert.ok(item.reasons[0].includes(TASK_9_REL), `reason should name ${TASK_9_REL}: ${item.reasons[0]}`);
+  assert.notEqual(queue[0].id, 'task-9', 'an item the run cannot read must not be hoisted to the front');
+});
 
 // Case 10: the gate is untouched by the hoist — an ungroomed marked item
 // hoists too, and is skipped at pre-flight like any other ungroomed item.
 // "The thing that would fix your runner is not groomed" is information, and
 // the top of the list is where it will actually be read.
 test('plan: an ungroomed runner-fix item still hoists, and init queues it first', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  const dir = path.join(project, 'backlog', 'bugs', 'open')
-  const file = path.join(dir, 'bug-3-ungroomed.md')
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  const dir = path.join(project, 'backlog', 'bugs', 'open');
+  const file = path.join(dir, 'bug-3-ungroomed.md');
   fs.writeFileSync(
     file,
-    '---\nid: bug-3\nrunner-fix: true\ntitle: Repairs the runner, ungroomed\ncreated: 2026-08-01\n---\n\n## Symptom\n\nSomething is wrong.\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n',
-  )
+    '---\nid: bug-3\nrunner-fix: true\ntitle: Repairs the runner, ungroomed\ncreated: 2026-08-01\n---\n\n## Symptom\n\nSomething is wrong.\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n'
+  );
 
-  const previewed = plan(project, home, '--json')
-  assert.equal(previewed.status, 0, previewed.stderr)
-  const queue = JSON.parse(previewed.stdout)
-  assert.deepEqual(queue.map((q) => q.id), ['bug-3', 'bug-2'])
-  assert.equal(queue[0].gate, 'ungroomed')
+  const previewed = plan(project, home, '--json');
+  assert.equal(previewed.status, 0, previewed.stderr);
+  const queue = JSON.parse(previewed.stdout);
+  assert.deepEqual(
+    queue.map((q) => q.id),
+    ['bug-3', 'bug-2']
+  );
+  assert.equal(queue[0].gate, 'ungroomed');
 
-  const out = run(project, home, 'init', '--project', project)
-  assert.equal(out.status, 0, out.stderr)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(written.queue.map((q) => q.id), ['bug-3', 'bug-2'])
-})
+  const out = run(project, home, 'init', '--project', project);
+  assert.equal(out.status, 0, out.stderr);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(
+    written.queue.map((q) => q.id),
+    ['bug-3', 'bug-2']
+  );
+});
 
 // Case 12: the human-readable printer names the hoist, and both suffixes
 // concatenate rather than exclude each other — `--max 0` puts even the
 // hoisted row beyond the cap, and that row has to say both things.
 test('plan without --json: the hoisted row names the hoist, and carries (beyond --max) alongside it', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
-  seedReadyTask(project, 'task-1', 'An ordinary task')
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'));
+  seedReadyTask(project, 'task-1', 'An ordinary task');
 
-  const plain = plan(project, home)
-  assert.equal(plain.status, 0, plain.stderr)
-  const rows = plain.stdout.split('\n')
-  const hoistedRow = rows.find((l) => l.includes('bug-3'))
-  const ordinaryRow = rows.find((l) => l.includes('bug-2'))
-  assert.match(hoistedRow, /runner fix/i)
-  assert.ok(!/runner fix/i.test(ordinaryRow), `an unmarked row must not claim a hoist: ${ordinaryRow}`)
+  const plain = plan(project, home);
+  assert.equal(plain.status, 0, plain.stderr);
+  const rows = plain.stdout.split('\n');
+  const hoistedRow = rows.find((l) => l.includes('bug-3'));
+  const ordinaryRow = rows.find((l) => l.includes('bug-2'));
+  assert.match(hoistedRow, /runner fix/i);
+  assert.ok(!/runner fix/i.test(ordinaryRow), `an unmarked row must not claim a hoist: ${ordinaryRow}`);
 
-  const capped = plan(project, home, '--max', '0')
-  assert.equal(capped.status, 0, capped.stderr)
-  const cappedRow = capped.stdout.split('\n').find((l) => l.includes('bug-3'))
-  assert.match(cappedRow, /runner fix/i)
-  assert.ok(cappedRow.includes('(beyond --max)'), `both suffixes should appear: ${cappedRow}`)
-})
+  const capped = plan(project, home, '--max', '0');
+  assert.equal(capped.status, 0, capped.stderr);
+  const cappedRow = capped.stdout.split('\n').find((l) => l.includes('bug-3'));
+  assert.match(cappedRow, /runner fix/i);
+  assert.ok(cappedRow.includes('(beyond --max)'), `both suffixes should appear: ${cappedRow}`);
+});
 
 // Case 13: the twin of the plan section's own "writes nothing" case, with a
 // marked item present — the new frontmatter read must not have introduced a
 // write of any kind.
 test('plan writes nothing at all with a runner-fix item present: store and state dir are byte-identical after', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyBug(project, 'bug-2', 'An ordinary bug')
-  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'))
-  const before = snapshotTree(path.join(project, 'backlog'))
-  const homeBefore = fs.readdirSync(home)
+  const { home, project } = orchFixture(t);
+  seedReadyBug(project, 'bug-2', 'An ordinary bug');
+  markRunnerFix(seedReadyBug(project, 'bug-3', 'Repairs the runner'));
+  const before = snapshotTree(path.join(project, 'backlog'));
+  const homeBefore = fs.readdirSync(home);
 
-  const out = plan(project, home, '--json')
+  const out = plan(project, home, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(snapshotTree(path.join(project, 'backlog')), before)
-  assert.deepEqual(fs.readdirSync(home), homeBefore)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(snapshotTree(path.join(project, 'backlog')), before);
+  assert.deepEqual(fs.readdirSync(home), homeBefore);
+});
 
 // --- Fix round 1 (Important): pidAlive's zombie fallback ------------------
 // `process.kill(pid, 0)` alone can't tell a live process from an unreaped
@@ -2217,17 +2279,17 @@ test('plan writes nothing at all with a runner-fix item present: store and state
 // REAL, non-zombie child process going through this exact function on
 // every tick.
 test('isZombieStatState treats a leading Z (zombie/defunct) as dead, everything else as alive', () => {
-  assert.equal(isZombieStatState('Z'), true)
-  assert.equal(isZombieStatState('Z+'), true)
-  assert.equal(isZombieStatState('Z+\n'), true, 'ps output routinely carries a trailing newline')
-  assert.equal(isZombieStatState('  Z+  '), true, 'leading/trailing whitespace must not defeat the check')
-  assert.equal(isZombieStatState('S'), false)
-  assert.equal(isZombieStatState('S+'), false)
-  assert.equal(isZombieStatState('Ss'), false)
-  assert.equal(isZombieStatState('R+'), false)
-  assert.equal(isZombieStatState('D'), false)
-  assert.equal(isZombieStatState(''), false)
-})
+  assert.equal(isZombieStatState('Z'), true);
+  assert.equal(isZombieStatState('Z+'), true);
+  assert.equal(isZombieStatState('Z+\n'), true, 'ps output routinely carries a trailing newline');
+  assert.equal(isZombieStatState('  Z+  '), true, 'leading/trailing whitespace must not defeat the check');
+  assert.equal(isZombieStatState('S'), false);
+  assert.equal(isZombieStatState('S+'), false);
+  assert.equal(isZombieStatState('Ss'), false);
+  assert.equal(isZombieStatState('R+'), false);
+  assert.equal(isZombieStatState('D'), false);
+  assert.equal(isZombieStatState(''), false);
+});
 
 // --- Task 5: watch --------------------------------------------------------
 // Every case here uses a real `node -e` child (never a mock of process
@@ -2239,29 +2301,38 @@ test('isZombieStatState treats a leading Z (zombie/defunct) as dead, everything 
 // the child dies, the fixture's session id landed in run.json via the same
 // field cmdStage's own `--session` writes, and updatedAt strictly advanced.
 test('watch exits 0 the moment a short-lived child dies, with the fixture session id landed in run.json and updatedAt moved', async (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-9', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-9', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
 
-  const child = spawnChild(t, 200)
+  const child = spawnChild(t, 200);
 
   // runAsync, not the blocking `run()` — see that helper's own comment:
   // this test's own event loop must stay free to reap `child` the moment
   // it actually exits, or `child.pid` looks "alive" to watch's pid check
   // for as long as this test's process is blocked, zombie or not.
   const out = await runAsync(
-    project, home, 'watch', 'task-9',
-    '--pid', String(child.pid), '--jsonl', STREAM_INIT,
-    '--interval-ms', '30', '--budget-ms', '5000',
-  )
+    project,
+    home,
+    'watch',
+    'task-9',
+    '--pid',
+    String(child.pid),
+    '--jsonl',
+    STREAM_INIT,
+    '--interval-ms',
+    '30',
+    '--budget-ms',
+    '5000'
+  );
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  const item = after.queue.find((q) => q.id === 'task-9')
-  assert.equal(item.sessionId, 'a1b2c3d4-5e6f-4a1b-8c2d-9f0e1a2b3c4d')
-  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const item = after.queue.find((q) => q.id === 'task-9');
+  assert.equal(item.sessionId, 'a1b2c3d4-5e6f-4a1b-8c2d-9f0e1a2b3c4d');
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance');
+});
 
 // Test case 2: a long-lived child with a tiny budget → exits 3 (child still
 // alive; the test kills it), having heartbeated at least twice along the
@@ -2269,157 +2340,167 @@ test('watch exits 0 the moment a short-lived child dies, with the fixture sessio
 // own blocking loop runs, since watch itself is synchronous end-to-end (see
 // orchestrate.mjs's own sleepSync comment for why that is safe here).
 test('watch heartbeats at least twice before its budget elapses, then exits 3 with the child still alive', async (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-11', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-11', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const child = spawnChild(t, 60_000)
+  const child = spawnChild(t, 60_000);
   const watchProc = spawn(
     'node',
     [SCRIPT, 'watch', 'task-11', '--pid', String(child.pid), '--jsonl', STREAM_NOINIT, '--interval-ms', '100', '--budget-ms', '300'],
-    { cwd: project, env: { ...process.env, BM_ORCH_HOME: home } },
-  )
+    { cwd: project, env: { ...process.env, BM_ORCH_HOME: home } }
+  );
   t.after(() => {
     try {
-      watchProc.kill('SIGKILL')
+      watchProc.kill('SIGKILL');
     } catch {
       // already exited
     }
-  })
+  });
 
-  const file = runFile(home, project)
-  const seen = new Set()
+  const file = runFile(home, project);
+  const seen = new Set();
   const poll = setInterval(() => {
     try {
-      seen.add(JSON.parse(fs.readFileSync(file, 'utf8')).updatedAt)
+      seen.add(JSON.parse(fs.readFileSync(file, 'utf8')).updatedAt);
     } catch {
       // a transient read racing writeRunAtomic's rename — try again next tick
     }
-  }, 20)
+  }, 20);
 
-  const [code] = await once(watchProc, 'exit')
-  clearInterval(poll)
+  const [code] = await once(watchProc, 'exit');
+  clearInterval(poll);
 
-  assert.equal(code, 3)
-  assert.ok(seen.size >= 2, `expected at least two distinct heartbeats, saw ${seen.size}`)
-  child.kill('SIGKILL')
-})
+  assert.equal(code, 3);
+  assert.ok(seen.size >= 2, `expected at least two distinct heartbeats, saw ${seen.size}`);
+  child.kill('SIGKILL');
+});
 
 // Test case 3: stream-noinit.jsonl (no init-type event anywhere in it) never
 // crashes and never picks up the OTHER lines' own `session_id` fields —
 // only a `type:"system","subtype":"init"` event counts. Exit is still
 // governed purely by the pid rule.
 test('watch with stream-noinit.jsonl never finds a session id, and still exits cleanly once the child dies', async (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-12', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-12', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const child = spawnChild(t, 200)
+  const child = spawnChild(t, 200);
 
   // runAsync — see test case 1's own comment on why the blocking `run()`
   // would risk seeing a zombie `child` as falsely "alive."
   const out = await runAsync(
-    project, home, 'watch', 'task-12',
-    '--pid', String(child.pid), '--jsonl', STREAM_NOINIT,
-    '--interval-ms', '30', '--budget-ms', '5000',
-  )
+    project,
+    home,
+    'watch',
+    'task-12',
+    '--pid',
+    String(child.pid),
+    '--jsonl',
+    STREAM_NOINIT,
+    '--interval-ms',
+    '30',
+    '--budget-ms',
+    '5000'
+  );
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.queue.find((q) => q.id === 'task-12').sessionId, null)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.queue.find((q) => q.id === 'task-12').sessionId, null);
+});
 
 // Fix round 1 (Minor): a leading line that isn't valid JSON at all must be
 // skipped, not treated as a wedge — findSessionIdInJsonl's own lenient
 // branch, pinned directly rather than only implied by stream-noinit.jsonl
 // (which never has a bad line, only a plain absence of an init event).
 test('watch skips a malformed leading line and still finds the session id on the line after it', async (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-15', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-15', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const child = spawnChild(t, 200)
+  const child = spawnChild(t, 200);
 
   const out = await runAsync(
-    project, home, 'watch', 'task-15',
-    '--pid', String(child.pid), '--jsonl', STREAM_MALFORMED_THEN_INIT,
-    '--interval-ms', '30', '--budget-ms', '5000',
-  )
+    project,
+    home,
+    'watch',
+    'task-15',
+    '--pid',
+    String(child.pid),
+    '--jsonl',
+    STREAM_MALFORMED_THEN_INIT,
+    '--interval-ms',
+    '30',
+    '--budget-ms',
+    '5000'
+  );
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.queue.find((q) => q.id === 'task-15').sessionId, 'deadbeef-1111-4fff-8fff-222222222222')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.queue.find((q) => q.id === 'task-15').sessionId, 'deadbeef-1111-4fff-8fff-222222222222');
+});
 
 // Supplementary: a `--jsonl` file that never gets created is tolerated for
 // exactly one interval (the child may not have opened it yet) but is a
 // hard exit-1 the moment a SECOND check still finds it missing.
 test('watch exits 1 when the jsonl file is still missing after the first interval', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-13', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-13', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const child = spawnChild(t, 60_000)
-  const missingJsonl = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-jsonl-')), 'never-written.jsonl')
+  const child = spawnChild(t, 60_000);
+  const missingJsonl = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-jsonl-')), 'never-written.jsonl');
 
-  const out = run(
-    project, home, 'watch', 'task-13',
-    '--pid', String(child.pid), '--jsonl', missingJsonl,
-    '--interval-ms', '30', '--budget-ms', '5000',
-  )
+  const out = run(project, home, 'watch', 'task-13', '--pid', String(child.pid), '--jsonl', missingJsonl, '--interval-ms', '30', '--budget-ms', '5000');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /never-written\.jsonl/)
-  child.kill('SIGKILL')
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /never-written\.jsonl/);
+  child.kill('SIGKILL');
+});
 
 // Supplementary: a "parse wedge" — `--jsonl` naming something that is not
 // even readable as a file (here, a directory) — is a hard exit-1 on the
 // very FIRST check, distinct from the missing-file grace period above.
 test('watch exits 1 when --jsonl names something unreadable as a file at all (a parse wedge)', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-14', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-14', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const child = spawnChild(t, 60_000)
-  const dirAsJsonl = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-wedge-'))
-  t.after(() => fs.rmSync(dirAsJsonl, { recursive: true, force: true }))
+  const child = spawnChild(t, 60_000);
+  const dirAsJsonl = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-wedge-'));
+  t.after(() => fs.rmSync(dirAsJsonl, { recursive: true, force: true }));
 
-  const out = run(
-    project, home, 'watch', 'task-14',
-    '--pid', String(child.pid), '--jsonl', dirAsJsonl,
-    '--interval-ms', '30', '--budget-ms', '5000',
-  )
+  const out = run(project, home, 'watch', 'task-14', '--pid', String(child.pid), '--jsonl', dirAsJsonl, '--interval-ms', '30', '--budget-ms', '5000');
 
-  assert.equal(out.status, 1)
-  child.kill('SIGKILL')
-})
+  assert.equal(out.status, 1);
+  child.kill('SIGKILL');
+});
 
 test('watch with no run exits 3 before ever touching the pid or jsonl file', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'watch', 'ghost-1', '--pid', '999999', '--jsonl', '/nonexistent')
+  const out = run(project, home, 'watch', 'ghost-1', '--pid', '999999', '--jsonl', '/nonexistent');
 
-  assert.equal(out.status, 3)
-})
+  assert.equal(out.status, 3);
+});
 
 test('watch with an unknown item id exits 1', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'watch', 'ghost-1', '--pid', '999999', '--jsonl', '/nonexistent')
+  const out = run(project, home, 'watch', 'ghost-1', '--pid', '999999', '--jsonl', '/nonexistent');
 
-  assert.equal(out.status, 1)
-})
+  assert.equal(out.status, 1);
+});
 
 test('watch missing --pid or --jsonl exits 1', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-1', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  assert.equal(run(project, home, 'watch', 'task-1', '--jsonl', STREAM_INIT).status, 1)
-  assert.equal(run(project, home, 'watch', 'task-1', '--pid', '123').status, 1)
-})
+  assert.equal(run(project, home, 'watch', 'task-1', '--jsonl', STREAM_INIT).status, 1);
+  assert.equal(run(project, home, 'watch', 'task-1', '--pid', '123').status, 1);
+});
 
 // --- Task 5: verify ---------------------------------------------------------
 // verify's own `--cwd` is a SEPARATE directory from the project root
@@ -2431,113 +2512,119 @@ test('watch missing --pid or --jsonl exits 1', (t) => {
 
 // Test case 4: backlog/verify.json with one passing, one failing command.
 test('verify runs backlog/verify.json commands in order, capturing pass/fail and tails; exit 1 on any failure', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-1', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
-  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true })
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true });
   fs.writeFileSync(
     path.join(worktree, 'backlog', 'verify.json'),
-    JSON.stringify({ commands: ['node -e "process.exit(0)"', 'node -e "console.error(\'boom\'); process.exit(1)"'] }),
-  )
+    JSON.stringify({ commands: ['node -e "process.exit(0)"', 'node -e "console.error(\'boom\'); process.exit(1)"'] })
+  );
 
-  const out = run(project, home, 'verify', 'task-1', '--cwd', worktree, '--json')
+  const out = run(project, home, 'verify', 'task-1', '--cwd', worktree, '--json');
 
-  assert.equal(out.status, 1, out.stderr)
-  const rows = JSON.parse(out.stdout)
-  assert.equal(rows.length, 2)
-  assert.equal(rows[0].cmd, 'node -e "process.exit(0)"')
-  assert.equal(rows[0].ok, true)
-  assert.equal(rows[1].ok, false)
-  assert.match(rows[1].tail, /boom/)
-  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.deepEqual(written.queue[0].verification, rows)
-})
+  assert.equal(out.status, 1, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].cmd, 'node -e "process.exit(0)"');
+  assert.equal(rows[0].ok, true);
+  assert.equal(rows[1].ok, false);
+  assert.match(rows[1].tail, /boom/);
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(written.queue[0].verification, rows);
+});
 
 // Test case 5: no verify.json, package.json with only a `test` script.
 test('verify with no verify.json falls back to the package.json test script only', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-2', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-2', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
-  fs.writeFileSync(path.join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }))
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
 
-  const out = run(project, home, 'verify', 'task-2', '--cwd', worktree, '--json')
+  const out = run(project, home, 'verify', 'task-2', '--cwd', worktree, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const rows = JSON.parse(out.stdout)
-  assert.equal(rows.length, 1)
-  assert.equal(rows[0].cmd, 'npm run test')
-  assert.equal(rows[0].ok, true)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].cmd, 'npm run test');
+  assert.equal(rows[0].ok, true);
+});
 
 test('verify prefers pnpm run when pnpm-lock.yaml is present, and orders test/typecheck/build', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-3', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-3', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
-  fs.writeFileSync(path.join(worktree, 'pnpm-lock.yaml'), '')
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(worktree, 'pnpm-lock.yaml'), '');
   fs.writeFileSync(
     path.join(worktree, 'package.json'),
-    JSON.stringify({ scripts: { build: 'node -e "process.exit(0)"', test: 'node -e "process.exit(0)"', typecheck: 'node -e "process.exit(0)"' } }),
-  )
+    JSON.stringify({ scripts: { build: 'node -e "process.exit(0)"', test: 'node -e "process.exit(0)"', typecheck: 'node -e "process.exit(0)"' } })
+  );
 
-  const out = run(project, home, 'verify', 'task-3', '--cwd', worktree, '--json')
+  const out = run(project, home, 'verify', 'task-3', '--cwd', worktree, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout).map((r) => r.cmd), ['pnpm run test', 'pnpm run typecheck', 'pnpm run build'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((r) => r.cmd),
+    ['pnpm run test', 'pnpm run typecheck', 'pnpm run build']
+  );
+});
 
 // Test case 6: nothing resolvable at all → exit 5, zero rows written.
 test('verify with nothing resolvable exits 5 and writes zero verification rows', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-4', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-4', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
 
-  const out = run(project, home, 'verify', 'task-4', '--cwd', worktree, '--json')
+  const out = run(project, home, 'verify', 'task-4', '--cwd', worktree, '--json');
 
-  assert.equal(out.status, 5)
-  assert.deepEqual(JSON.parse(out.stdout), [])
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json must be untouched when nothing was resolved')
-})
+  assert.equal(out.status, 5);
+  assert.deepEqual(JSON.parse(out.stdout), []);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json must be untouched when nothing was resolved');
+});
 
 // Reuses Task 4's own extractDoneWhenCommands rather than a second parser —
 // this is the test proving that reuse actually happened: a fenced `## Done
 // when` block in the item's WORKTREE copy adds its own commands after the
 // baseline, and an exact repeat of a baseline command collapses to one row.
-test("verify appends the item's own fenced \"## Done when\" commands after the baseline, de-duplicating an exact repeat", (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+test('verify appends the item\'s own fenced "## Done when" commands after the baseline, de-duplicating an exact repeat', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
   // Placed under done/, not open/ — by the time verify runs, backlog-execute
   // has typically already moved the item there (see the design spec's own
   // per-item loop, step 2), so verify's own item-file search must look in
   // both, not just open/ the way listOpenItems (the gate's own reader) does.
-  fs.mkdirSync(path.join(worktree, 'backlog', 'tasks', 'done'), { recursive: true })
+  fs.mkdirSync(path.join(worktree, 'backlog', 'tasks', 'done'), { recursive: true });
   fs.writeFileSync(
     path.join(worktree, 'backlog', 'tasks', 'done', 'task-5-fixture.md'),
-    '---\nid: task-5\ntitle: Some task\ncreated: 2026-08-01\n---\n\n## Plan\n\nDone.\n\n## Done when\n\n```bash\nnode -e "process.exit(0)"\necho only-in-done-when\n```\n',
-  )
-  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: ['node -e "process.exit(0)"'] }))
+    '---\nid: task-5\ntitle: Some task\ncreated: 2026-08-01\n---\n\n## Plan\n\nDone.\n\n## Done when\n\n```bash\nnode -e "process.exit(0)"\necho only-in-done-when\n```\n'
+  );
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: ['node -e "process.exit(0)"'] }));
 
-  const out = run(project, home, 'verify', 'task-5', '--cwd', worktree, '--json')
+  const out = run(project, home, 'verify', 'task-5', '--cwd', worktree, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout).map((r) => r.cmd), ['node -e "process.exit(0)"', 'echo only-in-done-when'])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((r) => r.cmd),
+    ['node -e "process.exit(0)"', 'echo only-in-done-when']
+  );
+});
 
 // Fix round 1 (Minor): a non-string entry in verify.json's own `commands`
 // array must be a clean, code-1 OrchestrateError — not a raw exception from
@@ -2545,22 +2632,22 @@ test("verify appends the item's own fenced \"## Done when\" commands after the b
 // Also pins that this is a HARD failure, never silently treated as "no
 // verify.json" and quietly falling back to package.json scripts.
 test('verify.json with a non-string commands entry exits 1 with a clean message, and writes nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-6', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-6', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
-  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true })
-  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: ['node -e "process.exit(0)"', 42] }))
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true });
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: ['node -e "process.exit(0)"', 42] }));
 
-  const out = run(project, home, 'verify', 'task-6', '--cwd', worktree, '--json')
+  const out = run(project, home, 'verify', 'task-6', '--cwd', worktree, '--json');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /commands.*string/i)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json must be untouched on a malformed verify.json')
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /commands.*string/i);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json must be untouched on a malformed verify.json');
+});
 
 // Final-review Important 4: Node's default spawnSync maxBuffer is 1 MiB, and
 // a PASSING command that prints more than that is SIGTERMed — `status` comes
@@ -2572,26 +2659,26 @@ test('verify.json with a non-string commands entry exits 1 with a clean message,
 // 1 MiB threshold is crossed by the CHILD's output — the thing maxBuffer
 // actually bounds — and not by anything on disk.
 test('verify records a passing command that prints more than 1 MiB as passing, not as a failure', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-7', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-7', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
-  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true })
-  const chatty = `node -e "for (let i=0;i<20000;i++) console.log('x'.repeat(80))"`
-  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: [chatty] }))
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true });
+  const chatty = `node -e "for (let i=0;i<20000;i++) console.log('x'.repeat(80))"`;
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: [chatty] }));
 
-  const out = run(project, home, 'verify', 'task-7', '--cwd', worktree, '--json')
+  const out = run(project, home, 'verify', 'task-7', '--cwd', worktree, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const rows = JSON.parse(out.stdout)
-  assert.equal(rows.length, 1)
-  assert.equal(rows[0].ok, true, `a command that exits 0 must be recorded ok: ${rows[0].tail}`)
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].ok, true, `a command that exits 0 must be recorded ok: ${rows[0].tail}`);
   // The row is still a TAIL, not the whole 1.6 MiB — the bigger buffer buys
   // an honest exit status, it does not widen what gets stored on the run.
-  assert.ok(rows[0].tail.split('\n').length <= 20)
-})
+  assert.ok(rows[0].tail.split('\n').length <= 20);
+});
 
 // Same finding, the other half: `result.error` is "we could not run this
 // command", which must never be recorded as if the command had run and
@@ -2600,20 +2687,20 @@ test('verify records a passing command that prints more than 1 MiB as passing, n
 // and spawnSync returns it with `status: null` and `signal: null`, i.e. the
 // exact shape the old `status === 0` line silently reduced to "failed".
 test('verify distinguishes "could not run this command" from a command that ran and failed', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-8', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-8', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
-  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true })
-  const unspawnable = `true # ${'a'.repeat(3 * 1024 * 1024)}`
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true });
+  const unspawnable = `true # ${'a'.repeat(3 * 1024 * 1024)}`;
   fs.writeFileSync(
     path.join(worktree, 'backlog', 'verify.json'),
-    JSON.stringify({ commands: [unspawnable, 'node -e "console.error(\'real failure\'); process.exit(1)"'] }),
-  )
+    JSON.stringify({ commands: [unspawnable, 'node -e "console.error(\'real failure\'); process.exit(1)"'] })
+  );
 
-  const out = run(project, home, 'verify', 'task-8', '--cwd', worktree)
+  const out = run(project, home, 'verify', 'task-8', '--cwd', worktree);
 
   // Rows read back from the run file, not from stdout, and deliberately
   // without `--json`: run.json is written before anything is printed, so the
@@ -2622,47 +2709,47 @@ test('verify distinguishes "could not run this command" from a command that ran 
   //
   // Both rows are red — an unrunnable command is no more proof the item works
   // than a failing one — but they do not read the same.
-  assert.equal(out.status, 1)
-  const rows = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].verification
-  assert.equal(rows[0].ok, false)
-  assert.match(rows[0].tail, /could not run this command \(E2BIG\)/)
-  assert.equal(rows[1].ok, false)
-  assert.match(rows[1].tail, /real failure/)
-  assert.doesNotMatch(rows[1].tail, /could not run this command/)
-})
+  assert.equal(out.status, 1);
+  const rows = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].verification;
+  assert.equal(rows[0].ok, false);
+  assert.match(rows[0].tail, /could not run this command \(E2BIG\)/);
+  assert.equal(rows[1].ok, false);
+  assert.match(rows[1].tail, /real failure/);
+  assert.doesNotMatch(rows[1].tail, /could not run this command/);
+});
 
 test('verify with no run exits 3', (t) => {
-  const { home, project } = orchFixture(t)
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  const { home, project } = orchFixture(t);
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
 
-  const out = run(project, home, 'verify', 'task-1', '--cwd', worktree)
+  const out = run(project, home, 'verify', 'task-1', '--cwd', worktree);
 
-  assert.equal(out.status, 3)
-})
+  assert.equal(out.status, 3);
+});
 
 test('verify with an unknown item id exits 1 and writes nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = fs.readFileSync(runFile(home, project))
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'))
-  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }))
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
 
-  const out = run(project, home, 'verify', 'ghost-1', '--cwd', worktree)
+  const out = run(project, home, 'verify', 'ghost-1', '--cwd', worktree);
 
-  assert.equal(out.status, 1)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))))
-})
+  assert.equal(out.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
 
 test('verify without --cwd exits 1', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-1', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'verify', 'task-1')
+  const out = run(project, home, 'verify', 'task-1');
 
-  assert.equal(out.status, 1)
-})
+  assert.equal(out.status, 1);
+});
 
 // --- Task 5: reconcile -------------------------------------------------
 // Read-only, always — every test below either asserts run.json is
@@ -2672,55 +2759,55 @@ test('verify without --cwd exits 1', (t) => {
 // commitEverything/spawnChild header comment.
 
 test('reconcile suggests redispatch-after-stop when the worktree survives with an in-progress phase: marker but no recorded session id', (t) => {
-  const { home, project } = orchFixture(t)
-  const itemFile = seedReadyTask(project, 'task-20', 'Some task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  const itemFile = seedReadyTask(project, 'task-20', 'Some task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktreePath = path.join(project, '.worktrees', 'task-20')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-20', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-20', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-20').status, 0)
+  const worktreePath = path.join(project, '.worktrees', 'task-20');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-20', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-20', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-20').status, 0);
 
   // Simulate a crashed execute session: `start --as execute` wrote
   // started:/phase: onto the WORKTREE's own copy, uncommitted (execute
   // never commits — see the design spec's per-item loop) — and no session
   // id, because the crash happened before watch's own jsonl parse ever
   // caught the init event.
-  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile))
-  const original = fs.readFileSync(worktreeItemFile, 'utf8')
-  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
+  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile));
+  const original = fs.readFileSync(worktreeItemFile, 'utf8');
+  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'));
 
-  const before = fs.readFileSync(runFile(home, project))
-  const out = run(project, home, 'reconcile', '--json')
+  const before = fs.readFileSync(runFile(home, project));
+  const out = run(project, home, 'reconcile', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-20')
-  assert.equal(row.suggestion, 'redispatch-after-stop')
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'reconcile must never write to run.json')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-20');
+  assert.equal(row.suggestion, 'redispatch-after-stop');
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'reconcile must never write to run.json');
+});
 
 test('reconcile suggests resume-session when a session id is already recorded and the marker is still live', (t) => {
-  const { home, project } = orchFixture(t)
-  const itemFile = seedReadyTask(project, 'task-21', 'Some task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  const itemFile = seedReadyTask(project, 'task-21', 'Some task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktreePath = path.join(project, '.worktrees', 'task-21')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-21', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  const worktreePath = path.join(project, '.worktrees', 'task-21');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-21', 'HEAD'], { encoding: 'utf8' }).status, 0);
   assert.equal(
     run(project, home, 'stage', 'task-21', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-21', '--session', 'sess-abc').status,
-    0,
-  )
-  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile))
-  const original = fs.readFileSync(worktreeItemFile, 'utf8')
-  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
+    0
+  );
+  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile));
+  const original = fs.readFileSync(worktreeItemFile, 'utf8');
+  fs.writeFileSync(worktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'));
 
-  const out = run(project, home, 'reconcile', '--json')
+  const out = run(project, home, 'reconcile', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-21')
-  assert.equal(row.suggestion, 'resume-session')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-21');
+  assert.equal(row.suggestion, 'resume-session');
+});
 
 // Test case 7: the recorded worktree was deleted out-of-band (a plain
 // `rm -rf`, never `git worktree remove` — exactly what a crash or a human
@@ -2729,55 +2816,52 @@ test('reconcile suggests resume-session when a session id is already recorded an
 // marker from, so the only honest suggestion is `inspect`, never a
 // redispatch that would silently skip billing a marker nobody can see.
 test('reconcile suggests inspect when the recorded worktree was deleted out-of-band, since no marker can be read', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-22', 'Some task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-22', 'Some task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktreePath = path.join(project, '.worktrees', 'task-22')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-22', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-22', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-22').status, 0)
-  fs.rmSync(worktreePath, { recursive: true, force: true })
+  const worktreePath = path.join(project, '.worktrees', 'task-22');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-22', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-22', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-22').status, 0);
+  fs.rmSync(worktreePath, { recursive: true, force: true });
 
   const before = fs.readFileSync(runFile(home, project));
-  const out = run(project, home, 'reconcile', '--json')
+  const out = run(project, home, 'reconcile', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-22')
-  assert.equal(row.suggestion, 'inspect')
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'reconcile must never write to run.json')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-22');
+  assert.equal(row.suggestion, 'inspect');
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'reconcile must never write to run.json');
+});
 
 test('reconcile suggests park when neither the worktree directory nor the branch ever actually exist', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-23', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-23', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
   assert.equal(
-    run(
-      project, home, 'stage', 'task-23', 'dispatched',
-      '--worktree', path.join(project, '.worktrees', 'task-23'), '--branch', 'backlog/task-23',
-    ).status,
-    0,
-  )
+    run(project, home, 'stage', 'task-23', 'dispatched', '--worktree', path.join(project, '.worktrees', 'task-23'), '--branch', 'backlog/task-23').status,
+    0
+  );
 
-  const out = run(project, home, 'reconcile', '--json')
+  const out = run(project, home, 'reconcile', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-23')
-  assert.equal(row.suggestion, 'park')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [row] = JSON.parse(out.stdout).filter((r) => r.id === 'task-23');
+  assert.equal(row.suggestion, 'park');
+});
 
 test('reconcile only reports non-terminal queue items, skipping merged/etc', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-24', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-24', 'merged').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-24', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-24', 'merged').status, 0);
 
-  const out = run(project, home, 'reconcile', '--json')
+  const out = run(project, home, 'reconcile', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout), [])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(JSON.parse(out.stdout), []);
+});
 
 // Controller ruling on top of the task-3 brief (spec §4's classification
 // table lists `branched` in RECONCILE_TERMINAL_STAGES explicitly): an item
@@ -2785,52 +2869,52 @@ test('reconcile only reports non-terminal queue items, skipping merged/etc', (t)
 // `merged` one has, so --resume's own reconcile pass must not treat an
 // already-delivered branch as unfinished work to redispatch into.
 test('reconcile also skips a branched item — branched is a true exit like merged', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-25', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-25', 'branched').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-25', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-25', 'branched').status, 0);
 
-  const out = run(project, home, 'reconcile', '--json')
+  const out = run(project, home, 'reconcile', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.deepEqual(JSON.parse(out.stdout), [])
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(JSON.parse(out.stdout), []);
+});
 
 test('reconcile with no run exits 3', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'reconcile')
+  const out = run(project, home, 'reconcile');
 
-  assert.equal(out.status, 3)
-})
+  assert.equal(out.status, 3);
+});
 
 // --- Task 5: abort -------------------------------------------------------
 
 // Test case 8.
 test('abort removes a real worktree and its branch, then finishes the run as aborted', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-26', 'Some task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-26', 'Some task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktreePath = path.join(project, '.worktrees', 'task-26')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-26', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-26', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-26').status, 0)
+  const worktreePath = path.join(project, '.worktrees', 'task-26');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-26', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-26', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-26').status, 0);
 
-  const out = run(project, home, 'abort')
+  const out = run(project, home, 'abort');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.existsSync(worktreePath), false)
-  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-26'], { encoding: 'utf8' })
-  assert.equal(branchList.stdout.trim(), '')
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'aborted')
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.existsSync(worktreePath), false);
+  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-26'], { encoding: 'utf8' });
+  assert.equal(branchList.stdout.trim(), '');
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted');
   // Fix round 1 (Minor): the one-line human-readable summary — this is the
   // simple "everything torn down cleanly" case, so it names the removed id
   // and reports nothing preserved.
-  assert.match(out.stdout, /removed 1 item\(s\) \(task-26\)/)
-  assert.match(out.stdout, /left 0 in place/)
-})
+  assert.match(out.stdout, /removed 1 item\(s\) \(task-26\)/);
+  assert.match(out.stdout, /left 0 in place/);
+});
 
 // Fix round 1 (Important): an earlier version of abort recorded the marker
 // in `attention` with instructions to run `backlog.mjs stop` "before the
@@ -2844,99 +2928,102 @@ test('abort removes a real worktree and its branch, then finishes the run as abo
 // its branch all survive byte-for-byte, and that the attention entry names
 // both the absolute path and the exact `backlog.mjs stop` command.
 test('abort leaves a marker-carrying worktree and its branch completely alone, and names the exact recovery command in attention', (t) => {
-  const { home, project } = orchFixture(t)
-  const itemFile = seedReadyTask(project, 'task-10', 'Some task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  const itemFile = seedReadyTask(project, 'task-10', 'Some task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const worktreePath = path.join(project, '.worktrees', 'task-10')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-10', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-10', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-10').status, 0)
+  const worktreePath = path.join(project, '.worktrees', 'task-10');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-10', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-10', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-10').status, 0);
 
-  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile))
-  const original = fs.readFileSync(worktreeItemFile, 'utf8')
-  const marked = original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---')
-  fs.writeFileSync(worktreeItemFile, marked)
+  const worktreeItemFile = path.join(worktreePath, 'backlog', 'tasks', 'open', path.basename(itemFile));
+  const original = fs.readFileSync(worktreeItemFile, 'utf8');
+  const marked = original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---');
+  fs.writeFileSync(worktreeItemFile, marked);
 
-  const out = run(project, home, 'abort')
+  const out = run(project, home, 'abort');
 
-  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.status, 0, out.stderr);
   // The worktree, its branch, AND its (uncommitted) marked item file all
   // survive byte-for-byte — this tool never touched any of it.
-  assert.equal(fs.existsSync(worktreePath), true)
-  assert.equal(fs.readFileSync(worktreeItemFile, 'utf8'), marked)
-  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-10'], { encoding: 'utf8' })
-  assert.match(branchList.stdout, /backlog\/task-10/)
+  assert.equal(fs.existsSync(worktreePath), true);
+  assert.equal(fs.readFileSync(worktreeItemFile, 'utf8'), marked);
+  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-10'], { encoding: 'utf8' });
+  assert.match(branchList.stdout, /backlog\/task-10/);
 
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'aborted', 'abort must still finish the run overall')
-  assert.equal(after.attention.length, 1)
-  assert.equal(after.attention[0].id, 'task-10')
-  assert.match(after.attention[0].detail, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'attention must name the absolute worktree path')
-  assert.match(after.attention[0].detail, /backlog\.mjs stop task-10/, 'attention must name the exact recovery command')
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted', 'abort must still finish the run overall');
+  assert.equal(after.attention.length, 1);
+  assert.equal(after.attention[0].id, 'task-10');
+  assert.match(after.attention[0].detail, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'attention must name the absolute worktree path');
+  assert.match(after.attention[0].detail, /backlog\.mjs stop task-10/, 'attention must name the exact recovery command');
 
-  assert.match(out.stdout, /left 1 in place with an in-progress marker \(task-10/)
-})
+  assert.match(out.stdout, /left 1 in place with an in-progress marker \(task-10/);
+});
 
 // Fix round 1 (Important) — the exact scenario the review asked to pin: a
 // mixed run with ONE clean item and ONE marker-carrying item. Abort must
 // still complete for everything else — the clean item's worktree/branch are
 // torn down exactly as before, only the marked item's survive.
 test('abort tears down a clean item normally while leaving a marker-carrying item in the same run untouched', (t) => {
-  const { home, project } = orchFixture(t)
-  const cleanItemFile = seedReadyTask(project, 'task-17', 'A clean task')
-  const markedItemFile = seedReadyTask(project, 'task-18', 'A marked task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  const cleanItemFile = seedReadyTask(project, 'task-17', 'A clean task');
+  const markedItemFile = seedReadyTask(project, 'task-18', 'A marked task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const cleanWorktree = path.join(project, '.worktrees', 'task-17')
-  const markedWorktree = path.join(project, '.worktrees', 'task-18')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', cleanWorktree, '-b', 'backlog/task-17', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', markedWorktree, '-b', 'backlog/task-18', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-17', 'dispatched', '--worktree', cleanWorktree, '--branch', 'backlog/task-17').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-18', 'dispatched', '--worktree', markedWorktree, '--branch', 'backlog/task-18').status, 0)
+  const cleanWorktree = path.join(project, '.worktrees', 'task-17');
+  const markedWorktree = path.join(project, '.worktrees', 'task-18');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', cleanWorktree, '-b', 'backlog/task-17', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', markedWorktree, '-b', 'backlog/task-18', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-17', 'dispatched', '--worktree', cleanWorktree, '--branch', 'backlog/task-17').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-18', 'dispatched', '--worktree', markedWorktree, '--branch', 'backlog/task-18').status, 0);
 
-  const markedWorktreeItemFile = path.join(markedWorktree, 'backlog', 'tasks', 'open', path.basename(markedItemFile))
-  const original = fs.readFileSync(markedWorktreeItemFile, 'utf8')
-  fs.writeFileSync(markedWorktreeItemFile, original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---'))
-  void cleanItemFile // seeded only so task-17 gates into the queue; not otherwise inspected
+  const markedWorktreeItemFile = path.join(markedWorktree, 'backlog', 'tasks', 'open', path.basename(markedItemFile));
+  const original = fs.readFileSync(markedWorktreeItemFile, 'utf8');
+  fs.writeFileSync(
+    markedWorktreeItemFile,
+    original.replace('created: 2026-08-01\n---', 'created: 2026-08-01\nstarted: 2026-08-30T10:00:00Z\nphase: execute\n---')
+  );
+  void cleanItemFile; // seeded only so task-17 gates into the queue; not otherwise inspected
 
-  const out = run(project, home, 'abort')
+  const out = run(project, home, 'abort');
 
-  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.status, 0, out.stderr);
 
   // The clean item: torn down exactly as before the fix.
-  assert.equal(fs.existsSync(cleanWorktree), false)
-  const cleanBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-17'], { encoding: 'utf8' })
-  assert.equal(cleanBranch.stdout.trim(), '')
+  assert.equal(fs.existsSync(cleanWorktree), false);
+  const cleanBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-17'], { encoding: 'utf8' });
+  assert.equal(cleanBranch.stdout.trim(), '');
 
   // The marked item: worktree AND branch both survive, exactly as seeded.
-  assert.equal(fs.existsSync(markedWorktree), true)
-  const markedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-18'], { encoding: 'utf8' })
-  assert.match(markedBranch.stdout, /backlog\/task-18/)
+  assert.equal(fs.existsSync(markedWorktree), true);
+  const markedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-18'], { encoding: 'utf8' });
+  assert.match(markedBranch.stdout, /backlog\/task-18/);
 
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'aborted', 'abort must complete for the whole run, not just the clean item')
-  assert.equal(after.attention.length, 1)
-  assert.equal(after.attention[0].id, 'task-18')
-  assert.match(after.attention[0].detail, new RegExp(markedWorktree.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'attention must name the surviving worktree path')
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted', 'abort must complete for the whole run, not just the clean item');
+  assert.equal(after.attention.length, 1);
+  assert.equal(after.attention[0].id, 'task-18');
+  assert.match(after.attention[0].detail, new RegExp(markedWorktree.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'attention must name the surviving worktree path');
 
-  assert.match(out.stdout, /removed 1 item\(s\) \(task-17\)/)
-  assert.match(out.stdout, /left 1 in place with an in-progress marker \(task-18/)
-})
+  assert.match(out.stdout, /removed 1 item\(s\) \(task-17\)/);
+  assert.match(out.stdout, /left 1 in place with an in-progress marker \(task-18/);
+});
 
 test('abort on a run with a never-dispatched pending item does nothing destructive and still finishes aborted', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-25', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-25', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'abort')
+  const out = run(project, home, 'abort');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'aborted')
-  assert.deepEqual(after.attention, [])
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.deepEqual(after.attention, []);
+});
 
 // Task-3 review fix round (Important) — the data-destroying defect: before
 // this fix, abort's teardown loop decided "preserve vs. remove" purely from
@@ -2953,35 +3040,35 @@ test('abort on a run with a never-dispatched pending item does nothing destructi
 // aborts the rest of a queue after several items have already completed as
 // `branched` can find every kept branch from the run file alone.
 test("abort removes a branched item's worktree but keeps its branch, recording the kept branch in attention", (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-60', 'A branch-mode task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-60', 'A branch-mode task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project, '--merge-mode', 'branch').status, 0);
 
-  const worktreePath = path.join(project, '.worktrees', 'task-60')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-60', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-60', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-60').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-60', 'branched').status, 0)
+  const worktreePath = path.join(project, '.worktrees', 'task-60');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', 'backlog/task-60', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-60', 'dispatched', '--worktree', worktreePath, '--branch', 'backlog/task-60').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-60', 'branched').status, 0);
 
-  const out = run(project, home, 'abort')
+  const out = run(project, home, 'abort');
 
-  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.status, 0, out.stderr);
   // Worktree gone...
-  assert.equal(fs.existsSync(worktreePath), false)
+  assert.equal(fs.existsSync(worktreePath), false);
   // ...but the branch itself is the surviving deliverable.
-  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-60'], { encoding: 'utf8' })
-  assert.match(branchList.stdout, /backlog\/task-60/)
+  const branchList = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-60'], { encoding: 'utf8' });
+  assert.match(branchList.stdout, /backlog\/task-60/);
 
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'aborted')
-  assert.equal(after.attention.length, 1)
-  assert.equal(after.attention[0].id, 'task-60')
-  assert.equal(after.attention[0].kind, 'parked')
-  assert.match(after.attention[0].detail, /backlog\/task-60/, 'attention must name the kept branch')
-  assert.match(after.attention[0].detail, /branched/, 'attention must say why the branch was kept')
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.equal(after.attention.length, 1);
+  assert.equal(after.attention[0].id, 'task-60');
+  assert.equal(after.attention[0].kind, 'parked');
+  assert.match(after.attention[0].detail, /backlog\/task-60/, 'attention must name the kept branch');
+  assert.match(after.attention[0].detail, /branched/, 'attention must say why the branch was kept');
 
-  assert.match(out.stdout, /kept 1 branch\(es\).*\(task-60/)
-})
+  assert.match(out.stdout, /kept 1 branch\(es\).*\(task-60/);
+});
 
 // Task-3 review fix round (Important) — the converse pin the finding calls
 // for: the fix above must not be over-broad. A `merged` item's branch was
@@ -2993,48 +3080,48 @@ test("abort removes a branched item's worktree but keeps its branch, recording t
 // branch survives — so the same abort call demonstrates both halves at
 // once, the same "mixed run" shape the marker tests above already use.
 test("abort still deletes a merged item's branch normally — only a branched item's branch is exempt", (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-61', 'A merged task')
-  seedReadyTask(project, 'task-62', 'A branched task')
-  commitEverything(project, 'seed')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-61', 'A merged task');
+  seedReadyTask(project, 'task-62', 'A branched task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const mergedWorktree = path.join(project, '.worktrees', 'task-61')
-  const branchedWorktree = path.join(project, '.worktrees', 'task-62')
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', mergedWorktree, '-b', 'backlog/task-61', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', branchedWorktree, '-b', 'backlog/task-62', 'HEAD'], { encoding: 'utf8' }).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-61', 'dispatched', '--worktree', mergedWorktree, '--branch', 'backlog/task-61').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-62', 'dispatched', '--worktree', branchedWorktree, '--branch', 'backlog/task-62').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-61', 'merged').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-62', 'branched').status, 0)
+  const mergedWorktree = path.join(project, '.worktrees', 'task-61');
+  const branchedWorktree = path.join(project, '.worktrees', 'task-62');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', mergedWorktree, '-b', 'backlog/task-61', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', branchedWorktree, '-b', 'backlog/task-62', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-61', 'dispatched', '--worktree', mergedWorktree, '--branch', 'backlog/task-61').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-62', 'dispatched', '--worktree', branchedWorktree, '--branch', 'backlog/task-62').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-61', 'merged').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-62', 'branched').status, 0);
 
-  const out = run(project, home, 'abort')
+  const out = run(project, home, 'abort');
 
-  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.status, 0, out.stderr);
 
   // The merged item: torn down exactly as before this fix — worktree AND
   // branch both gone.
-  assert.equal(fs.existsSync(mergedWorktree), false)
-  const mergedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-61'], { encoding: 'utf8' })
-  assert.equal(mergedBranch.stdout.trim(), '')
+  assert.equal(fs.existsSync(mergedWorktree), false);
+  const mergedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-61'], { encoding: 'utf8' });
+  assert.equal(mergedBranch.stdout.trim(), '');
 
   // The branched item: worktree gone, branch kept.
-  assert.equal(fs.existsSync(branchedWorktree), false)
-  const branchedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-62'], { encoding: 'utf8' })
-  assert.match(branchedBranch.stdout, /backlog\/task-62/)
+  assert.equal(fs.existsSync(branchedWorktree), false);
+  const branchedBranch = spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-62'], { encoding: 'utf8' });
+  assert.match(branchedBranch.stdout, /backlog\/task-62/);
 
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.attention.length, 1, 'only the branched item gets an attention entry, not the merged one')
-  assert.equal(after.attention[0].id, 'task-62')
-})
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.attention.length, 1, 'only the branched item gets an attention entry, not the merged one');
+  assert.equal(after.attention[0].id, 'task-62');
+});
 
 test('abort with no run exits 3', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'abort')
+  const out = run(project, home, 'abort');
 
-  assert.equal(out.status, 3)
-})
+  assert.equal(out.status, 3);
+});
 
 // --- bug-3: the dispatch flag, and the denial check that makes it safe ----
 // Two halves of one fix. The guard below pins the flag itself, because a
@@ -3045,21 +3132,21 @@ test('abort with no run exits 3', (t) => {
 // code 0, result subtype "success", is_error false — all three measured on
 // this machine against CLI 2.1.250).
 
-const SKILL_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'SKILL.md')
-const SKILLS_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+const SKILL_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'SKILL.md');
+const SKILLS_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-test('both of SKILL.md\'s headless dispatch lines carry --permission-mode auto', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
+test("both of SKILL.md's headless dispatch lines carry --permission-mode auto", () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
   // Every line that actually launches a headless session — the step 4
   // dispatch and step 5's --resume retry. Matched by `claude -p` rather
   // than by line number so the assertion survives the file growing, which
   // it already did once between this bug being filed and being fixed.
-  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
-  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`)
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
+  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`);
   for (const line of dispatchLines) {
-    assert.ok(line.includes('--permission-mode auto'), `dispatch line is missing --permission-mode auto: ${line}`)
+    assert.ok(line.includes('--permission-mode auto'), `dispatch line is missing --permission-mode auto: ${line}`);
   }
-})
+});
 
 test('no command anywhere under skills/ passes --dangerously-skip-permissions', () => {
   // A whole-tree sweep rather than a check on the two dispatch lines above:
@@ -3077,39 +3164,42 @@ test('no command anywhere under skills/ passes --dangerously-skip-permissions', 
   // deliberately allowed — this fix's own explanation of why the flag is
   // gone has to be able to say the word, and a guard that forbade that
   // would push the reasoning out of the file it belongs in.
-  const offenders = []
+  const offenders = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
+      const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === 'node_modules') continue
-        walk(full)
+        if (entry.name === 'node_modules') continue;
+        walk(full);
       } else if (entry.isFile()) {
-        const text = fs.readFileSync(full, 'utf8')
-        if (!text.includes('--dangerously-skip-permissions')) continue
+        const text = fs.readFileSync(full, 'utf8');
+        if (!text.includes('--dangerously-skip-permissions')) continue;
         for (const line of text.split('\n')) {
           if (line.includes('--dangerously-skip-permissions') && /\bclaude\b/.test(line)) {
-            offenders.push(`${full}: ${line.trim()}`)
+            offenders.push(`${full}: ${line.trim()}`);
           }
         }
         if (full.endsWith('.md')) {
           // Fenced blocks are executable content in a SKILL.md, prose is
           // not — so inside a fence the flag is an offence wherever it sits,
           // continuation line included.
-          let inFence = false
+          let inFence = false;
           for (const line of text.split('\n')) {
-            if (line.startsWith('```')) { inFence = !inFence; continue }
+            if (line.startsWith('```')) {
+              inFence = !inFence;
+              continue;
+            }
             if (inFence && line.includes('--dangerously-skip-permissions')) {
-              offenders.push(`${full} (in a fenced block): ${line.trim()}`)
+              offenders.push(`${full} (in a fenced block): ${line.trim()}`);
             }
           }
         }
       }
     }
-  }
-  walk(SKILLS_ROOT)
-  assert.deepEqual(offenders, [], `--dangerously-skip-permissions is back in:\n${offenders.join('\n')}`)
-})
+  };
+  walk(SKILLS_ROOT);
+  assert.deepEqual(offenders, [], `--dangerously-skip-permissions is back in:\n${offenders.join('\n')}`);
+});
 
 // --- bug-9: no positional parameters in a published skill body --------------
 
@@ -3134,29 +3224,32 @@ test('no fenced block under skills/ reads a positional parameter', () => {
   // session as `$2`..`$N` and are substituted into backlog-execute/SKILL.md
   // before it is read. That substitution is only safe while no fenced block
   // under skills/ reads a positional — i.e. while this test passes.
-  const offenders = []
+  const offenders = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name)
+      const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === 'node_modules') continue
-        walk(full)
+        if (entry.name === 'node_modules') continue;
+        walk(full);
       } else if (entry.isFile() && full.endsWith('.md')) {
-        let inFence = false
+        let inFence = false;
         for (const line of fs.readFileSync(full, 'utf8').split('\n')) {
-          if (line.startsWith('```')) { inFence = !inFence; continue }
+          if (line.startsWith('```')) {
+            inFence = !inFence;
+            continue;
+          }
           // `$0` is excluded deliberately: it names the shell itself, is not
           // an argument, and no substitution pass rewrites it.
           if (inFence && /\$\{?[1-9]\b/.test(line)) {
-            offenders.push(`${full}: ${line.trim()}`)
+            offenders.push(`${full}: ${line.trim()}`);
           }
         }
       }
     }
-  }
-  walk(SKILLS_ROOT)
-  assert.deepEqual(offenders, [], `a positional parameter is back in a fenced block:\n${offenders.join('\n')}`)
-})
+  };
+  walk(SKILLS_ROOT);
+  assert.deepEqual(offenders, [], `a positional parameter is back in a fenced block:\n${offenders.join('\n')}`);
+});
 
 // --- bug-8: the merge gate's two failures are not the same failure --------
 
@@ -3167,25 +3260,25 @@ test('SKILL.md keeps merge --abort under the conflict branch only', () => {
   // Collapsing the two branches back into one is the plausible future edit —
   // they sit adjacent and read alike — and it would send an unattended run to
   // a failing command at the one gate with no margin for an unhandled state.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const aborts = text.split('\n').filter((l) => l.includes('merge --abort') && !l.trimStart().startsWith('*'))
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const aborts = text.split('\n').filter((l) => l.includes('merge --abort') && !l.trimStart().startsWith('*'));
   // One in a fenced block (the conflict recovery), and prose references that
   // explain when it does NOT apply. The fenced occurrence is the one pinned.
-  const fenced = []
-  let inFence = false
+  const fenced = [];
+  let inFence = false;
   for (const line of text.split('\n')) {
-    if (line.startsWith('```')) { inFence = !inFence; continue }
-    if (inFence && line.includes('merge --abort')) fenced.push(line.trim())
+    if (line.startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence && line.includes('merge --abort')) fenced.push(line.trim());
   }
-  assert.equal(fenced.length, 1, `expected exactly 1 executable merge --abort, found ${fenced.length}:\n${fenced.join('\n')}`)
-  assert.ok(aborts.length >= 1)
+  assert.equal(fenced.length, 1, `expected exactly 1 executable merge --abort, found ${fenced.length}:\n${fenced.join('\n')}`);
+  assert.ok(aborts.length >= 1);
   // And the refusal must be named as its own case somewhere in step 9, so the
   // distinction survives a reader who only skims the fences.
-  assert.ok(
-    text.includes('would be overwritten by merge'),
-    'step 9 no longer names the pre-merge refusal as a distinct failure',
-  )
-})
+  assert.ok(text.includes('would be overwritten by merge'), 'step 9 no longer names the pre-merge refusal as a distinct failure');
+});
 
 test('step 9 probes the main tree for paths the branch also touches', () => {
   // The precondition used to be "is HEAD refs/heads/main" and nothing else,
@@ -3193,72 +3286,66 @@ test('step 9 probes the main tree for paths the branch also touches', () => {
   // refused by uncommitted work — observed live on bug-4, run-20260901-112815.
   // `diff --cached` is the half most likely to be dropped as redundant: a
   // STAGED change refuses the merge exactly as an unstaged one does.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  assert.ok(text.includes('diff --name-only main...backlog/<id>'), 'step 9 lost the branch-paths probe')
-  assert.ok(text.includes('diff --cached --name-only'), 'step 9 lost the staged half of the dirty-paths probe')
-  assert.ok(text.includes('comm -12'), 'step 9 lost the intersection of the two path lists')
-})
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(text.includes('diff --name-only main...backlog/<id>'), 'step 9 lost the branch-paths probe');
+  assert.ok(text.includes('diff --cached --name-only'), 'step 9 lost the staged half of the dirty-paths probe');
+  assert.ok(text.includes('comm -12'), 'step 9 lost the intersection of the two path lists');
+});
 
 test('step 9 documents resolving on the branch side before parking', () => {
   // Merging into a `main` that moved after step 8 puts content into main that
   // nothing green ever ran — every step green, the combination untested. The
   // recovery (merge main INTO the worktree, re-verify there, merge out) is
   // what keeps "never merges red" true, so it has to stay written down.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  assert.ok(
-    text.includes('.worktrees/<id>" merge --no-edit main'),
-    'step 9 lost the worktree-side merge of main',
-  )
-  assert.ok(
-    /re-run \*\*all of step 8\*\*/.test(text),
-    'step 9 no longer requires re-verification after the worktree-side merge',
-  )
-})
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(text.includes('.worktrees/<id>" merge --no-edit main'), 'step 9 lost the worktree-side merge of main');
+  assert.ok(/re-run \*\*all of step 8\*\*/.test(text), 'step 9 no longer requires re-verification after the worktree-side merge');
+});
 
-test('step 8\'s verify launcher carries its paths in named env variables', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const launcher = text.split('\n').filter((l) => l.includes('orchestrate.mjs" verify'))
-  assert.equal(launcher.length, 1, `expected exactly 1 verify launcher line, found ${launcher.length}`)
-  const line = launcher[0]
-  assert.ok(line.includes('BM_PLUGIN_ROOT'), `verify launcher lost BM_PLUGIN_ROOT: ${line}`)
-  assert.ok(line.includes('BM_RUN_DIR'), `verify launcher lost BM_RUN_DIR: ${line}`)
+test("step 8's verify launcher carries its paths in named env variables", () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const launcher = text.split('\n').filter((l) => l.includes('orchestrate.mjs" verify'));
+  assert.equal(launcher.length, 1, `expected exactly 1 verify launcher line, found ${launcher.length}`);
+  const line = launcher[0];
+  assert.ok(line.includes('BM_PLUGIN_ROOT'), `verify launcher lost BM_PLUGIN_ROOT: ${line}`);
+  assert.ok(line.includes('BM_RUN_DIR'), `verify launcher lost BM_RUN_DIR: ${line}`);
   // The single quotes are the whole reason env is needed rather than plain
   // interpolation: `$?` must reach the inner shell, not this one. A rewrite
   // that switched them to double quotes would capture the OUTER shell's exit
   // code into .status — a merge gate reading the wrong command's answer.
-  assert.ok(line.includes("sh -c 'node"), `verify launcher's script body is no longer single-quoted: ${line}`)
-})
+  assert.ok(line.includes("sh -c 'node"), `verify launcher's script body is no longer single-quoted: ${line}`);
+});
 
-const STREAM_DENIAL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial.jsonl')
-const STREAM_NO_DENIALS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-denials.jsonl')
-const STREAM_DENIAL_PARTIAL_TAIL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial-partial-tail.jsonl')
-const STREAM_TWO_RESULTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-two-results.jsonl')
-const STREAM_NO_RESULT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-result.jsonl')
+const STREAM_DENIAL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial.jsonl');
+const STREAM_NO_DENIALS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-denials.jsonl');
+const STREAM_DENIAL_PARTIAL_TAIL = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-denial-partial-tail.jsonl');
+const STREAM_TWO_RESULTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-two-results.jsonl');
+const STREAM_NO_RESULT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-no-result.jsonl');
 
 test('readPermissionDenials returns the denial recorded on the result event', () => {
-  const denials = readPermissionDenials(STREAM_DENIAL)
-  assert.equal(denials.length, 1)
-  assert.equal(denials[0].tool_name, 'Bash')
-  assert.match(denials[0].tool_input.command, /^curl -X POST/)
-})
+  const denials = readPermissionDenials(STREAM_DENIAL);
+  assert.equal(denials.length, 1);
+  assert.equal(denials[0].tool_name, 'Bash');
+  assert.match(denials[0].tool_input.command, /^curl -X POST/);
+});
 
 test('readPermissionDenials reads an absent permission_denials field as no denials', () => {
-  assert.deepEqual(readPermissionDenials(STREAM_NO_DENIALS), [])
-})
+  assert.deepEqual(readPermissionDenials(STREAM_NO_DENIALS), []);
+});
 
 test('readPermissionDenials finds a denial ahead of a partial trailing line', () => {
-  const denials = readPermissionDenials(STREAM_DENIAL_PARTIAL_TAIL)
-  assert.equal(denials.length, 1)
-  assert.equal(denials[0].tool_use_id, 'toolu_01PartialTailProbe')
-})
+  const denials = readPermissionDenials(STREAM_DENIAL_PARTIAL_TAIL);
+  assert.equal(denials.length, 1);
+  assert.equal(denials[0].tool_use_id, 'toolu_01PartialTailProbe');
+});
 
 test('readPermissionDenials takes the LAST result event when a resumed transcript holds several', () => {
   // First result clean, second refused. A reader that stopped at the first
   // would clear a resumed run whose retry never ran the command it needed.
-  const denials = readPermissionDenials(STREAM_TWO_RESULTS)
-  assert.equal(denials.length, 1)
-  assert.equal(denials[0].tool_use_id, 'toolu_01ResumedRunDenial')
-})
+  const denials = readPermissionDenials(STREAM_TWO_RESULTS);
+  assert.equal(denials.length, 1);
+  assert.equal(denials[0].tool_use_id, 'toolu_01ResumedRunDenial');
+});
 
 test('readPermissionDenials returns no denials for a transcript that has no result event at all', () => {
   // The crashed-session shape watch already knows about: the child died
@@ -3271,52 +3358,52 @@ test('readPermissionDenials returns no denials for a transcript that has no resu
   // second copy of the absent-field case above it and the branch it is named
   // for — the loop never matching a result event at all, so the initial []
   // is what comes back — went uncovered.
-  assert.deepEqual(readPermissionDenials(STREAM_NO_RESULT), [])
-})
+  assert.deepEqual(readPermissionDenials(STREAM_NO_RESULT), []);
+});
 
 test('denials --jsonl prints the denial count and the denials themselves', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'denials', '--jsonl', STREAM_DENIAL)
+  const out = run(project, home, 'denials', '--jsonl', STREAM_DENIAL);
 
-  assert.equal(out.status, 0, out.stderr)
-  const parsed = JSON.parse(out.stdout)
-  assert.equal(parsed.count, 1)
-  assert.equal(parsed.denials[0].tool_name, 'Bash')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const parsed = JSON.parse(out.stdout);
+  assert.equal(parsed.count, 1);
+  assert.equal(parsed.denials[0].tool_name, 'Bash');
+});
 
 test('denials on a missing --jsonl exits 1 rather than reporting a clean run', (t) => {
   // The failure mode worth spending an exit code on: an unreadable
   // transcript answering "no denials" is indistinguishable from a clean run,
   // and step 5 would merge on it.
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
 
-  const out = run(project, home, 'denials', '--jsonl', path.join(project, 'nope.jsonl'))
+  const out = run(project, home, 'denials', '--jsonl', path.join(project, 'nope.jsonl'));
 
-  assert.equal(out.status, 1)
-})
+  assert.equal(out.status, 1);
+});
 
 test('stage <id> dispatched --permission-mode records the mode on the queue item', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-7', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-7', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const out = run(project, home, 'stage', 'task-7', 'dispatched', '--worktree', '/tmp/w', '--branch', 'backlog/task-7', '--permission-mode', 'auto')
+  const out = run(project, home, 'stage', 'task-7', 'dispatched', '--worktree', '/tmp/w', '--branch', 'backlog/task-7', '--permission-mode', 'auto');
 
-  assert.equal(out.status, 0, out.stderr)
-  const item = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-7')
-  assert.equal(item.permissionMode, 'auto')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const item = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-7');
+  assert.equal(item.permissionMode, 'auto');
+});
 
 test('a queue item starts with a null permissionMode, before any dispatch has chosen one', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-8', 'Some task')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-8', 'Some task');
 
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const item = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-8')
-  assert.equal(item.permissionMode, null)
-})
+  const item = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-8');
+  assert.equal(item.permissionMode, null);
+});
 
 test('every step that runs a headless session checks its transcript for denials before committing', () => {
   // The structural half of the denials gate, and the one a reading of step 5
@@ -3331,27 +3418,27 @@ test('every step that runs a headless session checks its transcript for denials 
   // Asserted by section rather than by line number so the file can keep
   // growing, which it does constantly. If a section is renamed, update the
   // titles here — do not delete the case.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const sections = new Map()
-  let current = null
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const sections = new Map();
+  let current = null;
   for (const line of text.split('\n')) {
     if (line.startsWith('## ')) {
-      current = line.slice(3).trim()
-      sections.set(current, [])
+      current = line.slice(3).trim();
+      sections.set(current, []);
     } else if (current !== null) {
-      sections.get(current).push(line)
+      sections.get(current).push(line);
     }
   }
-  const MUST_CHECK = ['5. Inspect what the session left behind', '7. Review']
+  const MUST_CHECK = ['5. Inspect what the session left behind', '7. Review'];
   for (const title of MUST_CHECK) {
-    assert.ok(sections.has(title), `section not found (renamed?): ${title}`)
-    const body = sections.get(title).join('\n')
+    assert.ok(sections.has(title), `section not found (renamed?): ${title}`);
+    const body = sections.get(title).join('\n');
     assert.ok(
       body.includes('orchestrate.mjs" denials --jsonl'),
       `section "${title}" runs a session and then commits, but never checks its transcript for denials`
-    )
+    );
   }
-})
+});
 
 // --- bug-2: a cwd inside a linked worktree must refuse loudly, never resolve --
 // The whole point of these cases is the DIFFERENCE between the two ways a
@@ -3369,125 +3456,118 @@ test('every step that runs a headless session checks its transcript for denials 
 // A real linked worktree of `project`, on its own branch, with a real
 // commit behind it (git worktree add needs HEAD to resolve).
 function addWorktree(project, name, branch) {
-  commitEverything(project, 'seed')
-  const worktreePath = path.join(project, '.worktrees', name)
-  const added = spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', branch, 'HEAD'], { encoding: 'utf8' })
-  if (added.status !== 0) throw new Error(`git worktree add failed: ${added.stderr}`)
-  return worktreePath
+  commitEverything(project, 'seed');
+  const worktreePath = path.join(project, '.worktrees', name);
+  const added = spawnSync('git', ['-C', project, 'worktree', 'add', worktreePath, '-b', branch, 'HEAD'], { encoding: 'utf8' });
+  if (added.status !== 0) throw new Error(`git worktree add failed: ${added.stderr}`);
+  return worktreePath;
 }
 
 test('a command run from inside a linked worktree refuses with exit 1 and names both the worktree and the project root', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-30', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const worktreePath = addWorktree(project, 'task-30', 'backlog/task-30')
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-30', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const worktreePath = addWorktree(project, 'task-30', 'backlog/task-30');
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(worktreePath, home, 'heartbeat')
+  const out = run(worktreePath, home, 'heartbeat');
 
-  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`)
-  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'refusal must name the worktree it was run from')
-  assert.match(out.stderr, new RegExp(project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'refusal must name the project root to re-run from')
+  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`);
+  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'refusal must name the worktree it was run from');
+  assert.match(out.stderr, new RegExp(project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'refusal must name the project root to re-run from');
   // The live run is untouched, and nothing was keyed under the worktree.
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the refusal must never write to the real run.json')
-  assert.equal(fs.existsSync(path.join(home, encodeURIComponent(worktreePath))), false, 'nothing may be keyed under the worktree path')
-})
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'the refusal must never write to the real run.json');
+  assert.equal(fs.existsSync(path.join(home, encodeURIComponent(worktreePath))), false, 'nothing may be keyed under the worktree path');
+});
 
 test('the worktree refusal fires from a subdirectory of the worktree too — the walk reaches its .git before any parent', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-31', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const worktreePath = addWorktree(project, 'task-31', 'backlog/task-31')
-  const nested = path.join(worktreePath, 'a', 'b')
-  fs.mkdirSync(nested, { recursive: true })
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-31', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const worktreePath = addWorktree(project, 'task-31', 'backlog/task-31');
+  const nested = path.join(worktreePath, 'a', 'b');
+  fs.mkdirSync(nested, { recursive: true });
 
-  const out = run(nested, home, 'heartbeat')
+  const out = run(nested, home, 'heartbeat');
 
-  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`)
-  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-})
+  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`);
+  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
 
 test('init --project pointed at a linked worktree refuses with exit 1 and writes nothing at all', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-32', 'Some task')
-  const worktreePath = addWorktree(project, 'task-32', 'backlog/task-32')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-32', 'Some task');
+  const worktreePath = addWorktree(project, 'task-32', 'backlog/task-32');
 
-  const out = run(project, home, 'init', '--project', worktreePath)
+  const out = run(project, home, 'init', '--project', worktreePath);
 
-  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`)
-  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when it refuses')
-})
+  assert.equal(out.status, 1, `expected the worktree refusal, got status ${out.status}: ${out.stderr}`);
+  assert.match(out.stderr, new RegExp(worktreePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.deepEqual(fs.readdirSync(home), [], 'init must write nothing anywhere under BM_ORCH_HOME when it refuses');
+});
 
 test('a directory in no git repository at all still exits 1 with the original "no .git found" message — the new refusal must not reword it', (t) => {
-  const { home } = orchFixture(t)
+  const { home } = orchFixture(t);
   // A temp directory with no .git anywhere up its chain. macOS /tmp is
   // itself inside no repository, so the walk runs to / and refuses there.
-  const orphan = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-orphan-')))
-  t.after(() => fs.rmSync(orphan, { recursive: true, force: true }))
+  const orphan = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-orphan-')));
+  t.after(() => fs.rmSync(orphan, { recursive: true, force: true }));
 
-  const out = run(orphan, home, 'heartbeat')
+  const out = run(orphan, home, 'heartbeat');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /no \.git found/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /no \.git found/);
+});
 
 test('a submodule working tree resolves to itself and is never refused — commondir, not "\.git is a file", is the discriminator', (t) => {
-  const { home } = orchFixture(t)
-  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-submodule-')))
-  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }))
+  const { home } = orchFixture(t);
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-submodule-')));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 
   // A real submodule, because the entire claim under test is what git's own
   // plumbing writes: a submodule gitdir (<super>/.git/modules/<name>) has no
   // `commondir` entry, a worktree gitdir (<main>/.git/worktrees/<name>) does.
   // `protocol.file.allow=always` is required for a local-path submodule on
   // git >= 2.38.
-  const inner = path.join(scratch, 'inner')
-  const superRepo = path.join(scratch, 'super')
-  fs.mkdirSync(inner)
-  fs.mkdirSync(superRepo)
-  const ident = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test']
+  const inner = path.join(scratch, 'inner');
+  const superRepo = path.join(scratch, 'super');
+  fs.mkdirSync(inner);
+  fs.mkdirSync(superRepo);
+  const ident = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test'];
   for (const repo of [inner, superRepo]) {
-    assert.equal(spawnSync('git', ['-C', repo, 'init', '-q'], { encoding: 'utf8' }).status, 0)
-    fs.writeFileSync(path.join(repo, 'seed.txt'), 'seed\n')
-    spawnSync('git', ['-C', repo, 'add', '-A'], { encoding: 'utf8' })
-    assert.equal(spawnSync('git', ['-C', repo, ...ident, 'commit', '-qm', 'seed'], { encoding: 'utf8' }).status, 0)
+    assert.equal(spawnSync('git', ['-C', repo, 'init', '-q'], { encoding: 'utf8' }).status, 0);
+    fs.writeFileSync(path.join(repo, 'seed.txt'), 'seed\n');
+    spawnSync('git', ['-C', repo, 'add', '-A'], { encoding: 'utf8' });
+    assert.equal(spawnSync('git', ['-C', repo, ...ident, 'commit', '-qm', 'seed'], { encoding: 'utf8' }).status, 0);
   }
-  const added = spawnSync(
-    'git',
-    ['-C', superRepo, '-c', 'protocol.file.allow=always', ...ident, 'submodule', 'add', '-q', inner, 'sub'],
-    { encoding: 'utf8' },
-  )
-  assert.equal(added.status, 0, added.stderr)
-  const submodule = path.join(superRepo, 'sub')
-  assert.equal(fs.statSync(path.join(submodule, '.git')).isFile(), true, 'fixture sanity: a submodule .git is a file')
+  const added = spawnSync('git', ['-C', superRepo, '-c', 'protocol.file.allow=always', ...ident, 'submodule', 'add', '-q', inner, 'sub'], { encoding: 'utf8' });
+  assert.equal(added.status, 0, added.stderr);
+  const submodule = path.join(superRepo, 'sub');
+  assert.equal(fs.statSync(path.join(submodule, '.git')).isFile(), true, 'fixture sanity: a submodule .git is a file');
 
   // init keys the run under the submodule's own path (no refusal), and a
   // later command run from inside it finds that same run.
-  assert.equal(run(submodule, home, 'init', '--project', submodule).status, 0)
-  const out = run(submodule, home, 'heartbeat')
+  assert.equal(run(submodule, home, 'init', '--project', submodule).status, 0);
+  const out = run(submodule, home, 'heartbeat');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(fs.existsSync(runFile(home, submodule)), true, 'the submodule must resolve to itself, exactly as before')
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.existsSync(runFile(home, submodule)), true, 'the submodule must resolve to itself, exactly as before');
+});
 
 test('verify --cwd pointed at a real linked worktree is untouched by the refusal — the flag names a worktree deliberately', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-33', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const worktreePath = addWorktree(project, 'task-33', 'backlog/task-33')
-  fs.writeFileSync(
-    path.join(worktreePath, 'backlog', 'verify.json'),
-    JSON.stringify({ commands: ['node -e "process.exit(0)"'] }),
-  )
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-33', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const worktreePath = addWorktree(project, 'task-33', 'backlog/task-33');
+  fs.writeFileSync(path.join(worktreePath, 'backlog', 'verify.json'), JSON.stringify({ commands: ['node -e "process.exit(0)"'] }));
 
-  const out = run(project, home, 'verify', 'task-33', '--cwd', worktreePath, '--json')
+  const out = run(project, home, 'verify', 'task-33', '--cwd', worktreePath, '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const rows = JSON.parse(out.stdout)
-  assert.equal(rows.length, 1)
-  assert.equal(rows[0].ok, true)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].ok, true);
+});
 
 // --- the references split: what left the body must stay reachable ----------
 // SKILL.md is injected in full into every turn of a run, and a run is several
@@ -3498,44 +3578,41 @@ test('verify --cwd pointed at a real linked worktree is untouched by the refusal
 // can go wrong: a rule that lost its story also losing itself, and a reference
 // nothing points at.
 
-const REFERENCES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'references')
+const REFERENCES = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'references');
 
-test('the body\'s recovery stub points at references/recovery.md', () => {
+test("the body's recovery stub points at references/recovery.md", () => {
   // The failure this guards is narrow and expensive: §10 gets moved out and
   // the pointer does not follow, leaving an unattended run with no instruction
   // at the one moment it is already in trouble.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  assert.ok(text.includes('references/recovery.md'), 'SKILL.md no longer names references/recovery.md')
-  assert.ok(fs.existsSync(path.join(REFERENCES, 'recovery.md')), 'references/recovery.md is gone')
-})
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(text.includes('references/recovery.md'), 'SKILL.md no longer names references/recovery.md');
+  assert.ok(fs.existsSync(path.join(REFERENCES, 'recovery.md')), 'references/recovery.md is gone');
+});
 
 test('references/recovery.md keeps all four reconcile verdicts', () => {
   // `reconcile` prints exactly one of four suggestions per item. A recovery
   // doc missing one strands a run on the case it dropped, with no other file
   // saying what that word means.
-  const text = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8')
+  const text = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8');
   for (const verdict of ['resume-session', 'redispatch-after-stop', 'inspect', 'park']) {
-    assert.ok(text.includes(verdict), `recovery.md no longer explains the "${verdict}" verdict`)
+    assert.ok(text.includes(verdict), `recovery.md no longer explains the "${verdict}" verdict`);
   }
-})
+});
 
 test('references/recovery.md still bills a resumed session rather than abandoning it', () => {
   // This is the ruling that deliberately contradicts backlog-groom, which
   // prescribes `stop --abandon` for a marker that looks identical. A
   // re-layout is exactly how a surprising rule gets "corrected" back to the
   // sibling skill's version by someone reading only one of them.
-  const text = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8')
-  assert.ok(
-    text.includes('`--abandon` is not used'),
-    'recovery.md no longer states that a resumed session is billed, not abandoned',
-  )
-})
+  const text = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8');
+  assert.ok(text.includes('`--abandon` is not used'), 'recovery.md no longer states that a resumed session is billed, not abandoned');
+});
 
 test('the body keeps the rules whose stories moved to references/', () => {
   // One assertion per rule, each naming the rule rather than the string, so a
   // failure says which rule was lost instead of "substring not found". Every
   // one of these had a paragraph of evidence moved out from under it.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
   const RULES = [
     ['git revert -m 1', 'undoing a completed merge is a revert'],
     ['reset --hard', 'and never a hard reset'],
@@ -3543,23 +3620,23 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['( cd ', 'worktree-scoped backlog.mjs calls run in a subshell'],
     ['--permission-mode auto', 'the dispatch rung'],
     ['BM_PLUGIN_ROOT', "step 8's launcher carries its paths in named env variables"],
-    ['grep -qxF', 'the info/exclude append is checked first, whole-line and fixed-string'],
-  ]
+    ['grep -qxF', 'the info/exclude append is checked first, whole-line and fixed-string']
+  ];
   for (const [needle, rule] of RULES) {
-    assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`)
+    assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
   }
-})
+});
 
 test('every file under references/ is named by the body', () => {
   // An unreferenced reference is a file no session will ever open. Reading
   // them is not automatic — the body has to say when.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const files = fs.readdirSync(REFERENCES).filter((f) => f.endsWith('.md'))
-  assert.ok(files.length > 0, 'references/ has no .md files')
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const files = fs.readdirSync(REFERENCES).filter((f) => f.endsWith('.md'));
+  assert.ok(files.length > 0, 'references/ has no .md files');
   for (const f of files) {
-    assert.ok(text.includes(`references/${f}`), `references/${f} is never named in SKILL.md`)
+    assert.ok(text.includes(`references/${f}`), `references/${f} is never named in SKILL.md`);
   }
-})
+});
 
 // --- bug-18: the dispatch prompt has to say the session is inside a run ------
 // A dispatched execute session had nothing in its context saying so: its
@@ -3574,40 +3651,40 @@ test('every file under references/ is named by the body', () => {
 // `--append-system-prompt` or an env var. These cases pin the shape of that
 // string and the coupling between the two SKILL.md files that read it.
 
-const EXECUTE_SKILL_MD = path.join(SKILLS_ROOT, 'backlog-execute', 'SKILL.md')
+const EXECUTE_SKILL_MD = path.join(SKILLS_ROOT, 'backlog-execute', 'SKILL.md');
 
 // One constant, both halves. The marker is worthless if orchestrate emits one
 // token and execute recognises a different one that merely reads alike — the
 // same posture test/watchdog-coupling.ts takes for the board and the sweeper.
-const RUN_MARKER_TOKEN = '[orchestrator-run'
+const RUN_MARKER_TOKEN = '[orchestrator-run';
 
 test('exactly one dispatch line carries the run marker, and it is the fresh dispatch', () => {
   // The --resume retry deliberately does NOT repeat the marker: a resumed
   // session still carries its original prompt, so a second copy would be
   // noise in the one string a human reads in the dashboard drawer.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
-  const marked = dispatchLines.filter((l) => l.includes(RUN_MARKER_TOKEN))
-  assert.equal(marked.length, 1, `expected exactly 1 dispatch line carrying ${RUN_MARKER_TOKEN}, found ${marked.length}`)
-  assert.ok(!marked[0].includes('--resume'), 'the run marker landed on the --resume retry line rather than the fresh dispatch')
-})
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
+  const marked = dispatchLines.filter((l) => l.includes(RUN_MARKER_TOKEN));
+  assert.equal(marked.length, 1, `expected exactly 1 dispatch line carrying ${RUN_MARKER_TOKEN}, found ${marked.length}`);
+  assert.ok(!marked[0].includes('--resume'), 'the run marker landed on the --resume retry line rather than the fresh dispatch');
+});
 
 test('the marker follows the id rather than preceding it', () => {
   // backlog-execute's "Pick an item" reads the trigger's own words for an id.
   // Putting the marker between the trigger and the id is how this fix would
   // teach that section to guess.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const line = text.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN))
-  assert.ok(line, 'no dispatch line carries the run marker at all')
-  const trigger = line.indexOf('/backlog-execute')
-  const marker = line.indexOf(RUN_MARKER_TOKEN)
-  assert.ok(trigger !== -1, 'the marked dispatch line no longer invokes /backlog-execute')
-  assert.ok(marker > trigger, 'the marker sits before the trigger')
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const line = text.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN));
+  assert.ok(line, 'no dispatch line carries the run marker at all');
+  const trigger = line.indexOf('/backlog-execute');
+  const marker = line.indexOf(RUN_MARKER_TOKEN);
+  assert.ok(trigger !== -1, 'the marked dispatch line no longer invokes /backlog-execute');
+  assert.ok(marker > trigger, 'the marker sits before the trigger');
   // `<id>` is the placeholder the section substitutes; it must still be the
   // first token after the trigger, i.e. before the marker opens.
-  const id = line.indexOf('<id>', trigger)
-  assert.ok(id !== -1 && id < marker, 'the item id no longer sits between the trigger and the marker')
-})
+  const id = line.indexOf('<id>', trigger);
+  assert.ok(id !== -1 && id < marker, 'the item id no longer sits between the trigger and the marker');
+});
 
 test('no dispatch line contains an apostrophe', () => {
   // The dispatch is `nohup sh -c '…'`: a single-quoted body with the prompt
@@ -3615,28 +3692,28 @@ test('no dispatch line contains an apostrophe', () => {
   // whole line becomes a syntax error — on the one line whose failure mode is
   // "every item in the queue parks". Asserted on the line, never on prose
   // promising the line is clean.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
-  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`)
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
+  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`);
   for (const line of dispatchLines) {
-    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"))
-    assert.ok(!body.includes("'"), `an apostrophe is back inside the single-quoted dispatch body: ${line}`)
+    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"));
+    assert.ok(!body.includes("'"), `an apostrophe is back inside the single-quoted dispatch body: ${line}`);
   }
-})
+});
 
 test('the marker orchestrate emits is the one backlog-execute recognises', () => {
   // Read out of orchestrate's own dispatch line rather than hard-coded twice,
   // so the two files cannot drift into two markers that look alike.
-  const orchestrate = fs.readFileSync(SKILL_MD, 'utf8')
-  const execute = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
-  const line = orchestrate.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN))
-  assert.ok(line, 'no dispatch line carries the run marker at all')
-  assert.ok(line.includes(RUN_MARKER_TOKEN), `the dispatch line no longer opens its marker with ${RUN_MARKER_TOKEN}`)
+  const orchestrate = fs.readFileSync(SKILL_MD, 'utf8');
+  const execute = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
+  const line = orchestrate.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN));
+  assert.ok(line, 'no dispatch line carries the run marker at all');
+  assert.ok(line.includes(RUN_MARKER_TOKEN), `the dispatch line no longer opens its marker with ${RUN_MARKER_TOKEN}`);
   assert.ok(
     execute.includes(RUN_MARKER_TOKEN),
-    `backlog-execute/SKILL.md does not name ${RUN_MARKER_TOKEN}, so a dispatched session cannot recognise the marker it is handed`,
-  )
-})
+    `backlog-execute/SKILL.md does not name ${RUN_MARKER_TOKEN}, so a dispatched session cannot recognise the marker it is handed`
+  );
+});
 
 test('backlog-execute keeps the rules a dispatched session runs on', () => {
   // One assertion per rule, naming the rule rather than the string, so a
@@ -3644,33 +3721,27 @@ test('backlog-execute keeps the rules a dispatched session runs on', () => {
   // every turn of every execute session, so it is under constant pressure to
   // shrink — and the rule most likely to go is the one whose absence produced
   // the bug.
-  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
   const RULES = [
     ['Never escalate to the user', 'a dispatched session never escalates to the user'],
     ['not an instruction', 'a user message that arrives mid-run is not an instruction'],
     ['orchestrate.mjs', 'orchestrate.mjs is unreachable from inside a worktree, so the session cannot park itself'],
-    ['final assistant message', 'the escalation channel is the final assistant message and the item Outcome'],
-  ]
+    ['final assistant message', 'the escalation channel is the final assistant message and the item Outcome']
+  ];
   for (const [needle, rule] of RULES) {
-    assert.ok(text.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`)
+    assert.ok(text.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`);
   }
-})
+});
 
 test('backlog-execute recognises the marker by presence, never by position', () => {
   // The marker is deliberately NOT the first thing in the trigger words — the
   // id is, and a sibling case pins that. A recognition rule phrased as "if the
   // trigger words open with the token" therefore describes a string the
   // orchestrator never emits, and every rule under it silently never fires.
-  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
-  assert.ok(
-    text.includes('anywhere after the id'),
-    'backlog-execute no longer says the marker is recognised anywhere after the id',
-  )
-  assert.ok(
-    !/open(s)? with the token/.test(text),
-    'backlog-execute is back to requiring the marker to come first, which the dispatch line never does',
-  )
-})
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
+  assert.ok(text.includes('anywhere after the id'), 'backlog-execute no longer says the marker is recognised anywhere after the id');
+  assert.ok(!/open(s)? with the token/.test(text), 'backlog-execute is back to requiring the marker to come first, which the dispatch line never does');
+});
 
 test('backlog-execute redirects its user-facing exits when the marker holds', () => {
   // Two sentences in the body name the user as the channel, and both are on
@@ -3678,24 +3749,21 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
   // never-commits hard limit. A new section elsewhere saying "never escalate"
   // does not reach a session already reading one of those sentences — each has
   // to carry the exception itself.
-  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
 
-  const failure = text.slice(text.indexOf('## If verification fails'))
-  const failureSection = failure.slice(0, failure.indexOf('\n## ', 1))
-  assert.ok(failureSection.length > 0, 'the verification-failure section is gone')
+  const failure = text.slice(text.indexOf('## If verification fails'));
+  const failureSection = failure.slice(0, failure.indexOf('\n## ', 1));
+  assert.ok(failureSection.length > 0, 'the verification-failure section is gone');
   assert.ok(
     failureSection.includes(RUN_MARKER_TOKEN),
-    `the verification-failure path still hands the decision to a user with no exception for ${RUN_MARKER_TOKEN}`,
-  )
+    `the verification-failure path still hands the decision to a user with no exception for ${RUN_MARKER_TOKEN}`
+  );
 
-  const bulletStart = text.indexOf('- **Never commits, never pushes.**')
-  assert.ok(bulletStart !== -1, 'the never-commits hard limit is gone')
-  const bullet = text.slice(bulletStart, text.indexOf('\n- ', bulletStart + 1))
-  assert.ok(
-    bullet.includes(RUN_MARKER_TOKEN),
-    `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`,
-  )
-})
+  const bulletStart = text.indexOf('- **Never commits, never pushes.**');
+  assert.ok(bulletStart !== -1, 'the never-commits hard limit is gone');
+  const bullet = text.slice(bulletStart, text.indexOf('\n- ', bulletStart + 1));
+  assert.ok(bullet.includes(RUN_MARKER_TOKEN), `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`);
+});
 
 // --- bug-20: the environment marker the Stop hook reads ---------------------
 //
@@ -3722,23 +3790,20 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
 
 // One constant, read into every case below, so SKILL.md and any future
 // consumer cannot drift into two spellings of the same variable.
-const ORCH_RUN_ENV = 'BM_ORCH_RUN'
+const ORCH_RUN_ENV = 'BM_ORCH_RUN';
 
 test('both dispatch lines export the run id to the session they spawn', () => {
   // Both lines, unlike the prompt marker above, which is deliberately on the
   // fresh dispatch only. A resumed session is owned by the run exactly as much
   // as the original was, and it is a separate `exec claude -p` process with a
   // separate environment — the first line's assignment does not reach it.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
-  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`)
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
+  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`);
   for (const line of dispatchLines) {
-    assert.ok(
-      line.includes(`${ORCH_RUN_ENV}=<runId> exec claude -p`),
-      `dispatch line does not assign ${ORCH_RUN_ENV} immediately before exec claude: ${line}`,
-    )
+    assert.ok(line.includes(`${ORCH_RUN_ENV}=<runId> exec claude -p`), `dispatch line does not assign ${ORCH_RUN_ENV} immediately before exec claude: ${line}`);
   }
-})
+});
 
 test('the run id assignment sits inside the sh -c body, not in front of nohup', () => {
   // `VAR=x nohup sh -c '…'` would export the variable to nohup and thence to
@@ -3747,13 +3812,13 @@ test('the run id assignment sits inside the sh -c body, not in front of nohup', 
   // is one whose value a stray space or an unquoted substitution can detach
   // from the command entirely. Inside the body it is a plain simple-command
   // prefix on `exec`, which POSIX places in the exec'd program's environment.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'))
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
   for (const line of dispatchLines) {
-    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"))
-    assert.ok(body.includes(ORCH_RUN_ENV), `${ORCH_RUN_ENV} is outside the single-quoted dispatch body: ${line}`)
+    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"));
+    assert.ok(body.includes(ORCH_RUN_ENV), `${ORCH_RUN_ENV} is outside the single-quoted dispatch body: ${line}`);
   }
-})
+});
 
 test('SKILL.md names no environment variable but the three it owns', () => {
   // A closed allowlist rather than a search for near-misses: the failure this
@@ -3764,12 +3829,12 @@ test('SKILL.md names no environment variable but the three it owns', () => {
   // BM_RUN_DIR are the verify line's own two, passed in through `nohup env`
   // because its body dereferences them; this one is substituted at compose
   // time instead, so it is a plain assignment on the command.
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const ALLOWED = new Set([ORCH_RUN_ENV, 'BM_PLUGIN_ROOT', 'BM_RUN_DIR'])
-  const unexpected = [...new Set([...text.matchAll(/BM_[A-Z_]+/g)].map((m) => m[0]))].filter((n) => !ALLOWED.has(n))
-  assert.deepEqual(unexpected, [], `SKILL.md names an environment variable nothing reads: ${unexpected.join(', ')}`)
-  assert.ok(text.includes(ORCH_RUN_ENV), `SKILL.md no longer names ${ORCH_RUN_ENV} at all`)
-})
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const ALLOWED = new Set([ORCH_RUN_ENV, 'BM_PLUGIN_ROOT', 'BM_RUN_DIR']);
+  const unexpected = [...new Set([...text.matchAll(/BM_[A-Z_]+/g)].map((m) => m[0]))].filter((n) => !ALLOWED.has(n));
+  assert.deepEqual(unexpected, [], `SKILL.md names an environment variable nothing reads: ${unexpected.join(', ')}`);
+  assert.ok(text.includes(ORCH_RUN_ENV), `SKILL.md no longer names ${ORCH_RUN_ENV} at all`);
+});
 
 // --- bug-31: a run-composed prompt travels in a file, never in argv --------
 // The retry launcher spelled its prompt `"<what to do differently>"` — double
@@ -3784,92 +3849,75 @@ test('SKILL.md names no environment variable but the three it owns', () => {
 // about its text, because the property at stake — "sh does not expand this" —
 // is a property of sh, not of a string, and only sh can be asked.
 
-const RETRY_PROMPT_FILE = '<dir>/prompts/<id>-retry-1.txt'
-const FIX_PROMPT_FILE = '<dir>/prompts/<id>-fix-<n>.txt'
+const RETRY_PROMPT_FILE = '<dir>/prompts/<id>-retry-1.txt';
+const FIX_PROMPT_FILE = '<dir>/prompts/<id>-fix-<n>.txt';
 
 // The two `nohup sh -c '… exec claude -p …'` launchers, read off SKILL.md.
 // Named apart from `dispatchNames()` below, which parses the same two lines
 // for a different field.
 function execClaudeLines(text) {
-  return text.split('\n').filter((l) => l.includes('exec claude -p'))
+  return text.split('\n').filter((l) => l.includes('exec claude -p'));
 }
 
 function retryLineOf(text) {
-  const line = execClaudeLines(text).find((l) => l.includes('--resume'))
-  assert.ok(line, 'SKILL.md no longer carries a `--resume` retry launcher at all')
-  return line
+  const line = execClaudeLines(text).find((l) => l.includes('--resume'));
+  assert.ok(line, 'SKILL.md no longer carries a `--resume` retry launcher at all');
+  return line;
 }
 
 test('the retry launcher takes its prompt from a file, not from argv', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  assert.equal(execClaudeLines(text).length, 2, 'expected exactly 2 headless dispatch lines')
-  const retry = retryLineOf(text)
-  assert.ok(
-    retry.includes(`$(cat "${RETRY_PROMPT_FILE}")`),
-    `the retry launcher does not read its prompt back from ${RETRY_PROMPT_FILE}: ${retry}`,
-  )
-  assert.ok(
-    !retry.includes('<what to do differently>'),
-    `the retry launcher still interpolates prose into a command position: ${retry}`,
-  )
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.equal(execClaudeLines(text).length, 2, 'expected exactly 2 headless dispatch lines');
+  const retry = retryLineOf(text);
+  assert.ok(retry.includes(`$(cat "${RETRY_PROMPT_FILE}")`), `the retry launcher does not read its prompt back from ${RETRY_PROMPT_FILE}: ${retry}`);
+  assert.ok(!retry.includes('<what to do differently>'), `the retry launcher still interpolates prose into a command position: ${retry}`);
   // The guard: without it a missing or empty prompt file degrades to `""` and
   // the run spends its one fix loop on a session resumed with no instruction.
-  assert.ok(
-    retry.includes(`test -s "${RETRY_PROMPT_FILE}"`),
-    `the retry launcher has no \`test -s\` guard on its prompt file: ${retry}`,
-  )
-})
+  assert.ok(retry.includes(`test -s "${RETRY_PROMPT_FILE}"`), `the retry launcher has no \`test -s\` guard on its prompt file: ${retry}`);
+});
 
 test('the prompt file is written before the launcher, and by the Write tool', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  assert.ok(text.includes(FIX_PROMPT_FILE), `SKILL.md never names ${FIX_PROMPT_FILE}, so §7's fix loop has no prompt file`)
-  const launcherAt = text.indexOf(retryLineOf(text))
-  const writeAt = text.indexOf(RETRY_PROMPT_FILE)
-  assert.ok(writeAt !== -1, `SKILL.md never names ${RETRY_PROMPT_FILE}`)
-  assert.ok(writeAt < launcherAt, 'the prompt file is named for the first time on the launcher line itself — nothing has written it yet')
-  assert.match(
-    text.slice(writeAt, launcherAt),
-    /Write tool/,
-    'nothing between naming the prompt file and launching says to write it with the Write tool',
-  )
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(text.includes(FIX_PROMPT_FILE), `SKILL.md never names ${FIX_PROMPT_FILE}, so §7's fix loop has no prompt file`);
+  const launcherAt = text.indexOf(retryLineOf(text));
+  const writeAt = text.indexOf(RETRY_PROMPT_FILE);
+  assert.ok(writeAt !== -1, `SKILL.md never names ${RETRY_PROMPT_FILE}`);
+  assert.ok(writeAt < launcherAt, 'the prompt file is named for the first time on the launcher line itself — nothing has written it yet');
+  assert.match(text.slice(writeAt, launcherAt), /Write tool/, 'nothing between naming the prompt file and launching says to write it with the Write tool');
   // Mechanical, because this is the half a later edit "simplifies": a heredoc
   // delimiter that happens to appear in the findings ends the document early,
   // and `printf '%s' '…'` re-introduces the apostrophe problem the whole fix
   // exists to remove.
-  const shellWrites = text.split('\n').filter((l) => l.includes('prompts/') && (l.includes('printf') || l.includes('<<')))
-  assert.deepEqual(shellWrites, [], 'a prompt file is being written through the shell rather than with the Write tool')
-})
+  const shellWrites = text.split('\n').filter((l) => l.includes('prompts/') && (l.includes('printf') || l.includes('<<')));
+  assert.deepEqual(shellWrites, [], 'a prompt file is being written through the shell rather than with the Write tool');
+});
 
 test('the no-prose-in-argv rule is stated once, and §3 obeys it too', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
   // The rule itself, in §4's dispatch rules, so it covers the family rather
   // than only the two lines bug-31 happened to find.
-  assert.match(
-    text,
-    /never rides a shell command line/,
-    "§4's dispatch rules no longer state the rule that prose this run did not compose goes in a file",
-  )
+  assert.match(text, /never rides a shell command line/, "§4's dispatch rules no longer state the rule that prose this run did not compose goes in a file");
   // §3's two payload writes were the remaining inline ones: an apostrophe
   // inside a question was a syntax error there too.
-  const printfPayloads = text.split('\n').filter((l) => l.includes('printf') && l.includes('questions/'))
-  assert.deepEqual(printfPayloads, [], 'a questions payload is still being written with printf')
+  const printfPayloads = text.split('\n').filter((l) => l.includes('printf') && l.includes('questions/'));
+  assert.deepEqual(printfPayloads, [], 'a questions payload is still being written with printf');
   // The second half, which the first round of this fix left out: the values
   // that stay inline are safe because they are PARAPHRASES, and the rule has
   // to say so or the three sites that take one have no rule over them.
   assert.match(
     text,
     /never a verbatim quote of\s+text this run did not compose/,
-    "§4 states the rule for argv payloads but not for the --detail/--note values that stay inline",
-  )
-})
+    '§4 states the rule for argv payloads but not for the --detail/--note values that stay inline'
+  );
+});
 
 // A payload with one of each hazard the Cause names: a backtick-quoted
 // identifier, a `$(…)` that leaves visible evidence when it runs, and CSS
 // whose `var(--ink)` is what produced bug-15-fix-1.err's `syntax error near
 // unexpected token`.
-const HOSTILE_SUBST = 'Fix `rowId` here, then $(touch OWNED), and `.run-track-name-stalled { color: var(--ink) }`'
+const HOSTILE_SUBST = 'Fix `rowId` here, then $(touch OWNED), and `.run-track-name-stalled { color: var(--ink) }`';
 // Plus the second failure mode: an apostrophe closes the single-quoted body.
-const HOSTILE = `${HOSTILE_SUBST} — it's wrong\n`
+const HOSTILE = `${HOSTILE_SUBST} — it's wrong\n`;
 
 // Composes a runnable command out of SKILL.md's own retry line: every
 // placeholder substituted, `claude` swapped for a stub that dumps its argv,
@@ -3880,72 +3928,72 @@ const HOSTILE = `${HOSTILE_SUBST} — it's wrong\n`
 // prompt interpolated into the command, no `test -s` guard — which is what
 // makes a green result mean anything.
 function retryHarness(t, { prompt, inline = false, writePrompt = true }) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-shell-')))
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
-  const dir = path.join(root, 'runstate')
-  fs.mkdirSync(path.join(dir, 'logs'), { recursive: true })
-  fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true })
-  const cwd = path.join(root, 'project')
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-shell-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'runstate');
+  fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
+  const cwd = path.join(root, 'project');
   // The line's first act is `cd "$PWD/.worktrees/<id>"`, so the substitution
   // below runs with THAT as its cwd — which is where a `touch` would land.
-  fs.mkdirSync(path.join(cwd, '.worktrees', 'bug-1'), { recursive: true })
+  fs.mkdirSync(path.join(cwd, '.worktrees', 'bug-1'), { recursive: true });
 
-  const argvFile = path.join(root, 'argv')
-  const stub = path.join(root, 'stub.sh')
-  fs.writeFileSync(stub, `#!/bin/sh\n: > ${argvFile}\nfor a in "$@"; do printf '%s\\0' "$a" >> ${argvFile}; done\n`)
-  fs.chmodSync(stub, 0o755)
+  const argvFile = path.join(root, 'argv');
+  const stub = path.join(root, 'stub.sh');
+  fs.writeFileSync(stub, `#!/bin/sh\n: > ${argvFile}\nfor a in "$@"; do printf '%s\\0' "$a" >> ${argvFile}; done\n`);
+  fs.chmodSync(stub, 0o755);
 
-  const promptFile = path.join(dir, 'prompts', 'bug-1-retry-1.txt')
-  if (writePrompt) fs.writeFileSync(promptFile, prompt)
+  const promptFile = path.join(dir, 'prompts', 'bug-1-retry-1.txt');
+  if (writePrompt) fs.writeFileSync(promptFile, prompt);
 
   let line = retryLineOf(fs.readFileSync(SKILL_MD, 'utf8'))
     .replaceAll('<dir>', dir)
     .replaceAll('<id>', 'bug-1')
     .replaceAll('<runId>', 'run-1')
     .replaceAll('<sessionId>', 's1')
-    .replace('exec claude ', `exec ${stub} `)
+    .replace('exec claude ', `exec ${stub} `);
   if (inline) {
-    line = line.replace(`test -s "${promptFile}" && `, '').replace(`"$(cat "${promptFile}")"`, `"${prompt.trimEnd()}"`)
-    assert.ok(!line.includes('$(cat'), 'the inline variant still reads the prompt from a file')
+    line = line.replace(`test -s "${promptFile}" && `, '').replace(`"$(cat "${promptFile}")"`, `"${prompt.trimEnd()}"`);
+    assert.ok(!line.includes('$(cat'), 'the inline variant still reads the prompt from a file');
   }
   // `wait` for the backgrounded `nohup … &`: the line detaches on purpose, and
   // a test that did not wait would assert against a process still starting.
-  const result = spawnSync('sh', ['-c', `${line}\nwait`], { cwd, encoding: 'utf8' })
+  const result = spawnSync('sh', ['-c', `${line}\nwait`], { cwd, encoding: 'utf8' });
 
-  const argv = fs.existsSync(argvFile) ? fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1) : null
-  const owned = fs.readdirSync(root, { recursive: true }).filter((p) => String(p).endsWith('OWNED'))
-  const errFile = path.join(dir, 'logs', 'bug-1-retry-1.err')
-  return { root, argv, owned, result, err: fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf8') : null }
+  const argv = fs.existsSync(argvFile) ? fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1) : null;
+  const owned = fs.readdirSync(root, { recursive: true }).filter((p) => String(p).endsWith('OWNED'));
+  const errFile = path.join(dir, 'logs', 'bug-1-retry-1.err');
+  return { root, argv, owned, result, err: fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf8') : null };
 }
 
 test('bug-31 red proof: a file-carried prompt reaches argv intact and executes nothing', (t) => {
-  const fixed = retryHarness(t, { prompt: HOSTILE })
-  assert.ok(fixed.argv, `the launcher spawned nothing at all: ${fixed.result.stderr}`)
+  const fixed = retryHarness(t, { prompt: HOSTILE });
+  assert.ok(fixed.argv, `the launcher spawned nothing at all: ${fixed.result.stderr}`);
   // `-p --resume s1 <prompt> --output-format …` — the prompt is argv[3].
   // `$(cat …)` strips trailing newlines, which is the only difference allowed.
-  assert.equal(fixed.argv[3], HOSTILE.trimEnd())
-  assert.deepEqual(fixed.owned, [], 'the substitution in the prompt was executed')
-  assert.equal(fixed.err, '', `stderr from the launcher: ${fixed.err}`)
+  assert.equal(fixed.argv[3], HOSTILE.trimEnd());
+  assert.deepEqual(fixed.owned, [], 'the substitution in the prompt was executed');
+  assert.equal(fixed.err, '', `stderr from the launcher: ${fixed.err}`);
 
   // The same harness on the pre-fix shape — if this stayed green the case
   // above would be pinning nothing.
-  const pre = retryHarness(t, { prompt: `${HOSTILE_SUBST}\n`, inline: true })
-  assert.ok(pre.argv, 'the pre-fix shape spawned nothing, so this comparison is vacuous')
-  assert.ok(pre.owned.length > 0, 'the pre-fix shape did not execute the substitution, so this harness cannot go red')
-  assert.notEqual(pre.argv[3], HOSTILE_SUBST, 'the pre-fix shape delivered the prompt intact')
+  const pre = retryHarness(t, { prompt: `${HOSTILE_SUBST}\n`, inline: true });
+  assert.ok(pre.argv, 'the pre-fix shape spawned nothing, so this comparison is vacuous');
+  assert.ok(pre.owned.length > 0, 'the pre-fix shape did not execute the substitution, so this harness cannot go red');
+  assert.notEqual(pre.argv[3], HOSTILE_SUBST, 'the pre-fix shape delivered the prompt intact');
 
   // Second failure mode, unseen in the wild only because it destroys the
   // dispatch before anything can log it: one apostrophe ends the body.
-  const quoted = retryHarness(t, { prompt: HOSTILE, inline: true })
-  assert.equal(quoted.argv, null, 'an apostrophe in an inline prompt still managed to spawn a session')
-})
+  const quoted = retryHarness(t, { prompt: HOSTILE, inline: true });
+  assert.equal(quoted.argv, null, 'an apostrophe in an inline prompt still managed to spawn a session');
+});
 
 test('an absent or empty prompt file spawns nothing', (t) => {
-  const absent = retryHarness(t, { prompt: HOSTILE, writePrompt: false })
-  assert.equal(absent.argv, null, 'the launcher resumed a session with no instruction at all')
-  const empty = retryHarness(t, { prompt: '' })
-  assert.equal(empty.argv, null, 'an empty prompt file still resumed the session')
-})
+  const absent = retryHarness(t, { prompt: HOSTILE, writePrompt: false });
+  assert.equal(absent.argv, null, 'the launcher resumed a session with no instruction at all');
+  const empty = retryHarness(t, { prompt: '' });
+  assert.equal(empty.argv, null, 'an empty prompt file still resumed the session');
+});
 
 // The other half of the same rule, and the half the first round of this fix
 // missed: `attention --detail`, `stage --note` and `merge-mode --note` stay
@@ -3977,15 +4025,15 @@ const NOTE_PLACEHOLDERS = new Map([
   ['<what happened, your words>', "the driver's summary of a dead session"],
   ['<verdict summary, your words>', "the driver's summary of a review verdict"],
   ['<the failing command names>', 'command names, never their output'],
-  ['<why, your words>', "the driver's reason for skipping an item"],
-])
+  ['<why, your words>', "the driver's reason for skipping an item"]
+]);
 
 // Values can wrap across lines in prose (`--detail\n"<what happened…>"`), so
 // the text is flattened first: a line-by-line scan silently misses those, and
 // a missed site is exactly how this class survived round one.
 function noteValues(file) {
-  const flat = fs.readFileSync(file, 'utf8').replace(/\s*\n\s*/g, ' ')
-  return [...flat.matchAll(/--(?:note|detail)\s+"([^"]*)"/g)].map((m) => m[1])
+  const flat = fs.readFileSync(file, 'utf8').replace(/\s*\n\s*/g, ' ');
+  return [...flat.matchAll(/--(?:note|detail)\s+"([^"]*)"/g)].map((m) => m[1]);
 }
 
 test("every --detail and --note value is the driver's own words", () => {
@@ -3999,50 +4047,47 @@ test("every --detail and --note value is the driver's own words", () => {
     SKILL_MD,
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'recovery.md'),
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'rationale.md'),
-    path.join(SKILLS_ROOT, '..', 'docs', 'subsystems', 'invariants.md'),
-  ]
-  const seen = new Set()
-  let count = 0
+    path.join(SKILLS_ROOT, '..', 'docs', 'subsystems', 'invariants.md')
+  ];
+  const seen = new Set();
+  let count = 0;
   for (const file of FILES) {
     for (const value of noteValues(file)) {
-      count += 1
+      count += 1;
       assert.doesNotMatch(
         value,
         /verbatim|word for word|as the reviewer wrote|as written/i,
-        `a --detail/--note value asks for a verbatim quote of prose the run did not compose: "${value}" (${path.basename(file)})`,
-      )
+        `a --detail/--note value asks for a verbatim quote of prose the run did not compose: "${value}" (${path.basename(file)})`
+      );
       for (const [placeholder] of value.matchAll(/<[^>]*>/g)) {
-        seen.add(placeholder)
+        seen.add(placeholder);
         assert.ok(
           NOTE_PLACEHOLDERS.has(placeholder),
           `${placeholder} appears in a --detail/--note value in ${path.basename(file)} and is not on the list of values the driver composes itself. ` +
-            'Either spell it so it says whose words it is, or add it here with the reason it is safe.',
-        )
+            'Either spell it so it says whose words it is, or add it here with the reason it is safe.'
+        );
       }
     }
   }
   // The file is the authority, not this list: a spelling that disappears from
   // the prose has to disappear from here too, or the next reader takes the
   // list for a description of a file it no longer matches.
-  const unused = [...NOTE_PLACEHOLDERS.keys()].filter((k) => !seen.has(k))
-  assert.deepEqual(unused, [], `these placeholders are on the list but no longer appear in any --detail/--note value: ${unused.join(', ')}`)
+  const unused = [...NOTE_PLACEHOLDERS.keys()].filter((k) => !seen.has(k));
+  assert.deepEqual(unused, [], `these placeholders are on the list but no longer appear in any --detail/--note value: ${unused.join(', ')}`);
   // A guard on the scan itself: a regex that quietly stopped matching would
   // make every assertion above vacuous.
-  assert.ok(count >= 15, `only ${count} --detail/--note values found — the scan is no longer reaching them`)
-})
+  assert.ok(count >= 15, `only ${count} --detail/--note values found — the scan is no longer reaching them`);
+});
 
 test('the classifier denial records the run fact, not the classifier prose', () => {
   // Both denial sites — §2's pre-flight probe and §9's real merge — and the
   // note has to name which one asked, because that IS the answer
   // `mergeModeNote` exists to give.
-  const flat = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s*\n\s*/g, ' ')
-  const notes = [...flat.matchAll(/merge-mode branch --note "([^"]*)"/g)].map((m) => m[1])
-  assert.equal(notes.length, 2, `expected exactly 2 \`merge-mode branch --note\` sites, found ${notes.length}`)
-  assert.deepEqual(notes.sort(), [
-    'auto mode classifier denied the merge of <id>',
-    'auto mode classifier denied the merge probe',
-  ])
-})
+  const flat = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s*\n\s*/g, ' ');
+  const notes = [...flat.matchAll(/merge-mode branch --note "([^"]*)"/g)].map((m) => m[1]);
+  assert.equal(notes.length, 2, `expected exactly 2 \`merge-mode branch --note\` sites, found ${notes.length}`);
+  assert.deepEqual(notes.sort(), ['auto mode classifier denied the merge of <id>', 'auto mode classifier denied the merge probe']);
+});
 
 // --- task-17: the pause gates, finish paused, unpause ----------------------
 // The whole feature's load-bearing half lives in this tool rather than in
@@ -4057,275 +4102,279 @@ test('the classifier denial records the run fact, not the classifier prose', () 
 // A pause request that satisfies the predicate against the run just created:
 // this run's own id, stamped now (necessarily after `startedAt`).
 function effectiveControl(home, project, over = {}) {
-  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  writeControl(home, project, { runId: run.runId, requestedAt: new Date().toISOString(), ...over })
-  return run
+  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  writeControl(home, project, { runId: run.runId, requestedAt: new Date().toISOString(), ...over });
+  return run;
 }
 
 test('an effective pause request refuses stage <id> preflight with exit 6, writing nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  effectiveControl(home, project)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  effectiveControl(home, project);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'stage', 'task-5', 'preflight')
+  const out = run(project, home, 'stage', 'task-5', 'preflight');
 
-  assert.equal(out.status, 6, out.stderr)
+  assert.equal(out.status, 6, out.stderr);
   // The stderr has to carry the reaction, not just the refusal: a run reading
   // this is mid-loop and its next move is a DIFFERENT finish, not a retry.
-  assert.match(out.stderr, /finish --status paused/)
-  assert.match(out.stderr, /task-5/)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage')
-})
+  assert.match(out.stderr, /finish --status paused/);
+  assert.match(out.stderr, /task-5/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage');
+});
 
 test('an effective pause request refuses stage <id> dispatched with exit 6, writing nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
-  effectiveControl(home, project)
-  const before = fs.readFileSync(runFile(home, project))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0);
+  effectiveControl(home, project);
+  const before = fs.readFileSync(runFile(home, project));
 
-  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b')
+  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b');
 
-  assert.equal(out.status, 6, out.stderr)
-  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage')
-})
+  assert.equal(out.status, 6, out.stderr);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage');
+});
 
 // The transition rule, and the reason the gate reads the item's CURRENT
 // stage at all: once a child session exists, its session id has to be
 // recordable. Refusing this call would leave a live `claude -p` process the
 // run file has no id for — strictly worse than letting the item finish.
 test('a re-stamp of an already-dispatched item is not a transition and still succeeds under a pause request', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0)
-  effectiveControl(home, project)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  effectiveControl(home, project);
 
-  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--session', 's1')
+  const out = run(project, home, 'stage', 'task-5', 'dispatched', '--session', 's1');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.queue.find((q) => q.id === 'task-5').sessionId, 's1')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.queue.find((q) => q.id === 'task-5').sessionId, 's1');
+});
 
 // Every stage past `dispatched` is an item already in flight: pausing must
 // never strand it half-worked, so the gate is exactly two stages wide.
 test('a pause request never blocks a stage past dispatched', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
-  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0)
-  effectiveControl(home, project)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  effectiveControl(home, project);
 
-  assert.equal(run(project, home, 'stage', 'task-5', 'inspecting').status, 0)
-})
+  assert.equal(run(project, home, 'stage', 'task-5', 'inspecting').status, 0);
+});
 
 test('a pause request pinned to another runId is not effective', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  effectiveControl(home, project, { runId: 'run-19990101-000000' })
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  effectiveControl(home, project, { runId: 'run-19990101-000000' });
 
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
-})
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0);
+});
 
 // A request older than the run it names belongs to a PREVIOUS run under the
 // same runId-less reading — the timestamp is what makes "this run" mean this
 // start of it.
 test('a pause request dated before startedAt is not effective', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const runFileBody = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const runFileBody = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
   writeControl(home, project, {
     runId: runFileBody.runId,
-    requestedAt: new Date(Date.parse(runFileBody.startedAt) - 3600_000).toISOString(),
-  })
+    requestedAt: new Date(Date.parse(runFileBody.startedAt) - 3600_000).toISOString()
+  });
 
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0)
-})
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0);
+});
 
 // `unpausedAt` is the later of the two clocks the predicate compares: a
 // resumed run must not immediately re-pause itself on the very file that
 // paused it, and must still honour a request made AFTER the resume.
 test('unpausedAt, not startedAt, is what a pause request must post-date once a run has resumed', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  const file = runFile(home, project)
-  const body = JSON.parse(fs.readFileSync(file, 'utf8'))
-  const unpausedAt = new Date(Date.parse(body.startedAt) + 60_000).toISOString()
-  body.unpausedAt = unpausedAt
-  fs.writeFileSync(file, JSON.stringify(body, null, 2))
+  const file = runFile(home, project);
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const unpausedAt = new Date(Date.parse(body.startedAt) + 60_000).toISOString();
+  body.unpausedAt = unpausedAt;
+  fs.writeFileSync(file, JSON.stringify(body, null, 2));
 
-  writeControl(home, project, { runId: body.runId, requestedAt: new Date(Date.parse(unpausedAt) - 1000).toISOString() })
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0, 'a request older than the resume still paused the run')
+  writeControl(home, project, { runId: body.runId, requestedAt: new Date(Date.parse(unpausedAt) - 1000).toISOString() });
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0, 'a request older than the resume still paused the run');
 
   // Back to `pending`: that first probe SUCCEEDED, so the item now sits at
   // `preflight` and the second call would not be a transition — the gate
   // would answer 0 for the wrong reason and this case would prove nothing.
-  assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0)
-  writeControl(home, project, { runId: body.runId, requestedAt: new Date(Date.parse(unpausedAt) + 1000).toISOString() })
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 6, 'a request newer than the resume did not pause the run')
-})
+  assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0);
+  writeControl(home, project, { runId: body.runId, requestedAt: new Date(Date.parse(unpausedAt) + 1000).toISOString() });
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 6, 'a request newer than the resume did not pause the run');
+});
 
 // Every unreadable shape reads as "no request". A malformed control file must
 // never wedge a run — the file is written by another process entirely, and a
 // half-written or hand-edited one is not a reason to stop working.
 test('a missing or malformed control file is never an effective pause request', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const runId = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const runId = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId;
 
-  assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0, 'no control file at all')
+  assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0, 'no control file at all');
 
-  for (const body of ['not json', { runId }, { runId, requestedAt: 'yesterday' }, { requestedAt: new Date().toISOString() }, { runId: 7, requestedAt: new Date().toISOString() }]) {
-    writeControl(home, project, body)
-    const out = run(project, home, 'stage', 'task-5', 'preflight')
-    assert.equal(out.status, 0, `${JSON.stringify(body)} was treated as an effective request: ${out.stderr}`)
+  for (const body of [
+    'not json',
+    { runId },
+    { runId, requestedAt: 'yesterday' },
+    { requestedAt: new Date().toISOString() },
+    { runId: 7, requestedAt: new Date().toISOString() }
+  ]) {
+    writeControl(home, project, body);
+    const out = run(project, home, 'stage', 'task-5', 'preflight');
+    assert.equal(out.status, 0, `${JSON.stringify(body)} was treated as an effective request: ${out.stderr}`);
     // Put the item back so the next iteration is a transition again.
-    assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0)
+    assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0);
   }
-})
+});
 
 test('finish --status paused sets the status and leaves the run archivable by a later init', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
 
-  const out = run(project, home, 'finish', '--status', 'paused')
+  const out = run(project, home, 'finish', '--status', 'paused');
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(out.stdout.trim(), JSON.stringify({ status: 'paused' }))
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'paused')
-  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance')
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.stdout.trim(), JSON.stringify({ status: 'paused' }));
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'paused');
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(before.updatedAt), 'updatedAt did not strictly advance');
 
   // `init` refuses only a `running` file, so a paused one archives like a
   // done one — a person who gives up on resuming can still start fresh.
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(fs.readdirSync(runsDir(home, project)).length, 1)
-  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'running')
-})
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(fs.readdirSync(runsDir(home, project)).length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'running');
+});
 
 test('unpause returns a paused run to running and stamps unpausedAt', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  assert.equal(run(project, home, 'finish', '--status', 'paused').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'paused').status, 0);
 
-  const out = run(project, home, 'unpause')
+  const out = run(project, home, 'unpause');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'running')
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'running');
   // One clock reading, not two: the stamp that retires the pause request and
   // the heartbeat have to be the same instant, or a request landing between
   // them would be judged against the wrong one.
-  assert.equal(after.unpausedAt, after.updatedAt)
+  assert.equal(after.unpausedAt, after.updatedAt);
   // bug-19 review round 1: `unpause` also takes the driver lease, in that same
   // single write and off that same clock reading — a paused run's lease belongs
   // to the session that paused it and exited, so a resume session that left it
   // in place would be refused by its own next `claim`.
-  assert.equal(after.driver.at, after.unpausedAt)
+  assert.equal(after.driver.at, after.unpausedAt);
   assert.deepEqual(JSON.parse(out.stdout), {
-    status: 'running', unpausedAt: after.unpausedAt, driver: after.driver
-  })
-})
+    status: 'running',
+    unpausedAt: after.unpausedAt,
+    driver: after.driver
+  });
+});
 
 test('unpause refuses any status but paused, writing nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
 
   for (const status of ['running', 'done', 'aborted', 'failed']) {
-    assert.equal(run(project, home, 'init', '--project', project).status, 0)
-    if (status !== 'running') assert.equal(run(project, home, 'finish', '--status', status).status, 0)
-    const before = fs.readFileSync(runFile(home, project))
+    assert.equal(run(project, home, 'init', '--project', project).status, 0);
+    if (status !== 'running') assert.equal(run(project, home, 'finish', '--status', status).status, 0);
+    const before = fs.readFileSync(runFile(home, project));
 
-    const out = run(project, home, 'unpause')
+    const out = run(project, home, 'unpause');
 
-    assert.equal(out.status, 1, `unpause on a ${status} run: ${out.stderr}`)
-    assert.match(out.stderr, new RegExp(status))
-    assert.ok(before.equals(fs.readFileSync(runFile(home, project))), `run.json was modified by unpause on a ${status} run`)
+    assert.equal(out.status, 1, `unpause on a ${status} run: ${out.stderr}`);
+    assert.match(out.stderr, new RegExp(status));
+    assert.ok(before.equals(fs.readFileSync(runFile(home, project))), `run.json was modified by unpause on a ${status} run`);
     // Leave the file non-running so the next iteration's init can archive it.
-    if (status === 'running') assert.equal(run(project, home, 'finish', '--status', 'done').status, 0)
+    if (status === 'running') assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
   }
-})
+});
 
 test('unpause with no run exits 3', (t) => {
-  const { home, project } = orchFixture(t)
-  assert.equal(run(project, home, 'unpause').status, 3)
-})
+  const { home, project } = orchFixture(t);
+  assert.equal(run(project, home, 'unpause').status, 3);
+});
 
 // The spec's "the resume retires the request that paused it", end to end:
 // without this the first `stage <id> preflight` of a resumed run would read
 // the same file and pause the run again, forever.
 test('a resumed run is not re-paused by the request that paused it', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  effectiveControl(home, project)
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 6)
-  assert.equal(run(project, home, 'finish', '--status', 'paused').status, 0)
-  assert.equal(run(project, home, 'unpause').status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  effectiveControl(home, project);
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 6);
+  assert.equal(run(project, home, 'finish', '--status', 'paused').status, 0);
+  assert.equal(run(project, home, 'unpause').status, 0);
 
-  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0, 'the retired request paused the resumed run again')
-})
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0, 'the retired request paused the resumed run again');
+});
 
 test('status names an effective pause request, and says nothing when there is none', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
 
-  assert.doesNotMatch(run(project, home, 'status').stdout, /pause requested/)
+  assert.doesNotMatch(run(project, home, 'status').stdout, /pause requested/);
 
-  const runId = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId
-  const requestedAt = new Date().toISOString()
-  writeControl(home, project, { runId, requestedAt })
+  const runId = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId;
+  const requestedAt = new Date().toISOString();
+  writeControl(home, project, { runId, requestedAt });
 
-  assert.match(run(project, home, 'status').stdout, new RegExp(`pause requested at ${requestedAt}`))
+  assert.match(run(project, home, 'status').stdout, new RegExp(`pause requested at ${requestedAt}`));
   // `--json` stays a verbatim print of the run file — the request is not part
   // of the run, and a synthetic key here would make this command the second
   // thing claiming to describe run state.
-  assert.equal(Object.hasOwn(JSON.parse(run(project, home, 'status', '--json').stdout), 'pauseRequested'), false)
-})
+  assert.equal(Object.hasOwn(JSON.parse(run(project, home, 'status', '--json').stdout), 'pauseRequested'), false);
+});
 
 test('controlHome and controlFilePath are the paths the server writes', () => {
-  const withoutEnv = { ...process.env }
-  delete withoutEnv.BM_ORCH_CONTROL_HOME
-  const probe = spawnSync(
-    'node',
-    ['-e', `import('${pathToFileURL(SCRIPT).href}').then((m) => console.log(m.controlHome()))`],
-    { encoding: 'utf8', env: withoutEnv },
-  )
-  assert.equal(probe.stdout.trim(), path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control'))
-  assert.equal(controlHome(), process.env.BM_ORCH_CONTROL_HOME ?? path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control'))
-  assert.equal(controlFilePath('/r', '/a/b'), path.join('/r', '%2Fa%2Fb.json'))
-})
+  const withoutEnv = { ...process.env };
+  delete withoutEnv.BM_ORCH_CONTROL_HOME;
+  const probe = spawnSync('node', ['-e', `import('${pathToFileURL(SCRIPT).href}').then((m) => console.log(m.controlHome()))`], {
+    encoding: 'utf8',
+    env: withoutEnv
+  });
+  assert.equal(probe.stdout.trim(), path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control'));
+  assert.equal(controlHome(), process.env.BM_ORCH_CONTROL_HOME ?? path.join(os.homedir(), '.backlog-manager', 'settings', 'orchestrator-control'));
+  assert.equal(controlFilePath('/r', '/a/b'), path.join('/r', '%2Fa%2Fb.json'));
+});
 
 test('pauseRequestEffective refuses every malformed shape rather than throwing', () => {
-  const run = { runId: 'run-1', startedAt: '2026-09-05T10:00:00Z' }
-  assert.equal(pauseRequestEffective(null, run), false)
-  assert.equal(pauseRequestEffective(undefined, run), false)
-  assert.equal(pauseRequestEffective({ runId: 'run-2', requestedAt: '2026-09-05T11:00:00Z' }, run), false)
-  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T09:00:00Z' }, run), false)
-  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: 'yesterday' }, run), false)
-  assert.equal(pauseRequestEffective({ runId: 'run-1' }, run), false)
-  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, { runId: 'run-1', startedAt: 'nonsense' }), false)
-  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, run), true)
-  assert.equal(
-    pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, { ...run, unpausedAt: '2026-09-05T12:00:00Z' }),
-    false,
-  )
-})
+  const run = { runId: 'run-1', startedAt: '2026-09-05T10:00:00Z' };
+  assert.equal(pauseRequestEffective(null, run), false);
+  assert.equal(pauseRequestEffective(undefined, run), false);
+  assert.equal(pauseRequestEffective({ runId: 'run-2', requestedAt: '2026-09-05T11:00:00Z' }, run), false);
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T09:00:00Z' }, run), false);
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: 'yesterday' }, run), false);
+  assert.equal(pauseRequestEffective({ runId: 'run-1' }, run), false);
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, { runId: 'run-1', startedAt: 'nonsense' }), false);
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, run), true);
+  assert.equal(pauseRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z' }, { ...run, unpausedAt: '2026-09-05T12:00:00Z' }), false);
+});
 
 // --- bug-19: the driver lease ---------------------------------------------
 //
@@ -4349,190 +4398,190 @@ test('pauseRequestEffective refuses every malformed shape rather than throwing',
 // CLAUDE_CODE_SESSION_ID. `null` unsets it — the hand-run terminal case, which
 // must still work.
 function runAs(sessionId, cwd, home, ...args) {
-  const env = { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` }
-  if (sessionId === null) delete env.CLAUDE_CODE_SESSION_ID
-  else env.CLAUDE_CODE_SESSION_ID = sessionId
-  return spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd, env })
+  const env = { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` };
+  if (sessionId === null) delete env.CLAUDE_CODE_SESSION_ID;
+  else env.CLAUDE_CODE_SESSION_ID = sessionId;
+  return spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd, env });
 }
 
 function makeStale(home, project) {
-  const file = runFile(home, project)
-  const body = JSON.parse(fs.readFileSync(file, 'utf8'))
-  body.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString()
-  fs.writeFileSync(file, JSON.stringify(body, null, 2))
-  return body
+  const file = runFile(home, project);
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+  body.updatedAt = new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString();
+  fs.writeFileSync(file, JSON.stringify(body, null, 2));
+  return body;
 }
 
 test('init stamps the initiating session as the run driver', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
 
-  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
 
-  const body = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(body.driver.sessionId, 'sess-a')
-  assert.equal(body.driver.at, body.startedAt, 'the driver stamp and the run start are one clock reading')
-})
+  const body = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(body.driver.sessionId, 'sess-a');
+  assert.equal(body.driver.at, body.startedAt, 'the driver stamp and the run start are one clock reading');
+});
 
 test('claim takes an unclaimed crashed run and heartbeats it in the same write', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
-  const stale = makeStale(home, project)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+  const stale = makeStale(home, project);
   // No driver at all — every run file written before this feature existed.
-  const file = runFile(home, project)
-  const noDriver = JSON.parse(fs.readFileSync(file, 'utf8'))
-  delete noDriver.driver
-  fs.writeFileSync(file, JSON.stringify(noDriver, null, 2))
+  const file = runFile(home, project);
+  const noDriver = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete noDriver.driver;
+  fs.writeFileSync(file, JSON.stringify(noDriver, null, 2));
 
-  const out = runAs('sess-b', project, home, 'claim')
+  const out = runAs('sess-b', project, home, 'claim');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(file, 'utf8'))
-  assert.equal(after.driver.sessionId, 'sess-b')
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.driver.sessionId, 'sess-b');
   // The heartbeat recovery.md already requires at this point, not a second
   // call: claim IS that heartbeat, and it records who as well.
-  assert.ok(Date.parse(after.updatedAt) > Date.parse(stale.updatedAt))
-  assert.equal(after.updatedAt, after.driver.at)
-})
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(stale.updatedAt));
+  assert.equal(after.updatedAt, after.driver.at);
+});
 
 test('a second claim on a crashed run evicts the first, whose next writes then refuse', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
-  makeStale(home, project)
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+  makeStale(home, project);
 
-  assert.equal(runAs('sess-a', project, home, 'claim').status, 0, 'the original driver may re-claim its own run')
+  assert.equal(runAs('sess-a', project, home, 'claim').status, 0, 'the original driver may re-claim its own run');
   // That re-claim heartbeated the run, so it reads fresh again — and a fresh
   // run another session leads is exactly what `claim` refuses. Back to crashed,
   // which is the state a resume actually arrives into.
-  makeStale(home, project)
-  const evicting = runAs('sess-b', project, home, 'claim')
-  assert.equal(evicting.status, 0, evicting.stderr)
+  makeStale(home, project);
+  const evicting = runAs('sess-b', project, home, 'claim');
+  assert.equal(evicting.status, 0, evicting.stderr);
 
-  const file = runFile(home, project)
-  const afterClaim = fs.readFileSync(file, 'utf8')
+  const file = runFile(home, project);
+  const afterClaim = fs.readFileSync(file, 'utf8');
 
   for (const args of [['heartbeat'], ['stage', 'task-5', 'preflight'], ['finish', '--status', 'done']]) {
-    const refused = runAs('sess-a', project, home, ...args)
-    assert.notEqual(refused.status, 0, `${args[0]} was not refused for the evicted session`)
-    assert.match(refused.stderr, /sess-b/, `${args[0]}'s refusal does not name the session holding the run`)
+    const refused = runAs('sess-a', project, home, ...args);
+    assert.notEqual(refused.status, 0, `${args[0]} was not refused for the evicted session`);
+    assert.match(refused.stderr, /sess-b/, `${args[0]}'s refusal does not name the session holding the run`);
     // Byte-for-byte: a refused command must write nothing at all, or the
     // loser's own stage-write is the very thing the lease exists to prevent.
-    assert.equal(fs.readFileSync(file, 'utf8'), afterClaim, `${args[0]} wrote to the run file it was refused`)
+    assert.equal(fs.readFileSync(file, 'utf8'), afterClaim, `${args[0]} wrote to the run file it was refused`);
   }
 
   // And the winner still drives it.
-  assert.equal(runAs('sess-b', project, home, 'heartbeat').status, 0)
-})
+  assert.equal(runAs('sess-b', project, home, 'heartbeat').status, 0);
+});
 
 test('claim refuses a fresh run another session is driving, and writes nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
-  const file = runFile(home, project)
-  const before = fs.readFileSync(file, 'utf8')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+  const file = runFile(home, project);
+  const before = fs.readFileSync(file, 'utf8');
 
-  const out = runAs('sess-b', project, home, 'claim')
+  const out = runAs('sess-b', project, home, 'claim');
 
-  assert.notEqual(out.status, 0)
-  assert.match(out.stderr, /sess-a/)
-  assert.equal(fs.readFileSync(file, 'utf8'), before)
-})
+  assert.notEqual(out.status, 0);
+  assert.match(out.stderr, /sess-a/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+});
 
 test('a run file with no driver key accepts every command exactly as before', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
-  const file = runFile(home, project)
-  const body = JSON.parse(fs.readFileSync(file, 'utf8'))
-  delete body.driver
-  fs.writeFileSync(file, JSON.stringify(body, null, 2))
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+  const file = runFile(home, project);
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete body.driver;
+  fs.writeFileSync(file, JSON.stringify(body, null, 2));
 
   // Absent means unclaimed, never locked: every run file already on disk when
   // this shipped lacks the key, and a missing field must not strand a run.
-  assert.equal(runAs('sess-b', project, home, 'heartbeat').status, 0)
-  assert.equal(runAs('sess-b', project, home, 'stage', 'task-5', 'preflight').status, 0)
-  assert.equal(runAs('sess-c', project, home, 'attention', 'task-5', '--kind', 'parked', '--detail', 'x').status, 0)
-})
+  assert.equal(runAs('sess-b', project, home, 'heartbeat').status, 0);
+  assert.equal(runAs('sess-b', project, home, 'stage', 'task-5', 'preflight').status, 0);
+  assert.equal(runAs('sess-c', project, home, 'attention', 'task-5', '--kind', 'parked', '--detail', 'x').status, 0);
+});
 
 test('an unidentified session runs every command and warns that the lease cannot be enforced', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
   // A hand-run terminal: no CLAUDE_CODE_SESSION_ID anywhere.
-  const init = runAs(null, project, home, 'init', '--project', project)
-  assert.equal(init.status, 0, init.stderr)
-  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).driver, null)
-  assert.match(init.stderr, /lease/i)
+  const init = runAs(null, project, home, 'init', '--project', project);
+  assert.equal(init.status, 0, init.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).driver, null);
+  assert.match(init.stderr, /lease/i);
 
   // And it is not locked out by somebody else's lease either — refusing here
   // would strand the one person recovering a run by hand.
-  assert.equal(runAs('sess-a', project, home, 'claim').status, 0)
-  const beat = runAs(null, project, home, 'heartbeat')
-  assert.equal(beat.status, 0, beat.stderr)
-  assert.match(beat.stderr, /lease/i)
-})
+  assert.equal(runAs('sess-a', project, home, 'claim').status, 0);
+  const beat = runAs(null, project, home, 'heartbeat');
+  assert.equal(beat.status, 0, beat.stderr);
+  assert.match(beat.stderr, /lease/i);
+});
 
 // --- bug-19 review round 1: the lease must never strand a run --------------
 
 test('abort takes a crashed run over from its dead driver, and init can then start a new run', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
   // The shape that was bricked: `init` stamped the lease, that session died,
   // and the run file still names it. A person's `--abort` is a NEW session
   // with a new id, and `--abort` never claims — recovery.md's abort section
   // opens with the bare command.
-  assert.equal(runAs('sess-dead', project, home, 'init', '--project', project).status, 0)
-  makeStale(home, project)
+  assert.equal(runAs('sess-dead', project, home, 'init', '--project', project).status, 0);
+  makeStale(home, project);
 
-  const out = runAs('sess-human', project, home, 'abort')
+  const out = runAs('sess-human', project, home, 'abort');
 
-  assert.equal(out.status, 0, out.stderr)
-  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'))
-  assert.equal(after.status, 'aborted')
-  assert.equal(after.driver.sessionId, 'sess-human', 'abort did not record the session that ended the run')
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.equal(after.driver.sessionId, 'sess-human', 'abort did not record the session that ended the run');
   // The second half of the brick: a run stuck at `running` refuses every
   // later `init` with exit 4, so a lease that refuses abort locks the project
   // out of the orchestrator entirely.
-  assert.equal(runAs('sess-next', project, home, 'init', '--project', project).status, 0)
-})
+  assert.equal(runAs('sess-next', project, home, 'init', '--project', project).status, 0);
+});
 
 test('abort still refuses a fresh run another session is actively driving, and writes nothing', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
-  const file = runFile(home, project)
-  const before = fs.readFileSync(file, 'utf8')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+  const file = runFile(home, project);
+  const before = fs.readFileSync(file, 'utf8');
 
-  const out = runAs('sess-b', project, home, 'abort')
+  const out = runAs('sess-b', project, home, 'abort');
 
-  assert.notEqual(out.status, 0)
-  assert.match(out.stderr, /sess-a/)
-  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused abort wrote to the run file')
-})
+  assert.notEqual(out.status, 0);
+  assert.match(out.stderr, /sess-a/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused abort wrote to the run file');
+});
 
 test('unpause is exempt from the lease, so a fresh session can resume a paused run', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
   // A run paused by the session that was driving it, which then exited —
   // task-17's own shape. `run.json` keeps that session's lease.
-  assert.equal(runAs('sess-paused', project, home, 'init', '--project', project).status, 0)
-  assert.equal(runAs('sess-paused', project, home, 'finish', '--status', 'paused').status, 0)
+  assert.equal(runAs('sess-paused', project, home, 'init', '--project', project).status, 0);
+  assert.equal(runAs('sess-paused', project, home, 'finish', '--status', 'paused').status, 0);
 
   // recovery.md's paused branch, in its documented order: unpause first (a run
   // has to be `running` before there is anything to drive), claim second.
-  const unpaused = runAs('sess-resume', project, home, 'unpause')
-  assert.equal(unpaused.status, 0, unpaused.stderr)
-  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'running')
+  const unpaused = runAs('sess-resume', project, home, 'unpause');
+  assert.equal(unpaused.status, 0, unpaused.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'running');
 
-  const claimed = runAs('sess-resume', project, home, 'claim')
-  assert.equal(claimed.status, 0, claimed.stderr)
-  assert.equal(runAs('sess-resume', project, home, 'stage', 'task-5', 'preflight').status, 0)
+  const claimed = runAs('sess-resume', project, home, 'claim');
+  assert.equal(claimed.status, 0, claimed.stderr);
+  assert.equal(runAs('sess-resume', project, home, 'stage', 'task-5', 'preflight').status, 0);
 
   // The exemption is `unpause` alone — every other write by a session that is
   // not the driver still refuses.
-  assert.equal(runAs('sess-paused', project, home, 'heartbeat').status, 7)
-})
+  assert.equal(runAs('sess-paused', project, home, 'heartbeat').status, 7);
+});
 
 // --- bug-28: the per-item execute session is named ------------------------
 // Every other session this system spawns carries a `-n` display name
@@ -4564,19 +4613,19 @@ test('unpause is exempt from the lease, so a fresh session can resume a paused r
 // validator — the CLI accepts any string — because the three server-side
 // helpers all concluded the same charset, and a name that agrees with them is
 // one that keeps working if this line ever does grow a server hop.
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/
-const NAME_CAP = 60
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/;
+const NAME_CAP = 60;
 
 /** The `-n "…"` argument of every headless dispatch line, in file order. */
 function dispatchNames() {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const lines = text.split('\n').filter((l) => l.includes('exec claude -p'))
-  assert.equal(lines.length, 2, `expected exactly 2 headless dispatch lines, found ${lines.length}`)
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const lines = text.split('\n').filter((l) => l.includes('exec claude -p'));
+  assert.equal(lines.length, 2, `expected exactly 2 headless dispatch lines, found ${lines.length}`);
   return lines.map((line) => {
-    const m = /-n "([^"]*)"/.exec(line)
-    assert.ok(m, `dispatch line passes no -n "<name>": ${line}`)
-    return { line, name: m[1] }
-  })
+    const m = /-n "([^"]*)"/.exec(line);
+    assert.ok(m, `dispatch line passes no -n "<name>": ${line}`);
+    return { line, name: m[1] };
+  });
 }
 
 test('both dispatch lines name the session they spawn', () => {
@@ -4586,13 +4635,13 @@ test('both dispatch lines name the session they spawn', () => {
     // the CLI would read as another argument, and a flag outside the body
     // would be handed to `nohup` instead of to `claude`. Same failure shape
     // BM_ORCH_RUN's own placement test guards, for the same reason.
-    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"))
-    assert.ok(body.includes(`-n "${name}"`), `-n is outside the single-quoted dispatch body: ${line}`)
+    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"));
+    assert.ok(body.includes(`-n "${name}"`), `-n is outside the single-quoted dispatch body: ${line}`);
   }
-})
+});
 
 test('the two names are the documented spellings, and neither carries the run id', () => {
-  const [dispatch, retry] = dispatchNames()
+  const [dispatch, retry] = dispatchNames();
   // Exact spellings rather than a pattern: this is where bug-28's one open
   // judgement is recorded. The run id is deliberately absent — the worktree
   // already gives the row its own project (`…--worktrees-<id>`), `run.json`
@@ -4600,14 +4649,14 @@ test('the two names are the documented spellings, and neither carries the run id
   // in the environment for the hook, and a `run-20260906-151336` in the name
   // would eat a third of the cap to repeat what a reader is not looking for.
   // The id is what a reader IS looking for, so the id is what the name says.
-  assert.equal(dispatch.name, 'orch <id>')
+  assert.equal(dispatch.name, 'orch <id>');
   // `retry 1` and not `retry <n>`: the log file this same block writes is
   // `<id>-retry-1.jsonl`, so one counter is substituted into both and a reader
   // comparing the row to the transcript sees the same number. `<n>` is also
   // already spent on the dispatch prompt's `item <n> of <m>`, and two meanings
   // for one placeholder on adjacent lines is how a substitution goes wrong.
-  assert.equal(retry.name, 'orch <id> retry 1')
-})
+  assert.equal(retry.name, 'orch <id> retry 1');
+});
 
 test('both composed names satisfy the dashboard charset and cap', () => {
   // Rendered, not asserted as templates: `<id>` and `<n>` are placeholders the
@@ -4615,11 +4664,11 @@ test('both composed names satisfy the dashboard charset and cap', () => {
   // never be tested against the regex directly, and a test that did would
   // either be red forever or quietly weakened until it passed.
   for (const { name } of dispatchNames()) {
-    const rendered = name.replace('<id>', 'bug-28')
-    assert.match(rendered, NAME_RE, `composed name is outside the dashboard charset: ${rendered}`)
-    assert.ok(rendered.length <= NAME_CAP, `composed name is over the ${NAME_CAP}-char cap: ${rendered}`)
+    const rendered = name.replace('<id>', 'bug-28');
+    assert.match(rendered, NAME_RE, `composed name is outside the dashboard charset: ${rendered}`);
+    assert.ok(rendered.length <= NAME_CAP, `composed name is over the ${NAME_CAP}-char cap: ${rendered}`);
   }
-})
+});
 
 test('a pathologically long id still composes a name under the cap', () => {
   // The cap matters because going over it is SILENT on the server-side route
@@ -4628,12 +4677,12 @@ test('a pathologically long id still composes a name under the cap', () => {
   // prose, so headroom is the only mechanism available. 40 characters is far
   // past anything backlog.mjs mints (`^[a-z]+-\d+$`); leaving the project and
   // the run id out of the name is what buys the room.
-  const id = 'x'.repeat(40)
+  const id = 'x'.repeat(40);
   for (const { name } of dispatchNames()) {
-    const rendered = name.replace('<id>', id)
-    assert.ok(rendered.length <= NAME_CAP, `a ${id.length}-char id overflows the cap: ${rendered.length} chars`)
+    const rendered = name.replace('<id>', id);
+    assert.ok(rendered.length <= NAME_CAP, `a ${id.length}-char id overflows the cap: ${rendered.length} chars`);
   }
-})
+});
 
 test('the retry name differs from the dispatch name for the same item', () => {
   // `-n` on a `--resume` renames the existing row rather than adding one
@@ -4641,10 +4690,10 @@ test('the retry name differs from the dispatch name for the same item', () => {
   // the retry must stay recognisable as the same item — same `orch <id>`
   // prefix — while still reading as the retry it now is, or the row silently
   // claims the first dispatch is still the thing running.
-  const [dispatch, retry] = dispatchNames()
-  assert.notEqual(retry.name, dispatch.name)
-  assert.ok(retry.name.startsWith(dispatch.name), `retry name no longer extends the dispatch name: ${retry.name}`)
-})
+  const [dispatch, retry] = dispatchNames();
+  assert.notEqual(retry.name, dispatch.name);
+  assert.ok(retry.name.startsWith(dispatch.name), `retry name no longer extends the dispatch name: ${retry.name}`);
+});
 
 // --- task-27: `usage`, the one writer of RunQueueItem.usage ---------------
 //
@@ -4652,44 +4701,44 @@ test('the retry name differs from the dispatch name for the same item', () => {
 // cost; nothing copied it anywhere, so "what did this run cost" meant parsing
 // 43MB of transcripts with a purpose-written script. These tests pin the copy.
 
-const STREAM_USAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage.jsonl')
-const STREAM_USAGE_FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-fix.jsonl')
-const STREAM_MALFORMED_THEN_USAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-malformed-then-usage.jsonl')
-const STREAM_USAGE_TWO_MODELS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-two-models.jsonl')
+const STREAM_USAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage.jsonl');
+const STREAM_USAGE_FIX = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-fix.jsonl');
+const STREAM_MALFORMED_THEN_USAGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-malformed-then-usage.jsonl');
+const STREAM_USAGE_TWO_MODELS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-two-models.jsonl');
 
 // The command reads which dispatch a transcript belongs to out of its FILE
 // NAME, so every test here needs the fixture sitting under a name the real
 // logs directory would have produced. Copied into a throwaway directory per
 // call rather than renamed in place — the fixtures are shared and read-only.
 function transcriptAs(t, fixture, name) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-usage-'))
-  const file = path.join(dir, name)
-  fs.copyFileSync(fixture, file)
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
-  return file
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-usage-'));
+  const file = path.join(dir, name);
+  fs.copyFileSync(fixture, file);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return file;
 }
 
 function usageRun(t, id = 'task-5', title = 'Some task') {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, id, title)
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  return { home, project }
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, id, title);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  return { home, project };
 }
 
 function queueItem(home, project, id) {
-  return JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === id)
+  return JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === id);
 }
 
 test('usage copies the result event onto the queue item and echoes the entry', (t) => {
-  const { home, project } = usageRun(t)
-  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')
+  const { home, project } = usageRun(t);
+  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl');
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', file)
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', file);
 
-  assert.equal(out.status, 0, out.stderr)
-  const entries = queueItem(home, project, 'task-5').usage
-  assert.equal(entries.length, 1)
-  const [entry] = entries
+  assert.equal(out.status, 0, out.stderr);
+  const entries = queueItem(home, project, 'task-5').usage;
+  assert.equal(entries.length, 1);
+  const [entry] = entries;
   // The exact key set, not a spot-check: this shape is written into an
   // archive read months later, and a field silently dropped by a future edit
   // is invisible in every other assertion here. `loop` is the twelfth field
@@ -4697,23 +4746,32 @@ test('usage copies the result event onto the queue item and echoes the entry', (
   // count — which is why this list has eleven names; the fix-loop test below
   // is where the twelfth appears.
   assert.deepEqual(Object.keys(entry).sort(), [
-    'cacheCreationTokens', 'cacheReadTokens', 'costUsd', 'durationMs', 'endedAt',
-    'inputTokens', 'kind', 'model', 'outputTokens', 'sessionId', 'turns',
-  ])
-  assert.equal(entry.kind, 'execute')
-  assert.equal(entry.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64')
-  assert.equal(entry.costUsd, 2.641441)
-  assert.equal(entry.turns, 34)
-  assert.equal(entry.inputTokens, 208)
-  assert.equal(entry.outputTokens, 52893)
-  assert.equal(entry.cacheReadTokens, 15_155_855)
-  assert.equal(entry.cacheCreationTokens, 204_362)
-  assert.equal(entry.durationMs, 812_345)
-  assert.equal(entry.model, 'claude-opus-5[1m]')
-  assert.ok(Date.parse(entry.endedAt) > 0, 'endedAt is a parseable stamp')
+    'cacheCreationTokens',
+    'cacheReadTokens',
+    'costUsd',
+    'durationMs',
+    'endedAt',
+    'inputTokens',
+    'kind',
+    'model',
+    'outputTokens',
+    'sessionId',
+    'turns'
+  ]);
+  assert.equal(entry.kind, 'execute');
+  assert.equal(entry.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64');
+  assert.equal(entry.costUsd, 2.641441);
+  assert.equal(entry.turns, 34);
+  assert.equal(entry.inputTokens, 208);
+  assert.equal(entry.outputTokens, 52893);
+  assert.equal(entry.cacheReadTokens, 15_155_855);
+  assert.equal(entry.cacheCreationTokens, 204_362);
+  assert.equal(entry.durationMs, 812_345);
+  assert.equal(entry.model, 'claude-opus-5[1m]');
+  assert.ok(Date.parse(entry.endedAt) > 0, 'endedAt is a parseable stamp');
   // The echo is what SKILL.md §5 reads back on the same Bash invocation.
-  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-5', usage: entry })
-})
+  assert.deepEqual(JSON.parse(out.stdout), { id: 'task-5', usage: entry });
+});
 
 // The case the plan's own "idempotent by sessionId" rule would have got
 // wrong: `claude -p --resume` keeps the session id it was handed, so a fix
@@ -4722,142 +4780,142 @@ test('usage copies the result event onto the queue item and echoes the entry', (
 // would have made this second call overwrite the first entry instead of
 // sitting beside it — identity is the transcript slot, `kind` + `loop`.
 test('a fix loop adds a second entry beside the first, same session id and all', (t) => {
-  const { home, project } = usageRun(t)
-  assert.equal(run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')).status, 0)
-  const first = queueItem(home, project, 'task-5').usage[0]
+  const { home, project } = usageRun(t);
+  assert.equal(run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')).status, 0);
+  const first = queueItem(home, project, 'task-5').usage[0];
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_FIX, 'task-5-fix-1.jsonl'))
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_FIX, 'task-5-fix-1.jsonl'));
 
-  assert.equal(out.status, 0, out.stderr)
-  const entries = queueItem(home, project, 'task-5').usage
-  assert.equal(entries.length, 2)
-  assert.deepEqual(entries[0], first, 'the execute entry was rewritten by the fix loop')
-  assert.equal(entries[1].kind, 'fix')
-  assert.equal(entries[1].loop, 1)
-  assert.equal(entries[1].costUsd, 1.612241)
-  assert.equal(entries[1].sessionId, entries[0].sessionId, 'the fixture pins the real shape: a resumed session keeps its id')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const entries = queueItem(home, project, 'task-5').usage;
+  assert.equal(entries.length, 2);
+  assert.deepEqual(entries[0], first, 'the execute entry was rewritten by the fix loop');
+  assert.equal(entries[1].kind, 'fix');
+  assert.equal(entries[1].loop, 1);
+  assert.equal(entries[1].costUsd, 1.612241);
+  assert.equal(entries[1].sessionId, entries[0].sessionId, 'the fixture pins the real shape: a resumed session keeps its id');
+});
 
 test('a retry transcript records its own kind and loop number', (t) => {
-  const { home, project } = usageRun(t)
+  const { home, project } = usageRun(t);
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_FIX, 'task-5-retry-2.jsonl'))
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_FIX, 'task-5-retry-2.jsonl'));
 
-  assert.equal(out.status, 0, out.stderr)
-  const [entry] = queueItem(home, project, 'task-5').usage
-  assert.equal(entry.kind, 'retry')
-  assert.equal(entry.loop, 2)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [entry] = queueItem(home, project, 'task-5').usage;
+  assert.equal(entry.kind, 'retry');
+  assert.equal(entry.loop, 2);
+});
 
 // recovery.md tells a resumed driver to re-run this for any transcript whose
 // entry is absent, and "absent" is a judgement it makes from a run file it
 // did not write. Running it over one already recorded has to be harmless.
 test('the same transcript twice leaves exactly one entry for that slot', (t) => {
-  const { home, project } = usageRun(t)
-  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')
-  assert.equal(run(project, home, 'usage', 'task-5', '--jsonl', file).status, 0)
+  const { home, project } = usageRun(t);
+  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl');
+  assert.equal(run(project, home, 'usage', 'task-5', '--jsonl', file).status, 0);
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', file)
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', file);
 
-  assert.equal(out.status, 0, out.stderr)
-  const entries = queueItem(home, project, 'task-5').usage
-  assert.equal(entries.length, 1)
-  assert.equal(entries[0].costUsd, 2.641441)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const entries = queueItem(home, project, 'task-5').usage;
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].costUsd, 2.641441);
+});
 
 // A killed session. An absent entry is the honest record; a zero-valued one
 // would claim the session was free, which is the reading a cost rollup would
 // then print as fact.
 test('a transcript with no result event writes nothing, says so, and exits 0', (t) => {
-  const { home, project } = usageRun(t)
-  const file = transcriptAs(t, STREAM_NO_RESULT, 'task-5.jsonl')
-  const before = fs.readFileSync(runFile(home, project), 'utf8')
+  const { home, project } = usageRun(t);
+  const file = transcriptAs(t, STREAM_NO_RESULT, 'task-5.jsonl');
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', file)
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', file);
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.match(out.stderr, /task-5\.jsonl/)
-  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
-  assert.equal(queueItem(home, project, 'task-5').usage, undefined)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stderr, /task-5\.jsonl/);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before);
+  assert.equal(queueItem(home, project, 'task-5').usage, undefined);
+});
 
 test('usage on an unreadable transcript exits 1 and writes nothing', (t) => {
-  const { home, project } = usageRun(t)
-  const before = fs.readFileSync(runFile(home, project), 'utf8')
+  const { home, project } = usageRun(t);
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', path.join(project, 'task-5.jsonl'))
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', path.join(project, 'task-5.jsonl'));
 
-  assert.equal(out.status, 1)
-  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
-})
+  assert.equal(out.status, 1);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before);
+});
 
 test('a line that is not JSON at all, ahead of the result event, is skipped rather than fatal', (t) => {
-  const { home, project } = usageRun(t)
+  const { home, project } = usageRun(t);
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_MALFORMED_THEN_USAGE, 'task-5.jsonl'))
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_MALFORMED_THEN_USAGE, 'task-5.jsonl'));
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(queueItem(home, project, 'task-5').usage[0].costUsd, 2.641441)
-})
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(queueItem(home, project, 'task-5').usage[0].costUsd, 2.641441);
+});
 
 test('two models in one session join into one label, and the init event supplies a missing session id', (t) => {
-  const { home, project } = usageRun(t)
+  const { home, project } = usageRun(t);
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_TWO_MODELS, 'task-5.jsonl'))
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE_TWO_MODELS, 'task-5.jsonl'));
 
-  assert.equal(out.status, 0, out.stderr)
-  const [entry] = queueItem(home, project, 'task-5').usage
-  assert.equal(entry.model, 'claude-opus-5[1m], claude-haiku-4-5-20251001')
-  assert.equal(entry.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64')
-})
+  assert.equal(out.status, 0, out.stderr);
+  const [entry] = queueItem(home, project, 'task-5').usage;
+  assert.equal(entry.model, 'claude-opus-5[1m], claude-haiku-4-5-20251001');
+  assert.equal(entry.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64');
+});
 
 // The realistic way to name a file wrong is to hand this command ANOTHER
 // item's transcript, which a silent default to `execute` would file against
 // this item forever.
 test('a transcript whose name matches none of the three shapes exits 1 and names the shapes', (t) => {
-  const { home, project } = usageRun(t)
-  const before = fs.readFileSync(runFile(home, project), 'utf8')
+  const { home, project } = usageRun(t);
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
 
-  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE, 'task-6.jsonl'))
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', transcriptAs(t, STREAM_USAGE, 'task-6.jsonl'));
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /task-5-fix-<n>\.jsonl/)
-  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /task-5-fix-<n>\.jsonl/);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before);
+});
 
 test('usage with no --jsonl exits 1 and prints the usage line', (t) => {
-  const { home, project } = usageRun(t)
+  const { home, project } = usageRun(t);
 
-  const out = run(project, home, 'usage', 'task-5')
+  const out = run(project, home, 'usage', 'task-5');
 
-  assert.equal(out.status, 1)
-  assert.match(out.stderr, /usage: orchestrate\.mjs usage/)
-})
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /usage: orchestrate\.mjs usage/);
+});
 
-test('usage for an id that is not in this run\'s queue exits 1', (t) => {
-  const { home, project } = usageRun(t)
+test("usage for an id that is not in this run's queue exits 1", (t) => {
+  const { home, project } = usageRun(t);
 
-  const out = run(project, home, 'usage', 'nope-9', '--jsonl', transcriptAs(t, STREAM_USAGE, 'nope-9.jsonl'))
+  const out = run(project, home, 'usage', 'nope-9', '--jsonl', transcriptAs(t, STREAM_USAGE, 'nope-9.jsonl'));
 
-  assert.equal(out.status, 1)
-})
+  assert.equal(out.status, 1);
+});
 
 // It writes the run file, so it is bound by the lease exactly as `stage` is —
 // unlike `denials`, which is deliberately run-independent because it writes
 // nothing at all.
 test('usage is refused with exit 7 when another session holds the driver lease', (t) => {
-  const { home, project } = orchFixture(t)
-  seedReadyTask(project, 'task-5', 'Some task')
-  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0)
-  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl')
-  const before = fs.readFileSync(runFile(home, project), 'utf8')
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+  const file = transcriptAs(t, STREAM_USAGE, 'task-5.jsonl');
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
 
-  const out = runAs('sess-b', project, home, 'usage', 'task-5', '--jsonl', file)
+  const out = runAs('sess-b', project, home, 'usage', 'task-5', '--jsonl', file);
 
-  assert.equal(out.status, 7)
-  assert.match(out.stderr, /sess-a/)
-  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before)
-})
+  assert.equal(out.status, 7);
+  assert.match(out.stderr, /sess-a/);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before);
+});
 
 // The structural half of task-27, and the same shape as the denials check
 // above for the same reason: the two paths that run a headless session are
@@ -4865,64 +4923,64 @@ test('usage is refused with exit 7 when another session holds the driver lease',
 // on the second loses exactly the number this feature exists to keep — a fix
 // loop is routinely the more expensive half of an item.
 test('every step that runs a headless session records what it cost', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
-  const sections = new Map()
-  let current = null
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const sections = new Map();
+  let current = null;
   for (const line of text.split('\n')) {
     if (line.startsWith('## ')) {
-      current = line.slice(3).trim()
-      sections.set(current, [])
+      current = line.slice(3).trim();
+      sections.set(current, []);
     } else if (current !== null) {
-      sections.get(current).push(line)
+      sections.get(current).push(line);
     }
   }
   for (const title of ['5. Inspect what the session left behind', '7. Review']) {
-    assert.ok(sections.has(title), `section not found (renamed?): ${title}`)
+    assert.ok(sections.has(title), `section not found (renamed?): ${title}`);
     assert.ok(
       sections.get(title).join('\n').includes('orchestrate.mjs" usage <id> --jsonl'),
       `section "${title}" runs a headless session but never records what it cost`
-    )
+    );
   }
-})
+});
 
 // recovery.md, not SKILL.md: a resumed driver inherits a run file it did not
 // write, and the usage entries the crashed one never got to are the one piece
 // of a crashed run that decays on its own — the transcripts are pruned long
 // before the run history is.
 test('recovery.md tells a resumed driver to pick up the usage the crashed one missed', () => {
-  const text = fs.readFileSync(path.join(path.dirname(SKILL_MD), 'references', 'recovery.md'), 'utf8')
-  assert.ok(text.includes('orchestrate.mjs" usage <id> --jsonl'), 'recovery.md never re-runs `usage`')
-})
+  const text = fs.readFileSync(path.join(path.dirname(SKILL_MD), 'references', 'recovery.md'), 'utf8');
+  assert.ok(text.includes('orchestrate.mjs" usage <id> --jsonl'), 'recovery.md never re-runs `usage`');
+});
 
 // The reader on its own, the way readPermissionDenials is tested beside its
 // own command: these two cases are about the transcript, not about the run
 // file, and driving them through the CLI would make every assertion depend
 // on a run existing first.
-const STREAM_USAGE_TWO_RESULTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-two-results.jsonl')
-const STREAM_USAGE_NO_NUMBERS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-no-numbers.jsonl')
+const STREAM_USAGE_TWO_RESULTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-two-results.jsonl');
+const STREAM_USAGE_NO_NUMBERS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'stream-usage-no-numbers.jsonl');
 
 test('readSessionUsage reads the LAST result event, so a resumed segment is not read as the whole session', () => {
   // readPermissionDenials' own reason restated: a `--resume` can append a
   // second result to the same transcript, and the first describes a segment
   // that already ended.
-  const usage = readSessionUsage(STREAM_USAGE_TWO_RESULTS)
-  assert.equal(usage.costUsd, 9.5)
-  assert.equal(usage.turns, 40)
-})
+  const usage = readSessionUsage(STREAM_USAGE_TWO_RESULTS);
+  assert.equal(usage.costUsd, 9.5);
+  assert.equal(usage.turns, 40);
+});
 
 test('readSessionUsage returns null for a transcript with no result event, and holes for one with no numbers', () => {
   // The two shapes cmdUsage branches on. `null` means "write nothing" —
   // a killed session was not free. A result event whose fields a future CLI
   // renamed still earns an entry, with `null` in every slot it could not
   // fill: the session demonstrably ran, and a `0` would price it.
-  assert.equal(readSessionUsage(STREAM_NO_RESULT), null)
+  assert.equal(readSessionUsage(STREAM_NO_RESULT), null);
 
-  const holes = readSessionUsage(STREAM_USAGE_NO_NUMBERS)
-  assert.equal(holes.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64')
+  const holes = readSessionUsage(STREAM_USAGE_NO_NUMBERS);
+  assert.equal(holes.sessionId, '7c3d9a10-2b48-4e6f-9a01-5d8e3f2c7b64');
   for (const field of ['costUsd', 'turns', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'durationMs', 'model']) {
-    assert.equal(holes[field], null, `${field} was filled with something rather than left a hole`)
+    assert.equal(holes[field], null, `${field} was filled with something rather than left a hole`);
   }
-})
+});
 
 // --- bug-32: `git worktree remove` fails in two ways, not one -----------
 //
@@ -4942,65 +5000,65 @@ test('readSessionUsage returns null for a transcript with no result event, and h
 // Every line inside a ``` fence, trimmed: what a session actually runs, as
 // opposed to prose that mentions a command in order to forbid it.
 function fencedLinesOf(text) {
-  const out = []
-  let inFence = false
+  const out = [];
+  let inFence = false;
   for (const line of text.split('\n')) {
-    if (line.startsWith('```')) { inFence = !inFence; continue }
-    if (inFence) out.push(line.trim())
+    if (line.startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) out.push(line.trim());
   }
-  return out
+  return out;
 }
 
 test('§9 names both worktree-removal failures as distinct cases, and the park template sits under the clean-check one', () => {
   // Searched against a whitespace-flattened copy throughout: this file is
   // hard-wrapped prose, so any of these sentences can cross a line break for
   // reasons that have nothing to do with the rule being pinned.
-  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ')
+  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ');
 
-  const cleanCheck = text.indexOf('contains modified or untracked files')
-  const failedDelete = text.indexOf('failed to delete')
-  assert.ok(cleanCheck > 0, '§9 no longer quotes git\'s clean-check refusal')
-  assert.ok(failedDelete > 0, '§9 no longer names the failed recursive delete — the failure 2 of 2 real occurrences hit')
+  const cleanCheck = text.indexOf('contains modified or untracked files');
+  const failedDelete = text.indexOf('failed to delete');
+  assert.ok(cleanCheck > 0, "§9 no longer quotes git's clean-check refusal");
+  assert.ok(failedDelete > 0, '§9 no longer names the failed recursive delete — the failure 2 of 2 real occurrences hit');
 
   // The park template belongs to the clean check alone. Ordering is the
   // assertion that survives rewording: leftovers nobody committed are parked,
   // and that paragraph precedes the failed-delete one, which pages nobody.
-  const park = text.indexOf('would not remove cleanly')
-  assert.ok(park > 0, 'the park detail template is gone entirely')
+  const park = text.indexOf('would not remove cleanly');
+  assert.ok(park > 0, 'the park detail template is gone entirely');
   assert.ok(
     cleanCheck < park && park < failedDelete,
-    `the park template must sit under the clean-check branch and above the failed-delete branch (cleanCheck=${cleanCheck} park=${park} failedDelete=${failedDelete})`,
-  )
-})
+    `the park template must sit under the clean-check branch and above the failed-delete branch (cleanCheck=${cleanCheck} park=${park} failedDelete=${failedDelete})`
+  );
+});
 
 test('the removal split has exactly one home, and the other two cleanups still delegate to it', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ')
+  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ');
 
-  const copies = text.split('failed to delete').length - 1
-  assert.equal(copies, 1, `the split is stated ${copies} times; it has one home and two delegating cross-references`)
+  const copies = text.split('failed to delete').length - 1;
+  assert.equal(copies, 1, `the split is stated ${copies} times; it has one home and two delegating cross-references`);
 
   // Branch mode (§9's opening) and the classifier denial both clean up a
   // worktree and both already say "handle it exactly as that path says".
   // A second copy of a three-branch rule is how the copies drift apart.
-  const branchMode = text.indexOf('record the leftover exactly as')
-  const denial = text.indexOf('handle it exactly as that path says')
-  assert.ok(branchMode > 0, 'the branch-mode cleanup no longer delegates its removal refusal')
-  assert.ok(denial > 0, 'the classifier-denial cleanup no longer delegates its removal refusal')
-  assert.ok(branchMode < text.indexOf('failed to delete') && denial < text.indexOf('failed to delete'))
-})
+  const branchMode = text.indexOf('record the leftover exactly as');
+  const denial = text.indexOf('handle it exactly as that path says');
+  assert.ok(branchMode > 0, 'the branch-mode cleanup no longer delegates its removal refusal');
+  assert.ok(denial > 0, 'the classifier-denial cleanup no longer delegates its removal refusal');
+  assert.ok(branchMode < text.indexOf('failed to delete') && denial < text.indexOf('failed to delete'));
+});
 
 test('exactly one `rm -rf` is executable in SKILL.md, and it is the worktree path this run created', () => {
   // The first destructive filesystem verb in this file. It is licensed by
   // branch 3 alone — git has already certified the tree clean and already
   // dropped the registration — and by the literal path, never a variable
   // that can expand empty and never a path read back from anywhere.
-  const lines = fencedLinesOf(fs.readFileSync(SKILL_MD, 'utf8')).filter((l) => l.includes('rm -rf'))
-  assert.equal(lines.length, 1, `expected exactly 1 executable rm -rf, found ${lines.length}:\n${lines.join('\n')}`)
-  assert.ok(
-    lines[0].startsWith('rm -rf "$PWD/.worktrees/<id>"'),
-    `the one rm -rf must target the literal worktree path, got: ${lines[0]}`,
-  )
-})
+  const lines = fencedLinesOf(fs.readFileSync(SKILL_MD, 'utf8')).filter((l) => l.includes('rm -rf'));
+  assert.equal(lines.length, 1, `expected exactly 1 executable rm -rf, found ${lines.length}:\n${lines.join('\n')}`);
+  assert.ok(lines[0].startsWith('rm -rf "$PWD/.worktrees/<id>"'), `the one rm -rf must target the literal worktree path, got: ${lines[0]}`);
+});
 
 test('`worktree remove --force` never enters a fenced block in any skill', () => {
   // §10's `--abort` mention is prose explaining why marker order matters,
@@ -5008,124 +5066,120 @@ test('`worktree remove --force` never enters a fenced block in any skill', () =>
   // worktree that is still registered. Nothing in the cleanup path may copy
   // it: after `failed to delete` the registration is already gone, so
   // `--force` answers `is not a working tree` and deletes nothing.
-  const skills = fs.readdirSync(path.join(path.dirname(SKILL_MD), '..'))
-  let checked = 0
+  const skills = fs.readdirSync(path.join(path.dirname(SKILL_MD), '..'));
+  let checked = 0;
   for (const name of skills) {
-    const file = path.join(path.dirname(SKILL_MD), '..', name, 'SKILL.md')
-    if (!fs.existsSync(file)) continue
-    checked += 1
-    const bad = fencedLinesOf(fs.readFileSync(file, 'utf8')).filter((l) => /worktree remove.*--force/.test(l))
-    assert.deepEqual(bad, [], `${name}/SKILL.md runs a forced worktree remove:\n${bad.join('\n')}`)
+    const file = path.join(path.dirname(SKILL_MD), '..', name, 'SKILL.md');
+    if (!fs.existsSync(file)) continue;
+    checked += 1;
+    const bad = fencedLinesOf(fs.readFileSync(file, 'utf8')).filter((l) => /worktree remove.*--force/.test(l));
+    assert.deepEqual(bad, [], `${name}/SKILL.md runs a forced worktree remove:\n${bad.join('\n')}`);
   }
-  assert.ok(checked >= 6, `expected to have read every skill body, read ${checked}`)
-})
+  assert.ok(checked >= 6, `expected to have read every skill body, read ${checked}`);
+});
 
 test('the finished-cleanup branch pages nobody, and no attention detail template offers `worktree prune`', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
 
   // From `failed to delete` to the end of §9: the branch must say outright
   // that nothing is recorded, or a session reaching it reaches for the park
   // template one paragraph up — which is the whole bug.
-  const start = text.indexOf('failed to delete')
-  const end = text.indexOf('\n## ', start)
-  const branch = text.slice(start, end > 0 ? end : text.length)
-  assert.match(
-    branch,
-    /no `?attention`? entry/i,
-    'the failed-delete branch no longer says it records no attention entry',
-  )
+  const start = text.indexOf('failed to delete');
+  const end = text.indexOf('\n## ', start);
+  const branch = text.slice(start, end > 0 ? end : text.length);
+  assert.match(branch, /no `?attention`? entry/i, 'the failed-delete branch no longer says it records no attention entry');
 
   // Both recorded occurrences told a human to run `git worktree prune` on a
   // worktree git had already deregistered. The instruction was a no-op twice.
-  const prune = text.split('\n').filter((l) => l.includes('--kind parked') && l.includes('worktree prune'))
-  assert.deepEqual(prune, [], `an attention detail template still advises worktree prune:\n${prune.join('\n')}`)
-})
+  const prune = text.split('\n').filter((l) => l.includes('--kind parked') && l.includes('worktree prune'));
+  assert.deepEqual(prune, [], `an attention detail template still advises worktree prune:\n${prune.join('\n')}`);
+});
 
 test('ATTENTION_KINDS is still exactly needs-answers, parked, fix-exhausted — no cleanup kind was invented', () => {
   // The fix is prose-only: no new kind, no new stage, no new run-file field.
   // Case 11 above proves the tool refuses a fourth kind; this proves the
   // list itself was not widened to admit one.
-  const tool = fs.readFileSync(SCRIPT, 'utf8')
+  const tool = fs.readFileSync(SCRIPT, 'utf8');
   assert.ok(
     tool.includes("const ATTENTION_KINDS = ['needs-answers', 'parked', 'fix-exhausted']"),
-    'ATTENTION_KINDS is no longer the exact three-member list SKILL.md is written against',
-  )
-})
+    'ATTENTION_KINDS is no longer the exact three-member list SKILL.md is written against'
+  );
+});
 
 test('git worktree remove: ignored build output alone removes cleanly, and a failed delete deregisters first', (t) => {
   // The two assumptions the §9 prose rests on, measured rather than asserted,
   // because the prose tells an unattended session which commands are pointless
   // (`--force`, `prune`) in a state it cannot inspect afterwards.
-  if (process.getuid?.() === 0) return // root ignores the 0555 bit the second case needs
+  if (process.getuid?.() === 0) return; // root ignores the 0555 bit the second case needs
 
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-wt-')))
-  const repo = path.join(root, 'main')
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-wt-')));
+  const repo = path.join(root, 'main');
   t.after(() => {
     // Restore the mode first or the temp tree itself cannot be deleted.
-    fs.chmodSync(path.join(repo, 'wt-locked', 'src'), 0o755)
-    fs.rmSync(root, { recursive: true, force: true })
-  })
-  const git = (...args) => spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' })
+    fs.chmodSync(path.join(repo, 'wt-locked', 'src'), 0o755);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const git = (...args) => spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
 
-  fs.mkdirSync(repo, { recursive: true })
-  spawnSync('git', ['init', '-q', repo], { encoding: 'utf8' })
-  git('config', 'user.email', 'test@example.com')
-  git('config', 'user.name', 'test')
-  fs.writeFileSync(path.join(repo, '.gitignore'), 'dist/\n')
-  fs.mkdirSync(path.join(repo, 'src'))
-  fs.writeFileSync(path.join(repo, 'src', 'a.txt'), 'a\n')
-  git('add', '-A')
-  git('commit', '-qm', 'init')
+  fs.mkdirSync(repo, { recursive: true });
+  spawnSync('git', ['init', '-q', repo], { encoding: 'utf8' });
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'dist/\n');
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.writeFileSync(path.join(repo, 'src', 'a.txt'), 'a\n');
+  git('add', '-A');
+  git('commit', '-qm', 'init');
 
   // 1. Nothing but ignored build output — the shape the bug report blamed.
   //    It removes cleanly: `--force` was never the fix for what was observed.
-  git('worktree', 'add', '-q', 'wt-dist', '-b', 'b-dist')
-  fs.mkdirSync(path.join(repo, 'wt-dist', 'dist'))
-  fs.writeFileSync(path.join(repo, 'wt-dist', 'dist', 'bundle.js'), 'x'.repeat(1000))
-  const clean = git('worktree', 'remove', 'wt-dist')
-  assert.equal(clean.status, 0, `ignored output blocked a plain remove: ${clean.stderr}`)
-  assert.equal(fs.existsSync(path.join(repo, 'wt-dist')), false)
+  git('worktree', 'add', '-q', 'wt-dist', '-b', 'b-dist');
+  fs.mkdirSync(path.join(repo, 'wt-dist', 'dist'));
+  fs.writeFileSync(path.join(repo, 'wt-dist', 'dist', 'bundle.js'), 'x'.repeat(1000));
+  const clean = git('worktree', 'remove', 'wt-dist');
+  assert.equal(clean.status, 0, `ignored output blocked a plain remove: ${clean.stderr}`);
+  assert.equal(fs.existsSync(path.join(repo, 'wt-dist')), false);
 
   // 2. A tracked, unmodified tree git cannot finish deleting: the clean check
   //    passes, the delete fails, and the admin entry is already gone.
-  git('worktree', 'add', '-q', 'wt-locked', '-b', 'b-locked')
-  fs.chmodSync(path.join(repo, 'wt-locked', 'src'), 0o555)
-  const failed = git('worktree', 'remove', 'wt-locked')
-  assert.notEqual(failed.status, 0, 'the locked child did not stop the delete')
-  assert.match(failed.stderr, /failed to delete/, `expected a delete failure, got: ${failed.stderr}`)
-  assert.doesNotMatch(failed.stderr, /contains modified or untracked files/, 'this is the clean check, not the delete')
+  git('worktree', 'add', '-q', 'wt-locked', '-b', 'b-locked');
+  fs.chmodSync(path.join(repo, 'wt-locked', 'src'), 0o555);
+  const failed = git('worktree', 'remove', 'wt-locked');
+  assert.notEqual(failed.status, 0, 'the locked child did not stop the delete');
+  assert.match(failed.stderr, /failed to delete/, `expected a delete failure, got: ${failed.stderr}`);
+  assert.doesNotMatch(failed.stderr, /contains modified or untracked files/, 'this is the clean check, not the delete');
 
-  const listed = git('worktree', 'list', '--porcelain').stdout
-  assert.ok(!listed.includes('wt-locked'), `the worktree is still registered after a failed delete:\n${listed}`)
+  const listed = git('worktree', 'list', '--porcelain').stdout;
+  assert.ok(!listed.includes('wt-locked'), `the worktree is still registered after a failed delete:\n${listed}`);
 
-  const forced = git('worktree', 'remove', '--force', 'wt-locked')
-  assert.equal(forced.status, 128, `a --force retry should be refused outright, got ${forced.status}: ${forced.stderr}`)
-  assert.match(forced.stderr, /is not a working tree/)
-})
+  const forced = git('worktree', 'remove', '--force', 'wt-locked');
+  assert.equal(forced.status, 128, `a --force retry should be refused outright, got ${forced.status}: ${forced.stderr}`);
+  assert.match(forced.stderr, /is not a working tree/);
+});
 
 // --- task-34: a --json payload larger than the pipe buffer -------------------
 
 test('a status --json larger than the pipe buffer arrives whole', (t) => {
-  const { home, project } = orchFixture(t)
+  const { home, project } = orchFixture(t);
   // `process.stdout.write` to a PIPE is asynchronous, so `process.exit()` in
   // the entry guard drops everything past the 64KB pipe buffer — silently, and
   // only through a pipe (a `> file.json` redirect is a synchronous write on
   // POSIX and never shows it). `run` is spawnSync, i.e. a real pipe, which is
   // the whole point of driving the CLI here instead of calling cmdStatus.
   // retro.mjs:396-407 carries the long-form record of the shipped incident.
-  const count = 250
-  const title = (i) => `Queued item ${i} with a deliberately long ASCII title so that the printed run file comfortably outgrows the pipe buffer`
-  for (let i = 1; i <= count; i += 1) seedReadyTask(project, `task-${i}`, title(i))
+  const count = 250;
+  const title = (i) => `Queued item ${i} with a deliberately long ASCII title so that the printed run file comfortably outgrows the pipe buffer`;
+  for (let i = 1; i <= count; i += 1) seedReadyTask(project, `task-${i}`, title(i));
   // Load-bearing: the gate reads each item at `<base>` through `git show`, so
   // an uncommitted item is skipped as ungroomed and would never reach the
   // queue — leaving a fixture that is small, green, and proves nothing.
-  commitEverything(project, 'seed a queue big enough to outgrow the pipe buffer')
+  commitEverything(project, 'seed a queue big enough to outgrow the pipe buffer');
 
-  assert.equal(run(project, home, 'init', '--project', project).status, 0)
-  const out = run(project, home, 'status', '--json')
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const out = run(project, home, 'status', '--json');
 
-  assert.equal(out.status, 0, out.stderr)
-  const bytes = Buffer.byteLength(out.stdout, 'utf8')
-  assert.ok(bytes > 65536, `only ${bytes} bytes reached the pipe`)
-  assert.equal(JSON.parse(out.stdout).queue.length, count)
-})
+  assert.equal(out.status, 0, out.stderr);
+  const bytes = Buffer.byteLength(out.stdout, 'utf8');
+  assert.ok(bytes > 65536, `only ${bytes} bytes reached the pipe`);
+  assert.equal(JSON.parse(out.stdout).queue.length, count);
+});

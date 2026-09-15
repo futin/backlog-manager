@@ -10,10 +10,7 @@ import { DispatchButton } from '../client/src/components/board/DispatchButton';
 import { ItemDrawer } from '../client/src/components/board/ItemDrawer';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type {
-  AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunStage
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunStage } from '../shared/types';
 
 /* Plain JSON, so TS widens its string fields to `string` rather than the
    literal unions (`RunStage`) the run-claim cases below turn on — the same
@@ -30,24 +27,44 @@ function runFor(ids: string[], stage: RunStage, over: Partial<RunPayload> = {}):
     project: '/abs/alpha',
     queue: ids.map((id) => ({ ...runFixture.queue[0], id, stage })),
     fresh: true,
-    pastRuns: 0, pauseRequested: false,
+    pastRuns: 0,
+    pauseRequested: false,
     ...over
   };
 }
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
-    id: 'task-1', title: 'a task', created: '2026-08-20', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: true, path: '/abs/alpha/backlog/tasks/open/task-1.md'
+    id: 'task-1',
+    title: 'a task',
+    created: '2026-08-20',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'tasks',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: true,
+    path: '/abs/alpha/backlog/tasks/open/task-1.md'
   };
   return { ...base, ...over };
 }
 
 const READY: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha']
 };
 
 describe('DispatchButton', () => {
@@ -67,18 +84,11 @@ describe('DispatchButton', () => {
   // derivation — `.groom` is mustard and `.execute` cyan in styles.css, and
   // neither is amber, which the in-progress mark on the same card owns.
   it('wears the action as its tone class, in both shapes', () => {
-    const { unmount } = render(
-      <DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} variant="tab" />
-    );
+    const { unmount } = render(<DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} variant="tab" />);
     expect(screen.getByRole('button', { name: 'execute' })).toHaveClass('dispatch-tab', 'execute');
     unmount();
 
-    render(
-      <DispatchButton
-        item={fakeItem({ section: 'bugs', groomed: false })} status={READY}
-        onDispatch={() => {}}
-      />
-    );
+    render(<DispatchButton item={fakeItem({ section: 'bugs', groomed: false })} status={READY} onDispatch={() => {}} />);
     // chip is the default shape: the drawer head renders it with no variant.
     expect(screen.getByRole('button', { name: 'groom' })).toHaveClass('dispatch-chip', 'groom');
   });
@@ -92,9 +102,7 @@ describe('DispatchButton', () => {
   });
 
   it('offers groom on an ungroomed bug and execute on a groomed one', () => {
-    const { unmount } = render(
-      <DispatchButton item={fakeItem({ section: 'bugs', groomed: false })} status={READY} onDispatch={() => {}} />
-    );
+    const { unmount } = render(<DispatchButton item={fakeItem({ section: 'bugs', groomed: false })} status={READY} onDispatch={() => {}} />);
     expect(screen.getByRole('button', { name: 'groom' })).toBeEnabled();
     unmount();
 
@@ -103,9 +111,7 @@ describe('DispatchButton', () => {
   });
 
   it('renders nothing for an item with no next step', () => {
-    const { container } = render(
-      <DispatchButton item={fakeItem({ status: 'done' })} status={READY} onDispatch={() => {}} />
-    );
+    const { container } = render(<DispatchButton item={fakeItem({ status: 'done' })} status={READY} onDispatch={() => {}} />);
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -123,13 +129,8 @@ describe('DispatchButton', () => {
    * project-visibility block: it IS about this card, and it names a state the
    * reader can go and look at in the run strip above.
    */
-  it('disables with the run\'s reason when a run has claimed the item', () => {
-    render(
-      <DispatchButton
-        item={fakeItem()} status={READY} onDispatch={() => {}}
-        runBlock="an orchestrator run is working this item (reviewing)"
-      />
-    );
+  it("disables with the run's reason when a run has claimed the item", () => {
+    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={() => {}} runBlock="an orchestrator run is working this item (reviewing)" />);
     const btn = screen.getByRole('button', { name: 'execute' });
     expect(btn).toHaveAttribute('aria-disabled', 'true');
     expect(btn).toHaveAttribute('title', expect.stringContaining('reviewing'));
@@ -141,12 +142,7 @@ describe('DispatchButton', () => {
 
   it('dispatches nothing when a run-claimed button is clicked', async () => {
     const onDispatch = jest.fn();
-    render(
-      <DispatchButton
-        item={fakeItem()} status={READY} onDispatch={onDispatch}
-        runBlock="an orchestrator run is working this item (reviewing)"
-      />
-    );
+    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={onDispatch} runBlock="an orchestrator run is working this item (reviewing)" />);
     await userEvent.click(screen.getByRole('button', { name: 'execute' }));
     expect(onDispatch).not.toHaveBeenCalled();
   });
@@ -159,7 +155,9 @@ describe('DispatchButton', () => {
   it('still renders nothing when the environment hides the control, run claim or not', () => {
     const { container } = render(
       <DispatchButton
-        item={fakeItem()} status={{ ...READY, enabled: false }} onDispatch={() => {}}
+        item={fakeItem()}
+        status={{ ...READY, enabled: false }}
+        onDispatch={() => {}}
         runBlock="an orchestrator run is working this item (reviewing)"
       />
     );
@@ -179,28 +177,17 @@ describe('DispatchButton', () => {
    * marker if nobody does).
    */
   it("disables with the session's reason when a local session already holds the item", () => {
-    render(
-      <DispatchButton
-        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
-        status={READY} onDispatch={() => {}}
-      />
-    );
+    render(<DispatchButton item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })} status={READY} onDispatch={() => {}} />);
     const btn = screen.getByRole('button', { name: 'execute' });
     expect(btn).toHaveAttribute('aria-disabled', 'true');
     expect(btn).toHaveAttribute('title', expect.stringContaining('executing'));
     const describedBy = btn.getAttribute('aria-describedby');
-    expect(document.getElementById(String(describedBy)))
-      .toHaveTextContent('2026-08-28T14:03:07Z');
+    expect(document.getElementById(String(describedBy))).toHaveTextContent('2026-08-28T14:03:07Z');
   });
 
   it('dispatches nothing when an in-progress button is clicked', async () => {
     const onDispatch = jest.fn();
-    render(
-      <DispatchButton
-        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
-        status={READY} onDispatch={onDispatch}
-      />
-    );
+    render(<DispatchButton item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })} status={READY} onDispatch={onDispatch} />);
     await userEvent.click(screen.getByRole('button', { name: 'execute' }));
     expect(onDispatch).not.toHaveBeenCalled();
   });
@@ -215,7 +202,8 @@ describe('DispatchButton', () => {
     render(
       <DispatchButton
         item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
-        status={READY} onDispatch={() => {}}
+        status={READY}
+        onDispatch={() => {}}
         runBlock="an orchestrator run is working this item (reviewing)"
       />
     );
@@ -231,7 +219,8 @@ describe('DispatchButton', () => {
     render(
       <DispatchButton
         item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
-        status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}}
+        status={{ ...READY, projectPaths: ['/abs/other'] }}
+        onDispatch={() => {}}
       />
     );
     const btn = screen.getByRole('button', { name: 'execute' });
@@ -245,10 +234,7 @@ describe('DispatchButton', () => {
      environment had hidden. */
   it('still renders nothing when the environment hides the control, in progress or not', () => {
     const { container } = render(
-      <DispatchButton
-        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
-        status={{ ...READY, enabled: false }} onDispatch={() => {}}
-      />
+      <DispatchButton item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })} status={{ ...READY, enabled: false }} onDispatch={() => {}} />
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -266,9 +252,7 @@ describe('DispatchButton', () => {
   });
 
   it('disables with the reason when the dashboard cannot see the project', () => {
-    render(
-      <DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}} />
-    );
+    render(<DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}} />);
     const btn = screen.getByRole('button', { name: 'execute' });
     expect(btn).toHaveAttribute('aria-disabled', 'true');
     expect(btn).toHaveAttribute('title', expect.stringContaining('/abs/alpha'));
@@ -282,9 +266,7 @@ describe('DispatchButton', () => {
   // reports a count). So the reason has to be in the accessibility tree, and
   // the control has to be focusable for anything to read it out.
   it('keeps a blocked button focusable and describes the reason to a screen reader', async () => {
-    render(
-      <DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}} />
-    );
+    render(<DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}} />);
     const btn = screen.getByRole('button', { name: 'execute' });
 
     // Reachable: Tab lands on it. A `disabled` attribute would make this fail.
@@ -301,9 +283,7 @@ describe('DispatchButton', () => {
   // click on it, so the handler's own guard is what makes the control inert.
   it('dispatches nothing when a blocked button is clicked or activated', async () => {
     const onDispatch = jest.fn();
-    render(
-      <DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={onDispatch} />
-    );
+    render(<DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={onDispatch} />);
     const btn = screen.getByRole('button', { name: 'execute' });
     await userEvent.click(btn);
     btn.focus();
@@ -327,12 +307,7 @@ describe('DispatchButton', () => {
   it('re-asks the status when a project-visibility block is clicked, and dispatches once it clears', async () => {
     const onDispatch = jest.fn();
     const reverify = jest.fn(() => Promise.resolve(READY));
-    render(
-      <DispatchButton
-        item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }}
-        onDispatch={onDispatch} reverify={reverify}
-      />
-    );
+    render(<DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={onDispatch} reverify={reverify} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'execute' }));
 
@@ -348,9 +323,7 @@ describe('DispatchButton', () => {
     const stale: AgentsStatus = { ...READY, projectPaths: ['/abs/other'] };
     const onDispatch = jest.fn();
     const reverify = jest.fn(() => Promise.resolve(stale));
-    render(
-      <DispatchButton item={fakeItem()} status={stale} onDispatch={onDispatch} reverify={reverify} />
-    );
+    render(<DispatchButton item={fakeItem()} status={stale} onDispatch={onDispatch} reverify={reverify} />);
     const btn = screen.getByRole('button', { name: 'execute' });
 
     await userEvent.click(btn);
@@ -368,19 +341,21 @@ describe('DispatchButton', () => {
   // into it would announce the whole sentence as the control's name.
   it('marks itself busy while the re-ask is in flight', async () => {
     let settle = (_s: AgentsStatus) => {};
-    const reverify = jest.fn(() => new Promise<AgentsStatus>((res) => { settle = res; }));
-    render(
-      <DispatchButton
-        item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }}
-        onDispatch={() => {}} reverify={reverify}
-      />
+    const reverify = jest.fn(
+      () =>
+        new Promise<AgentsStatus>((res) => {
+          settle = res;
+        })
     );
+    render(<DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}} reverify={reverify} />);
     const btn = screen.getByRole('button', { name: 'execute' });
 
     await userEvent.click(btn);
     expect(btn).toHaveAttribute('aria-busy', 'true');
 
-    await act(async () => { settle(READY); });
+    await act(async () => {
+      settle(READY);
+    });
     expect(btn).toHaveAttribute('aria-busy', 'false');
   });
 
@@ -388,13 +363,13 @@ describe('DispatchButton', () => {
   // like it did nothing must not queue one status fetch per click.
   it('asks once while a re-ask is already in flight', async () => {
     let settle = (_s: AgentsStatus) => {};
-    const reverify = jest.fn(() => new Promise<AgentsStatus>((res) => { settle = res; }));
-    render(
-      <DispatchButton
-        item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }}
-        onDispatch={() => {}} reverify={reverify}
-      />
+    const reverify = jest.fn(
+      () =>
+        new Promise<AgentsStatus>((res) => {
+          settle = res;
+        })
     );
+    render(<DispatchButton item={fakeItem()} status={{ ...READY, projectPaths: ['/abs/other'] }} onDispatch={() => {}} reverify={reverify} />);
     const btn = screen.getByRole('button', { name: 'execute' });
 
     await userEvent.click(btn);
@@ -402,7 +377,9 @@ describe('DispatchButton', () => {
     await userEvent.click(btn);
 
     expect(reverify).toHaveBeenCalledTimes(1);
-    await act(async () => { settle(READY); });
+    await act(async () => {
+      settle(READY);
+    });
   });
 
   /*
@@ -419,22 +396,24 @@ describe('DispatchButton', () => {
   it.each([
     ['a run claim', { runBlock: 'task-1 is claimed by a run (implementing)' }],
     ['an in-progress stamp', { item: fakeItem({ started: '2026-08-28T14:03:07Z' }) }],
-    ['a run claim over a project-visibility block', {
-      runBlock: 'task-1 is claimed by a run (implementing)',
-      status: { ...READY, projectPaths: ['/abs/other'] }
-    }],
-    ['an in-progress stamp over a project-visibility block', {
-      item: fakeItem({ started: '2026-08-28T14:03:07Z' }),
-      status: { ...READY, projectPaths: ['/abs/other'] }
-    }]
+    [
+      'a run claim over a project-visibility block',
+      {
+        runBlock: 'task-1 is claimed by a run (implementing)',
+        status: { ...READY, projectPaths: ['/abs/other'] }
+      }
+    ],
+    [
+      'an in-progress stamp over a project-visibility block',
+      {
+        item: fakeItem({ started: '2026-08-28T14:03:07Z' }),
+        status: { ...READY, projectPaths: ['/abs/other'] }
+      }
+    ]
   ])('asks nothing and opens nothing for %s', async (_why, over) => {
     const onDispatch = jest.fn();
     const reverify = jest.fn(() => Promise.resolve(READY));
-    render(
-      <DispatchButton
-        item={fakeItem()} status={READY} onDispatch={onDispatch} reverify={reverify} {...over}
-      />
-    );
+    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={onDispatch} reverify={reverify} {...over} />);
 
     await userEvent.click(screen.getByRole('button', { name: /execute|groom/ }));
 
@@ -447,9 +426,7 @@ describe('DispatchButton', () => {
   it('dispatches an unblocked item without re-asking the status', async () => {
     const onDispatch = jest.fn();
     const reverify = jest.fn(() => Promise.resolve(READY));
-    render(
-      <DispatchButton item={fakeItem()} status={READY} onDispatch={onDispatch} reverify={reverify} />
-    );
+    render(<DispatchButton item={fakeItem()} status={READY} onDispatch={onDispatch} reverify={reverify} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'execute' }));
 
@@ -469,9 +446,7 @@ describe('DispatchButton', () => {
     ['the dashboard has no CLAUDE_BIN', { spawnAvailable: false }],
     ['remote answers are off', { remoteAnswer: false }]
   ])('renders no button at all when %s', (_why, over) => {
-    const { container } = render(
-      <DispatchButton item={fakeItem()} status={{ ...READY, ...over }} onDispatch={() => {}} />
-    );
+    const { container } = render(<DispatchButton item={fakeItem()} status={{ ...READY, ...over }} onDispatch={() => {}} />);
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -490,9 +465,7 @@ describe('DispatchButton', () => {
 // `BoardView`: the question is only "does the drawer render the button it
 // was handed", which needs no board around it.
 describe('ItemDrawer wiring', () => {
-  const HUES = buildProjectHues([
-    { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }
-  ]);
+  const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
 
   const realFetch = global.fetch;
 
@@ -500,9 +473,7 @@ describe('ItemDrawer wiring', () => {
     // The drawer always fetches the item body on mount; a resolved stub
     // keeps that effect from rejecting into an unrelated "unavailable" state
     // that has nothing to do with what this test checks.
-    global.fetch = jest.fn(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve('') } as Response)
-    ) as jest.Mock;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('') } as Response)) as jest.Mock;
   });
 
   afterEach(() => {
@@ -514,9 +485,7 @@ describe('ItemDrawer wiring', () => {
      immediately — but the fetch resolves either way, and a setState after the
      test has finished is exactly the un-acted update React warns about. */
   it('renders the dispatch button in the drawer head when the board supplies one', async () => {
-    render(
-      <ItemDrawer item={fakeItem()} hues={HUES} onClose={() => {}} agents={READY} onDispatch={() => {}} />
-    );
+    render(<ItemDrawer item={fakeItem()} hues={HUES} onClose={() => {}} agents={READY} onDispatch={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     const head = document.querySelector('.drawer-head') as HTMLElement;
     expect(within(head).getByRole('button', { name: 'execute' })).toBeInTheDocument();
@@ -536,10 +505,18 @@ describe('ItemDrawer wiring', () => {
 // threw "found multiple elements" before either test's own assertions ran.
 // Both items still exercise the board with a real mix of sections; only the
 // title changed, so nothing about what these tests verify has moved.
-const ITEMS: ItemsIndex = { items: [fakeItem(), fakeItem({ id: 'idea-1', title: 'an idea', section: 'ideas', groomed: null, path: '/abs/alpha/backlog/ideas/open/idea-1.md' })], errors: [] };
+const ITEMS: ItemsIndex = {
+  items: [fakeItem(), fakeItem({ id: 'idea-1', title: 'an idea', section: 'ideas', groomed: null, path: '/abs/alpha/backlog/ideas/open/idea-1.md' })],
+  errors: []
+};
 const PROJECTS: ProjectSummary[] = [
-  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 1, tasks: 1, refactors: 0, 'out-of-scope': 0 } }
+  {
+    name: 'alpha',
+    path: '/abs/alpha',
+    createdAt: '2026-08-26T00:00:00.000Z',
+    missing: false,
+    counts: { bugs: 0, ideas: 1, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+  }
 ];
 
 describe('the board wiring', () => {
@@ -575,14 +552,23 @@ describe('the board wiring', () => {
       if (url.includes('/api/items/body')) {
         return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') } as Response);
       }
-      const payload = url.includes('/api/agents/status') ? AGENTS
-        : url.includes('/api/orchestrator/runs') ? ({ runs: RUNS, starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/agents/plan') ? {
-          action: 'execute', prompt: 'do it', project: 'alpha',
-          allowedModes: ['plan', 'acceptEdits'], defaultMode: 'acceptEdits'
-        }
-        : url.includes('/api/agents/dispatch') ? { sessionId: 'sess-1' }
-        : url.includes('/api/projects') ? PROJECTS : ITEMS;
+      const payload = url.includes('/api/agents/status')
+        ? AGENTS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs: RUNS, starting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/agents/plan')
+            ? {
+                action: 'execute',
+                prompt: 'do it',
+                project: 'alpha',
+                allowedModes: ['plan', 'acceptEdits'],
+                defaultMode: 'acceptEdits'
+              }
+            : url.includes('/api/agents/dispatch')
+              ? { sessionId: 'sess-1' }
+              : url.includes('/api/projects')
+                ? PROJECTS
+                : ITEMS;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) } as Response);
     }) as jest.Mock;
   });
@@ -620,9 +606,7 @@ describe('the board wiring', () => {
     AGENTS = READY;
     await userEvent.click(btn);
 
-    await waitFor(() =>
-      expect(screen.getByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByRole('dialog', { name: /dispatch task-1/ })).toBeInTheDocument());
   });
 
   it('opens the sheet from a card without opening the item drawer', async () => {
@@ -643,9 +627,7 @@ describe('the board wiring', () => {
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
     await userEvent.click(within(card).getByRole('button', { name: 'execute' }));
     await userEvent.click(await screen.findByRole('button', { name: 'cancel' }));
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument());
   });
 
   // The card's whole surface is role="button" with its own onKeyDown, which
@@ -711,9 +693,7 @@ describe('the board wiring', () => {
     expect(btn).toHaveFocus();
 
     await userEvent.keyboard('{Escape}');
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /dispatch task-1/ })).not.toBeInTheDocument());
   });
 
   // LaunchSheet holds nine pieces of state and resets none of them on an
@@ -752,16 +732,11 @@ describe('the board wiring', () => {
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
 
     const taskCard = screen.getByText('a task').closest('.board-card') as HTMLElement;
-    await waitFor(() =>
-      expect(within(taskCard).getByRole('button', { name: 'execute' }))
-        .toHaveAttribute('aria-disabled', 'true')
-    );
-    expect(within(taskCard).getByRole('button', { name: 'execute' }))
-      .toHaveAttribute('title', expect.stringContaining('reviewing'));
+    await waitFor(() => expect(within(taskCard).getByRole('button', { name: 'execute' })).toHaveAttribute('aria-disabled', 'true'));
+    expect(within(taskCard).getByRole('button', { name: 'execute' })).toHaveAttribute('title', expect.stringContaining('reviewing'));
 
     const ideaCard = screen.getByText('an idea').closest('.board-card') as HTMLElement;
-    expect(within(ideaCard).getByRole('button', { name: 'groom' }))
-      .toHaveAttribute('aria-disabled', 'false');
+    expect(within(ideaCard).getByRole('button', { name: 'groom' })).toHaveAttribute('aria-disabled', 'false');
   });
 
   /* The second render site, from the same payload — the drawer chip was passed
@@ -776,12 +751,8 @@ describe('the board wiring', () => {
     const drawer = await screen.findByRole('dialog', { name: 'a task' });
     await waitFor(() => expect(within(drawer).queryByText('loading…')).not.toBeInTheDocument());
 
-    await waitFor(() =>
-      expect(within(drawer).getByRole('button', { name: 'execute' }))
-        .toHaveAttribute('aria-disabled', 'true')
-    );
-    expect(within(drawer).getByRole('button', { name: 'execute' }))
-      .toHaveAttribute('title', expect.stringContaining('merging'));
+    await waitFor(() => expect(within(drawer).getByRole('button', { name: 'execute' })).toHaveAttribute('aria-disabled', 'true'));
+    expect(within(drawer).getByRole('button', { name: 'execute' })).toHaveAttribute('title', expect.stringContaining('merging'));
   });
 
   /* Staleness, at the board layer: a run that has stopped reporting renders no
@@ -794,7 +765,6 @@ describe('the board wiring', () => {
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
 
     const taskCard = screen.getByText('a task').closest('.board-card') as HTMLElement;
-    expect(within(taskCard).getByRole('button', { name: 'execute' }))
-      .toHaveAttribute('aria-disabled', 'false');
+    expect(within(taskCard).getByRole('button', { name: 'execute' })).toHaveAttribute('aria-disabled', 'false');
   });
 });

@@ -1,11 +1,19 @@
 import {
-  itemStageSpans, runWallMs, runStageTotals, sumStageTotals, MACHINE_STAGES,
-  aggregateRuns, dayKey, dayLabel, formatTurns, formatUsd, itemUsageTotals, runUsageTotals
+  itemStageSpans,
+  runWallMs,
+  runStageTotals,
+  sumStageTotals,
+  MACHINE_STAGES,
+  aggregateRuns,
+  dayKey,
+  dayLabel,
+  formatTurns,
+  formatUsd,
+  itemUsageTotals,
+  runUsageTotals
 } from '../client/src/lib/run-stats';
 import { RUN_STALE_MS } from '../shared/types';
-import type {
-  ArchiveQueueItem, OrchestratorArchiveRun, RunQueueItem, RunSessionUsage, RunStage
-} from '../shared/types';
+import type { ArchiveQueueItem, OrchestratorArchiveRun, RunQueueItem, RunSessionUsage, RunStage } from '../shared/types';
 
 /**
  * The derivations behind the Runs section's stat tiles and per-item stage
@@ -200,9 +208,7 @@ describe('MACHINE_STAGES', () => {
   // build their expectations by reasoning about this list positionally, the
   // same way STEPPER_STAGES (run-time.test.ts) is pinned for its callers.
   it('names the seven pipeline stages in pipeline order', () => {
-    expect(MACHINE_STAGES).toEqual([
-      'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
-    ]);
+    expect(MACHINE_STAGES).toEqual(['preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging']);
   });
 });
 
@@ -307,7 +313,7 @@ describe('runStageTotals', () => {
   // `reviewing`'s total is `(T2-T1) + (now-T2)` exactly once — not the
   // `(T2-T1) + (now-T1)` a stale-stamp reading would produce, which is
   // `(T2-T1)` bigger than the truth: T1-to-T2 double-counted.
-  it('does not double-count a re-entered stage: the open span starts from the item\'s latest arrival, not the stale first one', () => {
+  it("does not double-count a re-entered stage: the open span starts from the item's latest arrival, not the stale first one", () => {
     const run = archiveRun({
       status: 'running',
       queue: [
@@ -475,10 +481,7 @@ describe('sumStageTotals', () => {
   // shows up in the result, and a stage present in both (dispatched) adds
   // rather than overwrites.
   it('sums corresponding stages across a list of totals, keeping stages unique to one', () => {
-    expect(sumStageTotals([
-      { dispatched: 1_000, fixing: 500 },
-      { dispatched: 2_000 }
-    ])).toEqual({ dispatched: 3_000, fixing: 500 });
+    expect(sumStageTotals([{ dispatched: 1_000, fixing: 500 }, { dispatched: 2_000 }])).toEqual({ dispatched: 3_000, fixing: 500 });
   });
 
   // A key PRESENT with an `undefined` value is admitted by
@@ -848,12 +851,9 @@ function usageEntry(over: Partial<RunSessionUsage> = {}): RunSessionUsage {
 }
 
 describe('itemUsageTotals', () => {
-  it('sums cost and turns across an item\'s sessions and counts them', () => {
+  it("sums cost and turns across an item's sessions and counts them", () => {
     const item = archiveItem({
-      usage: [
-        usageEntry(),
-        usageEntry({ kind: 'fix', loop: 1, costUsd: 0.75, turns: 4 })
-      ]
+      usage: [usageEntry(), usageEntry({ kind: 'fix', loop: 1, costUsd: 0.75, turns: 4 })]
     });
 
     expect(itemUsageTotals(item)).toEqual({ costUsd: 2.25, turns: 14, sessions: 2 });
@@ -880,13 +880,12 @@ describe('itemUsageTotals', () => {
   });
 
   it('keeps a genuine zero rather than reading it as a hole', () => {
-    expect(itemUsageTotals(archiveItem({ usage: [usageEntry({ costUsd: 0 })] })))
-      .toEqual({ costUsd: 0, turns: 10, sessions: 1 });
+    expect(itemUsageTotals(archiveItem({ usage: [usageEntry({ costUsd: 0 })] }))).toEqual({ costUsd: 0, turns: 10, sessions: 1 });
   });
 });
 
 describe('runUsageTotals', () => {
-  it('sums every item\'s sessions across the whole queue', () => {
+  it("sums every item's sessions across the whole queue", () => {
     const run = archiveRun({
       queue: [
         archiveItem({ id: 'bug-1', usage: [usageEntry(), usageEntry({ kind: 'fix', loop: 1, costUsd: 0.5, turns: 2 })] }),
@@ -898,8 +897,7 @@ describe('runUsageTotals', () => {
   });
 
   it('is null when no item in the queue carries any usage', () => {
-    expect(runUsageTotals(archiveRun({ queue: [archiveItem({ id: 'bug-1' }), archiveItem({ id: 'task-2' })] })))
-      .toBeNull();
+    expect(runUsageTotals(archiveRun({ queue: [archiveItem({ id: 'bug-1' }), archiveItem({ id: 'task-2' })] }))).toBeNull();
   });
 
   it('reports what it has when only some items carry usage', () => {

@@ -44,7 +44,6 @@ describe('SheetHead', () => {
 
     rerender(<SheetHead title="Watching" sub="three runs" right={<button>Pause</button>} />);
     expect(screen.getByText('three runs')).toHaveClass('ui-sheet-sub');
-    expect(document.querySelector('.ui-sheet-head-right'))
-      .toContainElement(screen.getByRole('button', { name: 'Pause' }));
+    expect(document.querySelector('.ui-sheet-head-right')).toContainElement(screen.getByRole('button', { name: 'Pause' }));
   });
 });

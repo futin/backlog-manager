@@ -1,8 +1,6 @@
 import { isStale, leavesBoard } from '../client/src/lib/item-stale';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type {
-  BacklogItem, OrchestratorRun, OrchestratorRunsPayload, RunQueueItem, RunStage
-} from '../shared/types';
+import type { BacklogItem, OrchestratorRun, OrchestratorRunsPayload, RunQueueItem, RunStage } from '../shared/types';
 
 /**
  * Local builder, same reasoning item-progress.test.ts gives for having its
@@ -12,10 +10,25 @@ import type {
  */
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   const base: BacklogItem = {
-    id: 'bug-1', title: 'a bug', created: '', started: '', tags: [],
-    updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
+    id: 'bug-1',
+    title: 'a bug',
+    created: '',
+    started: '',
+    tags: [],
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md'
   };
   return { ...base, ...over };
 }
@@ -100,8 +113,7 @@ describe('isStale', () => {
   it('is false for a done item, and for a rejected one', () => {
     const old = { updated: stampAgo(900 * DAY) };
     expect(isStale(fakeItem({ ...old, status: 'done' }), WINDOW, NOW, [])).toBe(false);
-    expect(isStale(fakeItem({ ...old, status: 'terminal', section: 'out-of-scope' }), WINDOW, NOW, []))
-      .toBe(false);
+    expect(isStale(fakeItem({ ...old, status: 'terminal', section: 'out-of-scope' }), WINDOW, NOW, [])).toBe(false);
   });
 
   /*
@@ -161,13 +173,11 @@ describe('leavesBoard', () => {
   });
 
   it('never evicts a task, however stale', () => {
-    expect(leavesBoard(fakeItem({ ...stale, id: 'task-1', section: 'tasks' }), WINDOW, NOW, []))
-      .toBe(false);
+    expect(leavesBoard(fakeItem({ ...stale, id: 'task-1', section: 'tasks' }), WINDOW, NOW, [])).toBe(false);
   });
 
   it('never evicts a fresh item', () => {
-    expect(leavesBoard(fakeItem({ updated: stampAgo(2 * DAY), section: 'ideas' }), WINDOW, NOW, []))
-      .toBe(false);
+    expect(leavesBoard(fakeItem({ updated: stampAgo(2 * DAY), section: 'ideas' }), WINDOW, NOW, [])).toBe(false);
   });
 
   it('never evicts an in-progress item with a stale stamp', () => {
@@ -201,22 +211,19 @@ describe('isStale against the run payload', () => {
      are genuinely back to being neglected open work. */
   it('is still stale at the four stages a run has exited the item at', () => {
     for (const stage of ['merged', 'failed', 'skipped', 'ungroomed'] as RunStage[]) {
-      expect(isStale(fakeItem({ ...QUIET, status: 'open' }), WINDOW, NOW, [runWith(stage)]))
-        .toBe(true);
+      expect(isStale(fakeItem({ ...QUIET, status: 'open' }), WINDOW, NOW, [runWith(stage)])).toBe(true);
     }
   });
 
   it('is still stale when the run holding the item has gone stale', () => {
-    expect(isStale(fakeItem(QUIET), WINDOW, NOW, [runWith('dispatched', { fresh: false })]))
-      .toBe(true);
+    expect(isStale(fakeItem(QUIET), WINDOW, NOW, [runWith('dispatched', { fresh: false })])).toBe(true);
   });
 
   // Ids are only sequential within one project's store, so two checkouts can
   // both hold `bug-1`; matching on id alone would exempt an item no run is
   // touching at all.
   it('is still stale when the run holding the id belongs to another project', () => {
-    expect(isStale(fakeItem(QUIET), WINDOW, NOW, [runWith('dispatched', { project: '/abs/other' })]))
-      .toBe(true);
+    expect(isStale(fakeItem(QUIET), WINDOW, NOW, [runWith('dispatched', { project: '/abs/other' })])).toBe(true);
   });
 });
 
@@ -233,8 +240,7 @@ describe('leavesBoard against the run payload', () => {
 
   it('still evicts them once that run has merged the item', () => {
     for (const section of ['refactors', 'ideas', 'bugs'] as const) {
-      expect(leavesBoard(fakeItem({ ...QUIET, section }), WINDOW, NOW, [runWith('merged')]))
-        .toBe(true);
+      expect(leavesBoard(fakeItem({ ...QUIET, section }), WINDOW, NOW, [runWith('merged')])).toBe(true);
     }
   });
 

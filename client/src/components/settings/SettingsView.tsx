@@ -3,9 +3,7 @@ import { Segmented } from '../ui/Segmented';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
-import {
-  FONT_SCALES, STALE_WINDOWS, THEMES, type Landing, type ThemeId
-} from '../../lib/settings';
+import { FONT_SCALES, STALE_WINDOWS, THEMES, type Landing, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import type { AgentsStatus, MergeMode, QuestionMode } from '../../../../shared/types';
 
@@ -86,17 +84,19 @@ function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
   if (status === null) return <>checking…</>;
   if (!status.enabled) return <>{dot} off — dispatch is not enabled on the API</>;
   if (!status.reachable) {
-    return <>{dot} unreachable{status.error ? ` — ${status.error}` : ''}</>;
+    return (
+      <>
+        {dot} unreachable{status.error ? ` — ${status.error}` : ''}
+      </>
+    );
   }
-  const gaps = [
-    status.spawnAvailable ? null : 'no CLAUDE_BIN',
-    status.remoteAnswer ? null : 'remote answers off'
-  ].filter((g): g is string => g !== null);
+  const gaps = [status.spawnAvailable ? null : 'no CLAUDE_BIN', status.remoteAnswer ? null : 'remote answers off'].filter((g): g is string => g !== null);
   return (
     <>
       {dot} connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
       {' · '}ceiling: {status.spawnMaxPermission ?? 'unknown'}
-      {' · '}{status.projectPaths.length} projects
+      {' · '}
+      {status.projectPaths.length} projects
     </>
   );
 }
@@ -132,21 +132,11 @@ export default function SettingsView() {
           ))}
         </div>
 
-        <SettingsRow
-          name="Density"
-          hint="Compact tightens padding and the gaps between cards — more items per screen."
-        >
-          <Segmented
-            value={settings.density}
-            options={DENSITIES}
-            onChange={(density) => update({ density })}
-          />
+        <SettingsRow name="Density" hint="Compact tightens padding and the gaps between cards — more items per screen.">
+          <Segmented value={settings.density} options={DENSITIES} onChange={(density) => update({ density })} />
         </SettingsRow>
 
-        <SettingsRow
-          name="Text size"
-          hint="Scales the whole board, not just type — the rail, the cards and the spacing move with it."
-        >
+        <SettingsRow name="Text size" hint="Scales the whole board, not just type — the rail, the cards and the spacing move with it.">
           <Segmented
             value={settings.fontScale}
             options={FONT_SCALES.map((v) => ({ value: v, label: `${v}%` }))}
@@ -154,17 +144,12 @@ export default function SettingsView() {
           />
         </SettingsRow>
 
-        <SettingsRow
-          name="Opens on"
-          hint="Which section this device lands on when you load the page."
-        >
-          <select
-            value={settings.landing}
-            aria-label="Opens on"
-            onChange={(e) => update({ landing: e.target.value as Landing })}
-          >
+        <SettingsRow name="Opens on" hint="Which section this device lands on when you load the page.">
+          <select value={settings.landing} aria-label="Opens on" onChange={(e) => update({ landing: e.target.value as Landing })}>
             {LANDINGS.map((l) => (
-              <option key={l.value} value={l.value}>{l.label}</option>
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
             ))}
           </select>
         </SettingsRow>
@@ -175,10 +160,8 @@ export default function SettingsView() {
           name="Archive after"
           hint={
             <>
-              How long an open item may go untouched before it leaves the Board
-              for Archive. Grooming one brings it straight back — the stamp this
-              reads is written by every start and stop. Tasks never leave: a
-              stale one keeps its column and is marked instead.
+              How long an open item may go untouched before it leaves the Board for Archive. Grooming one brings it straight back — the stamp this reads is
+              written by every start and stop. Tasks never leave: a stale one keeps its column and is marked instead.
             </>
           }
         >
@@ -265,9 +248,7 @@ function OrchestratorGroup() {
 function AgentsGroup() {
   const { settings, update } = useSettings();
   const { status } = useAgents();
-  const healthy =
-    status !== null && status.enabled && status.reachable &&
-    status.spawnAvailable && status.remoteAnswer;
+  const healthy = status !== null && status.enabled && status.reachable && status.spawnAvailable && status.remoteAnswer;
 
   return (
     <SettingsGroup title="Claude Agents · this machine">
@@ -291,27 +272,24 @@ function AgentsGroup() {
         name="Default model"
         hint="Preselected in a card's launch sheet. “CLI default” sends no --model flag and lets Claude Code pick. Overridable per launch."
       >
-        <select
-          aria-label="Default model"
-          value={settings.dispatchDefaultModel}
-          onChange={(e) => update({ dispatchDefaultModel: e.target.value })}
-        >
+        <select aria-label="Default model" value={settings.dispatchDefaultModel} onChange={(e) => update({ dispatchDefaultModel: e.target.value })}>
           <option value="">CLI default</option>
-          {MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+          {MODELS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
         </select>
       </SettingsRow>
 
-      <SettingsRow
-        name="Default effort"
-        hint="Preselected in a card's launch sheet. “CLI default” sends no --effort flag."
-      >
-        <select
-          aria-label="Default effort"
-          value={settings.dispatchDefaultEffort}
-          onChange={(e) => update({ dispatchDefaultEffort: e.target.value })}
-        >
+      <SettingsRow name="Default effort" hint="Preselected in a card's launch sheet. “CLI default” sends no --effort flag.">
+        <select aria-label="Default effort" value={settings.dispatchDefaultEffort} onChange={(e) => update({ dispatchDefaultEffort: e.target.value })}>
           <option value="">CLI default</option>
-          {EFFORTS.map((f) => <option key={f} value={f}>{f}</option>)}
+          {EFFORTS.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
         </select>
       </SettingsRow>
 
@@ -334,7 +312,9 @@ function AgentsGroup() {
           // stored and about to be used as the "open dashboard" href.
           key={settings.linkBase}
           onBlur={(e) => update({ linkBase: e.currentTarget.value })}
-          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
         />
       </SettingsRow>
 
@@ -348,11 +328,13 @@ function AgentsGroup() {
           <div className="set-label">
             <span className="set-name">Setting it up</span>
             <span className="set-hint">
-              1 · <code>BM_AGENTS=on</code> and <code>BM_AGENTS_URL</code> in this app's <code>.env</code>, then restart the API.<br />
-              2 · <code>CLAUDE_BIN</code> in the dashboard's <code>.env</code> — that is its spawn gate.<br />
-              3 · Turn its remote-answer pill on; spawning is refused without it.<br />
-              4 · Run its <code>pnpm hooks:install</code>, or a groom that asks you a question will stall with nowhere to ask.<br />
-              5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to — open one there, or raise <code>LOOKBACK_HOURS</code> in the dashboard's <code>.env</code>.
+              1 · <code>BM_AGENTS=on</code> and <code>BM_AGENTS_URL</code> in this app's <code>.env</code>, then restart the API.
+              <br />2 · <code>CLAUDE_BIN</code> in the dashboard's <code>.env</code> — that is its spawn gate.
+              <br />
+              3 · Turn its remote-answer pill on; spawning is refused without it.
+              <br />4 · Run its <code>pnpm hooks:install</code>, or a groom that asks you a question will stall with nowhere to ask.
+              <br />5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to — open one there,
+              or raise <code>LOOKBACK_HOURS</code> in the dashboard's <code>.env</code>.
             </span>
           </div>
         </div>

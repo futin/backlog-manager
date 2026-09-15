@@ -9,10 +9,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { liveBarFor } from '../client/src/components/board/ItemCard';
 import { RunStrip } from '../client/src/components/board/RunStrip';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type {
-  AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary,
-  RunQueueItem, RunStage, RunWatchdog
-} from '../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage, RunWatchdog } from '../shared/types';
 
 // Same translation orchestrator-hook.test.tsx (Task 10) already uses: the
 // fixture file is plain JSON, so without this cast its string fields widen
@@ -49,8 +46,13 @@ function runPayload(over: Partial<Payload> = {}): Payload {
  */
 function watchdog(over: Partial<RunWatchdog> = {}): RunWatchdog {
   return {
-    enabled: true, attempts: 0, maxAttempts: 2, lastSpawnAt: null,
-    lastSessionId: null, lastError: null, exhausted: false,
+    enabled: true,
+    attempts: 0,
+    maxAttempts: 2,
+    lastSpawnAt: null,
+    lastSessionId: null,
+    lastError: null,
+    exhausted: false,
     ...over
   };
 }
@@ -82,8 +84,18 @@ function crashedRun(over: Partial<Payload> & { watchdog?: RunWatchdog } = {}): P
  */
 function queueItem(id: string, stage: RunStage, over: Partial<RunQueueItem> = {}): RunQueueItem {
   return {
-    id, title: `${id} title`, stage, sessionId: null, worktree: null, branch: null,
-    permissionMode: null, fixLoops: 0, stageAt: {}, verification: [], questions: [], note: null,
+    id,
+    title: `${id} title`,
+    stage,
+    sessionId: null,
+    worktree: null,
+    branch: null,
+    permissionMode: null,
+    fixLoops: 0,
+    stageAt: {},
+    verification: [],
+    questions: [],
+    note: null,
     assumptions: [],
     ...over
   };
@@ -141,9 +153,13 @@ describe('RunStrip', () => {
      *  one fixed response — matching test/agents-client.test.ts's own
      *  `stub` shape for a single-call case. */
     function stubResume(status: number, body: unknown): jest.Mock {
-      const fn = jest.fn(() => Promise.resolve({
-        ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body)
-      } as Response));
+      const fn = jest.fn(() =>
+        Promise.resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          json: () => Promise.resolve(body)
+        } as Response)
+      );
       global.fetch = fn as unknown as typeof fetch;
       return fn;
     }
@@ -169,20 +185,14 @@ describe('RunStrip', () => {
     // Row 2.
     it('reads the watchdog\'s "attempt N/M spawned" clause, still with no Resume control', () => {
       const lastSpawnAt = new Date().toISOString();
-      render(<RunStrip
-        run={crashedRun({ watchdog: watchdog({ attempts: 1, lastSpawnAt }) })}
-        onOpen={() => {}}
-      />);
+      render(<RunStrip run={crashedRun({ watchdog: watchdog({ attempts: 1, lastSpawnAt }) })} onOpen={() => {}} />);
       expect(screen.getByTestId('run-strip')).toHaveTextContent('attempt 1/2 spawned');
       expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
     });
 
     // Row 3.
     it('reads the watchdog\'s "resume failed" clause', () => {
-      render(<RunStrip
-        run={crashedRun({ watchdog: watchdog({ lastError: 'busy' }) })}
-        onOpen={() => {}}
-      />);
+      render(<RunStrip run={crashedRun({ watchdog: watchdog({ lastError: 'busy' }) })} onOpen={() => {}} />);
       expect(screen.getByTestId('run-strip')).toHaveTextContent('resume failed: busy');
     });
 
@@ -191,11 +201,7 @@ describe('RunStrip', () => {
     // task must not relax (widening it reintroduces a double-spawn race
     // with the watchdog's own next tick, see RunStrip.tsx's own comment).
     it('shows an enabled Resume control once the watchdog is exhausted and the board allows it', () => {
-      render(<RunStrip
-        run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })}
-        onOpen={() => {}}
-        canResume
-      />);
+      render(<RunStrip run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })} onOpen={() => {}} canResume />);
       const strip = screen.getByTestId('run-strip');
       expect(strip).toHaveTextContent('exhausted after 2 — resume by hand');
       const button = screen.getByRole('button', { name: 'Resume run' });
@@ -206,11 +212,7 @@ describe('RunStrip', () => {
     // Row 5. `!watchdog.enabled` is the OTHER state the hard constraint
     // allows Resume for.
     it('shows a Resume control when the watchdog itself is off', () => {
-      render(<RunStrip
-        run={crashedRun({ watchdog: watchdog({ enabled: false }) })}
-        onOpen={() => {}}
-        canResume
-      />);
+      render(<RunStrip run={crashedRun({ watchdog: watchdog({ enabled: false }) })} onOpen={() => {}} canResume />);
       const strip = screen.getByTestId('run-strip');
       expect(strip).toHaveTextContent('off — resume by hand');
       expect(screen.getByRole('button', { name: 'Resume run' })).toBeInTheDocument();
@@ -221,11 +223,7 @@ describe('RunStrip', () => {
     // an environment-level/project-visibility block hides rather than merely
     // disables (BoardView passes `canResume` for exactly this reason).
     it('renders no Resume control when the board withholds it, even once exhausted', () => {
-      render(<RunStrip
-        run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })}
-        onOpen={() => {}}
-        canResume={false}
-      />);
+      render(<RunStrip run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })} onOpen={() => {}} canResume={false} />);
       expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
     });
 
@@ -234,12 +232,14 @@ describe('RunStrip', () => {
     // aria-disabled + title idiom (CLAUDE.md) rather than a native
     // `disabled` attribute, which a keyboard user cannot even focus.
     it('renders a disabled, titled Resume control when the board names a blocking reason', () => {
-      render(<RunStrip
-        run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })}
-        onOpen={() => {}}
-        canResume
-        resumeBlockedReason="the dashboard cannot see this project"
-      />);
+      render(
+        <RunStrip
+          run={crashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })}
+          onOpen={() => {}}
+          canResume
+          resumeBlockedReason="the dashboard cannot see this project"
+        />
+      );
       const button = screen.getByRole('button', { name: 'Resume run' });
       expect(button).toBeInTheDocument();
       expect(button).toHaveAttribute('aria-disabled', 'true');
@@ -250,15 +250,10 @@ describe('RunStrip', () => {
     // `'running'` is not crashed at all — it is the ordinary end of every
     // run that ever finished, and renders nothing, exactly as a stale run
     // always has.
-    it.each(['done', 'aborted', 'failed'] as const)(
-      'renders nothing for a stale run whose status is %s (not crashed)',
-      (status) => {
-        const { container } = render(
-          <RunStrip run={runPayload({ fresh: false, status })} onOpen={() => {}} />
-        );
-        expect(container).toBeEmptyDOMElement();
-      }
-    );
+    it.each(['done', 'aborted', 'failed'] as const)('renders nothing for a stale run whose status is %s (not crashed)', (status) => {
+      const { container } = render(<RunStrip run={runPayload({ fresh: false, status })} onOpen={() => {}} />);
+      expect(container).toBeEmptyDOMElement();
+    });
 
     // Row 10: the regression guard — a fresh run must render byte-identically
     // to before this feature, carrying neither the crashed class nor any of
@@ -358,7 +353,9 @@ describe('RunStrip', () => {
       // A spawn held open, so the assertions below run in the window that
       // actually produced the bug: after the click, before the answer.
       let release: (() => void) | undefined;
-      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       const fetchMock = jest.fn(async () => {
         await gate;
         return { ok: true, status: 200, json: () => Promise.resolve({ sessionId: 's' }) } as Response;
@@ -489,14 +486,13 @@ describe('RunStrip', () => {
   // park: 4/4, a full bar, no "current" item pointing at already-finished
   // work, and neither of the words a genuine failure state would use.
   it('renders a fully successful branch-mode run as done, not as a park or a failure', () => {
-    const queue = [
-      queueItem('bug-1', 'branched'),
-      queueItem('bug-2', 'branched'),
-      queueItem('bug-3', 'branched'),
-      queueItem('bug-4', 'branched')
-    ];
+    const queue = [queueItem('bug-1', 'branched'), queueItem('bug-2', 'branched'), queueItem('bug-3', 'branched'), queueItem('bug-4', 'branched')];
     const run = runPayload({
-      queue, attention: [], mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null
+      queue,
+      attention: [],
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null
     });
     render(<RunStrip run={run} onOpen={() => {}} />);
     const strip = screen.getByTestId('run-strip');
@@ -523,7 +519,11 @@ describe('RunStrip', () => {
   it("does not read an already-exited branched item as the run's current work", () => {
     const queue = [queueItem('bug-1', 'branched'), queueItem('bug-2', 'pending')];
     const run = runPayload({
-      queue, attention: [], mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: null
+      queue,
+      attention: [],
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null
     });
     render(<RunStrip run={run} onOpen={() => {}} />);
     const current = screen.getByTestId('run-strip').querySelector('.run-strip-current');
@@ -539,14 +539,12 @@ describe('RunStrip', () => {
   // undercounts real completion by half; this pins that both exits now
   // count toward the same "done" total, hiding neither.
   it('counts merged and branched items together for a run that downgraded mid-queue', () => {
-    const queue = [
-      queueItem('bug-1', 'merged'),
-      queueItem('bug-2', 'merged'),
-      queueItem('bug-3', 'branched'),
-      queueItem('bug-4', 'branched')
-    ];
+    const queue = [queueItem('bug-1', 'merged'), queueItem('bug-2', 'merged'), queueItem('bug-3', 'branched'), queueItem('bug-4', 'branched')];
     const run = runPayload({
-      queue, attention: [], mergeMode: 'merge', mergeModeEffective: 'branch',
+      queue,
+      attention: [],
+      mergeMode: 'merge',
+      mergeModeEffective: 'branch',
       mergeModeNote: 'classifier denied the merge on bug-3'
     });
     render(<RunStrip run={run} onOpen={() => {}} />);
@@ -573,23 +571,52 @@ describe('RunStrip', () => {
 
 describe('BoardView: run strips and card live bars', () => {
   const PROJECTS: ProjectSummary[] = [
-    { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 } },
-    { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 } }
+    {
+      name: 'alpha',
+      path: '/abs/alpha',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+    },
+    {
+      name: 'beta',
+      path: '/abs/beta',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      missing: false,
+      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+    }
   ];
 
   const AGENTS_STATUS: AgentsStatus = {
-    enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-    spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: 'auto',
+    projectPaths: ['/abs/alpha', '/abs/beta']
   };
 
   function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     const base: BacklogItem = {
-      id: 'task-14', title: 'wire the heartbeat', created: '2026-08-20', started: '', tags: [],
-      updated: '', lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '',
-      section: 'tasks', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-      groomed: true, path: '/abs/alpha/backlog/tasks/open/task-14-wire-the-heartbeat.md',
+      id: 'task-14',
+      title: 'wire the heartbeat',
+      created: '2026-08-20',
+      started: '',
+      tags: [],
+      updated: '',
+      lastCommit: '',
+      phase: '',
+      groomElapsed: 0,
+      executeElapsed: 0,
+      groomTokens: 0,
+      executeTokens: 0,
+      kind: '',
+      section: 'tasks',
+      status: 'open',
+      project: 'alpha',
+      projectPath: '/abs/alpha',
+      groomed: true,
+      path: '/abs/alpha/backlog/tasks/open/task-14-wire-the-heartbeat.md',
       ...over
     };
     return base;
@@ -605,10 +632,13 @@ describe('BoardView: run strips and card live bars', () => {
   function stub(runs: Payload[], items: BacklogItem[], projects: ProjectSummary[] = PROJECTS): jest.Mock {
     const fn = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload: unknown = url.includes('/api/agents/status') ? AGENTS_STATUS
-        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? projects
-        : { items, errors: [] };
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/projects')
+            ? projects
+            : { items, errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
     global.fetch = fn as unknown as typeof fetch;
@@ -724,17 +754,20 @@ describe('BoardView: run strips and card live bars', () => {
   function stubWithStatus(agentsStatus: AgentsStatus, runs: Payload[], items: BacklogItem[]): jest.Mock {
     const fn = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload: unknown = url.includes('/api/agents/status') ? agentsStatus
-        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? PROJECTS
-        : { items, errors: [] };
+      const payload: unknown = url.includes('/api/agents/status')
+        ? agentsStatus
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/projects')
+            ? PROJECTS
+            : { items, errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
     global.fetch = fn as unknown as typeof fetch;
     return fn;
   }
 
-  it('disables the crashed strip\'s Resume control when the dashboard cannot see the project', async () => {
+  it("disables the crashed strip's Resume control when the dashboard cannot see the project", async () => {
     stubWithStatus(
       { ...AGENTS_STATUS, projectPaths: [] },
       [alphaCrashedRun({ watchdog: watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }) })],
@@ -763,13 +796,7 @@ describe('BoardView: run strips and card live bars', () => {
   // Row 18: a crashed run and a fresh run, different projects — both strips
   // render, one crashed and one not.
   it('renders one crashed strip and one fresh strip for two different projects', async () => {
-    stub(
-      [
-        alphaCrashedRun(),
-        { ...fixture, runId: 'run-2', project: '/abs/beta', fresh: true, pastRuns: 0, pauseRequested: false }
-      ],
-      [fakeItem({})]
-    );
+    stub([alphaCrashedRun(), { ...fixture, runId: 'run-2', project: '/abs/beta', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
     const strips = await waitFor(() => {
       const found = screen.getAllByTestId('run-strip');
@@ -792,7 +819,7 @@ describe('BoardView: run strips and card live bars', () => {
   // halves of the tone are asserted — the bar's fill class and the card's own
   // border class — because a cyan bar on an amber-bordered card reads as two
   // different claims about one item.
-  it('gives the card matching the fresh run\'s queue entry a cyan live bar, then clears it once the run goes stale', async () => {
+  it("gives the card matching the fresh run's queue entry a cyan live bar, then clears it once the run goes stale", async () => {
     stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
 
@@ -835,11 +862,14 @@ describe('BoardView: run strips and card live bars', () => {
       [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }],
       [
         fakeItem({
-          id: 'task-21', title: 'decide the archive question',
+          id: 'task-21',
+          title: 'decide the archive question',
           path: '/abs/alpha/backlog/tasks/open/task-21-decide-the-archive-question.md'
         }),
         fakeItem({
-          id: 'bug-27', title: 'hue swatch lag', section: 'bugs',
+          id: 'bug-27',
+          title: 'hue swatch lag',
+          section: 'bugs',
           path: '/abs/alpha/backlog/bugs/open/bug-27-hue-swatch-lag.md'
         }),
         // The terminal end of the same negative: bug-14 is the fixture's merged
@@ -847,7 +877,10 @@ describe('BoardView: run strips and card live bars', () => {
         // and a marker that keyed off "the run mentions this item" rather than
         // off the stage would light up both.
         fakeItem({
-          id: 'bug-14', title: 'already merged', section: 'bugs', groomed: true,
+          id: 'bug-14',
+          title: 'already merged',
+          section: 'bugs',
+          groomed: true,
           path: '/abs/alpha/backlog/bugs/open/bug-14-already-merged.md'
         })
       ]
@@ -859,8 +892,7 @@ describe('BoardView: run strips and card live bars', () => {
     // legend's "a human is involved here" rather than a shade of progress.
     // The absent cyan class is asserted outright: the text alone would pass
     // just as well if the two tones had been collapsed into one.
-    const needsAnswersCard = (await screen.findByText('decide the archive question'))
-      .closest('.board-card') as HTMLElement;
+    const needsAnswersCard = (await screen.findByText('decide the archive question')).closest('.board-card') as HTMLElement;
     const warnBar = needsAnswersCard.querySelector('.board-card-live-bar');
     expect(warnBar).not.toBeNull();
     expect(warnBar).toHaveTextContent('needs-answers');
@@ -945,10 +977,7 @@ describe('BoardView: run strips and card live bars', () => {
   // (board.test.tsx pins that half). A queue entry with no stamp for the stage
   // it reports is the run-payload shape of the same problem.
   it('renders the words and no reading for a queue entry carrying no usable stamp', async () => {
-    stub(
-      [alphaRun([{ ...entry('task-14'), stageAt: {} }])],
-      [fakeItem({})]
-    );
+    stub([alphaRun([{ ...entry('task-14'), stageAt: {} }])], [fakeItem({})]);
     await renderBoard();
     const bar = await waitFor(() => {
       const found = barOf('wire the heartbeat');
@@ -965,12 +994,16 @@ describe('BoardView: run strips and card live bars', () => {
   // therefore the dispatched anchor and `5m` would be the current stage's — the
   // wrong one, asserted absent so a swapped anchor fails here rather than
   // reading plausibly and being off by hours.
-  it("reads the elapsed since dispatch on an active card, not since the stage it is on", async () => {
+  it('reads the elapsed since dispatch on an active card, not since the stage it is on', async () => {
     stub(
-      [alphaRun([{
-        ...entry('task-14'),
-        stageAt: { ...entry('task-14').stageAt, dispatched: agoISO(3 * HOUR), reviewing: agoISO(5 * MIN) }
-      }])],
+      [
+        alphaRun([
+          {
+            ...entry('task-14'),
+            stageAt: { ...entry('task-14').stageAt, dispatched: agoISO(3 * HOUR), reviewing: agoISO(5 * MIN) }
+          }
+        ])
+      ],
       [fakeItem({})]
     );
     await renderBoard();
@@ -990,10 +1023,14 @@ describe('BoardView: run strips and card live bars', () => {
   // colour — "waiting on you" is very different at 45m and at 4d.
   it('reads the elapsed since the question was asked on an attention card', async () => {
     stub(
-      [alphaRun([{
-        ...entry('task-21'),
-        stageAt: { ...entry('task-21').stageAt, 'needs-answers': agoISO(45 * MIN) }
-      }])],
+      [
+        alphaRun([
+          {
+            ...entry('task-21'),
+            stageAt: { ...entry('task-21').stageAt, 'needs-answers': agoISO(45 * MIN) }
+          }
+        ])
+      ],
       [task('task-21', 'decide the archive question')]
     );
     await renderBoard();
@@ -1016,15 +1053,8 @@ describe('BoardView: run strips and card live bars', () => {
    */
   it('treats parked as attention: amber, and above running work in the column', async () => {
     stub(
-      [alphaRun([
-        { ...entry('task-14'), id: 'task-30', stage: 'parked' as RunStage,
-          stageAt: { parked: agoISO(20 * MIN) } },
-        entry('task-14')
-      ])],
-      [
-        task('task-30', 'parked item', { created: '2026-08-01' }),
-        task('task-14', 'wire the heartbeat', { created: '2026-08-20' })
-      ]
+      [alphaRun([{ ...entry('task-14'), id: 'task-30', stage: 'parked' as RunStage, stageAt: { parked: agoISO(20 * MIN) } }, entry('task-14')])],
+      [task('task-30', 'parked item', { created: '2026-08-01' }), task('task-14', 'wire the heartbeat', { created: '2026-08-20' })]
     );
     await renderBoard();
     const bar = await waitFor(() => {
@@ -1056,10 +1086,15 @@ describe('BoardView: run strips and card live bars', () => {
   it('prints the stage once, on the bar, and leaves the file-derived footer markers alone', async () => {
     stub(
       [alphaRun([{ ...entry('task-14'), id: 'bug-9' }])],
-      [fakeItem({
-        id: 'bug-9', title: 'a groomed bug', section: 'bugs', groomed: true,
-        path: '/abs/alpha/backlog/bugs/open/bug-9-a-groomed-bug.md'
-      })]
+      [
+        fakeItem({
+          id: 'bug-9',
+          title: 'a groomed bug',
+          section: 'bugs',
+          groomed: true,
+          path: '/abs/alpha/backlog/bugs/open/bug-9-a-groomed-bug.md'
+        })
+      ]
     );
     await renderBoard();
     const card = await waitFor(() => {
@@ -1104,9 +1139,7 @@ describe('BoardView: run strips and card live bars', () => {
     );
     await renderBoard();
     await waitFor(() => expect(barOf('needs an answer')).not.toBeNull());
-    expect(titlesIn(3)).toEqual([
-      'needs an answer', 'hand-run', 'orchestrator has it', 'idle newest', 'idle older'
-    ]);
+    expect(titlesIn(3)).toEqual(['needs an answer', 'hand-run', 'orchestrator has it', 'idle newest', 'idle older']);
   });
 
   /*
@@ -1130,9 +1163,7 @@ describe('BoardView: run strips and card live bars', () => {
     );
     await renderBoard();
     expect(document.querySelectorAll('.board-card-live-bar')).toHaveLength(0);
-    expect(titlesIn(3)).toEqual([
-      'idle newest', 'idle older', 'orchestrator has it', 'needs an answer'
-    ]);
+    expect(titlesIn(3)).toEqual(['idle newest', 'idle older', 'orchestrator has it', 'needs an answer']);
   });
 
   /*
@@ -1171,10 +1202,8 @@ describe('BoardView: run strips and card live bars', () => {
       [
         task('task-14', 'orchestrator has it'),
         task('task-21', 'needs an answer'),
-        fakeItem({ id: 'bug-27', title: 'still pending', section: 'bugs',
-          path: '/abs/alpha/backlog/bugs/open/bug-27.md' }),
-        fakeItem({ id: 'bug-14', title: 'already merged', section: 'bugs',
-          path: '/abs/alpha/backlog/bugs/open/bug-14.md' })
+        fakeItem({ id: 'bug-27', title: 'still pending', section: 'bugs', path: '/abs/alpha/backlog/bugs/open/bug-27.md' }),
+        fakeItem({ id: 'bug-14', title: 'already merged', section: 'bugs', path: '/abs/alpha/backlog/bugs/open/bug-14.md' })
       ]
     );
     await renderBoard();
@@ -1213,10 +1242,13 @@ describe('BoardView: run strips and card live bars', () => {
     const runs: Payload[] = [{ ...fixture, project: '/abs/alpha', status: 'paused', fresh: false, pastRuns: 0, pauseRequested: false }];
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      const payload: unknown = url.includes('/api/agents/status') ? { ...AGENTS_STATUS, enabled: false }
-        : url.includes('/api/orchestrator/runs') ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
-        : url.includes('/api/projects') ? PROJECTS
-        : { items: [fakeItem({})], errors: [] };
+      const payload: unknown = url.includes('/api/agents/status')
+        ? { ...AGENTS_STATUS, enabled: false }
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/projects')
+            ? PROJECTS
+            : { items: [fakeItem({})], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     }) as unknown as typeof fetch;
 
@@ -1228,16 +1260,12 @@ describe('BoardView: run strips and card live bars', () => {
   });
 
   it('posts a resume from the paused strip', async () => {
-    const fetchMock = stub(
-      [{ ...fixture, project: '/abs/alpha', status: 'paused', fresh: false, pastRuns: 0, pauseRequested: false }],
-      [fakeItem({})]
-    );
+    const fetchMock = stub([{ ...fixture, project: '/abs/alpha', status: 'paused', fresh: false, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
     await renderBoard();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Resume run' }));
 
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/agents/resume'))).toHaveLength(1));
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/agents/resume'))).toHaveLength(1));
   });
 });
 
@@ -1260,28 +1288,14 @@ describe('RunStrip — the pausing chip and the paused rendering', () => {
   });
 
   it('renders a disabled Resume, with the reason as its title, for a project-visibility block', () => {
-    render(
-      <RunStrip
-        run={runPayload({ status: 'paused', fresh: false })}
-        onOpen={() => {}}
-        canResume
-        resumeBlockedReason="x"
-      />
-    );
+    render(<RunStrip run={runPayload({ status: 'paused', fresh: false })} onOpen={() => {}} canResume resumeBlockedReason="x" />);
     const button = screen.getByRole('button', { name: 'Resume run' });
     expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAttribute('title', 'x');
   });
 
   it('renders a Resuming… placeholder instead of the button while a resume is in flight', () => {
-    render(
-      <RunStrip
-        run={runPayload({ status: 'paused', fresh: false })}
-        onOpen={() => {}}
-        canResume
-        resuming
-      />
-    );
+    render(<RunStrip run={runPayload({ status: 'paused', fresh: false })} onOpen={() => {}} canResume resuming />);
     expect(screen.getByTestId('run-strip-resuming')).toHaveTextContent('Resuming…');
     expect(screen.queryByRole('button', { name: 'Resume run' })).toBeNull();
   });
@@ -1289,9 +1303,7 @@ describe('RunStrip — the pausing chip and the paused rendering', () => {
   // The one shape that must keep rendering nothing: a run that genuinely
   // ended. `paused` is the third rendering, not a fourth silence.
   it('still renders nothing for a stale done run', () => {
-    const { container } = render(
-      <RunStrip run={runPayload({ status: 'done', fresh: false })} onOpen={() => {}} />
-    );
+    const { container } = render(<RunStrip run={runPayload({ status: 'done', fresh: false })} onOpen={() => {}} />);
     expect(container.firstChild).toBeNull();
   });
 });

@@ -169,12 +169,7 @@ export class StartingRunsService {
    *      is built around, and the alternative is the shape whose two halves
    *      merely agree.
    */
-  private expired(
-    project: string,
-    requestedAt: number,
-    realRuns: readonly OrchestratorRun[],
-    now: number
-  ): boolean {
+  private expired(project: string, requestedAt: number, realRuns: readonly OrchestratorRun[], now: number): boolean {
     if (now - requestedAt > RUN_STALE_MS) return true;
     if (realRuns.some((run) => run.project === project && run.status === 'running')) return true;
     return realRuns.some((run) => run.project === project && Date.parse(run.startedAt) >= requestedAt);

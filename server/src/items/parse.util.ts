@@ -36,7 +36,13 @@ export function parseFrontmatter(text: string): { fm: Frontmatter; body: string 
       throw new ItemParseError('frontmatter must not carry a status: key — the directory a file lives in is its status');
     }
     if (key === 'tags') {
-      tags = value === '' ? [] : value.split(',').map((t) => t.trim()).filter((t) => t !== '');
+      tags =
+        value === ''
+          ? []
+          : value
+              .split(',')
+              .map((t) => t.trim())
+              .filter((t) => t !== '');
     } else {
       fields[key] = value;
     }
@@ -62,7 +68,10 @@ export function sectionText(body: string, heading: string): string {
   if (start === -1) return '';
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((l) => l.startsWith('## '));
-  return rest.slice(0, end === -1 ? undefined : end).join('\n').trim();
+  return rest
+    .slice(0, end === -1 ? undefined : end)
+    .join('\n')
+    .trim();
 }
 
 /**

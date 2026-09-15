@@ -73,7 +73,9 @@ export function useRunsMode(): [RunsMode, (m: RunsMode) => void] {
 
   useEffect(() => {
     listeners.add(setMode);
-    return () => { listeners.delete(setMode); };
+    return () => {
+      listeners.delete(setMode);
+    };
   }, []);
 
   return [mode, setRunsMode];

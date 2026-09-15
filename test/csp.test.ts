@@ -64,25 +64,16 @@ describe('Content-Security-Policy header', () => {
   });
 
   it('rides on every response the real app serves, 404s included', async () => {
-    await request(api.getHttpServer())
-      .get('/api/health')
-      .expect(200)
-      .expect('content-security-policy', CSP_POLICY);
+    await request(api.getHttpServer()).get('/api/health').expect(200).expect('content-security-policy', CSP_POLICY);
     // Not route-scoped: a response Nest never routed to a controller carries it
     // too, which is what makes it a property of the server and not of /api.
-    await request(api.getHttpServer())
-      .get('/api/items/body')
-      .expect(404)
-      .expect('content-security-policy', CSP_POLICY);
+    await request(api.getHttpServer()).get('/api/items/body').expect(404).expect('content-security-policy', CSP_POLICY);
   });
 
   it('reaches the served index.html, ahead of the static handler', async () => {
     // The ordering assertion: ServeStaticModule streams the file itself, so a
     // middleware registered after it would never run for this request.
-    const res = await request(page.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('content-security-policy', CSP_POLICY);
+    const res = await request(page.getHttpServer()).get('/').expect(200).expect('content-security-policy', CSP_POLICY);
     expect(res.text).toContain('<div id="root"></div>');
   });
 

@@ -74,9 +74,7 @@ describe('stage-track reduced-motion stylesheet rules', () => {
   // position — keeps this test correct even if a third block is ever added
   // somewhere else in the file.
   const reducedMotionBlocks = mediaBlocks(css, '@media (prefers-reduced-motion: reduce)');
-  const trackReducedMotion = reducedMotionBlocks.find((block) =>
-    block.includes('.run-track-node[data-in="live"]::before')
-  );
+  const trackReducedMotion = reducedMotionBlocks.find((block) => block.includes('.run-track-node[data-in="live"]::before'));
 
   it('has a reduced-motion block that covers the stage track', () => {
     expect(trackReducedMotion).toBeDefined();
@@ -113,11 +111,7 @@ describe('stalled stage-track stylesheet rules (bug-15)', () => {
   const css = readStyles();
 
   it('has a rule for the stalled dot, its segment, and the drawer-sized dot', () => {
-    for (const selector of [
-      '.run-track-dot-stalled',
-      '.run-track-node[data-in="stalled"]::before',
-      '.run-stepper-dot-stalled'
-    ]) {
+    for (const selector of ['.run-track-dot-stalled', '.run-track-node[data-in="stalled"]::before', '.run-stepper-dot-stalled']) {
       const block = ruleBlock(css, selector);
       expect(block).not.toBeNull();
       expect((block as string).trim()).not.toEqual('');
@@ -153,7 +147,10 @@ describe('stalled stage-track stylesheet rules (bug-15)', () => {
     const current = ruleBlock(css, '.run-track-dot-current') as string;
 
     const declarations = (rule: string): string[] =>
-      rule.split(';').map((d) => d.trim().replace(/\s+/g, ' ')).filter((d) => d !== '');
+      rule
+        .split(';')
+        .map((d) => d.trim().replace(/\s+/g, ' '))
+        .filter((d) => d !== '');
 
     for (const other of [filled, current]) {
       const differing = declarations(stalled).filter((d) => !declarations(other).includes(d));

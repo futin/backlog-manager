@@ -112,7 +112,9 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const reload = useCallback(async () => {
@@ -179,7 +181,9 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
   }, [reload]);
 
   useEffect(() => {
-    const onFocus = (): void => { void reload(); };
+    const onFocus = (): void => {
+      void reload();
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [reload]);
@@ -198,7 +202,9 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
   // interval installed or torn down on that render like any other input.
   useEffect(() => {
     if (!live || status?.phase !== 'armed') return;
-    const id = setInterval(() => { void reload(); }, WATCHDOG_POLL_MS);
+    const id = setInterval(() => {
+      void reload();
+    }, WATCHDOG_POLL_MS);
     return () => clearInterval(id);
   }, [live, status?.phase, reload]);
 

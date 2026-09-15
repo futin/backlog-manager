@@ -35,9 +35,7 @@ function status(phase: WatchdogPhase, over: Partial<WatchdogStatus> = {}): Watch
  *  CALL COUNT and CALL ARGS in one unchanging world, the same shape
  *  `test/orchestrator-hook.test.tsx`'s own `stubFetch` uses. */
 function stubFetch(body: WatchdogStatus): jest.Mock {
-  const fn = jest.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response)
-  );
+  const fn = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
   global.fetch = fn as unknown as typeof fetch;
   return fn;
 }
@@ -125,9 +123,7 @@ describe('useWatchdog', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const saved = status('armed', { config: { ...DEFAULT_WATCHDOG_CONFIG, tickMs: 120_000 } });
-    fetchMock.mockImplementationOnce(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(saved) } as Response)
-    );
+    fetchMock.mockImplementationOnce(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(saved) } as Response));
 
     await act(async () => {
       await result.current.save({ tickMs: 120_000 });
@@ -262,7 +258,8 @@ describe('useWatchdog', () => {
     });
 
     expect(result.current.saveError).toEqual({
-      field: 'tickMs', message: 'watchdog.json is read-only'
+      field: 'tickMs',
+      message: 'watchdog.json is read-only'
     });
     expect(result.current.error).toBeNull();
     // `status` untouched: the failure was on the write, so what is on screen
@@ -319,9 +316,7 @@ describe('useWatchdog', () => {
     expect(result.current.saveError).not.toBeNull();
 
     const saved = status('idle', { config: { ...DEFAULT_WATCHDOG_CONFIG, tickMs: 300_000 } });
-    fetchMock.mockImplementationOnce(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(saved) } as Response)
-    );
+    fetchMock.mockImplementationOnce(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(saved) } as Response));
     await act(async () => {
       await result.current.save({ tickMs: 300_000 });
     });
@@ -353,9 +348,7 @@ describe('useWatchdog', () => {
     // and the refreshed config is what makes that line true rather than
     // stale, since the value on screen is once again the server's own.
     const refetched = status('armed');
-    fetchMock.mockImplementationOnce(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(refetched) } as Response)
-    );
+    fetchMock.mockImplementationOnce(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(refetched) } as Response));
     act(() => {
       window.dispatchEvent(new Event('focus'));
     });

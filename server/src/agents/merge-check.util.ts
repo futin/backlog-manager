@@ -81,7 +81,10 @@ const WILDCARD_RE = /^Bash\((.*):\*\)$/;
  * accept or refuse.
  */
 function coversMergeCommand(prefix: string): boolean {
-  const words = prefix.trim().split(/\s+/).filter((word) => word.length > 0);
+  const words = prefix
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
   if (words.length === 0 || words.length > MERGE_COMMAND_WORDS.length) return false;
   return words.every((word, i) => word === MERGE_COMMAND_WORDS[i]);
 }

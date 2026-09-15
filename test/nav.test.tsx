@@ -43,13 +43,10 @@ const SECTION_KEY = 'backlog-manager.section';
 /** Written the way `usePersistedState` reads it back: JSON, not a bare string. */
 const storeSection = (raw: string): void => localStorage.setItem(SECTION_KEY, JSON.stringify(raw));
 const storedSection = (): unknown => JSON.parse(localStorage.getItem(SECTION_KEY) ?? 'null');
-const storeSettings = (patch: object): void =>
-  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(patch));
+const storeSettings = (patch: object): void => localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(patch));
 
-const railTabs = (): HTMLElement[] =>
-  within(screen.getByRole('navigation', { name: 'Sections' })).getAllByRole('button');
-const markedTabs = (): HTMLElement[] =>
-  railTabs().filter((t) => t.getAttribute('aria-current') === 'page');
+const railTabs = (): HTMLElement[] => within(screen.getByRole('navigation', { name: 'Sections' })).getAllByRole('button');
+const markedTabs = (): HTMLElement[] => railTabs().filter((t) => t.getAttribute('aria-current') === 'page');
 
 /**
  * The Archive marker these cases wait on: its Out of scope column heading,
@@ -63,10 +60,24 @@ const ARCHIVE_MARK = 'Out of scope';
  *  state. Deliberately minimal: this suite is about the shell, not about what
  *  Archive puts in its columns (test/archive.test.tsx owns that). */
 const ARCHIVE_ITEM = {
-  id: 'oos-1', title: 'declined thing', created: '2026-08-20', started: '', updated: '',
-  phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '', tags: [],
-  section: 'out-of-scope', status: 'terminal', project: 'alpha', projectPath: '/abs/alpha',
-  groomed: null, path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
+  id: 'oos-1',
+  title: 'declined thing',
+  created: '2026-08-20',
+  started: '',
+  updated: '',
+  phase: '',
+  groomElapsed: 0,
+  executeElapsed: 0,
+  groomTokens: 0,
+  executeTokens: 0,
+  kind: '',
+  tags: [],
+  section: 'out-of-scope',
+  status: 'terminal',
+  project: 'alpha',
+  projectPath: '/abs/alpha',
+  groomed: null,
+  path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
 };
 
 /**
@@ -86,13 +97,25 @@ describe('the section rail', () => {
       const url = String(input);
       const payload = url.includes('/api/agents/status')
         ? {
-          enabled: false, reachable: false, remoteAnswer: false,
-          spawnAvailable: false, spawnMaxPermission: null, projectPaths: []
-        }
-        : url.includes('/api/orchestrator/runs') ? { runs: [] }
+            enabled: false,
+            reachable: false,
+            remoteAnswer: false,
+            spawnAvailable: false,
+            spawnMaxPermission: null,
+            projectPaths: []
+          }
+        : url.includes('/api/orchestrator/runs')
+          ? { runs: [] }
           : url.includes('/api/projects')
-            ? [{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-              counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 1 } }]
+            ? [
+                {
+                  name: 'alpha',
+                  path: '/abs/alpha',
+                  createdAt: '2026-08-26T00:00:00.000Z',
+                  missing: false,
+                  counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 1 }
+                }
+              ]
             : { items: [ARCHIVE_ITEM], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     }) as jest.Mock;

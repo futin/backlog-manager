@@ -16,8 +16,10 @@ export type PillTone = 'neutral' | 'live' | 'warn' | 'bad' | 'done';
  * waiting on a person, `bad` for a failure, `done` for a finished thing — so a
  * palette swap moves the colour and never the meaning.
  */
-export function Pill({
-  children, tone = 'neutral', title
-}: { children: ReactNode; tone?: PillTone; title?: string }) {
-  return <span className={`ui-pill ui-pill-${tone}`} title={title}>{children}</span>;
+export function Pill({ children, tone = 'neutral', title }: { children: ReactNode; tone?: PillTone; title?: string }) {
+  return (
+    <span className={`ui-pill ui-pill-${tone}`} title={title}>
+      {children}
+    </span>
+  );
 }

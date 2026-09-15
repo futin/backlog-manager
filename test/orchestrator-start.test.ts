@@ -28,7 +28,10 @@ let projectPath: string;
    until two projects exist. */
 let otherPath: string;
 
-interface Sent { url: string; init?: RequestInit }
+interface Sent {
+  url: string;
+  init?: RequestInit;
+}
 
 /* The two shapes a rejected `fetch` actually arrives as, measured on Node 22
    while grooming bug-26: a connection failure is a `TypeError` whose message
@@ -70,17 +73,20 @@ function stubDashboard(
       // entered; that is why bug-26's escaping rejection had no case here.
       if ('reject' in spawn) return Promise.reject(spawn.reject);
       return Promise.resolve({
-        ok, status: spawn.status ?? (ok ? 200 : 429),
+        ok,
+        status: spawn.status ?? (ok ? 200 : 429),
         json: () => Promise.resolve(spawn.body ?? { sessionId: 'sess-1' })
       } as Response);
     }
     return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(
-        url.endsWith('/api/management')
-          ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-          : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: ceiling }
-      )
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve(
+          url.endsWith('/api/management')
+            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: ceiling }
+        )
     } as Response);
   }) as jest.Mock;
   return sent;
@@ -126,9 +132,7 @@ describe('POST /api/agents/orchestrate', () => {
       { leaf: 'tasks/done', filename: 'task-3-archived.md', content: item('task-3', 'archived', '## Plan\n\nstep one\n') },
       { leaf: 'ideas/open', filename: 'idea-1-an-idea.md', content: item('idea-1', 'an idea', 'a thought\n') }
     ]);
-    otherPath = makeProject('beta', [
-      { leaf: 'tasks/open', filename: 'task-9-beta-only.md', content: item('task-9', 'beta only', '## Plan\n\nstep one\n') }
-    ]);
+    otherPath = makeProject('beta', [{ leaf: 'tasks/open', filename: 'task-9-beta-only.md', content: item('task-9', 'beta only', '## Plan\n\nstep one\n') }]);
 
     // A fresh, empty BM_ORCH_HOME per test — never the developer's real
     // ~/.backlog-manager/orchestrator/. Deliberately not created here (only
@@ -147,7 +151,12 @@ describe('POST /api/agents/orchestrate', () => {
     // real-machine default would read the developer's actual registry.
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
-      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }, { name: 'beta', path: otherPath }]))
+      .useValue(
+        makeRegistry([
+          { name: 'alpha', path: projectPath },
+          { name: 'beta', path: otherPath }
+        ])
+      )
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -162,7 +171,9 @@ describe('POST /api/agents/orchestrate', () => {
   });
 
   const post = (body: unknown) =>
-    request(app.getHttpServer()).post('/api/agents/orchestrate').send(body as object);
+    request(app.getHttpServer())
+      .post('/api/agents/orchestrate')
+      .send(body as object);
 
   // --- Test case 1: BM_AGENTS off -----------------------------------------
 
@@ -182,11 +193,7 @@ describe('POST /api/agents/orchestrate', () => {
 
   it('403s a urlencoded POST without any outbound call', async () => {
     const sent = stubDashboard();
-    const res = await request(app.getHttpServer())
-      .post('/api/agents/orchestrate')
-      .type('form')
-      .send({ project: projectPath })
-      .expect(403);
+    const res = await request(app.getHttpServer()).post('/api/agents/orchestrate').type('form').send({ project: projectPath }).expect(403);
     expect(res.body.error).toMatch(/application\/json/);
     expect(sent).toEqual([]);
   });
@@ -217,16 +224,16 @@ describe('POST /api/agents/orchestrate', () => {
       const url = String(input);
       sent.push({ url, init });
       return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          // The dashboard is up and answering, but has no session in this
-          // project at all — the same "not in projectPaths" condition
-          // dispatchGate's `disabled` case refuses on for a per-item
-          // dispatch (shared/agent.ts).
-          url.endsWith('/api/management')
-            ? { projects: [] }
-            : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-        )
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            // The dashboard is up and answering, but has no session in this
+            // project at all — the same "not in projectPaths" condition
+            // dispatchGate's `disabled` case refuses on for a per-item
+            // dispatch (shared/agent.ts).
+            url.endsWith('/api/management') ? { projects: [] } : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+          )
       } as Response);
     }) as jest.Mock;
 
@@ -275,15 +282,17 @@ describe('POST /api/agents/orchestrate', () => {
       const url = String(input);
       sent.push(url);
       return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          url.endsWith('/api/management')
-            // The project IS visible here — proving this refusal fires
-            // for spawnAvailable specifically, not as a side effect of
-            // failing the later project-visibility check too.
-            ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
-            : { ok: true, remoteAnswer: true, spawnAvailable: false, spawnMaxPermission: 'acceptEdits' }
-        )
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            url.endsWith('/api/management')
+              ? // The project IS visible here — proving this refusal fires
+                // for spawnAvailable specifically, not as a side effect of
+                // failing the later project-visibility check too.
+                { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
+              : { ok: true, remoteAnswer: true, spawnAvailable: false, spawnMaxPermission: 'acceptEdits' }
+          )
       } as Response);
     }) as jest.Mock;
 
@@ -343,17 +352,18 @@ describe('POST /api/agents/orchestrate', () => {
         // re-read below it is a fresh call rather than a cache hit.
         now.mockReturnValue(base + 61_000);
         return Promise.resolve({
-          ok: true, status: 200,
-          json: () => Promise.resolve({
-            projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }]
-          })
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }]
+            })
         } as Response);
       }
       return Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
-        )
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' })
       } as Response);
     }) as jest.Mock;
 
@@ -500,7 +510,10 @@ describe('POST /api/agents/orchestrate', () => {
   it('spawns with the constant prompt and drops the client-supplied prompt and unknown model', async () => {
     const sent = stubDashboard();
     const res = await post({
-      project: projectPath, prompt: 'rm -rf', model: 'claude-x', mergeMode: 'branch'
+      project: projectPath,
+      prompt: 'rm -rf',
+      model: 'claude-x',
+      mergeMode: 'branch'
     }).expect(201);
     expect(res.body).toEqual({ sessionId: 'sess-1' });
 
@@ -841,5 +854,4 @@ describe('POST /api/agents/orchestrate', () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect(res.body.starting).toEqual([]);
   });
-
 });

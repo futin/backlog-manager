@@ -1,298 +1,194 @@
 # Front-end redesign — `.claude/DESIGN.md` and the surface-by-surface refactor — design
 
-Date: 2026-09-15
-Status: approved (user-reviewed via remote decision session: seven option
-picks, four interactive companion screens on real board and run data —
-the screens are kept beside this file in `2026-09-15-fe-redesign-mockups/`;
-on 2026-09-15 the picked option in each was revised for functional
-completeness and `05-run-modal.html` added — `00-functionality-audit.md`
-there lists every change, and this file was corrected in the same pass).
-Later the same day the user drew a fourth shape, **option D**, in
-`03-runs-shape.html` and picked it: the figures lead the page, the runs are
-rows in a Live sheet and a History sheet beside one always-visible detail
-sheet, and **there is no run modal**. D is the picked Runs shape and C is
-superseded — decision 5, §4.1, §6.1, §8 and §12 read D. `05-run-modal.html`
-was deleted in the same pass because D's frame 2 draws every `RunDetail`
-reading it drew; it is recoverable from commit `d8a7879` if ever needed.
+Date: 2026-09-15 Status: approved (user-reviewed via remote decision session: seven option picks, four interactive companion screens on real board and run data
+— the screens are kept beside this file in `2026-09-15-fe-redesign-mockups/`; on 2026-09-15 the picked option in each was revised for functional completeness
+and `05-run-modal.html` added — `00-functionality-audit.md` there lists every change, and this file was corrected in the same pass). Later the same day the user
+drew a fourth shape, **option D**, in `03-runs-shape.html` and picked it: the figures lead the page, the runs are rows in a Live sheet and a History sheet
+beside one always-visible detail sheet, and **there is no run modal**. D is the picked Runs shape and C is superseded — decision 5, §4.1, §6.1, §8 and §12 read
+D. `05-run-modal.html` was deleted in the same pass because D's frame 2 draws every `RunDetail` reading it drew; it is recoverable from commit `d8a7879` if ever
+needed.
 
 ## Problem
 
-The board's client is the odd one out of the three apps that share
-`shared/theme.css`'s token vocabulary. `../claude-agents-dashboard` moved to a
-reference design on 2026-09-11/12 and wrote it down as `.claude/DESIGN.md` —
-one geometric grotesque face, an 11 px floor, borderless white sheets on a
-warm-grey ground, a 280 px rail. This client still draws the strip-board it
-was ported from:
+The board's client is the odd one out of the three apps that share `shared/theme.css`'s token vocabulary. `../claude-agents-dashboard` moved to a reference
+design on 2026-09-11/12 and wrote it down as `.claude/DESIGN.md` — one geometric grotesque face, an 11 px floor, borderless white sheets on a warm-grey ground,
+a 280 px rail. This client still draws the strip-board it was ported from:
 
-- **Three faces.** Barlow, Barlow Condensed and IBM Plex Mono; 80 `--mono`
-  uses, 14 `--display`, 31 `text-transform: uppercase` rules.
-- **Type under the floor.** 124 of 130 `font-size` declarations in
-  `client/src/styles.css` are 12.5 px or smaller; 21 are 8–9.5 px.
+- **Three faces.** Barlow, Barlow Condensed and IBM Plex Mono; 80 `--mono` uses, 14 `--display`, 31 `text-transform: uppercase` rules.
+- **Type under the floor.** 124 of 130 `font-size` declarations in `client/src/styles.css` are 12.5 px or smaller; 21 are 8–9.5 px.
 - **A 150 px rail** of uppercase condensed labels with a cyan accent bar.
-- **Manila daylight.** `[data-theme="daylight"]` is `#e8e3d7` paper, not the
-  design's `#F4F4F3` ground and white sheets the dashboard already uses.
-- **Runs in two places.** A run strip above the Board's columns and the Runs
-  section both render the live run, with Pause/Resume on both.
+- **Manila daylight.** `[data-theme="daylight"]` is `#e8e3d7` paper, not the design's `#F4F4F3` ground and white sheets the dashboard already uses.
+- **Runs in two places.** A run strip above the Board's columns and the Runs section both render the live run, with Pause/Resume on both.
 
-The token names are already the dashboard's (`theme.css` was ported from it
-verbatim), the shell is the same rail-plus-lazy-sections shape, and the
-dashboard has already solved "a light reference design under five themes":
-daylight takes the design's palette, the four dark themes stay as token
-overrides, `--cyan` resolves to a dark green on daylight, and the nav bar
-is ink rather than accent. §1–7 of its DESIGN.md therefore apply here
-unchanged. Its §8 does not — it is about sessions, usage and management
-pages this app does not have — and nothing in it or in its mock draws a
-kanban column, an item card, a run strip, a stage track or a watchdog
-console. Those are this document's job.
+The token names are already the dashboard's (`theme.css` was ported from it verbatim), the shell is the same rail-plus-lazy-sections shape, and the dashboard
+has already solved "a light reference design under five themes": daylight takes the design's palette, the four dark themes stay as token overrides, `--cyan`
+resolves to a dark green on daylight, and the nav bar is ink rather than accent. §1–7 of its DESIGN.md therefore apply here unchanged. Its §8 does not — it is
+about sessions, usage and management pages this app does not have — and nothing in it or in its mock draws a kanban column, an item card, a run strip, a stage
+track or a watchdog console. Those are this document's job.
 
 ## Decisions taken (with the user, in order)
 
-1. **Composition: §1–7 verbatim, §8 our own.** Copy the reference analysis
-   unchanged; carry the dashboard's rail, type-scale and Settings-card
-   rules (its §8.0–8.2) reconciled to what its CSS actually ships where the
-   prose drifted (its prose says nav rows at 16/500 and a 300 px sidebar,
-   its stylesheet draws 14/500 rows at 36 px in a 280 px rail — we copy the
-   CSS). Rejected: re-deriving the rail and Settings from scratch (slower,
-   no gain), and pointing at the dashboard's file across repos (breaks
-   when a path moves).
-2. **Project hues stay, confined to one mark.** The reference design has no
-   identity-colour concept ("everything else stays inside the palette").
-   Eight hues per theme survive as one 8 px dot per card and per drawer
-   head, never on text; the project name reads in `--ink2` beside it.
-   Rejected: dropping hues (loses the one thing worth scanning for on a
-   cross-project board), and keeping the coloured outline pill (colour on
-   9 px text, eight hues fighting the five status colours).
-3. **Board shape: cards in columns** (`01-board-shape.html`, option A).
-   Today's kanban redrawn at the design's scale. Rejected: each column as
-   one sheet with hairline rows (~35 % less height, but the column header
-   grows a subtitle and the card stops being a card), and one ledger
-   grouped by type (densest; loses the four-column scan).
-4. **Runs leave the Board** (`02-runs-on-board.html`, option C). The user's
-   words: "the board can show the issues, but the runs shows more info,
-   no reason to keep it in both places." The Board keeps the card's own
-   live strip and gains one chip in the band that opens Runs. Rejected: the
-   strip redrawn as a band under the toolbar, and an aside card.
-5. **Runs shape: figures first, then the split** (`03-runs-shape.html`,
-   option D). The statistics lead: the six-cell figure strip sits directly
-   under the band. Under it a split — a 420 px list column holding a Live
-   sheet and a History sheet, both as compact rows, and beside it one
-   detail sheet carrying the whole of the selected run, `RunControls` in
-   its head. Selection is one run across both sheets; the first live run
-   is selected on arrival, so the Board's chip lands you on the current
-   item's stage track with no click. **There is no run modal** — everything
-   a run modal would have drawn is the detail sheet's body, re-flowed to
-   one column. Rejected: **live first, history under** (option C — picked
-   and audited earlier on 2026-09-15, then superseded the same day when the
-   user drew D; what D changed, in the mockup's own words, is that the
-   figure strip leads the page instead of sitting between live and history,
-   live runs are rows rather than cards, and the run detail is a sheet
-   beside the list rather than a modal — band, range control, figure cells,
-   status words, load-more and empty states are C's verbatim), the split
-   alone (list sheet, detail sheet — closest to today; D is that
-   arrangement carrying D's content), and a ledger with the picked row
-   expanding underneath.
-6. **The refactor lands surface by surface, on `main`, through the
-   orchestrator.** Six code tasks groomed on `main` and executed one at a
-   time by `backlog-orchestrate` exactly as every other item is: its own
-   worktree per item, reviewed and verified, merged to `main` before the
-   next one starts. Rejected: a big-bang branch (one review, tests red
-   until the end, no orchestrator); a parallel `client-v2` behind a flag
-   (two clients to keep in sync); and a long-lived `fe-redesign` branch
-   (revised 2026-09-15 — see §10), which would have required the
-   orchestrator to take a base branch other than `main`, a sub-project
-   costing more than the isolation it bought.
-7. **Watchdog is its own page under Runs** (`04-watchdog.html`, option A).
-   The rail gains its first sub-nav tree, Runs › History / Watchdog.
-   Rejected: folding the sweeper's facts onto the live runs on the History
-   page (drawn against C's live cards, and no better against D's rows), and
-   a 300 px aside on Runs.
-8. **The language is built as reusable components with one home** (§12),
-   at the user's ask. The dashboard built its language as components too,
-   but by area — `usage/Sheet.tsx`, `settings/SettingsRow.tsx`,
-   `sessions/atoms.tsx` — and already carries two Bands (`Band`,
-   `SettingsBand`) over two class families. Here every shared pattern is
-   one component under `client/src/components/ui/`, the same rule `lib/`
-   has for derivations.
+1. **Composition: §1–7 verbatim, §8 our own.** Copy the reference analysis unchanged; carry the dashboard's rail, type-scale and Settings-card rules (its
+   §8.0–8.2) reconciled to what its CSS actually ships where the prose drifted (its prose says nav rows at 16/500 and a 300 px sidebar, its stylesheet draws
+   14/500 rows at 36 px in a 280 px rail — we copy the CSS). Rejected: re-deriving the rail and Settings from scratch (slower, no gain), and pointing at the
+   dashboard's file across repos (breaks when a path moves).
+2. **Project hues stay, confined to one mark.** The reference design has no identity-colour concept ("everything else stays inside the palette"). Eight hues per
+   theme survive as one 8 px dot per card and per drawer head, never on text; the project name reads in `--ink2` beside it. Rejected: dropping hues (loses the
+   one thing worth scanning for on a cross-project board), and keeping the coloured outline pill (colour on 9 px text, eight hues fighting the five status
+   colours).
+3. **Board shape: cards in columns** (`01-board-shape.html`, option A). Today's kanban redrawn at the design's scale. Rejected: each column as one sheet with
+   hairline rows (~35 % less height, but the column header grows a subtitle and the card stops being a card), and one ledger grouped by type (densest; loses the
+   four-column scan).
+4. **Runs leave the Board** (`02-runs-on-board.html`, option C). The user's words: "the board can show the issues, but the runs shows more info, no reason to
+   keep it in both places." The Board keeps the card's own live strip and gains one chip in the band that opens Runs. Rejected: the strip redrawn as a band
+   under the toolbar, and an aside card.
+5. **Runs shape: figures first, then the split** (`03-runs-shape.html`, option D). The statistics lead: the six-cell figure strip sits directly under the band.
+   Under it a split — a 420 px list column holding a Live sheet and a History sheet, both as compact rows, and beside it one detail sheet carrying the whole of
+   the selected run, `RunControls` in its head. Selection is one run across both sheets; the first live run is selected on arrival, so the Board's chip lands
+   you on the current item's stage track with no click. **There is no run modal** — everything a run modal would have drawn is the detail sheet's body,
+   re-flowed to one column. Rejected: **live first, history under** (option C — picked and audited earlier on 2026-09-15, then superseded the same day when the
+   user drew D; what D changed, in the mockup's own words, is that the figure strip leads the page instead of sitting between live and history, live runs are
+   rows rather than cards, and the run detail is a sheet beside the list rather than a modal — band, range control, figure cells, status words, load-more and
+   empty states are C's verbatim), the split alone (list sheet, detail sheet — closest to today; D is that arrangement carrying D's content), and a ledger with
+   the picked row expanding underneath.
+6. **The refactor lands surface by surface, on `main`, through the orchestrator.** Six code tasks groomed on `main` and executed one at a time by
+   `backlog-orchestrate` exactly as every other item is: its own worktree per item, reviewed and verified, merged to `main` before the next one starts.
+   Rejected: a big-bang branch (one review, tests red until the end, no orchestrator); a parallel `client-v2` behind a flag (two clients to keep in sync); and a
+   long-lived `fe-redesign` branch (revised 2026-09-15 — see §10), which would have required the orchestrator to take a base branch other than `main`, a
+   sub-project costing more than the isolation it bought.
+7. **Watchdog is its own page under Runs** (`04-watchdog.html`, option A). The rail gains its first sub-nav tree, Runs › History / Watchdog. Rejected: folding
+   the sweeper's facts onto the live runs on the History page (drawn against C's live cards, and no better against D's rows), and a 300 px aside on Runs.
+8. **The language is built as reusable components with one home** (§12), at the user's ask. The dashboard built its language as components too, but by area —
+   `usage/Sheet.tsx`, `settings/SettingsRow.tsx`, `sessions/atoms.tsx` — and already carries two Bands (`Band`, `SettingsBand`) over two class families. Here
+   every shared pattern is one component under `client/src/components/ui/`, the same rule `lib/` has for derivations.
 
 ## Non-goals
 
-- **No new derivations.** Every predicate in `client/src/lib/` — staleness,
-  groomed, `runClaimBlock`, `runHoldsItem`, `itemDurationMs`,
-  `watchdogStoodDown` — is untouched. This is a redraw; the data authority
-  of every surface stays where it is.
-- **No server change in this spec**, and now none behind it either: the
-  orchestrator base-branch feature that an `fe-redesign` branch would have
-  needed is not being built (§10). The CSP, the pre-paint theme script and
-  its pinned hash do not move.
-- **No dark-theme redesign.** The four dark palettes stay as the token
-  overrides they are. Where a new rule needs a colour the palette lacks,
-  the spec adds a token to every theme (§2.2), never a literal.
-- **No second Board shape.** The ledger stays an idea for later; the Board
-  is the kanban.
-- **No change to the skills**, the item bodies' Markdown, or the
-  `backlog/` store.
-- Density (`compact`) and the text-scale `zoom` stay exactly as they are,
-  including every `/ var(--font-scale)` division.
+- **No new derivations.** Every predicate in `client/src/lib/` — staleness, groomed, `runClaimBlock`, `runHoldsItem`, `itemDurationMs`, `watchdogStoodDown` — is
+  untouched. This is a redraw; the data authority of every surface stays where it is.
+- **No server change in this spec**, and now none behind it either: the orchestrator base-branch feature that an `fe-redesign` branch would have needed is not
+  being built (§10). The CSP, the pre-paint theme script and its pinned hash do not move.
+- **No dark-theme redesign.** The four dark palettes stay as the token overrides they are. Where a new rule needs a colour the palette lacks, the spec adds a
+  token to every theme (§2.2), never a literal.
+- **No second Board shape.** The ledger stays an idea for later; the Board is the kanban.
+- **No change to the skills**, the item bodies' Markdown, or the `backlog/` store.
+- Density (`compact`) and the text-scale `zoom` stay exactly as they are, including every `/ var(--font-scale)` division.
 
 ## 1. `.claude/DESIGN.md`
 
 ### 1.1 Where, and how it is reached
 
-`.claude/DESIGN.md`, mirroring the dashboard. It is **not** a
-`.claude/rules/` file: those are pinned by `test/claude-rules.test.ts` to
-be one-line pointers into `docs/subsystems/invariants.md` and nothing
-else, so a design pointer there would fail the suite. It is reached the
-way the dashboard reaches its own: a line in `CLAUDE.md`'s Layout under
-`client/src/` and a row in `docs/overview.md`'s map, plus a `DESIGN.md §n`
-citation in the header comment of every component drawn from it.
+`.claude/DESIGN.md`, mirroring the dashboard. It is **not** a `.claude/rules/` file: those are pinned by `test/claude-rules.test.ts` to be one-line pointers
+into `docs/subsystems/invariants.md` and nothing else, so a design pointer there would fail the suite. It is reached the way the dashboard reaches its own: a
+line in `CLAUDE.md`'s Layout under `client/src/` and a row in `docs/overview.md`'s map, plus a `DESIGN.md §n` citation in the header comment of every component
+drawn from it.
 
 ### 1.2 §1–7 — verbatim
 
-Copied byte-for-byte from
-`../claude-agents-dashboard/.claude/DESIGN.md` §1 Typography through §7
-Reusable patterns, with one line added under the title naming the source
-and the date copied. The section is a description of a reference design,
-not of this app, so it has no reason to differ between the two repos; the
+Copied byte-for-byte from `../claude-agents-dashboard/.claude/DESIGN.md` §1 Typography through §7 Reusable patterns, with one line added under the title naming
+the source and the date copied. The section is a description of a reference design, not of this app, so it has no reason to differ between the two repos; the
 day it does, that line says which copy moved.
 
 ### 1.3 §8 — "Applying this to the board"
 
-Written new. Each subsection carries the numbers, the rule, and the
-reason, in the register the dashboard's §8 uses; the concrete values are
-in §§2–6 of this spec so the implementer and DESIGN.md read the same ones.
+Written new. Each subsection carries the numbers, the rule, and the reason, in the register the dashboard's §8 uses; the concrete values are in §§2–6 of this
+spec so the implementer and DESIGN.md read the same ones.
 
 - **§8.0 Shell and rail** — §2.4 below.
 - **§8.1 Type** — §2.3.
-- **§8.2 Tokens and themes** — §2.2, plus the project-hue rule (decision 2)
-  and the column ramp.
+- **§8.2 Tokens and themes** — §2.2, plus the project-hue rule (decision 2) and the column ramp.
 - **§8.3 Board** — §3.
 - **§8.4 Runs** — §4, both pages.
 - **§8.5 Archive** — §5.1.
 - **§8.6 Settings** — §5.2; the dashboard's §8.2 restated, not re-derived.
 - **§8.7 Overlays** — §6.
-- **§8.8 Motion** — the live dot breathes a ring, the current stage node
-  pulses, a needs-you control fades in place; all off under
-  `prefers-reduced-motion`, as today's reduced-motion block already does.
+- **§8.8 Motion** — the live dot breathes a ring, the current stage node pulses, a needs-you control fades in place; all off under `prefers-reduced-motion`, as
+  today's reduced-motion block already does.
 
-Two rules the dashboard learned the hard way are carried into every
-subsection that draws on the ground rather than re-learned here: nothing
-on `--board` uses `--strip-hi` as its only separator (on daylight the two
-are two points apart), and a raised control means a state, not a button.
+Two rules the dashboard learned the hard way are carried into every subsection that draws on the ground rather than re-learned here: nothing on `--board` uses
+`--strip-hi` as its only separator (on daylight the two are two points apart), and a raised control means a state, not a button.
 
 ## 2. Foundation (task 1)
 
-The whole app reads in the new face after this task; no layout changes.
-This task also lands the `ui/` primitives every later task composes
-(§12) — Band, Sheet, SheetHead, FigureStrip, Chip, Pill, Dot, Marker,
-ProgressRow, Ledger, the control family moved out of `settings/`, and
-`useNarrow` — each with its CSS family and its component test, used by
-nothing yet but the rail. Landing them first means tasks 2–5 compose and
-never invent.
+The whole app reads in the new face after this task; no layout changes. This task also lands the `ui/` primitives every later task composes (§12) — Band, Sheet,
+SheetHead, FigureStrip, Chip, Pill, Dot, Marker, ProgressRow, Ledger, the control family moved out of `settings/`, and `useNarrow` — each with its CSS family
+and its component test, used by nothing yet but the rail. Landing them first means tasks 2–5 compose and never invent.
 
 ### 2.1 Font
 
-- Add `@fontsource/hanken-grotesk`; import weights 400, 500, 600, 700 in
-  `client/src/main.tsx`. Remove `@fontsource/barlow`,
-  `@fontsource/barlow-condensed`, `@fontsource/ibm-plex-mono` from
-  `package.json` and their six imports.
-- Self-hosted, not Google Fonts: the served build's CSP is
-  `default-src 'self'` with no `font-src`, `style-src` is pinned exactly by
-  `test/csp.test.ts`, and the tailnet/phone use case wants the board to
-  render with no third-party fetch. The dashboard links Google Fonts; that
-  is the one thing in its foundation this app does not copy.
-- `--font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-  sans-serif` in every theme block. `--mono` and `--display` are
-  **deleted from `theme.css`, not aliased**, so a stale `var(--mono)`
-  falls back to the inherited face rather than silently keeping Plex. Add
-  `code, kbd, samp, pre { font-family: inherit }` and
-  `font-variant-numeric: tabular-nums` on `body`.
+- Add `@fontsource/hanken-grotesk`; import weights 400, 500, 600, 700 in `client/src/main.tsx`. Remove `@fontsource/barlow`, `@fontsource/barlow-condensed`,
+  `@fontsource/ibm-plex-mono` from `package.json` and their six imports.
+- Self-hosted, not Google Fonts: the served build's CSP is `default-src 'self'` with no `font-src`, `style-src` is pinned exactly by `test/csp.test.ts`, and the
+  tailnet/phone use case wants the board to render with no third-party fetch. The dashboard links Google Fonts; that is the one thing in its foundation this app
+  does not copy.
+- `--font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif` in every theme block. `--mono` and `--display` are **deleted from
+  `theme.css`, not aliased**, so a stale `var(--mono)` falls back to the inherited face rather than silently keeping Plex. Add
+  `code, kbd, samp, pre { font-family: inherit }` and `font-variant-numeric: tabular-nums` on `body`.
 
 ### 2.2 Tokens
 
-`shared/theme.css` keeps its vocabulary. Daylight is rewritten to the
-dashboard's values — the design's palette with the two mappings its
-comment records (accent is a darkened `--green-600`; the bright ramp
-values are fills, so `--amber`/`--mustard` take darkened cousins for text):
+`shared/theme.css` keeps its vocabulary. Daylight is rewritten to the dashboard's values — the design's palette with the two mappings its comment records
+(accent is a darkened `--green-600`; the bright ramp values are fills, so `--amber`/`--mustard` take darkened cousins for text):
 
-| token | daylight |
-|---|---|
-| `--board` / `--steel` / `--strip` / `--strip-hi` | `#f4f4f3` / `#ededec` / `#ffffff` / `#f2f2f1` |
-| `--edge` / `--hairline` / `--hairline2` | `rgba(0,0,0,.03)` / `#eaeae8` / `#dcdcda` |
-| `--ink` / `--ink2` / `--ink3` | `#131313` / `#6e6e6e` / `#a0a0a0` |
-| `--green` / `--amber` / `--mustard` / `--cyan` / `--red` / `--magenta` | `#5fa92c` / `#c4761f` / `#9a8712` / `#3f8f14` / `#b03b28` / `#6b52a8` |
-| `--on-accent` / `--scrim` / `--shadow` / `--shadow2` | `#ffffff` / `rgba(19,19,19,.28)` / `rgba(0,0,0,.06)` / `rgba(0,0,0,.1)` |
+| token                                                                  | daylight                                                                |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `--board` / `--steel` / `--strip` / `--strip-hi`                       | `#f4f4f3` / `#ededec` / `#ffffff` / `#f2f2f1`                           |
+| `--edge` / `--hairline` / `--hairline2`                                | `rgba(0,0,0,.03)` / `#eaeae8` / `#dcdcda`                               |
+| `--ink` / `--ink2` / `--ink3`                                          | `#131313` / `#6e6e6e` / `#a0a0a0`                                       |
+| `--green` / `--amber` / `--mustard` / `--cyan` / `--red` / `--magenta` | `#5fa92c` / `#c4761f` / `#9a8712` / `#3f8f14` / `#b03b28` / `#6b52a8`   |
+| `--on-accent` / `--scrim` / `--shadow` / `--shadow2`                   | `#ffffff` / `rgba(19,19,19,.28)` / `rgba(0,0,0,.06)` / `rgba(0,0,0,.1)` |
 
-Two tokens are **added to every theme block**, because the design draws
-two things in the ramp's bright fills and the palette has no fill that is
-not also a text colour:
+Two tokens are **added to every theme block**, because the design draws two things in the ramp's bright fills and the palette has no fill that is not also a
+text colour:
 
-| token | meaning | daylight | dark themes |
-|---|---|---|---|
-| `--fill-live` | the card's live strip, the current stage node, the "you are here" bar | `#F5A15C` (`--orange-400`) | `var(--amber)`, declared in each dark block |
-| `--fill-progress` | filled progress, a reached stage node | `#7DC242` (`--green-500`) | `var(--green)`, declared in each dark block |
+| token             | meaning                                                               | daylight                   | dark themes                                 |
+| ----------------- | --------------------------------------------------------------------- | -------------------------- | ------------------------------------------- |
+| `--fill-live`     | the card's live strip, the current stage node, the "you are here" bar | `#F5A15C` (`--orange-400`) | `var(--amber)`, declared in each dark block |
+| `--fill-progress` | filled progress, a reached stage node                                 | `#7DC242` (`--green-500`)  | `var(--green)`, declared in each dark block |
 
-The hatch is one utility rule, `.hatch`, over any fill:
-`repeating-linear-gradient(45deg, rgba(255,255,255,.30) 0 1px, transparent 1px 4px)`.
+The hatch is one utility rule, `.hatch`, over any fill: `repeating-linear-gradient(45deg, rgba(255,255,255,.30) 0 1px, transparent 1px 4px)`.
 
-The eight `--proj-N` sets stay as they are; on daylight they are dark inks,
-which an 8 px filled dot on white wants anyway.
+The eight `--proj-N` sets stay as they are; on daylight they are dark inks, which an 8 px filled dot on white wants anyway.
 
-**Column ramp.** The four column dots are the design's category ramp read
-left to right — refactors `--amber`, ideas `--mustard`, bugs `--red`, tasks
-`--green` — replacing today's magenta/mustard/red/cyan ticks. `--magenta`
-loses its only job on this screen and stays in the palette for the app
-that shares it.
+**Column ramp.** The four column dots are the design's category ramp read left to right — refactors `--amber`, ideas `--mustard`, bugs `--red`, tasks `--green`
+— replacing today's magenta/mustard/red/cyan ticks. `--magenta` loses its only job on this screen and stays in the palette for the app that shares it.
 
-The stale comment at the head of `theme.css` about a server `wrapPage`
-linking the file is removed (task 6): no server code in this repo reads
-`theme.css`.
+The stale comment at the head of `theme.css` about a server `wrapPage` linking the file is removed (task 6): no server code in this repo reads `theme.css`.
 
 ### 2.3 Type scale
 
 The dashboard's §8.1 table, adopted whole:
 
-| role | size / weight | where |
-|---|---|---|
-| Page and card title | 19/500, −.01em, 1.3 | band titles, sheet titles, the Runs detail sheet's project |
-| Large metric | 30/700, −.02em, 1.1 | figure strip values |
-| Row name | 15/500 | column header names |
-| Card title | 14/500, 1.35 | item card title, Runs list row project (Live and History), stage track item title |
-| Subtitle / hint | 13/400 | band subtitle, sheet subtitle, figure label, control label |
-| Body, chip and button label | 13 (500 on buttons) | filter chips, controls |
-| Meta / axis / caption | 12/400 | `id · date`, project name beside its dot, stage durations, table time column |
-| Pill, badge, status | 11/500 | count pills, markers, mode pill, stage word on the live strip |
+| role                        | size / weight       | where                                                                             |
+| --------------------------- | ------------------- | --------------------------------------------------------------------------------- |
+| Page and card title         | 19/500, −.01em, 1.3 | band titles, sheet titles, the Runs detail sheet's project                        |
+| Large metric                | 30/700, −.02em, 1.1 | figure strip values                                                               |
+| Row name                    | 15/500              | column header names                                                               |
+| Card title                  | 14/500, 1.35        | item card title, Runs list row project (Live and History), stage track item title |
+| Subtitle / hint             | 13/400              | band subtitle, sheet subtitle, figure label, control label                        |
+| Body, chip and button label | 13 (500 on buttons) | filter chips, controls                                                            |
+| Meta / axis / caption       | 12/400              | `id · date`, project name beside its dot, stage durations, table time column      |
+| Pill, badge, status         | 11/500              | count pills, markers, mode pill, stage word on the live strip                     |
 
-11 px is the floor. `text-transform: uppercase` survives on `.rail-kicker`
-alone.
+11 px is the floor. `text-transform: uppercase` survives on `.rail-kicker` alone.
 
 ### 2.4 Shell and rail
 
-The dashboard's rail as shipped, copied into `styles.css` and
-`SideRail.tsx`:
+The dashboard's rail as shipped, copied into `styles.css` and `SideRail.tsx`:
 
-- Rail 280 px, 32 px padding-y, `--strip` ground, `.main` on `--board` with
-  `margin-top: 24px` and a 24 px top-left radius — the design's app-shell
-  inset drawn on the one corner the rail meets.
-- Wordmark 20/700 over the 11/500 uppercase kicker; the one green dot is
-  decoration, not status.
-- Rows 36 px, 14/500, 16 px padding-x, 16 px radius, a 16 px outline icon
-  12 px from the label. Active: 3 px ink bar 16 px tall at the left edge
-  plus `--strip-hi` fill, never a colour change in the label. Hover darkens
-  the label and nothing else. Icons hold `--ink` at every row weight.
-- Sub-nav tree: `.rail-sub` hung 24 px in (the icon's centreline), 14 px
-  labels, stem and tick drawn as two background layers per row so the
-  last row's stem stops at its own centre. Drawn only while its section is
-  open. Runs gets the first tree: History / Watchdog (§4).
+- Rail 280 px, 32 px padding-y, `--strip` ground, `.main` on `--board` with `margin-top: 24px` and a 24 px top-left radius — the design's app-shell inset drawn
+  on the one corner the rail meets.
+- Wordmark 20/700 over the 11/500 uppercase kicker; the one green dot is decoration, not status.
+- Rows 36 px, 14/500, 16 px padding-x, 16 px radius, a 16 px outline icon 12 px from the label. Active: 3 px ink bar 16 px tall at the left edge plus
+  `--strip-hi` fill, never a colour change in the label. Hover darkens the label and nothing else. Icons hold `--ink` at every row weight.
+- Sub-nav tree: `.rail-sub` hung 24 px in (the icon's centreline), 14 px labels, stem and tick drawn as two background layers per row so the last row's stem
+  stops at its own centre. Drawn only while its section is open. Runs gets the first tree: History / Watchdog (§4).
 - Settings sits under a 1 px rule with 24 px either side.
-- Below 700 px the rail becomes a top bar (wordmark left, ☰ right) with the
-  menu dropping out of it full width; every tree stands open there. The bar
-  slides away on a downward scroll and returns on the first upward one,
-  pinned while the menu is open.
+- Below 700 px the rail becomes a top bar (wordmark left, ☰ right) with the menu dropping out of it full width; every tree stands open there. The bar slides
+  away on a downward scroll and returns on the first upward one, pinned while the menu is open.
 
-`resolveSection` and `SECTIONS` are unchanged; the sub-view key for Runs
-is `RUNS_MODE_KEY` (`lib/runs-mode.ts`), already persisted and guarded —
-the segmented control that reads it today is replaced by the tree at
-every width.
+`resolveSection` and `SECTIONS` are unchanged; the sub-view key for Runs is `RUNS_MODE_KEY` (`lib/runs-mode.ts`), already persisted and guarded — the segmented
+control that reads it today is replaced by the tree at every width.
 
 ## 3. Board (task 2)
 
@@ -300,507 +196,310 @@ Shape A of `01-board-shape.html`.
 
 ### 3.1 The band
 
-A band on the ground, not a card: title 19/500, a 13 px `--ink2` line
-(`21 open across 3 projects`), then right-aligned the 36 px search field
-(12 px radius, `--hairline` stroke) and the filter chips (32 px, 12 px
-radius, `--hairline2` stroke, 13/500). **Orchestrate is the one ink
-chip** on the page (`--ink` fill, `--strip` text). Its hide/disable rules
-are unchanged.
+A band on the ground, not a card: title 19/500, a 13 px `--ink2` line (`21 open across 3 projects`), then right-aligned the 36 px search field (12 px radius,
+`--hairline` stroke) and the filter chips (32 px, 12 px radius, `--hairline2` stroke, 13/500). **Orchestrate is the one ink chip** on the page (`--ink` fill,
+`--strip` text). Its hide/disable rules are unchanged.
 
 ### 3.2 The run chip
 
-Left of the controls, one chip carries every fact the strip used to and
-opens the Runs section: a dot in `--fill-progress` (live), `--fill-live`
-(paused or starting), `--red` (crashed), and a 12/500 count line —
-`2 runs · 1 live ›`, `1 run · crashed ›`, `1 starting ›`. With runs in
-more than one state the dot takes the worst: crashed over paused or
-starting over live, and the count line names each state present. It
-renders the payload's `starting` array with no client-side filter, as the
-strip did.
-It is a `<button>`; its click calls the same section setter the rail
-uses. Absent when the payload has no run and no starting entry.
+Left of the controls, one chip carries every fact the strip used to and opens the Runs section: a dot in `--fill-progress` (live), `--fill-live` (paused or
+starting), `--red` (crashed), and a 12/500 count line — `2 runs · 1 live ›`, `1 run · crashed ›`, `1 starting ›`. With runs in more than one state the dot takes
+the worst: crashed over paused or starting over live, and the count line names each state present. It renders the payload's `starting` array with no client-side
+filter, as the strip did. It is a `<button>`; its click calls the same section setter the rail uses. Absent when the payload has no run and no starting entry.
 
 ### 3.3 Columns
 
-`repeat(4, minmax(0, 1fr))` at 16 px gaps, two columns under 1100, one
-under 700 — the steps stay explicit. Column header: an 8 px ramp dot
-(§2.2), the name at 15/500, a 22×20 count pill (`--strip-hi`, 11/500)
-pushed right. No rule under the header; the cards' own ground gap
-separates it.
+`repeat(4, minmax(0, 1fr))` at 16 px gaps, two columns under 1100, one under 700 — the steps stay explicit. Column header: an 8 px ramp dot (§2.2), the name at
+15/500, a 22×20 count pill (`--strip-hi`, 11/500) pushed right. No rule under the header; the cards' own ground gap separates it.
 
 ### 3.4 The card
 
-White `--strip`, 12 px radius, no stroke and no shadow; hover raises
-nothing and changes nothing but the cursor — a card is a button by role,
-and the design marks nothing with hover. Face padding 14/16/12, 10 px
-internal gap.
+White `--strip`, 12 px radius, no stroke and no shadow; hover raises nothing and changes nothing but the cursor — a card is a button by role, and the design
+marks nothing with hover. Face padding 14/16/12, 10 px internal gap.
 
 - Title 14/500, 1.35, wraps.
-- Foot row: an 8 px project dot in `--proj-N` + the project name 12/400
-  `--ink2` (ellipsised), then `id · date` at 12/400 `--ink3` pushed right,
-  `flex: none`.
-- Marker row, only when any marker applies: `groomed` in `--green`,
-  `chore`/`debt` in `--ink3`, `done` in `--ink2`, `stale` in `--mustard`,
-  all 11/500. Same words, same tokens, the design's size.
-- **Live strip.** A 24 px bar across the top edge of the card, `--fill-live`
-  with the hatch, 11/500 `--ink` text: the stage word left (`executing`,
-  `grooming`, `reviewing`, `needs-answers`), the elapsed reading right. One
-  fill for both a hand session and an orchestrator stage — the word
-  carries the distinction, as the rule already says it must; the second
-  tone the strip used to switch between goes, because the design marks
-  state by ink, never by accent (§5).
-- Dispatch control: the same `DispatchButton` states, drawn as a 28 px
-  chip at the right end of the marker row, **always drawn** when the
-  environment allows dispatch at all — never hover-revealed, because a
-  disabled control that can be clicked to re-ask (bug-13) has to be
-  visible to be clicked, and because the design marks nothing with
-  hover. The marker row therefore renders whenever dispatch is available,
-  markers or not. Its three blocks and the re-ask click are unchanged.
+- Foot row: an 8 px project dot in `--proj-N` + the project name 12/400 `--ink2` (ellipsised), then `id · date` at 12/400 `--ink3` pushed right, `flex: none`.
+- Marker row, only when any marker applies: `groomed` in `--green`, `chore`/`debt` in `--ink3`, `done` in `--ink2`, `stale` in `--mustard`, all 11/500. Same
+  words, same tokens, the design's size.
+- **Live strip.** A 24 px bar across the top edge of the card, `--fill-live` with the hatch, 11/500 `--ink` text: the stage word left (`executing`, `grooming`,
+  `reviewing`, `needs-answers`), the elapsed reading right. One fill for both a hand session and an orchestrator stage — the word carries the distinction, as
+  the rule already says it must; the second tone the strip used to switch between goes, because the design marks state by ink, never by accent (§5).
+- Dispatch control: the same `DispatchButton` states, drawn as a 28 px chip at the right end of the marker row, **always drawn** when the environment allows
+  dispatch at all — never hover-revealed, because a disabled control that can be clicked to re-ask (bug-13) has to be visible to be clicked, and because the
+  design marks nothing with hover. The marker row therefore renders whenever dispatch is available, markers or not. Its three blocks and the re-ask click are
+  unchanged.
 
 ### 3.5 What leaves the Board
 
-`RunStrip.tsx`, `StartingStrip.tsx`, `RunDrawer.tsx` and their CSS. The
-data they read stays in `BoardView` for the chip and the card strips:
-`useOrchestratorRuns` keeps polling while any run is `running`, fresh or
-not, and `runClaimBlock` / `runHoldsItem` keep their inputs. The rules
-they carried move to Runs — §8 lists them.
+`RunStrip.tsx`, `StartingStrip.tsx`, `RunDrawer.tsx` and their CSS. The data they read stays in `BoardView` for the chip and the card strips:
+`useOrchestratorRuns` keeps polling while any run is `running`, fresh or not, and `runClaimBlock` / `runHoldsItem` keep their inputs. The rules they carried
+move to Runs — §8 lists them.
 
 ## 4. Runs (task 3)
 
-Two pages under one rail entry: **History** (the section's default) and
-**Watchdog**. Both open on a band and read off the same `useOrchestratorRuns`
-payload; Watchdog additionally mounts `useWatchdog`, exactly as
-`WatchdogMonitor` does today, so switching adds no request.
+Two pages under one rail entry: **History** (the section's default) and **Watchdog**. Both open on a band and read off the same `useOrchestratorRuns` payload;
+Watchdog additionally mounts `useWatchdog`, exactly as `WatchdogMonitor` does today, so switching adds no request.
 
 ### 4.1 History — shape D of `03-runs-shape.html`
 
-`History` is the rail destination's name (Runs › History / Watchdog), not
-an inventory of the page: the page carries the figures, the live runs, the
-past runs, and the selected run whole. Top to bottom:
+`History` is the rail destination's name (Runs › History / Watchdog), not an inventory of the page: the page carries the figures, the live runs, the past runs,
+and the selected run whole. Top to bottom:
 
-1. **Band.** `Runs`, `3 live · 1 starting · 28 past`, then the project
-   select and the range control as chips.
-2. **Figure strip**, directly under the band — the statistics lead the
-   page. One sheet the ground divides: five figures on a 2 px `--board`
-   gap grid, wrapping to three under 1100 and two under 700 with
-   the seam drawn in both directions. Each: label 13 `--ink2`, value 30/700,
-   a 12 px line under where today's tile has one. The five are today's
-   tiles and read what `aggregateRuns` returns and nothing else — no
-   prior-period delta, no parked count: **runs**, its line the
-   five-status breakdown (glyph + count each, `STATUS_ORDER`);
-   **completed / queued**, `merged or branched`; **avg item work**, `queue
-   wait excluded`; **rework / completed**, the one-decimal ratio
-   (`fixLoopsPerMerged`) with today's long sentence as its title; **verify
-   pass**, a rate over verification runs, not items. The wide "machine
-   time by stage" tile becomes the sixth cell, full width, holding
-   `StageBars` redrawn at 10 px bar height — always seven rows in pipeline
-   order, `—` for a stage never recorded — with `<range> · queue wait
-   excluded` as its line. The strip hides with the list when the range or
-   project filter empties it (`no runs in this range`), as today.
-3. **The split**, under the strip: a **420 px list column** on the left
-   holding the Live sheet and then the History sheet, and one **detail
-   sheet** on the right showing the selected run. Under 1100 px the two
-   columns stack — list first, the detail a scroll away; under 700 px the
-   sheets are full width.
-4. **Live sheet.** Title + subtitle (`3 runs · 1 starting`), then one row
-   per run whose status is `running` or `paused`, or that is `starting` —
-   **rows, not cards**, compact enough for the 420 px column: dot, project
-   14/500, `⚠ N` in `--amber` when the run has attention entries, the
-   two-tone `1 / 5` count, elapsed at 12 `--ink3`, and a status pill only
-   where one is earned (`‖ paused`, `⚠ crashed`; a running, fresh run
-   draws none). A `starting` entry is a row reading `starting… · <age>`
-   with no controls, and cannot be selected — it has no run to show. A
-   **crashed** run (running, heartbeat stale) takes a `--red` dot, a
-   `crashed` pill and a second line in `--amber` at 12 carrying `no
-   heartbeat for <age>`, `last reported <id> at <stage>` (or `all items at
-   rest`) and the watchdog clause from `run-watchdog.ts`. Everything C
-   carried on the live card that no longer fits a row — run id and start
-   clock, the heartbeat word, `$ · N turns · N sessions`, the mode pill,
-   `paused after <id>`, the current item's stage track — is in the detail
-   sheet, which is always beside the list.
-5. **History sheet.** Title + subtitle (`28 runs · all`), day kickers at
-   13/500 `--ink2`, one 44 px row per past run: dot **and the status word**
-   from `runStatusChip` (glyph + `done` / `aborted` / `failed` / `paused` —
-   a dot alone cannot tell the first three apart; tones `--ink3` done,
-   `--amber` aborted, `--red` failed, `--fill-live` paused; a crashed run
-   is a Live row, not a History row), project 14/500, `2 / 4` two-tone,
-   wall time at 12 `--ink3` and cost beside it when usage exists (`2h 29m`
-   · `$9.60`). Load-more stays as a flat chip at the sheet's foot. A row
-   **selects** the run into the detail sheet — nothing opens, there is no
-   run modal. Live runs are not in this list; they are the Live sheet
-   above.
-6. **Detail sheet.** One run, whole, beside the list.
-   **Head:** project (dot + 19/500), the run id at 12 `--ink3` and the item
-   count when the run is finished, and `RunControls` right — unchanged in
-   what it offers, drawn as 28 px chips: running and fresh → **Pause**;
-   while a pause is requested → the note `Pausing after <id>` and
-   **Cancel**, which withdraws the request (there is no control that stops
-   a run, and Cancel takes no accent because it is not destructive);
-   paused → **Resume run**, hidden when the environment cannot spawn,
-   `aria-disabled` with the reason as its title when the project is not
-   visible, `Resuming…` in flight; crashed → **Resume run** exactly when
-   `watchdogStoodDown` says the sweeper will not — the coupling test drives
-   this head from now on; a finished run has none. There is no `Open ›`:
-   the detail needs no opening.
-   **Body** — the whole of `RunDetail`, one column:
-   - a **facts strip**, label over value on a wrapping grid: `started` (and
-     `finished`) with the wall (`runWallMs`) or elapsed reading; `status` — the chip from
-     `runStatusChip` plus `heartbeat live` or its age, `pausing · finishes
-     <id>` while a pause is requested, `paused after <id>` when paused,
-     and for a crashed run `last heartbeat HH:MM · every stage below is
-     last reported, not current`; `mode` (`mergeModeLabel`: `branch mode` /
-     `branch mode (downgraded)`; a merge-mode run has no badge today);
-     `questions`; and `$ · N turns · N sessions` from `runUsageTotals` when
-     usage exists;
-   - the mode and question notes (`mergeModeNote`, and the headless note
-     under `decide`) as one 12 px line under the strip;
-   - today's chips in a row — merged, branched (when > 0), skipped,
-     attention, fix loops — plus **active** and **queued** while the run is
-     live. (An earlier draft named "fifteen stage chips"; they do not exist
-     today and are not added.)
+1. **Band.** `Runs`, `3 live · 1 starting · 28 past`, then the project select and the range control as chips.
+2. **Figure strip**, directly under the band — the statistics lead the page. One sheet the ground divides: five figures on a 2 px `--board` gap grid, wrapping
+   to three under 1100 and two under 700 with the seam drawn in both directions. Each: label 13 `--ink2`, value 30/700, a 12 px line under where today's tile
+   has one. The five are today's tiles and read what `aggregateRuns` returns and nothing else — no prior-period delta, no parked count: **runs**, its line the
+   five-status breakdown (glyph + count each, `STATUS_ORDER`); **completed / queued**, `merged or branched`; **avg item work**, `queue wait excluded`; **rework
+   / completed**, the one-decimal ratio (`fixLoopsPerMerged`) with today's long sentence as its title; **verify pass**, a rate over verification runs, not
+   items. The wide "machine time by stage" tile becomes the sixth cell, full width, holding `StageBars` redrawn at 10 px bar height — always seven rows in
+   pipeline order, `—` for a stage never recorded — with `<range> · queue wait excluded` as its line. The strip hides with the list when the range or project
+   filter empties it (`no runs in this range`), as today.
+3. **The split**, under the strip: a **420 px list column** on the left holding the Live sheet and then the History sheet, and one **detail sheet** on the right
+   showing the selected run. Under 1100 px the two columns stack — list first, the detail a scroll away; under 700 px the sheets are full width.
+4. **Live sheet.** Title + subtitle (`3 runs · 1 starting`), then one row per run whose status is `running` or `paused`, or that is `starting` — **rows, not
+   cards**, compact enough for the 420 px column: dot, project 14/500, `⚠ N` in `--amber` when the run has attention entries, the two-tone `1 / 5` count,
+   elapsed at 12 `--ink3`, and a status pill only where one is earned (`‖ paused`, `⚠ crashed`; a running, fresh run draws none). A `starting` entry is a row
+   reading `starting… · <age>` with no controls, and cannot be selected — it has no run to show. A **crashed** run (running, heartbeat stale) takes a `--red`
+   dot, a `crashed` pill and a second line in `--amber` at 12 carrying `no heartbeat for <age>`, `last reported <id> at <stage>` (or `all items at rest`) and
+   the watchdog clause from `run-watchdog.ts`. Everything C carried on the live card that no longer fits a row — run id and start clock, the heartbeat word,
+   `$ · N turns · N sessions`, the mode pill, `paused after <id>`, the current item's stage track — is in the detail sheet, which is always beside the list.
+5. **History sheet.** Title + subtitle (`28 runs · all`), day kickers at 13/500 `--ink2`, one 44 px row per past run: dot **and the status word** from
+   `runStatusChip` (glyph + `done` / `aborted` / `failed` / `paused` — a dot alone cannot tell the first three apart; tones `--ink3` done, `--amber` aborted,
+   `--red` failed, `--fill-live` paused; a crashed run is a Live row, not a History row), project 14/500, `2 / 4` two-tone, wall time at 12 `--ink3` and cost
+   beside it when usage exists (`2h 29m` · `$9.60`). Load-more stays as a flat chip at the sheet's foot. A row **selects** the run into the detail sheet —
+   nothing opens, there is no run modal. Live runs are not in this list; they are the Live sheet above.
+6. **Detail sheet.** One run, whole, beside the list. **Head:** project (dot + 19/500), the run id at 12 `--ink3` and the item count when the run is finished,
+   and `RunControls` right — unchanged in what it offers, drawn as 28 px chips: running and fresh → **Pause**; while a pause is requested → the note
+   `Pausing after <id>` and **Cancel**, which withdraws the request (there is no control that stops a run, and Cancel takes no accent because it is not
+   destructive); paused → **Resume run**, hidden when the environment cannot spawn, `aria-disabled` with the reason as its title when the project is not
+   visible, `Resuming…` in flight; crashed → **Resume run** exactly when `watchdogStoodDown` says the sweeper will not — the coupling test drives this head from
+   now on; a finished run has none. There is no `Open ›`: the detail needs no opening. **Body** — the whole of `RunDetail`, one column:
+   - a **facts strip**, label over value on a wrapping grid: `started` (and `finished`) with the wall (`runWallMs`) or elapsed reading; `status` — the chip from
+     `runStatusChip` plus `heartbeat live` or its age, `pausing · finishes <id>` while a pause is requested, `paused after <id>` when paused, and for a crashed
+     run `last heartbeat HH:MM · every stage below is last reported, not current`; `mode` (`mergeModeLabel`: `branch mode` / `branch mode (downgraded)`; a
+     merge-mode run has no badge today); `questions`; and `$ · N turns · N sessions` from `runUsageTotals` when usage exists;
+   - the mode and question notes (`mergeModeNote`, and the headless note under `decide`) as one 12 px line under the strip;
+   - today's chips in a row — merged, branched (when > 0), skipped, attention, fix loops — plus **active** and **queued** while the run is live. (An earlier
+     draft named "fifteen stage chips"; they do not exist today and are not added.)
    - the attention entries, each with its questions;
-   - **Machine time by stage** — `StageBars` over `runStageTotals`, the
-     strip's sixth cell scoped to one run, seven rows, `this run · queue
-     wait excluded` as its line;
-   - **Branches to merge** when any — one `git merge --no-ff <branch>` per
-     branched item;
-   - **Items**, in pipeline order: head (id 12 `--ink3`, title 14/500, the
-     stage chip — glyph + the real stage word, toned by `STAGE_TONE` — and
-     its `RowTime` reading right: `span · finish clock` for a terminal
-     stage, `span elapsed` otherwise, nothing at all for a skipped or
-     ungroomed item, `—` for a pending one), the `queue … · preflight …`
-     lead at 12 `--ink3`, the **stage track** (§4.3) with its `×N` fix-loop
-     pill and its terminal node reading the finish clock in `--ink2`, the
-     per-item usage line (`itemUsageTotals`; the session count only when
-     it is above 1), the `assumed` list under `decide`, and the last
-     verification as a disclosure — command, `ok` / `failed`, tail — open
-     when failed. The track's terminal node answers item first and run mode
-     second (`stepperTerminal`), so a run downgraded mid-queue still reads
-     `merged` on the item that merged before the downgrade and `branched`
-     on the rest. A crashed run's current node renders stalled (the current
-     tone, no ring, no pulse) against the clock clamped at the last
-     heartbeat.
+   - **Machine time by stage** — `StageBars` over `runStageTotals`, the strip's sixth cell scoped to one run, seven rows, `this run · queue wait excluded` as
+     its line;
+   - **Branches to merge** when any — one `git merge --no-ff <branch>` per branched item;
+   - **Items**, in pipeline order: head (id 12 `--ink3`, title 14/500, the stage chip — glyph + the real stage word, toned by `STAGE_TONE` — and its `RowTime`
+     reading right: `span · finish clock` for a terminal stage, `span elapsed` otherwise, nothing at all for a skipped or ungroomed item, `—` for a pending
+     one), the `queue … · preflight …` lead at 12 `--ink3`, the **stage track** (§4.3) with its `×N` fix-loop pill and its terminal node reading the finish
+     clock in `--ink2`, the per-item usage line (`itemUsageTotals`; the session count only when it is above 1), the `assumed` list under `decide`, and the last
+     verification as a disclosure — command, `ok` / `failed`, tail — open when failed. The track's terminal node answers item first and run mode second
+     (`stepperTerminal`), so a run downgraded mid-queue still reads `merged` on the item that merged before the downgrade and `branched` on the rest. A crashed
+     run's current node renders stalled (the current tone, no ring, no pulse) against the clock clamped at the last heartbeat.
 
-   Verification tails arrive with `fetchArchivedRun` when a finished run is
-   selected; `couldn't load verification output` reads under the facts
-   strip when that fetch fails.
-7. **Selection** is one run across both sheets. The first live run is
-   selected on arrival — so the Board's chip lands you on the current
-   item's stage track with no click — and with nothing live, the newest
-   History row is. Empty states are unchanged: `no runs yet` when there is
-   nothing anywhere, `no runs in this range` when the range or project
-   filter empties the list, the figure strip hidden with it.
+   Verification tails arrive with `fetchArchivedRun` when a finished run is selected; `couldn't load verification output` reads under the facts strip when that
+   fetch fails.
+
+7. **Selection** is one run across both sheets. The first live run is selected on arrival — so the Board's chip lands you on the current item's stage track with
+   no click — and with nothing live, the newest History row is. Empty states are unchanged: `no runs yet` when there is nothing anywhere,
+   `no runs in this range` when the range or project filter empties the list, the figure strip hidden with it.
 
 ### 4.2 Watchdog — option A of `04-watchdog.html`
 
 Today's `WatchdogMonitor`, redrawn:
 
-1. **Band.** `Runs · Watchdog` (the `section · destination` convention),
-   the state line as its 13 px subtitle, a flat `Policy in Settings ›` chip
-   right — the policy is edited there and nowhere else.
-2. **Three-figure strip.** Sweeper (phase as a 24/700 word, a 6 px sweep
-   meter under it in `--fill-progress` hatched, `next sweep in … · every
-   10m`); Watching (count of running runs, `N crashed · N fresh · N not
-   yet watched` — the words the tile actually prints);
-   Policy (`check every / leave alone for / give up after` as three
-   label-over-value pairs, 12 over 14/500, and the enabled switch's state
-   as the 12 px line).
-3. **Watching sheet.** One row per run in the runs payload with status
-   `running`, annotated from `watching` exactly as today (skew rendered,
-   not hidden): dot, project 14/500, run id 12 `--ink3`, `· not yet
-   watched` for the skew case, the verdict as glyph + word (`● ok` /
-   `⚠ crashed`), `last reported <id> · <stage>` or `between items`, the
-   heartbeat meter — age against `RUN_STALE_MS`, amber once past it, with
-   its two labels `heartbeat Ns ago` and `stale at <RUN_STALE_MS>` /
-   `past the <RUN_STALE_MS> stale line`, both printed from the constant
-   and never a typed numeral — and for a crashed run the attempts dots, the
-   `watchdogClause` sentence, `→ session <id>` and `leave alone Nm more`
-   while in grace; a `Resume now` chip **only** when `watchdogStoodDown`
-   allows — never while the sweeper still has attempts, whatever the grace
-   clock says. A watched id with no run in the payload renders as a
-   placeholder line, not nothing. The row is a button and **jumps to
-   History and selects the run** there (§4.1) — exactly what
-   `WatchdogMonitor` does today, and under D there is nowhere else for it
-   to go: the run's detail is the History page's detail sheet.
-4. **Activity sheet.** The event ledger with today's five columns and
-   full run ids: `time · kind · project · run · what the sweeper did`,
-   th 12/400 `--ink2`, td 13, time 12 `--ink3`; its subtitle keeps the
-   caveat (the last `WATCHDOG_EVENT_CAP` only, held in the API process's
-   memory, emptied by a restart); the kind cell is
-   `WATCHDOG_KIND_GLYPH` + the word, coloured by `WATCHDOG_KIND_TONE`:
-   `live` `--green`, `done` `--green`, `bad` `--red`, `warn` `--amber`,
-   `muted` `--ink3`. Scrolls inside its own sheet under 700 px.
+1. **Band.** `Runs · Watchdog` (the `section · destination` convention), the state line as its 13 px subtitle, a flat `Policy in Settings ›` chip right — the
+   policy is edited there and nowhere else.
+2. **Three-figure strip.** Sweeper (phase as a 24/700 word, a 6 px sweep meter under it in `--fill-progress` hatched, `next sweep in … · every 10m`); Watching
+   (count of running runs, `N crashed · N fresh · N not yet watched` — the words the tile actually prints); Policy
+   (`check every / leave alone for / give up after` as three label-over-value pairs, 12 over 14/500, and the enabled switch's state as the 12 px line).
+3. **Watching sheet.** One row per run in the runs payload with status `running`, annotated from `watching` exactly as today (skew rendered, not hidden): dot,
+   project 14/500, run id 12 `--ink3`, `· not yet watched` for the skew case, the verdict as glyph + word (`● ok` / `⚠ crashed`), `last reported <id> · <stage>`
+   or `between items`, the heartbeat meter — age against `RUN_STALE_MS`, amber once past it, with its two labels `heartbeat Ns ago` and
+   `stale at <RUN_STALE_MS>` / `past the <RUN_STALE_MS> stale line`, both printed from the constant and never a typed numeral — and for a crashed run the
+   attempts dots, the `watchdogClause` sentence, `→ session <id>` and `leave alone Nm more` while in grace; a `Resume now` chip **only** when
+   `watchdogStoodDown` allows — never while the sweeper still has attempts, whatever the grace clock says. A watched id with no run in the payload renders as a
+   placeholder line, not nothing. The row is a button and **jumps to History and selects the run** there (§4.1) — exactly what `WatchdogMonitor` does today, and
+   under D there is nowhere else for it to go: the run's detail is the History page's detail sheet.
+4. **Activity sheet.** The event ledger with today's five columns and full run ids: `time · kind · project · run · what the sweeper did`, th 12/400 `--ink2`, td
+   13, time 12 `--ink3`; its subtitle keeps the caveat (the last `WATCHDOG_EVENT_CAP` only, held in the API process's memory, emptied by a restart); the kind
+   cell is `WATCHDOG_KIND_GLYPH` + the word, coloured by `WATCHDOG_KIND_TONE`: `live` `--green`, `done` `--green`, `bad` `--red`, `warn` `--amber`, `muted`
+   `--ink3`. Scrolls inside its own sheet under 700 px.
 
 ### 4.3 The stage track
 
-`StageTrack` keeps its seven equal columns and its data; the drawing
-changes. Nodes are 12 px dots on a 2 px `--steel` rail: reached =
-`--fill-progress`, current = `--fill-live` with a 3 px 30 % ring that
-pulses, not reached = `--steel` with a `--hairline2` ring, skipped
-(`fixing` on a run with no fix loop) = dashed `--hairline2` ring. Stage
-names 11 `--ink2` under the dot, durations 12/500 under those; a `×N`
-fix-loop badge is an 11/500 pill on the `fixing` node. Verification line
-under the track: `✓` / `✕` glyph, the command in an inline code span
-(`--ink` on `--steel`, 4 px corner — inherits the face), the summary at
+`StageTrack` keeps its seven equal columns and its data; the drawing changes. Nodes are 12 px dots on a 2 px `--steel` rail: reached = `--fill-progress`,
+current = `--fill-live` with a 3 px 30 % ring that pulses, not reached = `--steel` with a `--hairline2` ring, skipped (`fixing` on a run with no fix loop) =
+dashed `--hairline2` ring. Stage names 11 `--ink2` under the dot, durations 12/500 under those; a `×N` fix-loop badge is an 11/500 pill on the `fixing` node.
+Verification line under the track: `✓` / `✕` glyph, the command in an inline code span (`--ink` on `--steel`, 4 px corner — inherits the face), the summary at
 12 `--ink2`.
 
 ## 5. Archive and Settings (task 4)
 
 ### 5.1 Archive
 
-The Board's card and columns (§3.3–3.4) under the four Archive columns
-(refactoring, ideas, bugs, out of scope), grouped by month with a sticky
-13/500 `--ink2` kicker per month on the `--board` ground. Band carries the
-project select and search and nothing else. Out-of-scope column's dot is
-`--ink3`. No live strips ever appear here; `capture` is the only dispatch
-action a card can derive.
+The Board's card and columns (§3.3–3.4) under the four Archive columns (refactoring, ideas, bugs, out of scope), grouped by month with a sticky 13/500 `--ink2`
+kicker per month on the `--board` ground. Band carries the project select and search and nothing else. Out-of-scope column's dot is `--ink3`. No live strips
+ever appear here; `capture` is the only dispatch action a card can derive.
 
 ### 5.2 Settings
 
-The dashboard's §8.2, restated: page header as a band (title 19/500, a
-13 px line), then borderless `--strip` cards at 16 px radius and 24 px
-padding, each a title + one-line subtitle pair — `Board · this device`,
-`Display · this device`, `Orchestrator · this device`, `Claude Agents ·
-this machine`, the existing four. Rows inside are boxless: 16 px vertical
-padding, a hairline between, name 15/500 over a 13 px hint left, the
-control right. One 36 px control family: select / number / text / button
-at 12 px radius with a `--hairline2` stroke; the on/off rows and the
-theme/density pickers use the pill switch — a recessed `--steel` track,
-a raised `--strip` option. Theme swatches stay, as 24 px tiles at 8 px
-radius. Two hand-balanced columns, folding to one under 1100. The
-watchdog group keeps its four rows; its `Live view` link opens
-Runs › Watchdog through the same section setter the rail uses.
+The dashboard's §8.2, restated: page header as a band (title 19/500, a 13 px line), then borderless `--strip` cards at 16 px radius and 24 px padding, each a
+title + one-line subtitle pair — `Board · this device`, `Display · this device`, `Orchestrator · this device`, `Claude Agents · this machine`, the existing
+four. Rows inside are boxless: 16 px vertical padding, a hairline between, name 15/500 over a 13 px hint left, the control right. One 36 px control family:
+select / number / text / button at 12 px radius with a `--hairline2` stroke; the on/off rows and the theme/density pickers use the pill switch — a recessed
+`--steel` track, a raised `--strip` option. Theme swatches stay, as 24 px tiles at 8 px radius. Two hand-balanced columns, folding to one under 1100. The
+watchdog group keeps its four rows; its `Live view` link opens Runs › Watchdog through the same section setter the rail uses.
 
 ## 6. Overlays (task 5)
 
-Both shapes are the dashboard's, chosen there after five drawings each;
-this app adopts them rather than re-litigating.
+Both shapes are the dashboard's, chosen there after five drawings each; this app adopts them rather than re-litigating.
 
 ### 6.1 The item modal
 
-`ItemDrawer` stops being a panel pinned to the right edge and becomes a
-modal with air around it (dashboard §8.6): `--scrim` everywhere and a real
-exit; a `--strip` shell at 16 px radius with the design's one shell lift
-(`0 24px 64px` at `--shadow2`); a 290 px left column of facts and the body
-on the right with a clean top edge. Max width 1080 px, `calc(100vw /
-var(--font-scale) - 48px)` below that; full-screen under 700 px, the facts
-column folding above the body.
+`ItemDrawer` stops being a panel pinned to the right edge and becomes a modal with air around it (dashboard §8.6): `--scrim` everywhere and a real exit; a
+`--strip` shell at 16 px radius with the design's one shell lift (`0 24px 64px` at `--shadow2`); a 290 px left column of facts and the body on the right with a
+clean top edge. Max width 1080 px, `calc(100vw / var(--font-scale) - 48px)` below that; full-screen under 700 px, the facts column folding above the body.
 
-It is the **only** modal this redesign keeps. `RunDrawer`'s content does
-not become a second one: under shape D (§4.1) it is the Runs page's detail
-sheet, always beside the list, and every reading it carries — including
-`RunControls`, which a modal could not have offered — is specified there.
-So the `Modal` primitive is composed by one surface, and it lands in task 5
-with the other overlay work rather than in task 3 (§12.4).
+It is the **only** modal this redesign keeps. `RunDrawer`'s content does not become a second one: under shape D (§4.1) it is the Runs page's detail sheet,
+always beside the list, and every reading it carries — including `RunControls`, which a modal could not have offered — is specified there. So the `Modal`
+primitive is composed by one surface, and it lands in task 5 with the other overlay work rather than in task 3 (§12.4).
 
-- **Facts.** Project dot + name, id, section, created / updated / last
-  commit, `groomed`, tags, `in progress since <started>` with its elapsed
-  reading while a session holds it, elapsed and token counters when
-  present, the file path, the dispatch control.
-- **Body.** The rendered Markdown at the §2.3 scale — 15/400 body, 19/500
-  headings, code spans on `--steel`.
+- **Facts.** Project dot + name, id, section, created / updated / last commit, `groomed`, tags, `in progress since <started>` with its elapsed reading while a
+  session holds it, elapsed and token counters when present, the file path, the dispatch control.
+- **Body.** The rendered Markdown at the §2.3 scale — 15/400 body, 19/500 headings, code spans on `--steel`.
 
 ### 6.2 The sheet — launch and orchestrate
 
-`LaunchSheet` and `OrchestrateSheet` keep every step and field and take
-the dashboard's §8.7 shell: scrim, air on every side, 620 px wide, the
-shell lift, full-screen under 700. Controls are §5.2's 36 px family; the
-three-step header of the orchestrate sheet is a 13/500 stepper on a
-hairline; Start stays on the last step alone. The `uncommitted` chip
-renders as an 11/500 `--amber` pill, its two consequences still spelled
-out in words.
+`LaunchSheet` and `OrchestrateSheet` keep every step and field and take the dashboard's §8.7 shell: scrim, air on every side, 620 px wide, the shell lift,
+full-screen under 700. Controls are §5.2's 36 px family; the three-step header of the orchestrate sheet is a 13/500 stepper on a hairline; Start stays on the
+last step alone. The `uncommitted` chip renders as an 11/500 `--amber` pill, its two consequences still spelled out in words.
 
-`useDialogEscape` is untouched in mechanism: one owner, LIFO, the topmost
-closes. What changes is the count it ranks — **three** dialogs, not four:
-the item modal and these two sheets. `RunDrawer` leaves the stack because
-under shape D its content is an inline sheet on the Runs page (§4.1) and no
-longer a dialog at all; the `invariants.md` entry is edited to name three,
-in the task that moves the surface (§8).
+`useDialogEscape` is untouched in mechanism: one owner, LIFO, the topmost closes. What changes is the count it ranks — **three** dialogs, not four: the item
+modal and these two sheets. `RunDrawer` leaves the stack because under shape D its content is an inline sheet on the Runs page (§4.1) and no longer a dialog at
+all; the `invariants.md` entry is edited to name three, in the task that moves the surface (§8).
 
 ## 7. Cleanup (task 6)
 
-Dead CSS after tasks 1–5 (`.rail-brand`'s old rules, `.run-strip*`,
-`.drawer` panel geometry, the `--mono`/`--display` consumers), the
-`theme.css` `wrapPage` comment, the `zoom` and `/ var(--font-scale)`
-comments re-read against the new geometry, and `docs/subsystems/board.md`
-rewritten for the surfaces as they now are — the run chip, the two Runs
-pages with History's detail sheet, the item modal and the two sheets.
+Dead CSS after tasks 1–5 (`.rail-brand`'s old rules, `.run-strip*`, `.drawer` panel geometry, the `--mono`/`--display` consumers), the `theme.css` `wrapPage`
+comment, the `zoom` and `/ var(--font-scale)` comments re-read against the new geometry, and `docs/subsystems/board.md` rewritten for the surfaces as they now
+are — the run chip, the two Runs pages with History's detail sheet, the item modal and the two sheets.
 
 ## 8. Rules that move
 
-Each is stated in `CLAUDE.md` and reasoned in `invariants.md` against a
-surface that changes here. The rule stands; its home moves. The
-invariants entry is edited in place to name the new surface, never
-deleted.
+Each is stated in `CLAUDE.md` and reasoned in `invariants.md` against a surface that changes here. The rule stands; its home moves. The invariants entry is
+edited in place to name the new surface, never deleted.
 
-| rule | today | after |
-|---|---|---|
-| A crashed run renders as crashed, never as nothing | `RunStrip` crashed strip; Runs list badge | the Runs **Live row** (`--red` dot, `crashed` pill, the clause on its second line) and its detail sheet; History row when the run finished; the Board chip counts it (`1 crashed ›`) |
-| Resume for a crashed run stays on the strip alone | `RunStrip` | the Runs **detail sheet's head** alone. Resume for `paused` — today on strip and Runs detail — collapses to the same single surface |
-| A resume is serialized at three layers (bug-19), **layer 1** | the board's Resume control in `RunStrip` — a synchronous in-flight guard, the only layer that can catch a second click before the first answer lands, because the board's `resuming` mark is set from `onResumed`, i.e. AFTER the request settles; its window ends on `running` **and** `fresh`, never on `running` alone | the Runs detail sheet's head: `RunControls` carries the same synchronous guard, for the same reason. Layers 2 (`AgentsService.resume()`) and 3 (`orchestrate.mjs`'s driver lease) are server-side and do not move |
-| The board offers a hand resume exactly when the watchdog will not | `RunStrip` + `watchdog.service.ts`, pinned by `watchdog-coupling.test.tsx` | the Runs detail sheet's head + the Watchdog page's `Resume now`; the coupling test drives the detail head |
-| A board-started run is visible before its run file exists | `StartingStrip` | the Board chip (`1 starting ›`) and a Runs **Live row** reading `starting… · <age>`, with no controls and no selection |
-| The toolbar Orchestrate control hides on a starting entry | unchanged | unchanged |
-| `useOrchestratorRuns` polls while any run is `running`, fresh or not | Board + Runs | Board (chip, card strips) + Runs — unchanged |
-| Escape has one owner | four dialogs (`ItemDrawer`, `RunDrawer`, `LaunchSheet`, `OrchestrateSheet`) | **three** — one modal (item) and two sheets. `RunDrawer`'s content is the Runs detail sheet, inline and never a dialog, so it leaves the LIFO stack; `useDialogEscape` itself is untouched, and the `invariants.md` entry is edited to name three |
-| A session's cost is recorded per transcript (task-27) | Runs row foot (`wall · $`), detail head (`$ · turns · sessions`), per item | History row (`wall · $`), the detail sheet's facts strip (`$ · turns · sessions`) and per item — unchanged in what is shown |
+| rule                                                                 | today                                                                                                                                                                                                                                                                                                                     | after                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A crashed run renders as crashed, never as nothing                   | `RunStrip` crashed strip; Runs list badge                                                                                                                                                                                                                                                                                 | the Runs **Live row** (`--red` dot, `crashed` pill, the clause on its second line) and its detail sheet; History row when the run finished; the Board chip counts it (`1 crashed ›`)                                                              |
+| Resume for a crashed run stays on the strip alone                    | `RunStrip`                                                                                                                                                                                                                                                                                                                | the Runs **detail sheet's head** alone. Resume for `paused` — today on strip and Runs detail — collapses to the same single surface                                                                                                               |
+| A resume is serialized at three layers (bug-19), **layer 1**         | the board's Resume control in `RunStrip` — a synchronous in-flight guard, the only layer that can catch a second click before the first answer lands, because the board's `resuming` mark is set from `onResumed`, i.e. AFTER the request settles; its window ends on `running` **and** `fresh`, never on `running` alone | the Runs detail sheet's head: `RunControls` carries the same synchronous guard, for the same reason. Layers 2 (`AgentsService.resume()`) and 3 (`orchestrate.mjs`'s driver lease) are server-side and do not move                                 |
+| The board offers a hand resume exactly when the watchdog will not    | `RunStrip` + `watchdog.service.ts`, pinned by `watchdog-coupling.test.tsx`                                                                                                                                                                                                                                                | the Runs detail sheet's head + the Watchdog page's `Resume now`; the coupling test drives the detail head                                                                                                                                         |
+| A board-started run is visible before its run file exists            | `StartingStrip`                                                                                                                                                                                                                                                                                                           | the Board chip (`1 starting ›`) and a Runs **Live row** reading `starting… · <age>`, with no controls and no selection                                                                                                                            |
+| The toolbar Orchestrate control hides on a starting entry            | unchanged                                                                                                                                                                                                                                                                                                                 | unchanged                                                                                                                                                                                                                                         |
+| `useOrchestratorRuns` polls while any run is `running`, fresh or not | Board + Runs                                                                                                                                                                                                                                                                                                              | Board (chip, card strips) + Runs — unchanged                                                                                                                                                                                                      |
+| Escape has one owner                                                 | four dialogs (`ItemDrawer`, `RunDrawer`, `LaunchSheet`, `OrchestrateSheet`)                                                                                                                                                                                                                                               | **three** — one modal (item) and two sheets. `RunDrawer`'s content is the Runs detail sheet, inline and never a dialog, so it leaves the LIFO stack; `useDialogEscape` itself is untouched, and the `invariants.md` entry is edited to name three |
+| A session's cost is recorded per transcript (task-27)                | Runs row foot (`wall · $`), detail head (`$ · turns · sessions`), per item                                                                                                                                                                                                                                                | History row (`wall · $`), the detail sheet's facts strip (`$ · turns · sessions`) and per item — unchanged in what is shown                                                                                                                       |
 
 ## 9. Testing
 
-- **Style suites move with their selectors.** The ten `*-style.test.ts`
-  suites read `styles.css` through `helpers/css-rule`; a task that renames
-  or removes a selector moves the case to its replacement in the same
-  change. No case is deleted without one — `dispatch-busy-style` in
-  particular keeps all three re-asking controls.
-- **Six source guards land with task 1**, one file `test/design-guards.test.ts`
-  reading `client/src/styles.css`, `shared/theme.css` and
-  `client/src/main.tsx` as text:
+- **Style suites move with their selectors.** The ten `*-style.test.ts` suites read `styles.css` through `helpers/css-rule`; a task that renames or removes a
+  selector moves the case to its replacement in the same change. No case is deleted without one — `dispatch-busy-style` in particular keeps all three re-asking
+  controls.
+- **Six source guards land with task 1**, one file `test/design-guards.test.ts` reading `client/src/styles.css`, `shared/theme.css` and `client/src/main.tsx` as
+  text:
   1. neither stylesheet declares or reads `--mono` or `--display`;
-  2. `theme.css` declares exactly one `--font` stack per theme block and
-     `styles.css` declares no other `font-family` but `inherit`;
-  3. every `font-size` in `styles.css` written as a px literal is ≥ 11 px;
-     a non-px value (`em`, `calc(...)`) is legal only for a selector named
-     in a literal allowlist inside the test, each entry with a one-line
-     reason — the test fails on any non-px value outside that list;
+  2. `theme.css` declares exactly one `--font` stack per theme block and `styles.css` declares no other `font-family` but `inherit`;
+  3. every `font-size` in `styles.css` written as a px literal is ≥ 11 px; a non-px value (`em`, `calc(...)`) is legal only for a selector named in a literal
+     allowlist inside the test, each entry with a one-line reason — the test fails on any non-px value outside that list;
   4. `text-transform: uppercase` appears in exactly one rule, `.rail-kicker`;
-  5. the daylight block's tokens equal the §2.2 table and every theme
-     block declares `--fill-live` and `--fill-progress`;
-  6. `main.tsx` imports `@fontsource/hanken-grotesk` weights 400/500/600/700
-     and no other `@fontsource` package; `package.json` lists none other.
-  7. **one home per primitive**: each `ui/` class family (§12's table) is
-     declared in `styles.css` exactly once as a bare base selector, inside
-     the block headed `/* ── ui primitives`, and no selector outside that
-     block starts with one of those names — a page may lay a `.chip` out,
-     never restyle it.
-- **Every `ui/` primitive has a component suite**, `test/ui-<name>.test.tsx`,
-  pinning its role, its accessible name, and that each variant prop lands
-  as its documented class — the shape `SettingsRow`'s suite already has.
-- **`test/csp.test.ts` is untouched** and must stay green: the pre-paint
-  script does not change.
-- **Component suites** keep their assertions where the DOM keeps its role
-  and text; Board and Runs suites (`runs-view`, `run-strip`, `starting-strip`,
-  `watchdog-coupling`, `settings-view`) are rewritten with their task, the
-  moved rules of §8 each keeping a named case.
-- **Screenshots per task**, before merge: Board, Runs › History,
-  Runs › Watchdog, Settings, an open item modal, at 1400 and 400 px wide,
-  daylight and midnight — through a pid-owned static server, killed by
-  pid.
+  5. the daylight block's tokens equal the §2.2 table and every theme block declares `--fill-live` and `--fill-progress`;
+  6. `main.tsx` imports `@fontsource/hanken-grotesk` weights 400/500/600/700 and no other `@fontsource` package; `package.json` lists none other.
+  7. **one home per primitive**: each `ui/` class family (§12's table) is declared in `styles.css` exactly once as a bare base selector, inside the block headed
+     `/* ── ui primitives`, and no selector outside that block starts with one of those names — a page may lay a `.chip` out, never restyle it.
+- **Every `ui/` primitive has a component suite**, `test/ui-<name>.test.tsx`, pinning its role, its accessible name, and that each variant prop lands as its
+  documented class — the shape `SettingsRow`'s suite already has.
+- **`test/csp.test.ts` is untouched** and must stay green: the pre-paint script does not change.
+- **Component suites** keep their assertions where the DOM keeps its role and text; Board and Runs suites (`runs-view`, `run-strip`, `starting-strip`,
+  `watchdog-coupling`, `settings-view`) are rewritten with their task, the moved rules of §8 each keeping a named case.
+- **Screenshots per task**, before merge: Board, Runs › History, Runs › Watchdog, Settings, an open item modal, at 1400 and 400 px wide, daylight and midnight —
+  through a pid-owned static server, killed by pid.
 
 ## 10. Sequencing
 
-**Revised 2026-09-15**, after `.claude/DESIGN.md` landed. The original order
-put an **orchestrator base-branch feature** between the docs and the code: the
-six tasks were to run against a long-lived `fe-redesign` branch in a linked
-worktree, which the orchestrator cannot target today. That feature is **not
-being built**, and this section records why, so the next reader does not
-reinstate it as an oversight.
+**Revised 2026-09-15**, after `.claude/DESIGN.md` landed. The original order put an **orchestrator base-branch feature** between the docs and the code: the six
+tasks were to run against a long-lived `fe-redesign` branch in a linked worktree, which the orchestrator cannot target today. That feature is **not being
+built**, and this section records why, so the next reader does not reinstate it as an oversight.
 
-What it would have cost: `base` made run-scoped like `mergeMode` (a run-file
-field, the spawn composing `--base`, a sheet picker), `SKILL.md`'s hardcoded
-`main` replaced in `worktree add`, the merge verification of
-`refs/heads/main`, `log` and `diff`, and `UNCOMMITTED_BASE_REF` no longer a
-literal — plus a merge target redefined as "the tree where `<base>` is checked
-out", verified before merge and parked if absent. Its own brainstorm, its own
-spec, its own execution, all of it orchestrator plumbing rather than the
-redesign.
+What it would have cost: `base` made run-scoped like `mergeMode` (a run-file field, the spawn composing `--base`, a sheet picker), `SKILL.md`'s hardcoded `main`
+replaced in `worktree add`, the merge verification of `refs/heads/main`, `log` and `diff`, and `UNCOMMITTED_BASE_REF` no longer a literal — plus a merge target
+redefined as "the tree where `<base>` is checked out", verified before merge and parked if absent. Its own brainstorm, its own spec, its own execution, all of
+it orchestrator plumbing rather than the redesign.
 
-What it would have bought: `main` never carrying a partly-redesigned client.
-That is worth less than it sounds, because **each of the six tasks finishes a
-surface rather than half of one**, every task is reviewed and verified before
-it merges, and the suite gates each merge exactly as it does for every other
-item. A `main` between task 3 and task 4 has a redesigned Board and Runs and
-an unredesigned Archive — inconsistent to look at, but working and shipping.
+What it would have bought: `main` never carrying a partly-redesigned client. That is worth less than it sounds, because **each of the six tasks finishes a
+surface rather than half of one**, every task is reviewed and verified before it merges, and the suite gates each merge exactly as it does for every other item.
+A `main` between task 3 and task 4 has a redesigned Board and Runs and an unredesigned Archive — inconsistent to look at, but working and shipping.
 
-It would also have carried two costs of its own, both stated in the original
-plan: the item file has to exist at `<base>`, so every task would need `main`
-merged into `fe-redesign` before each run; and the merge would land in a
-feature worktree while that worktree may be dirty, under today's
+It would also have carried two costs of its own, both stated in the original plan: the item file has to exist at `<base>`, so every task would need `main`
+merged into `fe-redesign` before each run; and the merge would land in a feature worktree while that worktree may be dirty, under today's
 overlapping-dirty-paths park rule.
 
 Order now:
 
 1. **This spec and `.claude/DESIGN.md`** land on `main` — docs only. Done.
-2. **`bug-34` first.** It is groomed, and it is a supertest suite binding the
-   wildcard instead of loopback, so an unrelated listener answers and the case
-   flakes. A flaky suite is a merge-gate defect: the orchestrator verifies
-   before every merge, so an intermittent red parks a run and spends a fix
-   loop on a test that was never broken. Fixing it first makes every run below
-   trustworthy.
-3. **Tasks 1–6** (§§2–7) are captured and groomed on `main` as `task-<n>`
-   items, each citing this spec's section, and drained by `backlog-orchestrate`
-   in the ordinary way — one worktree per item, reviewed, verified, merged to
-   `main`. No feature branch, no base flag, no hand merge at the end.
+2. **`bug-34` first.** It is groomed, and it is a supertest suite binding the wildcard instead of loopback, so an unrelated listener answers and the case
+   flakes. A flaky suite is a merge-gate defect: the orchestrator verifies before every merge, so an intermittent red parks a run and spends a fix loop on a
+   test that was never broken. Fixing it first makes every run below trustworthy.
+3. **Tasks 1–6** (§§2–7) are captured and groomed on `main` as `task-<n>` items, each citing this spec's section, and drained by `backlog-orchestrate` in the
+   ordinary way — one worktree per item, reviewed, verified, merged to `main`. No feature branch, no base flag, no hand merge at the end.
 4. **Screenshots after the last task**, per §9.
 
 ## 11. Documentation
 
-- `CLAUDE.md` Layout, under `client/src/`: one line naming
-  `.claude/DESIGN.md` as the visual language and where §8 applies it.
+- `CLAUDE.md` Layout, under `client/src/`: one line naming `.claude/DESIGN.md` as the visual language and where §8 applies it.
 - `docs/overview.md` map: one row for `.claude/DESIGN.md`.
-- `docs/subsystems/board.md`: rewritten in task 6 (§7), gaining a
-  "Primitives" section that is §12's table kept current.
-- `docs/subsystems/invariants.md`: the §8 rows edited in place, in the
-  task that moves each surface.
-- A memory note recording the four companion picks, so the next session
-  does not redraw them.
+- `docs/subsystems/board.md`: rewritten in task 6 (§7), gaining a "Primitives" section that is §12's table kept current.
+- `docs/subsystems/invariants.md`: the §8 rows edited in place, in the task that moves each surface.
+- A memory note recording the four companion picks, so the next session does not redraw them.
 
 ## 12. Components — one home per pattern
 
 ### 12.1 The rule
 
-Every DESIGN.md §7 pattern, and every §8 shape drawn by more than one
-surface, is **one React component in `client/src/components/ui/`**, which
-owns its CSS class family in one block of `styles.css` headed
-`/* ── ui primitives`. Page CSS lays primitives out — grid, gap, width —
-and never restates their look; a surface that needs a variant adds a
-prop, never a second class family. Same rule, same reason as `lib/`:
-"every derivation has one home" so two surfaces cannot disagree about the
-same thing. Pinned by guard 7 (§9).
+Every DESIGN.md §7 pattern, and every §8 shape drawn by more than one surface, is **one React component in `client/src/components/ui/`**, which owns its CSS
+class family in one block of `styles.css` headed `/* ── ui primitives`. Page CSS lays primitives out — grid, gap, width — and never restates their look; a
+surface that needs a variant adds a prop, never a second class family. Same rule, same reason as `lib/`: "every derivation has one home" so two surfaces cannot
+disagree about the same thing. Pinned by guard 7 (§9).
 
-What this repo has today is the drift in embryo: `SettingsGroup`,
-`Segmented`, `NumberField` under `settings/`, `RunControls` and
-`RunRowTime` at the top level, `.pill` and `.run-mode-badge` declared as
-board classes and read by Runs. Task 1 moves the first three and gives
-the rest a home.
+What this repo has today is the drift in embryo: `SettingsGroup`, `Segmented`, `NumberField` under `settings/`, `RunControls` and `RunRowTime` at the top level,
+`.pill` and `.run-mode-badge` declared as board classes and read by Runs. Task 1 moves the first three and gives the rest a home.
 
 ### 12.2 The primitives
 
-| component | DESIGN.md | props | composed by |
-|---|---|---|---|
-| `Band` | §8.2 "the page header is a band, not a card" | `title`, `sub`, `children` (right slot) | Board, Runs History, Runs Watchdog, Archive, Settings |
-| `Sheet`, `SheetHead` | §8.2 card; §7 title + one-line subtitle, right slot for one control | `Sheet{children, as?}`; `SheetHead{title, sub?, right?}` | Runs Live, History and detail sheets, Watching, Activity, Settings groups, the item modal's facts block |
-| `FigureStrip`, `Figure` | §8.4 "one card the ground divides" | `Figure{label, value, unit?, line?, tone?}`; strip wraps 5→3→2 | Runs History (six, the sixth wide), Watchdog (three) |
-| `Chip` | §7 filter chip; the 32 px control | `variant: outline \| ink \| flat \| danger`, `size: 32 \| 28`, `pressed?`, `as: button \| label`, `icon?` | every band and control row, `RunControls`, `DispatchButton`, load-more |
-| `Pill` | §1 status micro-label at 11/500, 999 px | `tone: neutral \| live \| warn \| bad \| done` | count, mode, stage, `crashed`, `paused`, `uncommitted` |
-| `Dot` | §7 legend dot | `tone: live \| paused \| crashed \| done \| ramp-<col>`, or `hue: 1–8`; `size: 8 \| 10`; `breathe?` | card foot, column header, rows, the run chip, the rail wordmark |
-| `Marker` | §8.3 marker row word | `tone: groomed \| kind \| done \| stale` | card, Archive card |
-| `ProgressRow` | §7 progress row | `value`, `max`, `caption?`, `hatch?`, `height: 10 \| 6`, `fill: progress \| ink` | sweep meter, heartbeat meter, `StageBars` rows (D's Live rows carry a two-tone count, not a bar) |
-| `Ledger`, `DayKicker` | §8.4 "every table scrolls inside its own sheet" | `Ledger{columns, children}` owns the `overflow-x` box | History, Activity |
-| `Modal` | dashboard §8.6 sidecar | `label`, `facts`, `children`, `onClose`; scrim, `useDialogEscape`, full-screen under `useNarrow` | the item modal — the only one under D (§6.1) |
-| `FormSheet` | dashboard §8.7 sheet | `title`, `steps?`, `footer`, `children`, `onClose` | `LaunchSheet`, `OrchestrateSheet` |
-| `Segmented`, `Select`, `NumberField`, `Switch` | §8.2 36 px control family, pill switch | as today, moved from `settings/SettingsRow.tsx` | Settings rows, the sheets' pickers |
-| `useNarrow` (hook) | the one place JS knows the 700 px breakpoint | — | `Modal`, `FormSheet`, `SideRail` |
+| component                                      | DESIGN.md                                                           | props                                                                                                     | composed by                                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `Band`                                         | §8.2 "the page header is a band, not a card"                        | `title`, `sub`, `children` (right slot)                                                                   | Board, Runs History, Runs Watchdog, Archive, Settings                                                   |
+| `Sheet`, `SheetHead`                           | §8.2 card; §7 title + one-line subtitle, right slot for one control | `Sheet{children, as?}`; `SheetHead{title, sub?, right?}`                                                  | Runs Live, History and detail sheets, Watching, Activity, Settings groups, the item modal's facts block |
+| `FigureStrip`, `Figure`                        | §8.4 "one card the ground divides"                                  | `Figure{label, value, unit?, line?, tone?}`; strip wraps 5→3→2                                            | Runs History (six, the sixth wide), Watchdog (three)                                                    |
+| `Chip`                                         | §7 filter chip; the 32 px control                                   | `variant: outline \| ink \| flat \| danger`, `size: 32 \| 28`, `pressed?`, `as: button \| label`, `icon?` | every band and control row, `RunControls`, `DispatchButton`, load-more                                  |
+| `Pill`                                         | §1 status micro-label at 11/500, 999 px                             | `tone: neutral \| live \| warn \| bad \| done`                                                            | count, mode, stage, `crashed`, `paused`, `uncommitted`                                                  |
+| `Dot`                                          | §7 legend dot                                                       | `tone: live \| paused \| crashed \| done \| ramp-<col>`, or `hue: 1–8`; `size: 8 \| 10`; `breathe?`       | card foot, column header, rows, the run chip, the rail wordmark                                         |
+| `Marker`                                       | §8.3 marker row word                                                | `tone: groomed \| kind \| done \| stale`                                                                  | card, Archive card                                                                                      |
+| `ProgressRow`                                  | §7 progress row                                                     | `value`, `max`, `caption?`, `hatch?`, `height: 10 \| 6`, `fill: progress \| ink`                          | sweep meter, heartbeat meter, `StageBars` rows (D's Live rows carry a two-tone count, not a bar)        |
+| `Ledger`, `DayKicker`                          | §8.4 "every table scrolls inside its own sheet"                     | `Ledger{columns, children}` owns the `overflow-x` box                                                     | History, Activity                                                                                       |
+| `Modal`                                        | dashboard §8.6 sidecar                                              | `label`, `facts`, `children`, `onClose`; scrim, `useDialogEscape`, full-screen under `useNarrow`          | the item modal — the only one under D (§6.1)                                                            |
+| `FormSheet`                                    | dashboard §8.7 sheet                                                | `title`, `steps?`, `footer`, `children`, `onClose`                                                        | `LaunchSheet`, `OrchestrateSheet`                                                                       |
+| `Segmented`, `Select`, `NumberField`, `Switch` | §8.2 36 px control family, pill switch                              | as today, moved from `settings/SettingsRow.tsx`                                                           | Settings rows, the sheets' pickers                                                                      |
+| `useNarrow` (hook)                             | the one place JS knows the 700 px breakpoint                        | —                                                                                                         | `Modal`, `FormSheet`, `SideRail`                                                                        |
 
-`SettingsRow` and `SettingsGroup` stay under `settings/`: they are the
-Settings card's composition of `Sheet` + rows, not a primitive. `Dot`'s
-`hue` prop resolves through `project-hue.ts` exactly as `.pill-proj-N`
-does today — the class stays in the stylesheet, never a `style` attribute.
+`SettingsRow` and `SettingsGroup` stay under `settings/`: they are the Settings card's composition of `Sheet` + rows, not a primitive. `Dot`'s `hue` prop
+resolves through `project-hue.ts` exactly as `.pill-proj-N` does today — the class stays in the stylesheet, never a `style` attribute.
 
 ### 12.3 Compositions
 
-Everything else is a page-level composition of the table above and stays
-in its section's directory: `ItemCard`, `BoardColumn`, `RunChip` (board);
-`LiveRunRow`, `HistoryRow`, `RunDetail`, `StageTrack`, `StageBars`,
-`WatchingRow`, `ActivityLedger` (runs); `SettingsRow`, `SettingsGroup`,
-`WatchdogGroup` (settings); `ItemModal` (board). `RunControls` stays
-top-level, composing `Chip`, for the reason its header gives — two lazy
-chunks read it.
+Everything else is a page-level composition of the table above and stays in its section's directory: `ItemCard`, `BoardColumn`, `RunChip` (board); `LiveRunRow`,
+`HistoryRow`, `RunDetail`, `StageTrack`, `StageBars`, `WatchingRow`, `ActivityLedger` (runs); `SettingsRow`, `SettingsGroup`, `WatchdogGroup` (settings);
+`ItemModal` (board). `RunControls` stays top-level, composing `Chip`, for the reason its header gives — two lazy chunks read it.
 
 ### 12.4 When each lands
 
-Task 1: everything in the table but `Modal` and `FormSheet`. Task 5:
-`Modal` and `FormSheet` — both overlays land together. `Modal` was to land
-in task 3 while History opened a run in one; under D (§4.1) History opens
-nothing, so its only composer is the item modal, which is task 5's. A task
-never adds a primitive the table does not list without amending this
-section first.
+Task 1: everything in the table but `Modal` and `FormSheet`. Task 5: `Modal` and `FormSheet` — both overlays land together. `Modal` was to land in task 3 while
+History opened a run in one; under D (§4.1) History opens nothing, so its only composer is the item modal, which is task 5's. A task never adds a primitive the
+table does not list without amending this section first.

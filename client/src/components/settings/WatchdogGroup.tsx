@@ -138,11 +138,16 @@ export type SaveErrorSlot = 'enabled' | 'tickMs' | 'graceMs' | 'maxAttempts' | '
  */
 export function saveErrorSlot(field: keyof WatchdogConfig | null): SaveErrorSlot {
   switch (field) {
-    case 'enabled': return 'enabled';
-    case 'tickMs': return 'tickMs';
-    case 'graceMs': return 'graceMs';
-    case 'maxAttempts': return 'maxAttempts';
-    default: return 'end';
+    case 'enabled':
+      return 'enabled';
+    case 'tickMs':
+      return 'tickMs';
+    case 'graceMs':
+      return 'graceMs';
+    case 'maxAttempts':
+      return 'maxAttempts';
+    default:
+      return 'end';
   }
 }
 
@@ -173,8 +178,8 @@ export function WatchdogGroup() {
           <div className="set-label">
             <span className="set-name">Unavailable</span>
             <span className="set-hint">
-              Could not reach the watchdog{error ? ` — ${error}` : ''}. This group will
-              fill in once the API answers <code>GET /api/agents/watchdog</code> again.
+              Could not reach the watchdog{error ? ` — ${error}` : ''}. This group will fill in once the API answers <code>GET /api/agents/watchdog</code>{' '}
+              again.
             </span>
           </div>
         </div>
@@ -193,17 +198,12 @@ export function WatchdogGroup() {
   // `slot` is a single value, so the `errorRow` guards below are mutually
   // exclusive by construction rather than by four conditions agreeing.
   const slot = saveError === null ? null : saveErrorSlot(saveError.field);
-  const errorRow = (at: SaveErrorSlot) => (
-    saveError !== null && slot === at
-      ? (
-        <div className="set-row set-error-row" role="alert">
-          <span className="set-error">
-            Not saved — {saveError.message}. The value shown is the one still on the server.
-          </span>
-        </div>
-      )
-      : null
-  );
+  const errorRow = (at: SaveErrorSlot) =>
+    saveError !== null && slot === at ? (
+      <div className="set-row set-error-row" role="alert">
+        <span className="set-error">Not saved — {saveError.message}. The value shown is the one still on the server.</span>
+      </div>
+    ) : null;
 
   return (
     <SettingsGroup title="Orchestrator watchdog · this server">
@@ -216,11 +216,9 @@ export function WatchdogGroup() {
         <div className="set-label">
           <span className="set-name">Live view</span>
           <span className="set-hint">
-            These values live on the API host, in <code>~/.backlog-manager/settings/watchdog.json</code>
-            {' '}— not this browser's storage. Every device that opens this board reads and
-            writes that same one file, unlike the device-only groups above.
-            {' '}The sweeper's state, the runs it is watching and its activity are on
-            Runs › Watchdog.
+            These values live on the API host, in <code>~/.backlog-manager/settings/watchdog.json</code> — not this browser's storage. Every device that opens
+            this board reads and writes that same one file, unlike the device-only groups above. The sweeper's state, the runs it is watching and its activity
+            are on Runs › Watchdog.
           </span>
         </div>
       </div>
@@ -229,12 +227,7 @@ export function WatchdogGroup() {
         name="Enabled"
         hint="Your own switch (design's 'Disabled'), separate from the sweeper's own phase: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
       >
-        <input
-          type="checkbox"
-          aria-label="Enabled"
-          checked={config.enabled}
-          onChange={(e) => void save({ enabled: e.target.checked })}
-        />
+        <input type="checkbox" aria-label="Enabled" checked={config.enabled} onChange={(e) => void save({ enabled: e.target.checked })} />
       </SettingsRow>
       {errorRow('enabled')}
 
@@ -242,13 +235,11 @@ export function WatchdogGroup() {
         name="Check every"
         hint="How often the sweeper re-reads every project's run file for staleness while armed. Shorter notices a crash sooner; longer costs less on a server watching many projects."
       >
-        <select
-          aria-label="Check every"
-          value={config.tickMs}
-          onChange={(e) => void save({ tickMs: Number(e.target.value) })}
-        >
+        <select aria-label="Check every" value={config.tickMs} onChange={(e) => void save({ tickMs: Number(e.target.value) })}>
           {ladderWithSelected(TICK_LADDER, config.tickMs).map((v) => (
-            <option key={v} value={v}>{formatSpanCompact(v)}</option>
+            <option key={v} value={v}>
+              {formatSpanCompact(v)}
+            </option>
           ))}
         </select>
       </SettingsRow>
@@ -258,13 +249,11 @@ export function WatchdogGroup() {
         name="Leave a resumed run alone for"
         hint="How long a crashed run is left alone after any resume attempt or failure before the sweeper tries again. The floor is five minutes: a resume spawned into the same overload that caused the crash can take several minutes just to run its first command."
       >
-        <select
-          aria-label="Leave a resumed run alone for"
-          value={config.graceMs}
-          onChange={(e) => void save({ graceMs: Number(e.target.value) })}
-        >
+        <select aria-label="Leave a resumed run alone for" value={config.graceMs} onChange={(e) => void save({ graceMs: Number(e.target.value) })}>
           {ladderWithSelected(GRACE_LADDER, config.graceMs).map((v) => (
-            <option key={v} value={v}>{formatSpanCompact(v)}</option>
+            <option key={v} value={v}>
+              {formatSpanCompact(v)}
+            </option>
           ))}
         </select>
       </SettingsRow>
@@ -274,13 +263,11 @@ export function WatchdogGroup() {
         name="Give up after"
         hint="How many resume spawns one crashed run gets before the sweeper marks it exhausted and stops trying — past that point the crashed strip's own Resume button is the way forward, by hand."
       >
-        <select
-          aria-label="Give up after"
-          value={config.maxAttempts}
-          onChange={(e) => void save({ maxAttempts: Number(e.target.value) })}
-        >
+        <select aria-label="Give up after" value={config.maxAttempts} onChange={(e) => void save({ maxAttempts: Number(e.target.value) })}>
           {ladderWithSelected(ATTEMPT_LADDER, config.maxAttempts).map((v) => (
-            <option key={v} value={v}>{v}</option>
+            <option key={v} value={v}>
+              {v}
+            </option>
           ))}
         </select>
       </SettingsRow>

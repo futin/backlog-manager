@@ -22,8 +22,17 @@ export type ChipSize = 32 | 28;
  * so neither is emitted there — the control inside carries both.
  */
 export function Chip({
-  children, variant = 'outline', size = 32, pressed, as = 'button', icon,
-  onClick, disabled, title, type = 'button', ...rest
+  children,
+  variant = 'outline',
+  size = 32,
+  pressed,
+  as = 'button',
+  icon,
+  onClick,
+  disabled,
+  title,
+  type = 'button',
+  ...rest
 }: {
   children: ReactNode;
   variant?: ChipVariant;
@@ -43,33 +52,29 @@ export function Chip({
     its own `onClick` or `className` and quietly take the component's look and
     behaviour back off it, which is the drift `ui/` exists to stop.
   */
-} & { [k: `data-${string}`]: string | number | boolean | undefined }
-  & { [k: `aria-${string}`]: string | number | boolean | undefined }) {
-  const className = [
-    'ui-chip', `ui-chip-${variant}`, size === 28 ? 'ui-chip-28' : 'ui-chip-32',
-    pressed ? 'on' : null
-  ].filter(Boolean).join(' ');
+} & { [k: `data-${string}`]: string | number | boolean | undefined } & { [k: `aria-${string}`]: string | number | boolean | undefined }) {
+  const className = ['ui-chip', `ui-chip-${variant}`, size === 28 ? 'ui-chip-28' : 'ui-chip-32', pressed ? 'on' : null].filter(Boolean).join(' ');
 
   const body = (
     <>
-      {icon && <span className="ui-chip-icon" aria-hidden="true">{icon}</span>}
+      {icon && (
+        <span className="ui-chip-icon" aria-hidden="true">
+          {icon}
+        </span>
+      )}
       {children}
     </>
   );
 
   if (as === 'label') {
-    return <label className={className} title={title} {...rest}>{body}</label>;
+    return (
+      <label className={className} title={title} {...rest}>
+        {body}
+      </label>
+    );
   }
   return (
-    <button
-      type={type}
-      className={className}
-      aria-pressed={pressed}
-      disabled={disabled}
-      title={title}
-      onClick={onClick}
-      {...rest}
-    >
+    <button type={type} className={className} aria-pressed={pressed} disabled={disabled} title={title} onClick={onClick} {...rest}>
       {body}
     </button>
   );

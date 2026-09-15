@@ -14,7 +14,12 @@
  * than leaving a reader to infer it from the word beside the row.
  */
 export function Switch({
-  checked, onChange, label, disabled, onLabel = 'On', offLabel = 'Off'
+  checked,
+  onChange,
+  label,
+  disabled,
+  onLabel = 'On',
+  offLabel = 'Off'
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
@@ -33,8 +38,12 @@ export function Switch({
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >
-      <span className="ui-switch-opt" aria-hidden="true">{offLabel}</span>
-      <span className="ui-switch-opt" aria-hidden="true">{onLabel}</span>
+      <span className="ui-switch-opt" aria-hidden="true">
+        {offLabel}
+      </span>
+      <span className="ui-switch-opt" aria-hidden="true">
+        {onLabel}
+      </span>
     </button>
   );
 }

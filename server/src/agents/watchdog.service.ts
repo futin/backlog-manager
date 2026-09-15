@@ -284,9 +284,7 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     // which is exactly the condition the lock exists for. Every genuinely
     // finished status still prunes immediately, so a resumed run that reached
     // `done` drops its entry on the very next tick as it always has.
-    const keep = payload.runs
-      .filter((run) => run.status === 'running' || run.status === 'paused')
-      .map((run) => run.runId);
+    const keep = payload.runs.filter((run) => run.status === 'running' || run.status === 'paused').map((run) => run.runId);
     this.state.prune(new Set(keep));
 
     if (running.length === 0) {
@@ -336,10 +334,7 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
    * person wait ten minutes to be told nobody is coming is the opposite of
    * what this feature is for.
    */
-  private async visit(
-    run: OrchestratorRunsPayload['runs'][number],
-    config: ReturnType<typeof readWatchdogConfig>
-  ): Promise<void> {
+  private async visit(run: OrchestratorRunsPayload['runs'][number], config: ReturnType<typeof readWatchdogConfig>): Promise<void> {
     // 1. Fresh — the run is alive. The only thing worth saying is that a run
     //    this sweeper had already spawned against has come back, which is
     //    also the moment it stops trying: `attempts > 0` is what makes this
@@ -505,27 +500,17 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
    * entry any tick could act on, so there is nothing for grace to protect.
    */
   noteBoardResume(project: string, sessionId: string): void {
-    const run = this.orchestrator.runs().runs.find(
-      (r) => r.project === project && r.status === 'running'
-    );
+    const run = this.orchestrator.runs().runs.find((r) => r.project === project && r.status === 'running');
     if (run === undefined) return;
 
     const entry = this.state.upsert(run.runId, run.project);
     entry.lastSpawnAt = new Date().toISOString();
     entry.lastSessionId = sessionId;
     entry.lastError = null;
-    this.push(
-      run,
-      'spawned',
-      `resumed by hand from the board → session ${sessionId} (not counted against the cap)`
-    );
+    this.push(run, 'spawned', `resumed by hand from the board → session ${sessionId} (not counted against the cap)`);
   }
 
-  private async spawn(
-    run: OrchestratorRunsPayload['runs'][number],
-    entry: WatchdogEntry,
-    maxAttempts: number
-  ): Promise<void> {
+  private async spawn(run: OrchestratorRunsPayload['runs'][number], entry: WatchdogEntry, maxAttempts: number): Promise<void> {
     // Stamped before the call, not after: an attempt that never returns —
     // a hung dashboard, a process killed mid-flight — has still consumed a
     // launch slot, and the next tick must back off from it exactly as it
@@ -549,11 +534,7 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     }
   }
 
-  private push(
-    run: OrchestratorRunsPayload['runs'][number],
-    kind: 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled',
-    detail: string
-  ): void {
+  private push(run: OrchestratorRunsPayload['runs'][number], kind: 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled', detail: string): void {
     this.state.push({ project: run.project, runId: run.runId, kind, detail });
   }
 }

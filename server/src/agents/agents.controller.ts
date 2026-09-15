@@ -7,10 +7,7 @@ import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { isAgentAction } from '../../../shared/agent';
-import type {
-  AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, PauseResult, WatchdogConfig,
-  WatchdogStatus
-} from '../../../shared/types';
+import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, PauseResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
  * Under /api like every other controller — test/vite-proxy.test.ts asserts it

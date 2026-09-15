@@ -1,26 +1,34 @@
 # Backlog Manager Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan
+> task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Home the four backlog skills in this repo as a Claude Code plugin, and build a NestJS + Vite/React app that shows every registered project's backlog on one kanban-by-type board with a right-hand item drawer.
+**Goal:** Home the four backlog skills in this repo as a Claude Code plugin, and build a NestJS + Vite/React app that shows every registered project's backlog
+on one kanban-by-type board with a right-hand item drawer.
 
-**Architecture:** pnpm single-package workspace mirroring `../guide-manager`: `skills/` is the plugin skill root, `server/src/` is a NestJS API with no database (the registry JSON plus each project's `backlog/*.md` files are the store, re-read per request), `client/src/` is a React SPA served by Vite in dev and by Nest's ServeStatic in prod. `skills/backlog/tools/backlog.mjs` is the registry's only writer; the server only reads.
+**Architecture:** pnpm single-package workspace mirroring `../guide-manager`: `skills/` is the plugin skill root, `server/src/` is a NestJS API with no database
+(the registry JSON plus each project's `backlog/*.md` files are the store, re-read per request), `client/src/` is a React SPA served by Vite in dev and by
+Nest's ServeStatic in prod. `skills/backlog/tools/backlog.mjs` is the registry's only writer; the server only reads.
 
-**Tech Stack:** Node ≥22.13, pnpm 11 (corepack), NestJS 11, Vite 5 + React 18, TypeScript strict, jest + ts-jest (+ jsdom for component suites), node:test for the skills tool, marked for drawer markdown, docker compose (2 services, no Mongo).
+**Tech Stack:** Node ≥22.13, pnpm 11 (corepack), NestJS 11, Vite 5 + React 18, TypeScript strict, jest + ts-jest (+ jsdom for component suites), node:test for
+the skills tool, marked for drawer markdown, docker compose (2 services, no Mongo).
 
 **Spec:** `docs/superpowers/specs/2026-08-26-backlog-manager-design.md`
 
 ## Global Constraints
 
-- Reference implementation for every ported file is `../guide-manager` (absolute: `/Users/andrejajevtic/Documents/custom-projects/guide-manager`). Copy means: read the source file, write it here, then apply ONLY the listed changes.
+- Reference implementation for every ported file is `../guide-manager` (absolute: `/Users/andrejajevtic/Documents/custom-projects/guide-manager`). Copy means:
+  read the source file, write it here, then apply ONLY the listed changes.
 - pnpm is the only package manager; `packageManager: "pnpm@11.13.0"`, `engines.node >= 22.13`, enforced via corepack in Docker.
 - Ports: API `4322`, web `5177` (guide-manager already holds 4321/5175/5176 on this machine). Host-side overrides: `BM_API_PORT`, `BM_WEB_PORT`.
-- Registry: `~/.backlog-manager/registry.json`, shape `{ "projects": [{ "name", "path", "createdAt" }] }`. Env override: `BM_REGISTRY_FILE`. Written ONLY by `skills/backlog/tools/backlog.mjs`.
+- Registry: `~/.backlog-manager/registry.json`, shape `{ "projects": [{ "name", "path", "createdAt" }] }`. Env override: `BM_REGISTRY_FILE`. Written ONLY by
+  `skills/backlog/tools/backlog.mjs`.
 - localStorage keys are prefixed `backlog-manager.` (settings, section, project, status, sort).
 - All server routes live under `/api` — that keeps the Vite proxy list to one entry, asserted by test.
 - `skills/` is the plugin skill root. Never create `.claude/skills/` copies.
 - Item files are never written, moved, or edited by the server or client. Read-only everywhere except backlog.mjs.
-- Comments explain *why*, at guide-manager's density. Tests live flat in `test/`, `*.test.ts(x)`; component suites opt into jsdom via `@jest-environment jsdom` docblock. Skill-tool tests are node:test `.test.mjs` files next to the tool.
+- Comments explain _why_, at guide-manager's density. Tests live flat in `test/`, `*.test.ts(x)`; component suites opt into jsdom via `@jest-environment jsdom`
+  docblock. Skill-tool tests are node:test `.test.mjs` files next to the tool.
 - Every commit message ends with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 
 ## File Structure (end state)
@@ -71,10 +79,13 @@ Dockerfile / docker-compose.yml / README.md / CLAUDE.md
 ### Task 1: Workspace scaffold
 
 **Files:**
+
 - Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.json`, `tsconfig.build.json`, `nest-cli.json`, `jest.config.ts`, `.gitignore`, `.env.example`
 
 **Interfaces:**
-- Produces: the install + script surface every later task runs against (`pnpm test`, `pnpm run test:skills`, `pnpm run typecheck`, `pnpm run build`, `pnpm run dev`, `pnpm run dev:web`).
+
+- Produces: the install + script surface every later task runs against (`pnpm test`, `pnpm run test:skills`, `pnpm run typecheck`, `pnpm run build`,
+  `pnpm run dev`, `pnpm run dev:web`).
 
 - [ ] **Step 1: Write `package.json`**
 
@@ -140,7 +151,8 @@ Dockerfile / docker-compose.yml / README.md / CLAUDE.md
 }
 ```
 
-This is guide-manager's `package.json` with: name/ports renamed; `@nestjs/mongoose`, `mongoose`, `mongodb-memory-server` removed (no database); `marked` added (drawer markdown); `test:skills` script added (node:test cannot ride jest — `backlog.mjs` is ESM and ts-jest compiles to CJS).
+This is guide-manager's `package.json` with: name/ports renamed; `@nestjs/mongoose`, `mongoose`, `mongodb-memory-server` removed (no database); `marked` added
+(drawer markdown); `test:skills` script added (node:test cannot ride jest — `backlog.mjs` is ESM and ts-jest compiles to CJS).
 
 - [ ] **Step 2: Write `pnpm-workspace.yaml`**
 
@@ -160,7 +172,9 @@ allowBuilds:
 
 - [ ] **Step 3: Write `tsconfig.json`, `tsconfig.build.json`, `nest-cli.json`, `jest.config.ts`**
 
-Copy all four from `../guide-manager` (same filenames, repo root) verbatim — they carry no project name. `jest.config.ts` keeps `setupFiles: ['reflect-metadata']` and `testMatch: ['<rootDir>/test/**/*.test.ts', '<rootDir>/test/**/*.test.tsx']` — node:test `.mjs` files under `skills/` never match, so the two runners stay disjoint.
+Copy all four from `../guide-manager` (same filenames, repo root) verbatim — they carry no project name. `jest.config.ts` keeps
+`setupFiles: ['reflect-metadata']` and `testMatch: ['<rootDir>/test/**/*.test.ts', '<rootDir>/test/**/*.test.tsx']` — node:test `.mjs` files under `skills/`
+never match, so the two runners stay disjoint.
 
 - [ ] **Step 4: Write `.gitignore`**
 
@@ -214,11 +228,10 @@ PORT=4322
 
 - [ ] **Step 6: Install and verify**
 
-Run: `pnpm install`
-Expected: lockfile written, no build-script warnings other than none (esbuild is allowed).
+Run: `pnpm install` Expected: lockfile written, no build-script warnings other than none (esbuild is allowed).
 
-Run: `pnpm run typecheck`
-Expected: PASS (nothing to check yet compiles trivially — `tsconfig.json` includes globs that match no files; if tsc errors on "no inputs", create `shared/types.ts` in Task 2 first and re-run, then fold both into one commit).
+Run: `pnpm run typecheck` Expected: PASS (nothing to check yet compiles trivially — `tsconfig.json` includes globs that match no files; if tsc errors on "no
+inputs", create `shared/types.ts` in Task 2 first and re-run, then fold both into one commit).
 
 - [ ] **Step 7: Commit**
 
@@ -232,11 +245,15 @@ git commit -m "chore: pnpm workspace scaffold (nest + vite, no db)"
 ### Task 2: Shared types and theme
 
 **Files:**
+
 - Create: `shared/types.ts`
 - Create: `shared/theme.css`
 
 **Interfaces:**
-- Produces: `Section` (`'bugs' | 'ideas' | 'tasks' | 'out-of-scope'`), `ItemStatus` (`'open' | 'done' | 'terminal'`), `RegistryProject { name; path; createdAt }`, `Registry { projects }`, `BacklogItem`, `ItemsIndex { items; errors }`, `SectionCounts`, `ProjectSummary` — consumed by every server and client task.
+
+- Produces: `Section` (`'bugs' | 'ideas' | 'tasks' | 'out-of-scope'`), `ItemStatus` (`'open' | 'done' | 'terminal'`),
+  `RegistryProject { name; path; createdAt }`, `Registry { projects }`, `BacklogItem`, `ItemsIndex { items; errors }`, `SectionCounts`, `ProjectSummary` —
+  consumed by every server and client task.
 
 - [ ] **Step 1: Write `shared/types.ts`**
 
@@ -317,8 +334,7 @@ Copy `../guide-manager/shared/theme.css` verbatim (all 5 `[data-theme]` palettes
 
 - [ ] **Step 3: Verify and commit**
 
-Run: `pnpm run typecheck`
-Expected: PASS
+Run: `pnpm run typecheck` Expected: PASS
 
 ```bash
 git add shared/
@@ -330,10 +346,13 @@ git commit -m "feat: shared registry/API types and theme palettes"
 ### Task 3: Skills move-in + plugin manifests
 
 **Files:**
-- Create: `skills/backlog/SKILL.md`, `skills/backlog/tools/backlog.mjs`, `skills/backlog-capture/SKILL.md`, `skills/backlog-groom/SKILL.md`, `skills/backlog-execute/SKILL.md` (copies from `~/.claude/skills/`)
+
+- Create: `skills/backlog/SKILL.md`, `skills/backlog/tools/backlog.mjs`, `skills/backlog-capture/SKILL.md`, `skills/backlog-groom/SKILL.md`,
+  `skills/backlog-execute/SKILL.md` (copies from `~/.claude/skills/`)
 - Create: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
 
 **Interfaces:**
+
 - Produces: `skills/backlog/tools/backlog.mjs` at its new path — Task 4 edits it; the four SKILL.md files reference it via `$CLAUDE_PLUGIN_ROOT`.
 
 - [ ] **Step 1: Copy the four skills in**
@@ -346,11 +365,13 @@ cp -R ~/.claude/skills/backlog-groom skills/backlog-groom
 cp -R ~/.claude/skills/backlog-execute skills/backlog-execute
 ```
 
-Do not delete the `~/.claude/skills/` originals yet — that is a user step at the very end (Task 14), after the plugin is installed, so the skills never disappear mid-migration.
+Do not delete the `~/.claude/skills/` originals yet — that is a user step at the very end (Task 14), after the plugin is installed, so the skills never
+disappear mid-migration.
 
 - [ ] **Step 2: Rewrite the tool path in every SKILL.md**
 
-Every `node ~/.claude/skills/backlog/tools/backlog.mjs …` invocation becomes `node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" …` — `CLAUDE_PLUGIN_ROOT` is set by Claude Code when a plugin skill runs, and the quotes survive a space in the plugin cache path.
+Every `node ~/.claude/skills/backlog/tools/backlog.mjs …` invocation becomes `node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" …` —
+`CLAUDE_PLUGIN_ROOT` is set by Claude Code when a plugin skill runs, and the quotes survive a space in the plugin cache path.
 
 ```bash
 sed -i '' 's|node ~/.claude/skills/backlog/tools/backlog.mjs|node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs"|g' skills/backlog/SKILL.md skills/backlog-capture/SKILL.md skills/backlog-groom/SKILL.md skills/backlog-execute/SKILL.md
@@ -362,7 +383,9 @@ Then verify nothing was missed (some invocations may lack the `node ` prefix or 
 grep -rn '.claude/skills' skills/ && echo 'LEFTOVERS — fix by hand' || echo clean
 ```
 
-Expected: `clean`. If there are leftovers, rewrite each by hand to the `$CLAUDE_PLUGIN_ROOT` form and re-run the grep. Also update the header comment in `backlog.mjs` (lines 2–8) which names the old path: change `Lives under ~/.claude/skills/backlog/tools/` to `Lives under skills/backlog/tools/ of the backlog-manager plugin repo` and the two example invocations to the `$CLAUDE_PLUGIN_ROOT` form.
+Expected: `clean`. If there are leftovers, rewrite each by hand to the `$CLAUDE_PLUGIN_ROOT` form and re-run the grep. Also update the header comment in
+`backlog.mjs` (lines 2–8) which names the old path: change `Lives under ~/.claude/skills/backlog/tools/` to
+`Lives under skills/backlog/tools/ of the backlog-manager plugin repo` and the two example invocations to the `$CLAUDE_PLUGIN_ROOT` form.
 
 - [ ] **Step 3: Write `.claude-plugin/plugin.json`**
 
@@ -392,8 +415,8 @@ Expected: `clean`. If there are leftovers, rewrite each by hand to the `$CLAUDE_
 
 - [ ] **Step 5: Smoke-test the tool from its new home**
 
-Run: `node skills/backlog/tools/backlog.mjs board`
-Expected: exit 3 with `no backlog/ store in … — run \`backlog.mjs init\` first` (this repo has no store yet — that's the correct answer, and it proves the tool runs from the new path).
+Run: `node skills/backlog/tools/backlog.mjs board` Expected: exit 3 with `no backlog/ store in … — run \`backlog.mjs init\` first` (this repo has no store yet —
+that's the correct answer, and it proves the tool runs from the new path).
 
 - [ ] **Step 6: Commit**
 
@@ -407,85 +430,91 @@ git commit -m "feat: home the four backlog skills as a plugin"
 ### Task 4: Registry upsert in backlog.mjs (TDD, node:test)
 
 **Files:**
+
 - Modify: `skills/backlog/tools/backlog.mjs`
 - Test: `skills/backlog/tools/backlog.test.mjs`
 
 **Interfaces:**
-- Produces: `registryFile(): string` (env `BM_REGISTRY_FILE` override, default `~/.backlog-manager/registry.json`) and `registerProject(root: string, file?: string): void` — exported from `backlog.mjs`. `main()`'s `init` and `new` paths call `registerProject` best-effort. The server (Task 5) reads the file this writes.
+
+- Produces: `registryFile(): string` (env `BM_REGISTRY_FILE` override, default `~/.backlog-manager/registry.json`) and
+  `registerProject(root: string, file?: string): void` — exported from `backlog.mjs`. `main()`'s `init` and `new` paths call `registerProject` best-effort. The
+  server (Task 5) reads the file this writes.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `skills/backlog/tools/backlog.test.mjs`:
 
 ```js
-import test from 'node:test'
-import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-import { registerProject, registryFile } from './backlog.mjs'
+import { registerProject, registryFile } from './backlog.mjs';
 
 function tmpRegistry() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-registry-'))
-  return path.join(dir, 'nested', 'registry.json') // nested: mkdir -p is part of the contract
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-registry-'));
+  return path.join(dir, 'nested', 'registry.json'); // nested: mkdir -p is part of the contract
 }
 
 test('registryFile honours BM_REGISTRY_FILE and falls back to the home default', () => {
-  const prev = process.env.BM_REGISTRY_FILE
+  const prev = process.env.BM_REGISTRY_FILE;
   try {
-    process.env.BM_REGISTRY_FILE = '/tmp/somewhere/registry.json'
-    assert.equal(registryFile(), '/tmp/somewhere/registry.json')
-    delete process.env.BM_REGISTRY_FILE
-    assert.equal(registryFile(), path.join(os.homedir(), '.backlog-manager', 'registry.json'))
+    process.env.BM_REGISTRY_FILE = '/tmp/somewhere/registry.json';
+    assert.equal(registryFile(), '/tmp/somewhere/registry.json');
+    delete process.env.BM_REGISTRY_FILE;
+    assert.equal(registryFile(), path.join(os.homedir(), '.backlog-manager', 'registry.json'));
   } finally {
-    if (prev === undefined) delete process.env.BM_REGISTRY_FILE
-    else process.env.BM_REGISTRY_FILE = prev
+    if (prev === undefined) delete process.env.BM_REGISTRY_FILE;
+    else process.env.BM_REGISTRY_FILE = prev;
   }
-})
+});
 
 test('registerProject inserts a new project with name = basename and an ISO createdAt', () => {
-  const file = tmpRegistry()
-  registerProject('/abs/path/my-project', file)
-  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
-  assert.equal(written.projects.length, 1)
-  assert.equal(written.projects[0].name, 'my-project')
-  assert.equal(written.projects[0].path, '/abs/path/my-project')
-  assert.ok(!Number.isNaN(Date.parse(written.projects[0].createdAt)))
-})
+  const file = tmpRegistry();
+  registerProject('/abs/path/my-project', file);
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(written.projects.length, 1);
+  assert.equal(written.projects[0].name, 'my-project');
+  assert.equal(written.projects[0].path, '/abs/path/my-project');
+  assert.ok(!Number.isNaN(Date.parse(written.projects[0].createdAt)));
+});
 
 test('registerProject upserts by path and never rewrites createdAt', () => {
-  const file = tmpRegistry()
-  registerProject('/abs/path/my-project', file)
-  const first = JSON.parse(fs.readFileSync(file, 'utf8')).projects[0]
-  registerProject('/abs/path/my-project', file)
-  const again = JSON.parse(fs.readFileSync(file, 'utf8'))
-  assert.equal(again.projects.length, 1)
-  assert.equal(again.projects[0].createdAt, first.createdAt)
-})
+  const file = tmpRegistry();
+  registerProject('/abs/path/my-project', file);
+  const first = JSON.parse(fs.readFileSync(file, 'utf8')).projects[0];
+  registerProject('/abs/path/my-project', file);
+  const again = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(again.projects.length, 1);
+  assert.equal(again.projects[0].createdAt, first.createdAt);
+});
 
 test('registerProject keeps other projects and appends new ones', () => {
-  const file = tmpRegistry()
-  registerProject('/abs/one', file)
-  registerProject('/abs/two', file)
-  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
-  assert.deepEqual(written.projects.map((p) => p.path), ['/abs/one', '/abs/two'])
-})
+  const file = tmpRegistry();
+  registerProject('/abs/one', file);
+  registerProject('/abs/two', file);
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(
+    written.projects.map((p) => p.path),
+    ['/abs/one', '/abs/two']
+  );
+});
 
 test('registerProject starts fresh over a corrupt registry rather than failing', () => {
-  const file = tmpRegistry()
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, 'not json')
-  registerProject('/abs/one', file)
-  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
-  assert.equal(written.projects.length, 1)
-})
+  const file = tmpRegistry();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, 'not json');
+  registerProject('/abs/one', file);
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(written.projects.length, 1);
+});
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
 
-Run: `pnpm run test:skills`
-Expected: FAIL — `registerProject` / `registryFile` are not exported.
+Run: `pnpm run test:skills` Expected: FAIL — `registerProject` / `registryFile` are not exported.
 
 - [ ] **Step 3: Implement**
 
@@ -506,25 +535,25 @@ Add `import os from 'node:os'` beside the existing `node:fs` / `node:path` impor
 // upsert so a renamed directory heals itself; createdAt is set once, on first
 // insert, and never rewritten.
 export function registryFile() {
-  return process.env.BM_REGISTRY_FILE || path.join(os.homedir(), '.backlog-manager', 'registry.json')
+  return process.env.BM_REGISTRY_FILE || path.join(os.homedir(), '.backlog-manager', 'registry.json');
 }
 
 export function registerProject(root, file = registryFile()) {
-  let registry = { projects: [] }
+  let registry = { projects: [] };
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
-    if (Array.isArray(parsed.projects)) registry = parsed
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (Array.isArray(parsed.projects)) registry = parsed;
   } catch {
     // first write, or a corrupt file — start fresh rather than fail the capture
   }
-  const existing = registry.projects.find((p) => p.path === root)
+  const existing = registry.projects.find((p) => p.path === root);
   if (existing) {
-    existing.name = path.basename(root)
+    existing.name = path.basename(root);
   } else {
-    registry.projects.push({ name: path.basename(root), path: root, createdAt: new Date().toISOString() })
+    registry.projects.push({ name: path.basename(root), path: root, createdAt: new Date().toISOString() });
   }
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n');
 }
 
 // Registration must never fail the command that triggered it: a capture that
@@ -532,9 +561,9 @@ export function registerProject(root, file = registryFile()) {
 // teach people not to capture. stderr and move on.
 function registerBestEffort(root) {
   try {
-    registerProject(root)
+    registerProject(root);
   } catch (e) {
-    console.error(`registry update failed (board will not list this project): ${e.message}`)
+    console.error(`registry update failed (board will not list this project): ${e.message}`);
   }
 }
 ```
@@ -544,19 +573,18 @@ Then wire the two call sites in `main()`:
 In the `init` command, after the `created.length === 0` if/else block and before `return 0`, add:
 
 ```js
-    registerBestEffort(r.resolved.root)
+registerBestEffort(r.resolved.root);
 ```
 
 In the `new` command, after `console.log(block)` and before its `return 0`, add:
 
 ```js
-    registerBestEffort(r.resolved.root)
+registerBestEffort(r.resolved.root);
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm run test:skills`
-Expected: PASS (5 tests).
+Run: `pnpm run test:skills` Expected: PASS (5 tests).
 
 - [ ] **Step 5: End-to-end check against a throwaway registry**
 
@@ -564,7 +592,8 @@ Expected: PASS (5 tests).
 BM_REGISTRY_FILE=/tmp/bm-smoke/registry.json node skills/backlog/tools/backlog.mjs init && cat /tmp/bm-smoke/registry.json && rm -rf /tmp/bm-smoke
 ```
 
-Expected: `initialized …/backlog` output (this repo gains its own `backlog/` store — keep it, the repo eats its own dog food), and the JSON lists this repo with `name: "backlog-manager"`.
+Expected: `initialized …/backlog` output (this repo gains its own `backlog/` store — keep it, the repo eats its own dog food), and the JSON lists this repo with
+`name: "backlog-manager"`.
 
 - [ ] **Step 6: Commit**
 
@@ -578,12 +607,15 @@ git commit -m "feat: backlog.mjs registers projects into ~/.backlog-manager/regi
 ### Task 5: Registry service (server)
 
 **Files:**
+
 - Create: `server/src/registry/registry.service.ts`, `server/src/registry/registry.module.ts`
 - Test: `test/registry.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Registry`, `RegistryProject` from `shared/types.ts`.
-- Produces: `RegistryService.load(): Registry`; DI token `REGISTRY_FILE` (string) and `defaultRegistryFile(): string`. Tests and later e2e suites override `REGISTRY_FILE` to point at fixtures.
+- Produces: `RegistryService.load(): Registry`; DI token `REGISTRY_FILE` (string) and `defaultRegistryFile(): string`. Tests and later e2e suites override
+  `REGISTRY_FILE` to point at fixtures.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -605,9 +637,11 @@ describe('RegistryService', () => {
   }
 
   it('loads a well-formed registry', () => {
-    const file = tmpFile(JSON.stringify({
-      projects: [{ name: 'p1', path: '/abs/p1', createdAt: '2026-08-26T00:00:00.000Z' }]
-    }));
+    const file = tmpFile(
+      JSON.stringify({
+        projects: [{ name: 'p1', path: '/abs/p1', createdAt: '2026-08-26T00:00:00.000Z' }]
+      })
+    );
     expect(new RegistryService(file).load().projects).toHaveLength(1);
   });
 
@@ -624,9 +658,12 @@ describe('RegistryService', () => {
     const file = tmpFile(JSON.stringify({ projects: [] }));
     const service = new RegistryService(file);
     expect(service.load().projects).toHaveLength(0);
-    writeFileSync(file, JSON.stringify({
-      projects: [{ name: 'late', path: '/abs/late', createdAt: '2026-08-26T00:00:00.000Z' }]
-    }));
+    writeFileSync(
+      file,
+      JSON.stringify({
+        projects: [{ name: 'late', path: '/abs/late', createdAt: '2026-08-26T00:00:00.000Z' }]
+      })
+    );
     expect(service.load().projects).toHaveLength(1);
   });
 
@@ -647,8 +684,7 @@ describe('RegistryService', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm test -- test/registry.test.ts`
-Expected: FAIL — module not found.
+Run: `pnpm test -- test/registry.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
@@ -724,8 +760,7 @@ export class RegistryModule {}
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm test -- test/registry.test.ts`
-Expected: PASS (5 tests).
+Run: `pnpm test -- test/registry.test.ts` Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -739,12 +774,16 @@ git commit -m "feat: read-only registry service, re-read per request"
 ### Task 6: Item parsing — frontmatter, sections, groomed (TDD)
 
 **Files:**
+
 - Create: `server/src/items/parse.util.ts`
 - Test: `test/parse.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Section` from `shared/types.ts`.
-- Produces: `ItemParseError`, `parseFrontmatter(text): { fm: { fields: Record<string,string>; tags: string[] }; body: string }`, `sectionText(body, heading): string`, `deriveGroomed(section: Section, body: string): boolean | null`. Task 7's scanner consumes all three; Task 8's body route consumes `parseFrontmatter`.
+- Produces: `ItemParseError`, `parseFrontmatter(text): { fm: { fields: Record<string,string>; tags: string[] }; body: string }`,
+  `sectionText(body, heading): string`, `deriveGroomed(section: Section, body: string): boolean | null`. Task 7's scanner consumes all three; Task 8's body
+  route consumes `parseFrontmatter`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -789,9 +828,7 @@ unknown
 
 describe('parseFrontmatter', () => {
   it('parses fields, splits tags on commas, returns the body', () => {
-    const { fm, body } = parseFrontmatter(
-      '---\nid: bug-1\ntitle: it breaks\ncreated: 2026-08-26\ntags: ui, board\n---\n\n## Symptom\n'
-    );
+    const { fm, body } = parseFrontmatter('---\nid: bug-1\ntitle: it breaks\ncreated: 2026-08-26\ntags: ui, board\n---\n\n## Symptom\n');
     expect(fm.fields.id).toBe('bug-1');
     expect(fm.fields.title).toBe('it breaks');
     expect(fm.tags).toEqual(['ui', 'board']);
@@ -858,8 +895,7 @@ describe('deriveGroomed', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm test -- test/parse.test.ts`
-Expected: FAIL — module not found.
+Run: `pnpm test -- test/parse.test.ts` Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
@@ -904,7 +940,13 @@ export function parseFrontmatter(text: string): { fm: Frontmatter; body: string 
       throw new ItemParseError('frontmatter must not carry a status: key — the directory a file lives in is its status');
     }
     if (key === 'tags') {
-      tags = value === '' ? [] : value.split(',').map((t) => t.trim()).filter((t) => t !== '');
+      tags =
+        value === ''
+          ? []
+          : value
+              .split(',')
+              .map((t) => t.trim())
+              .filter((t) => t !== '');
     } else {
       fields[key] = value;
     }
@@ -930,7 +972,10 @@ export function sectionText(body: string, heading: string): string {
   if (start === -1) return '';
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((l) => l.startsWith('## '));
-  return rest.slice(0, end === -1 ? undefined : end).join('\n').trim();
+  return rest
+    .slice(0, end === -1 ? undefined : end)
+    .join('\n')
+    .trim();
 }
 
 /** "unknown" with optional trailing period, any case — the exact sentinel
@@ -958,8 +1003,7 @@ export function deriveGroomed(section: Section, body: string): boolean | null {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm test -- test/parse.test.ts`
-Expected: PASS (13 tests).
+Run: `pnpm test -- test/parse.test.ts` Expected: PASS (13 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -973,13 +1017,17 @@ git commit -m "feat: item frontmatter/section parsing and groomed derivation"
 ### Task 7: Scanner, items service, index + projects routes (TDD, e2e)
 
 **Files:**
+
 - Create: `server/src/items/scan.util.ts`, `server/src/items/items.service.ts`, `server/src/items/items.controller.ts`, `server/src/items/items.module.ts`
 - Create: `test/helpers/store.ts`
 - Test: `test/items.test.ts`
 
 **Interfaces:**
+
 - Consumes: `parseFrontmatter` / `deriveGroomed` / `ItemParseError` (Task 6), `RegistryService` + `REGISTRY_FILE` (Task 5), shared types (Task 2).
-- Produces: `scanProject(project: RegistryProject): { items: BacklogItem[]; errors: string[] }`; `ItemsService.index(): ItemsIndex`, `.projects(): ProjectSummary[]`, `.body(path: string): string | null` (body wired to a route in Task 8); HTTP `GET /api/items`, `GET /api/projects`; `ItemsModule` (imports RegistryModule) — Task 9's AppModule imports it; `makeStore(...)` fixture helper reused by Task 8's tests.
+- Produces: `scanProject(project: RegistryProject): { items: BacklogItem[]; errors: string[] }`; `ItemsService.index(): ItemsIndex`,
+  `.projects(): ProjectSummary[]`, `.body(path: string): string | null` (body wired to a route in Task 8); HTTP `GET /api/items`, `GET /api/projects`;
+  `ItemsModule` (imports RegistryModule) — Task 9's AppModule imports it; `makeStore(...)` fixture helper reused by Task 8's tests.
 
 - [ ] **Step 1: Write the fixture helper**
 
@@ -1017,9 +1065,12 @@ export function makeProject(name: string, items: FixtureItem[]): string {
 export function makeRegistry(projects: { name: string; path: string }[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'bm-registry-'));
   const file = join(dir, 'registry.json');
-  writeFileSync(file, JSON.stringify({
-    projects: projects.map((p) => ({ ...p, createdAt: '2026-08-26T00:00:00.000Z' }))
-  }));
+  writeFileSync(
+    file,
+    JSON.stringify({
+      projects: projects.map((p) => ({ ...p, createdAt: '2026-08-26T00:00:00.000Z' }))
+    })
+  );
   return file;
 }
 
@@ -1046,22 +1097,18 @@ describe('GET /api/items and /api/projects', () => {
   let app: INestApplication;
 
   const alpha = makeProject('alpha', [
-    { leaf: 'bugs/open', filename: 'bug-1-it-breaks.md',
-      content: item('bug-1', 'it breaks', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n') },
-    { leaf: 'bugs/open', filename: 'bug-2-groomed.md',
-      content: item('bug-2', 'groomed bug', '## Symptom\n\nx\n\n## Cause\n\noff by one\n\n## Fix\n\nuse <=\n') },
-    { leaf: 'tasks/open', filename: 'task-1-build-it.md',
-      content: item('task-1', 'build it', '## Goal\n\ng\n\n## Plan\n\n1. step\n', 'tags: ui, board\n') },
-    { leaf: 'tasks/done', filename: 'task-2-shipped.md',
-      content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
-    { leaf: 'out-of-scope', filename: 'oos-1-nope.md',
-      content: item('oos-1', 'nope', '## What was proposed\n\nx\n\n## Why rejected\n\ny\n') },
+    { leaf: 'bugs/open', filename: 'bug-1-it-breaks.md', content: item('bug-1', 'it breaks', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-2-groomed.md',
+      content: item('bug-2', 'groomed bug', '## Symptom\n\nx\n\n## Cause\n\noff by one\n\n## Fix\n\nuse <=\n')
+    },
+    { leaf: 'tasks/open', filename: 'task-1-build-it.md', content: item('task-1', 'build it', '## Goal\n\ng\n\n## Plan\n\n1. step\n', 'tags: ui, board\n') },
+    { leaf: 'tasks/done', filename: 'task-2-shipped.md', content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
+    { leaf: 'out-of-scope', filename: 'oos-1-nope.md', content: item('oos-1', 'nope', '## What was proposed\n\nx\n\n## Why rejected\n\ny\n') },
     { leaf: 'ideas/open', filename: 'idea-1-broken.md', content: 'no frontmatter at all\n' }
   ]);
-  const beta = makeProject('beta', [
-    { leaf: 'ideas/open', filename: 'idea-1-someday.md',
-      content: item('idea-1', 'someday', '## Problem\n\np\n') }
-  ]);
+  const beta = makeProject('beta', [{ leaf: 'ideas/open', filename: 'idea-1-someday.md', content: item('idea-1', 'someday', '## Problem\n\np\n') }]);
 
   beforeAll(async () => {
     const registry = makeRegistry([
@@ -1128,8 +1175,7 @@ describe('GET /api/items and /api/projects', () => {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `pnpm test -- test/items.test.ts`
-Expected: FAIL — modules not found.
+Run: `pnpm test -- test/items.test.ts` Expected: FAIL — modules not found.
 
 - [ ] **Step 4: Implement the scanner**
 
@@ -1278,7 +1324,9 @@ export class ItemsService {
 }
 ```
 
-Note: this imports `./allow.util`, which Task 8 creates. To keep this task self-contained and green, create `server/src/items/allow.util.ts` NOW with the two functions (the code is in Task 8 Step 3 — write it verbatim here, then Task 8 only adds its tests and the route). Alternatively swap task order; the plan keeps the service whole because splitting `body()` out would leave a dangling import.
+Note: this imports `./allow.util`, which Task 8 creates. To keep this task self-contained and green, create `server/src/items/allow.util.ts` NOW with the two
+functions (the code is in Task 8 Step 3 — write it verbatim here, then Task 8 only adds its tests and the route). Alternatively swap task order; the plan keeps
+the service whole because splitting `body()` out would leave a dangling import.
 
 - [ ] **Step 6: Implement controller and module**
 
@@ -1347,8 +1395,7 @@ export class ItemsModule {}
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `pnpm test -- test/items.test.ts test/parse.test.ts test/registry.test.ts`
-Expected: PASS.
+Run: `pnpm test -- test/items.test.ts test/parse.test.ts test/registry.test.ts` Expected: PASS.
 
 - [ ] **Step 8: Commit**
 
@@ -1362,12 +1409,15 @@ git commit -m "feat: items index and project summaries over registered stores"
 ### Task 8: Body route allowlist (TDD)
 
 **Files:**
+
 - Create (if not already created in Task 7 Step 5): `server/src/items/allow.util.ts`
 - Test: `test/allow.test.ts` (unit) + extend `test/items.test.ts` (e2e)
 
 **Interfaces:**
+
 - Consumes: `Registry` from shared types.
-- Produces: `buildAllowlist(registry): Set<string>` (realpaths of every registered project's `backlog/`), `resolveAllowed(requestPath, allowedDirs): string | null`. `ItemsService.body` (Task 7) consumes both.
+- Produces: `buildAllowlist(registry): Set<string>` (realpaths of every registered project's `backlog/`),
+  `resolveAllowed(requestPath, allowedDirs): string | null`. `ItemsService.body` (Task 7) consumes both.
 
 - [ ] **Step 1: Write the failing unit test**
 
@@ -1422,8 +1472,8 @@ describe('body-route allowlist', () => {
 
 - [ ] **Step 2: Run test to verify it fails (or passes if Task 7 already created the util)**
 
-Run: `pnpm test -- test/allow.test.ts`
-Expected: FAIL with module not found if Task 7 skipped Step 5's note; PASS if it was created there. Either way continue — the e2e additions below are new.
+Run: `pnpm test -- test/allow.test.ts` Expected: FAIL with module not found if Task 7 skipped Step 5's note; PASS if it was created there. Either way continue —
+the e2e additions below are new.
 
 - [ ] **Step 3: Implement `server/src/items/allow.util.ts`** (skip if it exists — but diff it against this, which is canonical)
 
@@ -1471,28 +1521,27 @@ export function resolveAllowed(requestPath: string, allowedDirs: Set<string>): s
 Append to the `describe` in `test/items.test.ts`:
 
 ```ts
-  it('serves an item body as text/plain with the frontmatter stripped', async () => {
-    const items = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
-    const bug = items.items.find((i) => i.id === 'bug-2' && i.project === 'alpha') as BacklogItem;
-    const res = await request(app.getHttpServer())
-      .get('/api/items/body')
-      .query({ path: bug.path })
-      .expect(200)
-      .expect('content-type', /text\/plain/);
-    expect(res.text).toContain('## Cause');
-    expect(res.text).not.toContain('id: bug-2');
-  });
+it('serves an item body as text/plain with the frontmatter stripped', async () => {
+  const items = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+  const bug = items.items.find((i) => i.id === 'bug-2' && i.project === 'alpha') as BacklogItem;
+  const res = await request(app.getHttpServer())
+    .get('/api/items/body')
+    .query({ path: bug.path })
+    .expect(200)
+    .expect('content-type', /text\/plain/);
+  expect(res.text).toContain('## Cause');
+  expect(res.text).not.toContain('id: bug-2');
+});
 
-  it('404s a path outside every registered store, and a missing param', async () => {
-    await request(app.getHttpServer()).get('/api/items/body').query({ path: '/etc/hosts' }).expect(404);
-    await request(app.getHttpServer()).get('/api/items/body').expect(404);
-  });
+it('404s a path outside every registered store, and a missing param', async () => {
+  await request(app.getHttpServer()).get('/api/items/body').query({ path: '/etc/hosts' }).expect(404);
+  await request(app.getHttpServer()).get('/api/items/body').expect(404);
+});
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `pnpm test -- test/allow.test.ts test/items.test.ts`
-Expected: PASS.
+Run: `pnpm test -- test/allow.test.ts test/items.test.ts` Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1506,10 +1555,12 @@ git commit -m "feat: allowlisted item body route"
 ### Task 9: App bootstrap — main, app module, static, health
 
 **Files:**
+
 - Create: `server/src/main.ts`, `server/src/app.module.ts`, `server/src/static.ts`, `server/src/health/health.controller.ts`
 - Test: `test/app.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ItemsModule` (Task 7).
 - Produces: a bootable server on `PORT` (default 4322); `clientDistModules(distDir?)` exported from `static.ts`; `GET /api/health` → `{ ok: true }`.
 
@@ -1559,8 +1610,7 @@ describe('app bootstrap', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm test -- test/app.test.ts`
-Expected: FAIL — modules not found.
+Run: `pnpm test -- test/app.test.ts` Expected: FAIL — modules not found.
 
 - [ ] **Step 3: Implement**
 
@@ -1649,11 +1699,11 @@ bootstrap().catch((err: unknown) => {
 
 - [ ] **Step 4: Run tests, typecheck, and boot it once**
 
-Run: `pnpm test -- test/app.test.ts && pnpm run typecheck`
-Expected: PASS.
+Run: `pnpm test -- test/app.test.ts && pnpm run typecheck` Expected: PASS.
 
 Run: `pnpm run build:server && (node dist/server/src/main.js &) && sleep 2 && curl -s localhost:4322/api/health && curl -s localhost:4322/api/items && kill %1`
-Expected: `{"ok":true}` and a JSON index listing this repo's own backlog (registered in Task 4's smoke test — if that used the throwaway `BM_REGISTRY_FILE`, run `node skills/backlog/tools/backlog.mjs init` once first so the real registry has this repo).
+Expected: `{"ok":true}` and a JSON index listing this repo's own backlog (registered in Task 4's smoke test — if that used the throwaway `BM_REGISTRY_FILE`, run
+`node skills/backlog/tools/backlog.mjs init` once first so the real registry has this repo).
 
 - [ ] **Step 5: Commit**
 
@@ -1667,53 +1717,73 @@ git commit -m "feat: nest bootstrap on 4322 with conditional static serving"
 ### Task 10: Client scaffold — shell, settings, styles, vite
 
 **Files:**
-- Create: `client/index.html`, `client/src/main.tsx`, `client/src/App.tsx`, `client/src/components/SideRail.tsx`, `client/src/components/settings/SettingsRow.tsx`, `client/src/lib/settings.ts`, `client/src/hooks/usePersistedState.ts`, `client/src/hooks/useSettings.tsx`, `client/src/styles.css`, `vite.config.ts`
+
+- Create: `client/index.html`, `client/src/main.tsx`, `client/src/App.tsx`, `client/src/components/SideRail.tsx`,
+  `client/src/components/settings/SettingsRow.tsx`, `client/src/lib/settings.ts`, `client/src/hooks/usePersistedState.ts`, `client/src/hooks/useSettings.tsx`,
+  `client/src/styles.css`, `vite.config.ts`
 - Test: `test/settings.test.ts`, `test/vite-proxy.test.ts`
 
 **Interfaces:**
+
 - Consumes: `shared/theme.css` (Task 2).
-- Produces: `Section` (`'projects' | 'settings'`) from SideRail; `Settings`/`clampSettings`/`DEFAULT_SETTINGS`/`THEMES`/`FONT_SCALES`/`SETTINGS_STORAGE_KEY` from `lib/settings`; `usePersistedState`, `useSettings`/`SettingsProvider`; the `board-*`/`pill*`/`set-*`/`drawer*` CSS classes Tasks 11–13 style against. App renders a placeholder for the board until Task 11 replaces it.
+- Produces: `Section` (`'projects' | 'settings'`) from SideRail; `Settings`/`clampSettings`/`DEFAULT_SETTINGS`/`THEMES`/`FONT_SCALES`/`SETTINGS_STORAGE_KEY`
+  from `lib/settings`; `usePersistedState`, `useSettings`/`SettingsProvider`; the `board-*`/`pill*`/`set-*`/`drawer*` CSS classes Tasks 11–13 style against. App
+  renders a placeholder for the board until Task 11 replaces it.
 
 - [ ] **Step 1: Copy the verbatim files**
 
 From `../guide-manager/client/src/`:
+
 - `hooks/usePersistedState.ts` → copy verbatim.
 - `components/settings/SettingsRow.tsx` → copy verbatim.
 - `main.tsx` → copy verbatim (fontsource imports, styles import, mount).
 
 - [ ] **Step 2: Write `client/index.html`**
 
-Copy `../guide-manager/client/index.html`, then change exactly two things: `<title>Backlog Manager</title>`, and the storage key in the inline pre-paint script from `'guide-manager.settings'` to `'backlog-manager.settings'`. Keep the script's comment and the rest byte-identical — it stamps theme/density/font-scale before first paint so no load flashes the default palette.
+Copy `../guide-manager/client/index.html`, then change exactly two things: `<title>Backlog Manager</title>`, and the storage key in the inline pre-paint script
+from `'guide-manager.settings'` to `'backlog-manager.settings'`. Keep the script's comment and the rest byte-identical — it stamps theme/density/font-scale
+before first paint so no load flashes the default palette.
 
 - [ ] **Step 3: Write `client/src/lib/settings.ts`**
 
 Copy `../guide-manager/client/src/lib/settings.ts`, then apply:
 
-1. Delete the three bionic fields from `Settings` and `DEFAULT_SETTINGS` (`bionicOn`, `bionicStrength`, `bionicFreq`), the two bionic entries in `LIMITS`, the `STRENGTHS`-feeding exports `BIONIC_STORAGE_KEY` and `bionicKeyValue`, and the `pickBool`/`clampFloat` helpers if nothing else uses them (`pickBool` and `clampFloat` become dead — delete both; keep `pickOne`, `clampInt`).
+1. Delete the three bionic fields from `Settings` and `DEFAULT_SETTINGS` (`bionicOn`, `bionicStrength`, `bionicFreq`), the two bionic entries in `LIMITS`, the
+   `STRENGTHS`-feeding exports `BIONIC_STORAGE_KEY` and `bionicKeyValue`, and the `pickBool`/`clampFloat` helpers if nothing else uses them (`pickBool` and
+   `clampFloat` become dead — delete both; keep `pickOne`, `clampInt`).
 2. In `clampSettings`, delete the three bionic lines.
 3. `SETTINGS_STORAGE_KEY = 'backlog-manager.settings'`.
-4. `const LANDINGS = ['last', 'projects', 'settings'] as const;` (the section id is `projects` here, not `guides`) — and the doc comment above `Landing` keeps its warning that a section added to the rail must be added here.
-5. Keep `THEMES` (all five), `Density`, `fontScale` + `FONT_SCALES` + its `LIMITS` entry, `Landing`, and the header comment (reworded from guide-manager to backlog-manager and with the bionic-flatness sentence dropped).
+4. `const LANDINGS = ['last', 'projects', 'settings'] as const;` (the section id is `projects` here, not `guides`) — and the doc comment above `Landing` keeps
+   its warning that a section added to the rail must be added here.
+5. Keep `THEMES` (all five), `Density`, `fontScale` + `FONT_SCALES` + its `LIMITS` entry, `Landing`, and the header comment (reworded from guide-manager to
+   backlog-manager and with the bionic-flatness sentence dropped).
 
 - [ ] **Step 4: Write `client/src/hooks/useSettings.tsx`**
 
-Copy `../guide-manager/client/src/hooks/useSettings.tsx`, then: delete the second `useEffect` entirely (the `BIONIC_STORAGE_KEY` bridge — there is no reading aid here) and its imports (`BIONIC_STORAGE_KEY`, `bionicKeyValue`); keep the first effect (theme/density/font-scale stamped on the root) and the trailing comment about the fallback outside a provider.
+Copy `../guide-manager/client/src/hooks/useSettings.tsx`, then: delete the second `useEffect` entirely (the `BIONIC_STORAGE_KEY` bridge — there is no reading
+aid here) and its imports (`BIONIC_STORAGE_KEY`, `bionicKeyValue`); keep the first effect (theme/density/font-scale stamped on the root) and the trailing
+comment about the fallback outside a provider.
 
 - [ ] **Step 5: Write `client/src/components/SideRail.tsx`**
 
-Copy guide-manager's, with: `export type Section = 'projects' | 'settings';`, `TABS` = `[{ id: 'projects', label: 'Projects' }, { id: 'settings', label: 'Settings' }]`, and the brand block:
+Copy guide-manager's, with: `export type Section = 'projects' | 'settings';`, `TABS` =
+`[{ id: 'projects', label: 'Projects' }, { id: 'settings', label: 'Settings' }]`, and the brand block:
 
 ```tsx
-      <h1 className="rail-brand">
-        <span className="rail-kicker">Backlog</span>
-        <br />
-        Manager
-      </h1>
+<h1 className="rail-brand">
+  <span className="rail-kicker">Backlog</span>
+  <br />
+  Manager
+</h1>
 ```
 
 - [ ] **Step 6: Write `client/src/App.tsx`**
 
-Copy guide-manager's `App.tsx`, with: lazy imports `BoardView` from `./components/board/BoardView` and `SettingsView` from `./components/settings/SettingsView`; persisted key `'backlog-manager.section'` with fallback `'projects'`; the stale-value guard becomes `const current: Section = section === 'settings' ? 'settings' : 'projects';`; the wide-wrap line becomes `<div className={current === 'projects' ? 'wrap wide' : 'wrap'}>`; render `{current === 'projects' ? <BoardView /> : <SettingsView />}`. Until Tasks 11/13 exist, create the two files as minimal placeholders so this compiles:
+Copy guide-manager's `App.tsx`, with: lazy imports `BoardView` from `./components/board/BoardView` and `SettingsView` from `./components/settings/SettingsView`;
+persisted key `'backlog-manager.section'` with fallback `'projects'`; the stale-value guard becomes
+`const current: Section = section === 'settings' ? 'settings' : 'projects';`; the wide-wrap line becomes
+`<div className={current === 'projects' ? 'wrap wide' : 'wrap'}>`; render `{current === 'projects' ? <BoardView /> : <SettingsView />}`. Until Tasks 11/13
+exist, create the two files as minimal placeholders so this compiles:
 
 ```tsx
 // client/src/components/board/BoardView.tsx — replaced wholesale in Task 11
@@ -1733,8 +1803,12 @@ export default function SettingsView() {
 
 Start from `../guide-manager/client/src/styles.css` and apply, in order:
 
-1. Global rename of the reusable block names: `sed -i '' -e 's/guides-/board-/g' -e 's/\.guides\b/.board/g' client/src/styles.css` (the `.guides` flex-column block becomes `.board`; every `.guides-*` control/card/empty class becomes `.board-*`).
-2. Delete whole blocks that have no counterpart here: everything from the `.bay {` comment block through `.bay-h[aria-expanded="false"] .bay-caret { … }`; everything from `.guide-viewer {` (now `.board-viewer` after the sed — delete regardless of name) through the `.guide-locked` media block at the bottom of the viewer section, including the two viewer media queries (`@media (max-width: 700px)` viewer overlay block and the 701–1200px `min-height` block); the `@media (min-width: 1201px)` block that references the viewer.
+1. Global rename of the reusable block names: `sed -i '' -e 's/guides-/board-/g' -e 's/\.guides\b/.board/g' client/src/styles.css` (the `.guides` flex-column
+   block becomes `.board`; every `.guides-*` control/card/empty class becomes `.board-*`).
+2. Delete whole blocks that have no counterpart here: everything from the `.bay {` comment block through `.bay-h[aria-expanded="false"] .bay-caret { … }`;
+   everything from `.guide-viewer {` (now `.board-viewer` after the sed — delete regardless of name) through the `.guide-locked` media block at the bottom of
+   the viewer section, including the two viewer media queries (`@media (max-width: 700px)` viewer overlay block and the 701–1200px `min-height` block); the
+   `@media (min-width: 1201px)` block that references the viewer.
 3. Update the header comment (top of file) to name this repo and drop the guide-viewer sentences; keep the `--font-scale`/zoom explanation — it still applies.
 4. Delete the `--bay-gap` custom property from both density blocks (nothing uses it after step 2).
 5. Replace the two pill color rules (`.pill-study`, `.pill-tutor`) with the four section pills:
@@ -1743,10 +1817,22 @@ Start from `../guide-manager/client/src/styles.css` and apply, in order:
 /* Section pills. Outline and ink only, no tint — same rationale as
    guide-manager: a tinted fill would need a mix per palette. Four hues that
    collide with nothing else on the card: --green stays the groomed marker. */
-.pill-bug { color: var(--red); border-color: var(--red) }
-.pill-idea { color: var(--mustard); border-color: var(--mustard) }
-.pill-task { color: var(--cyan); border-color: var(--cyan) }
-.pill-oos { color: var(--ink3); border-color: var(--ink3) }
+.pill-bug {
+  color: var(--red);
+  border-color: var(--red);
+}
+.pill-idea {
+  color: var(--mustard);
+  border-color: var(--mustard);
+}
+.pill-task {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+.pill-oos {
+  color: var(--ink3);
+  border-color: var(--ink3);
+}
 ```
 
 6. Replace the `.board-card-read` / `.board-card-part` rules (post-sed names of the progress markers) with:
@@ -1754,8 +1840,12 @@ Start from `../guide-manager/client/src/styles.css` and apply, in order:
 ```css
 /* Meta-line markers. Groomed is quiet confirmation, not an alarm; done is
    history and dims. */
-.board-card-groomed { color: var(--green) }
-.board-card-done { color: var(--ink2) }
+.board-card-groomed {
+  color: var(--green);
+}
+.board-card-done {
+  color: var(--ink2);
+}
 ```
 
 7. Append the board-columns and drawer styles:
@@ -1767,84 +1857,233 @@ Start from `../guide-manager/client/src/styles.css` and apply, in order:
    on some widths; the type axis is the board's whole point, so the column
    count is stepped explicitly instead. align-items:start keeps a short column
    from stretching to its tallest neighbour. */
-.board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--card-gap); align-items: start }
-@media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
-@media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
+.board-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--card-gap);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .board-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .board-columns {
+    grid-template-columns: 1fr;
+  }
+}
 
-.board-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
+.board-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  min-width: 0;
+}
 /* Column header: the bay header's anatomy (tick, name, count) without the
    fold — a fixed four-column board has nothing to fold. The tick carries the
    section's hue, the same one its pills wear, so a card's pill points back to
    its column at a glance. */
-.board-col-h { display: flex; align-items: baseline; gap: 8px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline) }
-.board-col-tick { flex: none; align-self: center; width: 14px; height: 3px; background: var(--ink3) }
-.board-col-bugs .board-col-tick { background: var(--red) }
-.board-col-ideas .board-col-tick { background: var(--mustard) }
-.board-col-tasks .board-col-tick { background: var(--cyan) }
-.board-col-name {
-  font-family: var(--display); font-size: 14px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink);
+.board-col-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--hairline);
 }
-.board-col-count { font-family: var(--mono); font-size: 9.5px; color: var(--ink3) }
+.board-col-tick {
+  flex: none;
+  align-self: center;
+  width: 14px;
+  height: 3px;
+  background: var(--ink3);
+}
+.board-col-bugs .board-col-tick {
+  background: var(--red);
+}
+.board-col-ideas .board-col-tick {
+  background: var(--mustard);
+}
+.board-col-tasks .board-col-tick {
+  background: var(--cyan);
+}
+.board-col-name {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink);
+}
+.board-col-count {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink3);
+}
 
 /* Degraded-state line above the board: malformed files skipped by the scan,
    or registered projects whose store is gone. Amber, not red — the board
    below it is still real, just partial. */
-.board-warn { font-family: var(--mono); font-size: 10px; color: var(--amber); line-height: 1.5 }
+.board-warn {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--amber);
+  line-height: 1.5;
+}
 
 /* ---------------------------------------------- item drawer
    A right-hand panel over the board; the board stays mounted behind it.
    Fixed elements are inside the zoomed .shell, so both dimensions get the
    same /--font-scale division the guide-manager viewer overlay needs —
    without it the drawer hangs off two edges at any text size but 100%. */
-.drawer-backdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim) }
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--scrim);
+}
 .drawer {
-  position: fixed; top: 0; right: 0; z-index: 61;
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 61;
   height: calc(100dvh / var(--font-scale, 1));
   width: min(480px, calc(100vw / var(--font-scale, 1)));
-  background: var(--strip); border-left: 1px solid var(--hairline);
+  background: var(--strip);
+  border-left: 1px solid var(--hairline);
   box-shadow: -12px 0 32px var(--shadow2);
-  display: flex; flex-direction: column;
+  display: flex;
+  flex-direction: column;
 }
 .drawer-head {
-  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-  padding: 14px 16px; border-bottom: 1px solid var(--hairline);
-  background: var(--strip-hi); box-shadow: inset 0 1px 0 var(--edge);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--strip-hi);
+  box-shadow: inset 0 1px 0 var(--edge);
 }
-.drawer-head .pill { flex: none }
-.drawer-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink) }
+.drawer-head .pill {
+  flex: none;
+}
+.drawer-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
 .drawer-close {
-  font-family: var(--font); font-size: 11.5px; color: var(--ink2);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 5px 10px; cursor: pointer; transition: color .15s, border-color .15s;
+  font-family: var(--font);
+  font-size: 11.5px;
+  color: var(--ink2);
+  background: var(--steel);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
-.drawer-close:hover { color: var(--ink); border-color: var(--hairline2) }
+.drawer-close:hover {
+  color: var(--ink);
+  border-color: var(--hairline2);
+}
 .drawer-meta {
-  display: flex; flex-direction: column; gap: 3px;
-  padding: 10px 16px; border-bottom: 1px solid var(--hairline);
-  font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink2);
 }
-.drawer-meta .drawer-path { color: var(--ink3); word-break: break-all }
-.drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px }
-.drawer-empty { font-size: 11px; color: var(--ink3); padding: 20px 2px; text-align: center }
+.drawer-meta .drawer-path {
+  color: var(--ink3);
+  word-break: break-all;
+}
+.drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+.drawer-empty {
+  font-size: 11px;
+  color: var(--ink3);
+  padding: 20px 2px;
+  text-align: center;
+}
 
 /* Rendered item Markdown. The section headings are the store's fixed ## set
    (Symptom, Plan, …) — styled as printed labels, not document headings. */
 .drawer-body h2 {
-  font-family: var(--display); font-size: 12.5px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .08em; color: var(--ink2);
-  margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--hairline);
+  font-family: var(--display);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink2);
+  margin: 18px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--hairline);
 }
-.drawer-body h2:first-child { margin-top: 0 }
-.drawer-body p, .drawer-body li { font-size: 12.5px; color: var(--ink); line-height: 1.55; margin: 6px 0 }
-.drawer-body ul, .drawer-body ol { padding-left: 18px; margin: 6px 0 }
-.drawer-body code { font-family: var(--mono); font-size: 11px; color: var(--cyan) }
-.drawer-body pre { background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 10px; overflow-x: auto; margin: 8px 0 }
-.drawer-body pre code { color: var(--ink) }
-.drawer-body table { border-collapse: collapse; font-size: 11.5px; margin: 8px 0 }
-.drawer-body th, .drawer-body td { border: 1px solid var(--hairline); padding: 4px 8px; text-align: left; vertical-align: top }
-.drawer-body a { color: var(--cyan) }
-.drawer-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 10px; color: var(--ink2); margin: 6px 0 }
+.drawer-body h2:first-child {
+  margin-top: 0;
+}
+.drawer-body p,
+.drawer-body li {
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.55;
+  margin: 6px 0;
+}
+.drawer-body ul,
+.drawer-body ol {
+  padding-left: 18px;
+  margin: 6px 0;
+}
+.drawer-body code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--cyan);
+}
+.drawer-body pre {
+  background: var(--steel);
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  padding: 10px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.drawer-body pre code {
+  color: var(--ink);
+}
+.drawer-body table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+  margin: 8px 0;
+}
+.drawer-body th,
+.drawer-body td {
+  border: 1px solid var(--hairline);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.drawer-body a {
+  color: var(--cyan);
+}
+.drawer-body blockquote {
+  border-left: 2px solid var(--hairline2);
+  padding-left: 10px;
+  color: var(--ink2);
+  margin: 6px 0;
+}
 ```
 
 - [ ] **Step 8: Write `vite.config.ts`**
@@ -1953,8 +2192,7 @@ describe('vite dev proxy', () => {
 
 - [ ] **Step 10: Run everything**
 
-Run: `pnpm test && pnpm run typecheck && pnpm run build:client`
-Expected: all suites PASS; the client builds (placeholders render).
+Run: `pnpm test && pnpm run typecheck && pnpm run build:client` Expected: all suites PASS; the client builds (placeholders render).
 
 - [ ] **Step 11: Commit**
 
@@ -1968,13 +2206,17 @@ git commit -m "feat: client shell — rail, settings machinery, ported styles, v
 ### Task 11: Board — useBoard hook, BoardView, ItemCard (TDD, jsdom)
 
 **Files:**
+
 - Create: `client/src/hooks/useBoard.ts`, `client/src/components/board/ItemCard.tsx`
 - Modify: `client/src/components/board/BoardView.tsx` (replace the placeholder wholesale)
 - Test: `test/board.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `ItemsIndex`, `ProjectSummary`, `BacklogItem`, `Section` from `shared/types.ts`; `usePersistedState`.
-- Produces: `useBoard(): { items: ItemsIndex | null; projects: ProjectSummary[] | null; loading: boolean; error: boolean; refetch: () => void }`; `ItemCard({ item, onOpen })`; `BoardView` renders `<ItemDrawer item onClose>` when a card is opened — Task 12 supplies the real drawer; until then BoardView imports it, so Task 12's placeholder is created here:
+- Produces: `useBoard(): { items: ItemsIndex | null; projects: ProjectSummary[] | null; loading: boolean; error: boolean; refetch: () => void }`;
+  `ItemCard({ item, onOpen })`; `BoardView` renders `<ItemDrawer item onClose>` when a card is opened — Task 12 supplies the real drawer; until then BoardView
+  imports it, so Task 12's placeholder is created here:
 
 ```tsx
 // client/src/components/board/ItemDrawer.tsx — replaced wholesale in Task 12
@@ -1983,7 +2225,9 @@ import type { BacklogItem } from '../../../../shared/types';
 export function ItemDrawer({ item, onClose }: { item: BacklogItem; onClose: () => void }) {
   return (
     <aside className="drawer" role="dialog" aria-label={item.title}>
-      <button className="drawer-close" onClick={onClose}>close</button>
+      <button className="drawer-close" onClick={onClose}>
+        close
+      </button>
     </aside>
   );
 }
@@ -2006,9 +2250,16 @@ import type { BacklogItem, ItemsIndex, ProjectSummary } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   return {
-    id: 'bug-1', title: 'a bug', created: '2026-08-20', tags: [],
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
+    id: 'bug-1',
+    title: 'a bug',
+    created: '2026-08-20',
+    tags: [],
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     ...over
   };
 }
@@ -2026,12 +2277,9 @@ const ITEMS: ItemsIndex = {
 };
 
 const PROJECTS: ProjectSummary[] = [
-  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 2, ideas: 1, tasks: 0, 'out-of-scope': 1 } },
-  { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false,
-    counts: { bugs: 0, ideas: 0, tasks: 1, 'out-of-scope': 0 } },
-  { name: 'ghost', path: '/abs/ghost', createdAt: '2026-08-26T00:00:00.000Z', missing: true,
-    counts: { bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 } }
+  { name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z', missing: false, counts: { bugs: 2, ideas: 1, tasks: 0, 'out-of-scope': 1 } },
+  { name: 'beta', path: '/abs/beta', createdAt: '2026-08-26T00:00:00.000Z', missing: false, counts: { bugs: 0, ideas: 0, tasks: 1, 'out-of-scope': 0 } },
+  { name: 'ghost', path: '/abs/ghost', createdAt: '2026-08-26T00:00:00.000Z', missing: true, counts: { bugs: 0, ideas: 0, tasks: 0, 'out-of-scope': 0 } }
 ];
 
 beforeEach(() => {
@@ -2052,11 +2300,9 @@ describe('BoardView', () => {
   it('renders the four columns with counts of what they hold (open by default)', async () => {
     await renderBoard();
     const cols = screen.getAllByTestId('board-col');
-    expect(cols.map((c) => within(c).getByTestId('col-name').textContent))
-      .toEqual(['Bugs', 'Ideas', 'Tasks', 'Out of scope']);
+    expect(cols.map((c) => within(c).getByTestId('col-name').textContent)).toEqual(['Bugs', 'Ideas', 'Tasks', 'Out of scope']);
     // done task-9 hidden by the default open filter; oos unaffected
-    expect(cols.map((c) => within(c).getByTestId('col-count').textContent))
-      .toEqual(['2', '1', '1', '1']);
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['2', '1', '1', '1']);
     expect(screen.queryByText('finished task')).not.toBeInTheDocument();
   });
 
@@ -2118,8 +2364,7 @@ Note: `@testing-library/user-event` rides in as a dependency of nothing yet — 
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm test -- test/board.test.tsx`
-Expected: FAIL — `useBoard` / real BoardView missing.
+Run: `pnpm test -- test/board.test.tsx` Expected: FAIL — `useBoard` / real BoardView missing.
 
 - [ ] **Step 3: Implement the hook**
 
@@ -2158,9 +2403,7 @@ export function useBoard(): BoardState {
       fetch('/api/projects').then((res) => res.json() as Promise<ProjectSummary[]>)
     ])
       .then(([items, projects]) => setState({ items, projects, loading: false, error: false }))
-      .catch(() =>
-        setState((prev) => ({ items: prev.items, projects: prev.projects, loading: false, error: true }))
-      );
+      .catch(() => setState((prev) => ({ items: prev.items, projects: prev.projects, loading: false, error: true })));
   }, []);
 
   useEffect(() => {
@@ -2220,9 +2463,7 @@ export function ItemCard({ item, onOpen }: { item: BacklogItem; onOpen: () => vo
           {/* Groomed only on bugs: tasks are groomed by construction, and a
               marker that is always on says nothing. Ungroomed is the default
               state of a fresh bug, not a warning — so silence, not red. */}
-          {item.section === 'bugs' && item.groomed ? (
-            <span className="board-card-groomed"> · groomed</span>
-          ) : null}
+          {item.section === 'bugs' && item.groomed ? <span className="board-card-groomed"> · groomed</span> : null}
           {item.status === 'done' ? <span className="board-card-done"> · done</span> : null}
         </div>
       </div>
@@ -2318,10 +2559,7 @@ export default function BoardView() {
 
   const visible = all.filter(matches);
   const missing = registered.filter((p) => p.missing);
-  const warnings = [
-    ...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`),
-    ...(index?.errors ?? [])
-  ];
+  const warnings = [...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`), ...(index?.errors ?? [])];
 
   return (
     <div className="board">
@@ -2336,35 +2574,22 @@ export default function BoardView() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <select
-            className="board-select"
-            aria-label="Project"
-            value={projectValue}
-            onChange={(e) => setProject(e.target.value)}
-          >
+          <select className="board-select" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
             <option value={ALL}>All projects</option>
             {/* Valued by path, labelled by name — two checkouts of one repo
                 stay two selectable options. */}
             {registered.map((p) => (
-              <option key={p.path} value={p.path}>{p.name}</option>
+              <option key={p.path} value={p.path}>
+                {p.name}
+              </option>
             ))}
           </select>
-          <select
-            className="board-select"
-            aria-label="Status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as StatusFilter)}
-          >
+          <select className="board-select" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
             <option value="open">Open</option>
             <option value="done">Done</option>
             <option value="all">All</option>
           </select>
-          <select
-            className="board-select"
-            aria-label="Sort"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-          >
+          <select className="board-select" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
             <option value="created">Newest first</option>
             <option value="name">By name</option>
             <option value="project">By project</option>
@@ -2394,13 +2619,20 @@ export default function BoardView() {
       ) : (
         <div className="board-columns">
           {COLUMNS.map((col) => {
-            const colItems = sortItems(visible.filter((i) => i.section === col.section), sort);
+            const colItems = sortItems(
+              visible.filter((i) => i.section === col.section),
+              sort
+            );
             return (
               <div className={`board-col board-col-${col.slug}`} key={col.section} data-testid="board-col">
                 <div className="board-col-h">
                   <span className="board-col-tick" />
-                  <span className="board-col-name" data-testid="col-name">{col.label}</span>
-                  <span className="board-col-count" data-testid="col-count">{colItems.length}</span>
+                  <span className="board-col-name" data-testid="col-name">
+                    {col.label}
+                  </span>
+                  <span className="board-col-count" data-testid="col-count">
+                    {colItems.length}
+                  </span>
                 </div>
                 <div className="board-col-cards">
                   {colItems.map((item) => (
@@ -2423,8 +2655,7 @@ Also create the `ItemDrawer` placeholder shown in this task's Interfaces block (
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `pnpm test -- test/board.test.tsx && pnpm run typecheck`
-Expected: PASS (8 tests).
+Run: `pnpm test -- test/board.test.tsx && pnpm run typecheck` Expected: PASS (8 tests).
 
 - [ ] **Step 7: Commit**
 
@@ -2438,10 +2669,12 @@ git commit -m "feat: kanban-by-type board with toolbar filtering"
 ### Task 12: Item drawer (TDD, jsdom)
 
 **Files:**
+
 - Modify: `client/src/components/board/ItemDrawer.tsx` (replace the placeholder wholesale)
 - Test: `test/drawer.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `BacklogItem`; `GET /api/items/body?path=…` (Task 8); `marked`.
 - Produces: `ItemDrawer({ item, onClose })` — backdrop click, close button, and Escape all call `onClose`.
 
@@ -2461,23 +2694,26 @@ import { ItemDrawer } from '../client/src/components/board/ItemDrawer';
 import type { BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
-  id: 'bug-2', title: 'groomed bug', created: '2026-08-20', tags: ['ui'],
-  section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-  groomed: true, path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
+  id: 'bug-2',
+  title: 'groomed bug',
+  created: '2026-08-20',
+  tags: ['ui'],
+  section: 'bugs',
+  status: 'open',
+  project: 'alpha',
+  projectPath: '/abs/alpha',
+  groomed: true,
+  path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
 };
 
 describe('ItemDrawer', () => {
   beforeEach(() => {
-    global.fetch = jest.fn(() =>
-      Promise.resolve({ ok: true, text: () => Promise.resolve('## Cause\n\noff by one\n') } as Response)
-    ) as jest.Mock;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('## Cause\n\noff by one\n') } as Response)) as jest.Mock;
   });
 
   it('fetches the body by path and renders the markdown', async () => {
     render(<ItemDrawer item={ITEM} onClose={() => {}} />);
-    expect(global.fetch).toHaveBeenCalledWith(
-      `/api/items/body?path=${encodeURIComponent(ITEM.path)}`
-    );
+    expect(global.fetch).toHaveBeenCalledWith(`/api/items/body?path=${encodeURIComponent(ITEM.path)}`);
     await waitFor(() => expect(screen.getByText('Cause')).toBeInTheDocument());
     expect(screen.getByText('off by one')).toBeInTheDocument();
   });
@@ -2500,9 +2736,7 @@ describe('ItemDrawer', () => {
   });
 
   it('shows an unavailable state when the body fetch fails', async () => {
-    (global.fetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve({ ok: false, status: 404 } as Response)
-    );
+    (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: false, status: 404 } as Response));
     render(<ItemDrawer item={ITEM} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('item file unavailable')).toBeInTheDocument());
   });
@@ -2511,8 +2745,7 @@ describe('ItemDrawer', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm test -- test/drawer.test.tsx`
-Expected: FAIL — placeholder renders none of this.
+Run: `pnpm test -- test/drawer.test.tsx` Expected: FAIL — placeholder renders none of this.
 
 - [ ] **Step 3: Implement**
 
@@ -2584,7 +2817,9 @@ export function ItemDrawer({ item, onClose }: { item: BacklogItem; onClose: () =
         <div className="drawer-head">
           <span className={`pill ${PILL[item.section].cls}`}>{PILL[item.section].label}</span>
           <span className="drawer-title">{item.title}</span>
-          <button className="drawer-close" onClick={onClose}>close</button>
+          <button className="drawer-close" onClick={onClose}>
+            close
+          </button>
         </div>
         <div className="drawer-meta">
           <span>
@@ -2611,8 +2846,8 @@ export function ItemDrawer({ item, onClose }: { item: BacklogItem; onClose: () =
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm test -- test/drawer.test.tsx test/board.test.tsx && pnpm run typecheck`
-Expected: PASS (the board suite's drawer-open assertion now runs against the real drawer).
+Run: `pnpm test -- test/drawer.test.tsx test/board.test.tsx && pnpm run typecheck` Expected: PASS (the board suite's drawer-open assertion now runs against the
+real drawer).
 
 - [ ] **Step 5: Commit**
 
@@ -2626,10 +2861,12 @@ git commit -m "feat: read-only item drawer with rendered markdown body"
 ### Task 13: Settings view (TDD, jsdom)
 
 **Files:**
+
 - Modify: `client/src/components/settings/SettingsView.tsx` (replace the placeholder wholesale)
 - Test: `test/settings-view.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `useSettings`, `SettingsRow`/`SettingsGroup`/`Segmented`, `THEMES`/`FONT_SCALES`/`Landing`.
 - Produces: the Settings section — theme swatches, density, text size, opens-on. No Reading group (that was the bionic aid).
 
@@ -2694,8 +2931,7 @@ describe('SettingsView', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm test -- test/settings-view.test.tsx`
-Expected: FAIL — placeholder.
+Run: `pnpm test -- test/settings-view.test.tsx` Expected: FAIL — placeholder.
 
 - [ ] **Step 3: Implement**
 
@@ -2703,14 +2939,14 @@ Replace `client/src/components/settings/SettingsView.tsx` with guide-manager's `
 
 1. Delete the whole `<SettingsGroup title="Reading">…</SettingsGroup>` block, and the now-unused `ON_OFF`, `STRENGTHS`, `FREQUENCIES` constants.
 2. `LANDINGS` becomes `[{ value: 'last', label: 'Last used' }, { value: 'projects', label: 'Projects' }, { value: 'settings', label: 'Settings' }]`.
-3. In the "Text size" row's hint, drop the trailing sentence about the guide inside the viewer (there is no viewer): keep `"Scales the whole board, not just type — the rail, the cards and the spacing move with it."`
+3. In the "Text size" row's hint, drop the trailing sentence about the guide inside the viewer (there is no viewer): keep
+   `"Scales the whole board, not just type — the rail, the cards and the spacing move with it."`
 4. In the "Density" row's hint, `"more guides per screen"` → `"more items per screen"`.
 5. Keep `SWATCHES`, the theme grid, Density, Text size, and Opens on exactly as they are otherwise.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `pnpm test && pnpm run typecheck`
-Expected: full suite PASS.
+Run: `pnpm test && pnpm run typecheck` Expected: full suite PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -2724,15 +2960,18 @@ git commit -m "feat: settings — theme, density, text size, landing (no bionic)
 ### Task 14: Docker, docs, self-registration, final verification
 
 **Files:**
+
 - Create: `Dockerfile`, `docker-compose.yml`, `README.md`, `CLAUDE.md`, `.dockerignore`
 
 **Interfaces:**
+
 - Consumes: everything.
 - Produces: `pnpm run docker:up` bringing up api (4322) + client (5177); the repo registered in the real registry; docs.
 
 - [ ] **Step 1: Write `Dockerfile` and `.dockerignore`**
 
-Copy `../guide-manager/Dockerfile` verbatim — it is app-name-free (node:24-slim, procps, corepack, the two dependency-layer COPY lines) and every comment still applies. Copy `.dockerignore` verbatim too (`node_modules`, `dist`, `client/dist`, `.git` — check the source's exact list).
+Copy `../guide-manager/Dockerfile` verbatim — it is app-name-free (node:24-slim, procps, corepack, the two dependency-layer COPY lines) and every comment still
+applies. Copy `.dockerignore` verbatim too (`node_modules`, `dist`, `client/dist`, `.git` — check the source's exact list).
 
 - [ ] **Step 2: Write `docker-compose.yml`**
 
@@ -2805,12 +3044,16 @@ volumes:
 
 - [ ] **Step 3: Write `README.md` and `CLAUDE.md`**
 
-`README.md`: what this is (the four backlog skills as a plugin + the board app), the store format table (from `backlog/README.md`), install-as-plugin instructions (`/plugin marketplace add <path-or-repo>` then `/plugin install backlog-manager@backlog-manager-marketplace`), the commands table, ports, and a screenshot placeholder.
+`README.md`: what this is (the four backlog skills as a plugin + the board app), the store format table (from `backlog/README.md`), install-as-plugin
+instructions (`/plugin marketplace add <path-or-repo>` then `/plugin install backlog-manager@backlog-manager-marketplace`), the commands table, ports, and a
+screenshot placeholder.
 
-`CLAUDE.md`, modeled on guide-manager's — commands table (`docker:up`, `dev`, `dev:web`, `test`, `test:skills`, `typecheck`, `build`), layout section, and these invariants (each one line, in guide-manager's voice):
+`CLAUDE.md`, modeled on guide-manager's — commands table (`docker:up`, `dev`, `dev:web`, `test`, `test:skills`, `typecheck`, `build`), layout section, and these
+invariants (each one line, in guide-manager's voice):
 
 - `skills/` is the plugin skill root; never duplicate under `.claude/skills/`.
-- `~/.backlog-manager/registry.json` has exactly one writer: `skills/backlog/tools/backlog.mjs` (its `init`/`new` upsert). The server re-reads it per request, never writes, never caches.
+- `~/.backlog-manager/registry.json` has exactly one writer: `skills/backlog/tools/backlog.mjs` (its `init`/`new` upsert). The server re-reads it per request,
+  never writes, never caches.
 - Item files are read-only to the server and client; every write goes through the skills.
 - Every server route lives under `/api`; the Vite proxy has exactly one entry, asserted by `test/vite-proxy.test.ts`.
 - Item bodies are served through an allowlist built from the registry (`allow.util.ts`); a file outside every registered `backlog/` 404s.
@@ -2830,13 +3073,14 @@ node skills/backlog/tools/backlog.mjs init
 
 Expected: `already initialized` (Task 4 created the store) — and the real `~/.backlog-manager/registry.json` now lists this repo.
 
-Run: `pnpm test && pnpm run test:skills && pnpm run typecheck && pnpm run build`
-Expected: everything PASS, both bundles build.
+Run: `pnpm test && pnpm run test:skills && pnpm run typecheck && pnpm run build` Expected: everything PASS, both bundles build.
 
 - [ ] **Step 5: Manual smoke — the running board**
 
-Terminal 1: `pnpm run dev` · Terminal 2: `pnpm run dev:web`, open `http://localhost:5177`.
-Expected: four columns; this repo's own backlog items visible (capture one first if the store is empty: `node skills/backlog/tools/backlog.mjs new ideas "seed the board"` and write the printed file with the idea headings); clicking a card opens the drawer with the rendered body; Settings switches themes with no flash on reload; the phone breakpoint (narrow the window under 700px) stacks the columns and lays the rail down.
+Terminal 1: `pnpm run dev` · Terminal 2: `pnpm run dev:web`, open `http://localhost:5177`. Expected: four columns; this repo's own backlog items visible
+(capture one first if the store is empty: `node skills/backlog/tools/backlog.mjs new ideas "seed the board"` and write the printed file with the idea headings);
+clicking a card opens the drawer with the rendered body; Settings switches themes with no flash on reload; the phone breakpoint (narrow the window under 700px)
+stacks the columns and lays the rail down.
 
 - [ ] **Step 6: Commit**
 
@@ -2848,15 +3092,23 @@ git commit -m "chore: docker stack (no db), docs, self-registered store"
 - [ ] **Step 7: Hand the user the migration steps (do not perform them)**
 
 Print for the user:
-1. `claude` → `/plugin marketplace add /Users/andrejajevtic/Documents/custom-projects/backlog-manager` → `/plugin install backlog-manager@backlog-manager-marketplace`.
+
+1. `claude` → `/plugin marketplace add /Users/andrejajevtic/Documents/custom-projects/backlog-manager` →
+   `/plugin install backlog-manager@backlog-manager-marketplace`.
 2. Verify `/backlog` still answers in some project (now served by the plugin).
-3. Delete the old copies: `rm -rf ~/.claude/skills/backlog ~/.claude/skills/backlog-capture ~/.claude/skills/backlog-groom ~/.claude/skills/backlog-execute` — only after step 2, otherwise the skills load twice and drift.
-4. Existing projects appear on the board the first time any backlog skill runs in them (each `init`/`new` registers). To pre-seed one without capturing: `cd <project> && node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init`.
+3. Delete the old copies: `rm -rf ~/.claude/skills/backlog ~/.claude/skills/backlog-capture ~/.claude/skills/backlog-groom ~/.claude/skills/backlog-execute` —
+   only after step 2, otherwise the skills load twice and drift.
+4. Existing projects appear on the board the first time any backlog skill runs in them (each `init`/`new` registers). To pre-seed one without capturing:
+   `cd <project> && node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init`.
 
 ---
 
 ## Self-review notes (run after writing, fixed inline)
 
-- Spec coverage: registration (T4), 3 API routes (T7/T8), board B with toolbar + persisted selects + fail-open project filter (T11), drawer (T12), settings minus bionic (T13), 5 themes (T2/T10), docker no-mongo + ro mounts + tailnet (T14), partial-board errors[] (T7), missing-project flag (T7 + warn line T11), allowlist (T8), vite proxy invariant (T10), migration/rollout (T3 + T14). Self-dogfooding store: T4 smoke + T14.
-- Type consistency: `Section`/`ItemStatus`/`BacklogItem`/`ItemsIndex`/`ProjectSummary` defined once in T2 and imported everywhere; `REGISTRY_FILE` token provided in T5's module explicitly so overrides work in T7/T8/T9 suites; drawer placeholder created in T11 so T11 compiles before T12.
-- Known judgment calls an executor must not "fix": no database; no polling (focus refetch only); drawer read-only; `out-of-scope` ignores the status select; groomed marker only on bug cards.
+- Spec coverage: registration (T4), 3 API routes (T7/T8), board B with toolbar + persisted selects + fail-open project filter (T11), drawer (T12), settings
+  minus bionic (T13), 5 themes (T2/T10), docker no-mongo + ro mounts + tailnet (T14), partial-board errors[] (T7), missing-project flag (T7 + warn line T11),
+  allowlist (T8), vite proxy invariant (T10), migration/rollout (T3 + T14). Self-dogfooding store: T4 smoke + T14.
+- Type consistency: `Section`/`ItemStatus`/`BacklogItem`/`ItemsIndex`/`ProjectSummary` defined once in T2 and imported everywhere; `REGISTRY_FILE` token
+  provided in T5's module explicitly so overrides work in T7/T8/T9 suites; drawer placeholder created in T11 so T11 compiles before T12.
+- Known judgment calls an executor must not "fix": no database; no polling (focus refetch only); drawer read-only; `out-of-scope` ignores the status select;
+  groomed marker only on bug cards.

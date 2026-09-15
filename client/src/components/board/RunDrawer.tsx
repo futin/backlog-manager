@@ -4,8 +4,16 @@ import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { projectLabel } from '../../lib/project-label';
 import { mergeModeLabel, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import {
-  formatClock, formatSpan, formatSpanCompact, inStageMs, isTerminalStage, runClockMs, runElapsedMs,
-  runIsLive, stepperDots, stepperTerminal
+  formatClock,
+  formatSpan,
+  formatSpanCompact,
+  inStageMs,
+  isTerminalStage,
+  runClockMs,
+  runElapsedMs,
+  runIsLive,
+  stepperDots,
+  stepperTerminal
 } from '../../lib/run-time';
 import { RunControls } from '../RunControls';
 import type { RunControlsChange } from '../RunControls';
@@ -95,7 +103,6 @@ function staleNote(run: RunPayload): string | null {
   return `no heartbeat${age} — resume or abort from the terminal`;
 }
 
-
 // `TIMELESS_STAGES` and `RowTime` — the row's right-hand time reading — moved
 // to `./RunRowTime` (Task 3). The detail pane had its own separate reading
 // that counted queue wait back in, which Task 2 measured as wrong; moving the
@@ -145,11 +152,7 @@ function staleNote(run: RunPayload): string | null {
  * still prints the current stage in words for everyone, so nobody has to walk
  * the dots to learn the one fact that matters most.
  */
-function RowStepper({ item, live, mergeModeEffective }: {
-  item: RunQueueItem;
-  live: boolean;
-  mergeModeEffective: MergeMode;
-}): JSX.Element | null {
+function RowStepper({ item, live, mergeModeEffective }: { item: RunQueueItem; live: boolean; mergeModeEffective: MergeMode }): JSX.Element | null {
   if (item.stage === 'ungroomed') return null;
 
   const terminal = stepperTerminal(item, mergeModeEffective);
@@ -193,11 +196,7 @@ function RowStepper({ item, live, mergeModeEffective }: {
  * its stalled dot already say where the item stopped, so a third `null`
  * return beside this function's two existing ones is the answer.
  */
-function RowStageCaption({ item, now, live }: {
-  item: RunQueueItem;
-  now: number;
-  live: boolean;
-}): JSX.Element | null {
+function RowStageCaption({ item, now, live }: { item: RunQueueItem; now: number; live: boolean }): JSX.Element | null {
   if (!live) return null;
   if (isTerminalStage(item.stage) || item.stage === 'pending') return null;
   const ms = inStageMs(item, now);
@@ -227,7 +226,13 @@ function RowStageCaption({ item, now, live }: {
  * does NOT carry over: there is no project-hue identity or dispatch action
  * for a run the way there is for one backlog item.
  */
-export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
+export function RunDrawer({
+  run,
+  onClose,
+  gate,
+  resuming,
+  onChanged
+}: {
   run: RunPayload;
   onClose: () => void;
   /** task-17: the environment half of "may this browser resume a run"
@@ -341,7 +346,9 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
               on it without going back out to the strip. The component decides
               from the run alone whether it renders anything at all. */}
           <RunControls run={run} gate={gate} resuming={resuming} onChanged={onChanged} />
-          <button className="drawer-close" onClick={onClose}>close</button>
+          <button className="drawer-close" onClick={onClose}>
+            close
+          </button>
         </div>
         <div className="drawer-meta">
           <span data-testid="run-drawer-past">
@@ -354,7 +361,9 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
               construction that keeps every OTHER `mergeModeLabel` call site
               byte-identical for a run this feature predates. */}
           {modeLabel !== null && (
-            <span className="run-mode-badge" data-testid="run-drawer-mode">{modeLabel}</span>
+            <span className="run-mode-badge" data-testid="run-drawer-mode">
+              {modeLabel}
+            </span>
           )}
           {/* Each half appears only if its own stamp parsed: a run file with a
               readable `startedAt` and a corrupt `updatedAt` can still say when
@@ -362,10 +371,9 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
               an empty separator hanging in the meta line. */}
           {(startedClock !== null || elapsed !== null) && (
             <span data-testid="run-drawer-time">
-              {[
-                startedClock === null ? null : `started ${startedClock}`,
-                elapsed === null ? null : `${formatSpanCompact(elapsed)} elapsed`
-              ].filter((part) => part !== null).join(' · ')}
+              {[startedClock === null ? null : `started ${startedClock}`, elapsed === null ? null : `${formatSpanCompact(elapsed)} elapsed`]
+                .filter((part) => part !== null)
+                .join(' · ')}
             </span>
           )}
         </div>
@@ -374,7 +382,9 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
               for why a stale heartbeat has to be the first thing read, ahead
               of a pipeline that can no longer be trusted to be current. */}
           {note !== null && (
-            <div className="run-drawer-note" data-testid="run-drawer-note">{note}</div>
+            <div className="run-drawer-note" data-testid="run-drawer-note">
+              {note}
+            </div>
           )}
 
           <div className="run-drawer-chips" data-testid="run-drawer-chips">
@@ -474,10 +484,7 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
                         carries an empty list, so a key-gated heading would
                         print on every row of every run this app has shown. */}
                     {(q.assumptions ?? []).length > 0 && (
-                      <div
-                        className="run-drawer-item-assumptions"
-                        data-testid={`run-drawer-assumptions-${q.id}`}
-                      >
+                      <div className="run-drawer-item-assumptions" data-testid={`run-drawer-assumptions-${q.id}`}>
                         <div className="run-drawer-assumptions-label">assumed</div>
                         <dl className="run-drawer-assumptions-list">
                           {(q.assumptions ?? []).map((a, i) => (
@@ -512,9 +519,7 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
                       <details className="run-drawer-item-verify" open={!verify.ok}>
                         <summary className="run-drawer-item-verify-summary">
                           <span className="run-drawer-item-verify-cmd">{verify.cmd}</span>
-                          <span className={verify.ok ? 'run-drawer-item-verify-ok' : 'run-drawer-item-verify-bad'}>
-                            {verify.ok ? 'ok' : 'failed'}
-                          </span>
+                          <span className={verify.ok ? 'run-drawer-item-verify-ok' : 'run-drawer-item-verify-bad'}>{verify.ok ? 'ok' : 'failed'}</span>
                         </summary>
                         <span className="run-drawer-item-verify-tail">{verify.tail}</span>
                       </details>
@@ -543,11 +548,7 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
             run.attention.map((a, i) => {
               const item = run.queue.find((q) => q.id === a.id);
               return (
-                <div
-                  key={`${a.id}-${a.kind}-${i}`}
-                  className="run-drawer-attn"
-                  data-testid={`run-drawer-attention-${a.id}`}
-                >
+                <div key={`${a.id}-${a.kind}-${i}`} className="run-drawer-attn" data-testid={`run-drawer-attention-${a.id}`}>
                   <div className="run-drawer-attn-head">
                     <span className="run-drawer-item-id">{a.id}</span>
                     <span className="run-drawer-attn-kind">{a.kind}</span>
@@ -560,7 +561,9 @@ export function RunDrawer({ run, onClose, gate, resuming, onChanged }: {
                       nothing for a parked or fix-exhausted entry. */}
                   {item !== undefined && item.questions.length > 0 && (
                     <ul className="run-drawer-questions">
-                      {item.questions.map((question) => <li key={question}>{question}</li>)}
+                      {item.questions.map((question) => (
+                        <li key={question}>{question}</li>
+                      ))}
                     </ul>
                   )}
                 </div>

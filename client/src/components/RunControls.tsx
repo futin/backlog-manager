@@ -67,7 +67,12 @@ export function inFlightItemId(queue: RunControlsRun['queue']): string | null {
   return item?.id ?? null;
 }
 
-export function RunControls({ run, gate, resuming, onChanged }: {
+export function RunControls({
+  run,
+  gate,
+  resuming,
+  onChanged
+}: {
   run: RunControlsRun;
   gate: { canResume: boolean; blockedReason: string | null };
   resuming: boolean;
@@ -100,9 +105,12 @@ export function RunControls({ run, gate, resuming, onChanged }: {
       .finally(() => setBusy(false));
   };
 
-  const errorNode = error === null ? null : (
-    <span className="run-controls-error" data-testid="run-controls-error">{error}</span>
-  );
+  const errorNode =
+    error === null ? null : (
+      <span className="run-controls-error" data-testid="run-controls-error">
+        {error}
+      </span>
+    );
 
   // A run this component has nothing to offer for: crashed (the strip owns
   // it), or over. Checked first so every branch below can assume a live or
@@ -157,7 +165,9 @@ export function RunControls({ run, gate, resuming, onChanged }: {
     return (
       <span className="run-controls">
         {resuming ? (
-          <span className="run-controls-note" data-testid="run-controls-resuming">Resuming…</span>
+          <span className="run-controls-note" data-testid="run-controls-resuming">
+            Resuming…
+          </span>
         ) : (
           <button
             type="button"

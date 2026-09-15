@@ -209,9 +209,7 @@ function clampOrigin(value: unknown, fallback: string): string {
   if (typeof value !== 'string' || value.trim() === '') return fallback;
   try {
     const url = new URL(value.trim());
-    return url.protocol === 'http:' || url.protocol === 'https:'
-      ? `${url.origin}${url.pathname.replace(/\/+$/, '')}`
-      : fallback;
+    return url.protocol === 'http:' || url.protocol === 'https:' ? `${url.origin}${url.pathname.replace(/\/+$/, '')}` : fallback;
   } catch {
     return fallback;
   }
@@ -258,28 +256,13 @@ export function clampSettings(raw: unknown): Settings {
   return {
     theme: pickOne(s.theme, THEME_IDS, DEFAULT_SETTINGS.theme),
     density: pickOne(s.density, DENSITIES, DEFAULT_SETTINGS.density),
-    fontScale: clampInt(
-      s.fontScale, DEFAULT_SETTINGS.fontScale,
-      LIMITS.fontScale.min, LIMITS.fontScale.max
-    ),
+    fontScale: clampInt(s.fontScale, DEFAULT_SETTINGS.fontScale, LIMITS.fontScale.min, LIMITS.fontScale.max),
     landing: pickOne(s.landing, LANDINGS, DEFAULT_SETTINGS.landing),
     linkBase: clampOrigin(s.linkBase, DEFAULT_SETTINGS.linkBase),
-    dispatchDefaultModel: pickOne(
-      s.dispatchDefaultModel, DISPATCH_MODELS, DEFAULT_SETTINGS.dispatchDefaultModel
-    ),
-    dispatchDefaultEffort: pickOne(
-      s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort
-    ),
-    orchestrateDefaultMergeMode: pickOne(
-      s.orchestrateDefaultMergeMode, MERGE_MODES, DEFAULT_SETTINGS.orchestrateDefaultMergeMode
-    ),
-    orchestrateDefaultQuestionMode: pickOne(
-      s.orchestrateDefaultQuestionMode, QUESTION_MODES,
-      DEFAULT_SETTINGS.orchestrateDefaultQuestionMode
-    ),
-    staleDays: clampDays(
-      s.staleDays, DEFAULT_SETTINGS.staleDays,
-      LIMITS.staleDays.min, LIMITS.staleDays.max
-    )
+    dispatchDefaultModel: pickOne(s.dispatchDefaultModel, DISPATCH_MODELS, DEFAULT_SETTINGS.dispatchDefaultModel),
+    dispatchDefaultEffort: pickOne(s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort),
+    orchestrateDefaultMergeMode: pickOne(s.orchestrateDefaultMergeMode, MERGE_MODES, DEFAULT_SETTINGS.orchestrateDefaultMergeMode),
+    orchestrateDefaultQuestionMode: pickOne(s.orchestrateDefaultQuestionMode, QUESTION_MODES, DEFAULT_SETTINGS.orchestrateDefaultQuestionMode),
+    staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max)
   };
 }

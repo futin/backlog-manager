@@ -10,10 +10,25 @@ import type { BacklogItem } from '../shared/types';
  */
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   return {
-    id: 'bug-1', title: 'a bug', created: '2026-03-01', started: '', updated: '',
-    lastCommit: '', phase: '', groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0, kind: '', tags: [],
-    section: 'bugs', status: 'open', project: 'alpha', projectPath: '/abs/alpha',
-    groomed: false, path: '/abs/alpha/backlog/bugs/open/bug-1.md',
+    id: 'bug-1',
+    title: 'a bug',
+    created: '2026-03-01',
+    started: '',
+    updated: '',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    tags: [],
+    section: 'bugs',
+    status: 'open',
+    project: 'alpha',
+    projectPath: '/abs/alpha',
+    groomed: false,
+    path: '/abs/alpha/backlog/bugs/open/bug-1.md',
     ...over
   };
 }
@@ -23,8 +38,7 @@ describe('monthKey', () => {
     // The two must agree: an item is in Archive BECAUSE of `updated`, so
     // grouping it by `created` would order a column on a number nobody used to
     // decide the column's contents.
-    expect(monthKey(fakeItem({ created: '2026-03-01', updated: '2026-08-15T09:12:00Z' })))
-      .toBe('2026-08');
+    expect(monthKey(fakeItem({ created: '2026-03-01', updated: '2026-08-15T09:12:00Z' }))).toBe('2026-08');
   });
 
   it('falls back to created when updated is empty', () => {
@@ -34,8 +48,7 @@ describe('monthKey', () => {
   it('groups by lastCommit when updated is absent', () => {
     // Same precedence as isStale, so a column ordered by month matches the
     // dates that decided which items are in it.
-    expect(monthKey(fakeItem({ created: '2026-03-01', lastCommit: '2026-08-28T17:02:39+02:00' })))
-      .toBe('2026-08');
+    expect(monthKey(fakeItem({ created: '2026-03-01', lastCommit: '2026-08-28T17:02:39+02:00' }))).toBe('2026-08');
   });
 
   it('reads a bare YYYY-MM-DD updated as well as a timestamp', () => {
@@ -90,10 +103,7 @@ describe('groupByMonth', () => {
   it('puts the undated group last, though its key sorts first as a string', () => {
     // '' < '2026-06' lexicographically, so a plain descending sort would put the
     // items nobody can date above everything anyone can.
-    const groups = groupByMonth([
-      fakeItem({ id: 'bug-9', created: '', updated: '' }),
-      fakeItem({ id: 'bug-1', updated: '2026-06-10' })
-    ]);
+    const groups = groupByMonth([fakeItem({ id: 'bug-9', created: '', updated: '' }), fakeItem({ id: 'bug-1', updated: '2026-06-10' })]);
     expect(groups.map((g) => g.key)).toEqual(['2026-06', UNDATED]);
   });
 
@@ -119,10 +129,7 @@ describe('groupByMonth', () => {
   });
 
   it('groups two Augusts a year apart separately', () => {
-    const groups = groupByMonth([
-      fakeItem({ id: 'bug-1', updated: '2025-08-10' }),
-      fakeItem({ id: 'bug-2', updated: '2026-08-10' })
-    ]);
+    const groups = groupByMonth([fakeItem({ id: 'bug-1', updated: '2025-08-10' }), fakeItem({ id: 'bug-2', updated: '2026-08-10' })]);
     expect(groups.map((g) => g.label)).toEqual(['aug 2026', 'aug 2025']);
   });
 
@@ -133,10 +140,7 @@ describe('groupByMonth', () => {
   it('never mutates the array it was handed', () => {
     // The array belongs to the fetched index — the same discipline sortItems
     // keeps in BoardView.
-    const items = [
-      fakeItem({ id: 'bug-1', updated: '2026-06-10' }),
-      fakeItem({ id: 'bug-2', updated: '2026-08-10' })
-    ];
+    const items = [fakeItem({ id: 'bug-1', updated: '2026-06-10' }), fakeItem({ id: 'bug-2', updated: '2026-08-10' })];
     groupByMonth(items);
     expect(items.map((i) => i.id)).toEqual(['bug-1', 'bug-2']);
   });

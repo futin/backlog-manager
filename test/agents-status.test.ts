@@ -8,7 +8,10 @@ import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 
 const HEALTH = {
-  ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto'
+  ok: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto'
 };
 const MANAGEMENT = {
   projects: [
@@ -65,8 +68,12 @@ describe('GET /api/agents/status', () => {
     stubDashboard();
     const res = await request(app.getHttpServer()).get('/api/agents/status').expect(200);
     expect(res.body).toEqual({
-      enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-      spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha', '/abs/beta']
+      enabled: true,
+      reachable: true,
+      remoteAnswer: true,
+      spawnAvailable: true,
+      spawnMaxPermission: 'auto',
+      projectPaths: ['/abs/alpha', '/abs/beta']
     });
   });
 
@@ -76,8 +83,12 @@ describe('GET /api/agents/status', () => {
     const res = await request(app.getHttpServer()).get('/api/agents/status').expect(200);
     expect(calls).toEqual([]);
     expect(res.body).toEqual({
-      enabled: false, reachable: false, remoteAnswer: false, spawnAvailable: false,
-      spawnMaxPermission: null, projectPaths: []
+      enabled: false,
+      reachable: false,
+      remoteAnswer: false,
+      spawnAvailable: false,
+      spawnMaxPermission: null,
+      projectPaths: []
     });
   });
 
@@ -103,10 +114,9 @@ describe('GET /api/agents/status', () => {
   it('reads an unrecognised ceiling as null rather than passing it through', async () => {
     global.fetch = jest.fn((input: RequestInfo | URL) =>
       Promise.resolve({
-        ok: true, status: 200,
-        json: () => Promise.resolve(
-          String(input).endsWith('/api/management') ? MANAGEMENT : { ...HEALTH, spawnMaxPermission: 'godmode' }
-        )
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(String(input).endsWith('/api/management') ? MANAGEMENT : { ...HEALTH, spawnMaxPermission: 'godmode' })
       } as Response)
     ) as jest.Mock;
     const res = await request(app.getHttpServer()).get('/api/agents/status').expect(200);

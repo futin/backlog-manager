@@ -146,7 +146,9 @@ export function useOrchestratorRuns(): {
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const refresh = useCallback(() => {
@@ -169,9 +171,7 @@ export function useOrchestratorRuns(): {
         // the same reason: correctness never depends on the sweep.
         setResumeMarks((prev) => {
           const now = Date.now();
-          const next = new Map(
-            [...prev].filter(([project, expiresAt]) => now < expiresAt && !hasResumed(payload.runs, project))
-          );
+          const next = new Map([...prev].filter(([project, expiresAt]) => now < expiresAt && !hasResumed(payload.runs, project)));
           // Same Map when nothing was dropped, so a landed payload that
           // changed nothing here does not force an extra render.
           return next.size === prev.size ? prev : next;
@@ -236,13 +236,10 @@ export function useOrchestratorRuns(): {
    * why it is `running` AND `fresh` rather than `running` alone.
    */
   const resuming: ReadonlySet<string> = new Set(
-    [...resumeMarks]
-      .filter(([project, expiresAt]) => Date.now() < expiresAt && !hasResumed(runs, project))
-      .map(([project]) => project)
+    [...resumeMarks].filter(([project, expiresAt]) => Date.now() < expiresAt && !hasResumed(runs, project)).map(([project]) => project)
   );
 
-  const anyLive =
-    runs.some((run) => run.fresh || run.status === 'running') || starting.length > 0 || resuming.size > 0;
+  const anyLive = runs.some((run) => run.fresh || run.status === 'running') || starting.length > 0 || resuming.size > 0;
 
   /**
    * The point of this hook: an interval that exists only while it has
@@ -289,14 +286,17 @@ export function useOrchestratorRuns(): {
    * Overwrites any existing deadline rather than keeping the earlier one: a
    * second click is a second attempt, and it deserves its own full window.
    */
-  const noteResume = useCallback((project: string) => {
-    setResumeMarks((prev) => {
-      const next = new Map(prev);
-      next.set(project, Date.now() + RESUME_POLL_GRACE_MS);
-      return next;
-    });
-    refresh();
-  }, [refresh]);
+  const noteResume = useCallback(
+    (project: string) => {
+      setResumeMarks((prev) => {
+        const next = new Map(prev);
+        next.set(project, Date.now() + RESUME_POLL_GRACE_MS);
+        return next;
+      });
+      refresh();
+    },
+    [refresh]
+  );
 
   return { runs, starting, refresh, noteResume, resuming };
 }

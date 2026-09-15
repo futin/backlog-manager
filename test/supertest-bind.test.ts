@@ -237,9 +237,7 @@ describe('every supertest suite listens through the helper', () => {
   });
 
   it('has no supertest suite that skips listenLoopback', () => {
-    const offenders = files
-      .filter((file) => file.source.includes("from 'supertest'") && !file.source.includes('listenLoopback('))
-      .map((file) => file.path);
+    const offenders = files.filter((file) => file.source.includes("from 'supertest'") && !file.source.includes('listenLoopback(')).map((file) => file.path);
 
     expect(offenders).toEqual([]);
   });

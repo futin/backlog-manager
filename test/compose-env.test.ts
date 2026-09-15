@@ -60,8 +60,7 @@ describe('docker-compose BM_AGENTS', () => {
     // dispatch in the container. The override therefore rides a DIFFERENT key,
     // and the default is still the documented Docker Desktop topology — so a
     // `cp .env.example .env` install reaches the same address it always did.
-    expect(assignments('BM_AGENTS_URL'))
-      .toEqual(['${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}']);
+    expect(assignments('BM_AGENTS_URL')).toEqual(['${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}']);
   });
 
   it('never interpolates the host-oriented key into the container', () => {

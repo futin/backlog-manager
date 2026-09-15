@@ -42,9 +42,7 @@ function payloadWith(status: OrchestratorRun['status'], fresh: boolean): Orchest
  *  the same body, for the cases that only care about CALL COUNT in one
  *  unchanging world. */
 function stubFetch(body: OrchestratorRunsPayload): jest.Mock {
-  const fn = jest.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response)
-  );
+  const fn = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
   global.fetch = fn as unknown as typeof fetch;
   return fn;
 }
@@ -135,7 +133,7 @@ describe('useOrchestratorRuns', () => {
    * `result.current.runs` stuck at `[]` forever, confirming this case would
    * have caught the bug had it existed from Task 10's first draft.
    */
-  it('lands data normally after React StrictMode\'s dev-only mount, cleanup, remount cycle', async () => {
+  it("lands data normally after React StrictMode's dev-only mount, cleanup, remount cycle", async () => {
     const fetchMock = stubFetch(payload(true));
     const { result } = renderHook(() => useOrchestratorRuns(), { wrapper: StrictMode });
 
@@ -348,11 +346,17 @@ describe('useOrchestratorRuns', () => {
    */
   it('does not update state, throw, or warn for a fetch that resolves after a genuine unmount', async () => {
     let resolveFetch!: (body: OrchestratorRunsPayload) => void;
-    const fetchMock = jest.fn(() => new Promise<Response>((resolve) => {
-      resolveFetch = (body) => resolve({
-        ok: true, status: 200, json: () => Promise.resolve(body)
-      } as Response);
-    }));
+    const fetchMock = jest.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = (body) =>
+            resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve(body)
+            } as Response);
+        })
+    );
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const { result, unmount } = renderHook(() => useOrchestratorRuns());
@@ -537,9 +541,13 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.current.resuming.has(fixture.project)).toBe(true);
 
-    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
@@ -557,7 +565,9 @@ describe('useOrchestratorRuns', () => {
     expect(result.current.resuming.has(fixture.project)).toBe(false);
 
     const before = fetchMock.mock.calls.length;
-    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
     expect(fetchMock.mock.calls.length).toBe(before + 1);
   });
 
@@ -574,7 +584,7 @@ describe('useOrchestratorRuns', () => {
     const fetchMock = stubFetchSequence([
       payloadWith('running', false), // crashed: running, stale heartbeat
       payloadWith('running', false), // still crashed — the resumed session has not heartbeated yet
-      payloadWith('running', true)   // heartbeating again
+      payloadWith('running', true) // heartbeating again
     ]);
     const { result } = renderHook(() => useOrchestratorRuns());
     await flush();
@@ -585,7 +595,9 @@ describe('useOrchestratorRuns', () => {
     });
     expect(result.current.resuming.has(fixture.project)).toBe(true);
 
-    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
     expect(result.current.resuming.has(fixture.project)).toBe(false);
     expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
   });
@@ -600,11 +612,15 @@ describe('useOrchestratorRuns', () => {
       await jest.advanceTimersByTimeAsync(0);
     });
 
-    await act(async () => { await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS + 5_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS + 5_000);
+    });
     const settled = fetchMock.mock.calls.length;
     expect(result.current.resuming.has(fixture.project)).toBe(false);
 
-    await act(async () => { await jest.advanceTimersByTimeAsync(30_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
     expect(fetchMock.mock.calls.length).toBe(settled);
   });
 
@@ -617,7 +633,9 @@ describe('useOrchestratorRuns', () => {
       result.current.noteResume(fixture.project);
       await jest.advanceTimersByTimeAsync(0);
     });
-    await act(async () => { await jest.advanceTimersByTimeAsync(120_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(120_000);
+    });
 
     await act(async () => {
       result.current.noteResume(fixture.project);
@@ -627,10 +645,14 @@ describe('useOrchestratorRuns', () => {
     // 4 minutes after the FIRST call is only 2 minutes after the second, so
     // the mark is still live — a stored deadline that was never rewritten
     // would already have expired here.
-    await act(async () => { await jest.advanceTimersByTimeAsync(120_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(120_000);
+    });
     expect(result.current.resuming.has(fixture.project)).toBe(true);
 
-    await act(async () => { await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(RESUME_POLL_GRACE_MS);
+    });
     expect(result.current.resuming.has(fixture.project)).toBe(false);
   });
 
@@ -642,7 +664,9 @@ describe('useOrchestratorRuns', () => {
     await flush();
 
     const { refresh, noteResume } = result.current;
-    await act(async () => { await jest.advanceTimersByTimeAsync(5_000); });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
 
     expect(result.current.refresh).toBe(refresh);
     expect(result.current.noteResume).toBe(noteResume);

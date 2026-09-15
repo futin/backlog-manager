@@ -48,23 +48,17 @@ describe('NumberField', () => {
   });
 
   it('re-seeds when the value changes from somewhere else', () => {
-    const { rerender } = render(
-      <NumberField value={30} min={1} max={365} onCommit={jest.fn()} label="Stale after" />
-    );
+    const { rerender } = render(<NumberField value={30} min={1} max={365} onCommit={jest.fn()} label="Stale after" />);
     rerender(<NumberField value={90} min={1} max={365} onCommit={jest.fn()} label="Stale after" />);
 
     expect(screen.getByRole('spinbutton', { name: 'Stale after' })).toHaveValue(90);
   });
 
   it('draws the unit only when given', () => {
-    const { rerender } = render(
-      <NumberField value={30} min={1} max={365} onCommit={jest.fn()} label="Stale after" />
-    );
+    const { rerender } = render(<NumberField value={30} min={1} max={365} onCommit={jest.fn()} label="Stale after" />);
     expect(document.querySelector('.ui-number-unit')).toBeNull();
 
-    rerender(
-      <NumberField value={30} min={1} max={365} onCommit={jest.fn()} label="Stale after" unit="days" />
-    );
+    rerender(<NumberField value={30} min={1} max={365} onCommit={jest.fn()} label="Stale after" unit="days" />);
     expect(screen.getByText('days')).toHaveClass('ui-number-unit');
   });
 });

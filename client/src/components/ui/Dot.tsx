@@ -1,6 +1,4 @@
-export type DotTone =
-  | 'live' | 'paused' | 'crashed' | 'done'
-  | 'ramp-refactors' | 'ramp-ideas' | 'ramp-bugs' | 'ramp-tasks';
+export type DotTone = 'live' | 'paused' | 'crashed' | 'done' | 'ramp-refactors' | 'ramp-ideas' | 'ramp-bugs' | 'ramp-tasks';
 
 /**
  * Dot — §7's legend dot (.claude/DESIGN.md §7, §8.2, §8.3, §8.8).
@@ -24,13 +22,9 @@ export type DotTone =
  * blanket rule, which freezes an animation on its LAST keyframe rather than
  * cancelling it.
  */
-export function Dot(
-  props: { size?: 8 | 10; breathe?: boolean } & ({ tone: DotTone } | { hue: number })
-) {
+export function Dot(props: { size?: 8 | 10; breathe?: boolean } & ({ tone: DotTone } | { hue: number })) {
   const { size = 8, breathe } = props;
   const paint = 'tone' in props ? `ui-dot-${props.tone}` : `ui-dot-proj-${props.hue}`;
-  const className = [
-    'ui-dot', paint, size === 10 ? 'ui-dot-10' : 'ui-dot-8', breathe ? 'ui-dot-breathe' : null
-  ].filter(Boolean).join(' ');
+  const className = ['ui-dot', paint, size === 10 ? 'ui-dot-10' : 'ui-dot-8', breathe ? 'ui-dot-breathe' : null].filter(Boolean).join(' ');
   return <span className={className} aria-hidden="true" />;
 }

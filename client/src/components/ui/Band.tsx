@@ -15,9 +15,7 @@ import type { ReactNode } from 'react';
  * site without a nested fragment. `SheetHead` below makes the opposite choice
  * for the opposite reason — see its own comment.
  */
-export function Band({
-  title, sub, children
-}: { title: ReactNode; sub?: ReactNode; children?: ReactNode }) {
+export function Band({ title, sub, children }: { title: ReactNode; sub?: ReactNode; children?: ReactNode }) {
   return (
     <header className="ui-band">
       <div className="ui-band-text">

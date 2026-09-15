@@ -7,15 +7,17 @@ import { useAgents } from '../client/src/hooks/useAgents';
 import type { AgentsStatus } from '../shared/types';
 
 const READY: AgentsStatus = {
-  enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true,
-  spawnMaxPermission: 'auto', projectPaths: ['/abs/alpha']
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/abs/alpha']
 };
 
 /** Same shape test/orchestrator-hook.test.tsx's own `stubFetch` uses. */
 function stubFetch(body: AgentsStatus): jest.Mock {
-  const fn = jest.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response)
-  );
+  const fn = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
   global.fetch = fn as unknown as typeof fetch;
   return fn;
 }
@@ -41,7 +43,9 @@ describe('useAgents reload', () => {
     await waitFor(() => expect(result.current.status).toEqual(READY));
 
     let answered: AgentsStatus | null = null;
-    await act(async () => { answered = await result.current.reload(); });
+    await act(async () => {
+      answered = await result.current.reload();
+    });
 
     expect(answered).toEqual(READY);
   });
@@ -58,7 +62,9 @@ describe('useAgents reload', () => {
     await waitFor(() => expect(result.current.status).not.toBeNull());
 
     let answered: AgentsStatus | null = null;
-    await act(async () => { answered = await result.current.reload(); });
+    await act(async () => {
+      answered = await result.current.reload();
+    });
 
     expect(answered).toMatchObject({ enabled: false, reachable: false, projectPaths: [] });
   });

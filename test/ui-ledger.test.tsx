@@ -14,12 +14,15 @@ describe('Ledger', () => {
     cannot move the box onto its own wrapper and leave this one hollow.
   */
   it('owns the scroll box and takes the columns it is handed', () => {
-    render(<Ledger columns="1fr auto auto" label="History">rows</Ledger>);
+    render(
+      <Ledger columns="1fr auto auto" label="History">
+        rows
+      </Ledger>
+    );
 
     const box = screen.getByRole('group', { name: 'History' });
     expect(box).toHaveClass('ui-ledger');
-    expect(box.querySelector('.ui-ledger-grid'))
-      .toHaveStyle({ gridTemplateColumns: '1fr auto auto' });
+    expect(box.querySelector('.ui-ledger-grid')).toHaveStyle({ gridTemplateColumns: '1fr auto auto' });
   });
 });
 

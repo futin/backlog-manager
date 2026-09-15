@@ -114,11 +114,7 @@ describe('uncommittedItemPaths', () => {
       known: true
     });
 
-    const diffOnly = cp.execFileSync(
-      'git',
-      ['-C', root, 'diff', '--name-only', '--no-renames', 'main', '--', 'backlog'],
-      { cwd: root, encoding: 'utf8' }
-    );
+    const diffOnly = cp.execFileSync('git', ['-C', root, 'diff', '--name-only', '--no-renames', 'main', '--', 'backlog'], { cwd: root, encoding: 'utf8' });
     expect(diffOnly.trim()).toBe('');
   });
 
@@ -284,7 +280,12 @@ describe('GET /api/items/uncommitted', () => {
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
-      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }, { name: 'beta', path: otherPath }]))
+      .useValue(
+        makeRegistry([
+          { name: 'alpha', path: projectPath },
+          { name: 'beta', path: otherPath }
+        ])
+      )
       .compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -300,10 +301,7 @@ describe('GET /api/items/uncommitted', () => {
 
   // --- case 12 ----------------------------------------------------------
   it('case 12: 200s with { paths, known } for a registered project', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/api/items/uncommitted')
-      .query({ project: projectPath })
-      .expect(200);
+    const res = await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath }).expect(200);
     // The uncommitted file of THIS project, not the other registered one —
     // which is clean, so a service that resolved the wrong entry would answer
     // an empty list here.
@@ -328,14 +326,10 @@ describe('GET /api/items/uncommitted', () => {
     // process is the first thing worth watching.
     const unregistered = join(tmpdir(), 'bm-uncommitted-unregistered-never-created');
     const spawnSpy = jest.spyOn(cp, 'execFileSync');
-    await request(app.getHttpServer())
-      .get('/api/items/uncommitted')
-      .query({ project: unregistered })
-      .expect(404, { error: 'not found' });
+    await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: unregistered }).expect(404, { error: 'not found' });
     const asked = spawnSpy.mock.calls.some(
       ([, args, opts]) =>
-        JSON.stringify(args ?? []).includes(unregistered) ||
-        String((opts as { cwd?: string } | undefined)?.cwd ?? '').startsWith(unregistered)
+        JSON.stringify(args ?? []).includes(unregistered) || String((opts as { cwd?: string } | undefined)?.cwd ?? '').startsWith(unregistered)
     );
     expect(asked).toBe(false);
     // Guards the guard: with the registry gate removed the util is reached,
@@ -348,13 +342,8 @@ describe('GET /api/items/uncommitted', () => {
 
   // --- case 14 ----------------------------------------------------------
   it('case 14: 400s when project is absent, and when it is blank', async () => {
-    await request(app.getHttpServer())
-      .get('/api/items/uncommitted')
-      .expect(400, { error: 'project is required' });
-    await request(app.getHttpServer())
-      .get('/api/items/uncommitted')
-      .query({ project: '   ' })
-      .expect(400, { error: 'project is required' });
+    await request(app.getHttpServer()).get('/api/items/uncommitted').expect(400, { error: 'project is required' });
+    await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: '   ' }).expect(400, { error: 'project is required' });
   });
 });
 

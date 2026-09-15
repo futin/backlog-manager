@@ -25,30 +25,36 @@ import type { AgentsStatus } from '../../../shared/types';
 export function useAgents(): { status: AgentsStatus | null; reload: () => Promise<AgentsStatus> } {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
 
-  const reload = useCallback(() => (
-    fetchAgentsStatus()
-      .then((fresh) => {
-        setStatus(fresh);
-        return fresh;
-      })
-      // A failing status endpoint is our own API being down, which the board's
-      // own error state already covers. Report it as "off" rather than leaving
-      // it null forever: null means "still asking".
-      //
-      // Resolved, never rejected, and the returned promise carries the same
-      // off-status the state gets: an awaiting caller is inside a click
-      // handler, where an unhandled rejection would be an uncaught error in
-      // the UI, and `enabled: false` already reads as an environment-level
-      // block — i.e. "open nothing" — to everything that consumes it.
-      .catch(() => {
-        const off: AgentsStatus = {
-          enabled: false, reachable: false, remoteAnswer: false,
-          spawnAvailable: false, spawnMaxPermission: null, projectPaths: []
-        };
-        setStatus(off);
-        return off;
-      })
-  ), []);
+  const reload = useCallback(
+    () =>
+      fetchAgentsStatus()
+        .then((fresh) => {
+          setStatus(fresh);
+          return fresh;
+        })
+        // A failing status endpoint is our own API being down, which the board's
+        // own error state already covers. Report it as "off" rather than leaving
+        // it null forever: null means "still asking".
+        //
+        // Resolved, never rejected, and the returned promise carries the same
+        // off-status the state gets: an awaiting caller is inside a click
+        // handler, where an unhandled rejection would be an uncaught error in
+        // the UI, and `enabled: false` already reads as an environment-level
+        // block — i.e. "open nothing" — to everything that consumes it.
+        .catch(() => {
+          const off: AgentsStatus = {
+            enabled: false,
+            reachable: false,
+            remoteAnswer: false,
+            spawnAvailable: false,
+            spawnMaxPermission: null,
+            projectPaths: []
+          };
+          setStatus(off);
+          return off;
+        }),
+    []
+  );
 
   useEffect(() => {
     // `void`: the promise is the return of an explicit re-ask (bug-13), and
@@ -58,7 +64,9 @@ export function useAgents(): { status: AgentsStatus | null; reload: () => Promis
   }, [reload]);
 
   useEffect(() => {
-    const onFocus = (): void => { void reload(); };
+    const onFocus = (): void => {
+      void reload();
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [reload]);

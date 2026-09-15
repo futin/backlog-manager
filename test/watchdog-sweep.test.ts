@@ -185,7 +185,10 @@ describe('watchdog sweeper', () => {
 
   const svc = (): WatchdogService => app!.get(WatchdogService);
   const state = (): WatchdogStateService => app!.get(WatchdogStateService);
-  const kinds = (kind: WatchdogEventKind) => state().events().filter((e) => e.kind === kind);
+  const kinds = (kind: WatchdogEventKind) =>
+    state()
+      .events()
+      .filter((e) => e.kind === kind);
 
   /** `<BM_ORCH_HOME>/<encodeURIComponent(project)>/run.json` — the exact
    *  layout orchestrate.mjs's own projectDir()/runFilePath() write. */
@@ -744,10 +747,7 @@ describe('watchdog sweeper', () => {
     await createApp({ listen: true }); // hands this app to supertest below
     writeRun({ ...fixture, project: projectPath, status: 'paused', updatedAt: new Date().toISOString() });
 
-    await request(app!.getHttpServer())
-      .post('/api/agents/resume')
-      .send({ project: projectPath })
-      .expect(201);
+    await request(app!.getHttpServer()).post('/api/agents/resume').send({ project: projectPath }).expect(201);
     expect(dash.spawns()).toHaveLength(1);
 
     // The tick that used to wipe it: a paused run is not `running`, so it is
@@ -755,10 +755,7 @@ describe('watchdog sweeper', () => {
     await svc().tick();
     expect(state().entry(fixture.runId)?.resumeSpawnAt).not.toBeNull();
 
-    await request(app!.getHttpServer())
-      .post('/api/agents/resume')
-      .send({ project: projectPath })
-      .expect(409);
+    await request(app!.getHttpServer()).post('/api/agents/resume').send({ project: projectPath }).expect(409);
     expect(dash.spawns()).toHaveLength(1);
 
     // The retention is "still resumable", not "forever": the moment that run
@@ -772,7 +769,7 @@ describe('watchdog sweeper', () => {
 
   // --- 10: the gate refusing is a failure, recorded the same way ------------
 
-  it('records the gate\'s own wording when the dashboard is unreachable', async () => {
+  it("records the gate's own wording when the dashboard is unreachable", async () => {
     const dash = stubDashboard({ reject: true });
     await createApp();
     writeRun(crashedRun(projectPath));

@@ -48,7 +48,11 @@ describe('POST /api/agents/pause', () => {
   }
 
   const runningRun = (over: Partial<OrchestratorRun> = {}): OrchestratorRun => ({
-    ...fixture, project: projectPath, status: 'running', updatedAt: new Date().toISOString(), ...over
+    ...fixture,
+    project: projectPath,
+    status: 'running',
+    updatedAt: new Date().toISOString(),
+    ...over
   });
 
   async function createApp(): Promise<void> {
@@ -81,9 +85,13 @@ describe('POST /api/agents/pause', () => {
     // A stub that would ANSWER a dashboard call, so a route that made one
     // would pass rather than blow up — the point is the call count, not a
     // rejection that could mask itself as some other failure.
-    fetchStub = jest.fn(() => Promise.resolve({
-      ok: true, status: 200, json: () => Promise.resolve({ ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' })
-    } as Response)) as jest.Mock;
+    fetchStub = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' })
+      } as Response)
+    ) as jest.Mock;
     global.fetch = fetchStub;
 
     await createApp();
@@ -100,7 +108,9 @@ describe('POST /api/agents/pause', () => {
   });
 
   const post = (body: unknown) =>
-    request(app.getHttpServer()).post('/api/agents/pause').send(body as object);
+    request(app.getHttpServer())
+      .post('/api/agents/pause')
+      .send(body as object);
 
   it('400s a missing, empty or blank project', async () => {
     for (const body of [{}, { project: '' }, { project: '  ' }]) {
@@ -114,18 +124,15 @@ describe('POST /api/agents/pause', () => {
     expect(res.body).toEqual({ error: 'no running run to pause for this project' });
   });
 
-  it.each([['done'], ['aborted'], ['failed'], ['paused']] as const)(
-    '409s a run whose status is already %s',
-    async (status) => {
-      writeRun(runningRun({ status }));
-      const res = await post({ project: projectPath }).expect(409);
-      expect(res.body).toEqual({ error: 'no running run to pause for this project' });
-      // Nothing written on a refusal — a request naming a run that cannot act
-      // on it would sit there until the NEXT run started and be judged
-      // against that one's runId instead.
-      expect(readPauseRequest(projectPath, controlRoot)).toBeNull();
-    }
-  );
+  it.each([['done'], ['aborted'], ['failed'], ['paused']] as const)('409s a run whose status is already %s', async (status) => {
+    writeRun(runningRun({ status }));
+    const res = await post({ project: projectPath }).expect(409);
+    expect(res.body).toEqual({ error: 'no running run to pause for this project' });
+    // Nothing written on a refusal — a request naming a run that cannot act
+    // on it would sit there until the NEXT run started and be judged
+    // against that one's runId instead.
+    expect(readPauseRequest(projectPath, controlRoot)).toBeNull();
+  });
 
   it('writes a request pinned to the run for a fresh running run', async () => {
     writeRun(runningRun());

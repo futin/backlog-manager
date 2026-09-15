@@ -10,18 +10,14 @@ import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-ra
 import { RUN_STATUS_GLYPH, mergeModeLabel, runStatusChip } from '../../lib/run-stage';
 import { useRunsMode } from '../../hooks/useRunsMode';
 import { MODE_BUTTON, RUNS_MODES } from '../../lib/runs-mode';
-import {
-  aggregateRuns, dayKey, dayLabel, formatUsd, runStageTotals, runUsageTotals, runWallMs, sumStageTotals
-} from '../../lib/run-stats';
+import { aggregateRuns, dayKey, dayLabel, formatUsd, runStageTotals, runUsageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
 import { formatSpanCompact } from '../../lib/run-time';
 import { RunDetail } from './RunDetail';
 import { StageBars } from './StageBars';
 import { WatchdogMonitor } from './WatchdogMonitor';
 import type { RunRange } from '../../lib/run-range';
 import { resumeGate } from '../../../../shared/agent';
-import type {
-  OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RunStage, StartingRun
-} from '../../../../shared/types';
+import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RunStage, StartingRun } from '../../../../shared/types';
 
 /**
  * Runs — the board's third surface: history of every backlog-orchestrate run
@@ -440,14 +436,7 @@ function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { complete
  * run, so this adds nothing to the row for the shape of run that made up
  * every row in this list before this feature existed.
  */
-function RunRow({
-  row, now, isSelected, onSelect
-}: {
-  row: MergedRun;
-  now: number;
-  isSelected: boolean;
-  onSelect: () => void;
-}): JSX.Element {
+function RunRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: number; isSelected: boolean; onSelect: () => void }): JSX.Element {
   const { run } = row;
   const authority = pickAuthority([row.live], run);
   // bug-29: the status word, glyph and class, with `running` + a dead
@@ -490,7 +479,9 @@ function RunRow({
         </span>
         <span className="runs-row-project">{projectLabel(run.project)}</span>
         {modeLabel !== null && (
-          <span className="run-mode-badge" data-testid={`runs-row-mode-${run.runId}`}>{modeLabel}</span>
+          <span className="run-mode-badge" data-testid={`runs-row-mode-${run.runId}`}>
+            {modeLabel}
+          </span>
         )}
         {/* task-17: only a LIVE entry can carry this — `pauseRequested` is
             derived per request against a run that still exists on disk, and an
@@ -506,9 +497,13 @@ function RunRow({
             still waiting whether or not the run has stamped a heartbeat
             lately. */}
         {row.live?.pauseRequested === true && (
-          <span className="run-mode-badge" data-testid={`runs-row-pausing-${run.runId}`}>pausing</span>
+          <span className="run-mode-badge" data-testid={`runs-row-pausing-${run.runId}`}>
+            pausing
+          </span>
         )}
-        <span className="runs-row-count">{completed}/{total}</span>
+        <span className="runs-row-count">
+          {completed}/{total}
+        </span>
       </span>
       {/* The row's foot line: wall time, and what the run cost. Either half
           can be known without the other — a run with a corrupt `startedAt`
@@ -518,10 +513,7 @@ function RunRow({
           null-tolerant join `RunDetail`'s head and lead lines already use. */}
       {(wall !== null || cost !== null) && (
         <span className="runs-row-wall" data-testid={`runs-row-foot-${run.runId}`}>
-          {[
-            wall === null ? null : formatSpanCompact(wall),
-            cost
-          ].filter((part) => part !== null).join(' · ')}
+          {[wall === null ? null : formatSpanCompact(wall), cost].filter((part) => part !== null).join(' · ')}
         </span>
       )}
     </button>
@@ -730,8 +722,7 @@ export default function RunsView() {
   // the range or the project filter never removes an option that would
   // switch back: a project with no runs in the selected range must still
   // appear in this select, or there would be no way to widen back to it.
-  const projects = Array.from(new Set(merged.map((m) => m.run.project)))
-    .sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)));
+  const projects = Array.from(new Set(merged.map((m) => m.run.project))).sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)));
 
   // Range scoping runs BEFORE the project filter, not merely alongside it:
   // `inRange` reads only `startedAt` (lib/run-range.ts's own file header
@@ -812,11 +803,8 @@ export default function RunsView() {
   // `find` returns `undefined` and the first row in reading order takes over
   // rather than the detail pane silently pointing at a run the list can no
   // longer show.
-  const selectedRow = (
-    selected !== null
-      ? orderedRows.find((r) => r.run.project === selected.project && r.run.runId === selected.runId)
-      : undefined
-  ) ?? orderedRows[0];
+  const selectedRow =
+    (selected !== null ? orderedRows.find((r) => r.run.project === selected.project && r.run.runId === selected.runId) : undefined) ?? orderedRows[0];
 
   // Fix round 3: this used to be `filtered.map((m) => m.run)` — the
   // ARCHIVE record for every run, live-backed or not. A re-review caught
@@ -831,7 +819,10 @@ export default function RunsView() {
   // through the same `pickAuthority` call `RunRow` already uses closes it
   // the same way: every run in scope contributes its freshest known queue,
   // not whichever snapshot happened to be sitting in the archive payload.
-  const aggregates = aggregateRuns(filtered.map((m) => pickAuthority([m.live], m.run)), now);
+  const aggregates = aggregateRuns(
+    filtered.map((m) => pickAuthority([m.live], m.run)),
+    now
+  );
 
   // Task 7's own generalization of the identical fix-round-3 rule
   // immediately above: the wide "machine time by stage" tile sums
@@ -861,17 +852,16 @@ export default function RunsView() {
   // `key` for identity exactly the way this list already treats it
   // everywhere else. A bare `runId` key would silently misbehave on a
   // collision the dedupe fix above no longer drops from the list.
-  const renderRows = (rows: readonly MergedRun[]): JSX.Element[] => rows.map((row) => (
-    <RunRow
-      key={runKey(row.run.project, row.run.runId)}
-      row={row}
-      now={now}
-      isSelected={selectedRow !== undefined
-        && selectedRow.run.project === row.run.project
-        && selectedRow.run.runId === row.run.runId}
-      onSelect={() => setSelected({ project: row.run.project, runId: row.run.runId })}
-    />
-  ));
+  const renderRows = (rows: readonly MergedRun[]): JSX.Element[] =>
+    rows.map((row) => (
+      <RunRow
+        key={runKey(row.run.project, row.run.runId)}
+        row={row}
+        now={now}
+        isSelected={selectedRow !== undefined && selectedRow.run.project === row.run.project && selectedRow.run.runId === row.run.runId}
+        onSelect={() => setSelected({ project: row.run.project, runId: row.run.runId })}
+      />
+    ));
 
   return (
     // `runs-board` (task-16) is the modifier that bounds this section to one
@@ -883,8 +873,8 @@ export default function RunsView() {
         <div className="board-title">Runs</div>
         <div className="board-tools">
           {mode === 'runs' && merged.length > 0 && (
-          <>
-            {/* The range control (Task 7) — see styles.css's own `.runs-seg`
+            <>
+              {/* The range control (Task 7) — see styles.css's own `.runs-seg`
                 comment for why this is a segmented button group and not a
                 fifth `<select>` beside the project one. `role="group"` +
                 `aria-label` name the whole cluster for assistive tech the
@@ -892,35 +882,28 @@ export default function RunsView() {
                 each button's own `aria-pressed` (not a shared radio input)
                 states ITS membership in the group, matching the semantics
                 an exclusive toggle set is supposed to carry. */}
-            <div className="runs-seg" role="group" aria-label="Range" data-testid="runs-range">
-              {RUN_RANGES.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  data-testid={`runs-range-${r}`}
-                  aria-pressed={r === range}
-                  onClick={() => setRange(r)}
-                >
-                  {RANGE_BUTTON[r]}
-                </button>
-              ))}
-            </div>
-            <select
-              className="board-select"
-              aria-label="Project"
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
-            >
-              <option value="all">All projects</option>
-              {projects.map((p) => <option key={p} value={p}>{projectLabel(p)}</option>)}
-            </select>
-            {/* Inert, and inside this fragment on purpose: it appears exactly
+              <div className="runs-seg" role="group" aria-label="Range" data-testid="runs-range">
+                {RUN_RANGES.map((r) => (
+                  <button key={r} type="button" data-testid={`runs-range-${r}`} aria-pressed={r === range} onClick={() => setRange(r)}>
+                    {RANGE_BUTTON[r]}
+                  </button>
+                ))}
+              </div>
+              <select className="board-select" aria-label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+                <option value="all">All projects</option>
+                {projects.map((p) => (
+                  <option key={p} value={p}>
+                    {projectLabel(p)}
+                  </option>
+                ))}
+              </select>
+              {/* Inert, and inside this fragment on purpose: it appears exactly
                 when the filters do, so watchdog mode never shows an orphan
                 rule beside a lone switch. Its job is grouping — three
                 controls in one row, two of which scope history and one of
                 which picks the surface, should not read as one instrument. */}
-            <span className="board-tools-divider" aria-hidden="true" data-testid="runs-tools-divider" />
-          </>
+              <span className="board-tools-divider" aria-hidden="true" data-testid="runs-tools-divider" />
+            </>
           )}
           {/* task-18's mode switch, and the one tool in this bar that sits
               OUTSIDE the `merged.length > 0` condition wrapping the two
@@ -943,13 +926,7 @@ export default function RunsView() {
               its left. */}
           <div className="runs-seg" role="group" aria-label="View" data-testid="runs-mode">
             {RUNS_MODES.map((m) => (
-              <button
-                key={m}
-                type="button"
-                data-testid={`runs-mode-${m}`}
-                aria-pressed={m === mode}
-                onClick={() => setStoredMode(m)}
-              >
+              <button key={m} type="button" data-testid={`runs-mode-${m}`} aria-pressed={m === mode} onClick={() => setStoredMode(m)}>
                 {MODE_BUTTON[m]}
               </button>
             ))}
@@ -1028,7 +1005,9 @@ export default function RunsView() {
                 branch-mode fixture, which pins this tile at `2/2` for a run
                 that merged zero of two items. */}
             <div className="runs-tile" data-testid="runs-tile-merged">
-              <div className="runs-tile-value">{aggregates.itemsMerged}/{aggregates.itemsQueued}</div>
+              <div className="runs-tile-value">
+                {aggregates.itemsMerged}/{aggregates.itemsQueued}
+              </div>
               <div className="runs-tile-label">completed / queued</div>
             </div>
             {/* "avg item work" (Task 7), not "avg item": `avgItemWorkMs`
@@ -1042,9 +1021,7 @@ export default function RunsView() {
                 wide tile below (and RunDetail's own rollup) already caveat
                 the identical number rather than leaving it implicit. */}
             <div className="runs-tile" data-testid="runs-tile-avg-item">
-              <div className="runs-tile-value">
-                {aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}
-              </div>
+              <div className="runs-tile-value">{aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}</div>
               <div className="runs-tile-label">avg item work</div>
               <div className="runs-tile-substat">queue wait excluded</div>
             </div>
@@ -1078,15 +1055,11 @@ export default function RunsView() {
               data-testid="runs-tile-fixloops"
               title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."
             >
-              <div className="runs-tile-value">
-                {aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}
-              </div>
+              <div className="runs-tile-value">{aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}</div>
               <div className="runs-tile-label">rework / completed</div>
             </div>
             <div className="runs-tile" data-testid="runs-tile-verify">
-              <div className="runs-tile-value">
-                {aggregates.verifyPassRate === null ? '—' : `${Math.round(aggregates.verifyPassRate * 100)}%`}
-              </div>
+              <div className="runs-tile-value">{aggregates.verifyPassRate === null ? '—' : `${Math.round(aggregates.verifyPassRate * 100)}%`}</div>
               <div className="runs-tile-label">verify pass</div>
             </div>
             {/* The sixth, wide tile (Task 7) — `machine` (computed above,
@@ -1166,7 +1139,9 @@ export default function RunsView() {
                 // conditions rather than one, because they answer different
                 // questions and the starting row can coexist with either.
                 startingRows.length > 0 ? null : (
-                  <div className="drawer-empty" data-testid="runs-empty-range">no runs in this range</div>
+                  <div className="drawer-empty" data-testid="runs-empty-range">
+                    no runs in this range
+                  </div>
                 )
               ) : (
                 <>

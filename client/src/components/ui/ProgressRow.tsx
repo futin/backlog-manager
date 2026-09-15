@@ -21,7 +21,14 @@ import type { ReactNode } from 'react';
  * decoration, so the numbers have to live on the element.
  */
 export function ProgressRow({
-  name, value, max, caption, hatch, height = 10, fill = 'progress', valueText
+  name,
+  value,
+  max,
+  caption,
+  hatch,
+  height = 10,
+  fill = 'progress',
+  valueText
 }: {
   name?: ReactNode;
   value: number;
@@ -52,12 +59,7 @@ export function ProgressRow({
         aria-valuemax={safeMax}
         aria-valuenow={clamped}
       >
-        <span
-          className={[
-            'ui-progress-fill', `ui-progress-fill-${fill}`, hatch ? 'hatch' : null
-          ].filter(Boolean).join(' ')}
-          style={{ width: `${pct}%` }}
-        />
+        <span className={['ui-progress-fill', `ui-progress-fill-${fill}`, hatch ? 'hatch' : null].filter(Boolean).join(' ')} style={{ width: `${pct}%` }} />
       </div>
       {caption && <span className="ui-progress-caption">{caption}</span>}
     </div>

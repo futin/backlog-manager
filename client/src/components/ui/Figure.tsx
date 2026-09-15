@@ -24,7 +24,12 @@ export function FigureStrip({ children }: { children: ReactNode }) {
 }
 
 export function Figure({
-  label, value, unit, line, tone = 'ink', wide
+  label,
+  value,
+  unit,
+  line,
+  tone = 'ink',
+  wide
 }: {
   label: ReactNode;
   value: ReactNode;

@@ -15,20 +15,27 @@ describe('GET /api/items and /api/projects', () => {
   let app: INestApplication;
 
   const alpha = makeProject('alpha', [
-    { leaf: 'bugs/open', filename: 'bug-1-it-breaks.md',
-      content: item('bug-1', 'it breaks', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n') },
-    { leaf: 'bugs/open', filename: 'bug-2-groomed.md',
-      content: item('bug-2', 'groomed bug', '## Symptom\n\nx\n\n## Cause\n\noff by one\n\n## Fix\n\nuse <=\n') },
-    { leaf: 'tasks/open', filename: 'task-1-build-it.md',
-      content: item('task-1', 'build it', '## Goal\n\ng\n\n## Plan\n\n1. step\n', 'tags: ui, board\n') },
-    { leaf: 'bugs/open', filename: 'bug-3-in-progress.md',
-      content: item('bug-3', 'someone is on it', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-28T14:03:07Z\n') },
+    { leaf: 'bugs/open', filename: 'bug-1-it-breaks.md', content: item('bug-1', 'it breaks', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-2-groomed.md',
+      content: item('bug-2', 'groomed bug', '## Symptom\n\nx\n\n## Cause\n\noff by one\n\n## Fix\n\nuse <=\n')
+    },
+    { leaf: 'tasks/open', filename: 'task-1-build-it.md', content: item('task-1', 'build it', '## Goal\n\ng\n\n## Plan\n\n1. step\n', 'tags: ui, board\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-3-in-progress.md',
+      content: item('bug-3', 'someone is on it', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-28T14:03:07Z\n')
+    },
     // The shape `start` wrote before it stamped a time. Nothing rewrites an
     // existing item's frontmatter, so this is on disk permanently and the
     // scanner has to keep surfacing it — the client is what knows a bare date
     // can only be aged in days.
-    { leaf: 'bugs/open', filename: 'bug-4-legacy-start.md',
-      content: item('bug-4', 'started the old way', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-24\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-4-legacy-start.md',
+      content: item('bug-4', 'started the old way', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'started: 2026-08-24\n')
+    },
     // Task 4 fixtures: every new key present at once — proves the scan still
     // parses, still derives section/status from the directory, and doesn't
     // add itself to errors[].
@@ -37,45 +44,60 @@ describe('GET /api/items and /api/projects', () => {
     // reason: they are a second pair of kebab keys that has to reach a second
     // pair of camelCase fields, and nothing but a real file carrying them
     // proves the mapping exists.
-    { leaf: 'bugs/open', filename: 'bug-5-live-groom.md',
-      content: item('bug-5', 'mid groom', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
-        'phase: groom\nupdated: 2026-08-30T12:00:00Z\ngroom-elapsed: 90\nexecute-elapsed: 7\ngroom-tokens: 4200\nexecute-tokens: 7\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-5-live-groom.md',
+      content: item(
+        'bug-5',
+        'mid groom',
+        '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
+        'phase: groom\nupdated: 2026-08-30T12:00:00Z\ngroom-elapsed: 90\nexecute-elapsed: 7\ngroom-tokens: 4200\nexecute-tokens: 7\n'
+      )
+    },
     // execute-elapsed present without groom-elapsed: the two buckets are
     // independent counters, not a shared one that both keys feed.
-    { leaf: 'bugs/open', filename: 'bug-6-live-execute.md',
-      content: item('bug-6', 'mid execute', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
-        'phase: execute\nexecute-elapsed: 7\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-6-live-execute.md',
+      content: item('bug-6', 'mid execute', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', 'phase: execute\nexecute-elapsed: 7\n')
+    },
     // An unrecognised phase and a negative elapsed value, both only reachable
     // by hand-editing the file — the CLI never writes either.
-    { leaf: 'bugs/open', filename: 'bug-7-bad-values.md',
-      content: item('bug-7', 'hand-edited', '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
-        'phase: wat\ngroom-elapsed: -5\ngroom-tokens: 4.2\nexecute-tokens: abc\n') },
-    { leaf: 'tasks/done', filename: 'task-2-shipped.md',
-      content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
-    { leaf: 'out-of-scope', filename: 'oos-1-nope.md',
-      content: item('oos-1', 'nope', '## What was proposed\n\nx\n\n## Why rejected\n\ny\n') },
+    {
+      leaf: 'bugs/open',
+      filename: 'bug-7-bad-values.md',
+      content: item(
+        'bug-7',
+        'hand-edited',
+        '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n',
+        'phase: wat\ngroom-elapsed: -5\ngroom-tokens: 4.2\nexecute-tokens: abc\n'
+      )
+    },
+    { leaf: 'tasks/done', filename: 'task-2-shipped.md', content: item('task-2', 'shipped', '## Goal\n\ng\n\n## Plan\n\ndone\n') },
+    { leaf: 'out-of-scope', filename: 'oos-1-nope.md', content: item('oos-1', 'nope', '## What was proposed\n\nx\n\n## Why rejected\n\ny\n') },
     // Task 2 fixtures. The store on disk is what proves the scanner picks the
     // new leaf directories up at all — LEAVES in scan.util.ts is a hand-written
     // mirror of backlog.mjs's LEAF_DIRS, so nothing but a real refactors/ file
     // arriving in the index shows the two lists still agree.
-    { leaf: 'refactors/open', filename: 'ref-1-split-the-scanner.md',
-      content: item('ref-1', 'split the scanner',
+    {
+      leaf: 'refactors/open',
+      filename: 'ref-1-split-the-scanner.md',
+      content: item(
+        'ref-1',
+        'split the scanner',
         '## What exists today\n\nscan.util.ts does three things\n\n## Why it should change\n\nc\n\n## Rough shape\n\ns\n',
-        'kind: debt\n') },
+        'kind: debt\n'
+      )
+    },
     // An unrecognised kind, only reachable by hand or by a newer capture: it
     // must arrive verbatim rather than being clamped to '' the way `phase` is.
     // The client is the only thing that decides a value means nothing, and it
     // decides that by not rendering a badge — see REFACTOR_KINDS in ItemCard.
-    { leaf: 'refactors/open', filename: 'ref-2-odd-kind.md',
-      content: item('ref-2', 'odd kind', '## What exists today\n\nx\n', 'kind: whatever\n') },
-    { leaf: 'refactors/done', filename: 'ref-3-already-split.md',
-      content: item('ref-3', 'already split', '## What exists today\n\nx\n', 'kind: chore\n') },
+    { leaf: 'refactors/open', filename: 'ref-2-odd-kind.md', content: item('ref-2', 'odd kind', '## What exists today\n\nx\n', 'kind: whatever\n') },
+    { leaf: 'refactors/done', filename: 'ref-3-already-split.md', content: item('ref-3', 'already split', '## What exists today\n\nx\n', 'kind: chore\n') },
     { leaf: 'ideas/open', filename: 'idea-1-broken.md', content: 'no frontmatter at all\n' }
   ]);
-  const beta = makeProject('beta', [
-    { leaf: 'ideas/open', filename: 'idea-1-someday.md',
-      content: item('idea-1', 'someday', '## Problem\n\np\n') }
-  ]);
+  const beta = makeProject('beta', [{ leaf: 'ideas/open', filename: 'idea-1-someday.md', content: item('idea-1', 'someday', '## Problem\n\np\n') }]);
 
   beforeAll(async () => {
     const registry = makeRegistry([
@@ -285,10 +307,7 @@ describe('GET /api/items and /api/projects', () => {
     expect(res.text).toContain('## What exists today');
     expect(res.text).not.toContain('kind: debt');
 
-    await request(app.getHttpServer())
-      .get('/api/items/body')
-      .query({ path: '/etc/hosts' })
-      .expect(404);
+    await request(app.getHttpServer()).get('/api/items/body').query({ path: '/etc/hosts' }).expect(404);
   });
 });
 
@@ -299,10 +318,7 @@ describe('malformed registry entries and unreadable item paths', () => {
   // It clears the allowlist and the .md check, and readFileSync then throws
   // EISDIR — which used to escape ItemsService.body() as a 500 with a stack
   // trace, telling the caller the path IS inside an allowlisted store.
-  const gamma = makeProject('gamma', [
-    { leaf: 'bugs/open', filename: 'bug-1-real.md',
-      content: item('bug-1', 'real', '## Symptom\n\nx\n') }
-  ]);
+  const gamma = makeProject('gamma', [{ leaf: 'bugs/open', filename: 'bug-1-real.md', content: item('bug-1', 'real', '## Symptom\n\nx\n') }]);
   const dirNamedMd = join(gamma, 'backlog', 'bugs', 'open', 'not-a-file.md');
 
   beforeAll(async () => {
@@ -313,12 +329,15 @@ describe('malformed registry entries and unreadable item paths', () => {
     // 500, for anything it cannot make sense of.
     const dir = mkdtempSync(join(tmpdir(), 'bm-badreg-'));
     const registry = join(dir, 'registry.json');
-    writeFileSync(registry, JSON.stringify({
-      projects: [
-        { name: 1, path: 2 },
-        { name: 'gamma', path: gamma, createdAt: '2026-08-26T00:00:00.000Z' }
-      ]
-    }));
+    writeFileSync(
+      registry,
+      JSON.stringify({
+        projects: [
+          { name: 1, path: 2 },
+          { name: 'gamma', path: gamma, createdAt: '2026-08-26T00:00:00.000Z' }
+        ]
+      })
+    );
 
     const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
       .overrideProvider(REGISTRY_FILE)

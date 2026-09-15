@@ -1,7 +1,5 @@
 import { formatClock } from './run-time';
-import type {
-  OrchestratorRun, RunWatchdog, WatchdogConfig, WatchdogEventKind, WatchdogStatus
-} from '../../../shared/types';
+import type { OrchestratorRun, RunWatchdog, WatchdogConfig, WatchdogEventKind, WatchdogStatus } from '../../../shared/types';
 
 /**
  * run-watchdog.ts — every sentence the client can print about the watchdog,
@@ -115,9 +113,7 @@ export function watchdogClause(w: RunWatchdog | undefined, now: number = Date.no
   if (w.lastError !== null) return `watchdog: resume failed: ${w.lastError}`;
   if (w.attempts > 0) {
     const clock = w.lastSpawnAt === null ? null : formatClock(w.lastSpawnAt);
-    return clock === null
-      ? `watchdog: attempt ${w.attempts}/${w.maxAttempts} spawned`
-      : `watchdog: attempt ${w.attempts}/${w.maxAttempts} spawned ${clock}`;
+    return clock === null ? `watchdog: attempt ${w.attempts}/${w.maxAttempts} spawned` : `watchdog: attempt ${w.attempts}/${w.maxAttempts} spawned ${clock}`;
   }
   return 'watchdog: waiting for next check';
 }
@@ -224,11 +220,7 @@ export function sweepFraction(status: WatchdogStatus, now: number): number | nul
  * distinct from `0`, which means a window opened and has since closed. The
  * caller prints the line only while the result is positive.
  */
-export function graceRemainingMs(
-  w: RunWatchdog,
-  config: Pick<WatchdogConfig, 'graceMs'>,
-  now: number
-): number | null {
+export function graceRemainingMs(w: RunWatchdog, config: Pick<WatchdogConfig, 'graceMs'>, now: number): number | null {
   if (w.lastSpawnAt === null) return null;
   const spawned = Date.parse(w.lastSpawnAt);
   if (!Number.isFinite(spawned)) return null;

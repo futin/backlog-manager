@@ -27,9 +27,7 @@ import type { AgentsStatus, BacklogItem, RunQueueItem, RunStage } from '../../..
  * of it. Also read by BoardView (the column rank) and RunDrawer (its own
  * active count) — one list, three readers, none of them restating it.
  */
-export const ACTIVE_RUN_STAGES: readonly RunStage[] = [
-  'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'
-];
+export const ACTIVE_RUN_STAGES: readonly RunStage[] = ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
 
 /*
  * `ATTENTION_RUN_STAGES` — the two stages that mean the run has STOPPED and
@@ -103,8 +101,7 @@ export type LiveBar = {
  */
 export function liveBarFor(item: BacklogItem, run?: RunCardState): LiveBar | null {
   const stage = run?.stage;
-  if (stage !== undefined
-    && (ATTENTION_RUN_STAGES.includes(stage) || ACTIVE_RUN_STAGES.includes(stage))) {
+  if (stage !== undefined && (ATTENTION_RUN_STAGES.includes(stage) || ACTIVE_RUN_STAGES.includes(stage))) {
     const anchor = run?.stageAt.dispatched ?? run?.stageAt[stage] ?? null;
     return {
       label: stage,
@@ -147,81 +144,90 @@ export const REFACTOR_KINDS: readonly string[] = ['chore', 'debt'];
  * bottom with a project pill and a mono meta line. Keyboard added (the original
  * was pointer-only): the whole card is the target, so it needs to be reachable.
  */
-export function ItemCard(
-  { item, hues, onOpen, agents, onDispatch, now, stale, run, runBlock, reverify }: {
-    item: BacklogItem;
-    hues: ProjectHues;
-    onOpen: () => void;
-    /** null until the status probe answers; absent when the board is rendered
-     *  without dispatch at all (older tests, and any future read-only view). */
-    agents?: AgentsStatus | null;
-    onDispatch?: () => void;
-    /**
-     * The clock, passed in rather than read here, so this stays a pure function
-     * of its props: the board owns the one ticking timer (`useNow`) and every
-     * card renders against the same instant. Defaulted so a card can still be
-     * rendered on its own.
-     */
-    now?: number;
-    /**
-     * Task 5: whether nobody has touched this item inside the staleness
-     * window. Decided by BoardView (`isStale`, lib/item-stale.ts) and handed
-     * down, never computed here — the window is a setting and the age needs a
-     * clock, and this component owns neither, the same discipline `now` and
-     * `runStage` already follow.
-     *
-     * In practice this is only ever true on a task: every other stale section
-     * has already left the Board by the time a card renders (`leavesBoard`).
-     * The prop is not narrowed to tasks anyway, because the rule about which
-     * sections survive belongs to the board's filter, not to the card's
-     * markup.
-     *
-     * ArchiveView renders this same card for the sections that DID leave and
-     * deliberately passes nothing here — every card in its three stale columns
-     * is stale by construction, so a marker on all of them carries no
-     * information, exactly as `groomed` on a task would not. Its column
-     * headings say it once instead. The prop stays open to that surface all
-     * the same; what it does not have is a caller that always sets it.
-     */
-    stale?: boolean;
-    /**
-     * This card's entry in a fresh orchestrator run's queue, or undefined when
-     * no such run currently says anything about it. Looked up by BoardView, not
-     * derived here — this component stays a pure function of whatever it is
-     * handed, the same discipline `now` above already follows, and RunStrip.tsx
-     * carries the long version of why the source is a run payload rather than
-     * anything on `item` itself.
-     *
-     * The stage AND its stamps, in one prop rather than two: they are two
-     * halves of a single volatile fact, and a card handed a stage from one poll
-     * with stamps from another would print an elapsed for a stage it is not
-     * showing. `runBlock` below is a genuinely different question off the same
-     * payload and stays its own prop for the reason stated there.
-     */
-    run?: RunCardState;
-    /**
-     * Why a run forbids dispatching this item, or null/undefined when none
-     * does — passed straight through to `DispatchButton`.
-     *
-     * Deliberately a SECOND prop rather than something derived from `run`
-     * beside it: the two answer different questions off the same payload.
-     * `run` decides whether this card shows a live bar and reads
-     * `ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES` above, which correctly exclude
-     * `pending` and `preflight`; the block reads `RUN_CLAIMED_STAGES`
-     * (shared/types.ts),
-     * which must INCLUDE them — a pending item is already claimed even though
-     * a badge for it would be noise. Collapsing the two would break one rule
-     * or the other. See `runClaimBlock` (shared/agent.ts) for who computes it.
-     */
-    runBlock?: string | null;
-    /** Re-ask the dashboard status, resolving to the fresh answer — passed
-     *  straight through to `DispatchButton`, which spends it on the one block
-     *  a click may clear (bug-13; its own prop comment carries the reasoning).
-     *  Threaded rather than derived for the same reason `agents` is: the
-     *  status belongs to one hook per view, not to forty cards. */
-    reverify?: () => Promise<AgentsStatus>;
-  }
-) {
+export function ItemCard({
+  item,
+  hues,
+  onOpen,
+  agents,
+  onDispatch,
+  now,
+  stale,
+  run,
+  runBlock,
+  reverify
+}: {
+  item: BacklogItem;
+  hues: ProjectHues;
+  onOpen: () => void;
+  /** null until the status probe answers; absent when the board is rendered
+   *  without dispatch at all (older tests, and any future read-only view). */
+  agents?: AgentsStatus | null;
+  onDispatch?: () => void;
+  /**
+   * The clock, passed in rather than read here, so this stays a pure function
+   * of its props: the board owns the one ticking timer (`useNow`) and every
+   * card renders against the same instant. Defaulted so a card can still be
+   * rendered on its own.
+   */
+  now?: number;
+  /**
+   * Task 5: whether nobody has touched this item inside the staleness
+   * window. Decided by BoardView (`isStale`, lib/item-stale.ts) and handed
+   * down, never computed here — the window is a setting and the age needs a
+   * clock, and this component owns neither, the same discipline `now` and
+   * `runStage` already follow.
+   *
+   * In practice this is only ever true on a task: every other stale section
+   * has already left the Board by the time a card renders (`leavesBoard`).
+   * The prop is not narrowed to tasks anyway, because the rule about which
+   * sections survive belongs to the board's filter, not to the card's
+   * markup.
+   *
+   * ArchiveView renders this same card for the sections that DID leave and
+   * deliberately passes nothing here — every card in its three stale columns
+   * is stale by construction, so a marker on all of them carries no
+   * information, exactly as `groomed` on a task would not. Its column
+   * headings say it once instead. The prop stays open to that surface all
+   * the same; what it does not have is a caller that always sets it.
+   */
+  stale?: boolean;
+  /**
+   * This card's entry in a fresh orchestrator run's queue, or undefined when
+   * no such run currently says anything about it. Looked up by BoardView, not
+   * derived here — this component stays a pure function of whatever it is
+   * handed, the same discipline `now` above already follows, and RunStrip.tsx
+   * carries the long version of why the source is a run payload rather than
+   * anything on `item` itself.
+   *
+   * The stage AND its stamps, in one prop rather than two: they are two
+   * halves of a single volatile fact, and a card handed a stage from one poll
+   * with stamps from another would print an elapsed for a stage it is not
+   * showing. `runBlock` below is a genuinely different question off the same
+   * payload and stays its own prop for the reason stated there.
+   */
+  run?: RunCardState;
+  /**
+   * Why a run forbids dispatching this item, or null/undefined when none
+   * does — passed straight through to `DispatchButton`.
+   *
+   * Deliberately a SECOND prop rather than something derived from `run`
+   * beside it: the two answer different questions off the same payload.
+   * `run` decides whether this card shows a live bar and reads
+   * `ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES` above, which correctly exclude
+   * `pending` and `preflight`; the block reads `RUN_CLAIMED_STAGES`
+   * (shared/types.ts),
+   * which must INCLUDE them — a pending item is already claimed even though
+   * a badge for it would be noise. Collapsing the two would break one rule
+   * or the other. See `runClaimBlock` (shared/agent.ts) for who computes it.
+   */
+  runBlock?: string | null;
+  /** Re-ask the dashboard status, resolving to the fresh answer — passed
+   *  straight through to `DispatchButton`, which spends it on the one block
+   *  a click may clear (bug-13; its own prop comment carries the reasoning).
+   *  Threaded rather than derived for the same reason `agents` is: the
+   *  status belongs to one hook per view, not to forty cards. */
+  reverify?: () => Promise<AgentsStatus>;
+}) {
   const at = now ?? Date.now();
   /* One derivation for the whole marker — see `liveBarFor` above for the
      precedence and for why a run's stage outranks the item file's own stamp.
@@ -238,11 +244,7 @@ export function ItemCard(
 
   return (
     <div
-      className={
-        bar === null ? 'board-card'
-          : bar.tone === 'run' ? 'board-card board-card-live board-card-live-run'
-            : 'board-card board-card-live'
-      }
+      className={bar === null ? 'board-card' : bar.tone === 'run' ? 'board-card board-card-live board-card-live-run' : 'board-card board-card-live'}
       role="button"
       tabIndex={0}
       onClick={onOpen}
@@ -324,7 +326,8 @@ export function ItemCard(
                   and the stored form left no room for the id beside it. The
                   separator goes with the date when there is no date, so an
                   undated item does not trail off into nothing. */}
-              {item.id}{created === '' ? '' : ` · ${created}`}
+              {item.id}
+              {created === '' ? '' : ` · ${created}`}
             </div>
             {/* Siblings of the meta line, not children of it — the same
                 unshrinkable trick the elapsed marker used to need here, and for
@@ -346,12 +349,8 @@ export function ItemCard(
                 API verbatim, so the only thing a new kind needs is an entry in
                 REFACTOR_KINDS above. Silence, not a fallback badge: a badge
                 reading `kind: whatevr` would present a typo as a category. */}
-            {item.section === 'refactors' && REFACTOR_KINDS.includes(item.kind) ? (
-              <span className="board-card-kind">{item.kind}</span>
-            ) : null}
-            {item.section === 'bugs' && item.groomed ? (
-              <span className="board-card-groomed">groomed</span>
-            ) : null}
+            {item.section === 'refactors' && REFACTOR_KINDS.includes(item.kind) ? <span className="board-card-kind">{item.kind}</span> : null}
+            {item.section === 'bugs' && item.groomed ? <span className="board-card-groomed">groomed</span> : null}
             {item.status === 'done' ? <span className="board-card-done">done</span> : null}
             {/* Task 5. After `done`, before the run chip, which is where it
                 belongs on both counts: it is a fact derived from the file (so
@@ -388,12 +387,7 @@ export function ItemCard(
       </div>
       {/* Outside the face, as the card's right edge. Renders nothing at all
           when the item has no next step, so a done card is a plain strip. */}
-      {onDispatch && (
-        <DispatchButton
-          item={item} status={agents ?? null} onDispatch={onDispatch} variant="tab"
-          runBlock={runBlock} reverify={reverify}
-        />
-      )}
+      {onDispatch && <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} variant="tab" runBlock={runBlock} reverify={reverify} />}
     </div>
   );
 }

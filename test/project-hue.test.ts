@@ -82,9 +82,7 @@ describe('buildProjectHues', () => {
     // so this is the only churn that has to be safe — and it is safe precisely
     // because the sort is by createdAt and the newcomer is always last.
     const before = buildProjectHues(registry('guide-manager', 'claude-agents-dashboard', 'ixray'));
-    const after = buildProjectHues(
-      registry('guide-manager', 'claude-agents-dashboard', 'ixray', 'finance-manager')
-    );
+    const after = buildProjectHues(registry('guide-manager', 'claude-agents-dashboard', 'ixray', 'finance-manager'));
     for (const name of ['guide-manager', 'claude-agents-dashboard', 'ixray']) {
       expect(after.classFor(name)).toBe(before.classFor(name));
     }
@@ -98,8 +96,7 @@ describe('buildProjectHues', () => {
     const forwards = buildProjectHues(rows);
     const backwards = buildProjectHues([...rows].reverse());
     expect(backwards.classFor('guide-manager')).toBe(forwards.classFor('guide-manager'));
-    expect(backwards.classFor('claude-agents-dashboard'))
-      .toBe(forwards.classFor('claude-agents-dashboard'));
+    expect(backwards.classFor('claude-agents-dashboard')).toBe(forwards.classFor('claude-agents-dashboard'));
   });
 
   it('uses every hue before repeating one', () => {

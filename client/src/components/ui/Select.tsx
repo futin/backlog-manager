@@ -13,7 +13,11 @@
  * state it twice.
  */
 export function Select<T extends string>({
-  value, options, onChange, disabled, label
+  value,
+  options,
+  onChange,
+  disabled,
+  label
 }: {
   value: T;
   options: { value: T; label: string }[];
@@ -22,14 +26,12 @@ export function Select<T extends string>({
   label?: string;
 }) {
   return (
-    <select
-      className="ui-select"
-      aria-label={label}
-      value={value}
-      disabled={disabled}
-      onChange={e => onChange(e.currentTarget.value as T)}
-    >
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    <select className="ui-select" aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(e.currentTarget.value as T)}>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
     </select>
   );
 }

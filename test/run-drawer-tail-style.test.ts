@@ -1,6 +1,5 @@
 import { readStyles, ruleBlock } from './helpers/css-rule';
 
-
 /**
  * The run drawer's verification tail is a scroll box, and a scroll box is a
  * layout fact — which is exactly what jsdom cannot observe: it performs no

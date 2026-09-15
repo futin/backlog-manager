@@ -15,9 +15,7 @@ import type { ReactNode } from 'react';
  * `--ink2` on the ledger's own ground, so a day heading never competes with
  * the rows under it.
  */
-export function Ledger({
-  columns, children, label
-}: { columns: string; children: ReactNode; label?: string }) {
+export function Ledger({ columns, children, label }: { columns: string; children: ReactNode; label?: string }) {
   return (
     <div className="ui-ledger" role="group" aria-label={label}>
       <div className="ui-ledger-grid" style={{ gridTemplateColumns: columns }}>

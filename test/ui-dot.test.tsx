@@ -22,10 +22,7 @@ describe('Dot', () => {
   });
 
   it('lands each status tone as its own class', () => {
-    const tones: DotTone[] = [
-      'live', 'paused', 'crashed', 'done',
-      'ramp-refactors', 'ramp-ideas', 'ramp-bugs', 'ramp-tasks'
-    ];
+    const tones: DotTone[] = ['live', 'paused', 'crashed', 'done', 'ramp-refactors', 'ramp-ideas', 'ramp-bugs', 'ramp-tasks'];
     for (const tone of tones) {
       const { unmount } = render(<Dot tone={tone} />);
       expect(dot()).toHaveClass(`ui-dot-${tone}`);

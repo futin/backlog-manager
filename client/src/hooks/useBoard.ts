@@ -42,14 +42,9 @@ export function useBoard(): BoardState {
   });
 
   const refetch = useCallback(() => {
-    Promise.all([
-      fetchJson<ItemsIndex>('/api/items'),
-      fetchJson<ProjectSummary[]>('/api/projects')
-    ])
+    Promise.all([fetchJson<ItemsIndex>('/api/items'), fetchJson<ProjectSummary[]>('/api/projects')])
       .then(([items, projects]) => setState({ items, projects, loading: false, error: false }))
-      .catch(() =>
-        setState((prev) => ({ items: prev.items, projects: prev.projects, loading: false, error: true }))
-      );
+      .catch(() => setState((prev) => ({ items: prev.items, projects: prev.projects, loading: false, error: true })));
   }, []);
 
   useEffect(() => {

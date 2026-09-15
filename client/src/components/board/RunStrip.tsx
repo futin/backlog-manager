@@ -53,7 +53,10 @@ import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../../sha
 const LIVE_THRESHOLD_MS = POLL_MS;
 
 type RunPayload = OrchestratorRun & {
-  fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog;
+  fresh: boolean;
+  pastRuns: number;
+  pauseRequested: boolean;
+  watchdog?: RunWatchdog;
 };
 
 /**
@@ -70,7 +73,14 @@ type RunPayload = OrchestratorRun & {
  * `renderCrashedStrip`'s doc comment) — the state lives in `RunStrip` and
  * is threaded through here.
  */
-function makeAttemptResume({ run, blocked, busy, setBusy, onResumed, setResumeError }: {
+function makeAttemptResume({
+  run,
+  blocked,
+  busy,
+  setBusy,
+  onResumed,
+  setResumeError
+}: {
   run: RunPayload;
   blocked: string | null;
   /** bug-19: a request from THIS strip is already out. */
@@ -144,7 +154,16 @@ function makeAttemptResume({ run, blocked, busy, setBusy, onResumed, setResumeEr
  *     every paused run.
  */
 function renderPausedStrip({
-  run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
+  run,
+  onOpen,
+  canResume,
+  resumeBlockedReason,
+  resuming,
+  busy,
+  setBusy,
+  onResumed,
+  resumeError,
+  setResumeError
 }: {
   run: RunPayload;
   onOpen: (run: RunPayload) => void;
@@ -173,27 +192,29 @@ function renderPausedStrip({
         <span className="run-strip-dot" aria-hidden="true" />
         <span className="run-strip-project">{label}</span>
         <span className="run-strip-paused-label">paused</span>
-        <span className="run-strip-count">paused · {completed} of {total} done</span>
+        <span className="run-strip-count">
+          paused · {completed} of {total} done
+        </span>
         {modeLabel !== null && (
-          <span className="run-mode-badge" data-testid="run-strip-mode">{modeLabel}</span>
+          <span className="run-mode-badge" data-testid="run-strip-mode">
+            {modeLabel}
+          </span>
         )}
         {resumeError !== null && <span className="run-strip-error">{resumeError}</span>}
-        <span className="run-strip-mark" aria-hidden="true">▸</span>
+        <span className="run-strip-mark" aria-hidden="true">
+          ▸
+        </span>
       </button>
       {/* bug-19 adds `busy` to what was the mark alone: the mark is set from
           `onResumed`, so without it this strip keeps a live button for the
           whole in-flight window and a second click issues a second POST. */}
       {resuming === true || busy ? (
-        <span className="run-strip-resuming" data-testid="run-strip-resuming">Resuming…</span>
+        <span className="run-strip-resuming" data-testid="run-strip-resuming">
+          Resuming…
+        </span>
       ) : (
         canResume === true && (
-          <button
-            type="button"
-            className="run-strip-resume"
-            aria-disabled={blocked !== null || undefined}
-            title={blocked ?? undefined}
-            onClick={attemptResume}
-          >
+          <button type="button" className="run-strip-resume" aria-disabled={blocked !== null || undefined} title={blocked ?? undefined} onClick={attemptResume}>
             Resume run
           </button>
         )
@@ -257,7 +278,16 @@ function renderPausedStrip({
  * inspectable ("why can't I resume this") by a keyboard user.
  */
 function renderCrashedStrip({
-  run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
+  run,
+  onOpen,
+  canResume,
+  resumeBlockedReason,
+  resuming,
+  busy,
+  setBusy,
+  onResumed,
+  resumeError,
+  setResumeError
 }: {
   run: RunPayload;
   onOpen: (run: RunPayload) => void;
@@ -318,21 +348,17 @@ function renderCrashedStrip({
           the drawer, matching a fresh strip's "click anywhere" behaviour
           (brief case 14) without hand-wiring a click handler onto every
           individual span. */}
-      <button
-        type="button"
-        className="run-strip-open"
-        onClick={() => onOpen(run)}
-      >
+      <button type="button" className="run-strip-open" onClick={() => onOpen(run)}>
         <span className="run-strip-dot" aria-hidden="true" />
         <span className="run-strip-project">{label}</span>
         <span className="run-strip-crashed-label">crashed</span>
         <span className="run-strip-heartbeat">no heartbeat for {age ?? '—'}</span>
-        <span className="run-strip-current">
-          {reported === null ? 'all items at rest' : `last reported ${reported.id} at ${reported.stage}`}
-        </span>
+        <span className="run-strip-current">{reported === null ? 'all items at rest' : `last reported ${reported.id} at ${reported.stage}`}</span>
         {clause !== '' && <span className="run-strip-watchdog">{clause}</span>}
         {resumeError !== null && <span className="run-strip-error">{resumeError}</span>}
-        <span className="run-strip-mark" aria-hidden="true">▸</span>
+        <span className="run-strip-mark" aria-hidden="true">
+          ▸
+        </span>
       </button>
       {/* Resume: a genuine sibling `<button>`, never nested inside the
           open-button above — see this function's own doc comment for why
@@ -430,7 +456,12 @@ function renderCrashedStrip({
  * why neither is an oversight.
  */
 export function RunStrip({
-  run, onOpen, canResume, resumeBlockedReason = null, resuming, onResumed
+  run,
+  onOpen,
+  canResume,
+  resumeBlockedReason = null,
+  resuming,
+  onResumed
 }: {
   run: RunPayload;
   onOpen: (run: RunPayload) => void;
@@ -469,13 +500,31 @@ export function RunStrip({
 
   if (run.status === 'paused') {
     return renderPausedStrip({
-      run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
+      run,
+      onOpen,
+      canResume,
+      resumeBlockedReason,
+      resuming,
+      busy,
+      setBusy,
+      onResumed,
+      resumeError,
+      setResumeError
     });
   }
 
   if (isCrashed(run)) {
     return renderCrashedStrip({
-      run, onOpen, canResume, resumeBlockedReason, resuming, busy, setBusy, onResumed, resumeError, setResumeError
+      run,
+      onOpen,
+      canResume,
+      resumeBlockedReason,
+      resuming,
+      busy,
+      setBusy,
+      onResumed,
+      resumeError,
+      setResumeError
     });
   }
 
@@ -553,12 +602,7 @@ export function RunStrip({
   const label = projectLabel(run.project);
 
   return (
-    <button
-      type="button"
-      className="run-strip"
-      data-testid="run-strip"
-      onClick={() => onOpen(run)}
-    >
+    <button type="button" className="run-strip" data-testid="run-strip" onClick={() => onOpen(run)}>
       {/* Decorative: the adjacent "live"/aged text is the actual answer for
           a screen reader, matching how the card's own live-bar dot-equivalent
           (its amber fill) is never the only carrier of that state — the words
@@ -570,9 +614,11 @@ export function RunStrip({
           derivation above), which is what keeps that shape of run rendering
           byte-identically to before this feature existed. */}
       {modeLabel !== null && (
-        <span className="run-mode-badge" data-testid="run-strip-mode">{modeLabel}</span>
+        <span className="run-mode-badge" data-testid="run-strip-mode">
+          {modeLabel}
+        </span>
       )}
-      <span className="run-strip-heartbeat">{live ? 'live' : age ?? '—'}</span>
+      <span className="run-strip-heartbeat">{live ? 'live' : (age ?? '—')}</span>
       {/* task-17: the run has been asked to stop and has not got there yet.
           Naming the item it will finish first is the fact a person watching
           a pause actually wants — "how long is this" — and `null` (the run is
@@ -587,7 +633,9 @@ export function RunStrip({
           {formatSpanCompact(elapsed)}
         </span>
       )}
-      <span className="run-strip-count">{completed}/{total}</span>
+      <span className="run-strip-count">
+        {completed}/{total}
+      </span>
       {/* Purely a graphical restatement of the count just printed — hidden
           from the accessibility tree so a screen reader is not made to sit
           through the same fact twice in two forms. */}
@@ -611,9 +659,7 @@ export function RunStrip({
           </span>
         </span>
       )}
-      {run.attention.length > 0 && (
-        <span className="run-strip-attention">{run.attention.length} needs attention</span>
-      )}
+      {run.attention.length > 0 && <span className="run-strip-attention">{run.attention.length} needs attention</span>}
       {/* The same "there is more here" mark DispatchButton's own ▸ already
           is on every card (dispatch-mark) — aria-hidden for the identical
           reason: the accessible story is "this is a button", which the
@@ -621,7 +667,9 @@ export function RunStrip({
           is what this mark promises; until it exists the click is real (see
           BoardView's own comment on why onOpen is still a no-op today) but
           this is the one honest way to say "there will be more to see". */}
-      <span className="run-strip-mark" aria-hidden="true">▸</span>
+      <span className="run-strip-mark" aria-hidden="true">
+        ▸
+      </span>
     </button>
   );
 }

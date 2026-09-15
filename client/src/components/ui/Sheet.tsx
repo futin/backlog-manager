@@ -13,9 +13,7 @@ import type { ElementType, ReactNode } from 'react';
  * is a plain `<div>`. Defaulting to `<div>` and letting the composer name the
  * element keeps the semantics with the page that knows them.
  */
-export function Sheet({
-  children, as: As = 'div', className
-}: { children: ReactNode; as?: ElementType; className?: string }) {
+export function Sheet({ children, as: As = 'div', className }: { children: ReactNode; as?: ElementType; className?: string }) {
   return <As className={className ? `ui-sheet ${className}` : 'ui-sheet'}>{children}</As>;
 }
 
@@ -28,9 +26,7 @@ export function Sheet({
  * head takes one. A named prop that holds one control is a harder thing to
  * quietly fill with four than a children slot is.
  */
-export function SheetHead({
-  title, sub, right
-}: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
+export function SheetHead({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
   return (
     <div className="ui-sheet-head">
       <div className="ui-sheet-head-text">

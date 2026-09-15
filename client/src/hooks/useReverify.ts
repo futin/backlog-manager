@@ -59,16 +59,19 @@ export function useReverify(
      disabled for the whole first one. */
   const inFlight = useRef(false);
 
-  const ask = useCallback((act: (fresh: AgentsStatus) => void): void => {
-    if (reverify === undefined || inFlight.current) return;
-    inFlight.current = true;
-    setVerifying(true);
-    void reverify().then((fresh) => {
-      inFlight.current = false;
-      setVerifying(false);
-      act(fresh);
-    });
-  }, [reverify]);
+  const ask = useCallback(
+    (act: (fresh: AgentsStatus) => void): void => {
+      if (reverify === undefined || inFlight.current) return;
+      inFlight.current = true;
+      setVerifying(true);
+      void reverify().then((fresh) => {
+        inFlight.current = false;
+        setVerifying(false);
+        act(fresh);
+      });
+    },
+    [reverify]
+  );
 
   return { verifying, ask };
 }
