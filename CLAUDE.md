@@ -49,7 +49,8 @@ reasoning behind the rules in the next section lives in
   → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs,
   Archive, Settings), a run strip above the board's columns, and the
-  three-step Orchestrate sheet. Every derivation has one home in `lib/`.
+  three-step Orchestrate sheet. Every derivation has one home in `lib/`, and
+  every look more than one surface draws has one home in `components/ui/`.
   → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from
   the dashboard, §8 how this board applies it; every component must cite its subsection in a

@@ -16,6 +16,23 @@ is the one runtime list of them, and `resolveSection` in `App.tsx` maps a stored
 that names no tab — the legacy `'projects'` included — onto Board, so an upgrade never
 opens on a blank main area.
 
+Runs is the one section with a sub-nav tree under its row — History and Watchdog — drawn
+only while that section is open (`.claude/DESIGN.md` §8.0). The tree and the segmented
+control still inside `RunsView` are two writers of one stored value, so both go through
+`useRunsMode` (`client/src/hooks/useRunsMode.ts`), which holds the mode for every mounted
+reader at once; `lib/runs-mode.ts` stays the one home of the key, the member list and the
+guard. `task-41` is where the in-page control goes and this doc is rewritten.
+
+### Primitives
+
+`client/src/components/ui/` holds the patterns more than one surface draws — `Band`,
+`Sheet`, `FigureStrip`, `Chip`, `Pill`, `Dot`, `Marker`, `ProgressRow`, `Ledger` and the
+control family — each owning one class family declared once in `styles.css`'s
+`/* ── ui primitives` block. Page CSS lays a primitive out and never restates its look,
+which is the same rule `lib/` follows for derivations and for the same reason. The
+design spec's §12.2 is the table of which primitive owns which pattern until this doc
+carries it.
+
 ### Board
 
 Toolbar with search plus project/status/sort selects, four fixed columns

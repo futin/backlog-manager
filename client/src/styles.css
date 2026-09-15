@@ -71,60 +71,159 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   line-height: 1.4;
+  /* One face sets the figures too (DESIGN.md §1): there is no mono in this
+     design, so a run's elapsed reading and a table's time column line up only
+     if the one face is asked for its tabular figures. Declared here rather
+     than per-figure because every figure on this board wants it and none
+     wants proportional lining. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* The UA's own monospace default is the last place a second face could get in
+   — `code` inside a rendered item body, a `<kbd>` in a hint — so it is taken
+   away here rather than overridden per surface (DESIGN.md §8.1). A code span
+   is marked by its fill and its ink alone; §8.7 says so for the item modal's
+   body, and this rule is what makes that true everywhere else too. */
+code, kbd, samp, pre { font-family: inherit }
+
+/* The design's signature texture (DESIGN.md §2), one utility rule over any
+   fill rather than a gradient restated per bar: filled progress, the debit-card
+   face and the gauge all carry the same fine 45° hatch there, and every fill
+   on this board that wants it composes this class over its own background. */
+.hatch {
+  background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.30) 0 1px, transparent 1px 4px);
 }
 
 .wrap { max-width: 820px; margin: 0 }
 .wrap.wide { max-width: 1280px }
 
-/* rack selector — the section rail down the left edge. Sticky and full-height so
-   its right rule runs the length of the board. The height is divided by
-   --font-scale because .shell{zoom} leaves 100vh resolving against the UNZOOMED
-   viewport: at 120% a plain 100vh rail is drawn 20% taller than the screen. */
+/* ── Shell and rail ───────────────────────────────────────────────────────────
+   .claude/DESIGN.md §8.0. The rail is the reference design's sidebar at this
+   board's own three departures from the mock, each recorded in §8.0's table
+   with its reason: 280 px wide rather than 300, 36 px rows rather than 44 (the
+   44 survives on the phone menu, where a row is a thumb target), and a sub-nav
+   hung 24 px in — the icon's centreline — rather than 36.
+
+   The height is divided by --font-scale because .shell{zoom} leaves 100vh
+   resolving against the UNZOOMED viewport: at 120% a plain 100vh rail is drawn
+   20% taller than the screen. */
 .shell { display: flex }
 .rail {
-  flex: 0 0 150px; display: flex; flex-direction: column; gap: 2px;
+  flex: 0 0 280px; display: flex; flex-direction: column; gap: 2px;
   align-self: flex-start; position: sticky; top: 0; z-index: 5;
-  height: calc(100vh / var(--font-scale, 1)); overflow-y: auto; padding: var(--body-pad) 10px;
-  background: var(--strip); border-right: 1px solid var(--hairline);
+  height: calc(100vh / var(--font-scale, 1)); overflow-y: auto;
+  padding: 32px 16px;
+  background: var(--strip);
 }
-/* the app's wordmark, in the rail rather than the page — a kicker over the name */
+/* The app's only wordmark, in the rail rather than the page: 20/700 under an
+   11/500 kicker (§8.1's scale), with one green dot that is decoration and not
+   status — it names the app, and an app is never "running". */
 .rail-brand {
-  font-family: var(--display); font-size: 15px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .06em; line-height: 1.15;
-  color: var(--ink); padding: 0 10px; margin-bottom: 18px;
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 20px; font-weight: 700; line-height: 1.1;
+  color: var(--ink); padding: 0 16px; margin-bottom: 24px;
 }
+/* The one rule in this stylesheet allowed to uppercase anything (§8.1). */
 .rail-kicker {
-  font-family: var(--mono); font-size: 9.5px; font-weight: 400;
-  letter-spacing: .14em; color: var(--ink3);
+  font-size: 11px; font-weight: 500; line-height: 1.3;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--ink3);
 }
-.rail-link {
-  font-family: var(--display); font-size: 11.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .08em; text-align: left;
-  color: var(--ink3); background: none; border: 0; border-radius: 2px;
-  padding: 8px 10px; cursor: pointer; transition: color .15s, background .15s;
-}
-.rail-link:hover { color: var(--ink2); background: var(--strip-hi) }
-/* the accent bar sits on the LEFT edge here — a bottom bar marks position in a
-   row, but reads as a divider in a column */
-.rail-link.on {
-  color: var(--ink); background: var(--strip-hi);
-  box-shadow: inset 2px 0 0 var(--cyan), inset 0 1px 0 var(--edge);
-}
-.main { flex: 1; min-width: 0; padding: var(--body-pad) }
+/* The green dot rides here, and it is a `Dot` rather than a rule of this
+   family's own (§8.2's one-home rule): decoration or not, it is the same 8 px
+   filled circle every other surface draws, and a `.rail-dot` beside `.ui-dot`
+   would be the second declaration of one look that rule exists to prevent. */
+.rail-word { display: inline-flex; align-items: center; gap: 8px }
 
-/* phone: the rail lies down into a scrollable strip above the content, and the
-   accent bar goes back to the bottom edge where a row wants it. */
+.rail-link {
+  position: relative; display: flex; align-items: center; gap: 12px;
+  min-height: 36px; padding: 0 16px; border-radius: 16px;
+  font-size: 14px; font-weight: 500; text-align: left;
+  color: var(--ink2); background: none; border: 0;
+  cursor: pointer; transition: color .15s, background .15s;
+}
+/* Hover darkens the LABEL and nothing else. The fill stays reserved for the
+   active row, so a hovered row and a selected row read as two different things
+   rather than as one row filled twice (§8.0). */
+.rail-link:hover { color: var(--ink) }
+/* Active is a 3 px ink bar 16 px tall at the left edge plus the --strip-hi
+   fill — never a colour change in the label (§5). ::before rather than an inset
+   shadow because the bar is 16 px of a 36 px row, not its whole height. */
+.rail-link.on { color: var(--ink); background: var(--strip-hi) }
+.rail-link.on::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: 0 2px 2px 0; background: var(--ink);
+}
+/* Icons name the section, never its state (§6): --ink at every row weight, a
+   16 px box, ~1.5 px outline stroke. */
+.rail-ic { width: 16px; height: 16px; flex: none; color: var(--ink) }
+
+/* The sub-nav tree, drawn only for the open section (§8.0). Hung 24 px in — the
+   icon's centreline, 16 px of row padding plus half a 16 px icon — so the stem
+   falls straight down through the icons above it. */
+.rail-sub { display: flex; flex-direction: column; padding-left: 24px; margin: 2px 0 6px }
+/* Stem and tick as two background layers on the row itself rather than a
+   border on a wrapper: it is what lets the LAST row stop its stem at its own
+   centre, which is the whole shape of an L-tree. A wrapper border would run
+   the full height and leave a tail hanging under the last tick. */
+.rail-sublink {
+  display: flex; align-items: center; min-height: 32px;
+  padding: 0 0 0 16px; border: 0; background: none;
+  font-size: 14px; font-weight: 500; text-align: left;
+  color: var(--ink3); cursor: pointer; transition: color .15s;
+  background-image:
+    linear-gradient(var(--hairline), var(--hairline)),
+    linear-gradient(var(--hairline), var(--hairline));
+  background-repeat: no-repeat;
+  background-size: 1px 100%, 8px 1px;
+  background-position: 0 0, 0 50%;
+}
+.rail-sublink:last-child { background-size: 1px 50%, 8px 1px }
+.rail-sublink:hover { color: var(--ink2) }
+.rail-sublink.on { color: var(--ink) }
+
+/* Settings sits under a 1 px rule with 24 px of air either side: it is about
+   the board, the rows above it are about the work (§8.0). */
+.rail-rule { border-top: 1px solid var(--hairline); margin: 24px 0 }
+
+/* The phone's ☰, and the wordmark row it sits in — both render only under
+   useNarrow, so neither is ever in the desktop tree. */
+.rail-bar { display: none }
+.rail-menu {
+  margin-left: auto; width: 36px; height: 36px; border: 0; border-radius: 16px;
+  background: none; color: var(--ink); font-size: 15px; cursor: pointer;
+}
+
+/* .main sits on --board with a 24 px top margin and a 24 px top-LEFT radius —
+   the one corner the rail meets, which is the design's app-shell inset drawn
+   where it can actually be seen (§8.0). */
+.main {
+  flex: 1; min-width: 0; padding: var(--body-pad);
+  background: var(--board); margin-top: 24px; border-top-left-radius: 24px;
+}
+
+/* Phone: the rail lies down into a top bar — wordmark left, ☰ right — with the
+   menu dropping out of it full width and every tree standing open, so a
+   sub-view is a tap away rather than behind an accordion (§8.0). The bar hides
+   on a downward scroll and returns on the first upward one; `data-hidden` is
+   written by SideRail, which also pins it open while the menu is (the menu
+   hangs off the bar, so a bar that slid away would take it along). */
 @media (max-width: 700px) {
   .shell { flex-direction: column }
   .rail {
     flex: none; width: auto; height: auto; align-self: stretch;
-    flex-direction: row; gap: 4px; padding: 8px 10px;
-    overflow-x: auto; overflow-y: hidden;
-    border-right: none; border-bottom: 1px solid var(--hairline);
+    flex-direction: column; gap: 0; padding: 8px 12px;
+    overflow-x: hidden; overflow-y: visible;
+    border-bottom: 1px solid var(--hairline);
+    transition: transform .2s ease;
   }
-  .rail-brand { display: none }
-  .rail-link { flex: none; white-space: nowrap; min-height: 38px; display: flex; align-items: center }
-  .rail-link.on { box-shadow: inset 0 -2px 0 var(--cyan), inset 0 1px 0 var(--edge) }
+  .rail[data-hidden="true"] { transform: translateY(-100%) }
+  .rail-bar { display: flex; align-items: center }
+  .rail-brand { margin-bottom: 0; padding: 0; font-size: 17px }
+  /* The mock's full 44 px row, kept for the phone alone: here the row is a
+     thumb target rather than a pointer one (§8.0's table). */
+  .rail-link { min-height: 44px; border-radius: 12px }
+  .rail-sublink { min-height: 40px }
+  .main { margin-top: 0; border-top-left-radius: 0 }
 }
 
 /* ---------------------------------------------- Board section
@@ -138,8 +237,8 @@ body {
    right between controls sitting side by side. */
 .board-bar { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; row-gap: 8px }
 .board-title {
-  font-family: var(--display); font-size: 14px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink);
+  font-size: 19px; font-weight: 500;
+  color: var(--ink);
 }
 /* The toolbar: search, then project / type / sort. Pushed to the far end of the
    bar because it states the board's state, so it belongs beside the board rather
@@ -153,12 +252,14 @@ body {
    is ever changed. */
 .board-tools { margin-left: auto; display: flex; align-items: stretch; flex-wrap: wrap; gap: 6px }
 /* One recessed-well look for all four, inherited from the removed .board-scope
-   button: --steel against the --strip cards, a hairline rule, and 10px mono, so
-   the row reads as instrument panel rather than as a form. One block rather than
+   button: --steel against the --strip cards, a hairline rule, and one type size
+   for all four, so the row reads as instrument panel rather than as a form. (It
+   was 10px mono until task-36 put the board on one face at the 11px floor; the
+   block is what the reading depended on, not the family.) One block rather than
    four, because the four controls only read as one instrument while their
    padding, border and type are literally the same declarations. */
 .board-search, .board-select {
-  font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
+  font-size: 13px;
   color: var(--ink2); background: var(--steel);
   border: 1px solid var(--hairline); border-radius: 2px;
   padding: 4px 8px; transition: color .15s, border-color .15s;
@@ -186,7 +287,7 @@ body {
    4px-vertical rhythm .board-search/.board-select use so all five controls
    still read as one instrument row despite the different treatment. */
 .board-orchestrate {
-  font-family: var(--font); font-size: 10.5px; font-weight: 600; color: var(--bg);
+  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--bg);
   background: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
   padding: 4px 10px; cursor: pointer; white-space: nowrap;
 }
@@ -300,7 +401,7 @@ body {
   padding: var(--card-pad);
 }
 .board-card:hover { border-color: var(--hairline2) }
-.board-card-title { font-size: 13px; font-weight: 600; color: var(--ink) }
+.board-card-title { font-size: 14px; font-weight: 500; color: var(--ink) }
 /* margin-top:auto is the pin: cards in a row are as tall as the tallest title, and
    without it the meta lines of neighbours sit at different heights. */
 /* Wraps, rather than compressing its children onto one line. Three things want
@@ -324,7 +425,7 @@ body {
 .board-card-foot .pill { flex: none; max-width: 100% }
 .board-card-meta {
   flex: none; max-width: 100%;
-  font-size: 10.5px; color: var(--ink3); font-family: var(--mono);
+  font-size: 12px; color: var(--ink3);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -334,8 +435,8 @@ body {
    restate the column the card was already sitting in. Shape and type here; the
    colours are the eight rules below it. */
 .pill {
-  font-family: var(--mono); font-size: 9px; font-weight: 600; line-height: 1.5;
-  text-transform: uppercase; letter-spacing: .09em; white-space: nowrap;
+  font-size: 11px; font-weight: 600; line-height: 1.5;
+  white-space: nowrap;
   padding: 1px 6px; border: 1px solid; border-radius: 2px;
 }
 /* Project pills. Outline and ink only, no tint — same rationale as
@@ -357,10 +458,12 @@ body {
 /* Foot markers, beside the meta line rather than inside it: `flex: none` is why
    they sit out there at all — inside the nowrap-with-ellipsis meta they were
    clipped to `· gr…`. They inherit nothing from that line (they are its
-   siblings), so the mono family and size are restated here.
+   siblings), so the size and weight are restated here — 11/500, the scale's
+   marker row (DESIGN.md §8.1); it was the mono family and its size before
+   task-36 left one face in the app.
    Groomed is quiet confirmation, not an alarm; done is history and dims. */
 .board-card-groomed, .board-card-done, .board-card-kind, .board-card-stale {
-  flex: none; font-family: var(--mono); font-size: 10.5px; white-space: nowrap;
+  flex: none; font-size: 11px; font-weight: 500; white-space: nowrap;
 }
 .board-card-groomed { color: var(--green) }
 .board-card-done { color: var(--ink2) }
@@ -416,15 +519,15 @@ body {
    state. */
 .board-card-stage {
   flex: none; display: inline-flex; align-items: center; gap: 4px;
-  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+  font-size: 11px; font-weight: 600;
+  white-space: nowrap;
   padding: 1.5px 7px 1.5px 6px; border: 1px solid; border-radius: 999px;
   color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline));
   background: color-mix(in srgb, var(--cyan) 10%, var(--strip));
 }
 /* Sized off the chip's own font rather than a fixed px: the glyphs are text,
-   and at 9.5px a ✓ set at 1em sits visually smaller than the uppercase word
-   beside it. The line-height pin keeps a ⚠ (a taller glyph than ●) from
+   and at this size a ✓ set at 1em sits visually smaller than the word beside
+   it. The line-height pin keeps a ⚠ (a taller glyph than ●) from
    stretching the chip's box a half-pixel and making one chip in a row sit
    differently from the rest. */
 .board-card-stage-glyph { font-size: 1.15em; line-height: 1; opacity: .9 }
@@ -489,7 +592,7 @@ body {
 /* In progress: the card's own hairline goes amber, and a filled amber bar runs
    across the top of its face. "Which of these twelve is anyone on" is a question
    asked of a whole column at once, and the 3px amber inset this replaces — like
-   the 10.5px mono marker before it — could not answer it at a glance.
+   the small marker before it — could not answer it at a glance.
    border-color rather than a border of its own: the 1px border and the padding
    are one tuned block (with a compact-density override), so recolouring the
    existing line moves nothing. The `inset 0 1px 0 var(--edge)` catch-light from
@@ -507,22 +610,24 @@ body {
 .board-card-live-bar {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   background: var(--amber); color: var(--on-accent);
-  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .09em;
+  font-size: 11px; font-weight: 600;
   padding: 2px var(--card-pad-x);
 }
 /* flex:none so the reading stays whole if the label ever has to yield: the
    elapsed time is the half that cannot be guessed from the bar's colour, and
    three hours versus three weeks is the whole reason a timestamp is stored
-   rather than a boolean. Inherits the bar's ink and family rather than painting
-   amber on amber.
-   text-transform:none is load-bearing, not a style choice: the bar uppercases
-   its label, and an uppercased `21m` renders as `21M`, which reads as
-   twenty-one MONTHS. The unit letters have to stay lowercase to mean what they
-   say. */
+   rather than a boolean. Inherits the bar's ink rather than painting amber on
+   amber.
+   This used to carry `text-transform: none`, and it was load-bearing rather
+   than a style choice: the bar uppercased its label, and an uppercased `21m`
+   renders as `21M`, which reads as twenty-one MONTHS. task-36 took the
+   uppercasing off the bar itself (DESIGN.md §8.1 leaves it on `.rail-kicker`
+   alone), so the override has nothing left to correct — but the reason is kept
+   here, because anyone putting the bar back into caps has to put this line back
+   with it. */
 .board-card-live-mark {
-  flex: none; white-space: nowrap; letter-spacing: .04em;
-  text-transform: none; font-size: 10.5px;
+  flex: none; white-space: nowrap;
+  font-size: 12px;
 }
 /* Task 9: the same bar, in the tone the board's colour legend already assigns
    to "the orchestrator is running this, without a human" — cyan, the exact
@@ -549,8 +654,8 @@ body {
 /* ---------------------------------------------- Settings section */
 .mdetail-label {
   display: flex; align-items: center; gap: 8px;
-  font-family: var(--display); font-size: 10.5px; font-weight: 600;
-  color: var(--ink3); text-transform: uppercase; letter-spacing: .09em; margin-top: 4px;
+  font-size: 11px; font-weight: 600;
+  color: var(--ink3); margin-top: 4px;
 }
 .set { display: flex; flex-direction: column; gap: 18px; max-width: 640px }
 .set-group { display: flex; flex-direction: column; gap: 2px }
@@ -566,8 +671,8 @@ body {
 .set-row + .set-row, .set-themes + .set-row { margin-top: 5px }
 .set-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 }
 .set-name { font-size: 12px; font-weight: 600; color: var(--ink) }
-.set-hint { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
-.set-hint code { font-family: var(--mono); font-size: 10px; color: var(--cyan) }
+.set-hint { font-size: 12px; color: var(--ink3); line-height: 1.45 }
+.set-hint code { font-size: 12px; color: var(--cyan) }
 /* A refused `POST /api/agents/watchdog/config` (bug-24), rendered as its own
    row directly under the control that was refused. `var(--red)`, matching
    `.run-controls-error`'s posture rather than `.sheet-error`'s amber: this is
@@ -575,7 +680,7 @@ body {
    still happens. Size tracks `.set-hint` — it sits in the same reading
    register as the hint above it, one line explaining the row it follows. */
 .set-error-row { border-color: var(--red) }
-.set-error { font-size: 10.5px; line-height: 1.45; color: var(--red) }
+.set-error { font-size: 12px; line-height: 1.45; color: var(--red) }
 .set-dot-green { color: var(--green) }
 .set-dot-amber { color: var(--amber) }
 .set-dot-gray { color: var(--ink3) }
@@ -583,24 +688,13 @@ body {
 .set-control select,
 .set-control input[type=number],
 .set-control input[type=text] {
-  font-family: var(--mono); font-size: 11px; color: var(--ink);
+  font-size: 11px; color: var(--ink);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 5px 8px;
 }
 .set-control select:focus, .set-control input:focus { outline: none; border-color: var(--cyan) }
 .set-control input[type=number] { width: 84px; font-variant-numeric: tabular-nums }
-.set-unit { font-size: 10px; color: var(--ink3); font-family: var(--mono) }
-
-.set-seg { display: flex; gap: 4px }
-.set-seg button {
-  font-family: var(--display); font-size: 10.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 5px 11px; cursor: pointer; transition: color .15s, border-color .15s;
-}
-.set-seg button:hover:not(:disabled) { color: var(--ink2); border-color: var(--hairline2) }
-.set-seg button:disabled { cursor: default; opacity: .4 }
-.set-seg button.on { color: var(--ink); border-color: var(--cyan); box-shadow: inset 0 -2px 0 var(--cyan) }
+.set-unit { font-size: 12px; color: var(--ink3) }
 
 .set-themes { display: flex; gap: 8px; flex-wrap: wrap }
 .set-theme {
@@ -613,14 +707,12 @@ body {
 .set-swatch { display: flex; height: 34px; border-radius: 2px; overflow: hidden; border: 1px solid var(--hairline) }
 .set-swatch i { flex: 1 }
 .set-swatch i:last-child { flex: 0 0 8px }
-.set-theme-name { font-size: 10.5px; font-weight: 600; color: var(--ink2); text-align: left; line-height: 1.25 }
+.set-theme-name { font-size: 12px; font-weight: 600; color: var(--ink2); text-align: left; line-height: 1.25 }
 .set-theme.on .set-theme-name { color: var(--ink) }
 
 @media (max-width: 700px) {
   .set-row { align-items: flex-start; flex-direction: column; gap: 8px }
   .set-control { width: 100% }
-  .set-seg { width: 100% }
-  .set-seg button { flex: 1; min-height: 38px }
   .set-theme { width: calc(50% - 4px) }
 }
 
@@ -681,13 +773,13 @@ body {
    --proj-8 than the other three ticks sit to any project hue, which the
    project-hue note above already concedes is a property of an eight-colour set
    drawn a step off the reserved five — a tick is a filled 14x3 block and a
-   project pill is a 9px outline, so the two never read as the same object. */
+   project pill is a small outline, so the two never read as the same object. */
 .board-col-refactors .board-col-tick { background: var(--magenta) }
 .board-col-name {
-  font-family: var(--display); font-size: 14px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink);
+  font-size: 15px; font-weight: 500;
+  color: var(--ink);
 }
-.board-col-count { font-family: var(--mono); font-size: 9.5px; color: var(--ink3) }
+.board-col-count { font-size: 11px; color: var(--ink3) }
 /* The column's cards, in their own element rather than as .board-col's
    remaining children. Two reasons: an empty column needs something to render
    in place of the stack, and any per-column overflow later has to scroll the
@@ -709,21 +801,21 @@ body {
    Opaque --board, not a transparent or mixed background: cards scroll UNDER
    this, and anything less than opaque shows a card's title through the heading
    that is supposed to be labelling it.
-   Register is deliberately below .board-col-name — mono, small, --ink3, no
-   uppercase display face. It subdivides a column; it must not compete with the
-   column's own name two lines above it. */
+   Register is deliberately below .board-col-name — smaller, --ink3, no weight
+   of its own. It subdivides a column; it must not compete with the column's own
+   name two lines above it. */
 .archive-month {
   position: sticky; top: 0; z-index: 1;
   background: var(--board);
   padding: 4px 0 3px;
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  font-size: 11px;
   color: var(--ink3); border-bottom: 1px solid var(--hairline);
 }
 
 /* Degraded-state line above the board: malformed files skipped by the scan,
    or registered projects whose store is gone. Amber, not red — the board
    below it is still real, just partial. */
-.board-warn { font-family: var(--mono); font-size: 10px; color: var(--amber); line-height: 1.5 }
+.board-warn { font-size: 12px; color: var(--amber); line-height: 1.5 }
 
 /* ---------------------------------------------- orchestrator run strip
    Task 11: one row per project with a run currently worth watching live —
@@ -740,7 +832,7 @@ body {
 .run-strips { display: flex; flex-direction: column; gap: 6px }
 .run-strip {
   display: flex; align-items: center; gap: 10px; width: 100%;
-  font-family: var(--font); font-size: 11.5px; color: var(--ink2);
+  font-family: inherit; font-size: 11.5px; color: var(--ink2);
   background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 7px 12px; cursor: pointer; text-align: left;
   transition: border-color .15s;
@@ -757,8 +849,8 @@ body {
 .run-strip-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink3) }
 .run-strip-dot-live { background: var(--cyan) }
 .run-strip-project {
-  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .06em; color: var(--ink);
+  flex: none; font-size: 12px; font-weight: 600;
+  color: var(--ink);
 }
 /* Task 9's own badge for `lib/run-stage.ts`'s `mergeModeLabel` — shared
    verbatim by RunStrip, RunsView's row, RunDetail's header and (since the
@@ -775,13 +867,13 @@ body {
    two vocabularies must not share one map). */
 .run-mode-badge {
   flex: none; display: inline-flex; align-items: center;
-  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+  font-size: 11px; font-weight: 600;
+  white-space: nowrap;
   padding: 1.5px 7px; border: 1px solid; border-radius: 999px;
   color: var(--mustard); border-color: color-mix(in srgb, var(--mustard) 45%, var(--hairline));
   background: color-mix(in srgb, var(--mustard) 10%, var(--strip));
 }
-.run-strip-heartbeat { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-strip-heartbeat { flex: none; font-size: 12px; color: var(--ink3) }
 /* The run's own total, sitting immediately after the heartbeat because the
    two are read as a pair — "still being heard from" then "for how long" —
    and separating them would make the reader hunt. Dimmer than the count and
@@ -792,10 +884,10 @@ body {
    proportional digits make it visibly jitter its neighbours sideways as the
    minutes roll over. */
 .run-strip-elapsed {
-  flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3);
+  flex: none; font-size: 12px; color: var(--ink3);
   font-variant-numeric: tabular-nums;
 }
-.run-strip-count { flex: none; font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink) }
+.run-strip-count { flex: none; font-size: 11px; font-weight: 600; color: var(--ink) }
 /* The bar restates the count beside it graphically (aria-hidden in the
    markup, for that exact reason) — it does NOT track a separate "processed"
    fraction that could disagree with the count printed beside it, on purpose:
@@ -813,21 +905,21 @@ body {
 .run-strip-bar-fill { display: block; height: 100%; background: var(--good) }
 /* inline-flex, not the plain inline box this was: the stage half is now a
    chip (see RunStrip.tsx's own comment on why), and a chip in a text run
-   sitting on a text baseline rides half a pixel low next to the mono id.
+   sitting on a text baseline rides half a pixel low next to the id beside it.
    The `overflow: hidden` + ellipsis stay for the id, which is the half that
    can actually be long enough to need them. */
 .run-strip-current {
   flex: none; display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--mono); font-size: 10px; color: var(--ink2);
+  font-size: 12px; color: var(--ink2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
 }
 /* Amber, matching both the in-progress bar's and the card badge's
    needs-answers variant: "a human must act" is one legend, reused a third
    time here rather than invented anew. */
-.run-strip-attention { flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--amber) }
+.run-strip-attention { flex: none; font-size: 12px; font-weight: 600; color: var(--amber) }
 /* Trailing "there is more here" mark, same glyph and same aria-hidden
    reasoning as DispatchButton's own .dispatch-mark. */
-.run-strip-mark { flex: none; font-size: 9px; line-height: 1; color: var(--ink3) }
+.run-strip-mark { flex: none; font-size: 11px; line-height: 1; color: var(--ink3) }
 
 /* ---------------------------------------------- crashed run strip
    orchestrator-watchdog (design §6.1): a run whose heartbeat has gone
@@ -869,22 +961,22 @@ body {
    ink — same construction as `.run-strip-starting-label` above and for the
    same reason. */
 .run-strip-paused-label {
-  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .06em; color: var(--ink2);
+  flex: none; font-size: 11px; font-weight: 700;
+  color: var(--ink2);
 }
 /* `pausing · finishes <id>` on a run that is still going — amber, because
    unlike the paused row itself this IS a state in transition that a person
    may want to cancel, and it sits among the fresh strip's own live
    readings. */
 .run-strip-pausing {
-  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600;
-  letter-spacing: .04em; color: var(--amber); white-space: nowrap;
+  flex: none; font-size: 12px; font-weight: 600;
+  color: var(--amber); white-space: nowrap;
 }
 /* The `Resuming…` placeholder that stands in `.run-strip-resume`'s slot
    while a resume this board asked for is on its way — quiet ink, matching
    `.run-strip-heartbeat`: it is a state, not a control. */
 .run-strip-resuming {
-  flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink2);
+  flex: none; font-size: 12px; color: var(--ink2);
   white-space: nowrap;
 }
 /* task-14's placeholder row (StartingStrip.tsx) — a run this server spawned
@@ -915,8 +1007,8 @@ body {
    the quiet ink rather than amber: "starting" is not an alert, it is the
    most ordinary thing a run can be doing. */
 .run-strip-starting-label {
-  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .06em; color: var(--ink2);
+  flex: none; font-size: 11px; font-weight: 700;
+  color: var(--ink2);
 }
 /* The open-the-drawer control inside a crashed strip's `<div>` root (fix
    round 1) — everything `.run-strip` itself used to BE, now split into a
@@ -932,18 +1024,18 @@ body {
   background: none; border: none; padding: 0; margin: 0;
   font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
-/* The word itself — deliberately not folded into `.run-strip-project`,
-   which keeps its own uppercase-mono treatment for the project name alone;
-   this is a second, independent fact sitting next to it. */
+/* The word itself — deliberately not folded into `.run-strip-project`, which
+   keeps its own treatment for the project name alone; this is a second,
+   independent fact sitting next to it. */
 .run-strip-crashed-label {
-  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .06em; color: var(--amber);
+  flex: none; font-size: 11px; font-weight: 700;
+  color: var(--amber);
 }
 /* The watchdog's own one-sentence clause (lib/run-watchdog.ts's
    `watchdogClause`) — quiet, matching `.run-strip-heartbeat`'s own
    register: it is context sitting next to the louder amber facts either
    side of it, not itself an alarm. */
-.run-strip-watchdog { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-strip-watchdog { flex: none; font-size: 12px; color: var(--ink3) }
 /* The Resume control — fix round 1: a real, sibling `<button>` now (see
    RunStrip.tsx's own comment on why a nested `role="button"` span was the
    defect), so this reset undoes a plain `<button>`'s own UA chrome
@@ -957,8 +1049,8 @@ body {
    drops out of the tab order, which this control must not do. */
 .run-strip-resume {
   flex: none; display: inline-flex; align-items: center;
-  font-family: var(--mono); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap;
   padding: 2px 8px; margin: 0; background: none;
   border: 1px solid var(--amber); border-radius: 999px;
   color: var(--amber); cursor: pointer;
@@ -971,7 +1063,7 @@ body {
    `failed`, because this genuinely is a request that came back wrong,
    distinct from the amber "needs a person" register the rest of this
    strip reads in. */
-.run-strip-error { flex: none; font-family: var(--mono); font-size: 10px; color: var(--red) }
+.run-strip-error { flex: none; font-size: 12px; color: var(--red) }
 
 /* task-17's shared run controls (client/src/components/RunControls.tsx),
    hosted by both the board's run drawer and the Runs view's detail pane.
@@ -985,8 +1077,8 @@ body {
 .run-controls { display: inline-flex; align-items: center; gap: 8px }
 .run-controls-btn {
   flex: none; display: inline-flex; align-items: center;
-  font-family: var(--mono); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap;
   padding: 2px 8px; margin: 0; background: none;
   border: 1px solid var(--amber); border-radius: 999px;
   color: var(--amber); cursor: pointer;
@@ -999,8 +1091,8 @@ body {
 .run-controls-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed }
 /* `Pausing after <id>` and `Resuming…` — quiet ink, matching
    `.run-strip-heartbeat`'s register: these are states, not alerts. */
-.run-controls-note { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink2) }
-.run-controls-error { flex: none; font-family: var(--mono); font-size: 10px; color: var(--red) }
+.run-controls-note { flex: none; font-size: 12px; color: var(--ink2) }
+.run-controls-error { flex: none; font-size: 12px; color: var(--red) }
 
 @media (max-width: 700px) {
   /* The bar is the one segment built to give up its width first — the dot,
@@ -1030,9 +1122,9 @@ body {
   background: var(--strip-hi); box-shadow: inset 0 1px 0 var(--edge);
 }
 .drawer-head .pill { flex: none }
-.drawer-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink) }
+.drawer-title { flex: 1; min-width: 0; font-size: 19px; font-weight: 500; color: var(--ink) }
 .drawer-close {
-  font-family: var(--font); font-size: 11.5px; color: var(--ink2);
+  font-family: inherit; font-size: 11.5px; color: var(--ink2);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 5px 10px; cursor: pointer; transition: color .15s, border-color .15s;
 }
@@ -1040,7 +1132,7 @@ body {
 .drawer-meta {
   display: flex; flex-direction: column; gap: 3px;
   padding: 10px 16px; border-bottom: 1px solid var(--hairline);
-  font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  font-size: 12px; color: var(--ink2);
   /* `align-items: flex-start`, not the `stretch` default a column flex
      container would otherwise apply: every child here used to be plain
      text (ItemDrawer's one meta span, RunDrawer's past-run/time spans),
@@ -1064,14 +1156,14 @@ body {
 /* Rendered item Markdown. The section headings are the store's fixed ## set
    (Symptom, Plan, …) — styled as printed labels, not document headings. */
 .drawer-body h2 {
-  font-family: var(--display); font-size: 12.5px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .08em; color: var(--ink2);
+  font-size: 12.5px; font-weight: 700;
+  color: var(--ink2);
   margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--hairline);
 }
 .drawer-body h2:first-child { margin-top: 0 }
 .drawer-body p, .drawer-body li { font-size: 12.5px; color: var(--ink); line-height: 1.55; margin: 6px 0 }
 .drawer-body ul, .drawer-body ol { padding-left: 18px; margin: 6px 0 }
-.drawer-body code { font-family: var(--mono); font-size: 11px; color: var(--cyan) }
+.drawer-body code { font-size: 11px; color: var(--cyan) }
 .drawer-body pre { background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 10px; overflow-x: auto; margin: 8px 0 }
 .drawer-body pre code { color: var(--ink) }
 .drawer-body table { border-collapse: collapse; font-size: 11.5px; margin: 8px 0 }
@@ -1088,14 +1180,14 @@ body {
    needs that an item's markdown body never did — a stale-run fault note, a
    pipeline summary, and per-item queue/attention rows. */
 .run-drawer-note {
-  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--amber);
+  font-size: 11px; line-height: 1.5; color: var(--amber);
   background: color-mix(in srgb, var(--amber) 10%, var(--strip));
   border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--hairline));
   border-radius: 2px; padding: 8px 10px; margin-bottom: 14px;
 }
 .run-drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px }
 .run-drawer-chip {
-  font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  font-size: 11px; color: var(--ink2);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 4px 9px;
 }
@@ -1107,14 +1199,14 @@ body {
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
 }
 .run-drawer-item-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap }
-.run-drawer-item-id { flex: none; font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-drawer-item-id { flex: none; font-size: 12px; color: var(--ink3) }
 .run-drawer-item-title { flex: 1; min-width: 140px; font-size: 12px; color: var(--ink) }
 /* Neutral, not amber: a fix-loop count is history ("this took two attempts"),
    the same informational-only register as .board-card-kind, not a call to
    action — the loop already ran and, for every fixLoops>0 row except the one
    also listed under Attention, needs nobody's intervention any more. The
    amber warning belongs to the attention entry when there genuinely is one. */
-.run-drawer-item-fixloops { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-drawer-item-fixloops { font-size: 11px; color: var(--ink3) }
 /* `margin-left: auto` rather than a grid column: the head is a wrapping flex
    row (id / title / chip / this), and on a narrow drawer the title's own
    `min-width: 140px` pushes the chip and this reading onto a second line,
@@ -1123,14 +1215,14 @@ body {
    plus one this row has on its own: a column of durations only supports
    "which of these took longest" at a glance if the digits line up. */
 .run-drawer-item-time {
-  flex: none; margin-left: auto; font-family: var(--mono); font-size: 10px;
+  flex: none; margin-left: auto; font-size: 12px;
   color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 /* The active row's in-stage caption. Same size and colour as the fix-loop
    line it sits beside — both are secondary readings about the row, and
    giving this one its own weight would make every active row shout over the
    finished ones. */
-.run-drawer-item-stage-note { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-drawer-item-stage-note { font-size: 12px; color: var(--ink3) }
 
 /* The seven-dot pipeline stepper. A plain flex row of fixed dots with a
    1px connector drawn as the gap's own background: `flex: 1` segments would
@@ -1178,7 +1270,7 @@ body {
 }
 .run-drawer-item-verify {
   display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
-  font-family: var(--mono); font-size: 10px;
+  font-size: 12px;
 }
 .run-drawer-item-verify-cmd { color: var(--ink2) }
 .run-drawer-item-verify-ok { color: var(--green); font-weight: 600 }
@@ -1236,7 +1328,7 @@ body {
    everywhere else (mustard groom / cyan execute, DispatchButton's own
    comment on why), so a groomed vs ungroomed item reads the same colour
    here as it will on the card underneath it. */
-.orchestrate-preview-action { font-family: var(--mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em }
+.orchestrate-preview-action { font-size: 11px; font-weight: 600 }
 
 /* The selector's own two rules. `align-items: baseline` on the row head
    (above) leaves a checkbox sitting slightly high against the text it
@@ -1276,8 +1368,8 @@ body {
    variable is what keeps this readable on `--daylight`, where a literal
    colour picked against a dark palette would not be. */
 .orchestrate-preview-flag {
-  flex: none; font-family: var(--mono); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .04em; padding: 0 4px; border-radius: 2px;
+  flex: none; font-size: 11px; font-weight: 600;
+  padding: 0 4px; border-radius: 2px;
   color: var(--amber);
   border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--hairline));
   background: color-mix(in srgb, var(--amber) 12%, var(--steel));
@@ -1292,8 +1384,8 @@ body {
    would imply a progression the control does not enforce. */
 .orchestrate-steps {
   display: flex; gap: 12px; list-style: none; margin: 0; padding: 0 0 2px;
-  font-family: var(--mono); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .06em; color: var(--ink3);
+  font-size: 13px; font-weight: 600;
+  color: var(--ink3);
 }
 .orchestrate-step.current { color: var(--accent) }
 /* Each step's own body owns the column gap `.sheet-body` used to provide
@@ -1317,7 +1409,7 @@ body {
    does not have anywhere else. */
 .orchestrate-merge-hint p { margin: 0 0 6px }
 .orchestrate-merge-hint-json {
-  font-family: var(--mono); font-size: 10.5px; line-height: 1.5; color: var(--ink);
+  font-size: 12px; line-height: 1.5; color: var(--ink);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 8px; margin: 0; overflow-x: auto; white-space: pre;
 }
@@ -1333,8 +1425,8 @@ body {
 }
 .run-drawer-attn-head { display: flex; align-items: baseline; gap: 8px }
 .run-drawer-attn-kind {
-  font-family: var(--mono); font-size: 9.5px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .06em; color: var(--amber);
+  font-size: 11px; font-weight: 600;
+  color: var(--amber);
 }
 .run-drawer-attn-detail { font-size: 12px; color: var(--ink); line-height: 1.5; margin-top: 3px }
 .run-drawer-questions { margin: 6px 0 0; padding-left: 16px }
@@ -1351,8 +1443,8 @@ body {
   border-left: 2px solid color-mix(in srgb, var(--ink2) 25%, transparent);
 }
 .run-drawer-assumptions-label {
-  font-family: var(--mono); font-size: 9.5px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .06em; color: var(--ink2);
+  font-size: 11px; font-weight: 600;
+  color: var(--ink2);
 }
 .run-drawer-assumptions-list { margin: 3px 0 0 }
 .run-drawer-assumptions-list dt { font-size: 12px; color: var(--ink); line-height: 1.5; margin-top: 4px }
@@ -1379,22 +1471,22 @@ body {
   background: var(--strip-hi); box-shadow: inset 0 1px 0 var(--edge);
 }
 .sheet-kicker {
-  font-family: var(--mono); font-size: 10px; text-transform: uppercase;
-  letter-spacing: .08em; color: var(--cyan); flex: none;
+  font-size: 11px;
+  color: var(--cyan); flex: none;
 }
-.sheet-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink);
+.sheet-title { flex: 1; min-width: 0; font-size: 19px; font-weight: 500; color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .sheet-body { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px }
 .sheet-field { display: flex; flex-direction: column; gap: 4px }
-.sheet-static { font-family: var(--mono); font-size: 11px; color: var(--ink2) }
+.sheet-static { font-size: 11px; color: var(--ink2) }
 .sheet-prompt {
-  font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--ink);
+  font-size: 11px; line-height: 1.5; color: var(--ink);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 8px; resize: vertical;
 }
 .sheet-prompt:focus { outline: none; border-color: var(--cyan) }
 .sheet-field select {
-  font-family: var(--font); font-size: 11.5px; color: var(--ink);
+  font-family: inherit; font-size: 11.5px; color: var(--ink);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 5px 8px;
   align-self: flex-start;
 }
@@ -1410,15 +1502,15 @@ body {
 .sheet-check { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink2) }
 .sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px }
 .sheet-launch {
-  font-family: var(--font); font-size: 11.5px; font-weight: 600; color: var(--bg);
+  font-family: inherit; font-size: 11.5px; font-weight: 600; color: var(--bg);
   background: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
   padding: 5px 12px; cursor: pointer;
 }
 .sheet-launch:disabled { opacity: .45; cursor: default }
-.sheet-error, .sheet-blocked { font-family: var(--mono); font-size: 10.5px; line-height: 1.5; color: var(--amber) }
-.sheet-ok { font-family: var(--mono); font-size: 10.5px; color: var(--green, var(--cyan)) }
+.sheet-error, .sheet-blocked { font-size: 12px; line-height: 1.5; color: var(--amber) }
+.sheet-ok { font-size: 12px; color: var(--green, var(--cyan)) }
 .sheet-link { font-size: 12px; color: var(--cyan) }
-.sheet-note { font-size: 10.5px; color: var(--ink3); line-height: 1.45 }
+.sheet-note { font-size: 12px; color: var(--ink3); line-height: 1.45 }
 
 /* The dispatch control, in two shapes for the two places it hangs.
    ONE component renders both (DispatchButton's `variant`) and they share the
@@ -1458,21 +1550,20 @@ body {
 }
 .dispatch-tab-in { display: flex; flex-direction: column; align-items: center; gap: 3px }
 .dispatch-word {
-  font-family: var(--display); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em; white-space: nowrap;
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap;
 }
-.dispatch-mark { font-size: 9px; line-height: 1 }
+.dispatch-mark { font-size: 11px; line-height: 1 }
 
 .dispatch-chip {
   /* `flex: none` keeps it unshrinkable in the drawer head: the title's
      ellipsis is the thing in that row built to give up room, not this. */
   flex: none; display: inline-flex; align-items: center; gap: 5px;
-  font-family: var(--display); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em;
+  font-size: 13px; font-weight: 600;
   padding: 3px 8px; border: 1px solid; border-radius: 2px; cursor: pointer;
   transition: color .15s, background .15s, border-color .15s;
 }
-.dispatch-chip .dispatch-mark { font-size: 8px; opacity: .8 }
+.dispatch-chip .dispatch-mark { font-size: 11px; opacity: .8 }
 
 /* Tone, both shapes. `color-mix` against --strip rather than a hand-picked
    tint per theme: five palettes and two tones would be twenty values to keep
@@ -1584,8 +1675,8 @@ body {
    supposed to carry. */
 .runs-seg { display: inline-flex; background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; overflow: hidden }
 .runs-seg > button {
-  border: 0; background: transparent; font-family: var(--mono); font-size: 10px;
-  letter-spacing: .04em; color: var(--ink2); padding: 4px 10px; cursor: pointer;
+  border: 0; background: transparent; font-size: 13px;
+  color: var(--ink2); padding: 4px 10px; cursor: pointer;
   transition: color .15s, background .15s;
 }
 .runs-seg > button + button { border-left: 1px solid var(--hairline) }
@@ -1649,7 +1740,7 @@ body {
 /* `margin-left` rather than a flex gap: the value row is a plain block (the
    sweeper tile's is the flex one), so the unit would otherwise sit hard
    against the digit — `0running runs`. */
-.watchdog-tile-unit { margin-left: 6px; font-family: var(--display); font-size: 10px; font-weight: 600; color: var(--ink3) }
+.watchdog-tile-unit { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--ink3) }
 
 /* Cyan and ringed while armed, a flat disc while idle, hollow while off —
    three phases told apart by fill AND outline, never by colour alone, since
@@ -1670,8 +1761,8 @@ body {
   .watchdog-lamp-armed { animation: none !important }
 }
 
-.watchdog-state-line { font-family: var(--mono); font-size: 11px; color: var(--ink) }
-.watchdog-hint { font-size: 10.5px; color: var(--ink3) }
+.watchdog-state-line { font-size: 11px; color: var(--ink) }
+.watchdog-hint { font-size: 12px; color: var(--ink3) }
 .watchdog-warn { color: var(--amber) }
 
 /* The armed countdown, drawn. A recessed track so an empty bar still reads
@@ -1684,7 +1775,7 @@ body {
    as a table ("what is the policy") far more often than as prose. Tabular
    figures for the same reason `.runs-tile-value` uses them — three values in
    a column should not shift against each other. */
-.watchdog-policy { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-family: var(--mono); font-size: 10.5px; color: var(--ink3) }
+.watchdog-policy { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 12px; color: var(--ink3) }
 .watchdog-policy-label { color: var(--ink3) }
 .watchdog-policy-value { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right }
 
@@ -1700,7 +1791,7 @@ body {
 .watchdog-row {
   display: flex; flex-direction: column; gap: 7px; align-items: stretch;
   width: 100%; text-align: left; cursor: pointer;
-  padding: 10px 12px; font-family: var(--mono); font-size: 11px;
+  padding: 10px 12px; font-size: 11px;
   background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
   color: var(--ink2);
 }
@@ -1723,7 +1814,7 @@ body {
    — a track with literally nothing in it reads as broken. */
 .watchdog-meter { height: 6px; background: var(--steel); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden }
 .watchdog-meter-fill { display: block; height: 100%; min-width: 2px; background: var(--cyan); transition: width 5s linear }
-.watchdog-meter-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 9.5px; color: var(--ink3) }
+.watchdog-meter-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ink3) }
 
 /* The same amber the crashed strip uses (see `.run-strip-crashed`'s own
    comment for why amber and not red): the run may still be recovered
@@ -1736,7 +1827,7 @@ body {
 /* The watchdog's own line on a crashed card — amber for the same reason the
    border is, and wrapping because `watchdogClause` can be a long sentence
    and a session id is 30-odd characters after it. */
-.watchdog-card-wd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 10px; color: var(--amber) }
+.watchdog-card-wd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--amber) }
 .watchdog-card-session { color: var(--ink3) }
 /* Pips, not "1/2": at a glance the filled count against the total says how
    much rope is left without being read as a fraction first. `aria-label`
@@ -1746,7 +1837,7 @@ body {
 .watchdog-attempts i.on { background: var(--amber) }
 
 .watchdog-row-missing, .watchdog-rows-empty {
-  padding: 8px 12px; font-family: var(--mono); font-size: 11px; color: var(--ink3);
+  padding: 8px 12px; font-size: 11px; color: var(--ink3);
   border: 1px dashed var(--hairline); border-radius: 2px;
 }
 
@@ -1755,7 +1846,7 @@ body {
    tiles and the cards are the state, the feed is history. */
 .watchdog-activity { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0 }
 .watchdog-activity-name { font-size: 11px; font-weight: 600; color: var(--ink) }
-.watchdog-events-empty { font-size: 10.5px; color: var(--ink3) }
+.watchdog-events-empty { font-size: 12px; color: var(--ink3) }
 
 /* task-26 replaced the old `max-height: 220px` list with a box that takes
    whatever the section has left — 220px was a constant that was wrong in
@@ -1766,14 +1857,14 @@ body {
   flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain;
   background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
 }
-.watchdog-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10.5px; color: var(--ink2) }
+.watchdog-table { width: 100%; border-collapse: collapse; font-size: 12px; color: var(--ink2) }
 /* Sticky, so scrolling three weeks of sweeper history never leaves a reader
    guessing which column is which. `--strip-hi` rather than transparent: rows
    scroll UNDER this. */
 .watchdog-table th {
   position: sticky; top: 0; z-index: 1; background: var(--strip-hi);
-  font-family: var(--display); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+  font-size: 11px; font-weight: 600;
+  color: var(--ink3);
   text-align: left; white-space: nowrap; padding: 5px 10px;
   border-bottom: 1px solid var(--hairline);
 }
@@ -1790,8 +1881,8 @@ body {
    decides which kind wears which. */
 .watchdog-kind {
   display: inline-flex; align-items: center; gap: 4px;
-  font-family: var(--mono); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+  font-size: 11px; font-weight: 600;
+  white-space: nowrap;
   padding: 1px 7px 1px 5px; border: 1px solid; border-radius: 9px;
 }
 .watchdog-kind-live { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline)) }
@@ -1822,18 +1913,18 @@ body {
    weight for the same digit count, which reads as the row being unevenly
    important rather than as five equally-weighted numbers. */
 .runs-tile-value {
-  font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--ink);
+  font-size: 18px; font-weight: 700; color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 .runs-tile-label {
-  font-family: var(--display); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+  font-size: 11px; font-weight: 600;
+  color: var(--ink3);
 }
 /* The "runs" tile's by-status breakdown — the one tile whose single headline
    number (a bare run count) says the least on its own, so it is the one that
    earns a second line. Wraps rather than truncates: four short words are
    worth keeping legible over keeping the tile's own height fixed. */
-.runs-tile-substat { display: flex; flex-wrap: wrap; gap: 4px 8px; font-family: var(--mono); font-size: 9.5px; color: var(--ink3) }
+.runs-tile-substat { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--ink3) }
 .runs-tile-substat-item { white-space: nowrap }
 
 /* The wide sixth tile (Task 7). `.runs-tile-wide` layers onto the plain
@@ -1944,8 +2035,8 @@ body {
    it. */
 .runs-day-heading {
   position: sticky; top: 0; z-index: 1; background: var(--board);
-  font-family: var(--display); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+  font-size: 11px; font-weight: 600;
+  color: var(--ink3);
 }
 .runs-day-rows { display: flex; flex-direction: column; gap: 6px }
 
@@ -1954,7 +2045,7 @@ body {
    comment already argues for, not a div with a click handler bolted on. */
 .runs-row {
   display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
-  font-family: var(--font); font-size: 11px; color: var(--ink2);
+  font-family: inherit; font-size: 11px; color: var(--ink2);
   background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 7px 10px; cursor: pointer; transition: border-color .15s;
 }
@@ -1980,7 +2071,7 @@ body {
    happen to share one spelling. The colour tokens are the same four
    run-stage.ts already uses for its own tones, though — cyan/green/amber/red
    mean the same thing everywhere in this app. */
-.runs-status { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 10px; font-weight: 600 }
+.runs-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600 }
 .runs-status-live { color: var(--cyan) }
 .runs-status-done { color: var(--green) }
 .runs-status-warn { color: var(--amber) }
@@ -1990,8 +2081,8 @@ body {
    than borrowing amber (a warning) or green (an ending that went well). */
 .runs-status-paused { color: var(--ink3) }
 .runs-row-project {
-  font-family: var(--mono); font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .05em; color: var(--ink);
+  font-size: 12px; font-weight: 600;
+  color: var(--ink);
 }
 /* Pushed to the row's right margin, matching .run-drawer-item-time's own
    `margin-left: auto` reasoning: a reader scanning the list top to bottom
@@ -1999,8 +2090,8 @@ body {
    column, not wherever the status word and project label happened to leave
    room. "Done" here is `RunsView.tsx`'s own `completed` — merged or
    branched alike, RunStage's two success exits — not `merged` alone. */
-.runs-row-count { margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
-.runs-row-wall { font-family: var(--mono); font-size: 10px; color: var(--ink3); font-variant-numeric: tabular-nums }
+.runs-row-count { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
+.runs-row-wall { font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
 
 /* task-21's placeholder row (StartingRow, RunsView.tsx) — a run this server
    spawned whose run.json has not been written yet, in the runs LIST rather
@@ -2025,7 +2116,7 @@ body {
    puts a number in rather than trailing the project name and leaving that
    column empty. */
 .runs-row-starting-age {
-  margin-left: auto; font-family: var(--mono); font-size: 10px;
+  margin-left: auto; font-size: 12px;
   color: var(--ink3); font-variant-numeric: tabular-nums;
 }
 
@@ -2035,7 +2126,7 @@ body {
    run in it, which is the one thing a reader scanning rows must not mistake
    it for. */
 .runs-load-more {
-  width: 100%; text-align: center; font-family: var(--mono); font-size: 10px; color: var(--ink3);
+  width: 100%; text-align: center; font-size: 13px; color: var(--ink3);
   background: none; border: 1px dashed var(--hairline); border-radius: 2px;
   padding: 7px 10px; cursor: pointer; transition: color .15s, border-color .15s;
 }
@@ -2055,7 +2146,7 @@ body {
    160px, since none of the bounding applies there. */
 .runs-detail {
   background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 12px; font-family: var(--mono); font-size: 11px; color: var(--ink3);
+  padding: 12px; font-size: 11px; color: var(--ink3);
 }
 
 /* The same 700px rail breakpoint the rest of the app switches on (see the
@@ -2094,8 +2185,8 @@ body {
    .runs-day-heading's register without borrowing a component-specific name,
    an inline fetch-failure note, and the segmented per-item stage bar. */
 .run-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px }
-.run-detail-id { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink) }
-.run-detail-time { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-detail-id { font-size: 11px; font-weight: 600; color: var(--ink) }
+.run-detail-time { font-size: 12px; color: var(--ink3) }
 
 /* Task 9's own downgrade explanation (`mergeModeNote`, shown only when it
    differs from the run's own asked-for `mergeMode`) — mustard, matching
@@ -2107,7 +2198,7 @@ body {
    succeeding at what this whole feature exists to make possible, not a
    fault. */
 .run-detail-mode-note {
-  font-family: var(--mono); font-size: 11px; color: var(--ink);
+  font-size: 11px; color: var(--ink);
   background: color-mix(in srgb, var(--mustard) 10%, var(--strip));
   border: 1px solid color-mix(in srgb, var(--mustard) 40%, var(--hairline));
   border-radius: 2px; padding: 8px 10px; margin-bottom: 10px;
@@ -2121,7 +2212,7 @@ body {
    same reason: it has to be seen before the stages it qualifies, not skimmed
    past as another quiet meta line. */
 .run-detail-crashed {
-  font-family: var(--mono); font-size: 11px; color: var(--ink);
+  font-size: 11px; color: var(--ink);
   background: color-mix(in srgb, var(--amber) 10%, var(--strip));
   border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--hairline));
   border-radius: 2px; padding: 8px 10px; margin-bottom: 10px;
@@ -2136,7 +2227,7 @@ body {
    rather than wrapping: a git ref can be long enough to wrap mid-token, and
    a command that wraps is a command a person can copy wrong. */
 .run-detail-branch-cmd {
-  display: block; font-family: var(--mono); font-size: 10.5px; color: var(--ink2);
+  display: block; font-size: 12px; color: var(--ink2);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 5px 8px; margin-top: 4px; white-space: nowrap; overflow-x: auto;
 }
@@ -2147,8 +2238,8 @@ body {
    reusing that literal class name, which is scoped to a day GROUP in the
    list rather than a section of THIS pane. */
 .run-detail-heading {
-  font-family: var(--display); font-size: 9.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+  font-size: 11px; font-weight: 600;
+  color: var(--ink3);
   margin: 14px 0 6px; display: flex; align-items: baseline; gap: 8px;
 }
 /* The "queue wait excluded" caveat riding at the heading's right edge
@@ -2159,8 +2250,8 @@ body {
    should read as a normal (if small, if muted) sentence fragment rather
    than shout alongside the label it is qualifying. */
 .run-detail-sub {
-  margin-left: auto; font-family: var(--mono); text-transform: none;
-  letter-spacing: .02em; font-weight: 400;
+  margin-left: auto;
+  font-weight: 400;
 }
 
 /* The one failure this pane can hit on its own (the tail fetch — the list
@@ -2170,7 +2261,7 @@ body {
    this one reports a plain network failure on a read-only GET, a different
    and lesser kind of trouble that does not deserve the same alarm color. */
 .run-detail-error {
-  font-family: var(--mono); font-size: 11px; color: var(--red);
+  font-size: 11px; color: var(--red);
   background: color-mix(in srgb, var(--red) 10%, var(--strip));
   border: 1px solid color-mix(in srgb, var(--red) 40%, var(--hairline));
   border-radius: 2px; padding: 8px 10px; margin-bottom: 10px;
@@ -2206,7 +2297,7 @@ body {
    `preflight` half). Same size/colour as `.run-detail-time` above (the
    run-level equivalent of this same "secondary, muted context" register)
    rather than a new one invented for an item-scoped reading. */
-.run-detail-lead { font-family: var(--mono); font-size: 10px; color: var(--ink3) }
+.run-detail-lead { font-size: 12px; color: var(--ink3) }
 
 /* ---------------------------------------------- run stage bars (Task 4)
    StageBars.tsx: the seven-row "where did the time go" widget, rendered
@@ -2268,7 +2359,7 @@ body {
   display: grid; grid-template-columns: 80px 1fr 60px;
   align-items: center; gap: 8px;
 }
-.run-bars-label { font-family: var(--mono); font-size: 10px; color: var(--ink2) }
+.run-bars-label { font-size: 12px; color: var(--ink2) }
 .run-bars-track { position: relative; height: 6px; border-left: 1px solid var(--hairline2) }
 /* The same floor `.run-detail-seg` (deleted in Task 6) used to carry, for
    the identical reason: a genuinely brief stage (a few seconds) must stay a
@@ -2279,7 +2370,7 @@ body {
   background: var(--cyan); border-radius: 0 3px 3px 0; min-width: 2px;
 }
 .run-bars-value {
-  font-family: var(--mono); font-size: 10.5px; color: var(--ink);
+  font-size: 12px; color: var(--ink);
   text-align: right; font-variant-numeric: tabular-nums;
 }
 .run-bars-value-none { color: var(--ink3) }
@@ -2421,7 +2512,7 @@ body {
   animation: none;
 }
 .run-track-name {
-  font-family: var(--mono); font-size: 10px; color: var(--ink2); letter-spacing: .02em;
+  font-size: 12px; color: var(--ink2);
   margin-top: 3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .run-track-name-hollow { color: var(--ink3) }
@@ -2440,7 +2531,7 @@ body {
    number the eye is scanning the row for," where `--ink3` says "nothing was
    recorded here at all." */
 .run-track-val {
-  font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink);
+  font-size: 12px; font-weight: 600; color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 .run-track-val-none { color: var(--ink3); font-weight: 400 }
@@ -2452,7 +2543,7 @@ body {
    on a badge they can never show. */
 .run-track-loops {
   position: absolute; left: calc(50% + 9px); top: -3px;
-  font-family: var(--mono); font-size: 9px; font-weight: 600; color: var(--ink);
+  font-size: 11px; font-weight: 600; color: var(--ink);
   background: var(--strip-hi); border: 1px solid var(--hairline2); border-radius: 2px;
   padding: 0 3px; line-height: 14px; z-index: 2;
 }
@@ -2461,8 +2552,8 @@ body {
      seven-column grid at phone width — dropping both half a step keeps
      `inspecting` (the longest stage name) inside its own column instead of
      ellipsising into unreadability. */
-  .run-track-name { font-size: 8px }
-  .run-track-val { font-size: 10.5px }
+  .run-track-name { font-size: 11px }
+  .run-track-val { font-size: 11px }
 }
 /* This section's own reduced-motion carve-out — kept inside the run-track
    block itself, rather than folded into the blanket rule near the top of
@@ -2498,3 +2589,242 @@ body {
   .run-track-node[data-in="live"]::before { animation: none; background: var(--cyan) }
   .run-track-dot-current { animation: none }
 }
+
+/* ── ui primitives ────────────────────────────────────────────────────────────
+   Every class family owned by a component in client/src/components/ui/, and
+   nothing else. The design spec's §12.1 rule, restated where it is enforced:
+   each pattern §12.2's table names is ONE component owning ONE family declared
+   ONCE, here. Page CSS lays a primitive out — grid, gap, width — and never
+   restates its look; a surface that needs a variant adds a prop, never a
+   second class family. Same rule and same reason as `lib/`: every derivation
+   has one home, so two surfaces cannot disagree about the same thing.
+   `test/design-guards.test.ts`'s guard 7 pins both halves — the base selector
+   appears exactly once inside this block, and no selector outside it starts
+   with one of these names.
+
+   The `ui-` prefix is deliberate and is not decoration. Three of these
+   patterns already exist on this board under board-section names that other
+   sections read — `.pill` is the project pill, `.set-seg` was the Settings
+   segmented control — and tasks 2–6 retire those call sites one surface at a
+   time. A prefix means the new family and the dying one can stand side by
+   side for the length of that migration without either having to be renamed
+   twice, and it makes guard 7's "no selector outside this block" check a
+   string comparison rather than a judgement about which `.pill` was meant.
+
+   Nothing on the Board, Runs, Archive or Settings pages composes these yet
+   except the rail: landing them first is what lets tasks 2–5 compose rather
+   than invent (the design spec's §12.1). */
+
+/* Band — the page header (§8.2). Sits on --board, no card, no stroke. */
+.ui-band {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px 16px; margin-bottom: 16px;
+}
+.ui-band-text { min-width: 0; display: flex; flex-direction: column; gap: 4px }
+.ui-band-title { font-size: 19px; font-weight: 500; line-height: 1.3; letter-spacing: -.01em; color: var(--ink) }
+.ui-band-sub { font-size: 13px; font-weight: 400; color: var(--ink2) }
+.ui-band-right { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto }
+
+/* Sheet — the card (§8.2): --strip, 16 px radius, 24 px padding, no stroke and
+   no lift. A card is told from the page by its ground, not by a shadow (§5). */
+.ui-sheet { background: var(--strip); border-radius: 16px; padding: 24px }
+.ui-sheet-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px 16px; margin-bottom: 16px;
+}
+.ui-sheet-head-text { min-width: 0; display: flex; flex-direction: column; gap: 4px }
+.ui-sheet-title { font-size: 19px; font-weight: 500; line-height: 1.3; letter-spacing: -.01em; color: var(--ink) }
+.ui-sheet-sub { font-size: 13px; font-weight: 400; color: var(--ink2) }
+.ui-sheet-head-right { flex: none; display: flex; align-items: center; gap: 8px }
+
+/* FigureStrip — "one card the ground divides" (§8.4). The 1 px gaps are the
+   --board ground showing through the sheet, which is why there is no rule
+   drawn between cells: the divider IS the page. Wraps 5 → 3 → 2. */
+.ui-figure-strip {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px; background: var(--board);
+  border-radius: 16px; overflow: hidden;
+}
+.ui-figure {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--strip); padding: 16px 20px; min-width: 0;
+}
+.ui-figure-wide { grid-column: 1 / -1 }
+.ui-figure-label { font-size: 13px; font-weight: 400; color: var(--ink2) }
+.ui-figure-value {
+  font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -.02em;
+  color: var(--ink);
+}
+.ui-figure-unit { font-size: 13px; font-weight: 500; color: var(--ink3); margin-left: 4px }
+.ui-figure-line { font-size: 12px; font-weight: 400; color: var(--ink2) }
+.ui-figure-live { color: var(--amber) }
+.ui-figure-good { color: var(--green) }
+.ui-figure-warn { color: var(--mustard) }
+.ui-figure-bad { color: var(--red) }
+@media (max-width: 1100px) { .ui-figure-strip { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
+@media (max-width: 700px) { .ui-figure-strip { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+
+/* Chip — §7's filter chip and this board's 32 px control. */
+.ui-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px; border-radius: 12px;
+  font-size: 13px; font-weight: 500; white-space: nowrap;
+  color: var(--ink); background: var(--strip);
+  border: 1px solid var(--hairline2); cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.ui-chip-28 { height: 28px; padding: 0 10px }
+.ui-chip-icon { display: inline-flex; align-items: center; font-size: 11px; line-height: 1 }
+.ui-chip:hover:not(:disabled) { background: var(--strip-hi) }
+.ui-chip:disabled { cursor: default; opacity: .45 }
+/* Pressed is a STATE, so the fill moves and the label does not change colour
+   (§8's standing rule: a raised control marks a state, never a button). */
+.ui-chip.on { background: var(--strip-hi); border-color: var(--ink3) }
+.ui-chip-ink { color: var(--on-accent); background: var(--ink); border-color: var(--ink) }
+.ui-chip-ink:hover:not(:disabled) { background: var(--ink); opacity: .88 }
+.ui-chip-flat { border-color: transparent; background: none }
+.ui-chip-flat:hover:not(:disabled) { background: var(--strip-hi) }
+.ui-chip-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline2)) }
+
+/* Pill — §1's status micro-label at 11/500, 999 px (§4's radius-full). */
+.ui-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 500; line-height: 1.5; white-space: nowrap;
+  padding: 1px 8px; border-radius: 999px;
+  color: var(--ink2); background: var(--steel);
+}
+.ui-pill-live { color: var(--on-accent); background: var(--fill-live) }
+.ui-pill-warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, var(--strip)) }
+.ui-pill-bad { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
+.ui-pill-done { color: var(--green); background: color-mix(in srgb, var(--green) 14%, var(--strip)) }
+
+/* Dot — §7's legend dot. Filled, never outlined: at 8 px a 1 px stroke is most
+   of the circle and the hue stops being tellable from its neighbours. */
+.ui-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--ink3) }
+.ui-dot-10 { width: 10px; height: 10px }
+.ui-dot-live { background: var(--fill-live) }
+.ui-dot-paused { background: var(--mustard) }
+.ui-dot-crashed { background: var(--red) }
+.ui-dot-done { background: var(--fill-progress) }
+/* The category ramp read left to right (§8.2), the same four the column heads
+   take: refactors amber, ideas mustard, bugs red, tasks green. */
+.ui-dot-ramp-refactors { background: var(--amber) }
+.ui-dot-ramp-ideas { background: var(--mustard) }
+.ui-dot-ramp-bugs { background: var(--red) }
+.ui-dot-ramp-tasks { background: var(--green) }
+/* Project hues, by class and never a style attribute, so a theme swap
+   recolours every dot for free (§8.2) — the same bargain `.pill-proj-N` makes. */
+.ui-dot-proj-1 { background: var(--proj-1) }
+.ui-dot-proj-2 { background: var(--proj-2) }
+.ui-dot-proj-3 { background: var(--proj-3) }
+.ui-dot-proj-4 { background: var(--proj-4) }
+.ui-dot-proj-5 { background: var(--proj-5) }
+.ui-dot-proj-6 { background: var(--proj-6) }
+.ui-dot-proj-7 { background: var(--proj-7) }
+.ui-dot-proj-8 { background: var(--proj-8) }
+.ui-dot-breathe { animation: ui-dot-ring 1.8s ease-in-out infinite }
+@keyframes ui-dot-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--fill-live) 45%, transparent) }
+  70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--fill-live) 0%, transparent) }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--fill-live) 0%, transparent) }
+}
+/* §8.8: the blanket reduced-motion rule floors the timing and so parks an
+   animation on its LAST keyframe rather than cancelling it. Here that frame is
+   a transparent ring, which happens to be harmless — but the ring is redrawn
+   on every future theme, so the cancel is stated outright rather than left to
+   luck. No !important needed: this shares its selector with the unconditional
+   rule above and comes after it. */
+@media (prefers-reduced-motion: reduce) { .ui-dot-breathe { animation: none } }
+
+/* Marker — the word on a card's marker row (§8.3). No fill, no stroke: a row
+   of four filled pills on a card this size is a second card. */
+.ui-marker { font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--ink3) }
+.ui-marker-groomed { color: var(--green) }
+.ui-marker-kind { color: var(--ink3) }
+.ui-marker-done { color: var(--ink3) }
+.ui-marker-stale { color: var(--amber) }
+
+/* ProgressRow — §7's progress row: name + value, a 10 px bar, a caption under.
+   The track is flat --steel with no hatch and the fill carries it (§2). */
+.ui-progress { display: flex; flex-direction: column; gap: 6px; min-width: 0 }
+.ui-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px }
+.ui-progress-name { font-size: 13px; font-weight: 400; color: var(--ink); min-width: 0 }
+/* §7's two-tone amount: the spent figure in --ink, its ceiling in --ink3. */
+.ui-progress-value { font-size: 13px; font-weight: 400; color: var(--ink3); flex: none }
+.ui-progress-track { height: 10px; border-radius: 8px; background: var(--steel); overflow: hidden }
+.ui-progress-6 { height: 6px }
+.ui-progress-fill { display: block; height: 100%; border-radius: 8px; transition: width .2s }
+.ui-progress-fill-progress { background: var(--fill-progress) }
+.ui-progress-fill-ink { background: var(--ink) }
+.ui-progress-caption { font-size: 11px; font-weight: 400; color: var(--ink3) }
+
+/* Ledger — "every table scrolls inside its own sheet" (§8.4). This element
+   owns the overflow box; without it a wide table scrolls the PAGE and takes
+   the rail and the band sideways with it. */
+.ui-ledger { overflow-x: auto; min-width: 0 }
+.ui-ledger-grid { display: grid; align-items: center; gap: 0; min-width: min-content }
+.ui-ledger-day { font-size: 13px; font-weight: 500; color: var(--ink2); padding: 12px 0 6px }
+
+/* Segmented — moved here from `.set-seg` (the design spec's §12.1), wearing the
+   36 px control family's skin: 12 px radius, a --hairline2 stroke, --strip. */
+.ui-seg { display: inline-flex; gap: 4px }
+.ui-seg button {
+  height: 32px; padding: 0 11px; border-radius: 12px;
+  font-size: 13px; font-weight: 500;
+  color: var(--ink2); background: var(--strip);
+  border: 1px solid var(--hairline2); cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--strip-hi) }
+.ui-seg button:disabled { cursor: default; opacity: .4 }
+.ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
+
+/* Select and NumberField — the other two of the 36 px family (§8.6). */
+.ui-select {
+  height: 36px; padding: 0 10px; border-radius: 12px;
+  font-size: 13px; color: var(--ink);
+  background: var(--strip); border: 1px solid var(--hairline2);
+}
+.ui-select:focus { outline: none; border-color: var(--ink3) }
+.ui-number {
+  height: 36px; width: 84px; padding: 0 10px; border-radius: 12px;
+  font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums;
+  background: var(--strip); border: 1px solid var(--hairline2);
+}
+.ui-number:focus { outline: none; border-color: var(--ink3) }
+.ui-number-unit { font-size: 12px; color: var(--ink3) }
+
+/* Switch — the family's pill member (§8.6): a recessed --steel track under a
+   raised --strip option, so "on" is legible from the geometry before any
+   colour is read. That matters on the amber theme, which has no second hue to
+   spend on a state. */
+.ui-switch {
+  position: relative; display: inline-flex; align-items: center;
+  height: 36px; padding: 3px; border-radius: 999px;
+  background: var(--steel); border: 1px solid var(--hairline); cursor: pointer;
+}
+.ui-switch::before {
+  content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px;
+  width: calc(50% - 3px); border-radius: 999px;
+  background: var(--strip); box-shadow: 0 1px 2px var(--shadow);
+  transition: transform .15s;
+}
+.ui-switch.on::before { transform: translateX(100%) }
+.ui-switch:disabled { cursor: default; opacity: .45 }
+.ui-switch-opt {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  min-width: 44px; padding: 0 10px;
+  font-size: 13px; font-weight: 500; color: var(--ink3);
+}
+.ui-switch .ui-switch-opt:first-of-type { color: var(--ink) }
+.ui-switch.on .ui-switch-opt:first-of-type { color: var(--ink3) }
+.ui-switch.on .ui-switch-opt:last-of-type { color: var(--ink) }
+
+/* ── end ui primitives ────────────────────────────────────────────────────────
+   A closing marker, not decoration. Guard 7 has to be able to say whether a
+   selector is inside this block, and the block sits last in the file: with an
+   opening header alone, "after the header" means "anywhere below", so a rule
+   appended to the file — the single likeliest way a page comes to restate a
+   primitive's look — would have read as part of the block and passed. The
+   marker is what makes the check catch an offender on BOTH sides. */

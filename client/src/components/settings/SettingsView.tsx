@@ -1,4 +1,5 @@
-import { Segmented, SettingsGroup, SettingsRow } from './SettingsRow';
+import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { Segmented } from '../ui/Segmented';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
@@ -323,7 +324,7 @@ function AgentsGroup() {
           aria-label="Dashboard link"
           defaultValue={settings.linkBase}
           // Re-seed on commit, same idiom and same reason as `NumberField`
-          // (`SettingsRow.tsx`): this field's own commit path can rewrite
+          // (`components/ui/NumberField.tsx`): this field's own commit path can rewrite
           // what was typed into a different canonical value — `clampOrigin`
           // (client/src/lib/settings.ts) strips a trailing slash, or falls
           // back to the default outright on a rejected scheme. Without this
