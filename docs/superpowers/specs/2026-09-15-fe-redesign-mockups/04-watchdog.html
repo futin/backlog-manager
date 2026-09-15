@@ -1,0 +1,166 @@
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+.bm{--bg-app:#F4F4F3;--bg-surface:#fff;--bg-subtle:#F2F2F1;--bg-track:#EDEDEC;--border:#EAEAE8;--border2:#DCDCDA;
+  --ink:#131313;--ink2:#6E6E6E;--ink3:#A0A0A0;--inv:#111;
+  --g600:#5FA92C;--g500:#7DC242;--g200:#CDE8A8;--y400:#F2E635;--o400:#F5A15C;--o300:#F9C79A;--r500:#E0533F;
+  font-family:"Hanken Grotesk",Helvetica,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;line-height:1.4;font-size:14px}
+.bm *{box-sizing:border-box;margin:0;padding:0}
+.bm .frame{background:var(--bg-app);border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;max-width:1120px}
+.bm .band{display:flex;align-items:center;gap:12px}
+.bm .band h1{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3}
+.bm .band .sub{font-size:13px;color:var(--ink2)}
+.bm .band .ctl{margin-left:auto;display:flex;gap:8px;align-items:center}
+.bm .chip{height:32px;padding:0 12px;border:1px solid var(--border2);border-radius:12px;background:var(--bg-surface);
+  font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:var(--ink);white-space:nowrap}
+.bm .chip.sm{height:28px;font-size:12px;padding:0 10px}.bm .chip.danger{color:var(--r500)}
+.bm .chip.flat{border-color:transparent;background:transparent;color:var(--ink2)}
+.bm .hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.30) 0 1px,rgba(255,255,255,0) 1px 4px)}
+.bm .dot{display:inline-block;width:8px;height:8px;border-radius:999px;flex:none}
+.bm .dot.live{background:var(--g500);box-shadow:0 0 0 3px rgba(125,194,66,.25)}
+.bm .dot.done{background:var(--ink3)}.bm .dot.paused{background:var(--o400)}.bm .dot.crash{background:var(--r500)}
+.bm .pill{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;background:var(--bg-subtle);color:var(--ink2);white-space:nowrap}
+.bm .pill.o{background:var(--o300);color:var(--ink)}.bm .pill.g{background:var(--g200);color:var(--ink)}.bm .pill.r{color:var(--r500)}
+.bm .meta{font-size:12px;color:var(--ink3);white-space:nowrap}
+.bm .lbl{font-size:12px;color:var(--ink2);margin:2px 0 10px}
+.bm .bar{height:10px;border-radius:8px;background:var(--bg-track);overflow:hidden;min-width:0}
+.bm .bar i{display:block;height:100%;border-radius:8px;background:var(--g500)}
+.bm .bar.thin{height:6px}.bm .bar i.ink{background:var(--ink3)}
+.bm .figs{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:var(--bg-app);border-radius:16px;overflow:hidden}
+.bm .fig{background:var(--bg-surface);padding:18px 20px 16px}
+.bm .fig .k{font-size:13px;color:var(--ink2)}
+.bm .fig .v{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.1;margin-top:6px}
+.bm .fig .v small{font-size:14px;font-weight:400;color:var(--ink3);letter-spacing:0}
+.bm .fig .v.word{font-size:24px}
+.bm .fig .d{font-size:12px;color:var(--ink2);margin-top:6px}
+.bm .fig .pol{display:flex;gap:18px;margin-top:8px}.bm .fig .pol div{font-size:12px;color:var(--ink2)}.bm .fig .pol b{display:block;font-size:14px;font-weight:500;color:var(--ink)}
+.bm .sheet{background:var(--bg-surface);border-radius:16px;padding:20px 24px;min-width:0}
+.bm .sheet h2{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3}
+.bm .sheet .sub{font-size:13px;color:var(--ink2);margin-top:2px}
+.bm .row{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--border);min-width:0}
+.bm .row:first-of-type{border-top:0}
+.bm .row .pn{font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.bm .row .n{font-size:13px;color:var(--ink2);white-space:nowrap}.bm .row .n b{font-weight:500;color:var(--ink)}
+.bm .g{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;white-space:nowrap}
+.bm .g.live{color:var(--g600)}.bm .g.bad{color:var(--r500)}.bm .g.warn{color:#b8801f}.bm .g.muted{color:var(--ink3)}.bm .g.done{color:var(--g600)}
+.bm table{width:100%;border-collapse:collapse;font-size:13px}
+.bm th{font-size:12px;font-weight:400;color:var(--ink2);text-align:left;padding:12px 12px 8px 0;border-bottom:1px solid var(--border)}
+.bm td{padding:10px 12px 10px 0;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap}
+.bm td.d{white-space:normal;color:var(--ink2)}
+.bm td.t{color:var(--ink3);font-size:12px}
+/* live run card (from Runs shape C) */
+.bm .livecard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px 24px;align-items:start}
+.bm .dh{display:flex;align-items:center;gap:12px}
+.bm .liveprog{display:flex;align-items:center;gap:12px;margin-top:12px}.bm .liveprog .bar{flex:1}.bm .liveprog .n{font-size:14px}.bm .liveprog .n span{color:var(--ink3)}
+.bm .wdline{display:flex;align-items:center;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--ink2)}
+.bm .wdline .bar{width:120px}
+.bm .verdict{margin-top:10px;font-size:13px;color:var(--ink)}
+.bm .acts{display:flex;flex-direction:column;gap:8px}
+.bm .two{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+.bm .feed{display:flex;flex-direction:column}
+.bm .ev{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--border);font-size:12px;color:var(--ink2);align-items:flex-start}
+.bm .ev:first-of-type{border-top:0}
+.bm .ev .t{color:var(--ink3);flex:none;width:38px}
+.bm .ev .g{flex:none;width:76px}
+</style>
+
+<h2>The watchdog — where does it live?</h2>
+<p class="subtitle">Today: Runs › Watchdog, a console with three tiles (sweeper state + sweep meter, watching count, policy), a Watching table, and an Activity feed. The policy itself is edited in Settings. Same facts in all three; the live run card is Runs shape C.</p>
+
+<div class="bm">
+
+<!-- ═════════════ A ═════════════ -->
+<h3>A · Own page, Runs › Watchdog</h3>
+<p class="lbl">Today's console redrawn: a band naming the sub-view, a three-figure strip (sweeper with its meter, watching, policy), a Watching sheet, an Activity ledger. Rail shows the tree Runs › History / Watchdog.</p>
+<div class="frame">
+  <div class="band"><h1>Runs · Watchdog</h1><span class="sub">armed · next sweep in 4m 12s</span><div class="ctl"><span class="chip flat">Policy in Settings ›</span></div></div>
+  <div class="figs">
+    <div class="fig"><div class="k">Sweeper</div><div class="v word">Armed</div><div class="bar thin" style="margin-top:10px"><i class="hatch" style="width:58%"></i></div><div class="d">next sweep in 4m 12s · every 10m</div></div>
+    <div class="fig"><div class="k">Watching</div><div class="v">2 <small>running runs</small></div><div class="d">1 crashed · 1 heartbeating</div></div>
+    <div class="fig"><div class="k">Policy</div><div class="pol"><div>check every<b>10m</b></div><div>leave alone for<b>20m</b></div><div>give up after<b>3</b></div></div><div class="d">resume spawns on · your switch, not the phase</div></div>
+  </div>
+  <div class="sheet"><h2>Watching</h2><div class="sub">every run whose file says running · the sweeper's set, one tick of skew aside</div>
+    <div style="margin-top:8px">
+    <div class="row"><i class="dot live"></i><div class="pn"><span>backlog-manager</span><span class="meta">run-20260915-104412</span></div><span class="n">heartbeat <b>live</b></span><span class="n"><b>0</b> / 3 attempts</span><span class="g muted">◉ watched · not yet needed</span></div>
+    <div class="row"><i class="dot crash"></i><div class="pn"><span>guide-manager</span><span class="meta">run-20260915-071502</span></div><span class="n">heartbeat <b>38m</b></span><span class="n"><b>1</b> / 3 attempts</span><span class="g warn">‖ in grace · resumes in 11m</span><span class="chip sm">Resume now</span></div>
+    </div></div>
+  <div class="sheet"><h2>Activity</h2><div class="sub">what the sweeper did · newest first</div>
+    <table style="margin-top:8px"><thead><tr><th style="width:64px">time</th><th style="width:110px">kind</th><th style="width:220px">run</th><th>detail</th></tr></thead><tbody>
+      <tr><td class="t">10:58</td><td><span class="g live">● spawned</span></td><td>guide-manager · …071502</td><td class="d">resume attempt 1 of 3 · heartbeat was 27m stale</td></tr>
+      <tr><td class="t">10:44</td><td><span class="g muted">◉ armed</span></td><td>—</td><td class="d">watching for crashed runs</td></tr>
+      <tr><td class="t">09:42</td><td><span class="g muted">○ idle</span></td><td>—</td><td class="d">no running run — standing down</td></tr>
+      <tr><td class="t">Sep 13</td><td><span class="g done">✓ recovered</span></td><td>backlog-manager · …085203</td><td class="d">heartbeat fresh again 3m after resume</td></tr>
+    </tbody></table></div>
+</div>
+
+<!-- ═════════════ B ═════════════ -->
+<h3 style="margin-top:36px">B · Folded into Runs — no sub-view</h3>
+<p class="lbl">The watchdog's facts about a run sit on that run's live card, under a hairline: watched, heartbeat, attempts, next sweep. A crashed card carries the verdict beside its Resume — the coupling the invariant states, on one surface. The sweeper's own state is a chip in the band; Activity is a sheet under History. Policy stays in Settings. Runs has no sub-nav.</p>
+<div class="frame">
+  <div class="band"><h1>Runs</h1><span class="sub">2 live · 29 past</span><span class="chip sm flat"><span class="g muted">◉ sweeper armed · next 4m</span></span><div class="ctl"><span class="chip">All projects ▾</span><span class="chip">Last 30 days ▾</span></div></div>
+  <div class="sheet livecard">
+    <div><div class="dh"><i class="dot live"></i><h2>backlog-manager</h2><span class="meta">run-20260915-104412 · started 10:44</span><span class="pill">merge</span></div>
+      <div class="liveprog"><div class="bar"><i class="hatch" style="width:40%"></i></div><span class="n">2<span> / 5</span></span><span class="meta">12m · live</span></div>
+      <div class="wdline"><span class="g muted">◉ watched</span><span>heartbeat <b style="font-weight:500;color:var(--ink)">live</b></span><span>0 / 3 attempts</span><span style="display:flex;align-items:center;gap:8px">next sweep <div class="bar thin"><i class="ink" style="width:58%"></i></div> 4m</span></div></div>
+    <div class="acts"><span class="chip sm">Pause</span><span class="chip sm danger">Cancel</span><span class="chip sm">Open ›</span></div>
+  </div>
+  <div class="sheet livecard">
+    <div><div class="dh"><i class="dot crash"></i><h2>guide-manager</h2><span class="meta">run-20260915-071502 · started 07:15</span><span class="pill r">crashed</span></div>
+      <div class="liveprog"><div class="bar"><i class="hatch" style="width:0%"></i></div><span class="n">0<span> / 3</span></span><span class="meta">heartbeat 38m ago</span></div>
+      <div class="verdict">Watchdog resumed it once at 10:58; the run is in its 20m grace and will be tried again in 11m, then twice more before it gives up.</div>
+      <div class="wdline"><span class="g warn">‖ in grace</span><span>1 / 3 attempts</span><span style="display:flex;align-items:center;gap:8px">next try <div class="bar thin"><i class="ink" style="width:45%"></i></div> 11m</span></div></div>
+    <div class="acts"><span class="chip sm">Resume now</span><span class="chip sm danger">Abort</span><span class="chip sm">Open ›</span></div>
+  </div>
+  <div class="sheet"><h2>History</h2><div class="sub">29 runs · last 30 days</div>
+    <div class="row" style="margin-top:8px"><i class="dot done"></i><div class="pn"><span>backlog-manager</span></div><span class="n">task-34, task-35</span><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="meta">›</span></div>
+    <div class="row"><i class="dot done"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n">task-23 · 1 fix loop</span><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span><span class="meta">›</span></div></div>
+  <div class="sheet"><div class="dh" style="justify-content:space-between"><div><h2>Watchdog activity</h2><div class="sub">what the sweeper did · newest first</div></div><span class="chip sm flat">show 20 more ▾</span></div>
+    <table style="margin-top:8px"><tbody>
+      <tr><td class="t" style="width:64px">10:58</td><td style="width:110px"><span class="g live">● spawned</span></td><td style="width:220px">guide-manager · …071502</td><td class="d">resume attempt 1 of 3 · heartbeat was 27m stale</td></tr>
+      <tr><td class="t">10:44</td><td><span class="g muted">◉ armed</span></td><td>—</td><td class="d">watching for crashed runs</td></tr>
+      <tr><td class="t">09:42</td><td><span class="g muted">○ idle</span></td><td>—</td><td class="d">no running run — standing down</td></tr>
+    </tbody></table></div>
+</div>
+
+<!-- ═════════════ C ═════════════ -->
+<h3 style="margin-top:36px">C · Aside on Runs</h3>
+<p class="lbl">Runs keeps its main column (live cards, figures, history); a 300 px aside carries the Sweeper card — state, meter, policy — and the Activity feed. Per-run facts sit on the cards as in B. No sub-view; the aside folds under below 1100.</p>
+<div class="frame">
+  <div class="band"><h1>Runs</h1><span class="sub">2 live · 29 past</span><div class="ctl"><span class="chip">All projects ▾</span><span class="chip">Last 30 days ▾</span></div></div>
+  <div class="two">
+    <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+      <div class="sheet livecard">
+        <div><div class="dh"><i class="dot live"></i><h2>backlog-manager</h2><span class="meta">run-20260915-104412</span><span class="pill">merge</span></div>
+          <div class="liveprog"><div class="bar"><i class="hatch" style="width:40%"></i></div><span class="n">2<span> / 5</span></span><span class="meta">12m · live</span></div>
+          <div class="wdline"><span class="g muted">◉ watched</span><span>heartbeat live</span><span>0 / 3 attempts</span></div></div>
+        <div class="acts"><span class="chip sm">Pause</span><span class="chip sm danger">Cancel</span></div></div>
+      <div class="sheet livecard">
+        <div><div class="dh"><i class="dot crash"></i><h2>guide-manager</h2><span class="meta">run-20260915-071502</span><span class="pill r">crashed</span></div>
+          <div class="verdict">In its 20m grace after resume 1 of 3 · next try in 11m.</div></div>
+        <div class="acts"><span class="chip sm">Resume now</span><span class="chip sm danger">Abort</span></div></div>
+      <div class="sheet"><h2>History</h2><div class="sub">29 runs · last 30 days</div>
+        <div class="row" style="margin-top:8px"><i class="dot done"></i><div class="pn"><span>backlog-manager</span></div><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="meta">›</span></div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="sheet"><h2>Sweeper</h2><div class="sub">armed · next sweep in 4m 12s</div><div class="bar thin" style="margin-top:12px"><i class="hatch" style="width:58%"></i></div>
+        <div class="pol" style="display:flex;gap:18px;margin-top:14px"><div style="font-size:12px;color:var(--ink2)">check every<b style="display:block;font-size:14px;font-weight:500;color:var(--ink)">10m</b></div><div style="font-size:12px;color:var(--ink2)">leave alone<b style="display:block;font-size:14px;font-weight:500;color:var(--ink)">20m</b></div><div style="font-size:12px;color:var(--ink2)">give up<b style="display:block;font-size:14px;font-weight:500;color:var(--ink)">3</b></div></div>
+        <div class="meta" style="margin-top:10px">edit in Settings ›</div></div>
+      <div class="sheet"><h2>Activity</h2><div class="sub">newest first</div>
+        <div class="feed" style="margin-top:8px">
+          <div class="ev"><span class="t">10:58</span><span class="g live">● spawned</span><span>guide-manager · resume 1 of 3</span></div>
+          <div class="ev"><span class="t">10:44</span><span class="g muted">◉ armed</span><span>watching for crashed runs</span></div>
+          <div class="ev"><span class="t">09:42</span><span class="g muted">○ idle</span><span>no running run</span></div>
+          <div class="ev"><span class="t">Sep 13</span><span class="g done">✓ recovered</span><span>backlog-manager · fresh again</span></div>
+        </div></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<h3 style="margin-top:36px">Pick one</h3>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Own page</h3><p>Today's structure in the new language. Rail gains a Runs sub-nav. Watching duplicates the live cards one section away.</p></div></div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Folded into Runs</h3><p>Verdict beside Resume on one card. No sub-view, no rail tree. Activity feed lives under History; the sweeper's state is a chip in the band.</p></div></div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)"><div class="letter">C</div><div class="content"><h3>Aside on Runs</h3><p>Sweeper and feed always in view beside the runs. Main column loses 316 px; folds under 1100.</p></div></div>
+</div>

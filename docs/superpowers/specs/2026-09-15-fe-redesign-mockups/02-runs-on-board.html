@@ -1,0 +1,155 @@
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+.bm{--bg-app:#F4F4F3;--bg-surface:#fff;--bg-subtle:#F2F2F1;--bg-track:#EDEDEC;--border:#EAEAE8;--border2:#DCDCDA;
+  --ink:#131313;--ink2:#6E6E6E;--ink3:#A0A0A0;--inv:#111;
+  --g600:#5FA92C;--g500:#7DC242;--y400:#F2E635;--o400:#F5A15C;--o300:#F9C79A;--r500:#E0533F;
+  --p1:#a83a56;--p2:#2a5fae;--p3:#1c7a4e;
+  font-family:"Hanken Grotesk",Helvetica,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;line-height:1.4;font-size:14px}
+.bm *{box-sizing:border-box;margin:0;padding:0}
+.bm .frame{background:var(--bg-app);border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;max-width:1120px}
+.bm .band{display:flex;align-items:center;gap:12px}
+.bm .band h1{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3}
+.bm .band .sub{font-size:13px;color:var(--ink2)}
+.bm .band .ctl{margin-left:auto;display:flex;gap:8px;align-items:center}
+.bm .chip{height:32px;padding:0 12px;border:1px solid var(--border2);border-radius:12px;background:var(--bg-surface);
+  font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:var(--ink);white-space:nowrap}
+.bm .chip.ink{background:var(--inv);border-color:var(--inv);color:#fff}
+.bm .chip.sm{height:28px;font-size:12px;padding:0 10px}
+.bm .search{height:36px;width:200px;padding:0 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg-surface);
+  font-size:13px;color:var(--ink3);display:flex;align-items:center}
+.bm .hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.30) 0 1px,rgba(255,255,255,0) 1px 4px)}
+.bm .dot{display:inline-block;width:8px;height:8px;border-radius:999px;flex:none}
+.bm .dot.live{background:var(--g500);box-shadow:0 0 0 3px rgba(125,194,66,.25)}
+.bm .dot.paused{background:var(--o400)}
+.bm .cnt{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 7px;border-radius:999px;
+  background:var(--bg-subtle);font-size:11px;font-weight:500;color:var(--ink2)}
+.bm .pill{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;background:var(--bg-subtle);color:var(--ink2);white-space:nowrap}
+.bm .pill.o{background:var(--o300);color:var(--ink)}
+.bm .mk{font-size:11px;font-weight:500;color:var(--ink3);white-space:nowrap}.bm .mk.g{color:var(--g600)}
+.bm .meta{font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bm .proj{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);min-width:0}
+.bm .proj span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bm .lbl{font-size:12px;color:var(--ink2);margin:2px 0 10px}
+/* progress row (§7) */
+.bm .bar{height:10px;border-radius:8px;background:var(--bg-track);overflow:hidden;min-width:0}
+.bm .bar i{display:block;height:100%;border-radius:8px;background:var(--g500)}
+/* board bits */
+.bm .cols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start;min-width:0}
+.bm .col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.bm .colh{display:flex;align-items:center;gap:8px;padding:0 4px 4px}
+.bm .colh .name{font-size:15px;font-weight:500}.bm .colh .cnt{margin-left:auto}
+.bm .card{background:var(--bg-surface);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.bm .card .face{padding:14px 16px 12px;display:flex;flex-direction:column;gap:10px}
+.bm .card .t{font-size:14px;font-weight:500;line-height:1.35}
+.bm .card .foot{display:flex;align-items:center;gap:8px;min-width:0}.bm .card .foot .meta{margin-left:auto;flex:none}
+.bm .card .livebar{height:24px;padding:0 16px;display:flex;align-items:center;gap:8px;font-size:11px;font-weight:500;color:var(--ink);background:var(--o400)}
+.bm .card .livebar b{font-weight:500;margin-left:auto}
+/* A: run band */
+.bm .runs{display:flex;flex-direction:column;gap:8px}
+.bm .run{display:grid;grid-template-columns:auto minmax(120px,180px) minmax(0,1fr) minmax(140px,220px) auto auto auto;align-items:center;gap:14px;
+  height:48px;padding:0 16px;background:var(--bg-surface);border-radius:12px}
+.bm .run .pn{font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;min-width:0}
+.bm .run .pn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bm .run .what{font-size:13px;color:var(--ink2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bm .run .what b{font-weight:500;color:var(--ink)}
+.bm .run .prog{display:flex;align-items:center;gap:10px;min-width:0}
+.bm .run .prog .n{font-size:12px;color:var(--ink2);white-space:nowrap}.bm .run .prog .n b{font-weight:500;color:var(--ink)}
+.bm .run .prog .bar{flex:1}
+.bm .run .time{font-size:12px;color:var(--ink3);white-space:nowrap}
+.bm .run .go{font-size:13px;color:var(--ink2)}
+/* B: aside */
+.bm .two{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+.bm .sheet{background:var(--bg-surface);border-radius:16px;padding:24px}
+.bm .sheet h2{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3;margin:0}
+.bm .sheet .sub{font-size:13px;color:var(--ink2);margin-top:4px}
+.bm .prow{padding:16px 0 0;display:flex;flex-direction:column;gap:8px}
+.bm .prow+.prow{margin-top:16px;border-top:1px solid var(--border)}
+.bm .prow .h{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500}
+.bm .prow .h .n{margin-left:auto;font-size:14px}.bm .prow .h .n span{color:var(--ink3)}
+.bm .prow .cap{font-size:11px;color:var(--ink2)}
+.bm .prow .acts{display:flex;gap:8px;margin-top:4px}
+</style>
+
+<h2>Where do live runs sit on the Board?</h2>
+<p class="subtitle">Board shape A is settled. The orchestrator run strip today sits between the toolbar and the columns. One run executing bug-34, one paused, in all three.</p>
+
+<div class="bm">
+
+<!-- ═════════════ A ═════════════ -->
+<h3>A · Band under the toolbar</h3>
+<p class="lbl">Today's place, redrawn: one 48 px white row per run. Dot + project · what it is doing · §7 progress row (hatched green on track, count as two-tone) · elapsed · mode pill · controls · open.</p>
+<div class="frame">
+  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span>
+    <div class="ctl"><div class="search">Search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip ink">Orchestrate</span></div></div>
+  <div class="runs">
+    <div class="run"><i class="dot live"></i><div class="pn"><span>backlog-manager</span></div><div class="what">executing <b>bug-34</b> · question-mode prompt-composition test flakes…</div>
+      <div class="prog"><div class="bar"><i class="hatch" style="width:40%"></i></div><span class="n"><b>2</b> / 5</span></div><span class="time">12m · live</span><span class="pill">merge</span><span class="chip sm">Pause</span></div>
+    <div class="run"><i class="dot paused"></i><div class="pn"><span>claude-agents-dashboard</span></div><div class="what">paused · finished <b>task-24</b>, <b>task-25</b> waits</div>
+      <div class="prog"><div class="bar"><i class="hatch" style="width:50%"></i></div><span class="n"><b>1</b> / 2</span></div><span class="time">1h 04m</span><span class="pill o">paused</span><span class="chip sm">Resume</span></div>
+  </div>
+  <div class="cols">
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--o400)"></i><span class="name">Refactoring</span><span class="cnt">3</span></div>
+      <div class="card"><div class="face"><div class="t">Dated probe figures in session-surfaces.md read as live numbers</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-1 · Sep 7</span></div></div></div></div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--y400)"></i><span class="name">Ideas</span><span class="cnt">17</span></div>
+      <div class="card"><div class="face"><div class="t">Usage-aware auto-pause for orchestrator runs</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-7 · Sep 5</span></div></div></div></div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--r500)"></i><span class="name">Bugs</span><span class="cnt">8</span></div>
+      <div class="card"><div class="livebar hatch">executing<b>12m</b></div><div class="face"><div class="t">question-mode prompt-composition test flakes with a 400 under the full suite</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">bug-34 · Sep 7</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Graceful Stop leaves a spawned session's subagent running</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-21 · Sep 9</span></div></div></div></div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--g500)"></i><span class="name">Tasks</span><span class="cnt">2</span></div>
+      <div class="card"><div class="face"><div class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-25 · Jul 25</span></div></div></div></div>
+  </div>
+</div>
+
+<!-- ═════════════ B ═════════════ -->
+<h3 style="margin-top:36px">B · Aside card, dashboard Sessions' pattern</h3>
+<p class="lbl">A 300 px right column carries a Runs card: title + subtitle, one §7 progress row per run with controls under it. Columns shrink to ~190 px at this width; the aside folds under the columns below 1100.</p>
+<div class="frame">
+  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span>
+    <div class="ctl"><div class="search">Search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip ink">Orchestrate</span></div></div>
+  <div class="two">
+    <div class="cols">
+      <div class="col"><div class="colh"><i class="dot" style="background:var(--o400)"></i><span class="name">Refactoring</span><span class="cnt">3</span></div>
+        <div class="card"><div class="face"><div class="t">Dated probe figures in session-surfaces.md read as live numbers</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-1</span></div></div></div></div>
+      <div class="col"><div class="colh"><i class="dot" style="background:var(--y400)"></i><span class="name">Ideas</span><span class="cnt">17</span></div>
+        <div class="card"><div class="face"><div class="t">Usage-aware auto-pause for orchestrator runs</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-7</span></div></div></div></div>
+      <div class="col"><div class="colh"><i class="dot" style="background:var(--r500)"></i><span class="name">Bugs</span><span class="cnt">8</span></div>
+        <div class="card"><div class="livebar hatch">executing<b>12m</b></div><div class="face"><div class="t">question-mode prompt-composition test flakes with a 400 under the full suite</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">bug-34</span></div></div></div>
+        <div class="card"><div class="face"><div class="t">Graceful Stop leaves a spawned session's subagent running</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-21</span></div></div></div></div>
+      <div class="col"><div class="colh"><i class="dot" style="background:var(--g500)"></i><span class="name">Tasks</span><span class="cnt">2</span></div>
+        <div class="card"><div class="face"><div class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-25</span></div></div></div></div>
+    </div>
+    <div class="sheet"><h2>Runs</h2><div class="sub">2 live · 29 past</div>
+      <div class="prow"><div class="h"><i class="dot live"></i>backlog-manager<span class="n">2<span> / 5</span></span></div><div class="bar"><i class="hatch" style="width:40%"></i></div><div class="cap">executing bug-34 · 12m · live · merge</div><div class="acts"><span class="chip sm">Pause</span><span class="chip sm">Open ›</span></div></div>
+      <div class="prow"><div class="h"><i class="dot paused"></i>claude-agents-dashboard<span class="n">1<span> / 2</span></span></div><div class="bar"><i class="hatch" style="width:50%"></i></div><div class="cap">paused after task-24 · 1h 04m</div><div class="acts"><span class="chip sm">Resume</span><span class="chip sm">Open ›</span></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════ C ═════════════ -->
+<h3 style="margin-top:36px">C · Off the Board</h3>
+<p class="lbl">No run chrome on the Board beyond the card's own live strip and one chip in the band — dot, count, and it opens the Runs section. Facts and controls live in Runs only.</p>
+<div class="frame">
+  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span><span class="chip sm" style="margin-left:4px"><i class="dot live" style="width:7px;height:7px"></i>2 runs · 1 live ›</span>
+    <div class="ctl"><div class="search">Search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip ink">Orchestrate</span></div></div>
+  <div class="cols">
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--o400)"></i><span class="name">Refactoring</span><span class="cnt">3</span></div>
+      <div class="card"><div class="face"><div class="t">Dated probe figures in session-surfaces.md read as live numbers</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-1 · Sep 7</span></div></div></div></div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--y400)"></i><span class="name">Ideas</span><span class="cnt">17</span></div>
+      <div class="card"><div class="face"><div class="t">Usage-aware auto-pause for orchestrator runs</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-7 · Sep 5</span></div></div></div></div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--r500)"></i><span class="name">Bugs</span><span class="cnt">8</span></div>
+      <div class="card"><div class="livebar hatch">executing · 2 / 5<b>12m</b></div><div class="face"><div class="t">question-mode prompt-composition test flakes with a 400 under the full suite</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">bug-34 · Sep 7</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Graceful Stop leaves a spawned session's subagent running</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-21 · Sep 9</span></div></div></div></div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--g500)"></i><span class="name">Tasks</span><span class="cnt">2</span></div>
+      <div class="card"><div class="face"><div class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-25 · Jul 25</span></div></div></div></div>
+  </div>
+</div>
+
+</div>
+
+<h3 style="margin-top:36px">Pick one</h3>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Band under the toolbar</h3><p>Runs stay where they are. Pause/Resume one click away. Costs 56 px per run above the columns.</p></div></div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Aside card</h3><p>Same pattern as the dashboard's Sessions page. Columns lose ~70 px each while any run is live; aside folds under below 1100.</p></div></div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)"><div class="letter">C</div><div class="content"><h3>Off the Board</h3><p>Board stays pure. Controls need a section switch. A crashed run is a chip's tint, not a row.</p></div></div>
+</div>

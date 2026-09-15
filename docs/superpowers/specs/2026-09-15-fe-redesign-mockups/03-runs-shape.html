@@ -1,0 +1,192 @@
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+.bm{--bg-app:#F4F4F3;--bg-surface:#fff;--bg-subtle:#F2F2F1;--bg-track:#EDEDEC;--border:#EAEAE8;--border2:#DCDCDA;
+  --ink:#131313;--ink2:#6E6E6E;--ink3:#A0A0A0;--inv:#111;
+  --g600:#5FA92C;--g500:#7DC242;--g200:#CDE8A8;--y400:#F2E635;--o400:#F5A15C;--o300:#F9C79A;--r500:#E0533F;
+  --p1:#a83a56;--p2:#2a5fae;--p3:#1c7a4e;
+  font-family:"Hanken Grotesk",Helvetica,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;line-height:1.4;font-size:14px}
+.bm *{box-sizing:border-box;margin:0;padding:0}
+.bm .frame{background:var(--bg-app);border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;max-width:1120px}
+.bm .band{display:flex;align-items:center;gap:12px}
+.bm .band h1{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3}
+.bm .band .sub{font-size:13px;color:var(--ink2)}
+.bm .band .ctl{margin-left:auto;display:flex;gap:8px;align-items:center}
+.bm .chip{height:32px;padding:0 12px;border:1px solid var(--border2);border-radius:12px;background:var(--bg-surface);
+  font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:var(--ink);white-space:nowrap}
+.bm .chip.ink{background:var(--inv);border-color:var(--inv);color:#fff}
+.bm .chip.sm{height:28px;font-size:12px;padding:0 10px}
+.bm .chip.danger{color:var(--r500)}
+.bm .seg{display:inline-flex;background:var(--border2);border-radius:12px;padding:3px;gap:2px}
+.bm .seg span{padding:5px 12px;border-radius:9px;font-size:13px;font-weight:500;color:var(--ink2)}
+.bm .seg span.on{background:var(--bg-surface);color:var(--ink)}
+.bm .hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.30) 0 1px,rgba(255,255,255,0) 1px 4px)}
+.bm .dot{display:inline-block;width:8px;height:8px;border-radius:999px;flex:none}
+.bm .dot.live{background:var(--g500);box-shadow:0 0 0 3px rgba(125,194,66,.25)}
+.bm .dot.done{background:var(--ink3)}.bm .dot.paused{background:var(--o400)}.bm .dot.crash{background:var(--r500)}
+.bm .pill{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;background:var(--bg-subtle);color:var(--ink2);white-space:nowrap}
+.bm .pill.o{background:var(--o300);color:var(--ink)}.bm .pill.g{background:var(--g200);color:var(--ink)}
+.bm .meta{font-size:12px;color:var(--ink3);white-space:nowrap}
+.bm .lbl{font-size:12px;color:var(--ink2);margin:2px 0 10px}
+.bm .bar{height:10px;border-radius:8px;background:var(--bg-track);overflow:hidden;min-width:0}
+.bm .bar i{display:block;height:100%;border-radius:8px;background:var(--g500)}
+/* figure strip: ONE card the ground divides */
+.bm .figs{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;background:var(--bg-app);border-radius:16px;overflow:hidden}
+.bm .fig{background:var(--bg-surface);padding:18px 20px 16px}
+.bm .fig .k{font-size:13px;color:var(--ink2)}
+.bm .fig .v{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.1;margin-top:6px}
+.bm .fig .v small{font-size:14px;font-weight:400;color:var(--ink3);letter-spacing:0}
+.bm .fig .d{font-size:12px;color:var(--ink2);margin-top:4px}.bm .fig .d b{font-weight:500;color:var(--g600)}.bm .fig .d b.o{color:#b8801f}
+/* sheets */
+.bm .sheet{background:var(--bg-surface);border-radius:16px;padding:20px 24px;min-width:0}
+.bm .sheet h2{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3}
+.bm .sheet .sub{font-size:13px;color:var(--ink2);margin-top:2px}
+.bm .kick{font-size:13px;font-weight:500;color:var(--ink2);padding:16px 0 6px}
+.bm .row{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--border);min-width:0}
+.bm .row .pn{font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.bm .row .pn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bm .row .n{font-size:13px;color:var(--ink2);white-space:nowrap}.bm .row .n b{font-weight:500;color:var(--ink)}
+.bm .row.on{background:var(--bg-subtle);margin:0 -24px;padding-left:24px;padding-right:24px;position:relative}
+.bm .row.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:999px;background:var(--ink)}
+/* detail */
+.bm .dh{display:flex;align-items:flex-start;gap:12px}
+.bm .dh .ctl{margin-left:auto;display:flex;gap:8px}
+.bm .lead{font-size:14px;color:var(--ink2);margin-top:8px}.bm .lead b{color:var(--ink);font-weight:500}
+.bm .sec{font-size:13px;font-weight:500;color:var(--ink2);padding:20px 0 8px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.bm .item{padding:6px 0 14px}
+.bm .item .ih{display:flex;align-items:center;gap:10px}
+.bm .item .ih .id{font-size:12px;color:var(--ink3)}.bm .item .ih .t{font-size:14px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bm .item .ih .pill{margin-left:auto}
+.bm .track{display:grid;grid-template-columns:repeat(7,1fr);gap:0;margin:14px 0 0;position:relative}
+.bm .track::before{content:"";position:absolute;left:7%;right:7%;top:5px;height:2px;background:var(--bg-track)}
+.bm .node{display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+.bm .node i{width:12px;height:12px;border-radius:999px;background:var(--bg-track);border:2px solid var(--bg-surface);box-shadow:0 0 0 1px var(--border2)}
+.bm .node.done i{background:var(--g500);box-shadow:none}
+.bm .node.now i{background:var(--o400);box-shadow:0 0 0 3px rgba(245,161,92,.3)}
+.bm .node.skip i{background:var(--bg-surface);border:2px dashed var(--border2);box-shadow:none}
+.bm .node .nm{font-size:11px;color:var(--ink2)}.bm .node .dur{font-size:12px;font-weight:500}.bm .node.skip .dur{color:var(--ink3);font-weight:400}
+.bm .verify{margin-top:10px;font-size:12px;color:var(--ink2);display:flex;gap:8px;align-items:center}
+.bm .verify code{font-family:inherit;background:var(--bg-subtle);padding:1px 6px;border-radius:4px;color:var(--ink)}
+/* layouts */
+.bm .split{display:grid;grid-template-columns:380px minmax(0,1fr);gap:16px;align-items:start}
+.bm .livecard{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px 24px;align-items:start}
+.bm .liveprog{display:flex;align-items:center;gap:12px;margin-top:12px}.bm .liveprog .bar{flex:1}.bm .liveprog .n{font-size:14px}.bm .liveprog .n span{color:var(--ink3)}
+.bm .expand{background:var(--bg-subtle);margin:0 -24px;padding:16px 24px 20px;border-top:1px solid var(--border)}
+</style>
+
+<h2>Runs — the run's one home now</h2>
+<p class="subtitle">With runs off the Board, this section carries the live runs, their Pause/Cancel/Resume, and every past run. All three keep the figure strip (five figures, one card the ground divides — DESIGN.md §8.4) and the seven-node stage track per item. Watchdog becomes a rail sub-view (Runs › History / Watchdog), not a switch in the page.</p>
+
+<div class="bm">
+
+<!-- ═════════════ A ═════════════ -->
+<h3>A · Split — list sheet, detail sheet</h3>
+<p class="lbl">Today's arrangement in the card language: a 380 px list with day kickers on the left, the picked run's detail on the right. Live runs pin above the days with their controls in the detail head.</p>
+<div class="frame">
+  <div class="band"><h1>Runs</h1><span class="sub">2 live · 29 past</span><div class="ctl"><span class="chip">All projects ▾</span><span class="chip">Last 30 days ▾</span></div></div>
+  <div class="figs">
+    <div class="fig"><div class="k">Runs</div><div class="v">29</div><div class="d"><b>+4</b> vs prior 30 days</div></div>
+    <div class="fig"><div class="k">Completed / queued</div><div class="v">41 <small>/ 44</small></div><div class="d">3 parked</div></div>
+    <div class="fig"><div class="k">Avg item work</div><div class="v">38m</div><div class="d">queue wait excluded</div></div>
+    <div class="fig"><div class="k">Rework / completed</div><div class="v">6 <small>/ 41</small></div><div class="d"><b class="o">15%</b> fix loops</div></div>
+    <div class="fig"><div class="k">Verify pass</div><div class="v">97%</div><div class="d">1 red of 41</div></div>
+  </div>
+  <div class="split">
+    <div class="sheet">
+      <div class="kick" style="padding-top:0">Live</div>
+      <div class="row on"><i class="dot live"></i><div class="pn"><span>backlog-manager</span></div><span class="n"><b>2</b> / 5</span><span class="meta">12m</span></div>
+      <div class="row"><i class="dot paused"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n"><b>1</b> / 2</span><span class="pill o">paused</span></div>
+      <div class="kick">Sep 13</div>
+      <div class="row"><i class="dot done"></i><div class="pn"><span>backlog-manager</span></div><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span></div>
+      <div class="kick">Sep 8</div>
+      <div class="row"><i class="dot done"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span></div>
+      <div class="row"><i class="dot crash"></i><div class="pn"><span>guide-manager</span></div><span class="n"><b>0</b> / 3</span><span class="pill" style="color:var(--r500)">crashed</span></div>
+    </div>
+    <div class="sheet">
+      <div class="dh"><div><h2>backlog-manager <span class="meta">· run-20260915-104412</span></h2><div class="sub">started 10:44 · live · merge mode · question mode park</div></div>
+        <div class="ctl"><span class="chip sm">Pause</span><span class="chip sm danger">Cancel</span></div></div>
+      <div class="lead">Executing <b>bug-34</b>, item 2 of 5 · 12m in · preflight 22s · queue wait excluded</div>
+      <div class="sec">Items</div>
+      <div class="item"><div class="ih"><span class="id">bug-33</span><span class="t">Board-started run visible before its run file exists</span><span class="pill g">merged · 41m</span></div>
+        <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">24m</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">27s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">6m</span></div><div class="node skip"><i></i><span class="nm">fixing</span><span class="dur">—</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">2m 47s</span></div><div class="node done"><i></i><span class="nm">merging</span><span class="dur">25s</span></div><div class="node done"><i></i><span class="nm">merged</span><span class="dur">09:27</span></div></div>
+        <div class="verify">✓ <code>pnpm run test</code> 1,204 passed · <code>pnpm run typecheck</code> clean</div></div>
+      <div class="item"><div class="ih"><span class="id">bug-34</span><span class="t">question-mode prompt-composition test flakes with a 400 under the full suite</span><span class="pill o">executing · 12m</span></div>
+        <div class="track"><div class="node now"><i></i><span class="nm">dispatched</span><span class="dur">12m</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur meta">—</span></div></div></div>
+      <div class="item"><div class="ih"><span class="id">task-36</span><span class="t">Single face: drop Barlow Condensed and Plex Mono</span><span class="pill">pending</span></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════ B ═════════════ -->
+<h3 style="margin-top:36px">B · One ledger, the picked row expands underneath</h3>
+<p class="lbl">The dashboard's List shape: one sheet, day kickers, and the selected run's detail opens in a subtle-filled block under its own row. No second column, so a phone needs no second layout.</p>
+<div class="frame">
+  <div class="band"><h1>Runs</h1><span class="sub">2 live · 29 past</span><div class="ctl"><span class="chip">All projects ▾</span><span class="chip">Last 30 days ▾</span></div></div>
+  <div class="figs">
+    <div class="fig"><div class="k">Runs</div><div class="v">29</div><div class="d"><b>+4</b> vs prior 30 days</div></div>
+    <div class="fig"><div class="k">Completed / queued</div><div class="v">41 <small>/ 44</small></div><div class="d">3 parked</div></div>
+    <div class="fig"><div class="k">Avg item work</div><div class="v">38m</div><div class="d">queue wait excluded</div></div>
+    <div class="fig"><div class="k">Rework / completed</div><div class="v">6 <small>/ 41</small></div><div class="d"><b class="o">15%</b> fix loops</div></div>
+    <div class="fig"><div class="k">Verify pass</div><div class="v">97%</div><div class="d">1 red of 41</div></div>
+  </div>
+  <div class="sheet">
+    <div class="kick" style="padding-top:0">Live</div>
+    <div class="row on" style="margin-bottom:0"><i class="dot live"></i><div class="pn"><span>backlog-manager</span></div><span class="n">executing <b>bug-34</b></span><span class="n"><b>2</b> / 5</span><span class="meta">12m</span><span class="pill">merge</span><span class="chip sm">Pause</span><span class="chip sm danger">Cancel</span></div>
+    <div class="expand">
+      <div class="lead" style="margin-top:0">Executing <b>bug-34</b>, item 2 of 5 · 12m in · preflight 22s · queue wait excluded</div>
+      <div class="item" style="padding-top:14px"><div class="ih"><span class="id">bug-33</span><span class="t">Board-started run visible before its run file exists</span><span class="pill g">merged · 41m</span></div>
+        <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">24m</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">27s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">6m</span></div><div class="node skip"><i></i><span class="nm">fixing</span><span class="dur">—</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">2m 47s</span></div><div class="node done"><i></i><span class="nm">merging</span><span class="dur">25s</span></div><div class="node done"><i></i><span class="nm">merged</span><span class="dur">09:27</span></div></div></div>
+      <div class="item"><div class="ih"><span class="id">bug-34</span><span class="t">question-mode prompt-composition test flakes with a 400 under the full suite</span><span class="pill o">executing · 12m</span></div>
+        <div class="track"><div class="node now"><i></i><span class="nm">dispatched</span><span class="dur">12m</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur meta">—</span></div></div></div>
+    </div>
+    <div class="row"><i class="dot paused"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n">paused after <b>task-24</b></span><span class="n"><b>1</b> / 2</span><span class="meta">1h 04m</span><span class="pill o">paused</span><span class="chip sm">Resume</span></div>
+    <div class="kick">Sep 13</div>
+    <div class="row"><i class="dot done"></i><div class="pn"><span>backlog-manager</span></div><span class="n">task-34, task-35</span><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="pill">merge</span></div>
+    <div class="kick">Sep 8</div>
+    <div class="row"><i class="dot done"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n">task-23</span><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span><span class="pill">merge</span></div>
+    <div class="row"><i class="dot crash"></i><div class="pn"><span>guide-manager</span></div><span class="n">crashed at <b>bug-1</b></span><span class="n"><b>0</b> / 3</span><span class="meta">2h 40m</span><span class="pill" style="color:var(--r500)">crashed</span><span class="chip sm">Resume</span></div>
+  </div>
+</div>
+
+<!-- ═════════════ C ═════════════ -->
+<h3 style="margin-top:36px">C · Live first, history under</h3>
+<p class="lbl">Each live run is its own card at the top — progress row, controls, and the current item's stage track — because the Board sends you here for exactly those. Then the figures, then history as a ledger whose row opens the run in a modal (§8.6 shell).</p>
+<div class="frame">
+  <div class="band"><h1>Runs</h1><span class="sub">2 live · 29 past</span><div class="ctl"><span class="chip">All projects ▾</span><span class="chip">Last 30 days ▾</span></div></div>
+  <div class="sheet livecard">
+    <div><div class="dh" style="align-items:center"><i class="dot live"></i><h2>backlog-manager</h2><span class="meta">run-20260915-104412 · started 10:44</span><span class="pill">merge</span></div>
+      <div class="liveprog"><div class="bar"><i class="hatch" style="width:40%"></i></div><span class="n">2<span> / 5</span></span><span class="meta">12m · live</span></div>
+      <div class="item" style="padding-bottom:0"><div class="ih" style="margin-top:14px"><span class="id">bug-34</span><span class="t">question-mode prompt-composition test flakes with a 400 under the full suite</span><span class="pill o">executing · 12m</span></div>
+        <div class="track"><div class="node now"><i></i><span class="nm">dispatched</span><span class="dur">12m</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur meta">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur meta">—</span></div></div></div></div>
+    <div class="ctl" style="display:flex;flex-direction:column;gap:8px"><span class="chip sm">Pause</span><span class="chip sm danger">Cancel</span><span class="chip sm">Open ›</span></div>
+  </div>
+  <div class="sheet livecard">
+    <div><div class="dh" style="align-items:center"><i class="dot paused"></i><h2>claude-agents-dashboard</h2><span class="meta">run-20260915-093010 · paused after task-24</span><span class="pill o">paused</span></div>
+      <div class="liveprog"><div class="bar"><i class="hatch" style="width:50%"></i></div><span class="n">1<span> / 2</span></span><span class="meta">1h 04m</span></div></div>
+    <div class="ctl" style="display:flex;flex-direction:column;gap:8px"><span class="chip sm">Resume</span><span class="chip sm danger">Cancel</span><span class="chip sm">Open ›</span></div>
+  </div>
+  <div class="figs">
+    <div class="fig"><div class="k">Runs</div><div class="v">29</div><div class="d"><b>+4</b> vs prior 30 days</div></div>
+    <div class="fig"><div class="k">Completed / queued</div><div class="v">41 <small>/ 44</small></div><div class="d">3 parked</div></div>
+    <div class="fig"><div class="k">Avg item work</div><div class="v">38m</div><div class="d">queue wait excluded</div></div>
+    <div class="fig"><div class="k">Rework / completed</div><div class="v">6 <small>/ 41</small></div><div class="d"><b class="o">15%</b> fix loops</div></div>
+    <div class="fig"><div class="k">Verify pass</div><div class="v">97%</div><div class="d">1 red of 41</div></div>
+  </div>
+  <div class="sheet">
+    <h2>History</h2><div class="sub">29 runs · last 30 days · a row opens the run</div>
+    <div class="kick">Sep 13</div>
+    <div class="row"><i class="dot done"></i><div class="pn"><span>backlog-manager</span></div><span class="n">task-34, task-35</span><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="pill">merge</span><span class="meta">›</span></div>
+    <div class="kick">Sep 8</div>
+    <div class="row"><i class="dot done"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n">task-23 · 1 fix loop</span><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span><span class="pill">merge</span><span class="meta">›</span></div>
+    <div class="row"><i class="dot crash"></i><div class="pn"><span>guide-manager</span></div><span class="n">crashed at <b>bug-1</b></span><span class="n"><b>0</b> / 3</span><span class="meta">2h 40m</span><span class="pill" style="color:var(--r500)">crashed</span><span class="chip sm">Resume</span></div>
+  </div>
+</div>
+
+</div>
+
+<h3 style="margin-top:36px">Pick one</h3>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Split</h3><p>Closest to today. Detail always visible on desktop; under 1100 the two sheets stack and the detail is a scroll away.</p></div></div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Ledger with expanding row</h3><p>One layout for every width. Controls live on the row. A long detail pushes the rows under it down.</p></div></div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)"><div class="letter">C</div><div class="content"><h3>Live first, history under</h3><p>Now and ever are two things and get two shapes. Live controls need no selection. History detail opens in a modal.</p></div></div>
+</div>

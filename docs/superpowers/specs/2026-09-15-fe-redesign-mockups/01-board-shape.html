@@ -1,0 +1,177 @@
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* scoped: everything under .bm is the design's own language (DESIGN.md §1–7, daylight) */
+.bm{--bg-app:#F4F4F3;--bg-surface:#fff;--bg-subtle:#F2F2F1;--bg-track:#EDEDEC;--border:#EAEAE8;--border2:#DCDCDA;
+  --ink:#131313;--ink2:#6E6E6E;--ink3:#A0A0A0;--inv:#111;
+  --g600:#5FA92C;--g500:#7DC242;--y400:#F2E635;--o400:#F5A15C;--o300:#F9C79A;--r500:#E0533F;
+  --p1:#a83a56;--p2:#2a5fae;--p3:#1c7a4e;
+  font-family:"Hanken Grotesk",Helvetica,sans-serif;color:var(--ink);font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;line-height:1.4;font-size:14px}
+.bm *{box-sizing:border-box;margin:0;padding:0}
+.bm .frame{background:var(--bg-app);border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;max-width:1120px}
+.bm .band{display:flex;align-items:baseline;gap:12px}
+.bm .band h1{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3}
+.bm .band .sub{font-size:13px;color:var(--ink2)}
+.bm .band .ctl{margin-left:auto;display:flex;gap:8px}
+.bm .chip{height:32px;padding:0 12px;border:1px solid var(--border2);border-radius:12px;background:var(--bg-surface);
+  font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
+.bm .chip.ink{background:var(--inv);border-color:var(--inv);color:#fff}
+.bm .search{height:36px;width:220px;padding:0 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg-surface);
+  font-size:13px;color:var(--ink3);display:flex;align-items:center}
+.bm .hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.30) 0 1px,rgba(255,255,255,0) 1px 4px)}
+.bm .dot{display:inline-block;width:8px;height:8px;border-radius:999px;flex:none}
+.bm .cnt{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 7px;border-radius:999px;
+  background:var(--bg-subtle);font-size:11px;font-weight:500;color:var(--ink2)}
+.bm .mk{font-size:11px;font-weight:500;color:var(--ink3);white-space:nowrap}
+.bm .mk.g{color:var(--g600)}.bm .mk.s{color:#b8801f}
+.bm .meta{font-size:12px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bm .proj{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);min-width:0}
+.bm .proj span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── A: cards in columns ── */
+.bm .cols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
+.bm .col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.bm .colh{display:flex;align-items:center;gap:8px;padding:0 4px 4px}
+.bm .colh .name{font-size:15px;font-weight:500}
+.bm .colh .cnt{margin-left:auto}
+.bm .card{background:var(--bg-surface);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.bm .card .face{padding:14px 16px 12px;display:flex;flex-direction:column;gap:10px}
+.bm .card .t{font-size:14px;font-weight:500;line-height:1.35}
+.bm .card .foot{display:flex;align-items:center;gap:8px;min-width:0}
+.bm .card .foot .meta{margin-left:auto;flex:none}
+.bm .card .live{height:24px;padding:0 16px;display:flex;align-items:center;gap:8px;font-size:11px;font-weight:500;color:var(--ink);background:var(--o400)}
+.bm .card .live b{font-weight:500;margin-left:auto}
+
+/* ── B: column as one sheet, items as rows ── */
+.bm .sheets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
+.bm .sheet{background:var(--bg-surface);border-radius:16px;padding:20px 20px 8px;min-width:0}
+.bm .sheet .sh{display:flex;align-items:baseline;gap:8px;padding:0 0 8px}
+.bm .sheet .sh .name{font-size:19px;font-weight:500;letter-spacing:-.01em;line-height:1.3;display:flex;align-items:center;gap:8px}
+.bm .sheet .sh .sub{display:block;font-size:13px;color:var(--ink2);margin-top:2px}
+.bm .row{position:relative;padding:12px 0;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px;min-width:0}
+.bm .row .t{font-size:14px;font-weight:500;line-height:1.35}
+.bm .row .l2{display:flex;align-items:center;gap:8px;min-width:0}
+.bm .row .l2 .mk{margin-left:auto}
+.bm .row.on{background:var(--bg-subtle);margin:0 -20px;padding-left:20px;padding-right:20px}
+.bm .row.on::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:999px;background:var(--o400)}
+.bm .stage{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;background:var(--o300);color:var(--ink);margin-left:auto;white-space:nowrap}
+
+/* ── C: one ledger ── */
+.bm .ledger{background:var(--bg-surface);border-radius:16px;padding:8px 24px 12px;overflow-x:auto}
+.bm table{width:100%;border-collapse:collapse;font-size:14px}
+.bm th{font-size:12px;font-weight:400;color:var(--ink2);text-align:left;padding:14px 12px 10px 0;border-bottom:1px solid var(--border)}
+.bm td{padding:11px 12px 11px 0;border-bottom:1px solid var(--border);vertical-align:middle;white-space:nowrap}
+.bm td.t{white-space:normal;font-weight:500}
+.bm tr.grp td{padding:18px 0 6px;border-bottom:0;font-size:13px;font-weight:500;color:var(--ink2)}
+.bm tr.grp td .dot{margin-right:8px;vertical-align:middle}
+.bm td.right{text-align:right;color:var(--ink3);font-size:12px}
+.bm .lbl{font-size:12px;color:var(--ink2);margin:2px 0 10px}
+</style>
+
+<h2>Board at the design's scale — which shape?</h2>
+<p class="subtitle">Same 21 open items in all three. 11 px floor, one face, borderless white on the warm-grey ground, project hue confined to one dot. Column colours run the ramp: refactors orange, ideas yellow, bugs red, tasks green.</p>
+
+<div class="bm">
+
+<!-- ═════════════ A ═════════════ -->
+<h3>A · Cards in columns</h3>
+<p class="lbl">Today's shape, redrawn: 12 px radius, 16 px padding, title 14/500, project dot + name, id · date. The live state is a hatched orange strip on the card's top edge.</p>
+<div class="frame">
+  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span>
+    <div class="ctl"><div class="search">Search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip">Newest ▾</span><span class="chip ink">Orchestrate</span></div></div>
+  <div class="cols">
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--o400)"></i><span class="name">Refactoring</span><span class="cnt">3</span></div>
+      <div class="card"><div class="face"><div class="t">Dated probe figures in session-surfaces.md read as live numbers</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-1 · Sep 7</span></div><div class="foot"><span class="mk">chore</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Three docs claim exactly one outbound server call</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-2 · Sep 7</span></div><div class="foot"><span class="mk">chore</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">remote-message and remote-plan share most of their docs-sync sources</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-3 · Sep 7</span></div><div class="foot"><span class="mk">chore</span></div></div></div>
+    </div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--y400)"></i><span class="name">Ideas</span><span class="cnt">17</span></div>
+      <div class="card"><div class="face"><div class="t">Report which fate each uncommitted row has, since git already told the endpoint</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-10 · Sep 7</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Re-platform as a Jira-like service: one DB owns every project's issues and runs</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-12 · Sep 9</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Usage-aware auto-pause for orchestrator runs</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-7 · Sep 5</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Push a notification on the first drift crossing</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">idea-14 · Aug 31</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Statistics view over completed work</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-3 · Aug 30</span></div></div></div>
+    </div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--r500)"></i><span class="name">Bugs</span><span class="cnt">8</span></div>
+      <div class="card"><div class="live hatch">executing<b>12m</b></div><div class="face"><div class="t">Token-value drift verdict fires on a session-surface mix shift, not a rate change</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-23 · Sep 9</span></div><div class="foot"><span class="mk g">groomed</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">question-mode prompt-composition test flakes with a 400 under the full suite</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">bug-34 · Sep 7</span></div><div class="foot"><span class="mk g">groomed</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Graceful Stop leaves a spawned session's subagent running</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-21 · Sep 9</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Reset this device may leave the answer token behind</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-20 · Sep 7</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">progress suite intermittently gets 401 from a route with no guard</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p3)"></i><span>guide-manager</span></span><span class="meta">bug-1 · Aug 25</span></div></div></div>
+    </div>
+    <div class="col"><div class="colh"><i class="dot" style="background:var(--g500)"></i><span class="name">Tasks</span><span class="cnt">2</span></div>
+      <div class="card"><div class="face"><div class="t">Detect an active off-peak usage-limit boost</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-24 · Sep 9</span></div></div></div>
+      <div class="card"><div class="face"><div class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts with a check/ledger gate</div><div class="foot"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-25 · Jul 25</span></div><div class="foot"><span class="mk s">stale</span></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════ B ═════════════ -->
+<h3 style="margin-top:36px">B · Column as one sheet, items as rows</h3>
+<p class="lbl">§8.2's Settings-card furniture: the column is a card with title + subtitle, items are boxless rows under hairlines. The live row takes the "you are here" mark — subtle fill bled to the edge, orange bar, stage pill.</p>
+<div class="frame">
+  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span>
+    <div class="ctl"><div class="search">Search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip">Newest ▾</span><span class="chip ink">Orchestrate</span></div></div>
+  <div class="sheets">
+    <div class="sheet"><div class="sh"><div><span class="name"><i class="dot" style="background:var(--o400)"></i>Refactoring</span><span class="sub">3 open · all chores</span></div></div>
+      <div class="row"><div class="t">Dated probe figures in session-surfaces.md read as live numbers</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-1 · Sep 7</span><span class="mk">chore</span></div></div>
+      <div class="row"><div class="t">Three docs claim exactly one outbound server call</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-2 · Sep 7</span><span class="mk">chore</span></div></div>
+      <div class="row"><div class="t">remote-message and remote-plan share most of their docs-sync sources</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">ref-3 · Sep 7</span><span class="mk">chore</span></div></div>
+    </div>
+    <div class="sheet"><div class="sh"><div><span class="name"><i class="dot" style="background:var(--y400)"></i>Ideas</span><span class="sub">17 open · 2 projects</span></div></div>
+      <div class="row"><div class="t">Report which fate each uncommitted row has, since git already told the endpoint</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-10 · Sep 7</span></div></div>
+      <div class="row"><div class="t">Re-platform as a Jira-like service: one DB owns every project's issues and runs</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-12 · Sep 9</span></div></div>
+      <div class="row"><div class="t">Usage-aware auto-pause for orchestrator runs</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-7 · Sep 5</span></div></div>
+      <div class="row"><div class="t">Push a notification on the first drift crossing</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">idea-14 · Aug 31</span></div></div>
+      <div class="row"><div class="t">Statistics view over completed work</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">idea-3 · Aug 30</span></div></div>
+    </div>
+    <div class="sheet"><div class="sh"><div><span class="name"><i class="dot" style="background:var(--r500)"></i>Bugs</span><span class="sub">8 open · 2 groomed · 1 running</span></div></div>
+      <div class="row on"><div class="l2"><div class="t">Token-value drift verdict fires on a session-surface mix shift, not a rate change</div><span class="stage">executing · 12m</span></div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-23 · Sep 9</span><span class="mk g">groomed</span></div></div>
+      <div class="row"><div class="t">question-mode prompt-composition test flakes with a 400 under the full suite</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span><span class="meta">bug-34 · Sep 7</span><span class="mk g">groomed</span></div></div>
+      <div class="row"><div class="t">Graceful Stop leaves a spawned session's subagent running</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-21 · Sep 9</span></div></div>
+      <div class="row"><div class="t">Reset this device may leave the answer token behind</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">bug-20 · Sep 7</span></div></div>
+      <div class="row"><div class="t">progress suite intermittently gets 401 from a route with no guard</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p3)"></i><span>guide-manager</span></span><span class="meta">bug-1 · Aug 25</span></div></div>
+    </div>
+    <div class="sheet"><div class="sh"><div><span class="name"><i class="dot" style="background:var(--g500)"></i>Tasks</span><span class="sub">2 open · 1 stale</span></div></div>
+      <div class="row"><div class="t">Detect an active off-peak usage-limit boost</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-24 · Sep 9</span></div></div>
+      <div class="row"><div class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts with a check/ledger gate</div><div class="l2"><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span><span class="meta">task-25 · Jul 25</span><span class="mk s">stale</span></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════ C ═════════════ -->
+<h3 style="margin-top:36px">C · One ledger, grouped by type</h3>
+<p class="lbl">The dashboard's List shape: one sheet, type as group kickers, five columns. Densest read; the type axis becomes vertical. Scrolls inside its own sheet on a phone.</p>
+<div class="frame">
+  <div class="band"><h1>Board</h1><span class="sub">21 open across 3 projects</span>
+    <div class="ctl"><div class="search">Search titles</div><span class="chip">All projects ▾</span><span class="chip">Open ▾</span><span class="chip">Newest ▾</span><span class="chip ink">Orchestrate</span></div></div>
+  <div class="ledger">
+    <table>
+      <thead><tr><th style="width:52%">Item</th><th>Project</th><th>Id</th><th>State</th><th style="text-align:right">Created</th></tr></thead>
+      <tbody>
+        <tr class="grp"><td colspan="5"><i class="dot" style="background:var(--o400)"></i>Refactoring · 3</td></tr>
+        <tr><td class="t">Dated probe figures in session-surfaces.md read as live numbers</td><td><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span></td><td class="meta">ref-1</td><td><span class="mk">chore</span></td><td class="right">Sep 7</td></tr>
+        <tr><td class="t">Three docs claim exactly one outbound server call</td><td><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span></td><td class="meta">ref-2</td><td><span class="mk">chore</span></td><td class="right">Sep 7</td></tr>
+        <tr class="grp"><td colspan="5"><i class="dot" style="background:var(--y400)"></i>Ideas · 17</td></tr>
+        <tr><td class="t">Report which fate each uncommitted row has, since git already told the endpoint</td><td><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span></td><td class="meta">idea-10</td><td></td><td class="right">Sep 7</td></tr>
+        <tr><td class="t">Re-platform as a Jira-like service: one DB owns every project's issues and runs</td><td><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span></td><td class="meta">idea-12</td><td></td><td class="right">Sep 9</td></tr>
+        <tr class="grp"><td colspan="5"><i class="dot" style="background:var(--r500)"></i>Bugs · 8</td></tr>
+        <tr><td class="t">Token-value drift verdict fires on a session-surface mix shift, not a rate change</td><td><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span></td><td class="meta">bug-23</td><td><span class="stage" style="margin:0">executing · 12m</span> &nbsp;<span class="mk g">groomed</span></td><td class="right">Sep 9</td></tr>
+        <tr><td class="t">question-mode prompt-composition test flakes with a 400 under the full suite</td><td><span class="proj"><i class="dot" style="background:var(--p1)"></i><span>backlog-manager</span></span></td><td class="meta">bug-34</td><td><span class="mk g">groomed</span></td><td class="right">Sep 7</td></tr>
+        <tr><td class="t">progress suite intermittently gets 401 from a route with no guard</td><td><span class="proj"><i class="dot" style="background:var(--p3)"></i><span>guide-manager</span></span></td><td class="meta">bug-1</td><td></td><td class="right">Aug 25</td></tr>
+        <tr class="grp"><td colspan="5"><i class="dot" style="background:var(--g500)"></i>Tasks · 2</td></tr>
+        <tr><td class="t">Detect an active off-peak usage-limit boost</td><td><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span></td><td class="meta">task-24</td><td></td><td class="right">Sep 9</td></tr>
+        <tr><td class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts with a check/ledger gate</td><td><span class="proj"><i class="dot" style="background:var(--p2)"></i><span>claude-agents-dashboard</span></span></td><td class="meta">task-25</td><td><span class="mk s">stale</span></td><td class="right">Jul 25</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div>
+
+<h3 style="margin-top:36px">Pick one</h3>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Cards in columns</h3><p>Kanban kept. Most height per item; four columns hold at ≥1280, two under 1100, one under 700.</p></div></div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Sheets with rows</h3><p>Kanban kept, ~35% less height per item. Column header gains a subtitle line for counts and states.</p></div></div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)"><div class="letter">C</div><div class="content"><h3>Ledger</h3><p>Densest. Loses the four-column scan; could also be a second shape beside A or B rather than the only one.</p></div></div>
+</div>
