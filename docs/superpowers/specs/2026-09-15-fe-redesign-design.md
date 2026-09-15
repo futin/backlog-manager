@@ -91,14 +91,16 @@ console. Those are this document's job.
    alone (list sheet, detail sheet — closest to today; D is that
    arrangement carrying D's content), and a ledger with the picked row
    expanding underneath.
-6. **The refactor lands surface by surface, in a worktree, through the
-   orchestrator.** Six code tasks groomed on `main`, executed one at a time
-   by `backlog-orchestrate` against a long-lived `fe-redesign` branch
-   checked out in a linked worktree, merged to `main` by hand at the end.
-   That needs the orchestrator to take a base branch other than `main` —
-   a **separate sub-project with its own spec** (§10). Rejected: a
-   big-bang branch (one review, tests red until the end, no orchestrator),
-   and a parallel `client-v2` behind a flag (two clients to keep in sync).
+6. **The refactor lands surface by surface, on `main`, through the
+   orchestrator.** Six code tasks groomed on `main` and executed one at a
+   time by `backlog-orchestrate` exactly as every other item is: its own
+   worktree per item, reviewed and verified, merged to `main` before the
+   next one starts. Rejected: a big-bang branch (one review, tests red
+   until the end, no orchestrator); a parallel `client-v2` behind a flag
+   (two clients to keep in sync); and a long-lived `fe-redesign` branch
+   (revised 2026-09-15 — see §10), which would have required the
+   orchestrator to take a base branch other than `main`, a sub-project
+   costing more than the isolation it bought.
 7. **Watchdog is its own page under Runs** (`04-watchdog.html`, option A).
    The rail gains its first sub-nav tree, Runs › History / Watchdog.
    Rejected: folding the sweeper's facts onto the live runs on the History
@@ -118,9 +120,10 @@ console. Those are this document's job.
   groomed, `runClaimBlock`, `runHoldsItem`, `itemDurationMs`,
   `watchdogStoodDown` — is untouched. This is a redraw; the data authority
   of every surface stays where it is.
-- **No server change in this spec.** The orchestrator base branch (§10) is
-  a second spec; the CSP, the pre-paint theme script and its pinned hash
-  do not move.
+- **No server change in this spec**, and now none behind it either: the
+  orchestrator base-branch feature that an `fe-redesign` branch would have
+  needed is not being built (§10). The CSP, the pre-paint theme script and
+  its pinned hash do not move.
 - **No dark-theme redesign.** The four dark palettes stay as the token
   overrides they are. Where a new rule needs a colour the palette lacks,
   the spec adds a token to every theme (§2.2), never a literal.
@@ -683,35 +686,51 @@ deleted.
   daylight and midnight — through a pid-owned static server, killed by
   pid.
 
-## 10. Sequencing, and the orchestrator base branch
+## 10. Sequencing
 
-Order agreed with the user:
+**Revised 2026-09-15**, after `.claude/DESIGN.md` landed. The original order
+put an **orchestrator base-branch feature** between the docs and the code: the
+six tasks were to run against a long-lived `fe-redesign` branch in a linked
+worktree, which the orchestrator cannot target today. That feature is **not
+being built**, and this section records why, so the next reader does not
+reinstate it as an oversight.
 
-1. **This spec and `.claude/DESIGN.md`** land on `main` now — docs only.
-2. **Orchestrator base branch** — its own brainstorm and spec, executed
-   on `main` by the normal flow. What exists already: `orchestrate.mjs
-   init` and `plan` take `--base <ref>` (default `main`) and the queue gate
-   reads every item and the `runner-fix:` marker at `<base>`. What does
-   not: the run file has no `base` field; `SKILL.md` hardcodes `main` in
-   `worktree add`, the merge verification of `refs/heads/main`, `log` and
-   `diff`; `POST /api/agents/orchestrate` composes no `--base`; the
-   Orchestrate sheet has no picker; `UNCOMMITTED_BASE_REF` is `'main'`.
-   The feature makes `base` run-scoped like `mergeMode`, makes the merge
-   target "the tree where `<base>` is checked out" (`git worktree list`),
-   verified before merge and parked if none, and keeps the tool invoked
-   from the project root — the "never from a linked worktree" invariant
-   stands. Two costs it must state: the item file has to exist at
-   `<base>`, so FE tasks are captured on `main` and `main` merged into
-   `fe-redesign` before a run; and the merge lands in the feature
-   worktree while it may be dirty, under today's overlapping-dirty-paths
-   park rule.
-3. **Tasks 1–6** (§§2–7) are captured and groomed on `main` as
-   `task-<n>` items, each citing this spec's section; `git worktree add
-   .worktrees/fe-redesign -b fe-redesign main`; runs started from the
-   Board with base `fe-redesign`; `main` merged into `fe-redesign` before
-   each run.
-4. **`fe-redesign` merged to `main` by hand**, `--no-ff`, after the last
-   task's screenshots.
+What it would have cost: `base` made run-scoped like `mergeMode` (a run-file
+field, the spawn composing `--base`, a sheet picker), `SKILL.md`'s hardcoded
+`main` replaced in `worktree add`, the merge verification of
+`refs/heads/main`, `log` and `diff`, and `UNCOMMITTED_BASE_REF` no longer a
+literal — plus a merge target redefined as "the tree where `<base>` is checked
+out", verified before merge and parked if absent. Its own brainstorm, its own
+spec, its own execution, all of it orchestrator plumbing rather than the
+redesign.
+
+What it would have bought: `main` never carrying a partly-redesigned client.
+That is worth less than it sounds, because **each of the six tasks finishes a
+surface rather than half of one**, every task is reviewed and verified before
+it merges, and the suite gates each merge exactly as it does for every other
+item. A `main` between task 3 and task 4 has a redesigned Board and Runs and
+an unredesigned Archive — inconsistent to look at, but working and shipping.
+
+It would also have carried two costs of its own, both stated in the original
+plan: the item file has to exist at `<base>`, so every task would need `main`
+merged into `fe-redesign` before each run; and the merge would land in a
+feature worktree while that worktree may be dirty, under today's
+overlapping-dirty-paths park rule.
+
+Order now:
+
+1. **This spec and `.claude/DESIGN.md`** land on `main` — docs only. Done.
+2. **`bug-34` first.** It is groomed, and it is a supertest suite binding the
+   wildcard instead of loopback, so an unrelated listener answers and the case
+   flakes. A flaky suite is a merge-gate defect: the orchestrator verifies
+   before every merge, so an intermittent red parks a run and spends a fix
+   loop on a test that was never broken. Fixing it first makes every run below
+   trustworthy.
+3. **Tasks 1–6** (§§2–7) are captured and groomed on `main` as `task-<n>`
+   items, each citing this spec's section, and drained by `backlog-orchestrate`
+   in the ordinary way — one worktree per item, reviewed, verified, merged to
+   `main`. No feature branch, no base flag, no hand merge at the end.
+4. **Screenshots after the last task**, per §9.
 
 ## 11. Documentation
 
