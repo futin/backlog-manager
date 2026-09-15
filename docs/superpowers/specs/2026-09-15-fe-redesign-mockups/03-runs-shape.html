@@ -75,7 +75,7 @@
 </style>
 
 <h2>Runs — the run's one home now</h2>
-<p class="subtitle">With runs off the Board, this section carries the live runs, their Pause/Cancel/Resume, and every past run. All three keep the figure strip (five figures, one card the ground divides — DESIGN.md §8.4) and the seven-node stage track per item. Watchdog becomes a rail sub-view (Runs › History / Watchdog), not a switch in the page.</p>
+<p class="subtitle">With runs off the Board, this section carries the live runs, their Pause/Cancel/Resume, and every past run. All three keep the figure strip (five figures, one card the ground divides — DESIGN.md §8.4) and the seven-node stage track per item. Watchdog becomes a rail sub-view (Runs › History / Watchdog), not a switch in the page. <b>D</b>, drawn later on 2026-09-15 after C had been picked and audited, is the shape now picked: the figures first, then A's split carrying B's rows — Live and History sheets in a list column, the selected run in a detail sheet beside them; the run modal is gone.</p>
 
 <div class="bm">
 
@@ -182,7 +182,7 @@
 .bm .legend{font-size:12px;color:var(--ink2);margin:10px 0 0;padding-left:18px;line-height:1.55}
 .bm .legend li{margin:2px 0}.bm .legend b{font-weight:500;color:var(--ink)}
 </style>
-<h3 style="margin-top:36px">C · Live first, history under <span class="pill g" style="vertical-align:middle">picked</span></h3>
+<h3 style="margin-top:36px">C · Live first, history under <span class="pill" style="vertical-align:middle">picked 2026-09-15 · superseded by D the same day</span></h3>
 <p class="lbl">Each live run is its own card at the top — progress row, controls, and the current item's stage track — because the Board sends you here for exactly those. Then the figures, then history as a ledger whose row opens the run in a modal (§8.7 shell). <b style="font-weight:500;color:var(--ink)">Revised 2026-09-15</b> after auditing this drawing against <code style="font-family:inherit">RunsView</code>/<code style="font-family:inherit">RunDetail</code>/<code style="font-family:inherit">RunControls</code>/<code style="font-family:inherit">RunStrip</code>: every figure, control and reading the section has today is now drawn, and nothing the code cannot derive is (the audit beside these files lists each change). A and B above are kept exactly as they were picked against.</p>
 <div class="frame">
   <div class="band"><h1>Runs</h1><span class="sub">3 live · 1 starting · 28 past</span>
@@ -270,6 +270,256 @@
   <li><b>Empty states</b> unchanged: <b>no runs yet</b> (nothing anywhere) and <b>no runs in this range</b> (range or project filter empties the list) — the latter under the band, the figure strip hidden with it as today.</li>
 </ul>
 
+<!-- ═════════════ D ═════════════ -->
+<style>
+/* 2026-09-15 pm — option D: figures first, then A's split carrying D's content — runs as rows in a list column, the selected run in a detail sheet. Redrawn once the same day (first drawing: two ledgers, the picked row expanding underneath). */
+.bm .split.d{grid-template-columns:420px minmax(0,1fr)}
+.bm .col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.bm .split .st{width:auto}
+.bm .row.two{flex-wrap:wrap}
+.bm .row .sub2{flex-basis:100%;font-size:12px;line-height:1.45;color:#b8801f;padding-left:18px;margin-top:-2px;white-space:normal}
+.bm .row .warnct{font-size:12px;font-weight:500;color:#b8801f;white-space:nowrap}
+.bm .pill.w{color:#b8801f}.bm .pill.m{color:var(--ink3)}
+.bm .detail .dh h2{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.bm .detail .dh h2 .meta{font-weight:400}
+.bm .fstrip{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px 20px;padding:16px 0 14px;border-bottom:1px solid var(--border);margin-top:12px}
+.bm .fstrip dt{font-size:12px;color:var(--ink2)}.bm .fstrip dd{font-size:14px;font-weight:500;margin-top:1px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.bm .fstrip dd .meta{font-weight:400}
+.bm .fnote{font-size:12px;color:var(--ink2);line-height:1.45;margin-top:10px}.bm .fnote b{font-weight:500;color:var(--ink)}
+.bm .chips{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:12px}
+.bm .chips span{font-size:13px;color:var(--ink2)}.bm .chips b{font-weight:500;color:var(--ink)}
+.bm .attn{margin-top:12px;padding:10px 14px;background:var(--bg-subtle);border-radius:10px;font-size:13px}
+.bm .attn .k{display:flex;gap:8px;align-items:center}.bm .attn .k .id{font-size:12px;color:var(--ink3)}.bm .attn .k .kind{font-size:12px;font-weight:500;color:#b8801f}
+.bm .attn .d{color:var(--ink2);margin-top:4px}
+.bm .attn ul{margin:6px 0 0 16px;color:var(--ink2);font-size:12px;line-height:1.5}
+.bm .detail .sec .meta{margin-left:auto}
+.bm .detail .item+.item{border-top:1px solid var(--border)}
+.bm .detail .item{padding:12px 0 16px}
+.bm .detail .ih .id{flex:none}
+.bm .detail .track{margin-top:18px}
+.bm .branch{display:flex;align-items:center;gap:10px;padding:6px 0}
+.bm .branch .id{font-size:12px;color:var(--ink3)}.bm .branch .t{font-size:14px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bm code{font-family:inherit;padding:1px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--ink);font-size:12px}
+.bm .node .dur.when{color:var(--ink2)}.bm .node .dur.none{color:var(--ink3);font-weight:400}
+.bm .node .loops{position:absolute;top:-16px;font-size:11px;font-weight:500;padding:0 6px;border-radius:999px;background:var(--o300);color:var(--ink)}
+.bm .usage{font-size:12px;color:var(--ink2);margin-top:10px}
+.bm .assumed{margin-top:12px;border-radius:10px;padding:10px 14px;background:var(--bg-subtle)}
+.bm .assumed .k{font-size:12px;font-weight:500;color:var(--ink2);margin-bottom:6px}
+.bm .assumed dl{display:grid;grid-template-columns:1fr;gap:6px}.bm .assumed dt{font-size:13px;font-weight:500}.bm .assumed dd{font-size:13px;color:var(--ink2)}
+.bm details{margin-top:12px}
+.bm summary{list-style:none;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink2);cursor:pointer}
+.bm summary::-webkit-details-marker{display:none}
+.bm summary::before{content:"▸";color:var(--ink3);font-size:11px}.bm details[open] summary::before{content:"▾"}
+.bm summary .ok{color:var(--g600);font-weight:500}.bm summary .bad{color:var(--r500);font-weight:500}
+.bm .tail{margin-top:8px;padding:10px 12px;border-radius:8px;font-size:12px;color:var(--ink2);white-space:pre-wrap;line-height:1.5;background:var(--bg-subtle)}
+.bm .frame.tight{padding-top:16px}
+</style>
+<h3 style="margin-top:36px">D · Figures first, then the split — runs left, the selected run right <span class="pill g" style="vertical-align:middle">picked</span></h3>
+<p class="lbl">Drawn 2026-09-15 pm, after C had been picked and audited, and redrawn once the same day at the user's ask. <b style="font-weight:500;color:var(--ink)">The statistics lead</b> — the six-cell figure strip, Machine time by stage included, sits directly under the band. Under it, <b style="font-weight:500;color:var(--ink)">A's split with D's content</b>: a 420 px list column holding the Live sheet and then the History sheet as rows, and beside it one detail sheet showing the selected run — the whole of <code>RunDetail</code>, re-flowed to one column (facts as a strip, then Machine time by stage, Branches to merge, Items). <code>RunControls</code> live in the detail head, as A had them. One selection across both sheets; the first live run is selected on arrival, so the Board's chip lands you on the current item's stage track with no click. There is no run modal. Under 1100 the two columns stack, list first, and the detail is a scroll away.</p>
+
+<!-- ── frame 1: a live run selected ── -->
+<div class="frame">
+  <div class="band"><h1>Runs</h1><span class="sub">3 live · 1 starting · 28 past</span>
+    <div class="ctl"><span class="chip">All projects ▾</span><span class="seg"><span>Today</span><span>This week</span><span>This month</span><span class="on">All</span></span></div></div>
+
+  <div class="figs six">
+    <div class="fig"><div class="k">Runs</div><div class="v">31</div><div class="sub"><span>● <b>2</b> running</span><span>‖ <b>1</b> paused</span><span>✓ <b>25</b> done</span><span>⚠ <b>2</b> aborted</span><span>✕ <b>1</b> failed</span></div></div>
+    <div class="fig"><div class="k">Completed / queued</div><div class="v">41 <small>/ 52</small></div><div class="d">merged or branched</div></div>
+    <div class="fig"><div class="k">Avg item work</div><div class="v">38m</div><div class="d">queue wait excluded</div></div>
+    <div class="fig" title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."><div class="k">Rework / completed</div><div class="v">0.1</div><div class="d">fix loops per completed item</div></div>
+    <div class="fig"><div class="k">Verify pass</div><div class="v">97%</div><div class="d">of every verification run</div></div>
+    <div class="fig wide"><div class="head"><div class="k">Machine time by stage</div><div class="d">all runs · queue wait excluded</div></div>
+      <div class="bars">
+        <span class="l">preflight</span><span class="tr"><i style="width:0.7%"></i></span><span class="v">9m</span>
+        <span class="l">dispatched</span><span class="tr"><i style="width:100%"></i></span><span class="v">21h 40m</span>
+        <span class="l">inspecting</span><span class="tr"><i style="width:5.5%"></i></span><span class="v">1h 12m</span>
+        <span class="l">reviewing</span><span class="tr"><i style="width:18.8%"></i></span><span class="v">4h 05m</span>
+        <span class="l">fixing</span><span class="tr"><i style="width:11.6%"></i></span><span class="v">2h 31m</span>
+        <span class="l">verifying</span><span class="tr"><i style="width:8.3%"></i></span><span class="v">1h 48m</span>
+        <span class="l">merging</span><span class="tr"><i style="width:1.1%"></i></span><span class="v">14m</span>
+      </div></div>
+  </div>
+
+  <div class="split d">
+    <div class="col">
+      <!-- Live sheet -->
+      <div class="sheet">
+        <h2>Live</h2><div class="sub" style="margin-bottom:14px">3 runs · 1 starting</div>
+        <div class="row on"><i class="dot live"></i><div class="pn"><span>backlog-manager</span></div><span class="warnct">⚠ 1</span><span class="n"><b>1</b> / 5</span><span class="meta">1h 15m</span></div>
+        <div class="row"><i class="dot paused"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n"><b>1</b> / 2</span><span class="meta">1h 04m</span><span class="pill o">‖ paused</span></div>
+        <div class="row two"><i class="dot crash"></i><div class="pn"><span>guide-manager</span></div><span class="n"><b>0</b> / 3</span><span class="meta">3h 03m</span><span class="pill r">⚠ crashed</span>
+          <div class="sub2">no heartbeat for 38m · last reported <b style="font-weight:500;color:var(--ink)">bug-1</b> at <b style="font-weight:500;color:var(--ink)">dispatched</b> · watchdog: exhausted after 3 — resume by hand</div></div>
+        <div class="row"><i class="dot starting"></i><div class="pn"><span>ixray</span><span class="meta">starting… · 8s</span></div></div>
+      </div>
+      <!-- History sheet -->
+      <div class="sheet">
+        <h2>History</h2><div class="sub">28 runs · all</div>
+        <div class="kick">sat 13 sep</div>
+        <div class="row"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>backlog-manager</span></div><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="cost">$4.80</span></div>
+        <div class="kick">thu 11 sep</div>
+        <div class="row"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>backlog-manager</span></div><span class="n"><b>2</b> / 4</span><span class="meta">2h 29m</span><span class="cost">$9.60</span></div>
+        <div class="kick">mon 8 sep</div>
+        <div class="row"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>claude-agents-dashboard</span></div><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span><span class="cost">$2.95</span></div>
+        <div class="row"><i class="dot crash"></i><span class="st bad">✕ failed</span><div class="pn"><span>guide-manager</span></div><span class="n"><b>0</b> / 1</span><span class="meta">24m</span><span class="cost">$0.90</span></div>
+        <div class="kick">fri 5 sep</div>
+        <div class="row"><i class="dot paused"></i><span class="st warn">⚠ aborted</span><div class="pn"><span>backlog-manager</span></div><span class="n"><b>0</b> / 1</span><span class="meta">9m</span></div>
+        <div class="loadmore"><span class="chip sm flat">load more (24 older)</span></div>
+      </div>
+    </div>
+
+    <!-- detail: the selected live run -->
+    <div class="sheet detail">
+      <div class="dh"><div><h2><i class="dot live"></i>backlog-manager <span class="meta">· run-20260915-094112</span></h2></div>
+        <div class="ctl"><span class="chip sm" title="pause after the current item">Pause</span></div></div>
+      <dl class="fstrip">
+        <div><dt>started</dt><dd>09:41 <span class="meta">1h 15m elapsed</span></dd></div>
+        <div><dt>status</dt><dd><span class="pill g">● running</span><span class="meta">heartbeat live</span></dd></div>
+        <div><dt>mode</dt><dd>merge</dd></div>
+        <div><dt>questions</dt><dd>park</dd></div>
+        <div><dt>cost</dt><dd>$6.40 <span class="meta">52 turns · 4 sessions</span></dd></div>
+      </dl>
+      <div class="chips"><span><b>1</b> merged</span><span><b>0</b> skipped</span><span><b>1</b> attention</span><span><b>0</b> fix loops</span><span><b>1</b> active</span><span><b>2</b> queued</span></div>
+      <div class="attn">
+        <div class="k"><span class="id">task-35</span><span class="kind">needs-answers</span></div>
+        <div class="d">the executor parked the item with two open questions (question mode <b style="font-weight:500;color:var(--ink)">park</b>) — answer them in the item file and re-run</div>
+        <ul><li>Should `.claude/rules/` pointers cite the invariants anchor or the CLAUDE.md line?</li><li>Is a glob that also fires for Grep acceptable, or must the test pin the negative?</li></ul>
+      </div>
+
+      <div class="sec">Machine time by stage <span class="meta">this run · queue wait excluded</span></div>
+      <div class="bars">
+        <span class="l">preflight</span><span class="tr"><i style="width:2.4%"></i></span><span class="v">1m 05s</span>
+        <span class="l">dispatched</span><span class="tr"><i style="width:100%"></i></span><span class="v">45m 12s</span>
+        <span class="l">inspecting</span><span class="tr"><i style="width:1%"></i></span><span class="v">27s</span>
+        <span class="l">reviewing</span><span class="tr"><i style="width:13.3%"></i></span><span class="v">6m 02s</span>
+        <span class="l">fixing</span><span class="tr"></span><span class="v none">—</span>
+        <span class="l">verifying</span><span class="tr"><i style="width:6.2%"></i></span><span class="v">2m 47s</span>
+        <span class="l">merging</span><span class="tr"><i style="width:0.9%"></i></span><span class="v">25s</span>
+      </div>
+
+      <div class="sec">Items <span class="meta">5 · pipeline order</span></div>
+      <div class="item"><div class="ih"><span class="id">bug-33</span><span class="t">Board-started run visible before its run file exists</span><span class="pill g">✓ merged</span><span class="meta">34m 41s · 10:38</span></div>
+        <div class="meta" style="margin-top:6px">queue 0s · preflight 22s</div>
+        <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">24m 10s</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">27s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">6m 02s</span></div><div class="node skip"><i></i><span class="nm">fixing</span><span class="dur">—</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">2m 47s</span></div><div class="node done"><i></i><span class="nm">merging</span><span class="dur">25s</span></div><div class="node done"><i></i><span class="nm">merged</span><span class="dur when">10:38</span></div></div>
+        <div class="usage">$2.60 · 22 turns · 2 sessions</div>
+        <details><summary><code>pnpm test</code><span class="ok">ok</span></summary><div class="tail">Tests: 1,204 passed, 1,204 total
+# tests 96 · # pass 96 · # fail 0</div></details></div>
+      <div class="item"><div class="ih"><span class="id">task-35</span><span class="t">Path-scoped .claude/rules/ reach a headless run in a linked worktree</span><span class="pill w">⚠ parked</span><span class="meta">9m 12s · 10:48</span></div>
+        <div class="meta" style="margin-top:6px">queue 34m 41s · preflight 12s</div>
+        <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">9m 12s</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur none">—</span></div></div>
+        <div class="usage">$1.10 · 8 turns</div></div>
+      <div class="item"><div class="ih"><span class="id">bug-34</span><span class="t">question-mode prompt-composition test flakes with a 400 under the full suite</span><span class="pill o">● dispatched</span><span class="meta">12m 04s elapsed</span></div>
+        <div class="meta" style="margin-top:6px">queue 1h 02m · preflight 31s</div>
+        <div class="track"><div class="node now"><i></i><span class="nm">dispatched</span><span class="dur">12m 04s</span></div><div class="node"><i></i><span class="nm">inspecting</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">reviewing</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">fixing</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">verifying</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">merged</span><span class="dur none">—</span></div></div>
+        <div class="usage">$2.70 · 22 turns</div></div>
+      <div class="item"><div class="ih"><span class="id">task-36</span><span class="t">Single face: drop Barlow Condensed and Plex Mono</span><span class="pill">pending</span><span class="meta">—</span></div></div>
+      <div class="item"><div class="ih"><span class="id">task-37</span><span class="t">Board-versus-Archive predicates take runs, required</span><span class="pill">pending</span><span class="meta">—</span></div></div>
+    </div>
+  </div>
+</div>
+<div class="variant"><span class="k">same detail head, pause requested →</span><span>the facts strip's status reads <b style="color:var(--ink);font-weight:500">● running · pausing · finishes bug-34</b> and the head's control slot reads <b style="color:var(--ink);font-weight:500">Pausing after bug-34</b> beside one chip,</span><span class="chip sm">Cancel</span><span>— which withdraws the pause request. No control stops a run; abort is the terminal's. A paused run's head offers <b style="color:var(--ink);font-weight:500">Resume run</b>; a crashed run's, only when the watchdog stood down.</span></div>
+
+<!-- ── frame 2: the same split, a History row selected — a finished run chosen to exercise every RunDetail reading at once ── -->
+<p class="lbl" style="margin-top:20px">Same page, the <b style="font-weight:500;color:var(--ink)">thu 11 sep</b> row selected — a finished run the classifier downgraded to branch mode mid-queue: one item merged before the downgrade, one branched after it with a fix loop and a decided question, one parked after two fix loops with a failed verification, one skipped, so every <code>RunDetail</code> reading appears once in this shape. Band and figures unchanged above; only the split is drawn.</p>
+<div class="frame tight">
+  <div class="split d">
+    <div class="col">
+      <div class="sheet">
+        <h2>Live</h2><div class="sub" style="margin-bottom:14px">3 runs · 1 starting</div>
+        <div class="row"><i class="dot live"></i><div class="pn"><span>backlog-manager</span></div><span class="warnct">⚠ 1</span><span class="n"><b>1</b> / 5</span><span class="meta">1h 15m</span></div>
+        <div class="row"><i class="dot paused"></i><div class="pn"><span>claude-agents-dashboard</span></div><span class="n"><b>1</b> / 2</span><span class="meta">1h 04m</span><span class="pill o">‖ paused</span></div>
+        <div class="row two"><i class="dot crash"></i><div class="pn"><span>guide-manager</span></div><span class="n"><b>0</b> / 3</span><span class="meta">3h 03m</span><span class="pill r">⚠ crashed</span>
+          <div class="sub2">no heartbeat for 38m · last reported <b style="font-weight:500;color:var(--ink)">bug-1</b> at <b style="font-weight:500;color:var(--ink)">dispatched</b> · watchdog: exhausted after 3 — resume by hand</div></div>
+        <div class="row"><i class="dot starting"></i><div class="pn"><span>ixray</span><span class="meta">starting… · 8s</span></div></div>
+      </div>
+      <div class="sheet">
+        <h2>History</h2><div class="sub">28 runs · all</div>
+        <div class="kick">sat 13 sep</div>
+        <div class="row"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>backlog-manager</span></div><span class="n"><b>2</b> / 2</span><span class="meta">1h 02m</span><span class="cost">$4.80</span></div>
+        <div class="kick">thu 11 sep</div>
+        <div class="row on"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>backlog-manager</span></div><span class="n"><b>2</b> / 4</span><span class="meta">2h 29m</span><span class="cost">$9.60</span></div>
+        <div class="kick">mon 8 sep</div>
+        <div class="row"><i class="dot done"></i><span class="st done">✓ done</span><div class="pn"><span>claude-agents-dashboard</span></div><span class="n"><b>1</b> / 1</span><span class="meta">1h 12m</span><span class="cost">$2.95</span></div>
+        <div class="row"><i class="dot crash"></i><span class="st bad">✕ failed</span><div class="pn"><span>guide-manager</span></div><span class="n"><b>0</b> / 1</span><span class="meta">24m</span><span class="cost">$0.90</span></div>
+        <div class="kick">fri 5 sep</div>
+        <div class="row"><i class="dot paused"></i><span class="st warn">⚠ aborted</span><div class="pn"><span>backlog-manager</span></div><span class="n"><b>0</b> / 1</span><span class="meta">9m</span></div>
+        <div class="loadmore"><span class="chip sm flat">load more (24 older)</span></div>
+      </div>
+    </div>
+
+    <div class="sheet detail">
+      <div class="dh"><div><h2><i class="dot done"></i>backlog-manager <span class="meta">· run-20260911-140233 · 4 items</span></h2></div></div>
+      <dl class="fstrip">
+        <div><dt>started · finished</dt><dd>14:02 · 16:31 <span class="meta">2h 29m wall</span></dd></div>
+        <div><dt>status</dt><dd><span class="pill">✓ done</span></dd></div>
+        <div><dt>mode</dt><dd><span class="pill">branch mode (downgraded)</span></dd></div>
+        <div><dt>questions</dt><dd><span class="pill">decide</span></dd></div>
+        <div><dt>cost</dt><dd>$9.60 <span class="meta">84 turns · 6 sessions</span></dd></div>
+      </dl>
+      <div class="fnote"><b>mode:</b> merge mode was requested; the permission classifier denied <code>git merge</code> for task-31 at 15:38, so the remaining items were staged branched — merge them by hand from the list below. <b>questions:</b> headless — the executor answered its own questions and recorded them as assumptions.</div>
+      <div class="chips"><span><b>1</b> merged</span><span><b>1</b> branched</span><span><b>1</b> skipped</span><span><b>1</b> attention</span><span><b>3</b> fix loops</span></div>
+      <div class="attn">
+        <div class="k"><span class="id">bug-29</span><span class="kind">fix-exhausted</span></div>
+        <div class="d">reviewer still red after 2 fix loops: the retry budget for a flaking suite is spent</div>
+        <ul><li>Should the flaking `agents-origin-guard` case be quarantined or fixed in this item?</li><li>Is a 3rd fix loop acceptable for a bug this size?</li></ul>
+      </div>
+
+      <div class="sec">Machine time by stage <span class="meta">this run · queue wait excluded</span></div>
+      <div class="bars">
+        <span class="l">preflight</span><span class="tr"><i style="width:3.2%"></i></span><span class="v">1m 44s</span>
+        <span class="l">dispatched</span><span class="tr"><i style="width:100%"></i></span><span class="v">54m 10s</span>
+        <span class="l">inspecting</span><span class="tr"><i style="width:4.1%"></i></span><span class="v">2m 13s</span>
+        <span class="l">reviewing</span><span class="tr"><i style="width:31.6%"></i></span><span class="v">17m 08s</span>
+        <span class="l">fixing</span><span class="tr"><i style="width:51.2%"></i></span><span class="v">27m 45s</span>
+        <span class="l">verifying</span><span class="tr"><i style="width:19.5%"></i></span><span class="v">10m 34s</span>
+        <span class="l">merging</span><span class="tr"><i style="width:1.0%"></i></span><span class="v">31s</span>
+      </div>
+
+      <div class="sec">Branches to merge</div>
+      <div class="branch"><span class="id">task-31</span><span class="t">Single face: drop Barlow Condensed and Plex Mono</span><code>git merge --no-ff backlog/task-31</code></div>
+
+      <div class="sec">Items <span class="meta">4 · pipeline order</span></div>
+      <div class="item">
+        <div class="ih"><span class="id">task-30</span><span class="t">Detect an active off-peak usage-limit boost</span><span class="pill g">✓ merged</span><span class="meta">27m 48s · 14:31</span></div>
+        <div class="meta" style="margin-top:6px">queue 0s · preflight 22s</div>
+        <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">18m 02s</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">41s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">5m 12s</span></div><div class="node skip"><i></i><span class="nm">fixing</span><span class="dur">—</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">3m 02s</span></div><div class="node done"><i></i><span class="nm">merging</span><span class="dur">31s</span></div><div class="node done"><i></i><span class="nm">merged</span><span class="dur when">14:31</span></div></div>
+        <div class="usage">$2.10 · 19 turns</div>
+        <details><summary><code>pnpm test</code><span class="ok">ok</span></summary><div class="tail">Tests: 1,204 passed, 1,204 total
+# tests 96 · # pass 96 · # fail 0</div></details>
+      </div>
+      <div class="item">
+        <div class="ih"><span class="id">task-31</span><span class="t">Single face: drop Barlow Condensed and Plex Mono</span><span class="pill g">✓ branched</span><span class="meta">1h 08m · 15:40</span></div>
+        <div class="meta" style="margin-top:6px">queue 29m 10s · preflight 31s</div>
+        <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">24m 30s</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">48s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">6m 40s</span></div><div class="node done"><span class="loops" role="img" aria-label="1 fix loop">×1</span><i></i><span class="nm">fixing</span><span class="dur">8m 40s</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">4m 01s</span></div><div class="node done"><i></i><span class="nm">merging</span><span class="dur">—</span></div><div class="node done"><i></i><span class="nm">branched</span><span class="dur when">15:40</span></div></div>
+        <div class="usage">$4.30 · 38 turns · 3 sessions</div>
+        <div class="assumed"><div class="k">assumed</div><dl><div><dt>Keep <code>--mono</code> as an alias or delete it?</dt><dd>Deleted, not aliased — a stale var(--mono) must fall back to the inherited face rather than keep Plex (spec §2.3).</dd></div></dl></div>
+        <details><summary><code>pnpm test</code><span class="ok">ok</span></summary><div class="tail">Tests: 1,209 passed, 1,209 total</div></details>
+      </div>
+      <div class="item">
+        <div class="ih"><span class="id">bug-29</span><span class="t">progress suite intermittently gets 401 from a route with no guard</span><span class="pill w">⚠ parked</span><span class="meta">52m 10s · 16:20</span></div>
+        <div class="meta" style="margin-top:6px">queue 1h 37m · preflight 26s</div>
+        <div class="track"><div class="node done"><i></i><span class="nm">dispatched</span><span class="dur">11m 38s</span></div><div class="node done"><i></i><span class="nm">inspecting</span><span class="dur">44s</span></div><div class="node done"><i></i><span class="nm">reviewing</span><span class="dur">5m 16s</span></div><div class="node done"><span class="loops" role="img" aria-label="2 fix loops">×2</span><i></i><span class="nm">fixing</span><span class="dur">19m 05s</span></div><div class="node done"><i></i><span class="nm">verifying</span><span class="dur">—</span></div><div class="node"><i></i><span class="nm">merging</span><span class="dur none">—</span></div><div class="node"><i></i><span class="nm">branched</span><span class="dur none">—</span></div></div>
+        <div class="usage">$3.20 · 27 turns · 2 sessions</div>
+        <details open><summary><code>pnpm run test:jest</code><span class="bad">failed</span></summary><div class="tail">FAIL test/agents-origin-guard.test.ts
+  ● POST /api/agents/dispatch › refuses a foreign Origin
+    expected 403, received 401
+Tests: 1 failed, 1,208 passed, 1,209 total</div></details>
+      </div>
+      <div class="item">
+        <div class="ih"><span class="id">task-32</span><span class="t">Consolidate the rate-audit probes into scripts/rates-audit.ts</span><span class="pill m">– skipped</span></div>
+        <div class="meta" style="margin-top:6px">absent from <code>main</code> at dispatch — never entered the pipeline</div>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="legend">
+  <li><b>What changed from C.</b> The figure strip leads the page instead of sitting between live and history. Live runs are rows in a Live sheet, not cards; the run detail is a sheet beside the list (A's arrangement), never a modal; <code>RunControls</code> sit in that sheet's head. Band, range control, figure cells, status words, load-more and empty states are C's verbatim. (D's first drawing, two ledgers with the picked row expanding underneath, was replaced the same day.)</li>
+  <li><b>List rows</b> are compact so they fit a 420 px column. Live: dot · project · <b>⚠ N</b> when the run has attention entries · <b>n / m</b> two-tone · elapsed · status pill (<b>‖ paused</b>, <b>⚠ crashed</b>; a fresh running run draws none). History: dot · status word (<code>runStatusChip</code>) · project · <b>n / m</b> · wall · <b>$</b> when usage exists. Readings C carried on the card or row that no longer fit — run id and start clock, heartbeat word, <b>$ · turns · sessions</b>, the mode pill, <b>paused after &lt;id&gt;</b>, the items the run touched — are all in the detail sheet, which is always visible beside the list. A starting entry is a row with <b>starting… · age</b> and cannot be selected.</li>
+  <li><b>Crashed row</b> is two lines: the second, amber, carries <b>no heartbeat for &lt;age&gt;</b>, <b>last reported &lt;id&gt; at &lt;stage&gt;</b> (or <b>all items at rest</b>) and the <code>watchdogClause</code>. Its detail opens with <b>last heartbeat HH:MM · every stage below is last reported, not current</b> and its current node renders stalled (current tone, no ring, no pulse).</li>
+  <li><b>Detail head</b> = project (dot + 19/500) · run id (and item count when finished) · <code>RunControls</code> right, exactly as C's legend: running + fresh → Pause; pause requested → the note and Cancel (withdraws the request); paused → Resume run, hidden when the environment cannot spawn, dashed and disabled with its reason as the title when the project is not visible, <b>Resuming…</b> in flight; crashed → Resume run only when <code>watchdogStoodDown</code>; a finished run has none.</li>
+  <li><b>Detail body</b> is the whole of <code>RunDetail</code>, one column: the <b>facts strip</b> (started · finished · wall, status, mode, question mode, cost — <code>RunDetail</code>'s head laid across the sheet rather than stacked in a column), the mode and question notes as one 12 px line, today's chips in a row (merged · branched when &gt; 0 · skipped · attention · fix loops, plus <b>active</b> · <b>queued</b> while live), the attention entries with their questions, then <b>Machine time by stage</b> (<code>StageBars</code> over <code>runStageTotals</code>, seven rows), <b>Branches to merge</b> when any, and <b>Items</b> exactly as frame 2 draws them (head, <code>RowTime</code>, <b>queue · preflight</b> lead, stage track with its <b>×N</b> pill, usage line, <b>assumed</b> list, last verification as a disclosure open when failed). Verification tails arrive with <code>fetchArchivedRun</code> when a finished run is selected; <b>couldn't load verification output</b> under the facts strip if that fails.</li>
+  <li><b>Selection</b> is one run across both sheets. The first live run is selected on arrival (the Board's chip sends you here for exactly the current item's track); with nothing live, the newest History row is. Under 1100 px the columns stack — list first, detail under it, a scroll away (A's rule); under 700 the sheets are full width.</li>
+  <li><b>Watchdog › Watching</b> rows jump to History and select the run here — exactly what <code>WatchdogMonitor</code> does today. There is no run modal; the item modal (§6.1) is untouched, so <code>Modal</code> stays a primitive for it and moves to task 5 in §12.4.</li>
+  <li><b>Not drawn, unchanged from C:</b> the empty states (<b>no runs yet</b> / <b>no runs in this range</b>); Resume run's hidden / disabled / <b>Resuming…</b> states; the <b>merge</b> mode pill a merge-mode run does not draw today.</li>
+</ul>
 
 </div>
 
@@ -278,4 +528,5 @@
   <div class="option" data-choice="a" onclick="toggleSelect(this)"><div class="letter">A</div><div class="content"><h3>Split</h3><p>Closest to today. Detail always visible on desktop; under 1100 the two sheets stack and the detail is a scroll away.</p></div></div>
   <div class="option" data-choice="b" onclick="toggleSelect(this)"><div class="letter">B</div><div class="content"><h3>Ledger with expanding row</h3><p>One layout for every width. Controls live on the row. A long detail pushes the rows under it down.</p></div></div>
   <div class="option" data-choice="c" onclick="toggleSelect(this)"><div class="letter">C</div><div class="content"><h3>Live first, history under</h3><p>Now and ever are two things and get two shapes. Live controls need no selection. History detail opens in a modal.</p></div></div>
+  <div class="option" data-choice="d" onclick="toggleSelect(this)"><div class="letter">D</div><div class="content"><h3>Figures first, then the split</h3><p>Statistics lead. Runs as rows in a Live sheet and a History sheet on the left; the selected run, whole, in a sheet on the right. Controls in its head. No modal.</p></div></div>
 </div>

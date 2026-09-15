@@ -22,6 +22,19 @@ A fifth screen, `05-run-modal.html`, was added: the run modal spec §6.1
 adopts from the dashboard by description had no drawing, and `RunDetail` is
 the largest surface in Runs.
 
+> **Amended 2026-09-15 pm — 03's pick was re-opened, once, by the user.**
+> After this audit ran, the user drew a fourth shape in `03-runs-shape.html`,
+> **option D** (figures first, then a split: runs as rows in a Live sheet and
+> a History sheet in a 420 px column, the selected run whole in a detail sheet
+> beside them), and picked it. C is superseded. D has **no run modal at all**
+> — its frame 2 draws every `RunDetail` reading the fifth screen drew, on the
+> same run — so `05-run-modal.html` was deleted in the correction pass that
+> followed (recoverable from commit `d8a7879`). The audit below is a record of
+> what it found against C and is left standing; wherever it says *run modal*,
+> the surface is now §4.1's detail sheet, and wherever it says *live card*, a
+> Live sheet row plus that detail sheet. Spec §6.1 is now the **item** modal
+> alone. Nothing else in this document changed.
+
 ## 03 · Runs, option C
 
 | # | Mock as picked | Code today | Change |
@@ -121,12 +134,17 @@ Each entry names what the spec said and what it says now.
   line, the crashed note, the mode-downgrade note, the questions under an
   attention entry, and the `couldn't load verification output` error were all
   absent from the list → the list is now today's, in today's order, and
-  points at `05-run-modal.html`.
+  points at `05-run-modal.html`. *(Amended 2026-09-15 pm: that list is now
+  spec §4.1's detail sheet — same readings, same order — and the screen it
+  pointed at was deleted under option D. §6.1 keeps the item modal only.)*
 - §6.1 (Item modal): `tags` and `in progress since <started>` added to the
   facts list.
 - §4.2 (3): the Watching row's readings completed (last reported item,
   heartbeat meter, clause, session, grace), the `Resume now` gate stated as
   exclusive, the orphan placeholder named, and the row's target fixed: it
   opens the run modal (today it jumps to History and selects the run).
+  *(Amended 2026-09-15 pm: option D reverses this one — there is no run
+  modal, so the row keeps today's behaviour, jumping to History and
+  selecting the run in its detail sheet.)*
 - §4.2 (4): Activity ledger restored to today's five columns, full run ids,
   and the in-memory caveat.

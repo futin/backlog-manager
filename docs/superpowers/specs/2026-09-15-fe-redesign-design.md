@@ -6,7 +6,14 @@ picks, four interactive companion screens on real board and run data —
 the screens are kept beside this file in `2026-09-15-fe-redesign-mockups/`;
 on 2026-09-15 the picked option in each was revised for functional
 completeness and `05-run-modal.html` added — `00-functionality-audit.md`
-there lists every change, and this file was corrected in the same pass)
+there lists every change, and this file was corrected in the same pass).
+Later the same day the user drew a fourth shape, **option D**, in
+`03-runs-shape.html` and picked it: the figures lead the page, the runs are
+rows in a Live sheet and a History sheet beside one always-visible detail
+sheet, and **there is no run modal**. D is the picked Runs shape and C is
+superseded — decision 5, §4.1, §6.1, §8 and §12 read D. `05-run-modal.html`
+was deleted in the same pass because D's frame 2 draws every `RunDetail`
+reading it drew; it is recoverable from commit `d8a7879` if ever needed.
 
 ## Problem
 
@@ -65,13 +72,25 @@ console. Those are this document's job.
    no reason to keep it in both places." The Board keeps the card's own
    live strip and gains one chip in the band that opens Runs. Rejected: the
    strip redrawn as a band under the toolbar, and an aside card.
-5. **Runs shape: live first, history under** (`03-runs-shape.html`,
-   option C). Each live run is its own card with its controls and the
-   current item's stage track, because the Board now sends you here for
-   exactly those; then the figure strip; then history as a ledger whose
-   row opens the run in a modal. Rejected: the split (list sheet, detail
-   sheet — closest to today) and a ledger with the picked row expanding
-   underneath.
+5. **Runs shape: figures first, then the split** (`03-runs-shape.html`,
+   option D). The statistics lead: the six-cell figure strip sits directly
+   under the band. Under it a split — a 420 px list column holding a Live
+   sheet and a History sheet, both as compact rows, and beside it one
+   detail sheet carrying the whole of the selected run, `RunControls` in
+   its head. Selection is one run across both sheets; the first live run
+   is selected on arrival, so the Board's chip lands you on the current
+   item's stage track with no click. **There is no run modal** — everything
+   a run modal would have drawn is the detail sheet's body, re-flowed to
+   one column. Rejected: **live first, history under** (option C — picked
+   and audited earlier on 2026-09-15, then superseded the same day when the
+   user drew D; what D changed, in the mockup's own words, is that the
+   figure strip leads the page instead of sitting between live and history,
+   live runs are rows rather than cards, and the run detail is a sheet
+   beside the list rather than a modal — band, range control, figure cells,
+   status words, load-more and empty states are C's verbatim), the split
+   alone (list sheet, detail sheet — closest to today; D is that
+   arrangement carrying D's content), and a ledger with the picked row
+   expanding underneath.
 6. **The refactor lands surface by surface, in a worktree, through the
    orchestrator.** Six code tasks groomed on `main`, executed one at a time
    by `backlog-orchestrate` against a long-lived `fe-redesign` branch
@@ -82,8 +101,9 @@ console. Those are this document's job.
    and a parallel `client-v2` behind a flag (two clients to keep in sync).
 7. **Watchdog is its own page under Runs** (`04-watchdog.html`, option A).
    The rail gains its first sub-nav tree, Runs › History / Watchdog.
-   Rejected: folding the sweeper's facts onto the live run cards, and a
-   300 px aside on Runs.
+   Rejected: folding the sweeper's facts onto the live runs on the History
+   page (drawn against C's live cards, and no better against D's rows), and
+   a 300 px aside on Runs.
 8. **The language is built as reusable components with one home** (§12),
    at the user's ask. The dashboard built its language as components too,
    but by area — `usage/Sheet.tsx`, `settings/SettingsRow.tsx`,
@@ -230,10 +250,10 @@ The dashboard's §8.1 table, adopted whole:
 
 | role | size / weight | where |
 |---|---|---|
-| Page and card title | 19/500, −.01em, 1.3 | band titles, sheet titles, live run card project |
+| Page and card title | 19/500, −.01em, 1.3 | band titles, sheet titles, the Runs detail sheet's project |
 | Large metric | 30/700, −.02em, 1.1 | figure strip values |
 | Row name | 15/500 | column header names |
-| Card title | 14/500, 1.35 | item card title, history row project, stage track item title |
+| Card title | 14/500, 1.35 | item card title, Runs list row project (Live and History), stage track item title |
 | Subtitle / hint | 13/400 | band subtitle, sheet subtitle, figure label, control label |
 | Body, chip and button label | 13 (500 on buttons) | filter chips, controls |
 | Meta / axis / caption | 12/400 | `id · date`, project name beside its dot, stage durations, table time column |
@@ -349,49 +369,17 @@ Two pages under one rail entry: **History** (the section's default) and
 payload; Watchdog additionally mounts `useWatchdog`, exactly as
 `WatchdogMonitor` does today, so switching adds no request.
 
-### 4.1 History — shape C of `03-runs-shape.html`
+### 4.1 History — shape D of `03-runs-shape.html`
 
-Top to bottom:
+`History` is the rail destination's name (Runs › History / Watchdog), not
+an inventory of the page: the page carries the figures, the live runs, the
+past runs, and the selected run whole. Top to bottom:
 
-1. **Band.** `Runs`, `2 live · 29 past`, then the project select and the
-   range control as chips.
-2. **One live card per run** whose status is `running` or `paused`, or
-   that is `starting`. A `--strip` sheet at 16 px radius and 24 px
-   padding, two columns: the run on the left, its controls stacked on the
-   right (`RunControls`, unchanged in what it offers, drawn as 28 px
-   chips: running and fresh → **Pause**; while a pause is requested →
-   the note `Pausing after <id>` and **Cancel**, which withdraws the
-   request — there is no control that stops a run, and Cancel takes no
-   accent because it is not destructive; paused → **Resume run**, hidden
-   when the environment cannot spawn, `aria-disabled` with the reason as
-   its title when the project is not visible, `Resuming…` in flight —
-   plus **Open ›**, which opens the run modal, §6.1).
-   Left column: dot + project 19/500 + run id and start time at 12 `--ink3`
-   + mode pill (`mergeModeLabel`: `branch mode` / `branch mode
-   (downgraded)`; a merge-mode run has no badge today, and a `merge` pill
-   is optional); a §7 progress row (10 px `--fill-progress` hatched over
-   `--steel`, `2 / 5` two-tone beside it, then at 12: elapsed, the
-   heartbeat reading (`live` or its age), `pausing · finishes <id>` while
-   a pause is requested, `N needs attention` when the run has attention
-   entries, and `$ · N turns · N sessions` from `runUsageTotals` when
-   usage exists); a hairline; the current item's head (id 12 `--ink3`,
-   title 14/500, the stage chip — glyph + the real stage word — and its
-   `RowTime` reading right, the `queue … · preflight …` lead at 12
-   `--ink3` under) and its **stage track** (§4.3). A `paused` run shows
-   `paused after <id>` in place of the item. A `starting` entry shows the
-   dot in `--fill-live`, `starting…`, its age, and no controls. A
-   **crashed** run (running, heartbeat stale) shows a `--red` dot, a
-   `crashed` pill, `no heartbeat for <age>` in the heartbeat slot, then
-   as 13 px lines under the progress row: `last heartbeat HH:MM · every
-   stage below is last reported, not current`, `last reported <id> at
-   <stage>` (or `all items at rest`) and the watchdog clause from
-   `run-watchdog.ts`; its item's current node renders stalled (the
-   current tone, no ring, no pulse) against the clock clamped at the last
-   heartbeat; and Resume run exactly when
-   `watchdogStoodDown` says the sweeper will not — the coupling test
-   drives this card from now on.
-3. **Figure strip.** One sheet the ground divides: five figures on a 2 px
-   `--board` gap grid, wrapping to three under 1100 and two under 700 with
+1. **Band.** `Runs`, `3 live · 1 starting · 28 past`, then the project
+   select and the range control as chips.
+2. **Figure strip**, directly under the band — the statistics lead the
+   page. One sheet the ground divides: five figures on a 2 px `--board`
+   gap grid, wrapping to three under 1100 and two under 700 with
    the seam drawn in both directions. Each: label 13 `--ink2`, value 30/700,
    a 12 px line under where today's tile has one. The five are today's
    tiles and read what `aggregateRuns` returns and nothing else — no
@@ -406,18 +394,99 @@ Top to bottom:
    order, `—` for a stage never recorded — with `<range> · queue wait
    excluded` as its line. The strip hides with the list when the range or
    project filter empties it (`no runs in this range`), as today.
-4. **History sheet.** Title + subtitle (`29 runs · last 30 days · a row
-   opens the run`), day kickers at 13/500 `--ink2`, one 44 px row per run:
-   dot **and the status word** from `runStatusChip` (glyph + `done` /
-   `aborted` / `failed` / `paused` — a dot alone cannot tell the first
-   three apart; tones `--ink3` done, `--amber` aborted, `--red` failed,
-   `--fill-live` paused; a crashed run is a card, not a row), project
-   14/500, the items it touched at 13 `--ink2`, `2 / 2` two-tone, wall
-   time and cost at 12 `--ink3` (`1h 02m` · `$4.80`, cost only when
-   usage exists), mode pill, a `›`. Load-more stays as a flat chip
-   at the sheet's foot. A row opens the **run modal** (§6.1) — which is why
-   the `Modal` primitive lands in this task, not in task 5. Live runs are
-   not in this list — they are the cards above.
+3. **The split**, under the strip: a **420 px list column** on the left
+   holding the Live sheet and then the History sheet, and one **detail
+   sheet** on the right showing the selected run. Under 1100 px the two
+   columns stack — list first, the detail a scroll away; under 700 px the
+   sheets are full width.
+4. **Live sheet.** Title + subtitle (`3 runs · 1 starting`), then one row
+   per run whose status is `running` or `paused`, or that is `starting` —
+   **rows, not cards**, compact enough for the 420 px column: dot, project
+   14/500, `⚠ N` in `--amber` when the run has attention entries, the
+   two-tone `1 / 5` count, elapsed at 12 `--ink3`, and a status pill only
+   where one is earned (`‖ paused`, `⚠ crashed`; a running, fresh run
+   draws none). A `starting` entry is a row reading `starting… · <age>`
+   with no controls, and cannot be selected — it has no run to show. A
+   **crashed** run (running, heartbeat stale) takes a `--red` dot, a
+   `crashed` pill and a second line in `--amber` at 12 carrying `no
+   heartbeat for <age>`, `last reported <id> at <stage>` (or `all items at
+   rest`) and the watchdog clause from `run-watchdog.ts`. Everything C
+   carried on the live card that no longer fits a row — run id and start
+   clock, the heartbeat word, `$ · N turns · N sessions`, the mode pill,
+   `paused after <id>`, the current item's stage track — is in the detail
+   sheet, which is always beside the list.
+5. **History sheet.** Title + subtitle (`28 runs · all`), day kickers at
+   13/500 `--ink2`, one 44 px row per past run: dot **and the status word**
+   from `runStatusChip` (glyph + `done` / `aborted` / `failed` / `paused` —
+   a dot alone cannot tell the first three apart; tones `--ink3` done,
+   `--amber` aborted, `--red` failed, `--fill-live` paused; a crashed run
+   is a Live row, not a History row), project 14/500, `2 / 4` two-tone,
+   wall time at 12 `--ink3` and cost beside it when usage exists (`2h 29m`
+   · `$9.60`). Load-more stays as a flat chip at the sheet's foot. A row
+   **selects** the run into the detail sheet — nothing opens, there is no
+   run modal. Live runs are not in this list; they are the Live sheet
+   above.
+6. **Detail sheet.** One run, whole, beside the list.
+   **Head:** project (dot + 19/500), the run id at 12 `--ink3` and the item
+   count when the run is finished, and `RunControls` right — unchanged in
+   what it offers, drawn as 28 px chips: running and fresh → **Pause**;
+   while a pause is requested → the note `Pausing after <id>` and
+   **Cancel**, which withdraws the request (there is no control that stops
+   a run, and Cancel takes no accent because it is not destructive);
+   paused → **Resume run**, hidden when the environment cannot spawn,
+   `aria-disabled` with the reason as its title when the project is not
+   visible, `Resuming…` in flight; crashed → **Resume run** exactly when
+   `watchdogStoodDown` says the sweeper will not — the coupling test drives
+   this head from now on; a finished run has none. There is no `Open ›`:
+   the detail needs no opening.
+   **Body** — the whole of `RunDetail`, one column:
+   - a **facts strip**, label over value on a wrapping grid: `started` (and
+     `finished`) with the wall (`runWallMs`) or elapsed reading; `status` — the chip from
+     `runStatusChip` plus `heartbeat live` or its age, `pausing · finishes
+     <id>` while a pause is requested, `paused after <id>` when paused,
+     and for a crashed run `last heartbeat HH:MM · every stage below is
+     last reported, not current`; `mode` (`mergeModeLabel`: `branch mode` /
+     `branch mode (downgraded)`; a merge-mode run has no badge today);
+     `questions`; and `$ · N turns · N sessions` from `runUsageTotals` when
+     usage exists;
+   - the mode and question notes (`mergeModeNote`, and the headless note
+     under `decide`) as one 12 px line under the strip;
+   - today's chips in a row — merged, branched (when > 0), skipped,
+     attention, fix loops — plus **active** and **queued** while the run is
+     live. (An earlier draft named "fifteen stage chips"; they do not exist
+     today and are not added.)
+   - the attention entries, each with its questions;
+   - **Machine time by stage** — `StageBars` over `runStageTotals`, the
+     strip's sixth cell scoped to one run, seven rows, `this run · queue
+     wait excluded` as its line;
+   - **Branches to merge** when any — one `git merge --no-ff <branch>` per
+     branched item;
+   - **Items**, in pipeline order: head (id 12 `--ink3`, title 14/500, the
+     stage chip — glyph + the real stage word, toned by `STAGE_TONE` — and
+     its `RowTime` reading right: `span · finish clock` for a terminal
+     stage, `span elapsed` otherwise, nothing at all for a skipped or
+     ungroomed item, `—` for a pending one), the `queue … · preflight …`
+     lead at 12 `--ink3`, the **stage track** (§4.3) with its `×N` fix-loop
+     pill and its terminal node reading the finish clock in `--ink2`, the
+     per-item usage line (`itemUsageTotals`; the session count only when
+     it is above 1), the `assumed` list under `decide`, and the last
+     verification as a disclosure — command, `ok` / `failed`, tail — open
+     when failed. The track's terminal node answers item first and run mode
+     second (`stepperTerminal`), so a run downgraded mid-queue still reads
+     `merged` on the item that merged before the downgrade and `branched`
+     on the rest. A crashed run's current node renders stalled (the current
+     tone, no ring, no pulse) against the clock clamped at the last
+     heartbeat.
+
+   Verification tails arrive with `fetchArchivedRun` when a finished run is
+   selected; `couldn't load verification output` reads under the facts
+   strip when that fetch fails.
+7. **Selection** is one run across both sheets. The first live run is
+   selected on arrival — so the Board's chip lands you on the current
+   item's stage track with no click — and with nothing live, the newest
+   History row is. Empty states are unchanged: `no runs yet` when there is
+   nothing anywhere, `no runs in this range` when the range or project
+   filter empties the list, the figure strip hidden with it.
 
 ### 4.2 Watchdog — option A of `04-watchdog.html`
 
@@ -444,8 +513,10 @@ Today's `WatchdogMonitor`, redrawn:
    while in grace; a `Resume now` chip **only** when `watchdogStoodDown`
    allows — never while the sweeper still has attempts, whatever the grace
    clock says. A watched id with no run in the payload renders as a
-   placeholder line, not nothing. The row is a button and opens the run
-   modal (§6.1); today it jumps to History and selects the run.
+   placeholder line, not nothing. The row is a button and **jumps to
+   History and selects the run** there (§4.1) — exactly what
+   `WatchdogMonitor` does today, and under D there is nowhere else for it
+   to go: the run's detail is the History page's detail sheet.
 4. **Activity sheet.** The event ledger with today's five columns and
    full run ids: `time · kind · project · run · what the sweeper did`,
    th 12/400 `--ink2`, td 13, time 12 `--ink3`; its subtitle keeps the
@@ -500,37 +571,29 @@ Runs › Watchdog through the same section setter the rail uses.
 Both shapes are the dashboard's, chosen there after five drawings each;
 this app adopts them rather than re-litigating.
 
-### 6.1 The sidecar modal — item and run
+### 6.1 The item modal
 
-`ItemDrawer` and the former `RunDrawer`'s content stop being panels pinned
-to the right edge and become a modal with air around it (dashboard §8.6):
-`--scrim` everywhere and a real exit; a `--strip` shell at 16 px radius
-with the design's one shell lift (`0 24px 64px` at `--shadow2`); a 290 px
-left column of facts and the body on the right with a clean top edge.
-Max width 1080 px, `calc(100vw / var(--font-scale) - 48px)` below that;
-full-screen under 700 px, the facts column folding above the body.
+`ItemDrawer` stops being a panel pinned to the right edge and becomes a
+modal with air around it (dashboard §8.6): `--scrim` everywhere and a real
+exit; a `--strip` shell at 16 px radius with the design's one shell lift
+(`0 24px 64px` at `--shadow2`); a 290 px left column of facts and the body
+on the right with a clean top edge. Max width 1080 px, `calc(100vw /
+var(--font-scale) - 48px)` below that; full-screen under 700 px, the facts
+column folding above the body.
 
-- **Item.** Facts: project dot + name, id, section, created / updated /
-  last commit, `groomed`, tags, `in progress since <started>` with its
-  elapsed reading while a session holds it, elapsed and token counters
-  when present, the file path, the dispatch control. Body: the rendered Markdown at the
-  §2.3 scale — 15/400 body, 19/500 headings, code spans on `--steel`.
-- **Run.** Drawn in `05-run-modal.html`. Facts: project dot + name, run
-  id, started / finished / wall time, status chip, mode pill and its
-  downgrade note, question mode, `$ · N turns · N sessions`
-  (`runUsageTotals`), today's chips as a 2-column `n · word` list —
-  merged, branched (when > 0), skipped, attention, fix loops — and the
-  attention entries with their questions. (An earlier draft named
-  "fifteen stage chips"; they do not exist today and are not added.)
-  Body, in today's order: **Machine time by stage** (`StageBars` over
-  `runStageTotals`, the strip's sixth cell for one run), `Branches to
-  merge` (one `git merge --no-ff <branch>` per branched item) for a
-  branch-mode run, then the items, each with its head (id, title, stage
-  chip, `RowTime`), the `queue … · preflight …` lead, stage track (§4.3),
-  per-item usage line, `assumed` list and the last verification as a
-  disclosure — command, `ok` / `failed`, tail — open when failed;
-  `couldn't load verification output` when the archived run cannot be
-  fetched. No `RunControls`: a live run is a card, never a modal.
+It is the **only** modal this redesign keeps. `RunDrawer`'s content does
+not become a second one: under shape D (§4.1) it is the Runs page's detail
+sheet, always beside the list, and every reading it carries — including
+`RunControls`, which a modal could not have offered — is specified there.
+So the `Modal` primitive is composed by one surface, and it lands in task 5
+with the other overlay work rather than in task 3 (§12.4).
+
+- **Facts.** Project dot + name, id, section, created / updated / last
+  commit, `groomed`, tags, `in progress since <started>` with its elapsed
+  reading while a session holds it, elapsed and token counters when
+  present, the file path, the dispatch control.
+- **Body.** The rendered Markdown at the §2.3 scale — 15/400 body, 19/500
+  headings, code spans on `--steel`.
 
 ### 6.2 The sheet — launch and orchestrate
 
@@ -542,7 +605,12 @@ hairline; Start stays on the last step alone. The `uncommitted` chip
 renders as an 11/500 `--amber` pill, its two consequences still spelled
 out in words.
 
-`useDialogEscape` is untouched: one owner, LIFO, the topmost closes.
+`useDialogEscape` is untouched in mechanism: one owner, LIFO, the topmost
+closes. What changes is the count it ranks — **three** dialogs, not four:
+the item modal and these two sheets. `RunDrawer` leaves the stack because
+under shape D its content is an inline sheet on the Runs page (§4.1) and no
+longer a dialog at all; the `invariants.md` entry is edited to name three,
+in the task that moves the surface (§8).
 
 ## 7. Cleanup (task 6)
 
@@ -551,7 +619,7 @@ Dead CSS after tasks 1–5 (`.rail-brand`'s old rules, `.run-strip*`,
 `theme.css` `wrapPage` comment, the `zoom` and `/ var(--font-scale)`
 comments re-read against the new geometry, and `docs/subsystems/board.md`
 rewritten for the surfaces as they now are — the run chip, the two Runs
-pages, the modals.
+pages with History's detail sheet, the item modal and the two sheets.
 
 ## 8. Rules that move
 
@@ -562,14 +630,14 @@ deleted.
 
 | rule | today | after |
 |---|---|---|
-| A crashed run renders as crashed, never as nothing | `RunStrip` crashed strip; Runs list badge | Runs live card (`--red` dot, `crashed` pill, clause); History row when finished; the Board chip counts it (`1 crashed ›`) |
-| Resume for a crashed run stays on the strip alone | `RunStrip` | the Runs live card alone. Resume for `paused` — today on strip and Runs detail — collapses to the same single surface |
-| The board offers a hand resume exactly when the watchdog will not | `RunStrip` + `watchdog.service.ts`, pinned by `watchdog-coupling.test.tsx` | Runs live card + the Watchdog page's `Resume now`; the coupling test drives the live card |
-| A board-started run is visible before its run file exists | `StartingStrip` | the Board chip (`1 starting ›`) and a Runs live card with no controls |
+| A crashed run renders as crashed, never as nothing | `RunStrip` crashed strip; Runs list badge | the Runs **Live row** (`--red` dot, `crashed` pill, the clause on its second line) and its detail sheet; History row when the run finished; the Board chip counts it (`1 crashed ›`) |
+| Resume for a crashed run stays on the strip alone | `RunStrip` | the Runs **detail sheet's head** alone. Resume for `paused` — today on strip and Runs detail — collapses to the same single surface |
+| The board offers a hand resume exactly when the watchdog will not | `RunStrip` + `watchdog.service.ts`, pinned by `watchdog-coupling.test.tsx` | the Runs detail sheet's head + the Watchdog page's `Resume now`; the coupling test drives the detail head |
+| A board-started run is visible before its run file exists | `StartingStrip` | the Board chip (`1 starting ›`) and a Runs **Live row** reading `starting… · <age>`, with no controls and no selection |
 | The toolbar Orchestrate control hides on a starting entry | unchanged | unchanged |
 | `useOrchestratorRuns` polls while any run is `running`, fresh or not | Board + Runs | Board (chip, card strips) + Runs — unchanged |
-| Escape has one owner | four dialogs | the same four, now two modals and two sheets |
-| A session's cost is recorded per transcript (task-27) | Runs row foot (`wall · $`), detail head (`$ · turns · sessions`), per item | live card, history row, run modal facts and per item — unchanged in what is shown |
+| Escape has one owner | four dialogs (`ItemDrawer`, `RunDrawer`, `LaunchSheet`, `OrchestrateSheet`) | **three** — one modal (item) and two sheets. `RunDrawer`'s content is the Runs detail sheet, inline and never a dialog, so it leaves the LIFO stack; `useDialogEscape` itself is untouched, and the `invariants.md` entry is edited to name three |
+| A session's cost is recorded per transcript (task-27) | Runs row foot (`wall · $`), detail head (`$ · turns · sessions`), per item | History row (`wall · $`), the detail sheet's facts strip (`$ · turns · sessions`) and per item — unchanged in what is shown |
 
 ## 9. Testing
 
@@ -678,15 +746,15 @@ the rest a home.
 | component | DESIGN.md | props | composed by |
 |---|---|---|---|
 | `Band` | §8.2 "the page header is a band, not a card" | `title`, `sub`, `children` (right slot) | Board, Runs History, Runs Watchdog, Archive, Settings |
-| `Sheet`, `SheetHead` | §8.2 card; §7 title + one-line subtitle, right slot for one control | `Sheet{children, as?}`; `SheetHead{title, sub?, right?}` | live run card, History, Watching, Activity, Settings groups, the modals' facts blocks |
+| `Sheet`, `SheetHead` | §8.2 card; §7 title + one-line subtitle, right slot for one control | `Sheet{children, as?}`; `SheetHead{title, sub?, right?}` | Runs Live, History and detail sheets, Watching, Activity, Settings groups, the item modal's facts block |
 | `FigureStrip`, `Figure` | §8.4 "one card the ground divides" | `Figure{label, value, unit?, line?, tone?}`; strip wraps 5→3→2 | Runs History (six, the sixth wide), Watchdog (three) |
 | `Chip` | §7 filter chip; the 32 px control | `variant: outline \| ink \| flat \| danger`, `size: 32 \| 28`, `pressed?`, `as: button \| label`, `icon?` | every band and control row, `RunControls`, `DispatchButton`, load-more |
 | `Pill` | §1 status micro-label at 11/500, 999 px | `tone: neutral \| live \| warn \| bad \| done` | count, mode, stage, `crashed`, `paused`, `uncommitted` |
 | `Dot` | §7 legend dot | `tone: live \| paused \| crashed \| done \| ramp-<col>`, or `hue: 1–8`; `size: 8 \| 10`; `breathe?` | card foot, column header, rows, the run chip, the rail wordmark |
 | `Marker` | §8.3 marker row word | `tone: groomed \| kind \| done \| stale` | card, Archive card |
-| `ProgressRow` | §7 progress row | `value`, `max`, `caption?`, `hatch?`, `height: 10 \| 6`, `fill: progress \| ink` | live run card, sweep meter, `StageBars` rows |
+| `ProgressRow` | §7 progress row | `value`, `max`, `caption?`, `hatch?`, `height: 10 \| 6`, `fill: progress \| ink` | sweep meter, heartbeat meter, `StageBars` rows (D's Live rows carry a two-tone count, not a bar) |
 | `Ledger`, `DayKicker` | §8.4 "every table scrolls inside its own sheet" | `Ledger{columns, children}` owns the `overflow-x` box | History, Activity |
-| `Modal` | dashboard §8.6 sidecar | `label`, `facts`, `children`, `onClose`; scrim, `useDialogEscape`, full-screen under `useNarrow` | item modal, run modal |
+| `Modal` | dashboard §8.6 sidecar | `label`, `facts`, `children`, `onClose`; scrim, `useDialogEscape`, full-screen under `useNarrow` | the item modal — the only one under D (§6.1) |
 | `FormSheet` | dashboard §8.7 sheet | `title`, `steps?`, `footer`, `children`, `onClose` | `LaunchSheet`, `OrchestrateSheet` |
 | `Segmented`, `Select`, `NumberField`, `Switch` | §8.2 36 px control family, pill switch | as today, moved from `settings/SettingsRow.tsx` | Settings rows, the sheets' pickers |
 | `useNarrow` (hook) | the one place JS knows the 700 px breakpoint | — | `Modal`, `FormSheet`, `SideRail` |
@@ -700,7 +768,7 @@ does today — the class stays in the stylesheet, never a `style` attribute.
 
 Everything else is a page-level composition of the table above and stays
 in its section's directory: `ItemCard`, `BoardColumn`, `RunChip` (board);
-`LiveRunCard`, `HistoryRow`, `RunModal`, `StageTrack`, `StageBars`,
+`LiveRunRow`, `HistoryRow`, `RunDetail`, `StageTrack`, `StageBars`,
 `WatchingRow`, `ActivityLedger` (runs); `SettingsRow`, `SettingsGroup`,
 `WatchdogGroup` (settings); `ItemModal` (board). `RunControls` stays
 top-level, composing `Chip`, for the reason its header gives — two lazy
@@ -708,6 +776,9 @@ chunks read it.
 
 ### 12.4 When each lands
 
-Task 1: everything in the table but `Modal` and `FormSheet`. Task 3:
-`Modal` (History needs it). Task 5: `FormSheet`. A task never adds a
-primitive the table does not list without amending this section first.
+Task 1: everything in the table but `Modal` and `FormSheet`. Task 5:
+`Modal` and `FormSheet` — both overlays land together. `Modal` was to land
+in task 3 while History opened a run in one; under D (§4.1) History opens
+nothing, so its only composer is the item modal, which is task 5's. A task
+never adds a primitive the table does not list without amending this
+section first.
