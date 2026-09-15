@@ -51,6 +51,9 @@ reasoning behind the rules in the next section lives in
   Archive, Settings), a run strip above the board's columns, and the
   three-step Orchestrate sheet. Every derivation has one home in `lib/`.
   → [docs/subsystems/board.md](docs/subsystems/board.md)
+- [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from
+  the dashboard, §8 how this board applies it; every component cites its subsection in a
+  header comment. Not a `.claude/rules/` file — those pin to `invariants.md` anchors only.
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`,
   `dispatchGate` and the run/watchdog predicates both sides must agree on),
   `theme.css` (five theme palettes).

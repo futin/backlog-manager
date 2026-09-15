@@ -18,6 +18,7 @@ file, and each file that holds state has exactly one writer.
 | [CLAUDE.md](../CLAUDE.md) | the normative index: one line per rule, for anyone (or anything) working in this repo |
 | [subsystems/api.md](subsystems/api.md) | the Nest side: what each module owns, which reads are cached and which must never be |
 | [subsystems/board.md](subsystems/board.md) | the client: the four surfaces, and what the browser derives rather than fetches |
+| [.claude/DESIGN.md](../.claude/DESIGN.md) | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
 | [subsystems/skills.md](subsystems/skills.md) | the six skills, their three CLIs, and the reviewer agent |
 | [subsystems/invariants.md](subsystems/invariants.md) | the rationale behind the rules whose "why" outruns one line — most encode a failure that already happened |
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes |
