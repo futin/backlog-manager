@@ -31,9 +31,9 @@
   --scrim:rgba(4,8,16,.66);   /* drawer backdrop */
   --shadow:rgba(0,0,0,.4);    /* card lift — lighter themes need far less */
   --shadow2:rgba(0,0,0,.5);   /* deeper lift: popovers, the cocked strip */
-  --mono:'IBM Plex Mono','SF Mono','JetBrains Mono',monospace;
-  --font:'Barlow',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  --display:'Barlow Condensed','Barlow',sans-serif;
+  --fill-live:var(--amber);  /* see the daylight block: a FILL, not a text ink */
+  --fill-progress:var(--green);
+  --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   /* legacy aliases — TSX inline styles + unmigrated rules keep resolving */
   --bg:var(--board);--surface:var(--strip);--surface2:var(--steel);
   --border:var(--hairline);--border2:var(--hairline2);
@@ -52,6 +52,8 @@
   --red:#dd5f4c;--magenta:#c47fa4;
   --on-accent:#111214;--scrim:rgba(0,0,0,.66);
   --shadow:rgba(0,0,0,.45);--shadow2:rgba(0,0,0,.55);
+  --fill-live:var(--amber);--fill-progress:var(--green);
+  --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 /* Amber CRT — black glass, one phosphor. The status colors survive as amber
    tints rather than hues, which is the point: a monochrome tube. */
@@ -64,6 +66,8 @@
   --red:#e2603a;--magenta:#e0975a;
   --on-accent:#0a0805;--scrim:rgba(10,6,0,.72);
   --shadow:rgba(0,0,0,.55);--shadow2:rgba(0,0,0,.65);
+  --fill-live:var(--amber);--fill-progress:var(--green);
+  --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 /* Nightshift — a deep green scope. Easiest of the dark set on a dim room. */
 [data-theme="nightshift"]{
@@ -75,19 +79,36 @@
   --red:#e2664b;--magenta:#c982ad;
   --on-accent:#07120d;--scrim:rgba(2,10,7,.68);
   --shadow:rgba(0,0,0,.42);--shadow2:rgba(0,0,0,.52);
+  --fill-live:var(--amber);--fill-progress:var(--green);
+  --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
-/* Daylight Strip — the actual paper the whole metaphor comes from: manila
-   stock, dark ink, printed rules. The one light theme; shadows drop right down
-   because a lift that reads as depth on black reads as dirt on paper. */
+/* Daylight — the one light theme. It WAS manila stock and dark ink, the paper
+   the strip-board metaphor comes from; task-36 rewrote it to the reference
+   design's own daylight values (.claude/DESIGN.md §8.2), which are paper-white
+   rather than warm. The rule that outlasted the repaint is the one about
+   shadows: they drop right down here, because a lift that reads as depth on
+   black reads as dirt on paper. */
 [data-theme="daylight"]{
   color-scheme:light;
-  --board:#e8e3d7;--steel:#f2eee5;--strip:#fbf8f1;--strip-hi:#f2ecdd;
-  --edge:rgba(0,0,0,.04);--hairline:#cdc4b1;--hairline2:#ab9f88;
-  --ink:#231f1a;--ink2:#5a5346;--ink3:#8a8172;
-  --green:#1f7a4d;--amber:#a86414;--mustard:#8a7415;--cyan:#136d78;
-  --red:#a83420;--magenta:#8d3f66;
-  --on-accent:#fbf8f1;--scrim:rgba(60,52,38,.42);
-  --shadow:rgba(60,50,30,.13);--shadow2:rgba(60,50,30,.2);
+  --board:#f4f4f3;--steel:#ededec;--strip:#ffffff;--strip-hi:#f2f2f1;
+  --edge:rgba(0,0,0,.03);--hairline:#eaeae8;--hairline2:#dcdcda;
+  --ink:#131313;--ink2:#6e6e6e;--ink3:#a0a0a0;
+  /* Two of the six are MAPPED rather than lifted from the reference ramp, and
+     the mapping is the same one the reference palette's own daylight comment
+     records (DESIGN.md §8.2): --green resolves to the darkened --green-600,
+     that palette's positive-delta shade; and because the ramp's brightest
+     steps are fills rather than running text, --amber and --mustard take
+     darkened cousins here so both still hold contrast as TEXT. The two fills
+     those bright steps were for are --fill-live / --fill-progress below. */
+  --green:#5fa92c;--amber:#c4761f;--mustard:#9a8712;--cyan:#3f8f14;
+  --red:#b03b28;--magenta:#6b52a8;
+  --on-accent:#ffffff;--scrim:rgba(19,19,19,.28);
+  --shadow:rgba(0,0,0,.06);--shadow2:rgba(0,0,0,.1);
+  /* The literal ramp fills (--orange-400 / --green-500, DESIGN.md §2): the one
+     place in the palette a colour is allowed to be brighter than its text
+     cousin, because nothing sets type in it. */
+  --fill-live:#F5A15C;--fill-progress:#7DC242;
+  --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 
 /* ── Project hues ─────────────────────────────────────────────────────────────
@@ -102,7 +123,7 @@
    Which project gets which is decided in client/src/lib/project-hue.ts — a
    hash of the project's name picks its preference, and registration order
    settles collisions so no two registered projects share while there are hues
-   left. Eight because that is roughly where outline pills at 9px stop being
+   left. Eight because that is roughly where small outline pills stop being
    tellable apart, and because a hand-picked set per theme only stays feasible
    while it is small: --amber is a monochrome tube with no hues to rotate
    through, and --daylight needs dark inks on paper where the dark themes need
@@ -133,7 +154,7 @@
   --proj-1:#e0788d;--proj-2:#e59a55;--proj-3:#c2cb5f;--proj-4:#5fdc9a;
   --proj-5:#4fcdc0;--proj-6:#6fb0ea;--proj-7:#a794e2;--proj-8:#d489bd;
 }
-/* Dark inks, not bright ones: the pill is 9px uppercase on manila stock, where
+/* Dark inks, not bright ones: the pill is small type on a light ground, where
    the dark sets' hues would drop under 3:1 and read as a smudge. */
 [data-theme="daylight"]{
   --proj-1:#a83a56;--proj-2:#9a5a12;--proj-3:#6b7412;--proj-4:#1c7a4e;

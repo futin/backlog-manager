@@ -3,6 +3,10 @@ id: task-36
 title: Foundation: Hanken Grotesk, tokens, type scale and the rail (DESIGN.md 8.0-8.2)
 created: 2026-09-15
 tags: fe-redesign, foundation
+updated: 2026-09-15T20:20:55Z
+started: 2026-09-15T19:35:25Z
+execute-elapsed: 2730
+execute-tokens: 463350
 ---
 
 ## Goal
@@ -267,3 +271,200 @@ are the executor's to write against the primitives as actually built.
 - This task is reviewed, verified and **merged to `main` before any of the
   other five fe-redesign tasks starts** — it is the one every later task's
   `## Plan` names as its dependency by id (`task-36`).
+
+## Outcome
+
+2026-09-15 — landed. Hanken Grotesk is the app's one face, `shared/theme.css`
+carries the rewritten daylight palette plus `--fill-live`/`--fill-progress` in
+all five theme blocks, `client/src/styles.css` has no type under 11 px and no
+second face, the rail is DESIGN.md §8.0's 280 px rail with its sub-nav tree
+under Runs, and `client/src/components/ui/` holds every primitive spec §12.2
+lists except `Modal` and `FormSheet`. All seven source guards are green in
+`test/design-guards.test.ts`; every primitive has its own suite. No server
+route, no skill, no `shared/types.ts` change, and nothing in `client/src/lib/`
+moved.
+
+### What was built
+
+- **Font.** `@fontsource/hanken-grotesk` in, Barlow / Barlow Condensed / IBM
+  Plex Mono out of `package.json` and `main.tsx`; four weights (400/500/600/700).
+  `--font` is the Hanken stack in every theme block; `--mono` and `--display`
+  are deleted, not aliased. `body` gained `font-variant-numeric: tabular-nums`
+  and the sheet gained `code, kbd, samp, pre { font-family: inherit }`.
+  `client/index.html` was never touched, so `test/csp.test.ts`'s byte-hash case
+  needed nothing.
+- **Tokens.** Daylight rewritten to spec §2.2's table exactly (guard 5 pins
+  every value); the two fill tokens added per theme block — literals on
+  daylight, a `var(--amber)`/`var(--green)` line of its own in each of the four
+  dark blocks; `.hatch` added as one utility rule. The eight `--proj-N` sets and
+  `--magenta`'s dispatch-chip job are untouched, and the stale `wrapPage`
+  header comment is deliberately left for `task-41`.
+- **Type scale.** Of `styles.css`'s 130 px-literal `font-size` declarations, the
+  87 below 11 px were raised to the role §2.3's table gives them — from
+  8/9/9.5/10/10.5 px up to 11 px (pills, markers, badges, counts, kickers),
+  12 px (meta, captions, times) or 13 px (body, controls, buttons) — and the
+  elements the table names outright took their stated size and weight:
+  `.board-title` and `.drawer-title`/`.sheet-title` 19/500, `.board-col-name`
+  15/500, `.board-card-title` 14/500, the card's marker row 11/500. All 94
+  `var(--mono)`/`var(--display)` reads are gone, and so are all 31
+  `text-transform: uppercase` rules — the one in the sheet now is the new
+  `.rail-kicker`, which did not carry it before.
+- **Rail.** `SideRail.tsx` rewritten: 280 px, 32 px padding-y, 36 px rows at
+  14/500 with a 16 px inline-SVG icon 12 px from the label, active marked by a
+  3 px ink bar 16 px tall plus `--strip-hi` and never by a label colour, hover
+  on the label alone, a 20/700 wordmark over the 11/500 kicker with one
+  decorative green `Dot`, Settings under a 1 px rule with 24 px either side,
+  and `.main` on `--board` with a 24 px top margin and a 24 px top-left radius.
+  The Runs tree (History / Watchdog) is drawn only for the open section, hung
+  24 px in with its stem and tick as two background layers so the last row's
+  stem stops at its own centre. Below 700 px the rail is a top bar with a ☰
+  menu, every tree open, hiding on a downward scroll and pinned while the menu
+  is open. `resolveSection` and `SECTIONS` are unchanged.
+- **Primitives.** `Band`, `Sheet`+`SheetHead`, `FigureStrip`+`Figure`, `Chip`,
+  `Pill`, `Dot`, `Marker`, `ProgressRow`, `Ledger`+`DayKicker`, `Segmented`,
+  `Select`, `NumberField`, `Switch` and `useNarrow`. `Segmented` and
+  `NumberField` moved out of `settings/SettingsRow.tsx` with their behaviour
+  identical; `SettingsView.tsx` is the one importer and was updated.
+
+### Verification
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run build
+dist/assets/index-UhgBK15Y.js                                    347.65 kB │ gzip: 104.94 kB
+✓ built in 1.20s
+
+$ pnpm run test:jest -- design-guards
+
+Test Suites: 1 passed, 1 total
+Tests:       13 passed, 13 total
+Snapshots:   0 total
+Time:        2.696 s, estimated 3 s
+Ran all test suites matching /design-guards/i.
+
+$ pnpm test
+  ...
+1..538
+# tests 538
+# suites 0
+# pass 538
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 80591.575667
+
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+The `pnpm test` tail above is the node runner's; jest's own totals scrolled
+past it, and `PASS jest` is the line that gates the union (`scripts/test-all.mjs`
+exits 1 if either runner failed). Screenshots of the shell were
+taken at 1400 px and 400 px in daylight and midnight (Board and Runs, plus the
+phone menu with its tree open) against the production build served by
+`node dist/server/src/main.js` on port 4399, a process started by this session
+and killed by its recorded pid; `.playwright-mcp/` is gitignored, so they are
+not in the diff.
+
+### Decisions worth a reviewer's eye
+
+1. **`ui-` prefix on every primitive class family.** Spec §12.2 names components
+   and props, never class names. Three of these patterns already exist under
+   board-section names other sections read (`.pill` is the project pill,
+   `.set-seg` was the Settings segmented control) and tasks 2–6 retire those call
+   sites one surface at a time. A prefix lets the new family and the dying one
+   stand side by side for the length of that migration, and makes guard 7's "no
+   selector outside this block" a string comparison rather than a judgement about
+   which `.pill` was meant.
+2. **Guard 2 is stated as "one `font-family: var(--font)`, on `body`, and
+   `inherit` everywhere else."** §9's words are "styles.css declares no other
+   font-family but `inherit`", but one declaration necessarily names the face.
+   Six rules that re-declared `var(--font)` on form controls and buttons (which
+   do not inherit the document face) became `inherit`.
+3. **Sizes already at or above 11 px were left alone unless §2.3's table names
+   that element.** The floor is the guard; the surfaces carrying the table's
+   larger roles are each redrawn by tasks 2–5, and the primitives landed here
+   carry the full table. `.runs-tile-value` is the clearest case: it is today's
+   figure-strip value at 18 px, and the table's 30/700 lives on `Figure`, which
+   task 3 wires in — raising it here would have reflowed a page body this task
+   promises not to re-shape.
+4. **`useRunsMode` is new (`client/src/hooks/useRunsMode.ts`), and `RunsView`
+   now reads it.** The plan says the tree must write the same key through the
+   same guard, and be a second writer beside the in-page control. With
+   `usePersistedState` that is a `useState` per caller: the rail's write would
+   reach localStorage and never reach the mounted `RunsView`, so clicking
+   Watchdog in the tree would persist a mode the page beside it went on
+   ignoring. The hook holds no cached value — it re-reads storage per mount and
+   only adds a listener set — so nothing about the key, its JSON shape or its
+   guard changed, and `lib/runs-mode.ts` is untouched. This is the one file the
+   plan's file list did not name.
+5. **The rail's padding-y is the literal `32px`, so it no longer reads
+   `--body-pad`.** §2.4/§8.0 state it as a figure, so the rail's padding stops
+   tightening under compact density. No density token changed and every other
+   consumer of `--body-pad` is untouched, but it is a density behaviour this
+   task does alter.
+6. **`Dot`'s `hue` is the index, not the class.** `project-hue.ts`'s
+   `pillClass` returns `pill-proj-N`, which is the wrong family for a filled
+   dot, so `Dot` takes `1–8` and emits `ui-dot-proj-N` — still a class, never a
+   `style` attribute, so a theme swap recolours it for free. `lib/` is
+   unchanged, as the plan requires; task 2 will want an index rather than
+   `ProjectHues.classFor`'s string.
+7. **Guard 7's second case was vacuous until the red proof caught it.** The
+   block sits last in the sheet, so "after the header" meant "anywhere below",
+   and a rule appended to the file — the likeliest way a page comes to restate a
+   primitive — read as inside the block and passed. The block now carries a
+   closing `/* ── end ui primitives` marker and the guard prefix-matches class
+   tokens; an offender on either side of the block is now caught, proved both
+   ways.
+
+### Test cases, against the item's list
+
+1. `test/design-guards.test.ts`, all seven guards, green in isolation.
+2. One `test/ui-<name>.test.tsx` per primitive — 13 suites, plus
+   `ui-use-narrow` for the hook and `use-runs-mode` for its React binding.
+3. `Segmented`/`NumberField` callers unchanged: `SettingsView.tsx` is the only
+   importer (`WatchdogGroup.tsx` imports neither; `NumberField` had no caller at
+   all), and `settings-view`/`settings-watchdog` pass untouched.
+4. `test/csp.test.ts` untouched and green — `client/index.html` never changed.
+5. Rail behaviour: `test/rail.test.tsx`. The in-page segmented control still
+   renders and still works — `runs-view.test.tsx`'s three mode cases pass
+   unmodified.
+6. Eight `*-style.test.ts` suites in `test/` today (not the spec's "ten"); none
+   reads a rail or settings-control selector, none needed moving, all green.
+7. No new derivation: `git status client/src/lib` is empty.
+8. Density and zoom: the diff moves no `--font-scale` division and no
+   `[data-density]` token — see decision 5 for the one consumer that changed.
+
+### Left for the tasks that own them
+
+- `task-41` will find no `--mono`/`--display` consumers left in `styles.css`.
+  Its plan expects "the bulk" of them to survive this task, but guard 1 as §9
+  specifies it reads BOTH stylesheets, so making it green required removing
+  them all. Its own step is a grep confirming none remain, which still passes.
+- The stale `theme.css` `wrapPage` header comment is still there, deliberately.
+- `.magenta`'s dispatch-chip job and the stale comment about it are `ref-4`'s.
+
+Contract sweep: 17 sites updated (.claude/DESIGN.md §8.1 and §8.6, CLAUDE.md's
+`client/src/` Layout line, docs/subsystems/board.md's rail paragraph plus a new
+Primitives section, client/src/components/settings/SettingsView.tsx's
+`NumberField` path, nine now-false comments in client/src/styles.css and three
+in shared/theme.css). Left standing on purpose: shared/theme.css's `wrapPage`
+header comment (the plan assigns it to `task-41`), and
+docs/superpowers/plans/*.md, which quote the old CSS verbatim as a record of
+what was built then rather than as a live contract.
+Red proof: 18 tests went red with the change reverted — all 13 design-guards
+cases (across reverts of theme.css, styles.css, main.tsx and package.json, plus
+two injected offenders for the two guards no revert could reach) and 5 of
+rail.test.tsx's 7. The other 15 new suites fail to load at all without the
+components they pin, which is the same proof at file granularity. rail.test's
+two remaining cases (no `aria-expanded` on a section row, no ☰ at desktop
+width) are absence-invariants that were already true of the old rail and are
+kept as regression guards. The proof found a real defect: guard 7's
+"no selector outside the block" case was vacuous, and the fix is decision 7
+above.

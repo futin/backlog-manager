@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
 import { elapsedSince } from '../../lib/item-age';
-import { usePersistedState } from '../../hooks/usePersistedState';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
 import { RUN_STATUS_GLYPH, mergeModeLabel, runStatusChip } from '../../lib/run-stage';
-import { MODE_BUTTON, RUNS_MODES, RUNS_MODE_KEY, isRunsMode } from '../../lib/runs-mode';
+import { useRunsMode } from '../../hooks/useRunsMode';
+import { MODE_BUTTON, RUNS_MODES } from '../../lib/runs-mode';
 import {
   aggregateRuns, dayKey, dayLabel, formatUsd, runStageTotals, runUsageTotals, runWallMs, sumStageTotals
 } from '../../lib/run-stats';
@@ -627,9 +627,17 @@ export default function RunsView() {
   // why a mode is section-like where a filter is not. Read back through
   // `isRunsMode` because localStorage can hand back anything at all
   // (an older build, a hand edit, a `JSON.parse` of a number), and the one
-  // outcome this section must never have is rendering neither surface.
-  const [storedMode, setStoredMode] = usePersistedState<string>(RUNS_MODE_KEY, 'runs');
-  const mode = isRunsMode(storedMode) ? storedMode : 'runs';
+  // outcome this section must never have is rendering neither surface — the
+  // guard now lives inside `useRunsMode`, which is the only thing that
+  // changed here.
+  //
+  // `useRunsMode` rather than `usePersistedState` because task-36 gave the
+  // rail a sub-nav tree naming these same two views (DESIGN.md §8.0), so the
+  // stored mode is now a question two mounted components ask at once. A
+  // `usePersistedState` per caller is a `useState` per caller: the rail's
+  // write would reach localStorage and never reach this component. Nothing
+  // about the key, its guard or its persistence changed.
+  const [mode, setStoredMode] = useRunsMode();
   const [projectFilter, setProjectFilter] = useState<string>('all');
   // Component state, not persisted — same as `projectFilter` immediately
   // above, and for the same reason: a saved range would silently reopen the
