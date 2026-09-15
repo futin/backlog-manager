@@ -167,9 +167,9 @@ The rail takes §2.4's figures, three of which are themselves a departure from t
 
 | | Spec / mock | This board | Why |
 |---|---|---|---|
-| Rail width | 300 px | **280 px** | the only figure the content column notices, in a client read in windows at least as narrow as the dashboard's; the dashboard's own rail already ships this width and this spec copies it |
+| Rail width | 300 px | **280 px** | the only figure the content column notices in a window this narrow — this board's own figure, sitting between the mock's 300 px and the dashboard's own shipped rail at 240 px (`.rail{flex:0 0 240px}`, `styles.css:158`) |
 | Nav row height | 44 px | **36 px** (44 px on the phone menu) | the dashboard's own rail CSS ships 36 px rows at 14/500 — 8 px shorter than the mock, and lighter than its own DESIGN.md prose still records — and this spec copies the shipped rule rather than the drifted prose; the mock's full 44 px is kept for the phone menu, where the row is a thumb target rather than a pointer one |
-| Sub-nav indent | 36 px (the icon's right edge) | **24 px** (the icon's centreline: 16 px row padding + half of a 16 px icon) | this board's outline icon is 16 px, not the dashboard's 20 px, so the centreline sits 2 px inside the dashboard's own 26 px — the rule still drops out of the glyph above it rather than floating in the gutter, just off a smaller icon |
+| Sub-nav indent | 36 px (the icon's right edge) | **24 px** (the icon's centreline: 16 px row padding + half of a 16 px icon) | this board's icon is 16 px, and so — per its own CSS — is the dashboard's (`.rail-ic{width:16px;height:16px}`, `styles.css:183`); the two indents differ because this board hangs the rule off the icon's centreline (16 px row padding + half the 16 px icon) while the dashboard's shipped rule sits it flat at 20 px (`.rail-sublink{padding:7px 0 7px 20px}`, `styles.css:212`) |
 
 Everything else is the spec's, unchanged: 32 px padding-y, and a wordmark 20/700 over an 11/500 uppercase `.rail-kicker`.
 
@@ -200,7 +200,7 @@ Hanken Grotesk is the one face — self-hosted via `@fontsource/hanken-grotesk`,
 
 `--mono` and `--display` are deleted from `theme.css`, not aliased to `--font` — an alias would let a stale `var(--mono)` left behind by the redesign keep quietly resolving to Plex. Deleting it means the same rule instead falls back to the inherited face, which is the failure this board wants to surface rather than hide. `code, kbd, samp, pre { font-family: inherit }` removes the UA's own monospace default for the same reason, so a code span is marked by its fill and ink alone, and `body` carries `font-variant-numeric: tabular-nums` so figures line up wherever they appear. `text-transform: uppercase` survives on `.rail-kicker` alone.
 
-Three faces — Barlow, Barlow Condensed and IBM Plex Mono — leave behind 80 `--mono` uses, 14 `--display` uses and 31 `text-transform: uppercase` rules in `client/src/styles.css`; the same file has 129 of its 130 `font-size` declarations at 12.5 px or smaller, all of them now read off the scale above.
+Three faces — Barlow, Barlow Condensed and IBM Plex Mono — leave behind 80 `--mono` uses, 14 `--display` uses and 31 `text-transform: uppercase` rules in `client/src/styles.css`; the same file has 124 of its 130 `font-size` declarations at 12.5 px or smaller, all of them now read off the scale above.
 
 ### 8.2 Tokens and themes
 
@@ -223,7 +223,7 @@ Two tokens are new, added to every theme block, because the design draws two thi
 | `--fill-live` | the card's live strip, the current stage node, the "you are here" bar | `#F5A15C` (`--orange-400`, §2) | `var(--amber)` |
 | `--fill-progress` | filled progress, a reached stage node | `#7DC242` (`--green-500`, §2) | `var(--green)` |
 
-Each dark theme block declares its own `var(--amber)` / `var(--green)` line for these rather than sharing one rule across all four, the same way every other ramp token is themed per block.
+Each dark theme block declares its own `var(--amber)` / `var(--green)` line for these rather than sharing one rule across all four, the same way every other ramp token is themed per block. Beyond these two lines, the four dark theme blocks are otherwise unchanged as overrides — no other dark-theme rule in this section is touched.
 
 `.hatch` is one utility rule over any fill: `repeating-linear-gradient(45deg, rgba(255,255,255,.30) 0 1px, transparent 1px 4px)`.
 
