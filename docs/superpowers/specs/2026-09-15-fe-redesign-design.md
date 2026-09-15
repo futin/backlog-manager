@@ -3,7 +3,10 @@
 Date: 2026-09-15
 Status: approved (user-reviewed via remote decision session: seven option
 picks, four interactive companion screens on real board and run data —
-the screens are kept beside this file in `2026-09-15-fe-redesign-mockups/`)
+the screens are kept beside this file in `2026-09-15-fe-redesign-mockups/`;
+on 2026-09-15 the picked option in each was revised for functional
+completeness and `05-run-modal.html` added — `00-functionality-audit.md`
+there lists every change, and this file was corrected in the same pass)
 
 ## Problem
 
@@ -355,32 +358,63 @@ Top to bottom:
 2. **One live card per run** whose status is `running` or `paused`, or
    that is `starting`. A `--strip` sheet at 16 px radius and 24 px
    padding, two columns: the run on the left, its controls stacked on the
-   right (`RunControls` — Pause / Cancel / Resume, plus Open — unchanged
-   in what it offers, drawn as 28 px chips, Cancel in `--red` text).
+   right (`RunControls`, unchanged in what it offers, drawn as 28 px
+   chips: running and fresh → **Pause**; while a pause is requested →
+   the note `Pausing after <id>` and **Cancel**, which withdraws the
+   request — there is no control that stops a run, and Cancel takes no
+   accent because it is not destructive; paused → **Resume run**, hidden
+   when the environment cannot spawn, `aria-disabled` with the reason as
+   its title when the project is not visible, `Resuming…` in flight —
+   plus **Open ›**, which opens the run modal, §6.1).
    Left column: dot + project 19/500 + run id and start time at 12 `--ink3`
-   + mode pill; a §7 progress row (10 px `--fill-progress` hatched over
-   `--steel`, `2 / 5` two-tone beside it, elapsed and heartbeat reading at
-   12); a hairline; the current item's head (id 12 `--ink3`, title 14/500,
-   stage pill right) and its **stage track** (§4.3). A `paused` run shows
+   + mode pill (`mergeModeLabel`: `branch mode` / `branch mode
+   (downgraded)`; a merge-mode run has no badge today, and a `merge` pill
+   is optional); a §7 progress row (10 px `--fill-progress` hatched over
+   `--steel`, `2 / 5` two-tone beside it, then at 12: elapsed, the
+   heartbeat reading (`live` or its age), `pausing · finishes <id>` while
+   a pause is requested, `N needs attention` when the run has attention
+   entries, and `$ · N turns · N sessions` from `runUsageTotals` when
+   usage exists); a hairline; the current item's head (id 12 `--ink3`,
+   title 14/500, the stage chip — glyph + the real stage word — and its
+   `RowTime` reading right, the `queue … · preflight …` lead at 12
+   `--ink3` under) and its **stage track** (§4.3). A `paused` run shows
    `paused after <id>` in place of the item. A `starting` entry shows the
    dot in `--fill-live`, `starting…`, its age, and no controls. A
    **crashed** run (running, heartbeat stale) shows a `--red` dot, a
-   `crashed` pill, the watchdog clause from `run-watchdog.ts` as a 13 px
-   sentence under the progress row, and Resume exactly when
+   `crashed` pill, `no heartbeat for <age>` in the heartbeat slot, then
+   as 13 px lines under the progress row: `last heartbeat HH:MM · every
+   stage below is last reported, not current`, `last reported <id> at
+   <stage>` (or `all items at rest`) and the watchdog clause from
+   `run-watchdog.ts`; its item's current node renders stalled (the
+   current tone, no ring, no pulse) against the clock clamped at the last
+   heartbeat; and Resume run exactly when
    `watchdogStoodDown` says the sweeper will not — the coupling test
    drives this card from now on.
 3. **Figure strip.** One sheet the ground divides: five figures on a 2 px
    `--board` gap grid, wrapping to three under 1100 and two under 700 with
    the seam drawn in both directions. Each: label 13 `--ink2`, value 30/700,
-   a 12 px line under. The five are today's tiles — runs, completed /
-   queued, avg item work (queue wait excluded), rework / completed, verify
-   pass. The wide "machine time by stage" tile becomes the sixth cell,
-   full width, holding `StageBars` redrawn at 10 px bar height.
+   a 12 px line under where today's tile has one. The five are today's
+   tiles and read what `aggregateRuns` returns and nothing else — no
+   prior-period delta, no parked count: **runs**, its line the
+   five-status breakdown (glyph + count each, `STATUS_ORDER`);
+   **completed / queued**, `merged or branched`; **avg item work**, `queue
+   wait excluded`; **rework / completed**, the one-decimal ratio
+   (`fixLoopsPerMerged`) with today's long sentence as its title; **verify
+   pass**, a rate over verification runs, not items. The wide "machine
+   time by stage" tile becomes the sixth cell, full width, holding
+   `StageBars` redrawn at 10 px bar height — always seven rows in pipeline
+   order, `—` for a stage never recorded — with `<range> · queue wait
+   excluded` as its line. The strip hides with the list when the range or
+   project filter empties it (`no runs in this range`), as today.
 4. **History sheet.** Title + subtitle (`29 runs · last 30 days · a row
    opens the run`), day kickers at 13/500 `--ink2`, one 44 px row per run:
-   dot (`--ink3` done, `--red` crashed, `--fill-live` paused), project
+   dot **and the status word** from `runStatusChip` (glyph + `done` /
+   `aborted` / `failed` / `paused` — a dot alone cannot tell the first
+   three apart; tones `--ink3` done, `--amber` aborted, `--red` failed,
+   `--fill-live` paused; a crashed run is a card, not a row), project
    14/500, the items it touched at 13 `--ink2`, `2 / 2` two-tone, wall
-   time at 12 `--ink3`, mode pill, a `›`. Load-more stays as a flat chip
+   time and cost at 12 `--ink3` (`1h 02m` · `$4.80`, cost only when
+   usage exists), mode pill, a `›`. Load-more stays as a flat chip
    at the sheet's foot. A row opens the **run modal** (§6.1) — which is why
    the `Modal` primitive lands in this task, not in task 5. Live runs are
    not in this list — they are the cards above.
@@ -400,11 +434,23 @@ Today's `WatchdogMonitor`, redrawn:
    as the 12 px line).
 3. **Watching sheet.** One row per run in the runs payload with status
    `running`, annotated from `watching` exactly as today (skew rendered,
-   not hidden): dot, project 14/500, run id 12 `--ink3`, `heartbeat live`
-   / `heartbeat 38m`, `1 / 3 attempts`, the verdict as glyph + words in the
-   kind's tone, and a `Resume now` chip when `watchdogStoodDown` allows.
-4. **Activity sheet.** The event ledger: `time · kind · run · detail`,
-   th 12/400 `--ink2`, td 13, time 12 `--ink3`; the kind cell is
+   not hidden): dot, project 14/500, run id 12 `--ink3`, `· not yet
+   watched` for the skew case, the verdict as glyph + word (`● ok` /
+   `⚠ crashed`), `last reported <id> · <stage>` or `between items`, the
+   heartbeat meter — age against `RUN_STALE_MS`, amber once past it, with
+   its two labels `heartbeat Ns ago` and `stale at 10m` / `past the 10m
+   stale line` — and for a crashed run the attempts dots, the
+   `watchdogClause` sentence, `→ session <id>` and `leave alone Nm more`
+   while in grace; a `Resume now` chip **only** when `watchdogStoodDown`
+   allows — never while the sweeper still has attempts, whatever the grace
+   clock says. A watched id with no run in the payload renders as a
+   placeholder line, not nothing. The row is a button and opens the run
+   modal (§6.1); today it jumps to History and selects the run.
+4. **Activity sheet.** The event ledger with today's five columns and
+   full run ids: `time · kind · project · run · what the sweeper did`,
+   th 12/400 `--ink2`, td 13, time 12 `--ink3`; its subtitle keeps the
+   caveat (the last `WATCHDOG_EVENT_CAP` only, held in the API process's
+   memory, emptied by a restart); the kind cell is
    `WATCHDOG_KIND_GLYPH` + the word, coloured by `WATCHDOG_KIND_TONE`:
    `live` `--green`, `done` `--green`, `bad` `--red`, `warn` `--amber`,
    `muted` `--ink3`. Scrolls inside its own sheet under 700 px.
@@ -465,14 +511,26 @@ Max width 1080 px, `calc(100vw / var(--font-scale) - 48px)` below that;
 full-screen under 700 px, the facts column folding above the body.
 
 - **Item.** Facts: project dot + name, id, section, created / updated /
-  last commit, `groomed`, elapsed and token counters when present, the
-  file path, the dispatch control. Body: the rendered Markdown at the
+  last commit, `groomed`, tags, `in progress since <started>` with its
+  elapsed reading while a session holds it, elapsed and token counters
+  when present, the file path, the dispatch control. Body: the rendered Markdown at the
   §2.3 scale — 15/400 body, 19/500 headings, code spans on `--steel`.
-- **Run.** Facts: project, run id, started / finished, mode and its note,
-  question mode, the fifteen stage chips as a 2-column list of
-  `stage · n`, attention entries. Body: the items, each with its head,
-  stage track (§4.3), verification and assumptions; `Branches to merge`
-  under them for a branch-mode run.
+- **Run.** Drawn in `05-run-modal.html`. Facts: project dot + name, run
+  id, started / finished / wall time, status chip, mode pill and its
+  downgrade note, question mode, `$ · N turns · N sessions`
+  (`runUsageTotals`), today's chips as a 2-column `n · word` list —
+  merged, branched (when > 0), skipped, attention, fix loops — and the
+  attention entries with their questions. (An earlier draft named
+  "fifteen stage chips"; they do not exist today and are not added.)
+  Body, in today's order: **Machine time by stage** (`StageBars` over
+  `runStageTotals`, the strip's sixth cell for one run), `Branches to
+  merge` (one `git merge --no-ff <branch>` per branched item) for a
+  branch-mode run, then the items, each with its head (id, title, stage
+  chip, `RowTime`), the `queue … · preflight …` lead, stage track (§4.3),
+  per-item usage line, `assumed` list and the last verification as a
+  disclosure — command, `ok` / `failed`, tail — open when failed;
+  `couldn't load verification output` when the archived run cannot be
+  fetched. No `RunControls`: a live run is a card, never a modal.
 
 ### 6.2 The sheet — launch and orchestrate
 
@@ -511,6 +569,7 @@ deleted.
 | The toolbar Orchestrate control hides on a starting entry | unchanged | unchanged |
 | `useOrchestratorRuns` polls while any run is `running`, fresh or not | Board + Runs | Board (chip, card strips) + Runs — unchanged |
 | Escape has one owner | four dialogs | the same four, now two modals and two sheets |
+| A session's cost is recorded per transcript (task-27) | Runs row foot (`wall · $`), detail head (`$ · turns · sessions`), per item | live card, history row, run modal facts and per item — unchanged in what is shown |
 
 ## 9. Testing
 
