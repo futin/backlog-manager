@@ -193,6 +193,17 @@ any of these — most encode a failure that already happened.
   by the **same applier as the CSP** (`applySecurityMiddleware`, host gate first), so no app built here can carry one without the other, and it is global rather
   than scoped to the agents POSTs because the read routes are exposed to the same page. The origin guard is deliberately unchanged — it inherits the allowlist
   transitively. Why: [invariants.md](docs/subsystems/invariants.md#every-route-is-gated-by-a-host-allowlist)
+- **Settings is two pages, the page is the scope, and the rail is the only thing that switches them.** `settingsScope` (`client/src/lib/settings.ts`) is
+  `local | shared`: Local is this browser's `localStorage`, Shared is what the API reads off the host. No card mixes the two — which is why `Claude Agents` is
+  two cards and why `open dashboard ↗` sits beside the per-device field supplying its href — and there is no in-page switch at any width, the same rule Runs'
+  two pages follow. One `RailTree` renders both trees; `SECTIONS`/`Section` live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a
+  cycle with `lib/settings.ts`. Why:
+  [invariants.md](docs/subsystems/invariants.md#settings-is-two-pages-the-page-is-the-scope)
+- **`contentWidth` is stamped before first paint, and the CSP hash travels with the script that stamps it.** `data-width` on `<html>`, written twice — by
+  `client/index.html`'s inline script and by `useSettings`, whose dependency list must carry it or the setting works on reload and not on the click. One CSS
+  block releases `.wrap` **and** `.wrap.wide`; the cap goes, the `margin: 0` stays. Editing that script invalidates `THEME_SCRIPT_SHA256`
+  (`server/src/security.ts`), and dev has no CSP, so the failure is invisible until the built app is served. Why:
+  [invariants.md](docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it)
 - **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and
   `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
 - **Container mounts land on host paths, read-only**, because the registry stores absolute host paths.

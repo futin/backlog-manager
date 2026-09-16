@@ -12,3 +12,5 @@ paths: ["client/src/**"]
 - Before changing files here, read docs/subsystems/invariants.md#queue-wait-is-not-work
 - Before changing files here, read docs/subsystems/invariants.md#launch-sheet-modeleffort-pickers-seed-from-settings-never-the-last-launch
 - Before changing files here, read docs/subsystems/invariants.md#the-resume-coupling-the-board-offers-a-hand-resume-exactly-when-the-sweeper-will-not
+- Before changing files here, read docs/subsystems/invariants.md#settings-is-two-pages-the-page-is-the-scope
+- Before changing files here, read docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it

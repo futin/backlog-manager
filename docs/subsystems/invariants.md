@@ -2023,6 +2023,114 @@ silently forever; every body line is a pointer; no file exceeds 25 lines.
 It passes **vacuously** on an absent or empty directory, and that is deliberate: P3 could have come back negative, in which case the correct deliverable was
 zero rule files and a recorded negative. A guard that went red in that world would have made the honest outcome look like a failure.
 
+## Settings is two pages, the page is the scope
+
+`settingsScope` (`client/src/lib/settings.ts`) is `local | shared`, per device, defaulting to `local`. **Local is everything in this browser's `localStorage`;
+Shared is what the API reads off the host** — the watchdog's settings file beside the registry, and the environment the server was started with. No card mixes
+the two, and the rail's sub-nav tree is the only thing that switches them, at every width.
+
+### The rule is "the page is the scope", and one card had to split to satisfy it
+
+Settings has carried a scope subtitle per card since task-39 — `this device`, `this machine`, `this server` — because the scope answers a different question
+from the name: whether changing a setting affects anybody but the person changing it. Two pages are that same answer moved up a level, and the move is worth
+something only if it is true without exceptions. One card was not.
+
+`Claude Agents` mixed backends. Its status lines and its `Setting it up` block report the HOST's environment — `BM_AGENTS`, `CLAUDE_BIN`, the dashboard's
+remote-answer pill — while `Default model`, `Default effort` and `Dashboard link` were this browser's `localStorage` all along, sitting under a heading that
+said `this machine`. That was tolerable on one page, where the subtitle was the only claim being made. It is not tolerable when the PAGE makes the claim too: a
+card that mixes backends makes the band's scope pill a lie about half its own contents.
+
+So the card divides. `Dispatch · this device` is the Local card holding the three per-device rows; `Claude Agents · this machine` stays on Shared carrying the
+status row and the conditional setup block, and its status row has **no control in its right slot at all** — which is why `SettingsRow`'s `children` is
+optional, and why the empty `.set-control` is not rendered rather than rendered hollow.
+
+`open dashboard ↗` moved with the value that supplies its href, onto the `Dashboard link` row itself. A link driven by a per-device field has no business on the
+page that promises everything on it is the host's; and beside the field that sets it, the link stops needing an explanation.
+
+### What was given up, deliberately
+
+`Orchestrator · this device` and `Orchestrator watchdog · this server` used to sit one above the other in the same column, and the adjacency carried meaning:
+the same subject read at two scopes — what a run is STARTED with, then what happens to one that has already crashed — met in that order. The split puts them on
+different pages, and that is the cost paid for a page that is honestly one backend throughout.
+
+It is recorded here because a test used to protect it. `test/settings-view.test.tsx`'s `renders above the watchdog group` asserted the DOM order of those two
+cards, and after the split neither page can be asked the question. It was restated rather than deleted outright — the half that survives is that `Orchestrator`
+is on Local and still holds its own two rows — because the adjacency is gone by design, and a test asserting a layout the design deliberately dropped is worse
+than no test at all.
+
+### There is no in-page switch, at any width
+
+The dashboard this pattern was ported from draws a pill switch in its Settings band below 700 px. This board does not, and the difference is not an oversight:
+the rail's trees stand open at that width, so the tree is reachable in one tap on the phone exactly as it is on the desktop. Runs' two pages already establish
+the rule — task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair along with the in-page control it named — and a second control here would be a second wording
+free to disagree with the tree's. `test/settings-view.test.tsx` pins the absence, because "add a switch on the phone" is exactly the improvement a later reader
+would make without knowing it was already decided against.
+
+### The scope pill is the existing primitive, at `neutral`, on both pages
+
+`Band`'s right slot holds one `Pill` — `this browser` on Local, `this machine` on Shared — and the WORD carries the distinction, not a tone. `PillTone`'s five
+members each name a *reading* (`live`, `warn`, `bad`, `done`, `neutral`); none of them means "shared", and minting a sixth look inside the settings block would
+be a second home for a primitive, which `test/design-guards.test.ts`'s guard 7 exists to refuse.
+
+### The rail reads a SETTING, which moved `SECTIONS` out of the rail
+
+`settingsScope` lives in the settings object rather than in a module-level store like `useRunsMode`, because both of its readers — the rail's tree and
+`SettingsView` — already sit inside `SettingsProvider`. Runs' mode needs the store for a reason this one does not have: `RunsView` writes it too, from a surface
+with no settings context in its way.
+
+That choice had one mechanical consequence worth stating, because it will be rediscovered otherwise. The rail importing `useSettings` closed an import cycle:
+`lib/settings.ts` read `SECTIONS` off `SideRail.tsx` to clamp the `Opens on` preference, and ES imports hoist, so `settings.ts` ran before the rail's body and
+saw `SECTIONS` as `undefined` — every suite that loaded the rail died at import. The fix cut the cycle at its real edge: `SECTIONS` and `Section` are
+`client/src/lib/sections.ts` now, which is where a list of four strings belonged anyway. The rail keeps the LABELS, as a `Record<Section, string>`, so a section
+added to the list cannot ship without one — the same guarantee the old derivation gave from the other direction — and re-exports both names so component-layer
+callers are unchanged.
+
+### One tree component, two call sites
+
+`RailTree` (`SideRail.tsx`) is the one render path both trees take. Copied for a second section, the markup's three load-bearing details would become two things
+free to disagree: the `rail-sub`/`rail-sublink` class pair, `aria-current="true"` rather than `"page"` (the section row above holds `page`, and two elements
+claiming to be the current page leave a reader with two answers to one question), and closing the phone menu on a pick. What legitimately differs per section is
+the item list, which of them is current, and what a pick writes — so that is what the call sites supply, and nothing else.
+
+`current` is kept apart from the tree's own `section` for the phone: below 700 px every tree is drawn at once, and a tree whose section is not current must mark
+nothing, or the rail announces a current item on a page nobody is looking at.
+
+## `contentWidth` is stamped before first paint, and the CSP hash travels with it
+
+`contentWidth` (`client/src/lib/settings.ts`) is `fixed | full`, per device, defaulting to `fixed`. It is stamped on `<html>` as `data-width` **twice** — by
+`client/index.html`'s inline script and by `useSettings`'s effect — and one CSS block keys off it, releasing `.wrap` **and** `.wrap.wide`.
+
+### Why twice
+
+A stamp applied only at mount is the flash bug the theme and density stamps already exist to prevent, arriving under a new name: a `full` install would paint at
+the fixed measure and snap out of it on every single load. So the pre-paint script writes it, exactly as it writes the theme, the density and the font scale,
+and fails silently back to the default the same way.
+
+The effect's dependency list is the other half, and it is load-bearing rather than tidy. A stamp whose value is missing from the deps still works on RELOAD —
+the pre-paint script wrote it — and silently does nothing when the control is clicked. That is the one shape of this bug that survives being developed against,
+because reloading is what you do next anyway. `test/settings-view.test.tsx` asserts `document.documentElement.dataset.width` after a click for exactly that
+reason.
+
+### Why both wraps
+
+Every section renders in `.wrap.wide` since the Settings split took the shell's narrow-Settings ternary away, so a rule that freed `.wrap` alone would leave the
+whole app capped at 1280 px in the one mode whose entire promise is that it is not. The cap is all that goes: `margin` stays `0`, so a released section grows to
+the right from the rail rather than re-centring on the window, which would read as the page jumping sideways when the setting is toggled.
+
+### The CSP hash is not optional
+
+`server/src/security.ts`'s `THEME_SCRIPT_SHA256` pins the sha256 of that inline script's exact bytes. Editing the script without recomputing the hash ships a
+served build whose theme script the browser refuses to run: the page paints in the default palette at 100% on every load, and **nothing in dev shows it**,
+because dev has no CSP (see `security.ts`'s own comment for why the policy is a response header rather than a `<meta>` tag). `test/csp.test.ts` recomputes the
+hash from `client/index.html` and is the proof the step was taken.
+
+### Why a source guard, and not behaviour
+
+`test/content-width-style.test.ts` reads files rather than rendering, because both halves of this feature are invisible to a component suite. jsdom applies no
+stylesheet, so a rendered assertion on the released measure would pass whether or not the CSS rule existed — and the failure mode is a segmented control that
+toggles cleanly and changes nothing on screen. `client/index.html` is never loaded by any suite at all, so React's own stamp would keep every case green while
+the pre-paint half was missing. Neither is a detail a reader would think to check by hand, which is exactly why they are checked mechanically.
+
 <!-- docs-sync:
   sources:
     - server/src
