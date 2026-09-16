@@ -33,6 +33,15 @@
   --shadow2:rgba(0,0,0,.5);   /* deeper lift: popovers, the cocked strip */
   --fill-live:var(--amber);  /* see the daylight block: a FILL, not a text ink */
   --fill-progress:var(--green);
+  /* Ink ON one of those two fills (task-37). Not --ink, which every dark theme
+     sets near-WHITE: measured on this block, #dde6f4 on #ffb03a is 1.4:1, and
+     the card's live strip sets 11px type in it. Not --on-accent either, by
+     name — that token is "ink on a filled ACCENT", and on the light theme its
+     accents are dark so it resolves to white, which fails against a fill that
+     is light in every theme. So: one token, per block, always the dark end of
+     its own palette. Here that IS --on-accent's value, and saying so through
+     the token keeps the two moving together. */
+  --on-fill:var(--on-accent);
   --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   /* legacy aliases — TSX inline styles + unmigrated rules keep resolving */
   --bg:var(--board);--surface:var(--strip);--surface2:var(--steel);
@@ -52,7 +61,7 @@
   --red:#dd5f4c;--magenta:#c47fa4;
   --on-accent:#111214;--scrim:rgba(0,0,0,.66);
   --shadow:rgba(0,0,0,.45);--shadow2:rgba(0,0,0,.55);
-  --fill-live:var(--amber);--fill-progress:var(--green);
+  --fill-live:var(--amber);--fill-progress:var(--green);--on-fill:var(--on-accent);
   --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 /* Amber CRT — black glass, one phosphor. The status colors survive as amber
@@ -66,7 +75,7 @@
   --red:#e2603a;--magenta:#e0975a;
   --on-accent:#0a0805;--scrim:rgba(10,6,0,.72);
   --shadow:rgba(0,0,0,.55);--shadow2:rgba(0,0,0,.65);
-  --fill-live:var(--amber);--fill-progress:var(--green);
+  --fill-live:var(--amber);--fill-progress:var(--green);--on-fill:var(--on-accent);
   --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 /* Nightshift — a deep green scope. Easiest of the dark set on a dim room. */
@@ -79,7 +88,7 @@
   --red:#e2664b;--magenta:#c982ad;
   --on-accent:#07120d;--scrim:rgba(2,10,7,.68);
   --shadow:rgba(0,0,0,.42);--shadow2:rgba(0,0,0,.52);
-  --fill-live:var(--amber);--fill-progress:var(--green);
+  --fill-live:var(--amber);--fill-progress:var(--green);--on-fill:var(--on-accent);
   --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 /* Daylight — the one light theme. It WAS manila stock and dark ink, the paper
@@ -108,6 +117,11 @@
      place in the palette a colour is allowed to be brighter than its text
      cousin, because nothing sets type in it. */
   --fill-live:#F5A15C;--fill-progress:#7DC242;
+  /* The one block where --on-fill is NOT --on-accent: this palette's accents
+     are dark, so --on-accent is white, and white on #F5A15C is 2.0:1. --ink
+     against the same fill is 7.3:1 — the dark end of this palette, which is
+     what the other four blocks pick too, arrived at from the other side. */
+  --on-fill:var(--ink);
   --font:'Hanken Grotesk',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 

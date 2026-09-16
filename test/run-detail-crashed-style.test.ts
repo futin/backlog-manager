@@ -34,10 +34,10 @@ describe('run detail crashed-note stylesheet rule', () => {
   });
 
   it('carries the amber every other surface prints this verdict in', () => {
-    // `.run-strip-crashed-label` (the Board strip) and the `crashed` status
-    // badge (`runs-status-warn`, via `runStatusChip`) are both amber. One
-    // colour for one verdict: a reader who learns what amber means on the
-    // board should not have to learn it again here.
+    // The `crashed` status badge (`runs-status-warn`, via `runStatusChip`) is
+    // amber, and so was the Board's own crashed strip until task-37 deleted
+    // it. One colour for one verdict: a reader who learns what amber means on
+    // one surface should not have to learn it again here.
     expect(block).toContain('var(--amber)');
   });
 });

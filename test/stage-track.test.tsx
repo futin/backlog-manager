@@ -49,7 +49,7 @@ function at(offsetMs: number): string {
 
 /**
  * The local `HH:MM` `formatClock` (run-time.ts) would print for this stamp,
- * built the same hand way run-time-ui.test.tsx's own clock assertions
+ * built the same hand way the drawer suite's own clock assertions
  * already are, rather than importing the function under (indirect) test.
  */
 function clockOf(iso: string): string {

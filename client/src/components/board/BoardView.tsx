@@ -11,17 +11,19 @@ import { isInProgress } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { PROJECT_KEY } from '../../lib/view-keys';
-import { projectDispatchGate, resumeGate, runClaimBlock } from '../../../../shared/agent';
+import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
+import { Band } from '../ui/Band';
+import { Chip } from '../ui/Chip';
+import { BoardColumn } from './BoardColumn';
+import type { BoardColumnSlug } from './BoardColumn';
 import { ACTIVE_RUN_STAGES, ItemCard } from './ItemCard';
 import type { RunCardState } from './ItemCard';
 import { ItemDrawer } from './ItemDrawer';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
-import { RunDrawer } from './RunDrawer';
-import { RunStrip } from './RunStrip';
-import { StartingStrip } from './StartingStrip';
+import { RunChip } from './RunChip';
 import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
-import type { BacklogItem, OrchestratorRun, RunStage, RunWatchdog, Section } from '../../../../shared/types';
+import type { BacklogItem, RunStage, Section } from '../../../../shared/types';
 
 /* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
    the two surfaces are separate lazy chunks — see lib/view-keys.ts for why a
@@ -37,19 +39,21 @@ const ALL = 'all';
 type StatusFilter = 'open' | 'started' | 'done' | 'all';
 type SortKey = 'created' | 'name' | 'project';
 
-/** The endpoint's wrapper shape (Task 8) — the same local alias RunStrip.tsx
- *  declares for its own `run` prop, redeclared here rather than imported:
- *  neither file exports it, and a two-field intersection type is cheaper to
- *  restate per consumer than to thread a shared export through for. `watchdog?`
- *  (orchestrator-watchdog design §4.1) joined the intersection alongside
- *  RunStrip.tsx's own copy — this file never reads it directly, but `openRun`
- *  and every entry in `stripRuns` below are typed off this alias, and both
- *  get handed straight to `RunStrip`, which does. */
-type RunPayload = OrchestratorRun & {
-  fresh: boolean;
-  pastRuns: number;
-  pauseRequested: boolean;
-  watchdog?: RunWatchdog;
+/**
+ * The noun the band's count line uses for whatever the Status filter is
+ * currently admitting (DESIGN.md §8.3). One word per filter value rather than
+ * a fixed "open", because the number beside it is the filtered count: `4 open`
+ * printed under the Done filter would be counting done items and calling them
+ * open.
+ *
+ * `all` gets `items` rather than the filter's own label — "4 all" is not
+ * English, and the line's job is to say what was counted.
+ */
+const COUNT_WORDS: Record<StatusFilter, string> = {
+  open: 'open',
+  started: 'in progress',
+  done: 'done',
+  all: 'items'
 };
 
 /**
@@ -69,7 +73,7 @@ type RunPayload = OrchestratorRun & {
  * one of the four matches its section now that `oos` — the one abbreviation,
  * and only ever a class-name fragment — is gone with its column.
  */
-const COLUMNS: { section: Section; label: string; slug: string }[] = [
+const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
   { section: 'refactors', label: 'Refactoring', slug: 'refactors' },
   { section: 'ideas', label: 'Ideas', slug: 'ideas' },
   { section: 'bugs', label: 'Bugs', slug: 'bugs' },
@@ -165,8 +169,15 @@ function sortItems(items: BacklogItem[], sort: SortKey, stageFor: (item: Backlog
  * All narrowing happens here, client-side, over the fetched index — the whole
  * corpus is a few hundred rows of title-and-date, and a server-side filter
  * would cost a round trip per keystroke (guide-manager's rationale, kept).
+ *
+ * `onOpenRuns` is the rail's own section setter, threaded down for the run
+ * chip (DESIGN.md §8.3) — the one control on this page that navigates. A prop
+ * rather than a second copy of `App`'s state: the chip and the rail's Runs
+ * entry have to mean the same thing by construction, and the section lives in
+ * `AppShell`. Optional, because every suite that renders this view bare
+ * predates the chip and none of them needs a destination for it.
  */
-export default function BoardView() {
+export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   const { items: index, projects, loading, error } = useBoard();
   /* Task 5: only `staleDays` is read here, but the whole control comes back —
      `useSettings` falls back to the defaults outside a provider (see its own
@@ -185,11 +196,17 @@ export default function BoardView() {
   // while any run is fresh (useOrchestratorRuns.ts) and not at all otherwise.
   // `refresh` (Task 13): OrchestrateSheet's own Start button calls this
   // directly after both a successful start and a 409 "already running"
-  // conflict, so the strip has the fresh run ahead of the next scheduled
+  // conflict, so the run chip has the fresh run ahead of the next scheduled
   // poll rather than up to `POLL_MS` late — see OrchestrateSheet.tsx's own
   // comment on `start` for why the conflict path needs it just as much as
   // the success path does.
-  const { runs, starting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  //
+  // task-37: `noteResume`/`resuming` are no longer read here. They belonged to
+  // the Resume control on `RunStrip`, which left the Board with the strip —
+  // resume is the Runs section's now (§8.4.1's moved-rules table), and this
+  // view has no control that can start one. The hook still exports both for
+  // that surface; what it no longer has on this page is a second caller.
+  const { runs, starting, refresh: refreshRuns } = useOrchestratorRuns();
   /* Separate from `open`: the sheet can be opened from a card (drawer closed)
      or from inside the drawer (drawer stays open behind it), so one piece of
      state cannot serve both. */
@@ -218,23 +235,12 @@ export default function BoardView() {
      gate is a derivation. */
   const { verifying: orchestrateVerifying, ask: askOrchestrate } = useReverify(reverifyAgents);
   /*
-   * Task 12: which project's run drawer is open, keyed by `project` (the
-   * registry path) rather than holding the clicked run object itself. That
-   * distinction is load-bearing, not stylistic — a run keeps changing every
-   * poll while it is fresh (useOrchestratorRuns.ts), and RunDrawer's whole
-   * reason to exist is to say so the moment a heartbeat goes quiet (see its
-   * own file-level comment). Storing the clicked object would freeze the
-   * drawer at whatever the pipeline looked like at click time — exactly the
-   * "frozen pipeline that looks live" this feature exists to rule out. Keyed
-   * on `project` rather than `runId` for the same reason `runEntriesByProject`
-   * above already is: `runs` is one entry PER PROJECT (Task 8's own doc
-   * comment on OrchestratorRunsPayload), so a project path is a stable
-   * handle across every poll for as long as the SAME run is what that
-   * project is on — including after it goes stale, since a stale run stays
-   * in `runs` with `fresh: false` rather than dropping out (RunStrip.tsx
-   * relies on that same fact to know when to render nothing).
+   * Task 12's `openRunProject` — which project's run drawer is open — is gone
+   * with `RunDrawer` itself (task-37, DESIGN.md §8.3's "What leaves"). The
+   * drawer's whole content is the Runs page's detail sheet now, always beside
+   * the list rather than behind a click, so there is no per-project overlay
+   * state for this view to hold and no fourth dialog on the Escape stack.
    */
-  const [openRunProject, setOpenRunProject] = useState<string | null>(null);
 
   /* The query is plain useState — deliberately not remembered. A remembered
      query is a board that opens showing three cards out of forty for no
@@ -263,18 +269,17 @@ export default function BoardView() {
   const knownPaths = new Set(registered.map((p) => p.path));
   const projectValue = knownPaths.has(project) ? project : ALL;
 
-  /* Fresh runs only: a stale one has already gone silent as far as RunStrip
-     is concerned (see its own comment on why), and a card's live bar is the
-     same claim in miniature — "this item is being worked right now" — so it
-     has to go silent on exactly the same condition, not linger because this
+  /* Fresh runs only: a stale run has stopped reporting, and a card's live
+     strip is the claim "this item is being worked right now" — so it has to go
+     silent on exactly that condition, not linger because this
      map forgot to check. That single `fresh` filter is the ONLY thing
      unpinning a card when a run's heartbeat stops; there is deliberately no
-     second check downstream, and test/orchestrator-strip.test.tsx pins this
+     second check downstream, and test/board-live-cards.test.tsx pins this
      one in place so a future refactor sourcing the map from `runs` fails here
      rather than leaving a dead run pinning cards to the top of a column
      forever.
 
-     Declared this high up — well above the strip that renders from it — because
+     Declared this high up — well above the columns that render from it — because
      `matches` and `hasLive` just below now need the run's own view of an item:
      the Status filter's "In progress" and the board's ticking clock both have
      to count orchestrated work, and an orchestrated item's FILE says nothing
@@ -283,34 +288,24 @@ export default function BoardView() {
      orchestrator-watchdog (design §6.2): stays exactly this — freshness-based,
      feeding cards, badges and `runClaimBlock` alone — because a crashed run
      must not keep a card pinned to the top of its column or dead to dispatch
-     forever; only `RunStrip` itself needed a wider view, and `stripRuns`
-     just below is that second list, kept deliberately separate rather than
-     widening this one. */
+     forever. The surface that needed a wider view was `RunStrip`, through a
+     second list beside this one; `RunChip` is its replacement and takes the
+     whole `runs` array instead (see the note where that list used to be), so
+     this one is still narrow and still means exactly what it says. */
   const freshRuns = runs.filter((run) => run.fresh);
 
-  /* orchestrator-watchdog (design §6.1/§6.2) + task-17: the strip's own list,
-     wider than `freshRuns` above on purpose. `RunStrip` renders a live run
-     (`fresh: true`), a crashed one (`fresh: false, status: 'running'` —
-     `isCrashed`, lib/run-watchdog.ts) and a `paused` one, and returns null
-     for anything else (a run that is merely stale because it finished), so
-     mapping this board's strip row over all three is safe: it hands RunStrip
-     the shapes it knows how to render and nothing it doesn't. A second list
-     rather than widening `freshRuns` itself, per that constant's own comment
-     just above — cards, badges and dispatch claims must stay freshness-only,
-     and folding this in here would make a future reader of `freshRuns` have
-     to re-derive which half of it is safe to trust for THAT purpose.
+  /* `stripRuns` — the wider `running || paused` list the run strip rendered
+     from — went with the strip (task-37). `RunChip` takes the WHOLE `runs`
+     array instead, and that is a deliberate widening rather than an oversight:
+     the chip's rule (DESIGN.md §8.3) is that it is absent only when the
+     payload carries no run and no starting entry, so a finished run still
+     counts one, where the strip rendered null for it. What the chip does NOT
+     do is treat a stale run as live — `runChipReading` reads `isCrashed`, the
+     same single implementation everything else on this board reads.
 
-     bug-21 collapsed what were two lists into this one. The other was
-     `runningRuns` — `status === 'running'` exactly, no `paused` — and it
-     existed ONLY as the thing the old client-side `startingRuns` filter
-     subtracted against, because that subtraction was about the `init` lock,
-     which only a `running` run file holds. That rule now lives in
-     `StartingRunsService.expired()` (see `starting` below), so the second
-     list has no reader left. The distinction it drew is not lost: rule 3 is
-     keyed on `status === 'running'` for exactly the reason recorded here —
-     `init` archives a paused run like a done one, so a paused project can
-     legitimately start a new run and must keep its placeholder. */
-  const stripRuns = runs.filter((run) => run.status === 'running' || run.status === 'paused');
+     `freshRuns` above stays exactly as it was and keeps its narrow job: cards,
+     badges and dispatch claims are freshness-only, and nothing here widens
+     them. */
 
   /* task-14's placeholders are read straight off `starting` now. This used
      to be a filtered copy subtracting any project that already had a
@@ -432,6 +427,30 @@ export default function BoardView() {
      opinion about the window or the clock. */
   const staleFor = (item: BacklogItem): boolean => isStale(item, settings.staleDays, now, runs);
 
+  /* The band's 13 px count line — `21 open across 3 projects` (DESIGN.md
+     §8.3's own example reading).
+   *
+   * The noun is the Status filter's own word rather than a fixed "open",
+   * because the count it sits beside is `visible`, which the filter decides:
+   * a line reading `4 open` under the Done filter would be counting done
+   * items and calling them open. `?? 'items'` for the same reason
+   * `COMPARATORS` above has a fallback — `status` comes back out of
+   * localStorage as whatever some other build wrote there, and the type
+   * describes what this build WRITES, never what it can read.
+   *
+   * The project half is the projects the counted items actually belong to,
+   * not `registered.length`: an unreachable project (`missing`) contributes
+   * no items and the warning line above already names it, so counting it here
+   * would make the line disagree with the board under it. It is dropped
+   * entirely once the filter names one project, because the answer would be
+   * `across 1 project` on every board a reader narrowed themselves. */
+  const countWord = COUNT_WORDS[status] ?? 'items';
+  const countProjects = new Set(visible.map((i) => i.projectPath)).size;
+  const countLine =
+    projectValue === ALL
+      ? `${visible.length} ${countWord} across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
+      : `${visible.length} ${countWord}`;
+
   const missing = registered.filter((p) => p.missing);
   const warnings = [...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`), ...(index?.errors ?? [])];
 
@@ -451,13 +470,13 @@ export default function BoardView() {
    *     ladder hides the control outright, project-invisibility disables it
    *     with a reason.
    *  4. A fresh run already owns this project's whole story on the board
-   *     (the strip): a second Start would only race the 409 the server
+   *     (the run chip): a second Start would only race the 409 the server
    *     already enforces (agents.service.ts's own activeRun check) — same
    *     "nothing to add" reasoning as DispatchButton returning null for an
-   *     item with no next step. A STALE run does not count here — see
-   *     RunStrip's own comment on why a stale run renders nothing at all;
-   *     the control has to still be there to start a fresh one once the
-   *     last one has gone silent.
+   *     item with no next step. A STALE run does not count here: a run that
+   *     has stopped reporting is not a run in progress, and the control has
+   *     to still be there to start a fresh one once the last one has gone
+   *     silent.
    */
   const orchestrateGate = projectValue === ALL || agents === null ? null : projectDispatchGate(agents, projectValue);
   /* bug-21 widened condition 4 to cover the window BEFORE that fresh run
@@ -507,47 +526,27 @@ export default function BoardView() {
    */
   const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
 
-  // Looked up from the FULL `runs` list, not `freshRuns` above — the drawer
-  // has to keep showing a run that just went stale (that is the entire
-  // point of `openRunProject`'s own comment), and `freshRuns` has already
-  // dropped exactly that entry by the time it goes stale. Re-derived on
-  // every render rather than cached: this is what makes the drawer track
-  // each new poll instead of freezing at whatever `runs` looked like when
-  // it was opened.
-  const openRun: RunPayload | null = openRunProject === null ? null : (runs.find((r) => r.project === openRunProject) ?? null);
-
   /*
-   * Task 12 fix round 1: ItemDrawer and RunDrawer each render a
-   * role="dialog" `.drawer` aside with no focus trap of its own — mirrored,
-   * deliberately, from ItemDrawer's own choice not to add one (see
-   * RunDrawer.tsx's file comment) — so two mounted at once is not just a
-   * visual overlap but a real keyboard hazard: Tab from the frontmost
-   * drawer's backdrop walks a keyboard-only user straight into the
-   * interactive elements of whichever drawer is still mounted behind it,
-   * and a screen reader is left with two dialogs and no signal for which
-   * one is current. `open` and `openRunProject` stay two separate pieces of
-   * state rather than one tagged union (every other reader of `open` below
-   * — the ItemDrawer render, its onDispatch — wants a plain
-   * `BacklogItem | null`, and a union would push a `.kind` discriminant
-   * into each of those reads to buy a guarantee two setters already give
-   * just as reliably). These two functions are still the ONLY place either
-   * goes NON-null — both call sites below go through one of them, never
-   * `setOpen`/`setOpenRunProject` directly — but Task 13's fix round 1
-   * (below) added a third caller that clears them, so "opening either
-   * closes the other" is no longer the whole story; see that comment for
-   * the rest of it.
+   * Task 12 fix round 1 paired ItemDrawer with RunDrawer here: two
+   * role="dialog" `.drawer` asides, neither with a focus trap of its own, so
+   * two mounted at once was a real keyboard hazard rather than a visual
+   * overlap — Tab from the frontmost drawer's backdrop walked a keyboard-only
+   * user into the interactive elements of whichever drawer was still mounted
+   * behind it, and a screen reader was left with two dialogs and no signal for
+   * which one was current. The pair is gone with `RunDrawer` (task-37), so
+   * what survives here is the one opener and the three-way exclusion the
+   * sheets still need.
+   *
+   * This function is still the ONLY place `open` goes non-null — every call
+   * site below goes through it, never `setOpen` directly — but Task 13's fix
+   * round 1 (below) added a caller that clears it, so "opening either closes
+   * the other" is no longer the whole story; see that comment for the rest.
    */
   const openItemDrawer = (item: BacklogItem): void => {
-    setOpenRunProject(null);
     // Task 13 fix round 1 — see openOrchestrateSheet's own comment for why
     // this line was added here (it was not, at first).
     setOrchestrating(null);
     setOpen(item);
-  };
-  const openRunDrawer = (project: string): void => {
-    setOpen(null);
-    setOrchestrating(null);
-    setOpenRunProject(project);
   };
 
   /*
@@ -562,8 +561,8 @@ export default function BoardView() {
    * never set directly outside these two functions.
    *
    * Fix round 1 (Important): the first pass stopped there and left
-   * `orchestrating` free to coexist with an open `open`/`openRunProject`
-   * drawer, reasoning by analogy that OrchestrateSheet was "the same kind of
+   * `orchestrating` free to coexist with an open item drawer, reasoning by
+   * analogy that OrchestrateSheet was "the same kind of
    * overlay as LaunchSheet" and LaunchSheet already coexists with ItemDrawer
    * on purpose (test/dispatch-button.test.tsx's "opens the sheet from inside
    * the drawer, leaving the drawer open behind it"). Review found the
@@ -571,19 +570,16 @@ export default function BoardView() {
    * only through a per-item dispatch control that lives INSIDE the drawer it
    * coexists with (or on the card the drawer was opened from), which is a
    * narrow, deliberately-tested path. OrchestrateSheet's own trigger is the
-   * toolbar button, which is on screen and clickable at the exact same time
-   * as every card and every run strip — "drawer open, then Orchestrate" is
-   * not an edge case here, it is the ordinary path a keyboard user (Tab past
-   * either drawer's own untrapped focus) or even a mouse user (the drawer's
-   * backdrop covers the columns, but not the toolbar above it) reaches
-   * without trying to. So `orchestrating` now clears BOTH `open` and
-   * `openRunProject` too (see `openItemDrawer`/`openRunDrawer` above), and
-   * both drawer openers clear `orchestrating` right back — a true three-way
-   * exclusion, not a two-way one with a gap. `dispatching` (LaunchSheet)
-   * deliberately still does NOT participate in that three-way exclusion:
-   * the coexistence it has with the two drawers remains the proven,
-   * deliberate, tested behaviour described above, and nothing in this fix
-   * touches it.
+   * band's chip, which is on screen and clickable at the exact same time
+   * as every card — "drawer open, then Orchestrate" is not an edge case here,
+   * it is the ordinary path a keyboard user (Tab past the drawer's own
+   * untrapped focus) or even a mouse user (the drawer's backdrop covers the
+   * columns, but not the band above it) reaches without trying to. So
+   * `orchestrating` clears `open` too (see `openItemDrawer` above), and the
+   * drawer's opener clears `orchestrating` right back. `dispatching`
+   * (LaunchSheet) deliberately still does NOT participate in that exclusion:
+   * the coexistence it has with the item drawer remains the proven,
+   * deliberate, tested behaviour described above, and nothing here touches it.
    */
   const openLaunchSheet = (item: BacklogItem): void => {
     setOrchestrating(null);
@@ -592,24 +588,38 @@ export default function BoardView() {
   const openOrchestrateSheet = (proj: string): void => {
     setDispatching(null);
     setOpen(null);
-    setOpenRunProject(null);
     setOrchestrating(proj);
   };
 
   return (
     <div className="board">
-      <div className="board-bar">
-        <div className="board-title">Board</div>
-        <div className="board-tools">
-          <input
-            type="search"
-            className="board-search"
-            aria-label="Search items"
-            placeholder="search titles"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <select className="board-select" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
+      {/* The page header is a band, not a card (DESIGN.md §8.2/§8.3): the
+          19/500 title over the 13 px count line, then right-aligned the run
+          chip, the 36 px search field, the three filter chips and — last, and
+          the page's ONE ink chip — Orchestrate. */}
+      <Band title="Board" sub={countLine}>
+        {/* Left of the controls (spec §3.2). Everything the Board still says
+            about runs, in one control that opens Runs; absent entirely when
+            the payload carries no run and no starting entry. */}
+        <RunChip runs={runs} starting={starting} onOpen={() => onOpenRuns?.()} />
+        <input
+          type="search"
+          className="board-band-search"
+          aria-label="Search items"
+          placeholder="search titles"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {/* Each filter is a `Chip` wrapping its own native select — `as:
+            'label'`, the mode the primitive already has for a chip that wraps
+            its own control. The chip owns the shell (32 px, 12 px radius, the
+            `--hairline2` stroke) and the select owns the value text and the
+            picker, which is what keeps a project list of any length working
+            without this file growing a menu of its own. The `aria-label` stays
+            on the select, as it always was: it is the control, the label is
+            only its shell. */}
+        <Chip as="label">
+          <select className="board-filter" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
             <option value={ALL}>All projects</option>
             {/* Valued by path, labelled by name — two checkouts of one repo
                 stay two selectable options. */}
@@ -619,185 +629,119 @@ export default function BoardView() {
               </option>
             ))}
           </select>
-          <select className="board-select" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
+          {/* The UA's own arrow went with `appearance: none` (the select had to
+              lose its box, and the arrow is part of it). This is the design's
+              own, at the board's size and ink; aria-hidden, because the select
+              already announces itself as a combobox. */}
+          <span className="board-filter-mark" aria-hidden="true">
+            ▾
+          </span>
+        </Chip>
+        <Chip as="label">
+          <select className="board-filter" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
             <option value="open">Open</option>
             <option value="started">In progress</option>
             <option value="done">Done</option>
             <option value="all">All</option>
           </select>
-          <select className="board-select" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+          {/* The UA's own arrow went with `appearance: none` (the select had to
+              lose its box, and the arrow is part of it). This is the design's
+              own, at the board's size and ink; aria-hidden, because the select
+              already announces itself as a combobox. */}
+          <span className="board-filter-mark" aria-hidden="true">
+            ▾
+          </span>
+        </Chip>
+        <Chip as="label">
+          <select className="board-filter" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
             <option value="created">Newest first</option>
             <option value="name">By name</option>
             <option value="project">By project</option>
           </select>
-          {/* Task 13: the "drain this project's groomed queue" control.
-              `showOrchestrate`/`orchestrateBlockedReason` (computed above)
-              already encode all four visibility rules from the brief, so
-              this markup only has to react to them — the same hide-vs-disable
-              shape DispatchButton renders, restated by hand rather than
-              reused because DispatchButton's signature is fixed around one
-              `BacklogItem`, which a project-level control does not have. */}
-          {showOrchestrate && (
-            <>
-              <button
-                type="button"
-                className="board-orchestrate"
-                title={orchestrateBlockedReason ?? `drain ${orchestrateProjectName}'s groomed queue in a Claude session`}
-                aria-disabled={orchestrateBlockedReason !== null}
-                aria-describedby={orchestrateBlockedReason === null ? undefined : orchestrateReasonId}
-                // The one signal that a swallowed-looking click was actually
-                // answered (bug-16), for the reason DispatchButton carries the
-                // same attribute: the re-ask below is one request long, and
-                // styles.css keys a `progress` cursor and a lighter label off
-                // this, so the feedback is not screen-reader-only either.
-                aria-busy={orchestrateVerifying}
-                onClick={() => {
-                  // The other half of aria-disabled: the browser fires a
-                  // click on it regardless, so this is what decides what a
-                  // blocked button does — and since bug-16 that is "ask the
-                  // question once", not "nothing".
-                  //
-                  // Only ONE block can be speaking here, which is why there is
-                  // no equivalent of DispatchButton's three-condition
-                  // `reverifiable`: `showOrchestrate` above hides the control
-                  // outright for the environment ladder, for an unfiltered
-                  // board, and for a project with a fresh run, so a rendered
-                  // disabled button is necessarily blocked on project
-                  // visibility alone — the one block that can be silently
-                  // stale, because `useAgents` refetches on mount and window
-                  // focus only and a window that never loses focus is never
-                  // asked again. (The fresh-run rule is fed by
-                  // `useOrchestratorRuns`, which polls every 5s while any run
-                  // is fresh, so it is never stale in this way and a status
-                  // refetch could not see runs at all.) Nothing else recovers
-                  // it here: unlike LaunchSheet, OrchestrateSheet re-derives
-                  // no gate on open — its only server re-check is at Start,
-                  // as an uncoded 409 — so the sheet that would correct a
-                  // stale answer sits behind the control the stale answer
-                  // made inert.
-                  if (orchestrateBlockedReason !== null) {
-                    // Captured, not re-read at resolve time: the filter is a
-                    // live <select>, and the sheet must open for the project
-                    // the reader actually clicked for. Deliberately no "the
-                    // filter moved, discard the answer" guard — `orchestrating`
-                    // is keyed on the project path precisely so a sheet
-                    // outlives a filter change (see its declaration), and the
-                    // window here is one request wide.
-                    const path = projectValue;
-                    askOrchestrate((fresh) => {
-                      // Re-derived from the FRESH answer through the same
-                      // gate, so a status that came back with dispatch off or
-                      // the dashboard gone opens nothing either.
-                      if (projectDispatchGate(fresh, path).control === 'enabled') openOrchestrateSheet(path);
-                    });
-                    return;
-                  }
-                  openOrchestrateSheet(projectValue);
-                }}
-              >
-                Orchestrate
-              </button>
-              {orchestrateBlockedReason !== null && (
-                <span id={orchestrateReasonId} className="sr-only">
-                  {orchestrateBlockedReason}
-                </span>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* One row per LIVE run (fresh, crashed or paused — `stripRuns`, above),
-          ahead of the warnings: a run actually in flight or freshly gone
-          quiet is live, actionable information, where the warnings below
-          are a standing fact about the registry that will still be true the
-          next time this board loads.
-
-          orchestrator-watchdog (design §6.1/§6.2) widened this from
-          `freshRuns` to the wider list: `RunStrip` no longer merely "filters
-          its own staleness" (a fresh-or-null split) — it now renders a
-          THIRD shape, the crashed strip, for exactly the runs `freshRuns`
-          itself was built to exclude everywhere else on this page. Mapping
-          `stripRuns` here is still safe by the same "reuse rather than
-          protect" reasoning the old comment gave: `RunStrip` returns null
-          for anything that is neither fresh nor crashed, so this never
-          mounts a strip only to have it immediately render null — the set
-          of things worth trying just grew from one shape to two. */}
-      {(stripRuns.length > 0 || starting.length > 0) && (
-        <div className="run-strips">
-          {/* task-14's placeholders first, above the live strips: a run
-              nobody can see yet is the one thing on this stack a person is
-              actively waiting on, and it stops being a placeholder the
-              moment its run file lands.
-
-              Rule 3 (StartingRunsService.expired()) is what keeps these two
-              maps from both drawing a row for a project with a `running` run
-              file, fresh or crashed — which is the collision the deleted
-              client-side filter existed for. It is deliberately NOT a
-              guarantee for every pair: `stripRuns` above is `running ||
-              paused`, and rule 3 is keyed on `running` alone, so a project
-              with a stale `paused` run and a live starting entry renders
-              both. That pair is reachable (the pre-spawn `activeRun` lock
-              refuses only a FRESH run, and `cmdInit` archives a paused file,
-              so orchestrating a stale-paused project is allowed and marks
-              it) and it is also correct: the paused run and the starting one
-              are two different runs, and the second is genuinely starting.
-              The old filter permitted the identical pair, subtracting
-              `running` only. */}
-          {starting.map((s) => (
-            <StartingStrip key={`starting:${s.project}`} starting={s} />
-          ))}
-          {stripRuns.map((run) => {
-            // Per-run, not hoisted: `projectDispatchGate` is already the
-            // one shared implementation (see `orchestrateGate`'s own use of
-            // it above for the toolbar's identical project-level control),
-            // and a crashed run's Resume button is exactly that same
-            // question — can THIS project's dashboard even be reached —
-            // asked per strip instead of per toolbar filter.
-            const { canResume, blockedReason: resumeBlockedReason } = resumeGate(agents, run.project);
-            return (
-              <RunStrip
-                key={run.runId}
-                run={run}
-                // `r.project`, not the run object itself — see
-                // `openRunProject`'s own comment for why the drawer has to be
-                // keyed on identity rather than holding a frozen snapshot. Goes
-                // through `openRunDrawer`, not `setOpenRunProject` directly —
-                // see that function's own comment for why.
-                onOpen={(r) => openRunDrawer(r.project)}
-                canResume={canResume}
-                resumeBlockedReason={resumeBlockedReason}
-                // task-17: a resume this board already asked for is on its
-                // way, so the paused strip shows a placeholder instead of a
-                // second button. Keyed on the project rather than the runId
-                // because the mark outlives the run entry the click was made
-                // against (a resumed run gets a new `unpausedAt`, not a new
-                // file — but the entry is re-fetched, and identity by path is
-                // what every other run→project match in this file uses).
-                resuming={resuming.has(run.project)}
-                // A successful (or 409-recovered) Resume click changes the
-                // run's own state on the server, not anything this board
-                // already holds — `refreshRuns` is the same re-fetch
-                // OrchestrateSheet's own Start button already calls after a
-                // launch, for the identical reason: get the strip off its
-                // last-known state one poll early rather than waiting up to
-                // POLL_MS for the next scheduled tick to notice.
-                onResumed={() => {
-                  // Both, in this order: the mark is what keeps the poll
-                  // alive for a run that is neither fresh nor running (a
-                  // paused one polls nothing by the ordinary rule), and the
-                  // refresh is the one immediate re-read that stops the click
-                  // looking swallowed. `noteResume` already refreshes, but
-                  // calling it explicitly keeps this handler correct for the
-                  // crashed strip too, where no mark is needed at all.
-                  noteResume(run.project);
-                  refreshRuns();
-                }}
-              />
-            );
-          })}
-        </div>
-      )}
+          {/* The UA's own arrow went with `appearance: none` (the select had to
+              lose its box, and the arrow is part of it). This is the design's
+              own, at the board's size and ink; aria-hidden, because the select
+              already announces itself as a combobox. */}
+          <span className="board-filter-mark" aria-hidden="true">
+            ▾
+          </span>
+        </Chip>
+        {/* Task 13: the "drain this project's groomed queue" control.
+            `showOrchestrate`/`orchestrateBlockedReason` (computed above)
+            already encode all four visibility rules from the brief, so
+            this markup only has to react to them — the same hide-vs-disable
+            shape DispatchButton renders, restated by hand rather than
+            reused because DispatchButton's signature is fixed around one
+            `BacklogItem`, which a project-level control does not have.
+            task-37 redrew it as the page's one ink chip (DESIGN.md §8.3) and
+            touched none of those rules. */}
+        {showOrchestrate && (
+          <>
+            <Chip
+              variant="ink"
+              title={orchestrateBlockedReason ?? `drain ${orchestrateProjectName}'s groomed queue in a Claude session`}
+              aria-disabled={orchestrateBlockedReason !== null}
+              aria-describedby={orchestrateBlockedReason === null ? undefined : orchestrateReasonId}
+              // The one signal that a swallowed-looking click was actually
+              // answered (bug-16), for the reason DispatchButton carries the
+              // same attribute: the re-ask below is one request long, and
+              // styles.css keys a `progress` cursor and a lighter label off
+              // this, so the feedback is not screen-reader-only either.
+              aria-busy={orchestrateVerifying}
+              onClick={() => {
+                // The other half of aria-disabled: the browser fires a
+                // click on it regardless, so this is what decides what a
+                // blocked button does — and since bug-16 that is "ask the
+                // question once", not "nothing".
+                //
+                // Only ONE block can be speaking here, which is why there is
+                // no equivalent of DispatchButton's three-condition
+                // `reverifiable`: `showOrchestrate` above hides the control
+                // outright for the environment ladder, for an unfiltered
+                // board, and for a project with a fresh run, so a rendered
+                // disabled button is necessarily blocked on project
+                // visibility alone — the one block that can be silently
+                // stale, because `useAgents` refetches on mount and window
+                // focus only and a window that never loses focus is never
+                // asked again. (The fresh-run rule is fed by
+                // `useOrchestratorRuns`, which polls every 5s while any run
+                // is fresh, so it is never stale in this way and a status
+                // refetch could not see runs at all.) Nothing else recovers
+                // it here: unlike LaunchSheet, OrchestrateSheet re-derives
+                // no gate on open — its only server re-check is at Start,
+                // as an uncoded 409 — so the sheet that would correct a
+                // stale answer sits behind the control the stale answer
+                // made inert.
+                if (orchestrateBlockedReason !== null) {
+                  // Captured, not re-read at resolve time: the filter is a
+                  // live <select>, and the sheet must open for the project
+                  // the reader actually clicked for. Deliberately no "the
+                  // filter moved, discard the answer" guard — `orchestrating`
+                  // is keyed on the project path precisely so a sheet
+                  // outlives a filter change (see its declaration), and the
+                  // window here is one request wide.
+                  const path = projectValue;
+                  askOrchestrate((fresh) => {
+                    // Re-derived from the FRESH answer through the same
+                    // gate, so a status that came back with dispatch off or
+                    // the dashboard gone opens nothing either.
+                    if (projectDispatchGate(fresh, path).control === 'enabled') openOrchestrateSheet(path);
+                  });
+                  return;
+                }
+                openOrchestrateSheet(projectValue);
+              }}
+            >
+              Orchestrate
+            </Chip>
+            {orchestrateBlockedReason !== null && (
+              <span id={orchestrateReasonId} className="sr-only">
+                {orchestrateBlockedReason}
+              </span>
+            )}
+          </>
+        )}
+      </Band>
 
       {warnings.length > 0 && (
         <div className="board-warn" data-testid="board-warn">
@@ -827,41 +771,30 @@ export default function BoardView() {
               runStageFor
             );
             return (
-              <div className={`board-col board-col-${col.slug}`} key={col.section} data-testid="board-col">
-                <div className="board-col-h">
-                  <span className="board-col-tick" />
-                  <span className="board-col-name" data-testid="col-name">
-                    {col.label}
-                  </span>
-                  <span className="board-col-count" data-testid="col-count">
-                    {colItems.length}
-                  </span>
-                </div>
-                <div className="board-col-cards">
-                  {colItems.map((item) => (
-                    <ItemCard
-                      key={item.path}
-                      item={item}
-                      hues={hues}
-                      // Goes through `openItemDrawer`, not `setOpen`
-                      // directly — see that function's own comment for why.
-                      onOpen={() => openItemDrawer(item)}
-                      agents={agents}
-                      // Goes through `openLaunchSheet`, not `setDispatching`
-                      // directly — see that function's own comment for why.
-                      onDispatch={() => openLaunchSheet(item)}
-                      now={now}
-                      stale={staleFor(item)}
-                      /* The whole queue entry, not just its stage: the
-                         card's bar reads an elapsed off `stageAt`. See
-                         `runEntriesByProject` for why one prop and not two. */
-                      run={runEntryFor(item)}
-                      runBlock={runBlockFor(item)}
-                      reverify={reverifyAgents}
-                    />
-                  ))}
-                </div>
-              </div>
+              <BoardColumn key={col.section} slug={col.slug} label={col.label} count={colItems.length}>
+                {colItems.map((item) => (
+                  <ItemCard
+                    key={item.path}
+                    item={item}
+                    hues={hues}
+                    // Goes through `openItemDrawer`, not `setOpen`
+                    // directly — see that function's own comment for why.
+                    onOpen={() => openItemDrawer(item)}
+                    agents={agents}
+                    // Goes through `openLaunchSheet`, not `setDispatching`
+                    // directly — see that function's own comment for why.
+                    onDispatch={() => openLaunchSheet(item)}
+                    now={now}
+                    stale={staleFor(item)}
+                    /* The whole queue entry, not just its stage: the
+                       card's live strip reads an elapsed off `stageAt`. See
+                       `runEntriesByProject` for why one prop and not two. */
+                    run={runEntryFor(item)}
+                    runBlock={runBlockFor(item)}
+                    reverify={reverifyAgents}
+                  />
+                ))}
+              </BoardColumn>
             );
           })}
         </div>
@@ -878,22 +811,6 @@ export default function BoardView() {
           onDispatch={() => openLaunchSheet(open)}
           runBlock={runBlockFor(open)}
           reverify={reverifyAgents}
-        />
-      )}
-      {openRun !== null && (
-        <RunDrawer
-          run={openRun}
-          onClose={() => setOpenRunProject(null)}
-          gate={resumeGate(agents, openRun.project)}
-          resuming={resuming.has(openRun.project)}
-          onChanged={(kind) => {
-            // A resume needs the poll kept alive (see the strip's own
-            // `onResumed`); a pause or a cancel only needs the payload
-            // re-read, since `pauseRequested` flips on the live entry and
-            // nothing else about the run changes.
-            if (kind === 'resume') noteResume(openRun.project);
-            refreshRuns();
-          }}
         />
       )}
       {dispatching !== null && (

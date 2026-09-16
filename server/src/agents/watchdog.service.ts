@@ -372,11 +372,11 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     //    `--resume` into one `run.json`.
     //
     //    And the branch itself is `watchdogStoodDown`, the predicate
-    //    `RunStrip` renders that control on. Written this way — one call,
+    //    the client renders that control on. Written this way — one call,
     //    not two `if`s that happen to cover the same pair — because "the
     //    board offers a hand resume exactly when this sweeper will not spawn
     //    one" is the whole safety argument, and it survives only as long as
-    //    both sides read the same sentence. `test/watchdog-coupling.test.tsx`
+    //    both sides read the same sentence. `test/watchdog-coupling.test.ts`
     //    and this suite's own table case drive the two halves from one table
     //    of states so a change to either goes red.
     const enabled = this.state.spawningEnabled(config);

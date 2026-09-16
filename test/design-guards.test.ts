@@ -186,13 +186,23 @@ describe('guard 5 — the daylight palette and the two fill tokens', () => {
     expect(actual).toEqual(DAYLIGHT);
   });
 
-  it('every theme block declares both fill tokens', () => {
+  /**
+   * Both fill tokens, and the ink that goes on them. `--on-fill` joined them in
+   * task-37 for the reason `shared/theme.css`'s own comment records: the card's
+   * live strip sets 11 px type on `--fill-live`, `--ink` is near-white in four
+   * of the five palettes, and 1.4:1 on the DEFAULT theme is not a contrast. A
+   * token declared in four blocks out of five is the failure this guards —
+   * every miss resolves to nothing and paints the inherited colour, which on a
+   * dark theme is exactly the unreadable pairing it was added to fix.
+   */
+  it('every theme block declares both fill tokens and the ink for them', () => {
     for (const block of themeBlocks) {
       expect({
         selector: block.selector,
         live: /--fill-live: *[^;]+/.test(block.body),
-        progress: /--fill-progress: *[^;]+/.test(block.body)
-      }).toEqual({ selector: block.selector, live: true, progress: true });
+        progress: /--fill-progress: *[^;]+/.test(block.body),
+        onFill: /--on-fill: *[^;]+/.test(block.body)
+      }).toEqual({ selector: block.selector, live: true, progress: true, onFill: true });
     }
   });
 });

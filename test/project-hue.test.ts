@@ -63,6 +63,30 @@ describe('buildProjectHues', () => {
     expect(hues.classFor('ixray')).toBe(pillClass(projectHueIndex('ixray')));
   });
 
+  /**
+   * `hueFor` and `classFor` are one assignment in two shapes, and this is the
+   * case that keeps them one: the card's project dot composes `Dot`, which
+   * takes the hue as a NUMBER, while the item modal's pill still takes the
+   * class — so the two are read by different surfaces and would be free to
+   * drift if `classFor` stopped being written in terms of `hueFor`.
+   *
+   * Asserted through `pillClass` rather than against a literal `pill-proj-N`,
+   * because `pillClass` is the one place the class FORMAT lives and reading it
+   * back out of a string at any call site is the duplication `hueFor` exists
+   * to avoid.
+   */
+  it('answers the same assignment as a number and as a class', () => {
+    const hues = buildProjectHues(registry('backlog-manager', 'ixray', 'guide-manager'));
+    for (const name of ['backlog-manager', 'ixray', 'guide-manager']) {
+      expect(hues.classFor(name)).toBe(pillClass(hues.hueFor(name)));
+    }
+    // And the fallback path — a project the registry has not answered for yet,
+    // which is the window between /api/items and /api/projects — resolves the
+    // same way through both.
+    expect(hues.classFor('never-registered')).toBe(pillClass(hues.hueFor('never-registered')));
+    expect(hues.hueFor('never-registered')).toBe(projectHueIndex('never-registered'));
+  });
+
   it('probes past a collision instead of doubling up', () => {
     // The case that forced the design: on the first real registry this ran
     // against, these two names hash to the same preference. Asserting the

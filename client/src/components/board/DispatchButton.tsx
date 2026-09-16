@@ -4,6 +4,25 @@ import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agen
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { useReverify } from '../../hooks/useReverify';
 import { progressBlock } from '../../lib/item-progress';
+import { Chip } from '../ui/Chip';
+
+/**
+ * Whether this item gets a dispatch control at all — the two "no control, not
+ * a disabled one" rules below, in one predicate.
+ *
+ * Exported because `ItemCard` has to ask the same question before it draws the
+ * marker row: DESIGN.md §8.3 puts the dispatch chip at the row's right end and
+ * says the row "renders whenever dispatch is available, markers or not", so a
+ * card with no markers and no dispatch must draw no row while a card with no
+ * markers and a dispatch must. The card asking `deriveAction`/`dispatchGate`
+ * itself would be a second copy of this component's own first two lines, free
+ * to fall out of step with them; this is the one implementation, read by the
+ * component that renders the control and the one that reserves the space.
+ */
+export function dispatchAvailable(item: BacklogItem, status: AgentsStatus | null): boolean {
+  if (deriveAction(item) === null || status === null) return false;
+  return dispatchGate(item, status).control !== 'hidden';
+}
 
 /**
  * DispatchButton — the click that hands this item to a Claude session.
@@ -44,29 +63,27 @@ import { progressBlock } from '../../lib/item-progress';
  * The derivation is `shared/agent.ts`, the same module the server validates
  * with, so the label can never promise an action the API would refuse.
  *
- * Two shapes, one component: `tab` is the card's tear-off right edge and
- * `chip` is the drawer head's inline control. A shape prop rather than two
- * components because everything above this line — the gate, the derivation,
- * the aria-describedby reason, the two event-stopping handlers below — is the
- * hard part and is identical in both places; only the markup inside the button
- * differs. The tone class, though, is the action itself, so both shapes are
- * coloured by the same rules in styles.css.
+ * ONE shape, where there used to be two (task-37). The card's tear-off `tab`
+ * is gone with the card that had an edge to tear off: DESIGN.md §8.3 puts this
+ * control at the right end of the card's marker row as a 28 px `Chip`, the
+ * same chip the item modal's facts column draws, so the `variant` prop and the
+ * `.dispatch-tab` family it selected have no second case left to distinguish.
+ * The shell is now the primitive's; what stays this component's own is the
+ * action tone on the word (DESIGN.md §8.2 keeps all three: groom `--mustard`,
+ * execute `--cyan`, capture `--magenta`) — carried by the label's own class
+ * rather than by a rule reaching into `.ui-chip`, which is the restatement
+ * `test/design-guards.test.ts`'s guard 7 exists to refuse.
  */
 export function DispatchButton({
   item,
   status,
   onDispatch,
-  variant = 'chip',
   runBlock = null,
   reverify
 }: {
   item: BacklogItem;
   status: AgentsStatus | null;
   onDispatch: () => void;
-  /** Which shape to render — see the two blocks in styles.css. `tab` is the
-   *  card's tear-off edge and needs the card to be a flex row around it;
-   *  `chip` stands on its own anywhere, which is why it is the default. */
-  variant?: 'tab' | 'chip';
   /**
    * Why an orchestrator run forbids dispatching this item right now, or null.
    *
@@ -124,10 +141,15 @@ export function DispatchButton({
      callers. */
   const { verifying, ask } = useReverify(reverify);
   const action = deriveAction(item);
-  if (action === null || status === null) return null;
+  /* The same two rules `dispatchAvailable` states, read through it rather than
+     restated: this component and `ItemCard`'s marker row have to agree about
+     when a control exists, and they agree by construction only while there is
+     one predicate. The narrowing below is what the early return buys — TS
+     cannot see through the helper, so `action`/`status` are re-checked here
+     and the helper is what nobody else has to copy. */
+  if (!dispatchAvailable(item, status) || action === null || status === null) return null;
 
   const gate = dispatchGate(item, status);
-  if (gate.control === 'hidden') return null;
 
   /*
    * Order is the invariant, not a preference: ENVIRONMENT-level → per-item
@@ -175,116 +197,121 @@ export function DispatchButton({
    */
   const reverifiable = gateBlock !== null && itemBlock === null && reverify !== undefined;
 
-  // The action IS the tone class: `groom` and `execute` are the two
-  // AgentAction values, so the palette can never drift from the derivation.
   return (
     <>
-      <button
-        className={`dispatch-${variant} ${action}`}
-        // The reason, not a generic tooltip: "the dashboard does not list
-        // <path>" is a fixable thing, and nowhere else says it. Deliberately
-        // NOT swapped out while `verifying` — the reason has to still be
-        // readable when the re-ask comes back with the same answer.
-        title={blocked ?? `dispatch ${action} to a Claude session`}
-        // aria-disabled, NOT the `disabled` attribute, and the guard in
-        // onClick is what actually makes it inert. A `disabled` button is
-        // removed from the tab order and from the accessibility tree's
-        // interactive surface, so a keyboard user cannot reach it — and all
-        // three disabled states there are name something specific and
-        // actionable (which project the dashboard cannot see; which session
-        // holds this item and since when; which run stage owns it). `title`
-        // on an unreachable element is announced unreliably at
-        // best; the aria-describedby span below is what makes it dependable,
-        // and it is only readable if the control can be focused at all.
-        aria-disabled={blocked !== null}
-        aria-describedby={blocked === null ? undefined : reasonId}
-        // The one signal that a swallowed-looking click was actually answered
-        // (bug-13). An attribute rather than a spinner or a second label: the
-        // re-ask is one request long, and styles.css keys a `progress` cursor
-        // and a lighter label off this same attribute, so the feedback is not
-        // screen-reader-only either.
-        aria-busy={verifying}
-        onClick={(e) => {
-          // The whole card is a role="button" that opens the drawer. Without
-          // this, one click opens both.
-          e.stopPropagation();
-          // The other half of aria-disabled: the browser will not stop a
-          // click on a control that is only *labelled* disabled, so this does
-          // — except for the one block a click is allowed to re-ask (bug-13;
-          // see `reverifiable` above for the three conditions).
-          if (blocked !== null) {
-            if (!reverifiable) return;
-            // `ask` no-ops while an ask is already in flight, and `reverify`
-            // never rejects (useAgents.ts explains why it resolves to a
-            // flatly-off status instead), so there is no failure branch here:
-            // an off status simply is not `enabled` and opens nothing.
-            ask((fresh) => {
-              // Re-derived from the FRESH answer, not from the render this
-              // click came from — and through the same gate, so a status that
-              // came back with dispatch off or the dashboard gone opens
-              // nothing either. The two blocks `reverifiable` already ruled
-              // out cannot have changed in the meantime: one is on the item
-              // file this board is rendering, the other is a prop.
-              if (dispatchGate(item, fresh).control === 'enabled') onDispatch();
-            });
-            return;
-          }
-          onDispatch();
-        }}
+      {/*
+        The wrapper exists for the two stopped events alone, and both were on
+        the button itself until `Chip` took the shell over — the primitive's
+        `onClick` is a bare `() => void`, deliberately (a chip that handed out
+        its own event object would let a caller preventDefault its way into a
+        second behaviour), so the stopping has to happen one level out. It
+        still happens before the card's own handlers, because these fire on the
+        way up and the card is further up.
+
+        `stopPropagation` on click: the whole card is a role="button" that
+        opens the drawer, and without this one click opens both.
+
+        On keydown, bounded to the two keys the card's own handler acts on and
+        no further. Same reasoning, keyboard path: the card's onKeyDown bubbles
+        from ANY descendant and unconditionally calls preventDefault()+onOpen().
+        Left unstopped, Enter on this button would have that handler fire first
+        (preventDefault there cancels the button's own Enter-activates-click
+        behaviour, so the drawer opens and the sheet does not), and Space would
+        open the drawer on keydown while the button's own keyup click still
+        fires — both open, the exact double-open the click half prevents, back
+        again through the keyboard.
+
+        Stopping EVERY key instead was a real bug, not a harmless over-reach:
+        React 18 delegates keydown at the root, and a synthetic stopPropagation
+        also stops the native event, so nothing at `window` ever saw it. With
+        focus still on this button after the sheet opened — which is where
+        focus is, since nothing in the sheet takes it — Escape never reached
+        the sheet's own window listener and the sheet would not close. Same for
+        the drawer's Escape while its head button held focus.
+      */}
+      <span
+        className="dispatch-chip"
+        onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          // Bounded to the two keys the card's own handler actually acts on,
-          // and no further. Same reasoning as onClick's stopPropagation, for
-          // the keyboard path specifically: the card's onKeyDown bubbles up
-          // from ANY descendant and unconditionally calls
-          // preventDefault()+onOpen(). Left unstopped, Enter on this button
-          // would have that handler fire first (preventDefault there cancels
-          // this button's own Enter-activates-click behaviour, so the drawer
-          // opens and the sheet does not), and Space would open the drawer on
-          // keydown while the button's own keyup click still fires — both
-          // open, the exact double-open onClick's stopPropagation exists to
-          // prevent, back again through the keyboard.
-          //
-          // Stopping EVERY key instead was a real bug, not a harmless
-          // over-reach: React 18 delegates keydown at the root, and a
-          // synthetic stopPropagation also stops the native event, so nothing
-          // at `window` ever saw it. With focus still on this button after the
-          // sheet opened — which is where focus is, since nothing in the sheet
-          // takes it — Escape never reached the sheet's own window listener
-          // and the sheet would not close. Same for the drawer's Escape while
-          // its head button held focus.
           if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
         }}
       >
-        {variant === 'tab' ? (
-          <span className="dispatch-tab-in">
-            <span className="dispatch-word">{actionLabel(item, action)}</span>
-            {/* aria-hidden: the accessible name is the action word alone. */}
-            <span className="dispatch-mark" aria-hidden="true">
-              ▸
-            </span>
+        <Chip
+          size={28}
+          // The reason, not a generic tooltip: "the dashboard does not list
+          // <path>" is a fixable thing, and nowhere else says it. Deliberately
+          // NOT swapped out while `verifying` — the reason has to still be
+          // readable when the re-ask comes back with the same answer.
+          title={blocked ?? `dispatch ${action} to a Claude session`}
+          // aria-disabled, NOT `Chip`'s own `disabled` prop, and the guard in
+          // onClick is what actually makes it inert. A `disabled` button is
+          // removed from the tab order and from the accessibility tree's
+          // interactive surface, so a keyboard user cannot reach it — and all
+          // three disabled states here name something specific and actionable
+          // (which project the dashboard cannot see; which session holds this
+          // item and since when; which run stage owns it). `title` on an
+          // unreachable element is announced unreliably at best; the
+          // aria-describedby span below is what makes it dependable, and it is
+          // only readable if the control can be focused at all.
+          aria-disabled={blocked !== null}
+          aria-describedby={blocked === null ? undefined : reasonId}
+          // The one signal that a swallowed-looking click was actually answered
+          // (bug-13). An attribute rather than a spinner or a second label: the
+          // re-ask is one request long, and styles.css keys a `progress` cursor
+          // and a lighter label off this same attribute, so the feedback is not
+          // screen-reader-only either.
+          aria-busy={verifying}
+          onClick={() => {
+            // The other half of aria-disabled: the browser will not stop a
+            // click on a control that is only *labelled* disabled, so this does
+            // — except for the one block a click is allowed to re-ask (bug-13;
+            // see `reverifiable` above for the three conditions).
+            if (blocked !== null) {
+              if (!reverifiable) return;
+              // `ask` no-ops while an ask is already in flight, and `reverify`
+              // never rejects (useAgents.ts explains why it resolves to a
+              // flatly-off status instead), so there is no failure branch here:
+              // an off status simply is not `enabled` and opens nothing.
+              ask((fresh) => {
+                // Re-derived from the FRESH answer, not from the render this
+                // click came from — and through the same gate, so a status that
+                // came back with dispatch off or the dashboard gone opens
+                // nothing either. The two blocks `reverifiable` already ruled
+                // out cannot have changed in the meantime: one is on the item
+                // file this board is rendering, the other is a prop.
+                if (dispatchGate(item, fresh).control === 'enabled') onDispatch();
+              });
+              return;
+            }
+            onDispatch();
+          }}
+        >
+          {/* The action IS the tone class: `groom` and `execute` are the two
+              AgentAction values plus `capture`, so the palette can never drift
+              from the derivation. `blocked` replaces the tone rather than
+              joining it — a dimmed word is the disabled reading, and a
+              --mustard word at 45% opacity would be a third colour nobody
+              chose. */}
+          <span className={blocked === null ? `dispatch-word ${action}` : 'dispatch-word blocked'}>{actionLabel(item, action)}</span>
+          {/* aria-hidden: the accessible name is the action word alone. */}
+          <span className="dispatch-mark" aria-hidden="true">
+            ▸
           </span>
-        ) : (
-          <>
-            {actionLabel(item, action)}
-            <span className="dispatch-mark" aria-hidden="true">
-              ▸
-            </span>
-          </>
-        )}
-      </button>
+        </Chip>
+      </span>
       {/* Visually hidden, deliberately not `aria-label`: the label is the
           action word, and folding a two-line explanation into it would make
           every screen reader announce the whole sentence as the control's
           name. A description is the right slot for "why this cannot be used
           right now", and for the project-visibility reason it is the only
           place in the UI that states the condition at all — Settings reports
-          a project *count*, not which projects are missing. (The other two each have
-          a second telling: the run strip above the columns for a run claim,
-          though the strip names a queue and not this card, and this card's own
-          amber bar for a session already holding the item, though the bar
-          prints an elapsed rather than a reason not to dispatch.) Rendered as a sibling rather
-          than a child so its text stays out of the button's accessible
-          name. */}
+          a project *count*, not which projects are missing. (The other two each
+          have a second telling: the board's run chip for a run claim, though
+          the chip names a count and not this card, and this card's own live
+          strip for a session already holding the item, though the strip prints
+          an elapsed rather than a reason not to dispatch.) Rendered as a
+          sibling rather than a child so its text stays out of the button's
+          accessible name. */}
       {blocked !== null && (
         <span id={reasonId} className="sr-only">
           {blocked}

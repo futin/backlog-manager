@@ -5,15 +5,16 @@ import type { OrchestratorRunsPayload } from '../../../shared/types';
 
 /**
  * How often to poll while at least one run is fresh. Five seconds is fast
- * enough that the run strip (Task 11) reads as live without feeling laggy,
+ * enough that a live run (Task 11) reads as live without feeling laggy,
  * and slow enough that leaving the board open all afternoon costs a trickle
  * of same-origin GETs rather than a flood of them.
  *
- * Exported (fix round 1) because RunStrip.tsx imports it directly for its
- * own "how young does a heartbeat have to be to read as 'live'" threshold —
- * this poller is the only reason that number can ever be current, so the
- * strip's reading and this interval have to move together, not just start
- * out equal by coincidence.
+ * Exported (fix round 1) for the surface that reads it as its own "how young
+ * does a heartbeat have to be to read as 'live'" threshold — this poller is
+ * the only reason that number can ever be current, so a heartbeat reading and
+ * this interval have to move together rather than start out equal by
+ * coincidence. That reader was `RunStrip.tsx` until task-37 took it off the
+ * Board; the Runs section's own live rows are the next (task 3).
  */
 export const POLL_MS = 5_000;
 

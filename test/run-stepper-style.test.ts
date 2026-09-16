@@ -5,7 +5,7 @@ import { readStyles, ruleBlock, ruleBlocks } from './helpers/css-rule';
  * entire point of a stepper — and sight is exactly what jsdom cannot check: it
  * performs no layout, the component suites never load the stylesheet, and
  * `getComputedStyle` on a rendered dot would report nothing about its
- * background either way. run-time-ui.test.tsx pins the state CLASSES, which is
+ * background either way. A render suite pinned the state CLASSES, which is
  * the half a render test can prove; this file pins that each of those classes
  * actually paints something different, which is the half it cannot.
  *
@@ -67,15 +67,23 @@ describe('run stepper stylesheet rules', () => {
   });
 
   /**
-   * Both live-ticking readings use tabular figures, and it matters more here
-   * than anywhere else on the board: these two re-render every 5s while a run
-   * is fresh, and proportional digits make the numbers shove their neighbours
-   * sideways as minutes roll over. The drawer's row column needs them for a
+   * The live-ticking reading uses tabular figures: it re-renders every 5s while
+   * a run is fresh, and proportional digits make the numbers shove their
+   * neighbours sideways as minutes roll over. The row column needs them for a
    * second reason — a column of durations only supports "which took longest"
    * at a glance if the digits line up.
+   *
+   * This asserted two readings until task-37; the other was
+   * `.run-strip-elapsed`, which left with the run strip (DESIGN.md §8.3's
+   * "What leaves"). It is not replaced by a second assertion here because
+   * nothing replaced the rule: task-36 set `font-variant-numeric: tabular-nums`
+   * on `body`, so the Board's surviving live reading
+   * (`.board-card-live-mark`) and the Runs section's own inherit it, and the
+   * rule below is pinned because this one element could plausibly be given a
+   * local override. The Live row that inherits the strip's job is task 3's, and
+   * carries no declaration of its own for the same reason.
    */
-  it('sets tabular figures on both time readings', () => {
-    expect(ruleBlock(css, '.run-strip-elapsed')).toMatch(/font-variant-numeric\s*:\s*tabular-nums\b/);
+  it('sets tabular figures on the row time reading', () => {
     expect(ruleBlock(css, '.run-drawer-item-time')).toMatch(/font-variant-numeric\s*:\s*tabular-nums\b/);
   });
 });

@@ -13,14 +13,20 @@ import { useEffect, useRef } from 'react';
  * tested — so one press ran both callbacks and took the drawer the user
  * expected to come back to. DOM nesting cannot rank `window` listeners and a
  * bubbling `stopPropagation` cannot reach them, so ranking has to be explicit,
- * and it has to live somewhere all four dialogs can see. That is this module.
+ * and it has to live somewhere every dialog can see. That is this module.
+ *
+ * Three of them now, not four: task-37 deleted `RunDrawer` with the rest of
+ * the run's detail on the Board (the run is the Runs page's own inline sheet,
+ * never a dialog), so it left the stack rather than moving up it. Nothing in
+ * this module changed for that — which is the point of a stack whose entries
+ * are removed by identity.
  *
  * They stay `window` listeners rather than becoming element handlers because
- * none of these overlays traps focus (RunDrawer's own comment says so): Escape
+ * none of these overlays traps focus (each one's own comment says so): Escape
  * has to work wherever focus happens to sit, including on the card button that
  * opened the sheet. The `<dialog>` element would get topmost-only Escape from
  * the platform for free, and was rejected in grooming: it also brings its own
- * focus, scroll-locking and backdrop behaviour to four surfaces at once, which
+ * focus, scroll-locking and backdrop behaviour to every surface at once, which
  * is a redesign rather than this fix.
  *
  * Module state rather than a React context, the same shape `lib/view-keys.ts`

@@ -3,9 +3,11 @@
  */
 /*
  * bug-23: one Escape press used to close BOTH the launch sheet and the item
- * drawer it layers over, because all four dialogs in this app bound their own
- * unguarded `keydown` listener on `window` and called their own `onClose`
- * unconditionally. Every listener registered at the moment of the press fired.
+ * drawer it layers over, because each of the four dialogs this app had then
+ * bound its own unguarded `keydown` listener on `window` and called its own
+ * `onClose` unconditionally. Every listener registered at the moment of the
+ * press fired. (Three since task-37, which took the run drawer off the Board:
+ * the stack owns the rule, not the count, which is why nothing here moved.)
  *
  * The two-dialogs-at-once state is deliberate and already pinned elsewhere
  * (`test/dispatch-button.test.tsx`, "opens the sheet from inside the drawer,

@@ -9,8 +9,11 @@ import type { OrchestratorRun, RunQueueItem } from '../../../shared/types';
  * RunControls — Pause / Cancel / Resume for one orchestrator run (task-17).
  *
  * **Why one component, at the top level of `components/`.** Two surfaces
- * host these controls: the board's run drawer (`board/RunDrawer.tsx`) and
- * the Runs view's detail pane (`runs/RunDetail.tsx`). Those live in two
+ * hosted these controls: the board's run drawer and the Runs view's detail
+ * pane (`runs/RunDetail.tsx`). task-37 deleted the first — the run's detail is
+ * the Runs page's own sheet now, never a second copy on the Board — so there
+ * is one host today and the second is the detail sheet's HEAD, which task 3
+ * builds out of this same component. They live in two
  * different lazy chunks, so neither may import from the other — the same
  * constraint that put `lib/view-keys.ts` at the top level rather than
  * exporting the shared board/archive filter key from one of the two views.
@@ -19,9 +22,9 @@ import type { OrchestratorRun, RunQueueItem } from '../../../shared/types';
  * rule that lived as two expressions that merely agreed survived a whole
  * branch with every test green while one half was quietly widened.
  *
- * **Why the crashed run is not this component's business.** A crashed run's
- * Resume lives on `RunStrip` alone, behind `watchdogStoodDown` — because the
- * watchdog may be about to spawn a resume for that run itself, and a click
+ * **Why the crashed run is not this component's business — yet.** A crashed
+ * run's Resume lives behind `watchdogStoodDown` wherever it is drawn, because
+ * the watchdog may be about to spawn a resume for that run itself, and a click
  * plus a sweep both driving `--resume` into one `run.json` is the race that
  * gate exists to prevent. A `paused` run was never a watchdog subject (the
  * sweeper only walks `running` runs), so there is no automation to
@@ -112,9 +115,10 @@ export function RunControls({
       </span>
     );
 
-  // A run this component has nothing to offer for: crashed (the strip owns
-  // it), or over. Checked first so every branch below can assume a live or
-  // paused run.
+  // A run this component has nothing to offer for: crashed (nothing offers a
+  // Resume for one on the client between task-37 and task 3 — see the header),
+  // or over. Checked first so every branch below can assume a live or paused
+  // run.
   if (run.status === 'running' && run.fresh) {
     if (run.pauseRequested) {
       const inFlight = inFlightItemId(run.queue);

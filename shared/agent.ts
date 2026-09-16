@@ -588,7 +588,7 @@ export function watchdogExhausted(attempts: number, maxAttempts: number): boolea
  * **This is the coupling the whole feature's safety rests on, and it is why
  * this predicate is a shared function rather than two `||`s in two files.**
  * The board's crashed strip renders its Resume control on exactly this
- * condition (`RunStrip.tsx`), and the sweeper returns from `visit()` without
+ * condition (the client's own Resume control), and the sweeper returns from `visit()` without
  * spawning on exactly this condition (`watchdog.service.ts`). Those two
  * statements have to describe the same set of states, because nothing else
  * prevents a person's click and the sweeper's next tick from both spawning

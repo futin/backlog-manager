@@ -38,7 +38,7 @@ import type { OrchestratorRun, RunWatchdog, WatchdogConfig, WatchdogEventKind, W
  * payload can state without guessing, the entire time.
  *
  * `isCrashed` is the one place the split that fixes this gets decided, so
- * `RunStrip`, `BoardView` and `WatchdogMonitor` read the same verdict
+ * The board's run chip, `BoardView` and `WatchdogMonitor` read the same verdict
  * rather than each re-deriving
  * `status === 'running' && !fresh` by hand and drifting apart the day one
  * of them forgets the `!fresh` half. A run that finished — however long

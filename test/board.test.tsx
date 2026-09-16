@@ -222,8 +222,67 @@ describe('BoardView', () => {
     // A nav entry names a place, not a type, and this place holds bugs, ideas
     // and refactors as well as tasks — narrowing to one project is the
     // toolbar's job, one line to the right of this title.
-    expect(screen.getByText('Board')).toHaveClass('board-title');
+    // The band's own title element (task-37 — `Band`, a ui/ primitive), not
+    // the `.board-title` div the toolbar used to carry.
+    expect(screen.getByText('Board')).toHaveClass('ui-band-title');
     expect(screen.queryByText('Projects')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The band, composed (DESIGN.md §8.3): `Band` carries the title and the
+   * count line, its right slot carries the 36 px search field, the three
+   * filter chips and — last, and the page's ONE ink chip — Orchestrate.
+   *
+   * What is being pinned is the COMPOSITION, because that is what the design
+   * spec's §12.1 rule is about: a page that re-drew a chip's look under its
+   * own class would pass every behavioural case in this file while putting a
+   * second radius and stroke on the board. The behaviour of the controls
+   * themselves is unchanged and stays pinned where it was — the filters by the
+   * narrowing cases below, Orchestrate's four visibility rules by
+   * `test/orchestrator-start-ui.test.tsx`.
+   */
+  it('composes the band: title, count line, search, and the three filters as chips', async () => {
+    await renderBoard();
+
+    const band = screen.getByText('Board').closest('.ui-band') as HTMLElement;
+    expect(band).not.toBeNull();
+    expect(within(band).getByLabelText('Search items')).toHaveClass('board-band-search');
+
+    // Each filter is a `Chip` wrapping its own select — the chip is the shell,
+    // the select is the control, and the label is what ties them together.
+    for (const name of ['Project', 'Status', 'Sort']) {
+      const select = within(band).getByLabelText(name);
+      expect(select.closest('.ui-chip')).not.toBeNull();
+      expect(select.closest('.ui-chip')).toHaveClass('ui-chip-outline');
+    }
+  });
+
+  /**
+   * The count line, and the one thing about it that is not the design's own
+   * example string: the noun follows the Status filter. `4 open` printed under
+   * the Done filter would be counting done items and calling them open, which
+   * is the whole reason `COUNT_WORDS` exists rather than a literal.
+   *
+   * The project half counts the projects the VISIBLE items belong to, not the
+   * registry: `ghost` is registered and unreachable, contributes no item, and
+   * is already named on the warning line — counting it here would make the
+   * band disagree with the board under it.
+   */
+  it("reads the count line off what is actually shown, in the filter's own words", async () => {
+    await renderBoard();
+    // Five open items across alpha and beta: bug-1, bug-2, task-1, idea-1,
+    // ref-1. `ghost` holds none and is not counted.
+    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
+    expect(screen.getByText('2 done across 1 project')).toBeInTheDocument();
+
+    // Narrowed to one project, the "across" half goes: it would read
+    // `across 1 project` on every board a reader narrowed themselves.
+    // Both done items are alpha's, so the number does not move — which is what
+    // makes this assertion about the phrase rather than about the count.
+    await userEvent.selectOptions(screen.getByLabelText('Project'), '/abs/alpha');
+    expect(screen.getByText('2 done')).toBeInTheDocument();
   });
 
   it('renders the four columns with counts of what they hold (open by default)', async () => {
@@ -260,12 +319,18 @@ describe('BoardView', () => {
     // Beside the meta line, not inside it: inside, the nowrap-with-ellipsis
     // clipped it to `· gr…` at the real column width.
     const groomed = within(card).getByText('groomed');
-    expect(groomed).toHaveClass('board-card-groomed');
+    expect(groomed).toHaveClass('ui-marker', 'ui-marker-groomed');
     expect(groomed.closest('.board-card-meta')).toBeNull();
-    expect(groomed.closest('.board-card-foot')).not.toBeNull();
-    // The pill carries the project — not the type, which the column already
-    // states — and the meta line carries what is left.
-    expect(within(card).getByText('alpha')).toHaveClass('pill', buildProjectHues(PROJECTS).classFor('alpha'));
+    // Its own row since task-37 (DESIGN.md §8.3), no longer wedged into the
+    // foot beside the project and the id.
+    expect(groomed.closest('.board-card-markers')).not.toBeNull();
+    // A dot plus the name carries the project — not the type, which the column
+    // already states — and the meta line carries what is left. The dot takes
+    // the same hue assignment the pill it replaced did, through the same
+    // module, which is why `hueFor` and `classFor` are asserted as one answer.
+    expect(within(card).getByText('alpha')).toHaveClass('board-card-proj-name');
+    const dot = card.querySelector('.ui-dot') as HTMLElement;
+    expect(dot).toHaveClass(`ui-dot-proj-${buildProjectHues(PROJECTS).hueFor('alpha')}`);
     // Short, not the stored YYYY-MM-DD: the meta line is nowrap-with-ellipsis
     // in ~118px and the full date left no room for the id beside it, which is
     // the clipping this format exists to fix.
@@ -306,9 +371,11 @@ describe('BoardView', () => {
   it('marks an in-progress card with a live bar carrying the words and the elapsed time', async () => {
     await renderBoard();
     const live = screen.getByText('groomed bug').closest('.board-card') as HTMLElement;
-    expect(live).toHaveClass('board-card-live');
+    // The card itself carries no live class any more: §8.3 gives it no stroke
+    // to recolour, and the strip below is the whole marker.
+    expect(live).not.toHaveClass('board-card-live');
 
-    const bar = live.querySelector('.board-card-live-bar') as HTMLElement;
+    const bar = live.querySelector('.board-card-live') as HTMLElement;
     expect(bar).not.toBeNull();
     expect(bar.textContent).toContain('in progress');
     // The exact date is not on the card at any size — it is in the title
@@ -322,11 +389,16 @@ describe('BoardView', () => {
     expect(mark).toHaveClass('board-card-live-mark');
     expect(mark.closest('.board-card-foot')).toBeNull();
 
-    // The negative half matters as much: without it, a bar rendered
+    // One fill, and the hatch over it (DESIGN.md §8.3): the cyan/amber split
+    // task-9 drew is gone, and the stage word carries the distinction the
+    // second tone used to.
+    expect(bar).toHaveClass('hatch');
+    expect(bar).not.toHaveClass('board-card-live-bar-run');
+
+    // The negative half matters as much: without it, a strip rendered
     // unconditionally would pass every assertion above.
     const idle = screen.getByText('a bug').closest('.board-card') as HTMLElement;
-    expect(idle).not.toHaveClass('board-card-live');
-    expect(idle.querySelector('.board-card-live-bar')).toBeNull();
+    expect(idle.querySelector('.board-card-live')).toBeNull();
   });
 
   // The kind badge, and the three ways it stays silent. Written as one test
@@ -348,7 +420,7 @@ describe('BoardView', () => {
     ]);
     await renderBoard();
 
-    const kindOf = (title: string): HTMLElement | null => screen.getByText(title).closest('.board-card')!.querySelector('.board-card-kind');
+    const kindOf = (title: string): HTMLElement | null => screen.getByText(title).closest('.board-card')!.querySelector('.ui-marker-kind');
 
     expect(kindOf('a chore')).toHaveTextContent('chore');
     expect(kindOf('some debt')).toHaveTextContent('debt');
@@ -365,9 +437,9 @@ describe('BoardView', () => {
     await renderBoard();
 
     const badge = screen.getByText('debt');
-    expect(badge).toHaveClass('board-card-kind');
+    expect(badge).toHaveClass('ui-marker', 'ui-marker-kind');
     expect(badge.closest('.board-card-meta')).toBeNull();
-    expect(badge.closest('.board-card-foot')).not.toBeNull();
+    expect(badge.closest('.board-card-markers')).not.toBeNull();
   });
 
   // The bar used to always say "in progress"; now it names which skill holds
@@ -383,10 +455,10 @@ describe('BoardView', () => {
     ]);
     await renderBoard();
 
-    const groomingBar = screen.getByText('being groomed').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
+    const groomingBar = screen.getByText('being groomed').closest('.board-card')!.querySelector('.board-card-live') as HTMLElement;
     expect(within(groomingBar).getByText('grooming')).toBeInTheDocument();
 
-    const plainBar = screen.getByText('plain live').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
+    const plainBar = screen.getByText('plain live').closest('.board-card')!.querySelector('.board-card-live') as HTMLElement;
     expect(within(plainBar).getByText('in progress')).toBeInTheDocument();
   });
 
@@ -402,7 +474,7 @@ describe('BoardView', () => {
     });
     await renderBoard();
 
-    const bar = screen.getByText('just started').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
+    const bar = screen.getByText('just started').closest('.board-card')!.querySelector('.board-card-live') as HTMLElement;
     expect(within(bar).getByText('20m')).toBeInTheDocument();
   });
 
@@ -421,7 +493,7 @@ describe('BoardView', () => {
     });
     await renderBoard();
 
-    const bar = screen.getByText('legacy start').closest('.board-card')!.querySelector('.board-card-live-bar') as HTMLElement;
+    const bar = screen.getByText('legacy start').closest('.board-card')!.querySelector('.board-card-live') as HTMLElement;
     expect(within(bar).getByText('1d')).toBeInTheDocument();
   });
 
@@ -441,7 +513,7 @@ describe('BoardView', () => {
     await renderBoard();
 
     const card = screen.getByText('hand edited').closest('.board-card') as HTMLElement;
-    const bar = card.querySelector('.board-card-live-bar') as HTMLElement;
+    const bar = card.querySelector('.board-card-live') as HTMLElement;
     expect(bar).not.toBeNull();
     expect(bar.textContent).toContain('in progress');
     expect(card.textContent).not.toContain('NaN');
@@ -455,27 +527,24 @@ describe('BoardView', () => {
     await renderBoard();
     await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
     const card = screen.getByText('finished task').closest('.board-card') as HTMLElement;
-    expect(card).not.toHaveClass('board-card-live');
-    expect(card.querySelector('.board-card-live-bar')).toBeNull();
-    expect(within(card).getByText('done')).toHaveClass('board-card-done');
+    expect(card.querySelector('.board-card-live')).toBeNull();
+    expect(within(card).getByText('done')).toHaveClass('ui-marker', 'ui-marker-done');
   });
 
-  it('colours the pill by project, not by section', async () => {
+  it('colours the dot by project, not by section', async () => {
     await renderBoard();
-    // alpha's bug and alpha's task: different columns, so under the old
+    // alpha's bug and alpha's idea: different columns, so under the old
     // section-keyed pill these two carried different classes. Same project now
     // means the same class, which is the whole point — a project reads as one
-    // colour straight across the board.
-    const bug = screen.getByText('a bug').closest('.board-card') as HTMLElement;
-    const idea = screen.getByText('an idea').closest('.board-card') as HTMLElement;
-    const alphaOnBug = within(bug).getByText('alpha');
-    const alphaOnIdea = within(idea).getByText('alpha');
-    expect(alphaOnIdea.className).toBe(alphaOnBug.className);
+    // colour straight across the board. The mark is a `Dot` since task-37; the
+    // assignment behind it did not move.
+    const dotIn = (title: string): string => (screen.getByText(title).closest('.board-card')!.querySelector('.ui-dot') as HTMLElement).className;
 
-    // ...and beta, a different project in the same column as one of them, does
-    // not — otherwise "same class everywhere" would also pass on a constant.
-    const betaTask = screen.getByText('a task').closest('.board-card') as HTMLElement;
-    expect(within(betaTask).getByText('beta').className).not.toBe(alphaOnBug.className);
+    expect(dotIn('an idea')).toBe(dotIn('a bug'));
+
+    // ...and beta, a different project, does not — otherwise "same class
+    // everywhere" would also pass on a constant.
+    expect(dotIn('a task')).not.toBe(dotIn('a bug'));
   });
 
   // Done is a filter value over the same four type columns, not a view of its
@@ -648,11 +717,11 @@ describe('BoardView', () => {
     await renderBoard();
     const card = screen.getByText('old task').closest('.board-card') as HTMLElement;
     const marker = within(card).getByText('stale');
-    expect(marker).toHaveClass('board-card-stale');
-    // Beside the meta line, not inside it — the same nowrap-with-ellipsis
+    expect(marker).toHaveClass('ui-marker', 'ui-marker-stale');
+    // On the marker row, not in the meta line — the same nowrap-with-ellipsis
     // clipping the groomed marker had to be moved out of.
     expect(marker.closest('.board-card-meta')).toBeNull();
-    expect(marker.closest('.board-card-foot')).not.toBeNull();
+    expect(marker.closest('.board-card-markers')).not.toBeNull();
   });
 
   it('marks no fresh task', async () => {

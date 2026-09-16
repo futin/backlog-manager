@@ -6,7 +6,7 @@ import { readStyles, ruleBlock, ruleBlocks } from './helpers/css-rule';
  * never load styles.css, so a rendering assertion on the chip's colour would
  * pass whether or not the rule existed. What the component suites CAN prove is
  * that the right class name lands on the element (they do, in
- * orchestrator-drawer.test.tsx); this file proves the class name means
+ * run-detail.test.tsx); this file proves the class name means
  * something.
  *
  * The point being guarded is that success, failure and waiting are visually

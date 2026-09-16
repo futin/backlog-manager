@@ -86,9 +86,20 @@ export function pillClass(hue: number): string {
   return `pill-proj-${hue}`;
 }
 
-/** What the board hands down to a card or the drawer: name in, class out. */
+/** What the board hands down to a card or the drawer: name in, class out.
+ *
+ *  `hueFor` is the SAME assignment in the other shape, and the reason it
+ *  exists is `Dot` (`components/ui/Dot.tsx`), which takes the hue as a NUMBER
+ *  and builds `.ui-dot-proj-N` itself — the card's project dot (DESIGN.md
+ *  §8.3) composes that primitive where the card used to draw `.pill`. The
+ *  alternative was reading the number back out of `classFor`'s string at the
+ *  call site, which would put the `pill-proj-N` format in two places; the
+ *  whole point of `pillClass` is that it is in one. `classFor` is written in
+ *  terms of `hueFor` below for the same reason, so the two can never name
+ *  different hues for one project. */
 export interface ProjectHues {
   classFor(project: string): string;
+  hueFor(project: string): number;
 }
 
 /**
@@ -130,13 +141,18 @@ export function buildProjectHues(projects: readonly RegistryProject[]): ProjectH
     taken.add(hue);
   }
 
+  const hueFor = (project: string): number =>
+    // An item always belongs to a registered project (the scan walks the
+    // registry to find items at all), so the fallback is for the window
+    // where /api/items has answered and /api/projects has not: the raw
+    // preference, which is usually the hue the assignment lands on anyway.
+    assigned.get(project) ?? projectHueIndex(project);
+
   return {
-    classFor(project: string): string {
-      // An item always belongs to a registered project (the scan walks the
-      // registry to find items at all), so the fallback is for the window
-      // where /api/items has answered and /api/projects has not: the raw
-      // preference, which is usually the hue the assignment lands on anyway.
-      return pillClass(assigned.get(project) ?? projectHueIndex(project));
-    }
+    hueFor,
+    // Derived from `hueFor` rather than repeating the lookup: a card's dot and
+    // the drawer's pill are the same project in two shapes, and the fallback
+    // above is the kind of rule that drifts the moment it is written twice.
+    classFor: (project: string): string => pillClass(hueFor(project))
   };
 }

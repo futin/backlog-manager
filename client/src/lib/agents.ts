@@ -171,7 +171,7 @@ export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDis
  * field that only ever ADDS a card; `useOrchestratorRuns` defaults it to `[]`
  * for precisely that case. Present-but-wrong is the "lies quietly" shape this
  * guard exists for: `BoardView` calls `.filter` on this array during render
- * and `StartingStrip` reads `project`/`requestedAt` straight out of each
+ * and the board's run chip reads `project`/`requestedAt` straight out of each
  * entry, and an unguarded throw during render unmounts the whole tree to a
  * blank page (BoardView.tsx's own comment on that).
  */

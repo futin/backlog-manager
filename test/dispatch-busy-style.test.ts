@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { readStyles, ruleBlock } from './helpers/css-rule';
 
 /**
@@ -14,26 +17,36 @@ import { readStyles, ruleBlock } from './helpers/css-rule';
  * every sighted reader in exactly that position.
  *
  * bug-16 gave the toolbar's Orchestrate button the same re-asking click, from
- * the same hook, and therefore the same pair of rules — so it is a third row
- * in both tables below rather than a suite of its own. The parametrized shape
- * is the point: a fourth status-gated control gets its coverage by adding one
- * string, which is the only version of this that stays true. The rule itself
- * shipped unpinned for exactly one review round, and both halves of it were
- * deletable with all 1131 tests green.
+ * the same hook, and therefore the same pair of rules.
+ *
+ * task-37 collapsed the three controls into one shape: `DispatchButton`'s two
+ * became one 28 px `Chip` and Orchestrate became the band's ink `Chip`
+ * (DESIGN.md §8.3), so the pair of rules is declared once, on `.ui-chip`, in
+ * the ui primitives block. That is a real simplification and it is also a new
+ * way to lose the coverage: the rules reach a control only while that control
+ * actually composes a `Chip`. So the suite keeps a row per SOURCE that draws
+ * one — two of them now, since one component renders both of
+ * `DispatchButton`'s old shapes — as source assertions rather than as copies
+ * of one stylesheet rule.
  */
+const ROOT = join(__dirname, '..');
 const BUSY = "[aria-busy='true']";
 const DISABLED = "[aria-disabled='true']";
 
-/* Every control whose disabled state can be clicked to re-ask the status.
-   `.dispatch-tab`/`.dispatch-chip` are DispatchButton's two shapes (bug-13);
-   `.board-orchestrate` is the board toolbar's own control (bug-16). */
-const REVERIFYING_CONTROLS = ['.dispatch-tab', '.dispatch-chip', '.board-orchestrate'];
+/* Every control whose disabled state can be clicked to re-ask the status, and
+   the source that draws it. `DispatchButton` is the card's chip and the item
+   drawer's (bug-13 — ONE shape since task-37, where there were two);
+   `BoardView` is the band's Orchestrate chip (bug-16). */
+const REVERIFYING_CONTROLS = [
+  ['the card / drawer dispatch chip', 'client/src/components/board/DispatchButton.tsx'],
+  ['the band Orchestrate chip', 'client/src/components/board/BoardView.tsx']
+];
 
 describe('re-asking control busy stylesheet rules', () => {
   const css = readStyles();
 
-  it.each(REVERIFYING_CONTROLS)('gives %s a visible busy state', (base) => {
-    const block = ruleBlock(css, `${base}${BUSY}`);
+  it('gives the chip a visible busy state', () => {
+    const block = ruleBlock(css, `.ui-chip${BUSY}`);
     expect(block).not.toBeNull();
     // A cursor, because the pointer is already over the control when the
     // re-ask starts — it is the one channel that needs no second glance.
@@ -47,7 +60,18 @@ describe('re-asking control busy stylesheet rules', () => {
      wins. Declared the other way round, the busy state would be silently
      overwritten by the disabled colour and nothing would appear to happen —
      the exact symptom this whole fix exists to remove. */
-  it.each(REVERIFYING_CONTROLS)('declares %s busy after its disabled rule', (base) => {
-    expect(css.indexOf(`${base}${BUSY}`)).toBeGreaterThan(css.indexOf(`${base}${DISABLED}`));
+  it('declares the chip busy rule after its disabled rule', () => {
+    expect(css.indexOf(`.ui-chip${BUSY}`)).toBeGreaterThan(css.indexOf(`.ui-chip${DISABLED}`));
+  });
+
+  /* The other half, and the half that stopped being free when the three
+     controls started sharing one rule: a control that re-asks has to BE a chip
+     for the rule above to reach it. Read from the source rather than a render,
+     for the same reason the rules themselves are read from the sheet — a
+     rendered assertion here would prove the attribute is on some element, not
+     that the element is the one the stylesheet paints. */
+  it.each(REVERIFYING_CONTROLS)('draws %s as a Chip carrying aria-busy', (_name, file) => {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+    expect(src).toMatch(/<Chip[\s\S]{0,2000}?aria-busy=/);
   });
 });

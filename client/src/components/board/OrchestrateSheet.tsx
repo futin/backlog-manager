@@ -98,9 +98,10 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
  *     channel.
  *   - LaunchSheet's success state replaces the form with a session link and
  *     stays open. This sheet closes immediately on success instead (see
- *     `start` below) — the run strip (Task 11) is the ongoing-progress
- *     surface for an orchestrate run, not this sheet, so there is no
- *     "launched" panel here to show at all.
+ *     `start` below) — the Runs section is the ongoing-progress surface for
+ *     an orchestrate run, reached from the band's own run chip (task-37; the
+ *     run strip, Task 11, was that surface until then), not this sheet, so
+ *     there is no "launched" panel here to show at all.
  * All five state variables LaunchSheet holds (`plan`, `planError`, `prompt`,
  * `remoteControl`, `sessionId`) would therefore be either meaningless or
  * permanently unused in an "orchestrate mode" bolted onto it, and every
@@ -109,11 +110,12 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
  * what IS genuinely shared — `MODELS`/`EFFORTS`/`clampMode`/`modesUpTo`
  * (shared/agent.ts), `useSettings()`'s seeding, the `.sheet*` CSS vocabulary,
  * and `useDialogEscape`, the one owner of the Escape key every dialog in this
- * app now shares (ItemDrawer, LaunchSheet, RunDrawer) — is imported or
+ * app now shares (ItemDrawer, LaunchSheet, and this sheet — three since
+ * task-37 took the run drawer off the Board) — is imported or
  * restated in the same shape those already use, never copy-pasted out of
- * LaunchSheet's own body. That hook is bug-23's fix: the four dialogs each
- * used to bind their own unguarded `window` listener, so a press with two of
- * them open closed both.
+ * LaunchSheet's own body. That hook is bug-23's fix: each of the four dialogs
+ * this app had then used to bind its own unguarded `window` listener, so a
+ * press with two of them open closed both.
  */
 export function OrchestrateSheet({
   project,
@@ -599,7 +601,7 @@ export function OrchestrateSheet({
     })
       .then(() => {
         // No session link to show (see this file's own header comment) —
-        // the run strip is what takes over from here, and `refresh()`
+        // the band's run chip is what takes over from here, and `refresh()`
         // fetches it ahead of the next scheduled poll so it is already
         // there the instant this sheet closes rather than up to 5s later.
         refresh();
@@ -614,7 +616,7 @@ export function OrchestrateSheet({
         // (agents.service.ts's `orchestrate()`, "a run is already in
         // progress for this project (<runId>)"). Retrying from this sheet
         // cannot fix that; `refresh()` pulls the winning run in and
-        // `onClose()` hands the screen to the strip that already owns it.
+        // `onClose()` hands the screen to the chip that already counts it.
         //
         // Fix round 1 tried `e.status === 409` alone — an improvement over
         // matching the message's own prose, but still wrong, because this
@@ -632,11 +634,10 @@ export function OrchestrateSheet({
         // (uncoded) falls through to the generic path below and shows the
         // server's own, accurate error text instead.
         //
-        // Both of that endpoint's locks answer with it, and closing into the
-        // strip world is right for both: the activeRun lock means a run file
-        // is already there to render, and bug-21's starting lock means a
-        // `StartingStrip` is already rendering for the spawn this sheet is
-        // trying to duplicate. This deliberately does not care which.
+        // Both of that endpoint's locks answer with it, and closing is right
+        // for both: the activeRun lock means a run file is already there to
+        // count, and bug-21's starting lock means the chip is already counting
+        // the spawn this sheet is trying to duplicate. It does not care which.
         if (e instanceof ApiError && e.status === 409 && e.code === RUN_IN_PROGRESS_CODE) {
           refresh();
           onClose();
