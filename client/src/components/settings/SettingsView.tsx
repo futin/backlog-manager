@@ -1,11 +1,12 @@
 import { SettingsGroup, SettingsRow } from './SettingsRow';
 import { Band } from '../ui/Band';
+import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
-import { FONT_SCALES, STALE_WINDOWS, THEMES, type Landing, type ThemeId } from '../../lib/settings';
+import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import type { AgentsStatus, MergeMode, QuestionMode } from '../../../../shared/types';
 
@@ -26,6 +27,18 @@ const SWATCHES: Record<ThemeId, [string, string, string]> = {
 const DENSITIES = [
   { value: 'comfortable' as const, label: 'Comfortable' },
   { value: 'compact' as const, label: 'Compact' }
+];
+
+/**
+ * The two measures, labelled for what they do rather than for the numbers
+ * behind them: `Fixed` is the measure this board was drawn at and `Full` is
+ * the window. Written out rather than mapped over `CONTENT_WIDTHS` for the
+ * same reason `LANDINGS` below is — these are a settings row's copy, not the
+ * union's members — and `clampSettings` is what keeps the values in step.
+ */
+const CONTENT_WIDTH_OPTIONS = [
+  { value: 'fixed' as ContentWidth, label: 'Fixed' },
+  { value: 'full' as ContentWidth, label: 'Full' }
 ];
 
 /**
@@ -118,33 +131,104 @@ function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
  */
 export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   const { settings, update } = useSettings();
+  const shared = settings.settingsScope === 'shared';
 
   return (
     <div className="set">
       {/* A band, like every other page on this board (DESIGN.md §8.2/§8.6):
-          the 19/500 title over a 13 px line. No controls in its right slot —
-          every control on this page belongs to a row inside a card, and one
-          hoisted up here would be a setting with no group saying what it
-          scopes. */}
-      <Band title="Settings" sub="How this board looks and behaves — per device, except where a card says otherwise." />
+          the 19/500 title over a 13 px line. Its right slot carries ONE thing
+          and it is not a control — the scope pill, stating which backend this
+          page's cards write to. Every control on this page still belongs to a
+          row inside a card; one hoisted up here would be a setting with no
+          group saying what it scopes.
 
-      {/* Two hand-balanced columns (§8.6), placed by hand rather than reflowed:
-          a masonry pass would move a card to the other side of the page as its
-          neighbour above grew a row, so a reader who learnt where `Claude
-          Agents` sits would find it somewhere else after a knob changed.
-          The split is the orchestrator pair on the right and everything else on
-          the left, which is what balances the two sides AND keeps the one
-          adjacency that carries meaning: `Orchestrator · this device` and
-          `Orchestrator watchdog · this server` are the same subject read at two
-          scopes — what a run is started with, then what happens to one that has
-          already crashed — and a reader meets them in that order. Splitting them
-          across columns to even out a few pixels would have cost the only
-          ordering on this page that says anything.
-          Folds to one column under 1100 px, which is Settings' own breakpoint
-          and deliberately NOT the 700 px phone break every other split on this
-          board uses: these cards are a label-and-control row each, so they run
-          out of width for a side-by-side row long before the columns do. */}
-      <div className="set-cols">
+          Both pages use `tone="neutral"` and let the WORD carry the
+          distinction. Deliberately not a green-tinted Shared pill of the kind
+          the dashboard this pattern came from draws: `PillTone`'s five members
+          each name a reading — live, warn, bad, done, neutral — none of them
+          means "shared", and minting a second pill look inside the settings
+          block would be a second home for a primitive, which
+          test/design-guards.test.ts's guard 7 exists to refuse.
+
+          The subtitle changes with the page because the one-line summary is now
+          the page's own, and it is the sentence that makes the pill mean
+          something rather than decorate. */}
+      <Band
+        title="Settings"
+        sub={
+          shared
+            ? 'What the API reads off the host — the watchdog file beside the registry, and the environment the server was started with. Change one here and it changes for everyone.'
+            : 'How this board looks and behaves on this device. These live in this browser and never leave it.'
+        }
+      >
+        <Pill tone="neutral">{shared ? 'this machine' : 'this browser'}</Pill>
+      </Band>
+
+      {/* One of two card sets, never both — the page IS the scope (§8.6), so a
+          card that mixed backends would make the pill above a lie. That is why
+          `Claude Agents` is two cards: its status lines report the HOST's
+          environment while its model, effort and link rows were this browser's
+          localStorage all along, and the split is what let each half sit under
+          a truthful heading.
+
+          There is no in-page control that moves between these two, at any
+          width. The rail's tree is the only one, the same rule Runs' two pages
+          follow since task-38; a second control here would be a second wording
+          free to disagree with the tree's. */}
+      {shared ? <SharedPage onOpenWatchdog={onOpenWatchdog} /> : <LocalPage />}
+    </div>
+  );
+}
+
+/**
+ * The Shared page: the watchdog's file beside the registry, and the host
+ * environment `Claude Agents` reports on.
+ *
+ * Two cards rather than four, and the hand-balanced columns hold up for a
+ * different reason here than on Local: this is the watchdog's long card
+ * against the agents report, one tall column each, rather than Local's two
+ * short cards over two taller ones.
+ */
+function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
+  return (
+    <div className="set-cols">
+      <div className="set-col">
+        <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
+      </div>
+
+      <div className="set-col">
+        <AgentsGroup />
+      </div>
+    </div>
+  );
+}
+
+/** The Local page: everything in this browser's localStorage, and nothing else. */
+function LocalPage() {
+  const { settings, update } = useSettings();
+
+  return (
+    /* Two hand-balanced columns (§8.6), placed by hand rather than reflowed: a
+       masonry pass would move a card to the other side of the page as its
+       neighbour above grew a row, so a reader who learnt where a card sits
+       would find it somewhere else after a knob changed.
+
+       Each page has its own balance, and both are hand-checked. Local is two
+       short cards against two taller ones — `Display` over `Board` on the left,
+       `Orchestrator` over `Dispatch` on the right — which keeps the adjacency
+       that still carries meaning after the split: what a run is STARTED with,
+       beside what a dispatch is started with. `Orchestrator watchdog` used to
+       hang under `Orchestrator` for the same kind of reason, and that pairing
+       is gone by design — the watchdog is the server's and this page is the
+       browser's, and the split is what says so. Shared is the other shape
+       entirely: the watchdog's long card against the agents report, one tall
+       column each (see `SharedPage`).
+
+       Folds to one column under 1100 px, which is Settings' own breakpoint and
+       deliberately NOT the 700 px phone break every other split on this board
+       uses: these cards are a label-and-control row each, so they run out of
+       width for a side-by-side row long before the columns do. */
+    <div className="set-cols">
         <div className="set-col">
           <SettingsGroup title="Display" scope="this device">
             {/* Not a `SettingsRow`: the theme picker's control is a full-width
@@ -204,6 +288,17 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
               />
             </SettingsRow>
 
+            {/* Between Text size and Opens on, because the three rows above it
+                are all "how big is this board" and this is the fourth reading
+                of that same question — how wide. `Opens on` is a different
+                subject (which section) and stays last. */}
+            <SettingsRow
+              name="Content width"
+              hint="Fixed keeps the measure this board was drawn at, which is what every screenshot and every column width was tuned against. Full drops the cap so every section — the board, Runs, Archive and this page — spans the window."
+            >
+              <Segmented value={settings.contentWidth} options={CONTENT_WIDTH_OPTIONS} onChange={(contentWidth) => update({ contentWidth })} label="Content width" pill />
+            </SettingsRow>
+
             <SettingsRow name="Opens on" hint="Which section this device lands on when you load the page.">
               <Select label="Opens on" value={settings.landing} options={LANDINGS} onChange={(landing) => update({ landing })} />
             </SettingsRow>
@@ -229,15 +324,13 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
             </SettingsRow>
           </SettingsGroup>
 
-          <AgentsGroup />
         </div>
 
         <div className="set-col">
           <OrchestratorGroup />
 
-          <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
+          <DispatchGroup />
         </div>
-      </div>
     </div>
   );
 }
@@ -301,40 +394,85 @@ function OrchestratorGroup() {
 }
 
 /**
- * The integration's only editable field is the link base, because it is the
- * only part of it that is genuinely per-device: the API's own outbound call
- * uses BM_AGENTS_URL on the host, and the bearer token must never be in a
- * browser at all. Everything else here is a report on where that host config
- * currently stands.
+ * `Claude Agents`, Shared — a report on where the HOST's dispatch config
+ * currently stands, and nothing this browser can change.
+ *
+ * task-42 took three rows out of this card. `Default model`, `Default effort`
+ * and `Dashboard link` were this browser's localStorage sitting under a
+ * heading that says `this machine`, which was tolerable while Settings was one
+ * page and is not now that the page IS the scope: they are `DispatchGroup`
+ * below, on Local. What is left is genuinely the host's — the status lines and
+ * the conditional setup block — which is why this card has a status row with
+ * nothing in its right slot at all. The `open dashboard ↗` link went with the
+ * per-device field that supplies its href.
+ *
+ * The bearer token is not here and never was, on either page: it must never be
+ * in a browser at all.
  */
 function AgentsGroup() {
-  const { settings, update } = useSettings();
   const { status } = useAgents();
   const healthy = status !== null && status.enabled && status.reachable && status.spawnAvailable && status.remoteAnswer;
 
   return (
     <SettingsGroup title="Claude Agents" scope="this machine">
-      <SettingsRow name="Dispatch" hint={<AgentsStatusLines status={status} />}>
-        {/* The button member of §8.6's 36 px control family, and an `<a>`
-            rather than a `<button>` because it navigates: `.set-link` is
-            Settings' own class, not `.sheet-link`'s second caller, so
-            restyling a settings control to this page's figures cannot reach
-            into the launch sheet that still draws the other one. */}
-        <a className="set-link" href={settings.linkBase} target="_blank" rel="noreferrer">
-          open dashboard ↗
-        </a>
-      </SettingsRow>
+      {/* No control in the right slot, which is the shape of a card that
+          reports rather than sets. Every gate named in the hint lives on a host
+          — in this API's env or in the dashboard's — and a switch here that
+          wrote to a browser's localStorage would just be a lie about where the
+          setting is. */}
+      <SettingsRow name="Dispatch" hint={<AgentsStatusLines status={status} />} />
 
+      {/* Gated on an actual answer, not bare `!healthy`: `healthy` starts
+          false the instant `status` is still `null` (its own `status !==
+          null` check fails first), which would fold "not answered yet" into
+          "broken" and tell the reader to go edit their .env while the status
+          line above still correctly says "checking…". */}
+      {status !== null && !healthy && (
+        <div className="set-row set-row-stacked">
+          <div className="set-label">
+            <span className="set-name">Setting it up</span>
+            <span className="set-hint">
+              1 · <code>BM_AGENTS=on</code> and <code>BM_AGENTS_URL</code> in this app's <code>.env</code>, then restart the API.
+              <br />2 · <code>CLAUDE_BIN</code> in the dashboard's <code>.env</code> — that is its spawn gate.
+              <br />
+              3 · Turn its remote-answer pill on; spawning is refused without it.
+              <br />4 · Run its <code>pnpm hooks:install</code>, or a groom that asks you a question will stall with nowhere to ask.
+              <br />5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to — open one there,
+              or raise <code>LOOKBACK_HOURS</code> in the dashboard's <code>.env</code>.
+            </span>
+          </div>
+        </div>
+      )}
+    </SettingsGroup>
+  );
+}
+
+/**
+ * `Dispatch`, Local — the per-device half of what `Claude Agents` used to hold.
+ *
+ * A card of its own rather than three rows appended to `Orchestrator` above it:
+ * that group answers "what is a RUN started with" and none of these is a run
+ * default. This one answers "how does dispatch behave on this device", which is
+ * the question the Agents card's own comment always said a reader arrives with
+ * — the question just turned out to have a per-device answer and a per-machine
+ * one, and only the page split forced them apart.
+ *
+ * Deliberately NOT gated on the integration being healthy: a default is worth
+ * setting before dispatch works at all, and hiding the rows while it is down
+ * would read as the setting having been lost. It also cannot be gated here even
+ * in principle any more — health is the Shared page's reading, and this card
+ * does not mount `useAgents`.
+ */
+function DispatchGroup() {
+  const { settings, update } = useSettings();
+
+  return (
+    <SettingsGroup title="Dispatch" scope="this device">
       {/* The two picker defaults, copied from the dashboard's own "New sessions
-          · this device" group. They live here rather than in a group of their
-          own because the reader arrives at this group to ask "how does dispatch
-          behave on this device", and these two rows are that answer. `Default
-          merge mode` used to sit here as a third and moved out in task-19: it
-          never answered that question, and once a second orchestrate default
-          existed the mismatch stopped being cosmetic. Deliberately NOT gated on
-          `healthy`: a default is worth setting before the integration works, and
-          hiding the rows while it is down would read as the setting having been
-          lost. */}
+          · this device" group. `Default merge mode` used to sit beside them as
+          a third and moved out in task-19: it never answered this card's
+          question, and once a second orchestrate default existed the mismatch
+          stopped being cosmetic. */}
       <SettingsRow
         name="Default model"
         hint="Preselected in a card's launch sheet. “CLI default” sends no --model flag and lets Claude Code pick. Overridable per launch."
@@ -356,6 +494,15 @@ function AgentsGroup() {
         />
       </SettingsRow>
 
+      {/* The link RIDES this row since task-42, rather than sitting on the
+          status row a card away. A link driven by a per-device value had no
+          business on the page that promises everything on it is the host's —
+          and beside the field that supplies its href it also becomes
+          self-explaining, which it never was up on a status row.
+
+          Two controls in one right slot, the field and the link, which is the
+          only row on this page with two: they are one setting read and one
+          setting used. */}
       <SettingsRow
         name="Dashboard link"
         hint="Where THIS device reaches the dashboard — the laptop on loopback, a phone on its tailnet name. Used only for the link; the API calls it over BM_AGENTS_URL."
@@ -380,29 +527,15 @@ function AgentsGroup() {
             if (e.key === 'Enter') e.currentTarget.blur();
           }}
         />
+        {/* The button member of §8.6's 36 px control family, and an `<a>`
+            rather than a `<button>` because it navigates: `.set-link` is
+            Settings' own class, not `.sheet-link`'s second caller, so
+            restyling a settings control to this page's figures cannot reach
+            into the launch sheet that still draws the other one. */}
+        <a className="set-link" href={settings.linkBase} target="_blank" rel="noreferrer">
+          open dashboard ↗
+        </a>
       </SettingsRow>
-
-      {/* Gated on an actual answer, not bare `!healthy`: `healthy` starts
-          false the instant `status` is still `null` (its own `status !==
-          null` check fails first), which would fold "not answered yet" into
-          "broken" and tell the reader to go edit their .env while the status
-          line above still correctly says "checking…". */}
-      {status !== null && !healthy && (
-        <div className="set-row set-row-stacked">
-          <div className="set-label">
-            <span className="set-name">Setting it up</span>
-            <span className="set-hint">
-              1 · <code>BM_AGENTS=on</code> and <code>BM_AGENTS_URL</code> in this app's <code>.env</code>, then restart the API.
-              <br />2 · <code>CLAUDE_BIN</code> in the dashboard's <code>.env</code> — that is its spawn gate.
-              <br />
-              3 · Turn its remote-answer pill on; spawning is refused without it.
-              <br />4 · Run its <code>pnpm hooks:install</code>, or a groom that asks you a question will stall with nowhere to ask.
-              <br />5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to — open one there,
-              or raise <code>LOOKBACK_HOURS</code> in the dashboard's <code>.env</code>.
-            </span>
-          </div>
-        </div>
-      )}
     </SettingsGroup>
   );
 }

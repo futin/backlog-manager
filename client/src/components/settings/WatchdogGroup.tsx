@@ -28,19 +28,21 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * changes on a clock, so a poll here would redraw identical output forever.
  *
  * The card's scope subtitle says "this server", deliberately, against the
- * "this device" and "this machine" the other four carry — and against
- * `Orchestrator · this device` in particular, the card directly above this one
- * in the same column, which the two being one subject at two scopes is the
- * whole reason for. Both of those other scopes really are per-device: `useSettings` writes them to THIS browser's `localStorage`,
- * so opening the board on a phone shows different values than the laptop
- * that set them. `WatchdogConfig` cannot be that — the sweeper it configures
+ * "this device" the Local page's cards carry and against the "this machine" of
+ * `Claude Agents`, which since task-42 is the card beside this one on Settings'
+ * Shared page. (It sat under `Orchestrator · this device` until then, the two
+ * being one subject at two scopes; the Local/Shared split traded that adjacency
+ * for a page that is honestly one backend throughout, and this card went with
+ * the server it writes to.) `this device` really is per-device: `useSettings`
+ * writes those to THIS browser's `localStorage`, so opening the board on a
+ * phone shows different values than the laptop that set them. `WatchdogConfig` cannot be that — the sweeper it configures
  * runs once, on the API host, with no browser open at all (design §5.1), so
  * `~/.backlog-manager/settings/watchdog.json` is the only copy that exists,
  * read fresh on every tick and every GET. A phone opening this same board
  * reads and writes the identical file the laptop just touched. Naming that
- * plainly in the card's own subtitle — rather than reusing "this machine" and
- * letting a reader assume the same per-device meaning the neighbouring
- * group trained them to expect — is the whole point: silently reusing that
+ * plainly in the card's own subtitle — rather than reusing the "this machine"
+ * of the card beside it, and letting a reader carry over a meaning it does not
+ * have — is the whole point: silently reusing that
  * phrase would be a second thing this group gets wrong for free, on top of
  * the clamp problem the selects below exist to solve.
  *
@@ -247,8 +249,8 @@ export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void 
         hint={
           <>
             These values live on the API host, in <code>~/.backlog-manager/settings/watchdog.json</code> — not this browser's storage. Every device that opens
-            this board reads and writes that same one file, unlike the device-only cards beside it. The sweeper's state, the runs it is watching and its
-            activity are on Runs › Watchdog.
+            this board reads and writes that same one file, unlike the per-device settings on the Local page. The sweeper's state, the runs it is watching and
+            its activity are on Runs › Watchdog.
           </>
         }
       >

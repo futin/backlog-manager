@@ -14,7 +14,7 @@
 
 import { EFFORTS, MODELS } from '../../../shared/agent';
 import { MERGE_MODES, QUESTION_MODES, type MergeMode, type QuestionMode } from '../../../shared/types';
-import { SECTIONS, type Section } from '../components/SideRail';
+import { SECTIONS, type Section } from './sections';
 
 export const THEMES = [
   { id: 'midnight', label: 'Midnight Radar', hint: 'the original — deep navy scope room' },
@@ -33,6 +33,30 @@ export type Density = 'comfortable' | 'compact';
  * section added to the rail cannot be silently missing here.
  */
 export type Landing = Section | 'last';
+
+/**
+ * Which of Settings' two pages is showing: `local` is everything in this
+ * browser's localStorage, `shared` is what the API reads off the host — the
+ * watchdog's settings file and the environment the server was started with.
+ *
+ * A setting rather than a module-level store like `useRunsMode`, because both
+ * readers — the rail's tree and `SettingsView` itself — already sit inside
+ * `SettingsProvider`, so a second store beside the context would be a second
+ * mechanism for no gain. Per device because it is a VIEW POSITION and not a
+ * preference about the work: the laptop left on Shared and the phone opening
+ * on Local cost nothing and mean nothing to each other.
+ */
+export type SettingsScope = 'local' | 'shared';
+
+/**
+ * The page's measure. `fixed` keeps the drawn one (820 px, or 1280 px for
+ * `.wrap.wide`); `full` drops the cap so a section spans the window.
+ *
+ * Per device for the plainest reason any setting here has: the measure that
+ * reads well is a property of the screen in front of you, and a 34" monitor
+ * and a phone have no business agreeing about it.
+ */
+export type ContentWidth = 'fixed' | 'full';
 
 /**
  * A preselected launch flag, or `''` for "send no flag and let the `claude` CLI
@@ -117,6 +141,10 @@ export interface Settings {
    * and the laptop planning a quarter want different answers.
    */
   staleDays: number;
+  /** Which Settings page is showing. See `SettingsScope` for why this is a setting and why it is per device. */
+  settingsScope: SettingsScope;
+  /** Whether a section is capped at its drawn measure or spans the window. See `ContentWidth`. */
+  contentWidth: ContentWidth;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -129,7 +157,9 @@ export const DEFAULT_SETTINGS: Settings = {
   dispatchDefaultEffort: '',
   orchestrateDefaultMergeMode: 'merge',
   orchestrateDefaultQuestionMode: 'park',
-  staleDays: 30
+  staleDays: 30,
+  settingsScope: 'local',
+  contentWidth: 'fixed'
 };
 
 /**
@@ -218,12 +248,23 @@ function clampOrigin(value: unknown, fallback: string): string {
 const THEME_IDS = THEMES.map((t) => t.id);
 const DENSITIES = ['comfortable', 'compact'] as const;
 /**
+ * The two member lists, exported because the pickers and the rail's tree
+ * render from them and `clampSettings` below validates against them — one
+ * home each, so a third member cannot be added in one place only and leave a
+ * control offering an option the validator throws away on the next load.
+ */
+export const SETTINGS_SCOPES: readonly SettingsScope[] = ['local', 'shared'];
+export const CONTENT_WIDTHS: readonly ContentWidth[] = ['fixed', 'full'];
+/**
  * Every value `landing` may hold: the rail's own sections, plus `last`.
  *
  * Derived now rather than listed. This used to be a hand-copied literal, under
  * a comment warning that a section added to the rail had to be added here too
- * or it stayed unpickable — a warning nothing enforced. `SideRail` exports
- * `SECTIONS` for exactly this, so the warning and the failure mode go together.
+ * or it stayed unpickable — a warning nothing enforced. `lib/sections.ts` is
+ * the one runtime list for exactly this, so the warning and the failure mode
+ * go together. It read that list off `SideRail` itself until task-42, when the
+ * rail gained a `useSettings` read and the two files closed an import cycle —
+ * see `lib/sections.ts` for the whole of it.
  *
  * A stored `landing` naming a section this build no longer has — `'projects'`,
  * from before the rail said Board — falls back to `last` rather than being
@@ -263,6 +304,8 @@ export function clampSettings(raw: unknown): Settings {
     dispatchDefaultEffort: pickOne(s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort),
     orchestrateDefaultMergeMode: pickOne(s.orchestrateDefaultMergeMode, MERGE_MODES, DEFAULT_SETTINGS.orchestrateDefaultMergeMode),
     orchestrateDefaultQuestionMode: pickOne(s.orchestrateDefaultQuestionMode, QUESTION_MODES, DEFAULT_SETTINGS.orchestrateDefaultQuestionMode),
-    staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max)
+    staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max),
+    settingsScope: pickOne(s.settingsScope, SETTINGS_SCOPES, DEFAULT_SETTINGS.settingsScope),
+    contentWidth: pickOne(s.contentWidth, CONTENT_WIDTHS, DEFAULT_SETTINGS.contentWidth)
   };
 }

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 
-import { SECTIONS, SideRail, type Section } from './components/SideRail';
+import { SideRail } from './components/SideRail';
+import { SECTIONS, type Section } from './lib/sections';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { usePersistedState } from './hooks/usePersistedState';
 import { setRunsMode } from './hooks/useRunsMode';
@@ -90,10 +91,16 @@ function AppShell() {
     <div className="shell">
       <SideRail section={section} onChange={change} />
       <main className="main">
-        {/* Settings reads better narrow; every board surface wants the room for
-            its columns, so the test names the narrow one and new surfaces are
-            wide by default. */}
-        <div className={section === 'settings' ? 'wrap' : 'wrap wide'}>
+        {/* One measure for every section since task-42. Settings used to be the
+            exception — a narrow `wrap`, on the grounds that a column of
+            label-and-control rows reads better that way — and the Local/Shared
+            split took the exception away: both of its pages are two
+            hand-balanced columns of cards now, the same shape every other
+            section draws, and the narrow wrap folded them to one at every
+            width. The cap itself is released entirely under
+            `contentWidth: 'full'`, which is a stylesheet rule keyed off
+            `<html>` and nothing this expression has to know about. */}
+        <div className="wrap wide">
           <Suspense fallback={<SectionLoading />}>
             {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
                 the setter it navigates with — the same `change` the rail's own

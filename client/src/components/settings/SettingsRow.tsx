@@ -23,14 +23,23 @@ import { Sheet, SheetHead } from '../ui/Sheet';
  * refuses. The hairline is drawn between rows rather than under each, so the
  * last row in a card does not end on a rule with nothing beneath it.
  */
-export function SettingsRow({ name, hint, children }: { name: string; hint?: ReactNode; children: ReactNode }) {
+/*
+  `children` is optional since task-42, and the empty `.set-control` goes with
+  it rather than being rendered hollow. The Shared page's `Claude Agents` card
+  is a REPORT — its one row states where the host's dispatch config stands and
+  has nothing to set — and a row is the right shape for it: the label and hint
+  are exactly what such a row needs. An empty control div beside it would
+  reserve the right-hand slot's width for nothing, pulling the hint in against
+  a margin no control occupies.
+*/
+export function SettingsRow({ name, hint, children }: { name: string; hint?: ReactNode; children?: ReactNode }) {
   return (
     <div className="set-row">
       <div className="set-label">
         <span className="set-name">{name}</span>
         {hint && <span className="set-hint">{hint}</span>}
       </div>
-      <div className="set-control">{children}</div>
+      {children && <div className="set-control">{children}</div>}
     </div>
   );
 }

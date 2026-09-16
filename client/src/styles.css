@@ -105,6 +105,18 @@ code, kbd, samp, pre { font-family: inherit }
 
 .wrap { max-width: 820px; margin: 0 }
 .wrap.wide { max-width: 1280px }
+/* `contentWidth: 'full'` (Settings › Display), stamped on <html> as `data-width`
+   pre-paint by client/index.html and kept in step by hooks/useSettings.tsx — so
+   the measure is released by one CSS block and no component re-renders for it.
+
+   BOTH wraps are released, not just the narrow one: every section renders in
+   `.wrap.wide`, so freeing `.wrap` alone would leave the whole app capped at
+   1280 px in the one mode whose entire promise is that it is not. The cap is
+   all that goes — the margin stays 0, so a released section grows to the right
+   from the rail rather than re-centring on the window as it is dropped, which
+   would read as the page jumping sideways when the setting is toggled. */
+:root[data-width="full"] .wrap,
+:root[data-width="full"] .wrap.wide { max-width: none }
 
 /* ── Shell and rail ───────────────────────────────────────────────────────────
    .claude/DESIGN.md §8.0. The rail is the reference design's sidebar at this

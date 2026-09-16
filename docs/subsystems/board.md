@@ -12,14 +12,21 @@ reads, and which file owns each decision.
 
 ### The rail
 
-Board / Runs / Archive / Settings, a plain section switch. `SECTIONS` in `SideRail.tsx` is the one runtime list of them, and `resolveSection` in `App.tsx` maps
-a stored value that names no tab — the legacy `'projects'` included — onto Board, so an upgrade never opens on a blank main area.
+Board / Runs / Archive / Settings, a plain section switch. `SECTIONS` in `client/src/lib/sections.ts` is the one runtime list of them — it lived in
+`SideRail.tsx` until the rail gained a `useSettings` read and the two files closed an import cycle — and the rail keeps only the LABELS, as a
+`Record<Section, string>`, so a section added to the list cannot ship without one. `resolveSection` in `App.tsx` maps a stored value that names no tab — the
+legacy `'projects'` included — onto Board, so an upgrade never opens on a blank main area.
 
-Runs is the one section with a sub-nav tree under its row — History and Watchdog — and that tree is the **only** control that switches between them: there is no
-in-page mode switch at any width (`.claude/DESIGN.md` §8.0). It is not the only writer of the stored value, though — the Watchdog page's own rows jump back to
-History with a run selected, and the Settings watchdog card's `Live view` link opens Watchdog — so every writer goes through `useRunsMode`
-(`client/src/hooks/useRunsMode.ts`), a module-level value every mounted reader subscribes to, which is what keeps the rail and the page from looking at
-different views. `lib/runs-mode.ts` stays the one home of the key, the member list and the guard.
+TWO sections have a sub-nav tree under their row: Runs (History, Watchdog) and Settings (Local, Shared). Both are drawn by one component, `RailTree`, because
+the markup carries three details that must not drift — the `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone
+menu on a pick. What each call site supplies is only what legitimately differs: the item list, which of them is current, and what a pick writes. In both cases
+the tree is the **only** control that switches between the two views — there is no in-page switch at any width (`.claude/DESIGN.md` §8.0).
+
+The two trees differ in where their value lives, and the difference is not arbitrary. Runs' mode goes through `useRunsMode` (`client/src/hooks/useRunsMode.ts`),
+a module-level value every mounted reader subscribes to, because the rail is not its only writer — the Watchdog page's own rows jump back to History with a run
+selected, and the Settings watchdog card's `Live view` link opens Watchdog — and a second copy would let the rail and the page look at different views;
+`lib/runs-mode.ts` stays the one home of the key, the member list and the guard. Settings' scope is a field on the settings object instead, because both of its
+readers already sit inside `SettingsProvider` and nothing outside Settings writes it.
 
 Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
@@ -168,18 +175,35 @@ hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row
 
 ### Settings
 
-Five cards on two hand-placed columns — `Board`, `Display` and `Claude Agents` left, `Orchestrator · this device` over `Orchestrator watchdog · this server`
-right, because those two are the same subject at two scopes and a reader should meet them in that order. Each card is a title plus a scope (`this device`,
-`this machine`, `this server`) answering a different question from the name: whether changing this affects anybody but the person changing it. Hand-placed
-rather than reflowed, so a card does not move to the other side of the page when its neighbour grows a row; one column under 1100 px.
+TWO pages, picked from the rail's tree and from nothing else — `settingsScope` is the setting, `local` the default. **The page is the scope**: Local is
+everything in this browser's `localStorage`, Shared is what the API reads off the host. The band states which in a `Pill` at `neutral` (`this browser` /
+`this machine`) and its subtitle is the page's own one-line summary; there is no in-page switch at any width.
 
-Themes, density, text scale, landing section, the staleness window and the two orchestrator run defaults are per-device, in `localStorage`, never sent to the
-server. The Claude Agents card adds the dashboard's status, the default model and effort every launch sheet seeds from, and the dashboard link base. The
-watchdog card is the one place Settings writes to the server — four knobs that live in `settings/watchdog.json` beside the registry rather than in this browser,
-plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it is the one write, it is also the one card that can be
-refused: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while every knob keeps
-showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it, because a failed read replaces
-the whole group and a failed write must not.
+| Page       | Column 1              | Column 2      |
+| ---------- | --------------------- | ------------- |
+| **Local**  | Display, Board        | Orchestrator, Dispatch |
+| **Shared** | Orchestrator watchdog | Claude Agents |
+
+Each card is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether changing this
+affects anybody but the person changing it. Both pages draw the same two hand-placed columns, so a card does not move to the other side of the page when its
+neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card
+against the agents report.
+
+Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
+model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
+from. That card is what the old `Claude Agents` card's per-device half became: that card mixed backends, and a page that promises a scope cannot carry one that
+does. What stayed on Shared is genuinely the host's — the dispatch status lines and the conditional `Setting it up` block — on a status row with no control in
+its right slot at all.
+
+The watchdog card is the one place Settings writes to the server — four knobs that live in `settings/watchdog.json` beside the registry rather than in this
+browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it is the one write, it is also the one card
+that can be refused: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while
+every knob keeps showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it, because a
+failed read replaces the whole group and a failed write must not.
+
+`contentWidth` is the one setting here whose effect is not drawn by a component at all: `fixed | full`, stamped on `<html>` as `data-width` pre-paint and by
+`useSettings`, releasing `.wrap` and `.wrap.wide` through one CSS block. Every section renders in `wrap wide` — Settings included since the split, which took
+the shell's narrow-Settings exception away.
 
 ## Interfaces
 
@@ -194,7 +218,9 @@ the whole group and a failed write must not.
 ## Invariants
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the three per-item dispatch blocks
-and which one lets a click through, the dialog escape stack and its three entries, a crashed run rendering as crashed, "queue wait is not work" — are in
+and which one lets a click through, the dialog escape stack and its three entries, a crashed run rendering as crashed, "queue wait is not work",
+[Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope), and
+[the content-width stamp that the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in
 [invariants.md](invariants.md), with the failure each one encodes. Not restated here.
 
 <!-- docs-sync:
