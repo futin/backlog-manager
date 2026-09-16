@@ -1,5 +1,7 @@
 import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { Band } from '../ui/Band';
 import { Segmented } from '../ui/Segmented';
+import { Select } from '../ui/Select';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
@@ -101,83 +103,141 @@ function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
   );
 }
 
-/** The Settings section: this device only (localStorage). */
-export default function SettingsView() {
+/**
+ * The Settings section (`.claude/DESIGN.md` §8.6): this device only
+ * (localStorage), plus the one card that is not — the watchdog's, which says so
+ * in its own scope subtitle.
+ *
+ * `onOpenWatchdog` is the rail's own navigation, threaded down for the watchdog
+ * group's `Live view` link (DESIGN.md §8.6), exactly as `BoardView` takes
+ * `onOpenRuns` for its run chip and for the same reason: the link and the
+ * rail's Watchdog sub-nav entry have to mean the same thing by construction,
+ * and the section lives in `App`'s shell. Optional, because every suite that
+ * renders this view bare predates the link and none of them needs a
+ * destination for it.
+ */
+export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   const { settings, update } = useSettings();
 
   return (
     <div className="set">
-      <SettingsGroup title="Display · this device">
-        <div className="set-row">
-          <div className="set-label">
-            <span className="set-name">Theme</span>
-            <span className="set-hint">{THEMES.find((t) => t.id === settings.theme)?.hint}</span>
-          </div>
-        </div>
-        <div className="set-themes" style={{ marginTop: 5 }}>
-          {THEMES.map((t) => (
-            <button
-              key={t.id}
-              className={t.id === settings.theme ? 'set-theme on' : 'set-theme'}
-              aria-pressed={t.id === settings.theme}
-              onClick={() => update({ theme: t.id })}
+      {/* A band, like every other page on this board (DESIGN.md §8.2/§8.6):
+          the 19/500 title over a 13 px line. No controls in its right slot —
+          every control on this page belongs to a row inside a card, and one
+          hoisted up here would be a setting with no group saying what it
+          scopes. */}
+      <Band title="Settings" sub="How this board looks and behaves — per device, except where a card says otherwise." />
+
+      {/* Two hand-balanced columns (§8.6), placed by hand rather than reflowed:
+          a masonry pass would move a card to the other side of the page as its
+          neighbour above grew a row, so a reader who learnt where `Claude
+          Agents` sits would find it somewhere else after a knob changed.
+          The split is the orchestrator pair on the right and everything else on
+          the left, which is what balances the two sides AND keeps the one
+          adjacency that carries meaning: `Orchestrator · this device` and
+          `Orchestrator watchdog · this server` are the same subject read at two
+          scopes — what a run is started with, then what happens to one that has
+          already crashed — and a reader meets them in that order. Splitting them
+          across columns to even out a few pixels would have cost the only
+          ordering on this page that says anything.
+          Folds to one column under 1100 px, which is Settings' own breakpoint
+          and deliberately NOT the 700 px phone break every other split on this
+          board uses: these cards are a label-and-control row each, so they run
+          out of width for a side-by-side row long before the columns do. */}
+      <div className="set-cols">
+        <div className="set-col">
+          <SettingsGroup title="Display" scope="this device">
+            {/* Not a `SettingsRow`: the theme picker's control is a full-width
+                track under its own label rather than a control sitting to the
+                right of one, because five options with a swatch each cannot fit
+                a row's right-hand slot at any width this page has. The hint is
+                the SELECTED theme's own line, which is why it reads as a
+                description rather than as an instruction. */}
+            <div className="set-row set-row-stacked">
+              <div className="set-label">
+                <span className="set-name">Theme</span>
+                <span className="set-hint">{THEMES.find((t) => t.id === settings.theme)?.hint}</span>
+              </div>
+              {/* The `Switch` primitive's own ground, restated as a page layout
+                  rather than borrowed from its class family (§12.1 forbids the
+                  borrowing, guard 7 pins it): a recessed `--steel` track under
+                  raised `--strip` options. A raised option marks a STATE, which
+                  is §8's standing rule and the whole reason the selected theme
+                  is the one that lifts rather than the one that gains a colour.
+                  `aria-pressed` rather than a radio group, unchanged from what
+                  this picker always did — a pressed toggle is what a reader
+                  hears, and the five are not a form field. */}
+              <div className="set-themes" role="group" aria-label="Theme">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={t.id === settings.theme ? 'set-theme on' : 'set-theme'}
+                    aria-pressed={t.id === settings.theme}
+                    onClick={() => update({ theme: t.id })}
+                  >
+                    {/* 24 px at an 8 px radius — this design's own figure
+                        (§8.6), not the 34 px strip at a 2 px corner this
+                        carried before. Three bands: board, strip, accent. */}
+                    <span className="set-swatch">
+                      <i style={{ background: SWATCHES[t.id][0] }} />
+                      <i style={{ background: SWATCHES[t.id][1] }} />
+                      <i style={{ background: SWATCHES[t.id][2] }} />
+                    </span>
+                    <span className="set-theme-name">{t.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <SettingsRow name="Density" hint="Compact tightens padding and the gaps between cards — more items per screen.">
+              <Segmented value={settings.density} options={DENSITIES} onChange={(density) => update({ density })} label="Density" pill />
+            </SettingsRow>
+
+            <SettingsRow name="Text size" hint="Scales the whole board, not just type — the rail, the cards and the spacing move with it.">
+              <Segmented
+                value={settings.fontScale}
+                options={FONT_SCALES.map((v) => ({ value: v, label: `${v}%` }))}
+                onChange={(fontScale) => update({ fontScale })}
+                label="Text size"
+                pill
+              />
+            </SettingsRow>
+
+            <SettingsRow name="Opens on" hint="Which section this device lands on when you load the page.">
+              <Select label="Opens on" value={settings.landing} options={LANDINGS} onChange={(landing) => update({ landing })} />
+            </SettingsRow>
+          </SettingsGroup>
+
+          <SettingsGroup title="Board" scope="this device">
+            <SettingsRow
+              name="Archive after"
+              hint={
+                <>
+                  How long an open item may go untouched before it leaves the Board for Archive. Grooming one brings it straight back — the stamp this reads is
+                  written by every start and stop. Tasks never leave: a stale one keeps its column and is marked instead.
+                </>
+              }
             >
-              <span className="set-swatch">
-                <i style={{ background: SWATCHES[t.id][0] }} />
-                <i style={{ background: SWATCHES[t.id][1] }} />
-                <i style={{ background: SWATCHES[t.id][2] }} />
-              </span>
-              <span className="set-theme-name">{t.label}</span>
-            </button>
-          ))}
+              <Segmented
+                value={settings.staleDays}
+                options={STALE_WINDOWS.map((v) => ({ value: v, label: `${v}d` }))}
+                onChange={(staleDays) => update({ staleDays })}
+                label="Archive after"
+                pill
+              />
+            </SettingsRow>
+          </SettingsGroup>
+
+          <AgentsGroup />
         </div>
 
-        <SettingsRow name="Density" hint="Compact tightens padding and the gaps between cards — more items per screen.">
-          <Segmented value={settings.density} options={DENSITIES} onChange={(density) => update({ density })} />
-        </SettingsRow>
+        <div className="set-col">
+          <OrchestratorGroup />
 
-        <SettingsRow name="Text size" hint="Scales the whole board, not just type — the rail, the cards and the spacing move with it.">
-          <Segmented
-            value={settings.fontScale}
-            options={FONT_SCALES.map((v) => ({ value: v, label: `${v}%` }))}
-            onChange={(fontScale) => update({ fontScale })}
-          />
-        </SettingsRow>
-
-        <SettingsRow name="Opens on" hint="Which section this device lands on when you load the page.">
-          <select value={settings.landing} aria-label="Opens on" onChange={(e) => update({ landing: e.target.value as Landing })}>
-            {LANDINGS.map((l) => (
-              <option key={l.value} value={l.value}>
-                {l.label}
-              </option>
-            ))}
-          </select>
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup title="Board · this device">
-        <SettingsRow
-          name="Archive after"
-          hint={
-            <>
-              How long an open item may go untouched before it leaves the Board for Archive. Grooming one brings it straight back — the stamp this reads is
-              written by every start and stop. Tasks never leave: a stale one keeps its column and is marked instead.
-            </>
-          }
-        >
-          <Segmented
-            value={settings.staleDays}
-            options={STALE_WINDOWS.map((v) => ({ value: v, label: `${v}d` }))}
-            onChange={(staleDays) => update({ staleDays })}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
-      <AgentsGroup />
-
-      <OrchestratorGroup />
-
-      <WatchdogGroup />
+          <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -200,19 +260,20 @@ function OrchestratorGroup() {
   const { settings, update } = useSettings();
 
   return (
-    <SettingsGroup title="Orchestrator · this device">
+    <SettingsGroup title="Orchestrator" scope="this device">
       <SettingsRow
         name="Default merge mode"
         hint="Preselected in the Orchestrate sheet. “Merge to main” is what every run does today; “Leave branches for me” stops at a reviewed git branch per item instead. Overridable per launch."
       >
-        <select
-          aria-label="Default merge mode"
+        <Select
+          label="Default merge mode"
           value={settings.orchestrateDefaultMergeMode}
-          onChange={(e) => update({ orchestrateDefaultMergeMode: e.target.value as MergeMode })}
-        >
-          <option value="merge">Merge to main</option>
-          <option value="branch">Leave branches for me</option>
-        </select>
+          options={[
+            { value: 'merge' as MergeMode, label: 'Merge to main' },
+            { value: 'branch' as MergeMode, label: 'Leave branches for me' }
+          ]}
+          onChange={(orchestrateDefaultMergeMode) => update({ orchestrateDefaultMergeMode })}
+        />
       </SettingsRow>
 
       {/* The hint carries the whole doctrine, because this is one of the four
@@ -225,14 +286,15 @@ function OrchestratorGroup() {
         name="Default question mode"
         hint="What a run does with an item's open questions when nobody can answer them. Want control over a question, start the run from a harness that has AskUserQuestion; start it from the board and you are choosing between skipping the item and letting the runner answer. Overridable per launch."
       >
-        <select
-          aria-label="Default question mode"
+        <Select
+          label="Default question mode"
           value={settings.orchestrateDefaultQuestionMode}
-          onChange={(e) => update({ orchestrateDefaultQuestionMode: e.target.value as QuestionMode })}
-        >
-          <option value="decide">Decide and continue</option>
-          <option value="park">Skip the item for me</option>
-        </select>
+          options={[
+            { value: 'decide' as QuestionMode, label: 'Decide and continue' },
+            { value: 'park' as QuestionMode, label: 'Skip the item for me' }
+          ]}
+          onChange={(orchestrateDefaultQuestionMode) => update({ orchestrateDefaultQuestionMode })}
+        />
       </SettingsRow>
     </SettingsGroup>
   );
@@ -251,9 +313,14 @@ function AgentsGroup() {
   const healthy = status !== null && status.enabled && status.reachable && status.spawnAvailable && status.remoteAnswer;
 
   return (
-    <SettingsGroup title="Claude Agents · this machine">
+    <SettingsGroup title="Claude Agents" scope="this machine">
       <SettingsRow name="Dispatch" hint={<AgentsStatusLines status={status} />}>
-        <a className="sheet-link" href={settings.linkBase} target="_blank" rel="noreferrer">
+        {/* The button member of §8.6's 36 px control family, and an `<a>`
+            rather than a `<button>` because it navigates: `.set-link` is
+            Settings' own class, not `.sheet-link`'s second caller, so
+            restyling a settings control to this page's figures cannot reach
+            into the launch sheet that still draws the other one. */}
+        <a className="set-link" href={settings.linkBase} target="_blank" rel="noreferrer">
           open dashboard ↗
         </a>
       </SettingsRow>
@@ -272,25 +339,21 @@ function AgentsGroup() {
         name="Default model"
         hint="Preselected in a card's launch sheet. “CLI default” sends no --model flag and lets Claude Code pick. Overridable per launch."
       >
-        <select aria-label="Default model" value={settings.dispatchDefaultModel} onChange={(e) => update({ dispatchDefaultModel: e.target.value })}>
-          <option value="">CLI default</option>
-          {MODELS.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
+        <Select
+          label="Default model"
+          value={settings.dispatchDefaultModel}
+          options={[{ value: '', label: 'CLI default' }, ...MODELS.map((m) => ({ value: m as string, label: m }))]}
+          onChange={(dispatchDefaultModel) => update({ dispatchDefaultModel })}
+        />
       </SettingsRow>
 
       <SettingsRow name="Default effort" hint="Preselected in a card's launch sheet. “CLI default” sends no --effort flag.">
-        <select aria-label="Default effort" value={settings.dispatchDefaultEffort} onChange={(e) => update({ dispatchDefaultEffort: e.target.value })}>
-          <option value="">CLI default</option>
-          {EFFORTS.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
+        <Select
+          label="Default effort"
+          value={settings.dispatchDefaultEffort}
+          options={[{ value: '', label: 'CLI default' }, ...EFFORTS.map((f) => ({ value: f as string, label: f }))]}
+          onChange={(dispatchDefaultEffort) => update({ dispatchDefaultEffort })}
+        />
       </SettingsRow>
 
       <SettingsRow
@@ -299,6 +362,7 @@ function AgentsGroup() {
       >
         <input
           type="text"
+          className="set-text"
           aria-label="Dashboard link"
           defaultValue={settings.linkBase}
           // Re-seed on commit, same idiom and same reason as `NumberField`
@@ -324,7 +388,7 @@ function AgentsGroup() {
           "broken" and tell the reader to go edit their .env while the status
           line above still correctly says "checking…". */}
       {status !== null && !healthy && (
-        <div className="set-row">
+        <div className="set-row set-row-stacked">
           <div className="set-label">
             <span className="set-name">Setting it up</span>
             <span className="set-hint">

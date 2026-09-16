@@ -128,7 +128,8 @@ describe('BoardColumn', () => {
   });
 
   /** The count is a `Pill` — the primitive — inside the span that lays it out.
-   *  The old `.board-col-count` text node is Archive's now, until task 4. */
+   *  The old `.board-col-count` text node went with `.board-col-h` in task-39,
+   *  when Archive — its last reader — moved onto this component. */
   it('carries the count in a neutral Pill pushed right', async () => {
     await renderBoard();
     const counts = screen.getAllByTestId('col-count');
@@ -140,9 +141,12 @@ describe('BoardColumn', () => {
   });
 
   /** The tick is gone with the rule under it — both were the old header's. */
-  it('draws no tick', async () => {
+  it('draws no tick, and the stylesheet declares none', async () => {
     await renderBoard();
     expect(document.querySelector('.board-col-tick')).toBeNull();
+    // Task-39: and no rule survives for one either, now that Archive — which
+    // kept the tick alive through task-37 — draws this header instead.
+    expect(ruleBlock(readStyles(), '.board-col-tick')).toBeNull();
   });
 
   /**
@@ -155,9 +159,12 @@ describe('BoardColumn', () => {
   it('declares no border under the header, where the old one did', () => {
     const css = readStyles();
     expect(ruleBlock(css, '.board-col-head') as string).not.toMatch(/border/);
-    // The old header rule survives for Archive, and still draws its rule —
-    // which is the whole reason this is a second class rather than a retune.
-    expect(ruleBlock(css, '.board-col-h') as string).toMatch(/border-bottom/);
+    // The old `.board-col-h` rule outlived the Board's header only because
+    // Archive was still drawing it; task-39 put Archive on this component too,
+    // so the class went with the last surface asking for it. Its absence is
+    // asserted rather than left implied — a rule left standing with no reader
+    // is how a redrawn surface comes to be restyled back by accident.
+    expect(ruleBlock(css, '.board-col-h')).toBeNull();
   });
 });
 

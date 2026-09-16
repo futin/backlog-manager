@@ -1,11 +1,13 @@
 import { useWatchdog } from '../../hooks/useWatchdog';
 import { formatSpanCompact } from '../../lib/run-time';
 import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { Select } from '../ui/Select';
+import { Switch } from '../ui/Switch';
 import type { WatchdogConfig } from '../../../../shared/types';
 
 /**
- * The watchdog Settings group (design §6.4, trimmed by task-18) — the four
- * knobs, and nothing else.
+ * The watchdog Settings group (design §6.4, trimmed by task-18; drawn to
+ * `.claude/DESIGN.md` §8.6 since task-39) — the four knobs, and nothing else.
  *
  * It used to carry a live State row and an Activity feed as well, on the
  * reasoning that the knobs went here so their readings should too. That was
@@ -15,7 +17,7 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * board — the surface anyone actually watches — said nothing about the
  * sweeper until a run had already crashed. Both moved to Runs › Watchdog
  * (`WatchdogMonitor`), and what stays behind is the `Live view` row below,
- * saying so.
+ * saying so — and, since task-39, opening it.
  *
  * The rule that move establishes, and that this file is now the reference
  * for: NOTHING IN SETTINGS IS LIVE. Every other group here is a preference —
@@ -25,16 +27,18 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * `useWatchdog({ live: false })` below: this group renders no text that
  * changes on a clock, so a poll here would redraw identical output forever.
  *
- * Title says "this server", deliberately, against "Display · this device"
- * and "Claude Agents · this machine" above it. Both of those really are
- * per-device: `useSettings` writes them to THIS browser's `localStorage`,
+ * The card's scope subtitle says "this server", deliberately, against the
+ * "this device" and "this machine" the other four carry — and against
+ * `Orchestrator · this device` in particular, the card directly above this one
+ * in the same column, which the two being one subject at two scopes is the
+ * whole reason for. Both of those other scopes really are per-device: `useSettings` writes them to THIS browser's `localStorage`,
  * so opening the board on a phone shows different values than the laptop
  * that set them. `WatchdogConfig` cannot be that — the sweeper it configures
  * runs once, on the API host, with no browser open at all (design §5.1), so
  * `~/.backlog-manager/settings/watchdog.json` is the only copy that exists,
  * read fresh on every tick and every GET. A phone opening this same board
  * reads and writes the identical file the laptop just touched. Naming that
- * plainly in the group title — rather than reusing "this machine" and
+ * plainly in the card's own subtitle — rather than reusing "this machine" and
  * letting a reader assume the same per-device meaning the neighbouring
  * group trained them to expect — is the whole point: silently reusing that
  * phrase would be a second thing this group gets wrong for free, on top of
@@ -71,7 +75,7 @@ import type { WatchdogConfig } from '../../../../shared/types';
  * when that POST is refused, says so in a row of its own under the control
  * that was changed (`saveErrorSlot`). Rows
  * are not gated on `phase`: a knob is worth setting while nothing is
- * running, so the three selects and the checkbox render identically whether
+ * running, so the three selects and the switch render identically whether
  * the sweeper is `off`, `idle` or `armed` — and this group no longer reports
  * which of those it is, so `phase` is now read here for nothing at all.
  */
@@ -116,6 +120,21 @@ function ladderWithSelected(ladder: readonly number[], value: number): number[] 
   return ladder.includes(value) ? [...ladder] : [...ladder, value].sort((a, b) => a - b);
 }
 
+/**
+ * A ladder as `Select`'s options (task-39): the numbers above, stringified,
+ * each labelled by `label`.
+ *
+ * The stringifying is the primitive's requirement rather than a preference —
+ * `Select` is generic over `T extends string` because a native `<option>`'s
+ * value IS a string and a component that pretended otherwise would hand every
+ * caller back `"30000"` typed as `number`. Doing the conversion here, once,
+ * next to the ladder it converts, is what keeps each of the three call sites
+ * below to one `Number(...)` on the way out and no cast on the way in.
+ */
+function ladderOptions(ladder: readonly number[], value: number, label: (v: number) => string): { value: string; label: string }[] {
+  return ladderWithSelected(ladder, value).map((v) => ({ value: String(v), label: label(v) }));
+}
+
 /** Where a refused save's message goes: the row for the field that was
  *  refused, or the end of the group when there is no such row. */
 export type SaveErrorSlot = 'enabled' | 'tickMs' | 'graceMs' | 'maxAttempts' | 'end';
@@ -151,9 +170,17 @@ export function saveErrorSlot(field: keyof WatchdogConfig | null): SaveErrorSlot
   }
 }
 
-/** The watchdog's own Settings group. Mounted directly after `AgentsGroup`
- *  in `SettingsView.tsx`. */
-export function WatchdogGroup() {
+/**
+ * The watchdog's own Settings group. Mounted in `SettingsView.tsx`'s right-hand
+ * column, under `AgentsGroup` — the two cards that reach off this device.
+ *
+ * `onOpenWatchdog` is `SettingsView`'s own prop threaded one level further: the
+ * `Live view` row below is a real link since task-39, and the destination it
+ * opens has to be the rail's own, not a second opinion about where Runs ›
+ * Watchdog is. Optional for the reason `SettingsView`'s own signature gives —
+ * this suite's cases render the group bare and need no destination.
+ */
+export function WatchdogGroup({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   // `live: false` — see this file's header: with the State row gone,
   // nothing here changes on a clock, so the armed 5s poll would buy a
   // redraw nobody can see. The mount fetch and the focus refetch stay, and
@@ -173,8 +200,8 @@ export function WatchdogGroup() {
   // on a `null` status.
   if (status === null) {
     return (
-      <SettingsGroup title="Orchestrator watchdog · this server">
-        <div className="set-row">
+      <SettingsGroup title="Orchestrator watchdog" scope="this server">
+        <div className="set-row set-row-stacked">
           <div className="set-label">
             <span className="set-name">Unavailable</span>
             <span className="set-hint">
@@ -206,28 +233,47 @@ export function WatchdogGroup() {
     ) : null;
 
   return (
-    <SettingsGroup title="Orchestrator watchdog · this server">
-      {/* Not a `SettingsRow`: it has no control, and that is the point —
-          this group opens with one paragraph of orientation and then four
-          knobs. One row rather than two because both sentences answer the
-          same question a person arriving here has ("where does this live,
-          and where do I watch it work"). */}
-      <div className="set-row">
-        <div className="set-label">
-          <span className="set-name">Live view</span>
-          <span className="set-hint">
+    <SettingsGroup title="Orchestrator watchdog" scope="this server">
+      {/* A `SettingsRow` since task-39, where this was a control-less div: the
+          row now HAS a control, and it is the point of the redraw (DESIGN.md
+          §8.6). The sentence used to end by naming Runs › Watchdog and leaving
+          the reader to find it; the rail can name that destination now, so this
+          row opens it through the rail's own section setter rather than
+          describing where it is. One row rather than two because both sentences
+          still answer the same question a person arriving here has — where does
+          this live, and where do I watch it work. */}
+      <SettingsRow
+        name="Live view"
+        hint={
+          <>
             These values live on the API host, in <code>~/.backlog-manager/settings/watchdog.json</code> — not this browser's storage. Every device that opens
-            this board reads and writes that same one file, unlike the device-only groups above. The sweeper's state, the runs it is watching and its activity
-            are on Runs › Watchdog.
-          </span>
-        </div>
-      </div>
+            this board reads and writes that same one file, unlike the device-only cards beside it. The sweeper's state, the runs it is watching and its
+            activity are on Runs › Watchdog.
+          </>
+        }
+      >
+        {/* A `<button>`, not an `<a href>`: there is no URL for a section in
+            this app — the rail switches a React state — so an anchor would be
+            an href this page would have to invent and then cancel on click.
+            `.set-link` is the same 36 px family member the dashboard link in
+            the card beside it draws. */}
+        <button type="button" className="set-link" onClick={() => onOpenWatchdog?.()}>
+          Runs › Watchdog ↗
+        </button>
+      </SettingsRow>
 
       <SettingsRow
         name="Enabled"
         hint="Your own switch (design's 'Disabled'), separate from the sweeper's own phase: watching, arming and reporting a crashed run all continue either way. Turning this off only withholds the resume spawn itself."
       >
-        <input type="checkbox" aria-label="Enabled" checked={config.enabled} onChange={(e) => void save({ enabled: e.target.checked })} />
+        {/* The pill `Switch` (§8.6), where this was a bare checkbox: a recessed
+            `--steel` track under a raised `--strip` option, so "on" is legible
+            from the geometry before any colour is read — which matters on the
+            amber theme, the one with no second hue to spend on a state. The
+            accessible name and the save call are unchanged; what changed is
+            that the control is now the same 36 px height as the three selects
+            under it, where a UA checkbox was whatever the platform drew. */}
+        <Switch label="Enabled" checked={config.enabled} onChange={(enabled) => void save({ enabled })} />
       </SettingsRow>
       {errorRow('enabled')}
 
@@ -235,13 +281,12 @@ export function WatchdogGroup() {
         name="Check every"
         hint="How often the sweeper re-reads every project's run file for staleness while armed. Shorter notices a crash sooner; longer costs less on a server watching many projects."
       >
-        <select aria-label="Check every" value={config.tickMs} onChange={(e) => void save({ tickMs: Number(e.target.value) })}>
-          {ladderWithSelected(TICK_LADDER, config.tickMs).map((v) => (
-            <option key={v} value={v}>
-              {formatSpanCompact(v)}
-            </option>
-          ))}
-        </select>
+        <Select
+          label="Check every"
+          value={String(config.tickMs)}
+          options={ladderOptions(TICK_LADDER, config.tickMs, formatSpanCompact)}
+          onChange={(v) => void save({ tickMs: Number(v) })}
+        />
       </SettingsRow>
       {errorRow('tickMs')}
 
@@ -249,13 +294,12 @@ export function WatchdogGroup() {
         name="Leave a resumed run alone for"
         hint="How long a crashed run is left alone after any resume attempt or failure before the sweeper tries again. The floor is five minutes: a resume spawned into the same overload that caused the crash can take several minutes just to run its first command."
       >
-        <select aria-label="Leave a resumed run alone for" value={config.graceMs} onChange={(e) => void save({ graceMs: Number(e.target.value) })}>
-          {ladderWithSelected(GRACE_LADDER, config.graceMs).map((v) => (
-            <option key={v} value={v}>
-              {formatSpanCompact(v)}
-            </option>
-          ))}
-        </select>
+        <Select
+          label="Leave a resumed run alone for"
+          value={String(config.graceMs)}
+          options={ladderOptions(GRACE_LADDER, config.graceMs, formatSpanCompact)}
+          onChange={(v) => void save({ graceMs: Number(v) })}
+        />
       </SettingsRow>
       {errorRow('graceMs')}
 
@@ -263,13 +307,12 @@ export function WatchdogGroup() {
         name="Give up after"
         hint="How many resume spawns one crashed run gets before the sweeper marks it exhausted and stops trying — past that point the crashed strip's own Resume button is the way forward, by hand."
       >
-        <select aria-label="Give up after" value={config.maxAttempts} onChange={(e) => void save({ maxAttempts: Number(e.target.value) })}>
-          {ladderWithSelected(ATTEMPT_LADDER, config.maxAttempts).map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
+        <Select
+          label="Give up after"
+          value={String(config.maxAttempts)}
+          options={ladderOptions(ATTEMPT_LADDER, config.maxAttempts, String)}
+          onChange={(v) => void save({ maxAttempts: Number(v) })}
+        />
       </SettingsRow>
       {errorRow('maxAttempts')}
       {errorRow('end')}

@@ -1,9 +1,14 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
+
+import { readStyles, ruleBlock } from './helpers/css-rule';
 
 import SettingsView from '../client/src/components/settings/SettingsView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
@@ -28,6 +33,34 @@ const DEFAULT_AGENTS_STATUS: AgentsStatus = {
   spawnMaxPermission: 'auto',
   projectPaths: []
 };
+
+/**
+ * Every card's title, in render order.
+ *
+ * `.ui-sheet-title` since task-39, where this read `.set-group > .mdetail-label`:
+ * a settings group is a `Sheet` under a `SheetHead` now (DESIGN.md §8.6), so the
+ * title is the primitive's `h3` and the group's scope is the `p` beside it. A
+ * heading has no role this suite can use to tell it from the band's own title,
+ * which is also a heading — hence the class, which is the one the component
+ * actually renders.
+ */
+function groupTitles(): string[] {
+  return [...document.querySelectorAll('.set-group .ui-sheet-title')].map((el) => el.textContent ?? '');
+}
+
+/** Each card's scope subtitle, in the same order — the second half of the pair
+ *  `SettingsGroup` splits the old `Display · this device` string into. */
+function groupScopes(): string[] {
+  return [...document.querySelectorAll('.set-group .ui-sheet-sub')].map((el) => el.textContent ?? '');
+}
+
+/** The rows inside one named card, by their visible name — how this suite tells
+ *  "moved into the new group" apart from "rendered twice". */
+function rowNamesIn(title: string): string[] {
+  const group = [...document.querySelectorAll('.set-group')].find((el) => el.querySelector('.ui-sheet-title')?.textContent === title);
+  if (!group) throw new Error(`no settings card titled ${title}`);
+  return [...group.querySelectorAll('.set-name')].map((el) => el.textContent ?? '');
+}
 
 describe('SettingsView', () => {
   beforeEach(() => {
@@ -277,39 +310,24 @@ describe('SettingsView', () => {
    * sheet borrowing them is not a reason to move them.
    */
   describe('the Orchestrator group', () => {
-    /** Every group heading on screen, in render order — `SettingsGroup`
-     *  renders its title as an `.mdetail-label` div, which has no ARIA role
-     *  to query by, so this reads the class the component actually uses. */
-    function groupTitles(): string[] {
-      return [...document.querySelectorAll('.set-group > .mdetail-label')].map((el) => el.textContent ?? '');
-    }
-
     it('renders above the watchdog group', async () => {
       renderView();
       await screen.findByLabelText('Default question mode');
       const titles = groupTitles();
-      const orchestrator = titles.indexOf('Orchestrator · this device');
-      const watchdog = titles.indexOf('Orchestrator watchdog · this server');
+      const orchestrator = titles.indexOf('Orchestrator');
+      const watchdog = titles.indexOf('Orchestrator watchdog');
       expect(orchestrator).toBeGreaterThanOrEqual(0);
       expect(watchdog).toBeGreaterThanOrEqual(0);
       expect(orchestrator).toBeLessThan(watchdog);
     });
 
-    /** The rows inside one named group, by their visible name — how this
-     *  suite tells "moved into the new group" apart from "rendered twice". */
-    function rowNamesIn(title: string): string[] {
-      const group = [...document.querySelectorAll('.set-group')].find((el) => el.querySelector('.mdetail-label')?.textContent === title);
-      if (!group) throw new Error(`no settings group titled ${title}`);
-      return [...group.querySelectorAll('.set-name')].map((el) => el.textContent ?? '');
-    }
-
     it('holds both orchestrate defaults, and the Agents group holds neither', async () => {
       renderView();
       await screen.findByLabelText('Default question mode');
 
-      expect(rowNamesIn('Orchestrator · this device')).toEqual(expect.arrayContaining(['Default merge mode', 'Default question mode']));
+      expect(rowNamesIn('Orchestrator')).toEqual(expect.arrayContaining(['Default merge mode', 'Default question mode']));
 
-      const agents = rowNamesIn('Claude Agents · this machine');
+      const agents = rowNamesIn('Claude Agents');
       expect(agents).not.toContain('Default merge mode');
       expect(agents).toEqual(expect.arrayContaining(['Default model', 'Default effort']));
     });
@@ -335,6 +353,120 @@ describe('SettingsView', () => {
       await userEvent.selectOptions(select, 'branch');
       const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
       expect(stored.orchestrateDefaultMergeMode).toBe('branch');
+    });
+  });
+  /*
+   * task-39 — the restyle. What these cases pin is the half of §8.6 that is
+   * structural rather than cosmetic: which cards exist, what each groups, and
+   * that every control on the page is one of the `ui/` 36 px family rather than
+   * a bare element this file styled itself.
+   */
+  describe('the redrawn page (task-39)', () => {
+    it('opens on a band, not a card', async () => {
+      renderView();
+      await screen.findByText(/connected/);
+      // The same `Band` primitive every other page opens with (§8.2). Queried by
+      // ROLE as well as text, because `Settings` is also one of the five
+      // `Opens on` options and a bare text query matches both — and asserted
+      // through the primitive's own class because a band title and a card title
+      // are both headings, and the distinction between them is the point.
+      expect(screen.getByRole('heading', { name: 'Settings' })).toHaveClass('ui-band-title');
+    });
+
+    /**
+     * The five groupings, unchanged — this task restyles the cards, it does not
+     * decide what they group. Asserted as an exact ordered list rather than five
+     * `toBeInTheDocument`s, because the failure worth catching is a card
+     * quietly gaining or losing a member, which five presence checks would miss.
+     *
+     * The scopes are asserted beside them because `SettingsGroup` splits what
+     * used to be one `Display · this device` string into a title and a subtitle:
+     * a list of titles alone would pass on a page that had dropped every scope,
+     * and the scope is the half that says whether changing a setting affects
+     * anybody else.
+     */
+    it('renders the same five groupings, each with its own scope', async () => {
+      renderView();
+      await screen.findByText(/connected/);
+      expect(groupTitles()).toEqual(['Display', 'Board', 'Claude Agents', 'Orchestrator', 'Orchestrator watchdog']);
+      expect(groupScopes()).toEqual(['this device', 'this device', 'this machine', 'this device', 'this server']);
+    });
+
+    /** And the same rows inside them — the three cards this file owns outright.
+     *  `Theme` and `Setting it up` are rows without a `SettingsRow` wrapper and
+     *  still carry `.set-name`, which is what makes them visible here. */
+    it('groups the same rows it grouped before', async () => {
+      renderView();
+      await screen.findByText(/connected/);
+      expect(rowNamesIn('Display')).toEqual(['Theme', 'Density', 'Text size', 'Opens on']);
+      expect(rowNamesIn('Board')).toEqual(['Archive after']);
+      expect(rowNamesIn('Claude Agents')).toEqual(['Dispatch', 'Default model', 'Default effort', 'Dashboard link']);
+    });
+
+    /**
+     * Every picker on the page is the `Select` primitive, and every segmented
+     * control is `Segmented` wearing its pill variant (§8.6) — a source-level
+     * check over what this file IMPORTS, not over what it renders.
+     *
+     * Rendered classes would pass just as happily on a page that had copied the
+     * primitive's markup inline, which is precisely the drift `ui/` exists to
+     * stop and precisely what a `./SettingsRow` import left behind by task-36
+     * would look like. The one thing a test can say about that is where the
+     * component came from.
+     */
+    it('takes every control from ui/, never from ./SettingsRow', () => {
+      const src = readFileSync(join(__dirname, '..', 'client', 'src', 'components', 'settings', 'SettingsView.tsx'), 'utf8');
+      expect(src).toMatch(/import \{ Segmented \} from '\.\.\/ui\/Segmented'/);
+      expect(src).toMatch(/import \{ Select \} from '\.\.\/ui\/Select'/);
+      expect(src).toMatch(/import \{ Band \} from '\.\.\/ui\/Band'/);
+      // `./SettingsRow` may still hand over the row and the group — those are
+      // this card's composition, not primitives (the design spec's §12.3) — and
+      // nothing else.
+      const fromRow = /import \{([^}]*)\} from '\.\/SettingsRow'/.exec(src)?.[1] ?? '';
+      expect(fromRow.split(',').map((n) => n.trim())).toEqual(['SettingsGroup', 'SettingsRow']);
+      // No bare `<select>` left anywhere: the primitive is the one home for the
+      // look, so a hand-rolled one is a second.
+      expect(src).not.toMatch(/<select\b/);
+    });
+
+    /** `Segmented`'s pill variant, on every segmented row this page draws
+     *  (§8.6's "the theme and density pickers take `Switch`'s pill shape"). */
+    it('draws its segmented rows in the pill skin', async () => {
+      renderView();
+      await screen.findByText(/connected/);
+      for (const label of ['Density', 'Text size', 'Archive after']) {
+        expect(screen.getByRole('group', { name: label })).toHaveClass('ui-seg-pill');
+      }
+    });
+
+    /**
+     * The theme swatch keeps its job at 24 px and an 8 px radius — this design's
+     * own figure (§8.6), against the 34 px strip at a 2 px corner it drew
+     * before. Read off the stylesheet, since jsdom applies none.
+     */
+    it('sizes the theme swatch at 24 px and an 8 px radius', () => {
+      const block = ruleBlock(readStyles(), '.set-swatch') as string;
+      expect(block).toMatch(/width: *24px/);
+      expect(block).toMatch(/height: *24px/);
+      expect(block).toMatch(/border-radius: *8px/);
+    });
+
+    /**
+     * Settings' own breakpoint (§8.6): the two columns fold to one under
+     * 1100 px, ABOVE the 700 px phone break every other split on this board
+     * uses. A regression guard against unifying it with the others — which is
+     * the change a reader tidying up media queries would make, and which would
+     * squeeze a label, a hint and a 36 px control into one 800 px-wide row.
+     */
+    it('folds its columns at 1100 px, not at the board-wide 700 px', () => {
+      const css = readStyles();
+      const fold = /@media \(max-width: (\d+)px\) \{ \.set-cols \{[^}]*grid-template-columns: 1fr/.exec(css);
+      expect(fold?.[1]).toBe('1100');
+      // And the 700 px block that DOES exist for this page touches the row, not
+      // the grid: it stacks a control under its label and says nothing about
+      // `.set-cols`.
+      const phone = /@media \(max-width: 700px\) \{\s*\.set-row[\s\S]*?\n\}/.exec(css)?.[0] ?? '';
+      expect(phone).not.toMatch(/set-cols/);
     });
   });
 });

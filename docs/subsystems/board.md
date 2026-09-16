@@ -62,9 +62,11 @@ instead.
 
 ### Archive
 
-Where those land, in four columns of its own — refactoring, ideas, bugs, out of scope — grouped under sticky month subheaders, newest month first. It carries a
-project filter and a search box and nothing else: its contents are defined by staleness and rejection, not by status, so a status filter there would either do
-nothing or contradict the surface.
+Where those land, in four columns — refactoring, ideas, bugs, out of scope — grouped under sticky month subheaders, newest month first. The column is the
+Board's own `BoardColumn` and the card its own `ItemCard`, not a second set: what differs is the fourth column, whose dot carries no type hue at all, because a
+rejection is a verdict rather than a type. It carries a project filter and a search box and nothing else: its contents are defined by staleness and rejection,
+not by status, so a status filter there would either do nothing or contradict the surface. No card here ever paints a live strip — whatever put an item in
+Archive already took it off the Board a run could be holding — which `ArchiveView` guarantees by handing `ItemCard` no run at all.
 
 Nothing in it is finished, and both halves come back by their own route — a stale item by dispatching a **groom**, which refreshes `updated:` and puts it back
 on the Board at the next load; a rejected one by dispatching a **capture**, which files a _new_ item citing `from: <id>` and leaves the original rejected on the

@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import SettingsView from '../client/src/components/settings/SettingsView';
-import { ATTEMPT_LADDER, GRACE_LADDER, TICK_LADDER, saveErrorSlot } from '../client/src/components/settings/WatchdogGroup';
+import { ATTEMPT_LADDER, GRACE_LADDER, TICK_LADDER, WatchdogGroup, saveErrorSlot } from '../client/src/components/settings/WatchdogGroup';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
 import { formatSpanCompact } from '../client/src/lib/run-time';
@@ -112,7 +112,14 @@ function renderView(): void {
   );
 }
 
-const GROUP_TITLE = 'Orchestrator watchdog · this server';
+/* The card's title and its scope subtitle, two strings since task-39 —
+   `SettingsGroup` splits what was one `Orchestrator watchdog · this server`
+   line into `SheetHead`'s title and sub (DESIGN.md §8.6). Both are asserted,
+   because the scope is the half that says the file this card edits is NOT this
+   browser's, which is the one thing this group's own header comment argues at
+   length. */
+const GROUP_TITLE = 'Orchestrator watchdog';
+const GROUP_SCOPE = 'this server';
 
 describe('WatchdogGroup', () => {
   afterEach(() => {
@@ -137,6 +144,7 @@ describe('WatchdogGroup', () => {
     // actually landed, so waiting on ONE of them is what waits for the fetch.
     expect(await screen.findByLabelText('Enabled')).toBeInTheDocument();
     expect(screen.getByText(GROUP_TITLE)).toBeInTheDocument();
+    expect(screen.getByText(GROUP_SCOPE)).toBeInTheDocument();
 
     // The hint is read as running text — same pattern
     // test/settings-view.test.tsx already relies on for AgentsStatusLines'
@@ -147,9 +155,43 @@ describe('WatchdogGroup', () => {
 
     // task-18: the live half moved. What stays behind is one sentence saying
     // where it went — and, crucially, NOTHING that changes on a clock.
-    expect(screen.getByText(/Runs › Watchdog/)).toBeInTheDocument();
+    // task-39: and a control that OPENS it, where the sentence used to be the
+    // whole of it. Both readings are asserted — the sentence still has to name
+    // the destination for a reader who is only scanning, and the button is what
+    // the redraw added.
+    expect(screen.getByText(/The sweeper's state, the runs it is watching/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Runs › Watchdog/ })).toBeInTheDocument();
     expect(screen.queryByText(/^idle — /)).not.toBeInTheDocument();
     expect(screen.queryByText('Activity')).not.toBeInTheDocument();
+  });
+
+  /**
+   * task-39 — the `Live view` row's control calls the destination it is handed
+   * and nothing else.
+   *
+   * Asserted against the PROP rather than against a rendered Watchdog page,
+   * because the destination is the rail's own and this group has no opinion
+   * about it: the shell hands down the same pair the rail's sub-nav entry calls
+   * (test/nav.test.tsx pins that half). A group that opened Runs › Watchdog by
+   * calling `setRunsMode` itself would pass a "the page changed" assertion and
+   * be exactly the second expression of one destination this prop exists to
+   * prevent.
+   *
+   * `WatchdogGroup` is rendered directly rather than through `SettingsView`,
+   * so the prop under test is the one this component actually receives.
+   */
+  it('opens Runs › Watchdog through the destination it is handed', async () => {
+    stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
+    const onOpenWatchdog = jest.fn();
+    render(
+      <SettingsProvider>
+        <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
+      </SettingsProvider>
+    );
+    await screen.findByRole('switch', { name: 'Enabled' });
+
+    await userEvent.click(screen.getByRole('button', { name: /Runs › Watchdog/ }));
+    expect(onOpenWatchdog).toHaveBeenCalledTimes(1);
   });
 
   // --- 2: off, controls not gated on phase -----------------------------------
@@ -313,7 +355,7 @@ describe('WatchdogGroup', () => {
 
   // --- 8: Enabled checkbox -> exactly one POST {enabled:false} --------------
 
-  it('posts exactly {enabled:false} when the Enabled checkbox is unticked', async () => {
+  it('posts exactly {enabled:false} when the Enabled switch is turned off', async () => {
     const responded = watchdogStatus({
       config: { ...DEFAULT_WATCHDOG_CONFIG, enabled: false }
     });
@@ -323,15 +365,18 @@ describe('WatchdogGroup', () => {
     });
     renderView();
 
-    const checkbox = (await screen.findByLabelText('Enabled')) as HTMLInputElement;
-    expect(checkbox.checked).toBe(true);
+    // A `Switch` since task-39 (§8.6's pill), not a UA checkbox: the accessible
+    // name and the save call are unchanged, so what moved is `checked` →
+    // `aria-checked` and `input` → `role="switch"`.
+    const toggle = await screen.findByRole('switch', { name: 'Enabled' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
 
     // Same "before" snapshot as case 7's — see that case's comment for why
     // it is taken only after the mount fetch has already settled.
     const getsToWatchdog = (): number => fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog')).length;
     const getsBeforeSave = getsToWatchdog();
 
-    await userEvent.click(checkbox);
+    await userEvent.click(toggle);
 
     await waitFor(() => {
       const posts = fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/agents/watchdog/config'));
@@ -340,7 +385,7 @@ describe('WatchdogGroup', () => {
     const [, init] = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/agents/watchdog/config')) as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({ enabled: false });
 
-    // Same call-count proof as case 7's, for the checkbox's own save path.
+    // Same call-count proof as case 7's, for the switch's own save path.
     expect(getsToWatchdog()).toBe(getsBeforeSave);
   });
 
@@ -404,11 +449,12 @@ describe('WatchdogGroup', () => {
     );
     await screen.findByLabelText('Enabled');
 
-    // Scoped to this group alone: `SettingsView` renders several others
-    // above it, all of which use the same `.set-name` class.
-    const group =
-      container.querySelector('[data-testid="settings-group-orchestrator-watchdog"]') ??
-      Array.from(container.querySelectorAll('.set-group')).find((el) => el.textContent?.includes(GROUP_TITLE));
+    // Scoped to this card alone: `SettingsView` renders four others, all of
+    // which use the same `.set-name` class. Matched on the card's own
+    // `SheetHead` title rather than on its text CONTENT, which since task-39
+    // would also match the card beside it — `Orchestrator · this device`'s hints
+    // mention the watchdog.
+    const group = Array.from(container.querySelectorAll('.set-group')).find((el) => el.querySelector('.ui-sheet-title')?.textContent === GROUP_TITLE);
     const names = Array.from(group?.querySelectorAll('.set-name') ?? []).map((el) => el.textContent);
     expect(names).toEqual(['Live view', 'Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after']);
   });
@@ -467,16 +513,19 @@ describe('WatchdogGroup', () => {
     expect(alert.previousElementSibling).toContainElement(screen.getByLabelText('Give up after'));
   });
 
-  it('reports a refused save from the checkbox the same way', async () => {
+  it('reports a refused save from the switch the same way', async () => {
     stubRefusedSave();
     renderView();
 
-    const checkbox = (await screen.findByLabelText('Enabled')) as HTMLInputElement;
-    expect(checkbox.checked).toBe(true);
-    await userEvent.click(checkbox);
+    const toggle = await screen.findByRole('switch', { name: 'Enabled' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(toggle);
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect((screen.getByLabelText('Enabled') as HTMLInputElement).checked).toBe(true);
+    // Still on: the control shows the value that is actually on the server,
+    // which is the whole of bug-24's claim and is unaffected by the control
+    // being a pill rather than a checkbox.
+    expect(await screen.findByRole('switch', { name: 'Enabled' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('removes the message once a later save succeeds', async () => {
