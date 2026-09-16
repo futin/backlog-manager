@@ -5,7 +5,7 @@ import { Select } from '../ui/Select';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
-import { FONT_SCALES, STALE_WINDOWS, THEMES, type Landing, type ThemeId } from '../../lib/settings';
+import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import type { AgentsStatus, MergeMode, QuestionMode } from '../../../../shared/types';
 
@@ -26,6 +26,18 @@ const SWATCHES: Record<ThemeId, [string, string, string]> = {
 const DENSITIES = [
   { value: 'comfortable' as const, label: 'Comfortable' },
   { value: 'compact' as const, label: 'Compact' }
+];
+
+/**
+ * The two measures, labelled for what they do rather than for the numbers
+ * behind them: `Fixed` is the measure this board was drawn at and `Full` is
+ * the window. Written out rather than mapped over `CONTENT_WIDTHS` for the
+ * same reason `LANDINGS` below is — these are a settings row's copy, not the
+ * union's members — and `clampSettings` is what keeps the values in step.
+ */
+const CONTENT_WIDTH_OPTIONS = [
+  { value: 'fixed' as ContentWidth, label: 'Fixed' },
+  { value: 'full' as ContentWidth, label: 'Full' }
 ];
 
 /**
@@ -202,6 +214,17 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
                 label="Text size"
                 pill
               />
+            </SettingsRow>
+
+            {/* Between Text size and Opens on, because the three rows above it
+                are all "how big is this board" and this is the fourth reading
+                of that same question — how wide. `Opens on` is a different
+                subject (which section) and stays last. */}
+            <SettingsRow
+              name="Content width"
+              hint="Fixed keeps the measure this board was drawn at, which is what every screenshot and every column width was tuned against. Full drops the cap so every section — the board, Runs, Archive and this page — spans the window."
+            >
+              <Segmented value={settings.contentWidth} options={CONTENT_WIDTH_OPTIONS} onChange={(contentWidth) => update({ contentWidth })} label="Content width" pill />
             </SettingsRow>
 
             <SettingsRow name="Opens on" hint="Which section this device lands on when you load the page.">

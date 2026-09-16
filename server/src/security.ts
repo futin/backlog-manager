@@ -17,7 +17,7 @@ import { allowedHostGate } from './allowed-hosts';
  * without updating this constant is a red test, not a silently blocked script
  * and a theme flash nobody notices until they change themes.
  */
-export const THEME_SCRIPT_SHA256 = 'sha256-wZHQJ85rj3ae+nJZWhUQ1vAodctY1gHVM02A+GiCCQU=';
+export const THEME_SCRIPT_SHA256 = 'sha256-bmx9tAgRlDv06/LcHGD8vBp7TYMeFgtAu3vDmPF9gRI=';
 
 /**
  * The drawer renders item Markdown, and its sanitizer was the only thing

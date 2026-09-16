@@ -26,11 +26,13 @@
      reading as a board; bottom-aligned bars read as a bar chart instead. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffb03a'/%3E%3Cg fill='%230c1220'%3E%3Crect x='5' y='5' width='6' height='22' rx='3'/%3E%3Crect x='13' y='5' width='6' height='14.5' rx='3'/%3E%3Crect x='21' y='5' width='6' height='7' rx='3'/%3E%3C/g%3E%3C/svg%3E">
 <script>
-// Stamp the saved theme, density and text scale before first paint. Without
-// this every load renders in the default palette at 100% until React mounts,
-// which reads as a flash — worst on the light theme, and a scaled device
-// flashing 100% is the same flash by a different name. Kept inline and tiny on
-// purpose: it must run before the stylesheet paints, so it cannot be a module.
+// Stamp the saved theme, density, text scale and content width before first
+// paint. Without this every load renders in the default palette at 100% until
+// React mounts, which reads as a flash — worst on the light theme, and a
+// scaled device flashing 100% is the same flash by a different name. The width
+// is the same bargain: a `full` install would paint at the fixed measure and
+// snap out of it on every single load. Kept inline and tiny on purpose: it
+// must run before the stylesheet paints, so it cannot be a module.
 //
 // Mirrors hooks/useSettings.tsx. Fails silently (private mode, no storage)
 // straight back to the defaults.
@@ -39,6 +41,7 @@ try {
   var r = document.documentElement;
   if (s.theme) r.dataset.theme = s.theme;
   if (s.density) r.dataset.density = s.density;
+  if (s.contentWidth) r.dataset.width = s.contentWidth;
   if (s.fontScale) r.style.setProperty('--font-scale', String(s.fontScale / 100));
 } catch (e) {}
 </script>

@@ -130,6 +130,37 @@ describe('SettingsView', () => {
     expect(document.documentElement.style.getPropertyValue('--font-scale')).toBe('1.2');
   });
 
+  /*
+    The content-width row (task-42). Three cases rather than one, because the
+    setting has three separable halves and only two of them are observable
+    here: the control exists and starts on the drawn measure; a pick reaches
+    storage; and the same pick reaches `<html>`.
+
+    That third assertion is the one worth its line. Control and stamp are
+    wired to each other by a dependency list in `useSettings`'s effect, and a
+    stamp missing from that list is the classic version of this bug — it works
+    on reload and not on the click, which is the shape nobody notices while
+    developing because a reload is what you do next anyway. The CSS half and
+    the pre-paint half are not observable at all and live in
+    test/content-width-style.test.ts.
+  */
+  it('offers a content width, starting on the drawn measure', async () => {
+    renderView();
+    const row = screen.getByText('Content width').closest('.set-row') as HTMLElement;
+    expect(within(row).getByRole('button', { name: 'Fixed' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(row).getByRole('button', { name: 'Full' })).toHaveAttribute('aria-pressed', 'false');
+    await screen.findByText(/connected/);
+  });
+
+  it('persists a full-width pick and stamps it on the document', async () => {
+    renderView();
+    const row = screen.getByText('Content width').closest('.set-row') as HTMLElement;
+    await userEvent.click(within(row).getByRole('button', { name: 'Full' }));
+
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').contentWidth).toBe('full');
+    expect(document.documentElement.dataset.width).toBe('full');
+  });
+
   it('offers every rail section as a landing choice, plus Last used', async () => {
     renderView();
     const picker = screen.getByLabelText('Opens on');
@@ -398,7 +429,7 @@ describe('SettingsView', () => {
     it('groups the same rows it grouped before', async () => {
       renderView();
       await screen.findByText(/connected/);
-      expect(rowNamesIn('Display')).toEqual(['Theme', 'Density', 'Text size', 'Opens on']);
+      expect(rowNamesIn('Display')).toEqual(['Theme', 'Density', 'Text size', 'Content width', 'Opens on']);
       expect(rowNamesIn('Board')).toEqual(['Archive after']);
       expect(rowNamesIn('Claude Agents')).toEqual(['Dispatch', 'Default model', 'Default effort', 'Dashboard link']);
     });
@@ -434,7 +465,7 @@ describe('SettingsView', () => {
     it('draws its segmented rows in the pill skin', async () => {
       renderView();
       await screen.findByText(/connected/);
-      for (const label of ['Density', 'Text size', 'Archive after']) {
+      for (const label of ['Density', 'Text size', 'Content width', 'Archive after']) {
         expect(screen.getByRole('group', { name: label })).toHaveClass('ui-seg-pill');
       }
     });

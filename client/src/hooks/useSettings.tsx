@@ -25,16 +25,23 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const update = useCallback((patch: Partial<Settings>) => setStored(clampSettings({ ...settings, ...patch })), [settings, setStored]);
 
-  // Theme, density and text scale are all pure CSS: everything downstream keys
-  // off these three root values, so no component re-renders when they change.
-  // All three are stamped pre-paint by the inline script in index.html, so this
-  // effect only keeps them in step afterwards.
+  // Theme, density, text scale and content width are all pure CSS: everything
+  // downstream keys off these four root values, so no component re-renders when
+  // they change. All four are stamped pre-paint by the inline script in
+  // index.html, so this effect only keeps them in step afterwards.
+  //
+  // Every one of them is in the dependency list, and that is load-bearing
+  // rather than tidy: a stamp whose value is missing from the deps still works
+  // on reload — the pre-paint script wrote it — and silently does nothing when
+  // the control is clicked, which is the one shape of this bug that survives
+  // being developed against, because reloading is what you do next anyway.
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.theme = settings.theme;
     root.dataset.density = settings.density;
+    root.dataset.width = settings.contentWidth;
     root.style.setProperty('--font-scale', String(settings.fontScale / 100));
-  }, [settings.theme, settings.density, settings.fontScale]);
+  }, [settings.theme, settings.density, settings.contentWidth, settings.fontScale]);
 
   const value = useMemo(() => ({ settings, update }), [settings, update]);
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
