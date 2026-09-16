@@ -104,7 +104,20 @@ function stubFetch(opts: { watchdog: WatchdogStatus | 'reject'; onConfigPost?: (
   return fn;
 }
 
+/**
+ * The watchdog card is on Settings' SHARED page since task-42 — it is the one
+ * card here that writes to the server, so it sits with the other host-backed
+ * card rather than among this browser's preferences. Every render through
+ * `SettingsView` therefore has to say so first: `settingsScope` is read out of
+ * localStorage once, when the provider mounts, and the page offers no control
+ * that changes it (the rail's tree is the only one).
+ */
+function storeSharedPage(): void {
+  localStorage.setItem('backlog-manager.settings', JSON.stringify({ settingsScope: 'shared' }));
+}
+
 function renderView(): void {
+  storeSharedPage();
   render(
     <SettingsProvider>
       <SettingsView />
@@ -442,6 +455,7 @@ describe('WatchdogGroup', () => {
 
   it('opens with the Live view pointer and then the four knobs, in that order', async () => {
     stubFetch({ watchdog: watchdogStatus({ phase: 'idle' }) });
+    storeSharedPage();
     const { container } = render(
       <SettingsProvider>
         <SettingsView />
@@ -449,11 +463,12 @@ describe('WatchdogGroup', () => {
     );
     await screen.findByLabelText('Enabled');
 
-    // Scoped to this card alone: `SettingsView` renders four others, all of
-    // which use the same `.set-name` class. Matched on the card's own
-    // `SheetHead` title rather than on its text CONTENT, which since task-39
-    // would also match the card beside it — `Orchestrator · this device`'s hints
-    // mention the watchdog.
+    // Scoped to this card alone: the Shared page renders `Claude Agents`
+    // beside it, using the same `.set-name` class. Matched on the card's own
+    // `SheetHead` title rather than on its text CONTENT, which would also
+    // match a neighbour whose hints mention the watchdog — `Orchestrator ·
+    // this device`'s did until task-42 moved that card to the other page, and
+    // matching on the title is what made this immune to the move.
     const group = Array.from(container.querySelectorAll('.set-group')).find((el) => el.querySelector('.ui-sheet-title')?.textContent === GROUP_TITLE);
     const names = Array.from(group?.querySelectorAll('.set-name') ?? []).map((el) => el.textContent);
     expect(names).toEqual(['Live view', 'Enabled', 'Check every', 'Leave a resumed run alone for', 'Give up after']);

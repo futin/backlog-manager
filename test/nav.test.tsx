@@ -231,6 +231,30 @@ describe('the section rail', () => {
     expect(await screen.findByText(RUNS_EMPTY)).toBeInTheDocument();
   });
 
+  /*
+    task-42: every section renders in the same wrap, Settings included.
+
+    Settings was the one exception — `wrap` rather than `wrap wide`, on the
+    grounds that a column of label-and-control rows reads better narrow — and
+    the split took the exception away: the page is two hand-balanced columns of
+    cards on both of its pages now, the same shape every other section draws,
+    and a narrow wrap would fold them to one column at every width.
+
+    Asserted for all four rather than for Settings alone, deliberately. A
+    single-section assertion is the shape that goes stale: it keeps passing
+    while a later change quietly gives some other section a measure of its own,
+    which is the drift this case exists to catch.
+  */
+  it('renders every section in the same wide wrap', async () => {
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+
+    for (const label of ['Board', 'Runs', 'Archive', 'Settings']) {
+      await userEvent.click(screen.getByRole('button', { name: label }));
+      expect(document.querySelector('.main > div')).toHaveClass('wrap', 'wide');
+    }
+  });
+
   it('gives no tab aria-expanded — every tab is a plain section switch', async () => {
     render(<App />);
 
