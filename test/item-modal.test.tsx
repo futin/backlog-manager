@@ -5,7 +5,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
-import { ItemDrawer } from '../client/src/components/board/ItemDrawer';
+import { ItemModal } from '../client/src/components/board/ItemModal';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { BacklogItem } from '../shared/types';
 
@@ -31,27 +31,42 @@ const ITEM: BacklogItem = {
   path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
 };
 
-/* The drawer renders whatever assignment the board hands it, so the suite
+/* The modal renders whatever assignment the board hands it, so the suite
    builds one from a one-project registry rather than hard-coding a class —
-   which keeps this test about the drawer and leaves the hue arithmetic to
+   which keeps this test about the modal and leaves the hue arithmetic to
    test/project-hue.test.ts. */
 const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
 
-describe('ItemDrawer', () => {
+/**
+ * The value of one labelled fact, or `null` when that fact is not drawn at all.
+ *
+ * `null` rather than a throw because absence is half of what this suite
+ * asserts — a zero counter, an unset `updated`, an idea's `groomed` — and a
+ * helper that threw would force every one of those cases into a different
+ * shape than its present-value twin. Addressed through the label's own row so
+ * a value that merely appears somewhere else in the modal (the path, say, also
+ * printed in a body) cannot satisfy a fact assertion.
+ */
+function factValue(label: string): string | null {
+  const dt = Array.from(document.querySelectorAll('.item-fact-label')).find((el) => el.textContent === label);
+  return dt?.parentElement?.querySelector('.item-fact-value')?.textContent ?? null;
+}
+
+describe('ItemModal', () => {
   beforeEach(() => {
     global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('## Cause\n\noff by one\n') } as Response)) as jest.Mock;
   });
 
-  // The card has room only for an elapsed reading; the drawer is where the
+  // The card has room only for an elapsed reading; the modal is where the
   // stored value belongs, since "in progress 47d" invites the follow-up question
   // "since when" and the answer is right there in the file. It prints BOTH: the
   // elapsed for reading, the raw value because that is what is on disk.
   it('names the moment an in-progress item was picked up, and says nothing when it was not', async () => {
-    const { unmount } = render(<ItemDrawer item={{ ...ITEM, started: '2026-08-24' }} hues={HUES} onClose={() => {}} />);
-    expect(screen.getByText(/in progress \d+d \(since 2026-08-24\)/)).toBeInTheDocument();
+    const { unmount } = render(<ItemModal item={{ ...ITEM, started: '2026-08-24' }} hues={HUES} onClose={() => {}} />);
+    expect(screen.getByText(/^\d+d \(since 2026-08-24\)$/)).toBeInTheDocument();
     unmount();
 
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     expect(screen.queryByText(/in progress/)).not.toBeInTheDocument();
     // The first render was unmounted, so its `alive` flag swallowed its own
     // resolution; this second one is still mounted and its body fetch lands
@@ -61,13 +76,13 @@ describe('ItemDrawer', () => {
   });
 
   // A timestamped value reads to the hour or minute, and the parenthetical
-  // carries it verbatim — the drawer is the one surface with room to be exact,
+  // carries it verbatim — the modal is the one surface with room to be exact,
   // and someone reconciling a card against the file needs the exact bytes.
   it('reads a timestamped start to the hour and still prints the stored value', async () => {
     const threeHoursAgo = `${new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
-    render(<ItemDrawer item={{ ...ITEM, started: threeHoursAgo }} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={{ ...ITEM, started: threeHoursAgo }} hues={HUES} onClose={() => {}} />);
 
-    expect(screen.getByText(`bug-2 · 2026-08-20 · ◍ in progress 3h (since ${threeHoursAgo}) · ui`)).toBeInTheDocument();
+    expect(factValue('in progress')).toBe(`3h (since ${threeHoursAgo})`);
     await screen.findByText('off by one');
   });
 
@@ -85,16 +100,16 @@ describe('ItemDrawer', () => {
    */
   describe('accumulated time', () => {
     it('shows "groomed for" with the formatted total, and hides "worked for" when execute is zero', async () => {
-      render(<ItemDrawer item={{ ...ITEM, groomElapsed: 3660, executeElapsed: 0 }} hues={HUES} onClose={() => {}} />);
-      expect(screen.getByText(/groomed for 1h 1m/)).toBeInTheDocument();
-      expect(screen.queryByText(/worked for/)).not.toBeInTheDocument();
+      render(<ItemModal item={{ ...ITEM, groomElapsed: 3660, executeElapsed: 0 }} hues={HUES} onClose={() => {}} />);
+      expect(factValue('groomed for')).toBe('1h 1m');
+      expect(factValue('worked for')).toBeNull();
       await screen.findByText('off by one');
     });
 
     it('shows neither bucket when both are zero', async () => {
-      render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
-      expect(screen.queryByText(/groomed for/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/worked for/)).not.toBeInTheDocument();
+      render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+      expect(factValue('groomed for')).toBeNull();
+      expect(factValue('worked for')).toBeNull();
       await screen.findByText('off by one');
     });
 
@@ -103,25 +118,56 @@ describe('ItemDrawer', () => {
     // isInProgress-gated segment already correctly opts out of for a done
     // item — this bucket must not inherit that gate by accident.
     it('shows accumulated execute time on a done item, not gated behind in-progress', async () => {
-      render(<ItemDrawer item={{ ...ITEM, status: 'done', executeElapsed: 90 }} hues={HUES} onClose={() => {}} />);
-      expect(screen.getByText(/worked for 1m/)).toBeInTheDocument();
+      render(<ItemModal item={{ ...ITEM, status: 'done', executeElapsed: 90 }} hues={HUES} onClose={() => {}} />);
+      expect(factValue('worked for')).toBe('1m');
       await screen.findByText('off by one');
     });
   });
 
   it('fetches the body by path and renders the markdown', async () => {
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     expect(global.fetch).toHaveBeenCalledWith(`/api/items/body?path=${encodeURIComponent(ITEM.path)}`);
     await waitFor(() => expect(screen.getByText('Cause')).toBeInTheDocument());
     expect(screen.getByText('off by one')).toBeInTheDocument();
   });
 
-  it('shows the item meta: project pill, id, created, path', async () => {
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+  /**
+   * Test case 3 of the brief: every fact the old right-hand drawer rendered is
+   * still rendered, now one labelled row each in the modal's facts slot, plus
+   * the three §6.1 names that were in `BacklogItem` all along and had nowhere
+   * to go on a single run-on meta line. Asserted as ONE case because it is one
+   * claim — the move is like-for-like and then some — rather than eleven cases
+   * that could each be deleted on its own.
+   */
+  it('renders every fact §6.1 lists, in the modal facts slot', async () => {
+    const item = {
+      ...ITEM,
+      updated: '2026-08-30T10:00:00Z',
+      lastCommit: '2026-08-29T09:00:00+02:00',
+      groomElapsed: 60,
+      executeElapsed: 120,
+      groomTokens: 1234567,
+      executeTokens: 42
+    };
+    render(<ItemModal item={item} hues={HUES} onClose={() => {}} />);
+
     expect(screen.getByRole('dialog', { name: 'groomed bug' })).toBeInTheDocument();
-    expect(screen.getByText('alpha')).toHaveClass('pill', HUES.classFor('alpha'));
-    expect(screen.getByText(/bug-2 · 2026-08-20/)).toBeInTheDocument();
-    expect(screen.getByText(ITEM.path)).toBeInTheDocument();
+    // The project reads as a hue dot plus its name, from the same assignment
+    // the card's own dot takes — never a second colour table here.
+    expect(document.querySelector(`.item-facts-proj .ui-dot-proj-${HUES.hueFor('alpha')}`)).not.toBeNull();
+    expect(screen.getByText('alpha')).toHaveClass('item-facts-proj-name');
+    expect(factValue('id')).toBe('bug-2');
+    expect(factValue('section')).toBe('bugs');
+    expect(factValue('created')).toBe('2026-08-20');
+    expect(factValue('updated')).toBe('2026-08-30T10:00:00Z');
+    expect(factValue('last commit')).toBe('2026-08-29T09:00:00+02:00');
+    expect(factValue('groomed')).toBe('yes');
+    expect(factValue('tags')).toBe('ui');
+    expect(factValue('groomed for')).toBe('1m');
+    expect(factValue('worked for')).toBe('2m');
+    expect(factValue('groom tokens')).toBe('1,234,567');
+    expect(factValue('execute tokens')).toBe('42');
+    expect(factValue('file')).toBe(ITEM.path);
     // Lets the mocked fetch's state update land inside act() before the test
     // ends — otherwise React logs an act() warning on every run because
     // nothing above this line waits on the body fetch this component always
@@ -129,9 +175,9 @@ describe('ItemDrawer', () => {
     await screen.findByText('off by one');
   });
 
-  it('closes on Escape, on the close button, and on the backdrop', async () => {
+  it('closes on Escape, on the close button, and on the scrim', async () => {
     const onClose = jest.fn();
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={onClose} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={onClose} />);
     // Same reason as the case above: the mount fetch resolves whether or not
     // this test cares about the body, and letting it land after the last
     // assertion is an un-acted state update React warns about. It was the one
@@ -139,13 +185,13 @@ describe('ItemDrawer', () => {
     await screen.findByText('off by one');
     await userEvent.keyboard('{Escape}');
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
-    await userEvent.click(screen.getByTestId('drawer-backdrop'));
+    await userEvent.click(screen.getByTestId('modal-scrim'));
     expect(onClose).toHaveBeenCalledTimes(3);
   });
 
   it('shows an unavailable state when the body fetch fails', async () => {
     (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: false, status: 404 } as Response));
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('item file unavailable')).toBeInTheDocument());
   });
 
@@ -156,10 +202,10 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('safe text\n\n<img src=x onerror="window.__pwned=1">')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('safe text')).toBeInTheDocument());
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    expect(document.querySelector('.drawer-body')?.innerHTML).not.toContain('onerror');
+    expect(document.querySelector('.item-body')?.innerHTML).not.toContain('onerror');
     expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
   });
 
@@ -170,10 +216,10 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('[click](javascript:alert(1))')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    expect(document.querySelector('.drawer-body')?.innerHTML).not.toContain('javascript:');
+    expect(document.querySelector('.item-body')?.innerHTML).not.toContain('javascript:');
   });
 
   // Round 2: a scheme hidden behind an HTML character reference reads as "no
@@ -196,9 +242,9 @@ describe('ItemDrawer', () => {
     ['reference-style definition', '[click][r]\n\n[r]: &#106;avascript:alert(1)\n']
   ])('neutralizes a javascript: scheme hidden behind an entity — %s', async (_desc, body) => {
     (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
-    const link = document.querySelector('.drawer-body a') as HTMLAnchorElement | null;
+    const link = document.querySelector('.item-body a') as HTMLAnchorElement | null;
     // A real anchor still renders (the scheme check alone can't see through
     // the entity, same as before) — the fix is that escaping `&` when the
     // href is interpolated stops the browser from ever reconstituting the
@@ -215,14 +261,14 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![logo](javascript:alert(1))')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     // Waits on the loading state clearing rather than the alt text becoming
     // visible: alt text is only ever *visible* text in the disallowed-src
     // fallback this test is trying to prove exists — waiting on it directly
     // would make a pre-fix run (where the src renders as a real, invisible
     // <img alt> attribute) hang until timeout instead of failing cleanly.
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
-    expect(document.querySelector('.drawer-body img')).not.toBeInTheDocument();
+    expect(document.querySelector('.item-body img')).not.toBeInTheDocument();
   });
 
   it('never requests a remote image src — this board only ever talks to its own origin', async () => {
@@ -232,9 +278,9 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![logo](https://evil.example/tracker.gif)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
-    expect(document.querySelector('.drawer-body img')).not.toBeInTheDocument();
+    expect(document.querySelector('.item-body img')).not.toBeInTheDocument();
   });
 
   // The other half of the fix: none of the above should come at the cost of
@@ -247,9 +293,9 @@ describe('ItemDrawer', () => {
     ['mailto:', '[docs](mailto:team@example.com)']
   ])('still renders an ordinary %s link as clickable', async (protocol, body) => {
     (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
-    const link = document.querySelector('.drawer-body a') as HTMLAnchorElement | null;
+    const link = document.querySelector('.item-body a') as HTMLAnchorElement | null;
     expect(link?.protocol).toBe(protocol);
   });
 
@@ -258,9 +304,9 @@ describe('ItemDrawer', () => {
     ['anchor', '[docs](#section)', '#section']
   ])('still renders an ordinary %s link with its href intact', async (_kind, body, href) => {
     (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('docs')).toBeInTheDocument());
-    const link = document.querySelector('.drawer-body a');
+    const link = document.querySelector('.item-body a');
     expect(link?.getAttribute('href')).toBe(href);
   });
 
@@ -271,9 +317,9 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![diagram](./diagram.png)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
-    await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
-    const img = document.querySelector('.drawer-body img') as HTMLImageElement;
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.item-body img')).not.toBeNull());
+    const img = document.querySelector('.item-body img') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('./diagram.png');
     expect(img.getAttribute('alt')).toBe('diagram');
   });
@@ -292,12 +338,12 @@ describe('ItemDrawer', () => {
     ['reference-definition form', '![logo][r]\n\n[r]: //evil.example/p.png\n']
   ])('never requests a protocol-relative image src — %s', async (_desc, body) => {
     (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     // No <img> at all — same fallback as the scheme-based cases above, and
     // for the same reason: there is no safe src to neutralize this src down
     // to, so it renders as its alt text instead.
-    expect(document.querySelector('.drawer-body img')).not.toBeInTheDocument();
+    expect(document.querySelector('.item-body img')).not.toBeInTheDocument();
   });
 
   it('still renders an absolute-path (single-slash) image as a real img tag', async () => {
@@ -307,9 +353,9 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![diagram](/abs/path.png)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
-    await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
-    const img = document.querySelector('.drawer-body img') as HTMLImageElement;
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.item-body img')).not.toBeNull());
+    const img = document.querySelector('.item-body img') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('/abs/path.png');
   });
 
@@ -335,9 +381,9 @@ describe('ItemDrawer', () => {
     ['leading tab, triple slash', `![logo](<${TAB}///evil.example/p.png>)`]
   ])('never requests an off-origin image src hidden behind whitespace — %s', async (_desc, body) => {
     (global.fetch as jest.Mock).mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve(body) } as Response));
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
-    const img = document.querySelector('.drawer-body img') as HTMLImageElement | null;
+    const img = document.querySelector('.item-body img') as HTMLImageElement | null;
     // `.src` is the resolved property, not the attribute and not the HTML
     // string: only that form shows where the request would actually go. The
     // attribute still reads as a relative-looking path in every one of these,
@@ -354,11 +400,11 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve(`[click](<java${TAB}script:alert(1)>)`)
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
     // Same normalization as the image cases above — a browser ignores the tab
     // when it sniffs the scheme, so the guard has to as well.
-    expect(document.querySelector('.drawer-body a')).not.toBeInTheDocument();
+    expect(document.querySelector('.item-body a')).not.toBeInTheDocument();
   });
 
   it('still renders a nested relative image path as a real img tag', async () => {
@@ -368,9 +414,9 @@ describe('ItemDrawer', () => {
         text: () => Promise.resolve('![diagram](sub/dir/x.png)')
       } as Response)
     );
-    render(<ItemDrawer item={ITEM} hues={HUES} onClose={() => {}} />);
-    await waitFor(() => expect(document.querySelector('.drawer-body img')).not.toBeNull());
-    const img = document.querySelector('.drawer-body img') as HTMLImageElement;
+    render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await waitFor(() => expect(document.querySelector('.item-body img')).not.toBeNull());
+    const img = document.querySelector('.item-body img') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('sub/dir/x.png');
     expect(new URL(img.src).origin).toBe(window.location.origin);
   });

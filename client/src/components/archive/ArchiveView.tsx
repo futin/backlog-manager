@@ -16,7 +16,7 @@ import { Chip } from '../ui/Chip';
 import { BoardColumn } from '../board/BoardColumn';
 import type { BoardColumnSlug } from '../board/BoardColumn';
 import { ItemCard } from '../board/ItemCard';
-import { ItemDrawer } from '../board/ItemDrawer';
+import { ItemModal } from '../board/ItemModal';
 import { LaunchSheet } from '../board/LaunchSheet';
 import type { BacklogItem, Section } from '../../../../shared/types';
 
@@ -42,7 +42,7 @@ import type { BacklogItem, Section } from '../../../../shared/types';
  * `ALL` and the fetch-state ladder below are deliberately shaped like
  * BoardView's rather than merged with them: the two surfaces answer different
  * questions over one index, and the parts that must not drift — the staleness
- * rule, the action derivation, the card, the drawer, the sheet — are already
+ * rule, the action derivation, the card, the modal, the sheet — are already
  * shared modules. What is restated here is the small amount that genuinely
  * differs, which is cheaper and more honest than a `<BoardSurface>` component
  * with a mode flag threading four behaviours through one render.
@@ -98,7 +98,7 @@ export default function ArchiveView() {
      control, and it sits behind the same project-visibility gate — a stale
      block is no more recoverable here than it was there. */
   const { status: agents, reload: reverifyAgents } = useAgents();
-  /* The run payload, read by two things here and still by no strip or drawer —
+  /* The run payload, read by two things here and still by no strip or modal —
      a run is queue work and this surface is what is not queue work.
 
      `leavesBoard` below is the second reader and the newer one (bug-11): the
@@ -215,10 +215,10 @@ export default function ArchiveView() {
   const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
 
   /* The same two overlays the Board has, with the same relationship: the sheet
-     may be opened from a card (drawer closed) or from inside the drawer (drawer
+     may be opened from a card (modal closed) or from inside the modal (the modal
      stays open behind it), so one piece of state cannot serve both, and their
      coexistence is deliberate rather than an oversight — see BoardView's own
-     comment on why LaunchSheet and ItemDrawer are the one pair NOT mutually
+     comment on why LaunchSheet and ItemModal are the one pair NOT mutually
      excluded. Archive has no third or fourth overlay, so there is no exclusion
      to arrange here at all. */
   return (
@@ -362,7 +362,7 @@ export default function ArchiveView() {
       )}
 
       {open !== null && (
-        <ItemDrawer
+        <ItemModal
           item={open}
           hues={hues}
           onClose={() => setOpen(null)}

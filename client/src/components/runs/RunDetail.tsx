@@ -534,20 +534,27 @@ export function RunDetail({
              be true of it is `status: 'paused'`, read off the archive record,
              and that is exactly the case the Resume control exists for.
              `RunControls` renders nothing for every other finished status. */
-          <RunControls
-            run={
-              live ?? {
-                status: source.status,
-                project: summary.project,
-                queue: source.queue,
-                fresh: false,
-                pauseRequested: false
+          /* The slot §8.8's fade arrives into, reserved whether or not there
+             is a control to put in it: `RunControls` renders `null` for most
+             run states, and a head that grew by a chip's height the instant
+             the sweeper stood down would move every reading under it while
+             someone was reading them. */
+          <span className="run-detail-controls">
+            <RunControls
+              run={
+                live ?? {
+                  status: source.status,
+                  project: summary.project,
+                  queue: source.queue,
+                  fresh: false,
+                  pauseRequested: false
+                }
               }
-            }
-            gate={gate}
-            resuming={resuming}
-            onChanged={onChanged}
-          />
+              gate={gate}
+              resuming={resuming}
+              onChanged={onChanged}
+            />
+          </span>
         }
       />
 

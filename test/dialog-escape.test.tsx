@@ -3,7 +3,8 @@
  */
 /*
  * bug-23: one Escape press used to close BOTH the launch sheet and the item
- * drawer it layers over, because each of the four dialogs this app had then
+ * modal it layers over (the item DRAWER, when this was written), because each
+ * of the four dialogs this app had then
  * bound its own unguarded `keydown` listener on `window` and called its own
  * `onClose` unconditionally. Every listener registered at the moment of the
  * press fired. (Three since task-37, which took the run drawer off the Board:
@@ -27,7 +28,11 @@ import { useState } from 'react';
 
 import ArchiveView from '../client/src/components/archive/ArchiveView';
 import BoardView from '../client/src/components/board/BoardView';
+import { ItemModal } from '../client/src/components/board/ItemModal';
+import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
+import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
+import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 
 const READY: AgentsStatus = {
@@ -83,9 +88,9 @@ const PROJECTS: ProjectSummary[] = [
 const realFetch = global.fetch;
 
 /** Both hosts' whole world. `/api/items/body` answers `text()`, not `json()` —
- *  ItemDrawer's effect calls the former, and a json-only stub leaves the drawer
+ *  `ItemModal`'s effect calls the former, and a json-only stub leaves the modal
  *  stuck in its "item file unavailable" state, which would make these cases
- *  prove that the sheet layers over a BROKEN drawer. */
+ *  prove that the sheet layers over a BROKEN modal. */
 function stubFetch(items: BacklogItem[]): void {
   const index: ItemsIndex = { items, errors: [] };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
@@ -193,6 +198,66 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /dispatch bug-1/ })).not.toBeInTheDocument());
     expect(screen.getByRole('dialog', { name: 'a task' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * Task-40's test case 5: the stack ranks THREE dialogs, not four, and Escape
+ * still closes exactly the topmost of them.
+ *
+ * Direct-rendered rather than driven through a host, because no host mounts
+ * all three: the Board deliberately makes the orchestrate sheet and the item
+ * modal mutually exclusive (`openOrchestrateSheet` clears `open`), so the
+ * three-deep stack is reachable only by mounting the three components
+ * themselves. That is the right level anyway — what is being pinned is the
+ * hook's ranking across its three real callers, not a host's state machine.
+ *
+ * No `RunDrawer` here and none coming back: task-37 deleted it, and its
+ * content is the Runs page's inline detail sheet, which is not a dialog and
+ * has nothing for Escape to close.
+ */
+describe('the three dialogs on the stack', () => {
+  const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
+
+  it('closes them one at a time, topmost first, across all three callers', async () => {
+    stubFetch([fakeItem()]);
+    const item = fakeItem();
+    const closeModal = jest.fn();
+    const closeLaunch = jest.fn();
+    const closeOrchestrate = jest.fn();
+
+    // Mount order is the ranking (the hook's own contract), so these three
+    // renders are the test's whole setup.
+    render(<ItemModal item={item} hues={HUES} onClose={closeModal} />);
+    render(<LaunchSheet item={item} onClose={closeLaunch} />);
+    render(<OrchestrateSheet project="/abs/alpha" projectName="alpha" items={[item]} spawnMaxPermission="acceptEdits" onClose={closeOrchestrate} refresh={() => {}} />);
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(3));
+
+    await userEvent.keyboard('{Escape}');
+    expect([closeModal.mock.calls.length, closeLaunch.mock.calls.length, closeOrchestrate.mock.calls.length]).toEqual([0, 0, 1]);
+  });
+
+  /* The other half of "topmost only": as each dialog unmounts, the next one
+     down inherits the key. Unmounting is what the hosts actually do on close,
+     so this is the sequence a person pressing Escape three times sees. */
+  it('hands the key back down the stack as each one unmounts', async () => {
+    stubFetch([fakeItem()]);
+    const item = fakeItem();
+    const closeModal = jest.fn();
+    const closeLaunch = jest.fn();
+
+    render(<ItemModal item={item} hues={HUES} onClose={closeModal} />);
+    const launch = render(<LaunchSheet item={item} onClose={closeLaunch} />);
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(2));
+
+    await userEvent.keyboard('{Escape}');
+    expect(closeLaunch).toHaveBeenCalledTimes(1);
+    expect(closeModal).not.toHaveBeenCalled();
+
+    launch.unmount();
+    await userEvent.keyboard('{Escape}');
+    expect(closeModal).toHaveBeenCalledTimes(1);
+    expect(closeLaunch).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1214,11 +1214,16 @@ the one settings key a hand-edited localStorage value could turn into script exe
 ## Escape has one owner, and the topmost dialog is the only one that closes
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-listener, installed on the first entry and removed with the last; all three dialogs (`ItemDrawer`, `LaunchSheet`, `OrchestrateSheet`) call it and none binds its
-own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which is the Runs page's own sheet — inline, beside
-the list, never a dialog — so it is off the stack rather than migrated onto it, and `useDialogEscape` itself is untouched. They used to bind four, unguarded,
-and two of them are mounted together by design — Board and Archive both keep the item drawer open behind the launch sheet — so one press ran both callbacks and
-took the drawer with the sheet (bug-23).
+listener, installed on the first entry and removed with the last; all three dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet` and
+`OrchestrateSheet` — call it and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
+is the Runs page's own sheet — inline, beside the list, never a dialog — so it is off the stack rather than migrated onto it, and `useDialogEscape` itself is
+untouched. They used to bind four, unguarded, and two of them are mounted together by design — Board and Archive both keep the item modal open behind the launch
+sheet — so one press ran both callbacks and took the modal with the sheet (bug-23).
+
+Since task-40 the three do not call the hook themselves either: the two overlay SHELLS do. `ui/Modal.tsx` is the item modal's, `ui/FormSheet.tsx` is both
+sheets', and each calls `useDialogEscape` once, so a fourth surface opened through either shell joins the stack by construction rather than by remembering to.
+The count is still three because the shells have three composers, and `test/dialog-escape.test.tsx` mounts all three together to prove the ranking holds across
+them.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the

@@ -853,11 +853,43 @@ code, kbd, samp, pre { font-family: inherit }
 .run-controls-note { flex: none; font-size: 12px; color: var(--ink2) }
 .run-controls-error { flex: none; font-size: 12px; color: var(--red) }
 
-/* ---------------------------------------------- item drawer
-   A right-hand panel over the board; the board stays mounted behind it.
-   Fixed elements are inside the zoomed .shell, so both dimensions get the
-   same /--font-scale division the guide-manager viewer overlay needs —
-   without it the drawer hangs off two edges at any text size but 100%. */
+/* §8.8's needs-you fade. The control arrives mid-read — the sweeper has given
+   up and a person is the only path left — so it fades in over the slot its
+   host reserved rather than snapping into a row that then jumps.
+   `both` for the fill mode so the first painted frame is the 0 % one: without
+   it the element paints fully opaque for one frame and the fade reads as a
+   flicker. */
+.run-controls-needs-you { animation: run-controls-fade .22s ease-out both }
+@keyframes run-controls-fade {
+  from { opacity: 0 }
+  to { opacity: 1 }
+}
+/* §8.8, stated outright rather than left to luck. The blanket reduced-motion
+   rule near the top of this file floors every duration and iteration count,
+   which PARKS an animation on its last keyframe — here that frame happens to
+   be `opacity: 1`, the resting state, so the blanket rule alone is already
+   harmless. It is harmless by coincidence, and the coincidence expires the
+   day this fade grows a transform or a second property, so the cancel is
+   declared. No `!important`: the unconditional rule above is a single class,
+   this is the same single class, and it comes later — source order settles it,
+   exactly as `.run-track-dot-current`'s own override does and unlike
+   `.board-card-stage-glyph`'s, whose unconditional rule is two classes deep. */
+@media (prefers-reduced-motion: reduce) { .run-controls-needs-you { animation: none } }
+
+/* The slot the fade lands in, reserved by each host rather than by the control
+   (§8.8): `RunControls` renders `null` for most run states, so a slot sized by
+   its own content would be no slot at all. 28 px is the `Chip` size both
+   surfaces draw here. */
+.run-detail-controls { display: flex; align-items: center; justify-content: flex-end; min-height: 28px }
+
+/* ---------------------------------------------- item drawer — DEAD since task-40
+   The right-hand panel the item opened in until task-40 made it a modal (§8.7,
+   `.ui-modal` in the ui block at the foot of this file). Nothing renders any of
+   the rules below any more except `.drawer-empty`, which RunsView and RunDetail
+   still draw; the rest is spec §7's cleanup, i.e. task 6's, listed there by
+   name ("`.drawer` panel geometry") rather than removed here.
+   Kept verbatim for that reason, including the note about the /--font-scale
+   division fixed elements inside the zoomed .shell need. */
 .drawer-backdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim) }
 .drawer {
   position: fixed; top: 0; right: 0; z-index: 61;
@@ -901,35 +933,59 @@ code, kbd, samp, pre { font-family: inherit }
   align-items: flex-start;
 }
 .drawer-meta .drawer-path { color: var(--ink3); word-break: break-all }
-.drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px }
 .drawer-empty { font-size: 11px; color: var(--ink3); padding: 20px 2px; text-align: center }
 
-/* Rendered item Markdown. The section headings are the store's fixed ## set
-   (Symptom, Plan, …) — styled as printed labels, not document headings. */
-.drawer-body h2 {
-  font-size: 12.5px; font-weight: 700;
-  color: var(--ink2);
-  margin: 18px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--hairline);
+/* ---------------------------------------------- item modal (§8.7)
+   What `Modal` puts in its two slots. The shell — scrim, panel, radius, the
+   one shell lift, the 700 px fold — is the primitive's and lives in the ui
+   block at the foot of this file; everything here is layout INSIDE it, which
+   is the §12.1 division: a page lays a primitive out and never restates its
+   look. */
+.item-facts { display: flex; flex-direction: column; gap: 14px }
+.item-facts-proj { display: flex; align-items: center; gap: 8px }
+/* 12/400 — §8.1's "project name beside its dot", the same reading the card's
+   foot gives the same pair. */
+.item-facts-proj-name { font-size: 12px; color: var(--ink2) }
+.item-facts-list { display: flex; flex-direction: column; gap: 10px; margin: 0 }
+.item-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+/* 11/500 label over a 13/400 value: the label is a status-sized micro-word
+   (§8.1's bottom row) and the value is the thing being read. */
+.item-fact-label { font-size: 11px; font-weight: 500; color: var(--ink3) }
+.item-fact-value { font-size: 13px; color: var(--ink); margin: 0; min-width: 0 }
+.item-facts-path { color: var(--ink3); word-break: break-all }
+.item-facts-dispatch { display: flex }
+
+/* Rendered item Markdown, at §6.1's scale: 15/400 body, 19/500 headings, code
+   spans on --steel. The section headings are the store's fixed ## set
+   (Symptom, Plan, …), so they carry a hairline rather than sitting on size
+   alone — a body of six of them reads as a form, which is what it is. */
+.item-body-title { font-size: 19px; font-weight: 500; line-height: 1.3; letter-spacing: -.01em; color: var(--ink); margin: 0 0 14px }
+.item-body h2 {
+  font-size: 19px; font-weight: 500; color: var(--ink);
+  margin: 22px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline);
 }
-.drawer-body h2:first-child { margin-top: 0 }
-.drawer-body p, .drawer-body li { font-size: 12.5px; color: var(--ink); line-height: 1.55; margin: 6px 0 }
-.drawer-body ul, .drawer-body ol { padding-left: 18px; margin: 6px 0 }
-.drawer-body code { font-size: 11px; color: var(--cyan) }
-.drawer-body pre { background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 10px; overflow-x: auto; margin: 8px 0 }
-.drawer-body pre code { color: var(--ink) }
-.drawer-body table { border-collapse: collapse; font-size: 11.5px; margin: 8px 0 }
-.drawer-body th, .drawer-body td { border: 1px solid var(--hairline); padding: 4px 8px; text-align: left; vertical-align: top }
-.drawer-body a { color: var(--cyan) }
-.drawer-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 10px; color: var(--ink2); margin: 6px 0 }
+.item-body h2:first-child { margin-top: 0 }
+.item-body h3 { font-size: 15px; font-weight: 500; color: var(--ink); margin: 16px 0 6px }
+.item-body p, .item-body li { font-size: 15px; font-weight: 400; color: var(--ink); line-height: 1.6; margin: 8px 0 }
+.item-body ul, .item-body ol { padding-left: 20px; margin: 8px 0 }
+.item-body code { font-size: 13px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 1px 5px }
+.item-body pre { background: var(--steel); border: 1px solid var(--hairline); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 10px 0 }
+.item-body pre code { background: none; padding: 0 }
+.item-body table { border-collapse: collapse; font-size: 13px; margin: 10px 0 }
+.item-body th, .item-body td { border: 1px solid var(--hairline); padding: 5px 9px; text-align: left; vertical-align: top }
+.item-body a { color: var(--cyan) }
+.item-body blockquote { border-left: 2px solid var(--hairline2); padding-left: 12px; color: var(--ink2); margin: 8px 0 }
 
 /* ---------------------------------------------- run drawer
    The board's own detail view of a run (RunDrawer.tsx) until task-37 deleted
    it; every rule below is read by `RunDetail.tsx` (the Runs section) now, and
    only the names still say "drawer" — renaming a live class family is task 6's
-   cleanup, not this one's. The .drawer scaffolding above — backdrop, the aside
-   itself, .drawer-head, .drawer-close, .drawer-meta, .drawer-body and its h2
-   "printed label" rule — was REUSED wholesale rather than
-   duplicated, and this section exists only for what a run's content
+   cleanup, not this one's. The .drawer scaffolding it once REUSED wholesale
+   rather than duplicated — backdrop, the aside itself, .drawer-head,
+   .drawer-close, .drawer-meta, .drawer-body and its h2 "printed label" rule —
+   is gone or going: task-40 turned the item drawer into the item modal and
+   rewrote that markdown block as .item-body, so the only name left shared
+   across the two is .drawer-empty. This section exists only for what a run's content
    needs that an item's markdown body never did — a stale-run fault note, a
    pipeline summary, and per-item queue/attention rows. */
 .run-drawer-note {
@@ -1049,9 +1105,9 @@ code, kbd, samp, pre { font-family: inherit }
      max-height in em so it tracks the parent's 10px mono size under
    --font-scale rather than pinning a pixel height; overflow-y auto, not scroll,
    so a two-line tail carries no permanent scrollbar gutter. overscroll-behavior
-   because .drawer-body is itself overflow-y: auto — chaining a wheel gesture
-   past the tail's end into the drawer behind it reads as the drawer randomly
-   jumping while you read output. */
+   because the sheet this sits in scrolls too — chaining a wheel gesture past
+   the tail's end into the pane behind it reads as that pane randomly jumping
+   while you read output. */
 .run-drawer-item-verify-tail {
   color: var(--ink3);
   /* display: block is load-bearing, and it is the one declaration here that
@@ -1204,8 +1260,13 @@ code, kbd, samp, pre { font-family: inherit }
 .run-drawer-assumptions-list dd { font-size: 12px; color: var(--ink2); line-height: 1.5; margin: 0 0 0 12px }
 
 /* ---- dispatch: the card button and the launch sheet -------------------
-   z-index above the item drawer (60/61): the sheet is opened FROM the
-   drawer as well as from a card, so it has to sit over it. */
+   The `.sheet*` family below is HALF dead since task-40: the shell — backdrop,
+   panel, head, actions row, the launch button — is `FormSheet`'s
+   (`.ui-form-sheet`, ui block), and what both sheets still use from here is the
+   field/row/note vocabulary their own bodies are written in. The dead half is
+   spec §7's cleanup, task 6's, not this section's to delete.
+   The old shell's z-index sat above the item drawer's (60/61) because the sheet
+   is opened FROM it as well as from a card; the two shells keep that order. */
 .sheet-backdrop { position: fixed; inset: 0; z-index: 70; background: var(--scrim) }
 .sheet {
   position: fixed; z-index: 71;
@@ -1230,19 +1291,23 @@ code, kbd, samp, pre { font-family: inherit }
 .sheet-title { flex: 1; min-width: 0; font-size: 19px; font-weight: 500; color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .sheet-body { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px }
-.sheet-field { display: flex; flex-direction: column; gap: 4px }
+/* `align-items: flex-start`, so a control in a sheet field is as wide as its
+   own content and no wider. A column flex container stretches its children by
+   default, which is right for the textarea and wrong for every select in the
+   36 px family: stretched, `Skip the item for me` was cut off mid-word inside a
+   field the wrapping row had narrowed, while the native auto width sizes a
+   select to its longest option. The textarea opts back in below. */
+.sheet-field { display: flex; flex-direction: column; gap: 4px; align-items: flex-start }
 .sheet-static { font-size: 11px; color: var(--ink2) }
 .sheet-prompt {
+  /* The one field that DOES want its container's full width — see
+     `.sheet-field`'s `align-items` above for why that is opt-in here. */
+  align-self: stretch;
   font-size: 11px; line-height: 1.5; color: var(--ink);
   background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
   padding: 8px; resize: vertical;
 }
 .sheet-prompt:focus { outline: none; border-color: var(--cyan) }
-.sheet-field select {
-  font-family: inherit; font-size: 11.5px; color: var(--ink);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; padding: 5px 8px;
-  align-self: flex-start;
-}
 /* The three launch controls on one line. `wrap` rather than a media query:
    the row only has to survive a narrow phone, and the widest select here is
    "bypassPermissions" — letting it drop to its own line when it no longer fits
@@ -1416,7 +1481,12 @@ code, kbd, samp, pre { font-family: inherit }
   background: none; border: 0; padding: 0; color: var(--ink2);
 }
 .watchdog-row-open:focus-visible { outline: 2px solid var(--ink3); outline-offset: 2px; border-radius: 4px }
-.watchdog-row-resume { flex: none }
+/* The Watchdog page's half of the same reserved slot — see
+   `.run-detail-controls` above. The div is drawn for every crashed row, the
+   control inside it only once `watchdogStoodDown` says the sweeper will not
+   act, so without a minimum the row's width and height both move at exactly
+   the moment a reader is deciding whether to click. */
+.watchdog-row-resume { flex: none; display: flex; align-items: center; justify-content: flex-end; min-width: 104px; min-height: 28px }
 .watchdog-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
 .watchdog-row-project { font-size: 14px; font-weight: 500; color: var(--ink) }
 .watchdog-row-id { color: var(--ink3) }
@@ -2426,6 +2496,94 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-switch .ui-switch-opt:first-of-type { color: var(--ink) }
 .ui-switch.on .ui-switch-opt:first-of-type { color: var(--ink3) }
 .ui-switch.on .ui-switch-opt:last-of-type { color: var(--ink) }
+
+/* Modal — the sidecar (§8.7). The board's ONE modal: air on every side, the
+   scrim over everything behind it, and the design's single shell lift (§5) —
+   nothing else on this board floats, which is what keeps the lift meaning
+   "this is over the page" rather than "this is a card".
+
+   Both dimensions are divided by --font-scale for the same reason the old
+   drawer's were: fixed elements sit inside the zoomed .shell, so a viewport
+   unit here is a pre-zoom number and the panel hangs off two edges at any text
+   size but 100%. */
+.ui-modal-scrim { position: fixed; inset: 0; z-index: 60; background: var(--scrim) }
+.ui-modal {
+  position: fixed; z-index: 61; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(1080px, calc(100vw / var(--font-scale, 1) - 48px));
+  max-height: calc(100dvh / var(--font-scale, 1) - 48px);
+  display: grid; grid-template-columns: 290px minmax(0, 1fr);
+  background: var(--strip); border-radius: 16px;
+  box-shadow: 0 24px 64px var(--shadow2);
+  overflow: hidden;
+}
+/* Under 700 px the panel is the screen and the facts FOLD ABOVE the body
+   rather than beside it — a reading order, which is why `useNarrow` decides
+   this in JS and the rule below only draws what it decided. */
+.ui-modal-narrow {
+  top: 0; left: 0; transform: none;
+  width: calc(100vw / var(--font-scale, 1)); max-height: none;
+  height: calc(100dvh / var(--font-scale, 1));
+  border-radius: 0;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, auto) minmax(0, 1fr);
+}
+.ui-modal-close {
+  position: absolute; top: 10px; right: 12px; z-index: 1;
+  font-family: inherit; font-size: 13px; line-height: 1; color: var(--ink3);
+  background: none; border: none; padding: 6px; cursor: pointer;
+}
+.ui-modal-close:hover { color: var(--ink) }
+.ui-modal-facts {
+  min-width: 0; overflow-y: auto; padding: 20px;
+  border-right: 1px solid var(--hairline);
+}
+/* The cap is a VIEWPORT length, never a percentage: a percentage max-height
+   inside a grid row sized `auto` resolves against the row the element's own
+   height just decided, which is circular — measured at 400 px it left the
+   facts box 161 px tall inside a 403 px row and 242 px of blank paper between
+   the facts and the body. The same `/ --font-scale` division every other fixed
+   dimension here carries, for the same reason. */
+.ui-modal-narrow .ui-modal-facts {
+  border-right: none; border-bottom: 1px solid var(--hairline);
+  max-height: calc(38dvh / var(--font-scale, 1));
+}
+/* A clean top edge (§8.7): no head bar, no rule — the body starts at the top
+   of its own column and the title is the dialog's accessible name. */
+.ui-modal-body { min-width: 0; overflow-y: auto; padding: 20px 24px }
+
+/* FormSheet — the sheet (§8.7). 620 px of air, the same one shell lift the
+   modal carries, and a footer pinned under a scrolling body so no sheet can
+   scroll its own Start out of reach. */
+.ui-form-sheet-scrim { position: fixed; inset: 0; z-index: 70; background: var(--scrim) }
+.ui-form-sheet {
+  position: fixed; z-index: 71; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(620px, calc(100vw / var(--font-scale, 1) - 48px));
+  max-height: calc(100dvh / var(--font-scale, 1) - 48px);
+  display: flex; flex-direction: column;
+  background: var(--strip); border-radius: 16px;
+  box-shadow: 0 24px 64px var(--shadow2);
+  overflow: hidden;
+}
+.ui-form-sheet-narrow {
+  top: 0; left: 0; transform: none;
+  width: calc(100vw / var(--font-scale, 1)); max-height: none;
+  height: calc(100dvh / var(--font-scale, 1));
+  border-radius: 0;
+}
+.ui-form-sheet-head { display: flex; align-items: baseline; gap: 12px; padding: 18px 20px 12px }
+.ui-form-sheet-title {
+  flex: 1; min-width: 0; font-size: 19px; font-weight: 500; color: var(--ink);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.ui-form-sheet-close {
+  flex: none; font-family: inherit; font-size: 13px; line-height: 1; color: var(--ink3);
+  background: none; border: none; padding: 4px; cursor: pointer;
+}
+.ui-form-sheet-close:hover { color: var(--ink) }
+/* The stepper sits ON a hairline (§8.7) — one rule under it, none above: the
+   head it follows is already told apart by its type size. */
+.ui-form-sheet-steps { padding: 0 20px 10px; border-bottom: 1px solid var(--hairline) }
+.ui-form-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px }
+.ui-form-sheet-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--hairline) }
 
 /* ── end ui primitives ────────────────────────────────────────────────────────
    A closing marker, not decoration. Guard 7 has to be able to say whether a

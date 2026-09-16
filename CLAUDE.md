@@ -93,8 +93,10 @@ any of these — most encode a failure that already happened.
   refuses a starting project with the same `RUN_IN_PROGRESS_CODE`. `runHoldsItem` deliberately does NOT gain the parameter. Why:
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-  listener; all three dialogs call it and none binds its own (bug-23 — four until task-37 took the run drawer off the Board). Ranking is by mount order; entries
-  are removed by identity, never popped. Why:
+  listener; three dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet` — and none binds its own (bug-23 — four until task-37 took the run
+  drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog again). Since task-40 the hook is called by the two overlay
+  shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the three surfaces themselves. Ranking is by mount order; entries are removed by identity, never popped.
+  Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
   the skills, which remain the only writers.

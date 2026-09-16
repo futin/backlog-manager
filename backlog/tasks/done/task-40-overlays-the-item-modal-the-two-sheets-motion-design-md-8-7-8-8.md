@@ -3,6 +3,10 @@ id: task-40
 title: Overlays: the item modal, the two sheets, motion (DESIGN.md 8.7-8.8)
 created: 2026-09-15
 tags: fe-redesign, overlays, motion
+updated: 2026-09-16T10:25:57Z
+started: 2026-09-16T09:43:07Z
+execute-elapsed: 2570
+execute-tokens: 412248
 ---
 
 ## Goal
@@ -213,3 +217,84 @@ Authority: spec §9.
   first caller), `client/src/styles.css`,
   `docs/subsystems/invariants.md`, `CLAUDE.md`, and test files. No server
   route, no skill, no `shared/` change.
+
+## Outcome
+
+2026-09-16 — done. `ItemDrawer` is `board/ItemModal.tsx`, a composition of the new `ui/Modal` primitive: `--scrim` over everything, a `--strip` shell at 16 px
+radius with the design's one lift, a 290 px facts column beside a body with a clean top edge, full-screen under 700 px with the facts folding above. Both sheets
+wear the new `ui/FormSheet` shell — scrim, 620 px, the same lift, a stepper slot on a hairline, a footer pinned under the scrolling body — keeping every step and
+field they already had. Both shells call `useDialogEscape` themselves, so the three surfaces no longer bind it at all. §8.8's third moving element, the needs-you
+fade, is `.run-controls-needs-you` on the one Resume control `RunControls` draws for both surfaces, landing in a slot each host now reserves.
+
+Five decisions worth naming, since each departs from the plan's letter:
+
+1. **The facts column is a superset of what the drawer drew, not a like-for-like move.** The plan says the §6.1 list is "the same set `ItemDrawer` already
+   renders today, unchanged in substance". It is not: the old one-line `drawer-meta` carried project, id, created, in-progress, done, tags and the two elapsed
+   buckets, and had nowhere to put `section`, `updated`, `last commit`, `groomed` or the two token counters — all of which were in `BacklogItem` and all of
+   which §6.1 and DESIGN.md §8.7 name. The modal draws all of them, one labelled row each. Nothing was dropped, so test case 3 reads as the one like-for-like
+   case it asks for, with the three additions covered by the same case.
+2. **`FormSheet` takes a `label` the spec's §12.2 table did not list**, and §12.2 is amended in this change to list it. On both sheets the dialog's accessible
+   name and its visible title are different strings (`dispatch <id>`; `orchestrate <project>`), `title` is a node, and deriving a name from it would have
+   silently renamed both dialogs. `Modal` already had the prop for the same reason.
+3. **The facts block does not compose `Sheet`,** which §12.2's "composed by" column listed it under; that cell is amended too. The modal shell is already
+   `--strip` at 16 px carrying the one lift, so a `Sheet` inside it is an invisible card whose 24 px padding doubles the slot's own.
+4. **The fade rides every Resume, not only the crashed one.** `resumeControl()` is one function drawing the control for both the crashed and the paused branch,
+   and a paused run's Resume is a needs-you control by the same reading — the sweeper is not coming, a person is the only path left. No gate was added: the
+   crashed branch's existing `watchdogStoodDown` check is untouched and is still the only reader beside `watchdog.service.ts` (test case 8; the exact-set list in
+   `test/watchdog-coupling.test.tsx` is unchanged).
+5. **Plan §3 was already done in code and in prose.** task-37 dropped the count to three in `useDialogEscape.ts`, `invariants.md` and `CLAUDE.md`. What this task
+   added is the naming (`ItemDrawer` → the item modal), the reason the shells now own the binding, and `test/dialog-count-docs.test.ts`, so the count cannot rot
+   in either file again.
+
+Two defects were found by screenshotting and fixed, both mine:
+
+- **A percentage `max-height` inside a grid row sized `auto` is circular.** `.ui-modal-narrow .ui-modal-facts { max-height: 40% }` resolved against the row its
+  own height had just decided: measured at 400 px it left a 161 px facts box inside a 403 px row, i.e. 242 px of blank paper between the facts and the body. Now
+  `calc(38dvh / var(--font-scale, 1))`, with the row `minmax(0, auto)`.
+- **A select in a sheet field was stretched and truncated.** Swapping the bare `<select>` for the 36 px `Select` lost the old `align-self: flex-start`, and a
+  column flex container stretches its children: `Skip the item for me` was cut mid-word inside a field the wrapping row had narrowed. `.sheet-field` now sets
+  `align-items: flex-start` and `.sheet-prompt` opts back into `stretch` — the one field that wants the full width.
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm test
+Test Suites: 105 passed, 105 total
+Tests:       1704 passed, 1704 total
+# pass 538
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.09s
+```
+
+Screenshots: the open item modal at 1400 px and 400 px, daylight and midnight, plus the launch sheet at 1400/400 and the orchestrate sheet's steps 1 and 3 —
+eight files under the worktree's gitignored `.playwright-mcp/`, taken through the built server on a pid-owned loopback port (4399), killed by that recorded pid.
+They caught both defects above. One observation they also surfaced, NOT fixed here because it is neither this task's nor a regression from it: the served build's
+CSP (`default-src 'self'`, no `font-src`) blocks the `data:` font URIs Vite inlines from `@fontsource`, so the production server renders in a fallback face while
+the dev server does not. It predates this task (task-36 added the font), `test/csp.test.ts` pins the policy, and changing it is a decision of its own — worth a
+`backlog-capture`.
+
+Contract sweep: 9 sites updated (`client/src/styles.css` — the item-drawer and dispatch section headers now say which half is dead and that spec §7 assigns the
+removal to task 6, the run-drawer section's claim to reuse `.drawer-body`, and the verify-tail comment naming `.drawer-body` as its scroll parent;
+`client/src/components/board/BoardView.tsx` and `archive/ArchiveView.tsx` — every prose reference to "the drawer" and `openItemDrawer`;
+`client/src/components/board/OrchestrateSheet.tsx`'s header on what it shares with LaunchSheet; `.claude/DESIGN.md` §8.7's "both name four dialogs today" and
+§8.8's five stale line numbers; `docs/superpowers/specs/2026-09-15-fe-redesign-design.md` §12.2's two cells plus an amendment note;
+`docs/subsystems/invariants.md` and `CLAUDE.md`'s Escape entries; `test/settings-view.test.tsx`, `test/orchestrator-start-ui.test.tsx`,
+`test/dispatch-button.test.tsx` and `test/dialog-escape.test.tsx`'s comments naming `ItemDrawer`). Left standing on purpose: the dead `.drawer*` / `.sheet*`
+shell rules in `client/src/styles.css`, which spec §7 lists by name as task 6's cleanup and which are now annotated as dead rather than removed here;
+`docs/subsystems/board.md`'s three drawer sentences, whose rewrite §7 assigns to the same task (they were already stale for the run drawer before this change);
+`audits/2026-09-06-audit.md` and `backlog/*/done/*`, which are historical records of what was true when written; and `docs/superpowers/plans/` plus the older
+specs, likewise.
+
+Red proof: 18 tests went red with the change reverted — `ui-modal` (2, dropping `useDialogEscape`/`useNarrow` from `Modal`), its two source guards (2, adding a
+`runs/RunModal.tsx` that composes `Modal`), `ui-form-sheet` plus the three-deep Escape cases (11, unconditional footer/steps slots, no `useDialogEscape`, no
+`useNarrow`, `label` derived from `title`), `motion-style` (1, removing the fade's reduced-motion override), `dialog-count-docs` (1, putting `ItemDrawer` back in
+`invariants.md`) and `item-modal` (1, dropping the `section` and `groom tokens` rows). Every file was copied aside and restored from the copy — never `git
+stash`, which is shared with every other worktree of this repository.

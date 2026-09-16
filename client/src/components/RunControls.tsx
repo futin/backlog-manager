@@ -189,7 +189,19 @@ export function RunControls({
   const resumeControl = (): JSX.Element | null => {
     if (!gate.canResume) return null;
     return (
-      <span className="run-controls">
+      /* §8.8's third moving thing: a needs-you control FADES into the slot its
+         host already reserves rather than snapping in or shoving the row
+         beside it. One class on the one component both surfaces draw — the
+         Runs detail head and the Watchdog page's rows — so the fade arrives
+         wherever a Resume does, and the reserved slot is the host's
+         (`.run-detail-controls`, `.watchdog-row-resume`), since only the host
+         knows what it is reserving space inside of.
+           It rides the resume control alone and not `.run-controls`: a Pause
+         is present for the whole length of a healthy run and has nothing to
+         fade in FROM, while a Resume appears mid-read, at the moment the
+         sweeper gives up, which is precisely when a row that jumps costs a
+         reader their place. */
+      <span className="run-controls run-controls-needs-you">
         {resuming || busy ? (
           <span className="run-controls-note" data-testid="run-controls-resuming">
             Resuming…

@@ -117,7 +117,7 @@ describe('SettingsView', () => {
     // before the test ends — otherwise React logs an act() warning on every
     // run, because nothing above this line waits on the fetch `AgentsGroup`
     // (via `useAgents`) always fires on mount. Same idiom as
-    // test/drawer.test.tsx's identical fix for ItemDrawer's body fetch: wait
+    // test/item-modal.test.tsx's identical fix for the modal's body fetch: wait
     // on text the healthy default stub (above) is guaranteed to produce.
     await screen.findByText(/connected/);
   });

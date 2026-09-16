@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { marked } from 'marked';
 
-import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { elapsedSince, formatSeconds } from '../../lib/item-age';
 import { isInProgress } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
+import { Dot } from '../ui/Dot';
+import { Modal } from '../ui/Modal';
 import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
@@ -175,14 +177,57 @@ marked.use({
 });
 
 /**
- * The right-hand detail drawer. Read-only on purpose — every write to an item
- * belongs to the skills, so the drawer renders and never edits.
+ * One fact in the modal's facts column: a 11/500 label over its value.
+ *
+ * A component rather than nine hand-written pairs, because a fact that is
+ * absent must draw NOTHING — no label, no empty value, no stray separator —
+ * and "absent" is a different question per fact (an empty string for a date, a
+ * `null` for `groomed`, a zero for a counter). Each call site answers its own
+ * question and this renders only what survived it.
+ */
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="item-fact">
+      <dt className="item-fact-label">{label}</dt>
+      <dd className="item-fact-value">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * Integers with thousands separators, pinned to `en-US` rather than the
+ * viewer's locale — `run-stats.ts`'s `formatUsd` states the reason this board
+ * keeps making the same choice: two people looking at the same item should
+ * read the same string, and a locale-driven `toLocaleString` gives one of them
+ * `1.234.567`.
+ */
+function groupDigits(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+/**
+ * ItemModal — the item's detail, and the ONE modal this app draws
+ * (.claude/DESIGN.md §8.7, the design spec's §6.1 and §12.3).
+ *
+ * It composes `Modal`, which owns the scrim, the exit, the Escape key and the
+ * 700 px shape; this file owns what goes in the two slots. Read-only on
+ * purpose — every write to an item belongs to the skills, so this renders and
+ * never edits.
+ *
+ * It was `ItemDrawer`, a panel pinned to the right edge, until task-40. The
+ * facts it drew as one run-on meta line are a facts COLUMN now, one labelled
+ * row each, which is what 290 px of column buys over 480 px of panel: the same
+ * readings, none dropped, and each one findable without parsing a sentence.
+ * Three of the facts §6.1 lists — `section`, `updated`/`last commit`, and the
+ * token counters — were in `BacklogItem` all along and were the casualties of
+ * that one-line shape; they are drawn here rather than left out, which is why
+ * this is not quite a like-for-like move.
  *
  * The body is fetched on open rather than carried in the index: the index is
  * refetched on every window focus, and shipping every body every time would
  * make that refresh pay for content nobody is looking at.
  */
-export function ItemDrawer({
+export function ItemModal({
   item,
   hues,
   onClose,
@@ -203,13 +248,13 @@ export function ItemDrawer({
    * when none does — passed straight through to `DispatchButton`, and looked
    * up by BoardView from the same run payload the card's own copy of this
    * prop comes from. Both render sites need it: they render two independent
-   * buttons for one item, and a drawer chip that stayed live while the card
+   * buttons for one item, and a modal chip that stayed live while the card
    * tab went dead is half of the bug this exists to fix.
    */
   runBlock?: string | null;
   /** Re-ask the dashboard status, resolving to the fresh answer — passed
    *  straight through to `DispatchButton` (bug-13). Both render sites need
-   *  it for the same reason they both need `runBlock`: the drawer chip and
+   *  it for the same reason they both need `runBlock`: the modal's chip and
    *  the card tab are two independent buttons for one item, and a chip that
    *  stayed unrecoverably disabled while the tab could clear itself would be
    *  the same contradiction on two surfaces. */
@@ -219,14 +264,14 @@ export function ItemDrawer({
   const [failed, setFailed] = useState(false);
 
   /* The shared predicate, not a local copy of its two conditions — see
-     item-progress.ts for why it is two and not one. This drawer and the card
+     item-progress.ts for why it is two and not one. This modal and the card
      render the same claim about the same item side by side, so the day the
      rule grows a third condition (a stamp past some age no longer counting as
      live, say) they have to grow it together or the board will contradict
      itself about one item on two surfaces at once.
      Read once per render rather than twice inside the JSX below, where the
      null-check and the value would each call it. No injected clock, unlike the
-     card: the drawer is opened, read and closed, so a reading that aged in place
+     card: the modal is opened, read and closed, so a reading that aged in place
      while it sat open would be motion for its own sake. */
   const inProgress = isInProgress(item);
   const elapsed = inProgress ? elapsedSince(item.started) : null;
@@ -251,12 +296,6 @@ export function ItemDrawer({
     };
   }, [item.path]);
 
-  // One stack, one window listener, topmost dialog only — see
-  // hooks/useDialogEscape.ts. Replaced the four copies of this effect this app
-  // used to carry (bug-23: the sheet and the drawer it layers over both closed
-  // on one press).
-  useDialogEscape(onClose);
-
   /* marked is synchronous unless handed async extensions — none here. The
      HTML goes in via dangerouslySetInnerHTML below — safe not because these
      files are "local" (an item body is LLM-written, not vetted), but because
@@ -265,65 +304,82 @@ export function ItemDrawer({
      entity-hidden scheme survives to reach the browser's own HTML parser. */
   const html = body === null ? '' : (marked.parse(body, { async: false }) as string);
 
+  const facts = (
+    <div className="item-facts">
+      {/* The project reads as a dot plus its name (§6.1) rather than as the
+          filled pill the card used to draw here: a pill is a status
+          micro-label, and the project is an identity. The hue is the same
+          assignment the card's dot takes, from the one helper, so a card and
+          the modal it opens can never disagree about a colour. */}
+      <div className="item-facts-proj">
+        <Dot hue={hues.hueFor(item.project)} size={10} />
+        <span className="item-facts-proj-name">{item.project}</span>
+      </div>
+      <dl className="item-facts-list">
+        <Fact label="id">{item.id}</Fact>
+        <Fact label="section">{item.section}</Fact>
+        {item.created !== '' && <Fact label="created">{item.created}</Fact>}
+        {/* Verbatim, all three of them, and never collapsed into `lastTouched`'s
+            one answer: that derivation exists to decide Board versus Archive,
+            and this column is the surface someone reconciling a card against
+            the bytes on disk comes to. Which rung won is their question to ask;
+            printing only the winner would answer it for them, wrongly, on any
+            item whose `updated` is silent because a groom edited the file
+            without `start`. */}
+        {item.updated !== '' && <Fact label="updated">{item.updated}</Fact>}
+        {item.lastCommit !== '' && <Fact label="last commit">{item.lastCommit}</Fact>}
+        {/* `null` is a reading, not a missing value: an idea, a refactor and an
+            out-of-scope item have no groomed state at all (CLAUDE.md —
+            "grooming is not a state they have"), so the row is absent rather
+            than saying `no`, which would be a claim about them that is false. */}
+        {item.groomed !== null && <Fact label="groomed">{item.groomed ? 'yes' : 'no'}</Fact>}
+        {item.tags.length > 0 && <Fact label="tags">{item.tags.join(', ')}</Fact>}
+        {/* Both halves, because they answer different questions — the elapsed
+            is what a person reads, the parenthetical is the exact bytes on
+            disk, which is what anyone reconciling a card against the file
+            actually needs. The reading drops out on a value that cannot be aged
+            (a hand-edited file), leaving the stored value alone rather than
+            printing NaN. Gated on `isInProgress` the same way the card is, so
+            an archived item reads as done rather than as still being worked. */}
+        {inProgress && <Fact label="in progress">{elapsed === null ? `(since ${item.started})` : `${elapsed} (since ${item.started})`}</Fact>}
+        {item.status === 'done' && <Fact label="status">done</Fact>}
+        {/* Accumulated time and tokens, unlike the in-progress row above, are
+            NOT gated on `inProgress` or `item.status`: they are history, not a
+            live reading, and `move` never rewrites an item's content, so a done
+            item's billed seconds are exactly as true after archiving as before.
+            Each counter renders independently — an item can carry any subset —
+            and a zero is silent rather than printing `0s`, since `0` is also
+            what an item that was never groomed or executed carries (see
+            BacklogItem.groomElapsed/groomTokens in shared/types.ts): there is
+            nothing true to say about it. */}
+        {item.groomElapsed > 0 && <Fact label="groomed for">{formatSeconds(item.groomElapsed)}</Fact>}
+        {item.executeElapsed > 0 && <Fact label="worked for">{formatSeconds(item.executeElapsed)}</Fact>}
+        {item.groomTokens > 0 && <Fact label="groom tokens">{groupDigits(item.groomTokens)}</Fact>}
+        {item.executeTokens > 0 && <Fact label="execute tokens">{groupDigits(item.executeTokens)}</Fact>}
+        <Fact label="file">
+          <span className="item-facts-path">{item.path}</span>
+        </Fact>
+      </dl>
+      {onDispatch && (
+        <div className="item-facts-dispatch">
+          <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} />
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <>
-      <div className="drawer-backdrop" data-testid="drawer-backdrop" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-label={item.title}>
-        <div className="drawer-head">
-          {/* Same pill the card carried, same hue — one shared helper rather
-              than a second table here, so a card and the drawer it opens can
-              never disagree. The drawer has no column to state the type, but
-              the id's prefix on the meta line below still does. */}
-          <span className={`pill ${hues.classFor(item.project)}`}>{item.project}</span>
-          <span className="drawer-title">{item.title}</span>
-          {onDispatch && <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} />}
-          <button className="drawer-close" onClick={onClose}>
-            close
-          </button>
-        </div>
-        <div className="drawer-meta">
-          <span>
-            {/* Project lives in the pill above, not twice. */}
-            {item.id} · {item.created}
-            {/* Plain text, like the `done` marker beside it — the card has room
-                only for an elapsed reading, so the drawer is where the stored
-                value belongs: "in progress 47d" invites "since when", and the
-                answer is here. Both halves, because they answer different
-                questions — the elapsed is what a person reads, the parenthetical
-                is the exact bytes on disk, which is what anyone reconciling a
-                card against the file actually needs. The reading drops out on a
-                value that cannot be aged (a hand-edited file), leaving the words
-                and the verbatim value rather than printing NaN.
-                Gated on status the same way the card is, so an archived item
-                reads as done rather than as still being worked. */}
-            {inProgress ? ` · ◍ in progress${elapsed === null ? '' : ` ${elapsed}`} (since ${item.started})` : ''}
-            {item.status === 'done' ? ' · done' : ''}
-            {item.tags.length > 0 ? ` · ${item.tags.join(', ')}` : ''}
-            {/* Accumulated time, unlike the in-progress segment above, is NOT
-                gated on `inProgress` or `item.status`: it is history, not a
-                live reading, and `move` never rewrites an item's content, so
-                a done item's billed seconds are exactly as true after
-                archiving as before. Each bucket renders independently — an
-                item can carry either, both, or neither — and a zero bucket
-                is silent rather than printing "groomed for 0s", since `0` is
-                also what an item that was never groomed or executed carries
-                (see BacklogItem.groomElapsed/executeElapsed in
-                shared/types.ts): there is nothing true to say about it. */}
-            {item.groomElapsed > 0 ? ` · groomed for ${formatSeconds(item.groomElapsed)}` : ''}
-            {item.executeElapsed > 0 ? ` · worked for ${formatSeconds(item.executeElapsed)}` : ''}
-          </span>
-          <span className="drawer-path">{item.path}</span>
-        </div>
-        <div className="drawer-body">
-          {failed ? (
-            <div className="drawer-empty">item file unavailable</div>
-          ) : body === null ? (
-            <div className="drawer-empty">loading…</div>
-          ) : (
-            <div dangerouslySetInnerHTML={{ __html: html }} />
-          )}
-        </div>
-      </aside>
-    </>
+    <Modal label={item.title} facts={facts} onClose={onClose}>
+      <h2 className="item-body-title">{item.title}</h2>
+      <div className="item-body">
+        {failed ? (
+          <div className="drawer-empty">item file unavailable</div>
+        ) : body === null ? (
+          <div className="drawer-empty">loading…</div>
+        ) : (
+          <div dangerouslySetInnerHTML={{ __html: html }} />
+        )}
+      </div>
+    </Modal>
   );
 }

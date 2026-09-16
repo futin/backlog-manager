@@ -18,7 +18,7 @@ import { BoardColumn } from './BoardColumn';
 import type { BoardColumnSlug } from './BoardColumn';
 import { ACTIVE_RUN_STAGES, ItemCard } from './ItemCard';
 import type { RunCardState } from './ItemCard';
-import { ItemDrawer } from './ItemDrawer';
+import { ItemModal } from './ItemModal';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunChip } from './RunChip';
@@ -207,8 +207,8 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   // view has no control that can start one. The hook still exports both for
   // that surface; what it no longer has on this page is a second caller.
   const { runs, starting, refresh: refreshRuns } = useOrchestratorRuns();
-  /* Separate from `open`: the sheet can be opened from a card (drawer closed)
-     or from inside the drawer (drawer stays open behind it), so one piece of
+  /* Separate from `open`: the sheet can be opened from a card (modal closed)
+     or from inside the modal (the modal stays open behind it), so one piece of
      state cannot serve both. */
   const [dispatching, setDispatching] = useState<BacklogItem | null>(null);
   /* Task 13: which project's Orchestrate sheet is open, or null. A project
@@ -505,7 +505,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   /*
    * The dispatch half of the same run payload: why a run forbids dispatching
    * this item, or null. Fed to BOTH render sites below — the card's tear-off
-   * tab and the drawer's chip — since they are two independent buttons for one
+   * tab and the modal's chip — since they are two independent buttons for one
    * item, and only one of them being run-aware is half of the bug this fixes.
    *
    * Deliberately reading the FULL `runs` list rather than going through
@@ -527,22 +527,22 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
 
   /*
-   * Task 12 fix round 1 paired ItemDrawer with RunDrawer here: two
+   * Task 12 fix round 1 paired the item drawer with `RunDrawer` here: two
    * role="dialog" `.drawer` asides, neither with a focus trap of its own, so
    * two mounted at once was a real keyboard hazard rather than a visual
-   * overlap — Tab from the frontmost drawer's backdrop walked a keyboard-only
-   * user into the interactive elements of whichever drawer was still mounted
+   * overlap — Tab from the frontmost one's backdrop walked a keyboard-only
+   * user into the interactive elements of whichever was still mounted
    * behind it, and a screen reader was left with two dialogs and no signal for
-   * which one was current. The pair is gone with `RunDrawer` (task-37), so
-   * what survives here is the one opener and the three-way exclusion the
-   * sheets still need.
+   * which one was current. The pair is gone with `RunDrawer` (task-37) and the
+   * survivor is `ItemModal` (task-40), so what is left here is the one opener
+   * and the three-way exclusion the sheets still need.
    *
    * This function is still the ONLY place `open` goes non-null — every call
    * site below goes through it, never `setOpen` directly — but Task 13's fix
    * round 1 (below) added a caller that clears it, so "opening either closes
    * the other" is no longer the whole story; see that comment for the rest.
    */
-  const openItemDrawer = (item: BacklogItem): void => {
+  const openItemModal = (item: BacklogItem): void => {
     // Task 13 fix round 1 — see openOrchestrateSheet's own comment for why
     // this line was added here (it was not, at first).
     setOrchestrating(null);
@@ -552,33 +552,33 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   /*
    * Task 13 adds a second overlay pair, and the same hazard the comment
    * above describes applies to it for the same structural reason:
-   * OrchestrateSheet reuses LaunchSheet's own `.sheet` shape verbatim
-   * (OrchestrateSheet.tsx's own header comment), which means it has exactly
-   * the same "no focus trap of its own" property the two `.drawer`s share.
+   * OrchestrateSheet and LaunchSheet wear the same `FormSheet` shell
+   * (task-40), which means both have exactly the same "no focus trap of its
+   * own" property the two `.drawer`s shared.
    * `dispatching` and `orchestrating` get the identical treatment LaunchSheet
    * and OrchestrateSheet's two openers already gave each other in Task 13's
    * first pass: two separate pieces of state, cleared by each other's opener,
    * never set directly outside these two functions.
    *
    * Fix round 1 (Important): the first pass stopped there and left
-   * `orchestrating` free to coexist with an open item drawer, reasoning by
+   * `orchestrating` free to coexist with an open item modal, reasoning by
    * analogy that OrchestrateSheet was "the same kind of
-   * overlay as LaunchSheet" and LaunchSheet already coexists with ItemDrawer
-   * on purpose (test/dispatch-button.test.tsx's "opens the sheet from inside
-   * the drawer, leaving the drawer open behind it"). Review found the
+   * overlay as LaunchSheet" and LaunchSheet already coexists with the item
+   * modal on purpose (test/dispatch-button.test.tsx's "opens the sheet from
+   * inside the modal, leaving it open behind it"). Review found the
    * analogy does not actually hold: LaunchSheet's coexistence is reachable
-   * only through a per-item dispatch control that lives INSIDE the drawer it
-   * coexists with (or on the card the drawer was opened from), which is a
+   * only through a per-item dispatch control that lives INSIDE the modal it
+   * coexists with (or on the card the modal was opened from), which is a
    * narrow, deliberately-tested path. OrchestrateSheet's own trigger is the
    * band's chip, which is on screen and clickable at the exact same time
-   * as every card — "drawer open, then Orchestrate" is not an edge case here,
-   * it is the ordinary path a keyboard user (Tab past the drawer's own
-   * untrapped focus) or even a mouse user (the drawer's backdrop covers the
+   * as every card — "modal open, then Orchestrate" is not an edge case here,
+   * it is the ordinary path a keyboard user (Tab past the modal's own
+   * untrapped focus) or even a mouse user (the modal's scrim covers the
    * columns, but not the band above it) reaches without trying to. So
-   * `orchestrating` clears `open` too (see `openItemDrawer` above), and the
-   * drawer's opener clears `orchestrating` right back. `dispatching`
+   * `orchestrating` clears `open` too (see `openItemModal` above), and the
+   * modal's opener clears `orchestrating` right back. `dispatching`
    * (LaunchSheet) deliberately still does NOT participate in that exclusion:
-   * the coexistence it has with the item drawer remains the proven,
+   * the coexistence it has with the item modal remains the proven,
    * deliberate, tested behaviour described above, and nothing here touches it.
    */
   const openLaunchSheet = (item: BacklogItem): void => {
@@ -777,9 +777,9 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
                     key={item.path}
                     item={item}
                     hues={hues}
-                    // Goes through `openItemDrawer`, not `setOpen`
+                    // Goes through `openItemModal`, not `setOpen`
                     // directly — see that function's own comment for why.
-                    onOpen={() => openItemDrawer(item)}
+                    onOpen={() => openItemModal(item)}
                     agents={agents}
                     // Goes through `openLaunchSheet`, not `setDispatching`
                     // directly — see that function's own comment for why.
@@ -801,7 +801,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
       )}
 
       {open !== null && (
-        <ItemDrawer
+        <ItemModal
           item={open}
           hues={hues}
           onClose={() => setOpen(null)}
@@ -826,7 +826,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
            prompt.
            One key resets all nine, which is smaller and more honest than
            nine resets in an effect that would have to be extended every time
-           the sheet grows a tenth. Contrast ItemDrawer, which DOES clear its
+           the sheet grows a tenth. Contrast ItemModal, which DOES clear its
            own state on an `item.path` change: it holds two fields and both
            are derived from the fetch that effect already owns, so the reset
            is the effect's own business there. The difference is deliberate. */
