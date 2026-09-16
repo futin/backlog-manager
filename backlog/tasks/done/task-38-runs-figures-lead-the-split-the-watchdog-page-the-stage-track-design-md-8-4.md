@@ -3,6 +3,10 @@ id: task-38
 title: Runs: figures lead, the split, the Watchdog page, the stage track (DESIGN.md 8.4)
 created: 2026-09-15
 tags: fe-redesign, runs
+updated: 2026-09-16T08:28:50Z
+started: 2026-09-16T06:56:42Z
+execute-elapsed: 5528
+execute-tokens: 809590
 ---
 
 ## Goal
@@ -259,3 +263,93 @@ introduces rather than deleting any of them (spec §9's rule for
   `client/src/components/RunControls.tsx`, `client/src/styles.css`, and
   test files. No change to `shared/agent.ts`, `shared/types.ts`, or any
   server route.
+
+## Outcome
+
+2026-09-16 — done. Runs is shape D: a band, a six-cell figure strip, a 420 px list column (a Live sheet over a History sheet) beside one always-visible detail
+sheet, with Watchdog as its own page reached through the rail's sub-nav tree. The in-page segmented control is gone, and with it `runs-mode.ts`'s `MODE_BUTTON`
+pair — the rail's tree is the one place the two views are switched, and a second exported wording could only have disagreed with it.
+
+Every row of the moved-rules table is implemented and named by a passing case:
+
+| Rule | Where it landed | Case |
+|---|---|---|
+| A crashed run renders as crashed, never as nothing | the Live sheet's row — `--red` dot, `crashed` pill, and all three readings in ONE amber line (`runs-live-crashed-<runId>`) so an edit cannot drop one silently. `splitLive`'s gate is "the payload still lists this run as `running`/`paused`", freshness deliberately excluded, which is what used to drop a crashed run into history among finished ones | `runs-view` "carries all three of a crashed run's readings together on one line" |
+| Resume for a crashed run → the detail sheet's head alone | `RunControls` gained the crashed branch behind `watchdogStoodDown`; the paused branch's Resume is the same control, so there is exactly one Resume per run state | `watchdog-coupling` (7 rows), `run-controls` "offers Resume, and only Resume, once the sweeper has stood down" |
+| A resume is serialized at three layers, layer 1 | the crashed branch dispatches through the SAME `act` every other branch uses — no second state variable | `run-controls` × 3 double-click cases |
+| The board offers a hand resume exactly when the watchdog will not | one function AND one COMPONENT: the Watchdog page's Resume is `RunControls` itself, so `WatchdogMonitor` never calls the predicate | `watchdog-coupling` reader-list case, asserted as an exact set |
+| A board-started run is visible before its run file exists | the Live sheet's first rows — `starting… · <age>`, no controls, not selectable (asserted by a click, not by the absence of a handler) | `runs-view` "leads the Live sheet", "refuses to select a starting row" |
+| The toolbar Orchestrate control hides on a starting entry | untouched | — |
+| `useOrchestratorRuns` polls while any run is `running`, fresh or not | untouched | — |
+
+**Three findings the work itself turned up, all fixed rather than filed:**
+
+1. **The bug-19 guard was not synchronous.** `RunControls` guarded on a `useState` `busy`, so two clicks dispatched before React re-rendered both read `false` and
+   both fired. It is now a `useRef` checked and assigned in the same turn, with the state kept for the rendering half. Found by the red proof: the first version
+   of the double-click case passed with `if (busy) return` deleted, because `userEvent.click` awaits between clicks and the second one lands on a control that
+   has already swapped itself for `Resuming…` — the case was pinning the rendered state, not the guard.
+2. **`WatchdogMonitor` crashed on `phase: 'idle'`.** The sweeper figure's countdown parsed `nextTickAt`, which is `null` for every phase but `armed`, and fed
+   `NaN` to `formatSpanCompact`. Gated on `sweepFraction`'s own verdict so the bar and the words under it can never disagree about whether a tick is pending.
+3. **The History sheet's empty state had no way to say "nothing has finished yet".** With a starting placeholder and an empty archive it printed `no runs in this
+   range`, sending a reader hunting through a range control for runs that do not exist. Three states now, in a fixed precedence.
+
+**Deviations from the plan, each deliberate:**
+
+- **The plan's line citation was stale.** It cites spec §4 at "lines 365–546"; the spec is 505 lines and §4 is 238–332. Read against the headings, as the plan's
+  own caution says to.
+- **Five files outside the plan's `git diff --stat` list are touched**, all additive and all for the same reason — §12.1 says a surface that needs a variant adds
+  a PROP: `ui/Figure.tsx` (`cols`, `title`, `testId`, optional `value`, `children`), `ui/Ledger.tsx` (optional `columns`, so a real `<table>` can have the box
+  without the grid), `ui/ProgressRow.tsx` (a `warn` fill for the heartbeat meter past its stale line), `lib/run-stage.ts` (`runDotTone`, additive — every
+  existing export is byte-identical, `git diff` shows no removed line), and `lib/runs-mode.ts` + `SideRail.tsx` (the `MODE_BUTTON` removal). `shared/agent.ts`,
+  `shared/types.ts` and every server route are untouched.
+- **`StageBars.tsx` itself is unchanged** — its 10 px redraw is entirely CSS, and the component already drew "always seven rows, `—` for a stage never
+  recorded".
+- **The sweeper's phase renders at the strip's 30/700, not §4.2's 24/700.** `.ui-figure-value`'s type scale belongs to the primitive, and a per-page override
+  would be exactly the restatement §12.1 forbids.
+- **The Watchdog page's Resume reads `Resume run`, not the mock's `Resume now`** — because it IS `RunControls`, which is what makes "one function, not two
+  agreeing expressions" true at the component level rather than at the call level.
+- **§8.4.1 puts the crashed sentence in the `status` fact; it is drawn as the boxed `.run-detail-crashed` line immediately under the strip.** That line's own
+  style guard (`run-detail-crashed-style.test.ts`) requires the box, and a boxed alert inside one narrow cell of a wrapping facts grid is not readable. The
+  `status` fact still says `crashed` through `runStatusChip`.
+- **The six figures keep their `runs-tile-*` test hooks.** The tile became a `Figure`; the reading did not change, and renaming thirty assertions would have
+  churned the suite without pinning anything new.
+- **Test case 9's "change the constant in a test double" could not be written.** Swapping `shared/types` needs `jest.resetModules`, which hands the re-imported
+  component a second copy of React and every hook throws before a label is drawn (attempted, reverted). Replaced by two mechanisms that between them cover both
+  failure modes: the rendering cases compute their expected strings from the imported constant (catches a typed numeral), and a source guard asserts the format
+  call sits inside the JSX that draws each label and that the file spells the window nowhere (catches a module-scope freeze).
+- **`docs/subsystems/board.md` is left describing the old Runs surface** — spec §11 assigns its rewrite to task 6 (`task-41`).
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run build
+✓ built in 1.04s
+
+$ pnpm test
+Test Suites: 101 passed, 101 total
+Tests:       1666 passed, 1666 total
+# pass 538
+# fail 0
+pnpm test: both runners passed.
+```
+
+Screenshots: Runs › History and Runs › Watchdog at 1400 px and 400 px, daylight and midnight — eight files under `.playwright-mcp/` (gitignored), taken against
+a real API this session started on port 4399 (`PORT=4399 BM_AGENTS=off BM_WATCHDOG=off`, so nothing could spawn) serving the built client and this machine's real
+run state, including this very run as the Live row. Killed by its recorded pid, never by pattern; the user's own API on 4322 was untouched throughout. The
+Watchdog page necessarily shows `off — BM_WATCHDOG off`: reaching `armed` would have needed `BM_AGENTS` on, which in an unattended run risks a real spawn.
+
+Contract sweep: 6 sites updated (client/src/lib/runs-mode.ts, client/src/components/SideRail.tsx, test/rail.test.tsx, CLAUDE.md, docs/subsystems/invariants.md,
+test/watchdog-coupling.test.ts→.tsx). CLAUDE.md's resume-coupling and crashed-run bullets, its pause entry's "lands on the Runs detail head in task-38", its
+`client/src/` layout line and its starting-entry bullet now name the surfaces that exist; invariants.md's crashed-run, resume-coupling and task-27 entries were
+edited in place per spec §8, never deleted. Left standing on purpose: every `backlog/*/done/` item and every `docs/superpowers/plans|specs` file that names
+`RunStrip`, `runs-tile` or `runs-day-live` — those are records of what was true when they were written, not statements the change makes false — and
+`docs/subsystems/board.md`, whose rewrite spec §11 assigns to task-41.
+
+Red proof: 18 tests went red with the change reverted, across seven separate reverts — StageTrack's `skipped` derivation (2 cases), `RunControls`' synchronous guard (3), the
+`watchdogStoodDown` gate on the crashed Resume (6), one of the crashed row's three readings (1), the skipped node's dashed ring (1), `splitLive`'s
+presence-not-freshness gate (2), and `runDotTone`'s no-tone-for-a-finished-run (3). Two of those proofs FAILED on the first attempt and are the reason two cases
+now look the way they do: the double-click case was rewritten to dispatch both events in one `act` (and the production guard made synchronous), and
+`runDotTone`'s verdict was pinned in `test/run-stage.test.ts`, which had no case for it at all.

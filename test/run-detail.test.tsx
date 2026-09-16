@@ -685,10 +685,15 @@ describe('RunDetail', () => {
 
     // The cross-surface rule, asserted as a comparison rather than as two
     // constants: no item's reading may exceed its own run's wall time. The
-    // header prints `formatSpanCompact` (7m), the row `formatSpan` (7m 24s),
-    // so this is pinned on the underlying numbers via their own libs in
+    // facts strip prints `formatSpanCompact` (7m), the row `formatSpan` (7m
+    // 24s), so this is pinned on the underlying numbers via their own libs in
     // run-time.test.ts and stated here in the two strings a person reads.
-    expect(screen.getByTestId('run-detail-time')).toHaveTextContent('7m elapsed');
+    //   task-38 moved the word: the reading is a `wall` fact on a finished run
+    // and an `elapsed` one while it is going, which is the same number under
+    // whichever of the two is true, rather than "elapsed" on a run that
+    // stopped days ago.
+    expect(screen.getByTestId('run-detail-time')).toHaveTextContent('7m');
+    expect(screen.getByTestId('run-detail-time').parentElement).toHaveTextContent('wall');
   });
 
   it('fix loops show as a badge, not a line', () => {
@@ -859,15 +864,20 @@ describe('RunDetail', () => {
   });
 });
 
-/* task-17 — the pane's own half of the shared controls. The board's drawer
-   hosts the identical component with the identical props, so what this block
+/* task-17 — the sheet's own half of the shared controls. What this block
    proves is the WIRING (which run object each shape hands down), not the
-   table — that lives in test/run-controls.test.tsx. */
+   table — that lives in test/run-controls.test.tsx, and the crashed row of it
+   in test/watchdog-coupling.test.tsx.
+     task-38 made this head a `SheetHead`, so the selector moved from this
+   file's own `.run-detail-head` to the primitive's `.ui-sheet-head`. The cases
+   moved with it rather than being deleted: what they assert — that the
+   controls are in the HEAD and not loose in the body — is unchanged, and it is
+   the only thing keeping "one Resume per run state" anchored to a place. */
 describe('RunDetail — the controls in its head', () => {
   const OPEN_GATE = { canResume: true, blockedReason: null };
 
   function head(): HTMLElement {
-    return document.querySelector('.run-detail-head') as HTMLElement;
+    return document.querySelector('.ui-sheet-head') as HTMLElement;
   }
 
   it('offers Pause for a live fresh run', () => {

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -35,6 +35,32 @@ const agents = jest.requireMock('../client/src/lib/agents') as {
 
 const OPEN_GATE = { canResume: true, blockedReason: null };
 
+/**
+ * Two clicks that both land before React re-renders — which is the ONLY shape
+ * that tests bug-19's layer 1, and the reason this is a raw `dispatchEvent`
+ * pair inside one `act` rather than two `userEvent.click`s.
+ *
+ * `userEvent.click` awaits between clicks, so React has already re-rendered by
+ * the second one and the control has already swapped itself for the
+ * `Resuming…` word. The second click then lands on a detached node and calls
+ * nothing — which means the case passes with the synchronous guard DELETED,
+ * i.e. it proves the rendered state and not the guard. (Measured: with
+ * `if (busy) return` removed from `act`, the `userEvent` version of this case
+ * stayed green.)
+ *
+ * The real defect is a person double-clicking inside the in-flight window,
+ * where nothing on screen has changed yet because the host's `resuming` mark
+ * is set from `onChanged` — i.e. after the request settles. Dispatching both
+ * events in one `act` reproduces exactly that: both handlers run against the
+ * same render, and only `act`'s own `if (busy) return` can stop the second.
+ */
+function doubleClick(el: HTMLElement): void {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 function runFor(over: Partial<RunControlsRun> = {}): RunControlsRun {
   return {
     status: fixture.status,
@@ -64,17 +90,23 @@ beforeEach(() => {
 });
 
 /**
- * One component, two hosts (the board's run drawer and the Runs view's
- * detail pane), and every decision made from the run entry alone — that is
- * what these cases pin. A second copy of this table living in each host is
- * exactly the drift `watchdogStoodDown`'s own history records, and the two
- * hosts here are in different lazy chunks, so a shared component at the top
- * level is the only shape that keeps them agreeing.
+ * One component, one decision table, every decision made from the run entry
+ * alone — that is what these cases pin. A second copy of the table living in
+ * each host is exactly the drift `watchdogStoodDown`'s own history records.
  *
- * The crashed run is deliberately NOT this component's business: a crashed
- * run's Resume lives on the strip, behind `watchdogStoodDown`, because the
- * watchdog may be about to spawn one itself. A paused run was never a
- * watchdog subject, so it has no such coordination to do.
+ * task-38 made the crashed run this component's business too: its Resume is
+ * here, behind `watchdogStoodDown`, because the watchdog may be about to spawn
+ * one itself and a click plus a sweep both driving `--resume` into one
+ * `run.json` is the race that gate exists to prevent. The full verdict TABLE
+ * for that gate lives in `test/watchdog-coupling.test.tsx`, driven from the
+ * same hand-checked rows the sweeper's own half is; what this file adds is the
+ * rest of the crashed branch — that an unannotated run offers nothing, and
+ * that the branch dispatches through the same synchronous guard every other
+ * one does.
+ *
+ * A paused run was never a watchdog subject (the sweeper only walks `running`
+ * runs), so it has no such coordination to do, and its Resume is gated by the
+ * environment ladder alone.
  */
 describe('RunControls — what renders, by run', () => {
   it.each([
@@ -90,7 +122,7 @@ describe('RunControls — what renders, by run', () => {
   });
 
   it.each([
-    ['a crashed run — the strip owns that Resume', { status: 'running' as const, fresh: false }],
+    ['a crashed run the server has not annotated yet', { status: 'running' as const, fresh: false }],
     ['a done run', { status: 'done' as const, fresh: false }],
     ['an aborted run', { status: 'aborted' as const, fresh: false }],
     ['a failed run', { status: 'failed' as const, fresh: false }]
@@ -218,5 +250,109 @@ describe('inFlightItemId', () => {
         { id: 'b', stage: 'branched' }
       ])
     ).toBeNull();
+  });
+});
+
+/**
+ * task-38's crashed branch — the half `watchdog-coupling.test.tsx` does not
+ * own. That file drives the stand-down VERDICT from one table shared with the
+ * sweeper; these are the two things about the branch that are not verdicts.
+ */
+describe('RunControls — the crashed run', () => {
+  /** A crashed run (running, heartbeat gone) whose sweeper has stood down. */
+  function crashedRun(over: Partial<RunControlsRun> = {}): RunControlsRun {
+    return runFor({
+      status: 'running',
+      fresh: false,
+      watchdog: {
+        enabled: false,
+        attempts: 0,
+        maxAttempts: 2,
+        lastSpawnAt: null,
+        lastSessionId: null,
+        lastError: null,
+        exhausted: false
+      },
+      ...over
+    });
+  }
+
+  it('offers Resume, and only Resume, once the sweeper has stood down', () => {
+    render(<RunControls run={crashedRun()} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
+    expect(screen.getByTestId('run-controls-resume')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-controls-pause')).toBeNull();
+    expect(screen.queryByTestId('run-controls-cancel')).toBeNull();
+  });
+
+  // The environment ladder applies to this branch exactly as it does to the
+  // paused one — both halves of the gate must agree before any control is
+  // drawn, and the environment half HIDES rather than disables.
+  it('renders nothing when the environment cannot spawn, however far the sweeper has stood down', () => {
+    const { container } = render(<RunControls run={crashedRun()} gate={{ canResume: false, blockedReason: null }} resuming={false} onChanged={jest.fn()} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  /**
+   * **bug-19's layer 1, applied to the branch task-38 added.** This is the
+   * direct regression test: two rapid clicks must produce exactly ONE
+   * `resumeOrchestrate` call.
+   *
+   * The call COUNT is the assertion, not the rendered state, and that
+   * distinction is the whole point — the host's own `resuming` mark is set
+   * from `onChanged`, i.e. after the request settles, so for the whole
+   * in-flight window nothing above the guard has changed on screen. A case
+   * that only checked what was rendered would pass against a branch with no
+   * guard at all (occurrence 1 was three clicks inside ten seconds against a
+   * control that looked identical after each one).
+   *
+   * The stub is held UNRESOLVED so the second click lands inside that window
+   * rather than after it; resolving it first would test nothing.
+   */
+  it('fires exactly one resume for two clicks landing before the first re-render', async () => {
+    let settle: () => void = () => {};
+    agents.resumeOrchestrate.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = () => resolve();
+        })
+    );
+    const onChanged = jest.fn();
+    render(<RunControls run={crashedRun()} gate={OPEN_GATE} resuming={false} onChanged={onChanged} />);
+
+    doubleClick(screen.getByTestId('run-controls-resume'));
+
+    expect(agents.resumeOrchestrate).toHaveBeenCalledTimes(1);
+
+    settle();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith('resume'));
+    expect(agents.resumeOrchestrate).toHaveBeenCalledTimes(1);
+  });
+
+  /* The same guard, on the branch that already had it — asserted as a PAIR
+     with the case above rather than on its own, because what regressed
+     bug-19 the first time was a guard that covered some branches and not
+     others, and a suite that checked each branch in isolation would not have
+     caught it. */
+  it('fires exactly one resume for two clicks on a paused run too', () => {
+    agents.resumeOrchestrate.mockImplementation(() => new Promise<void>(() => {}));
+    render(<RunControls run={runFor({ status: 'paused', fresh: false })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
+
+    doubleClick(screen.getByTestId('run-controls-resume'));
+
+    expect(agents.resumeOrchestrate).toHaveBeenCalledTimes(1);
+  });
+
+  /* The pause control is the third branch through the same `act`, and it is
+     in this block rather than the one above because what it pins is the same
+     one thing: the guard is `act`'s, so it covers whatever `act` dispatches.
+     A branch added later that bypassed `act` would fail this row and no
+     other. */
+  it('fires exactly one pause for two clicks on a running run', () => {
+    agents.pauseOrchestrate.mockImplementation(() => new Promise<void>(() => {}));
+    render(<RunControls run={runFor({ status: 'running', fresh: true })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
+
+    doubleClick(screen.getByTestId('run-controls-pause'));
+
+    expect(agents.pauseOrchestrate).toHaveBeenCalledTimes(1);
   });
 });

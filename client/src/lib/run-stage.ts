@@ -242,3 +242,37 @@ export function runStatusChip(
   }
   return { label: status, glyph: RUN_STATUS_GLYPH[status], className: RUN_STATUS_CLASS[status] };
 }
+
+/**
+ * The run-level DOT's tone (task-38, DESIGN.md §8.4.1) — the Live row's, the
+ * History row's and the detail sheet's head, which is why it is one function
+ * here beside `runStatusChip` rather than three hand-written maps on three
+ * surfaces.
+ *
+ * `undefined` means NO tone, which is a reading rather than a gap: `.ui-dot`'s
+ * base rule paints `--ink3`, and that quiet grey is the honest answer for
+ * every run that has FINISHED. `done`, `aborted` and `failed` deliberately
+ * share it, because §8.4.1's own argument for printing the status word beside
+ * the dot is that "a dot alone cannot tell the first three apart, and three
+ * colours of the same dot is the encoding §5 rules out". The word carries
+ * which ending it was; the dot carries only whether the run is still a going
+ * concern.
+ *
+ * Crashed outranks everything for the same reason `RunChip`'s `STATES` order
+ * does — it is the one state a person has to act on — and it is decided by
+ * `isCrashed` through the same `live` entry `runStatusChip` reads, never by a
+ * second `status === 'running' && !fresh` written here.
+ *
+ * The return type is a plain string union rather than `ui/Dot`'s own `DotTone`
+ * on purpose: `lib/` must not import from `components/`, and these four names
+ * are a subset `Dot` accepts structurally.
+ */
+export function runDotTone(
+  status: OrchestratorRun['status'],
+  live: { status: OrchestratorRun['status']; fresh: boolean } | null | undefined
+): 'live' | 'paused' | 'crashed' | undefined {
+  if (live !== null && live !== undefined && isCrashed(live)) return 'crashed';
+  if (status === 'running') return 'live';
+  if (status === 'paused') return 'paused';
+  return undefined;
+}

@@ -3,17 +3,21 @@ import { Fragment, useEffect, useState } from 'react';
 import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
-import { mergeModeLabel, runStatusChip, stageChipClass, stageGlyph } from '../../lib/run-stage';
+import { projectLabel } from '../../lib/project-label';
+import { mergeModeLabel, runDotTone, runStatusChip, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { formatTurns, formatUsd, itemStageSpans, itemUsageTotals, runStageTotals, runUsageTotals, runWallMs } from '../../lib/run-stats';
 import { isCrashed } from '../../lib/run-watchdog';
 import { formatClock, formatSpan, formatSpanCompact, itemQueueWaitMs, runClockMs, runIsLive } from '../../lib/run-time';
-import { RunControls } from '../RunControls';
+import { RunControls, inFlightItemId } from '../RunControls';
 import type { RunControlsChange } from '../RunControls';
+import { Dot } from '../ui/Dot';
+import { Pill } from '../ui/Pill';
+import { SheetHead } from '../ui/Sheet';
 import { ACTIVE_RUN_STAGES } from '../board/ItemCard';
 import { RowTime } from '../board/RunRowTime';
 import { StageBars } from './StageBars';
 import { StageTrack } from './StageTrack';
-import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../../../../shared/types';
+import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage, RunWatchdog } from '../../../../shared/types';
 
 /**
  * The Runs section's persistent right-hand pane (RunsView.tsx, Task 6) — the
@@ -181,15 +185,16 @@ export function RunDetail({
   summary: OrchestratorArchiveRun;
   /** The live poll's own entry for this runId — the whole payload entry
    *  (task-17), not a bare `OrchestratorRun`: `RunControls` below decides
-   *  from `fresh` and `pauseRequested`, and both are annotations the
-   *  endpoint adds rather than fields the run file carries. Named as
-   *  exactly those two rather than the whole payload entry, so this prop
-   *  states what it READS: `pastRuns` and `watchdog` ride the same entry
-   *  and are none of this pane's business. */
-  live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean }) | null;
-  /** task-17: the same three props `RunDrawer` takes, from the same
-   *  `resumeGate` call — the two hosts of `RunControls` are deliberately
-   *  symmetric, so neither can drift into deriving its own gate. */
+   *  from `fresh`, `pauseRequested` and — since task-38 put the crashed
+   *  run's Resume in this sheet's head — `watchdog`, all three annotations
+   *  the endpoint adds rather than fields the run file carries. Named as
+   *  exactly those three rather than the whole payload entry, so this prop
+   *  states what it READS: `pastRuns` rides the same entry and is none of
+   *  this sheet's business. */
+  live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean; watchdog?: RunWatchdog }) | null;
+  /** task-17: the resume gate, from the same `resumeGate` call every host of
+   *  `RunControls` has made — one host today (this sheet's head), and the
+   *  prop stays so the component never reaches for a data source itself. */
   gate: { canResume: boolean; blockedReason: string | null };
   resuming: boolean;
   onChanged: (kind: RunControlsChange) => void;
@@ -439,116 +444,262 @@ export function RunDetail({
   // concrete queue-item shapes carry `usage`, so no narrowing is needed.
   const runUsage = runUsageTotals(source);
 
+  // ── task-38: what the detail SHEET's head and facts strip need ───────────
+  //
+  // "Finished" is the two statuses a run can still leave excluded, never a
+  // list of the three it cannot — `RunStatus` gaining a sixth member must not
+  // silently read as finished here, and `running`/`paused` are the two this
+  // sheet already forks on everywhere else.
+  const finished = authority.status !== 'running' && authority.status !== 'paused';
+  const finishedClock = finished ? formatClock(authority.updatedAt) : null;
+  // The head's own sub line: the run id, and the item count ONLY once the run
+  // is over (DESIGN.md §8.4.1). While it is live the count is still moving and
+  // the chip row below already carries every number that matters about it.
+  const itemCount = finished ? `${rows.length} ${rows.length === 1 ? 'item' : 'items'}` : null;
+  // The dot beside the project name, from the same function the Live and
+  // History rows read — see `runDotTone` (lib/run-stage.ts) for why a finished
+  // run gets no tone at all rather than a third colour of the same dot.
+  const dotTone = runDotTone(authority.status, live);
+  // The item a pause is waiting on, or the one a paused run stopped after —
+  // `inFlightItemId` (RunControls.tsx), the same lookup the Pause note in this
+  // sheet's own head already prints, never a second scan of the queue.
+  const boundaryItem = inFlightItemId(source.queue);
+  /**
+   * The `status` fact's second reading (§8.4.1). One of four, in this
+   * precedence, and the order is the point rather than incidental: a pause
+   * REQUESTED against a still-running run is the most specific thing true of
+   * it, `paused` is the state that request became, and only then does the
+   * heartbeat get a word.
+   *
+   * `null` for a crashed run deliberately: its sentence is the boxed
+   * `.run-detail-crashed` line below, which is the one reading on this sheet
+   * that must not be skimmed past (bug-29 — the stages below it MOVE), and
+   * printing an age here as well would be the same fact twice.
+   */
+  const statusNote =
+    live?.pauseRequested === true
+      ? `pausing · finishes ${boundaryItem ?? 'the current item'}`
+      : authority.status === 'paused'
+        ? boundaryItem === null
+          ? 'paused at a boundary'
+          : `paused after ${boundaryItem}`
+        : crashed
+          ? null
+          : liveFresh
+            ? 'heartbeat live'
+            : null;
+  /**
+   * The headless note under `decide` (§8.4.1), and the reason `questionMode`
+   * is read defensively: a run file written before the field existed simply
+   * lacks it, and absent means `park` — the mode those runs actually had
+   * (`OrchestratorRun.questionMode`'s own doc comment calls tolerating that a
+   * display concern in this file, which is exactly what this is). `park`
+   * appends nothing, matching the tool's own default.
+   */
+  const questionMode = source.questionMode === 'decide' ? 'decide' : 'park';
+  const questionNote = questionMode === 'decide' ? 'decide mode — a question nobody could answer was decided by the run, not parked' : null;
+
   return (
     <>
-      <div className="run-detail-head">
-        <span className="run-detail-id">{summary.runId}</span>
-        {/* bug-29: `runStatusChip` (lib/run-stage.ts), the one place the
-            `running` + dead-heartbeat -> `crashed` substitution is decided,
-            shared with RunsView's list row so the two badges on one screen
-            cannot disagree. Derived from `live`, never from `authority` —
-            `authority` may be an archive record, which carries no `fresh`
-            field, and a run with no heartbeat to judge must keep printing
-            its recorded status. */}
-        <span className={`runs-status ${statusChip.className}`}>
-          <span aria-hidden="true">{statusChip.glyph}</span>
-          {statusChip.label}
-        </span>
-        {modeLabel !== null && (
-          <span className="run-mode-badge" data-testid="run-detail-mode">
-            {modeLabel}
+      {/* The detail sheet's HEAD (task-38, DESIGN.md §8.4.1): project, the run
+          id, the item count once the run is over, and `RunControls` right.
+          `SheetHead` rather than this file's own old `.run-detail-head` row —
+          the detail is a sheet now, and §12.1's rule is that a shape more than
+          one surface draws has one home. The head's own three readings moved
+          in from what used to sit here: the status chip, the mode badge and
+          the elapsed/cost lines are all facts about the run rather than
+          identity, so they are in the facts strip below.
+            This is also the ONE place any run state offers a Resume — crashed
+          and paused alike (§8.4.1's moved-rules table). `RunControls` decides
+          which control that is from the entry alone. */}
+      <SheetHead
+        title={
+          <span className="run-detail-proj">
+            {/* `breathe` only while something is actually moving (§8.8): a
+                ring pulsing around a crashed, paused or finished run would be
+                an animation asserting something false. */}
+            {dotTone === undefined ? <Dot size={10} /> : <Dot size={10} tone={dotTone} breathe={dotTone === 'live'} />}
+            {projectLabel(summary.project)}
           </span>
-        )}
-        {/* task-17. `live` when there is one — it already carries `fresh` and
-            `pauseRequested`, the two fields the controls decide from — and a
-            synthesised entry otherwise. The synthesis is honest rather than a
-            placeholder: a run with no live entry is one this server's run
-            payload does not list, which means its file is gone or superseded,
-            so it is neither fresh nor pause-requested by construction. The
-            one thing that CAN still be true of it is `status: 'paused'`, read
-            off the archive record, and that is exactly the case the Resume
-            control exists for. `RunControls` renders nothing for every other
-            finished status regardless. */}
-        <RunControls
-          run={
-            live ?? {
-              status: source.status,
-              project: summary.project,
-              queue: source.queue,
-              fresh: false,
-              pauseRequested: false
+        }
+        sub={[summary.runId, itemCount].filter((part) => part !== null).join(' · ')}
+        right={
+          /* task-17. `live` when there is one — it already carries `fresh`,
+             `pauseRequested` and `watchdog`, the three fields the controls
+             decide from — and a synthesised entry otherwise. The synthesis is
+             honest rather than a placeholder: a run with no live entry is one
+             this server's run payload does not list, which means its file is
+             gone or superseded, so it is neither fresh nor pause-requested nor
+             a watchdog subject by construction. The one thing that CAN still
+             be true of it is `status: 'paused'`, read off the archive record,
+             and that is exactly the case the Resume control exists for.
+             `RunControls` renders nothing for every other finished status. */
+          <RunControls
+            run={
+              live ?? {
+                status: source.status,
+                project: summary.project,
+                queue: source.queue,
+                fresh: false,
+                pauseRequested: false
+              }
             }
-          }
-          gate={gate}
-          resuming={resuming}
-          onChanged={onChanged}
-        />
-        {/* Each half renders only if its own stamp parsed — RunDrawer's own
-            null-tolerant join, restated here rather than re-derived: a run
-            with a readable `startedAt` and a corrupt `updatedAt` can still
-            say when it began even with no honest wall time to report. */}
-        {(startedClock !== null || wall !== null) && (
-          <span className="run-detail-time" data-testid="run-detail-time">
-            {[startedClock === null ? null : `started ${startedClock}`, wall === null ? null : `${formatSpanCompact(wall)} elapsed`]
-              .filter((part) => part !== null)
-              .join(' · ')}
-          </span>
+            gate={gate}
+            resuming={resuming}
+            onChanged={onChanged}
+          />
+        }
+      />
+
+      {/* The facts strip (§8.4.1's body item 1) — label over value on a
+          wrapping grid, replacing the row of loose spans this sheet's head
+          used to carry. Each fact renders only when it has something to say:
+          a run with a corrupt `startedAt` still reports its cost, a
+          merge-mode run draws no mode pill (`mergeModeLabel` returns `null`
+          for one), and every run archived before task-27 carries no usage at
+          all — the reading that must never become a `$0.00`. */}
+      <div className="run-facts" data-testid="run-detail-facts">
+        {startedClock !== null && (
+          <div className="run-fact">
+            <span className="run-fact-label">started</span>
+            <span className="run-fact-value" data-testid="run-detail-started">
+              {startedClock}
+            </span>
+          </div>
         )}
+        {finishedClock !== null && (
+          <div className="run-fact">
+            <span className="run-fact-label">finished</span>
+            <span className="run-fact-value" data-testid="run-detail-finished">
+              {finishedClock}
+            </span>
+          </div>
+        )}
+        {/* `wall` while the run is over, `elapsed` while it is not — one
+            reading from `runWallMs`, which freezes itself on a dead heartbeat
+            (bug-14), under whichever of the two words is true. The testid is
+            the one this reading has always carried, so the case that pins it
+            follows the number rather than the markup. */}
+        {wall !== null && (
+          <div className="run-fact">
+            <span className="run-fact-label">{finished ? 'wall' : 'elapsed'}</span>
+            <span className="run-fact-value" data-testid="run-detail-time">
+              {formatSpanCompact(wall)}
+            </span>
+          </div>
+        )}
+        <div className="run-fact">
+          <span className="run-fact-label">status</span>
+          <span className="run-fact-value">
+            {/* bug-29: `runStatusChip` (lib/run-stage.ts), the one place the
+                `running` + dead-heartbeat -> `crashed` substitution is
+                decided, shared with the Live and History rows so no two
+                badges on one screen can disagree. Derived from `live`, never
+                from `authority` — `authority` may be an archive record, which
+                carries no `fresh` field, and a run with no heartbeat to judge
+                must keep printing its recorded status. */}
+            <span className={`runs-status ${statusChip.className}`}>
+              <span aria-hidden="true">{statusChip.glyph}</span>
+              {statusChip.label}
+            </span>
+            {statusNote !== null && (
+              <span className="run-fact-note" data-testid="run-detail-status-note">
+                {statusNote}
+              </span>
+            )}
+          </span>
+        </div>
+        {modeLabel !== null && (
+          <div className="run-fact">
+            <span className="run-fact-label">mode</span>
+            <span className="run-fact-value">
+              <Pill tone="warn">
+                <span data-testid="run-detail-mode">{modeLabel}</span>
+              </Pill>
+            </span>
+          </div>
+        )}
+        <div className="run-fact">
+          <span className="run-fact-label">questions</span>
+          <span className="run-fact-value" data-testid="run-detail-questions">
+            {questionMode}
+          </span>
+        </div>
         {/* task-27: what the whole run cost, summed off the per-transcript
             entries `orchestrate.mjs usage` wrote. `runUsageTotals` returns
-            `null` for every run archived before that command existed, so
-            this renders nothing at all for them — never a `$0.00`, which is
-            the one reading this feature must not produce. Sits in the head
-            beside the elapsed reading rather than under the tiles because it
-            is the same register: a fact about this run as a whole, in the row
-            a reader's eye is already on. The `sessions` count rides along
-            once it exceeds the item count's floor of one per item — it is
-            what explains a total that looks high for the queue length. */}
+            `null` for every run archived before that command existed, so this
+            fact does not render at all for them — never a `$0.00`, which is
+            the one reading that feature must not produce. The `sessions`
+            count rides along because it is what explains a total that looks
+            high for the queue length. */}
         {runUsage !== null && (
-          <span className="run-detail-time" data-testid="run-detail-usage">
-            {[
-              runUsage.costUsd === null ? null : formatUsd(runUsage.costUsd),
-              runUsage.turns === null ? null : formatTurns(runUsage.turns),
-              `${runUsage.sessions} session${runUsage.sessions === 1 ? '' : 's'}`
-            ]
-              .filter((part) => part !== null)
-              .join(' · ')}
-          </span>
+          <div className="run-fact">
+            <span className="run-fact-label">cost</span>
+            <span className="run-fact-value" data-testid="run-detail-usage">
+              {[
+                runUsage.costUsd === null ? null : formatUsd(runUsage.costUsd),
+                runUsage.turns === null ? null : formatTurns(runUsage.turns),
+                `${runUsage.sessions} session${runUsage.sessions === 1 ? '' : 's'}`
+              ]
+                .filter((part) => part !== null)
+                .join(' · ')}
+            </span>
+          </div>
         )}
       </div>
 
       {crashed && (
-        // Placed directly under the head, above the mode note and the chips,
-        // for the reason the mode note gives for its own placement: a reader
-        // who skims past this line goes on to read every stage below it as
-        // current. That qualifier is what earns the fix: this pane's stages
-        // now MOVE for a crashed run (bug-29), where before they were frozen,
-        // and a readout that moves must not read as a process anybody is
-        // still hearing from. The strip does not need the same sentence — it
-        // prints one stage, this pane prints a whole queue of them.
+        // §8.4.1 lists this sentence as the `status` fact's own second
+        // reading; it is drawn here, immediately under the strip and boxed,
+        // for the reason bug-29 gave it that box in the first place — a reader
+        // who skims past it goes on to read every stage below as current, and
+        // this sheet's stages MOVE for a crashed run. A boxed alert inside one
+        // narrow cell of a wrapping facts grid is not readable, and the
+        // `status` fact says `crashed` in its chip either way, so the box
+        // keeps the sentence and the fact keeps the word. The Live row carries
+        // the age; this line carries a fixed stamp, which is a fact that never
+        // goes stale — and no interval is installed for a crashed run.
         <div className="run-detail-crashed" data-testid="run-detail-crashed">
-          {/* Null-tolerant, matching `run-detail-time`'s own join right above:
-              a run whose `updatedAt` will not parse is exactly the run the
-              server already reads as un-fresh, so it reaches this line with
-              no stamp to print — and the qualifier is the load-bearing half
-              anyway. */}
+          {/* Null-tolerant, matching the facts above: a run whose `updatedAt`
+              will not parse is exactly the run the server already reads as
+              un-fresh, so it reaches this line with no stamp to print — and
+              the qualifier is the load-bearing half anyway. */}
           {lastHeartbeat === null ? 'heartbeat stopped' : `last heartbeat ${lastHeartbeat}`}
           {' · every stage below is last reported, not current'}
         </div>
       )}
 
-      {modeNote !== null && (
-        // Verbatim, not paraphrased — matching RunDrawer.tsx's own rule for
-        // `RunAttention`'s `detail` prose: the exact reason a person carries
-        // forward is more useful than this pane's own summary of it. Placed
-        // right after the head, ahead of the chips, for the same "this has
-        // to be the first thing a reader sees" reasoning RunDrawer.tsx's
-        // `staleNote` gives for its own first-in-body placement — a
-        // downgraded run's whole point (design §7: "legible at a glance in
-        // history") is lost if the explanation sits below four count chips
-        // a skimming reader may never reach.
+      {fetchFailed && (
+        // The one failure mode this pane can hit on its own (the fetch,
+        // not the poll or the archive listing, both handled upstream): the
+        // rows above are already fully rendered off `summary` regardless,
+        // per the brief's own instruction that a failed tail fetch must
+        // leave them standing — this note says only that one thing behind
+        // them (a still-collapsed or still-open `<details>`) may never
+        // gain a tail.
+        <div className="run-detail-error" data-testid="run-detail-error">
+          couldn't load verification output
+        </div>
+      )}
+
+      {/* The mode and question notes as ONE 12 px line under the strip
+          (§8.4.1's body item 2), joined rather than stacked: both qualify the
+          run's own configuration, and two separate lines would read as two
+          unrelated alerts.
+            `mergeModeNote` verbatim, not paraphrased — matching RunDrawer's
+          own rule for `RunAttention`'s `detail` prose: the exact reason a
+          person carries forward is more useful than this sheet's summary of
+          it. It is `null` whenever the two mode fields agree, so a
+          deliberately-chosen branch-mode run earns nothing here either; only
+          a genuinely DOWNGRADED one does, which is the distinction design
+          §5.2 exists for (the classifier's verdict is a per-call coin flip,
+          and naming WHICH call got denied is the whole post-mortem value).
+            The `decide` note is the other half: a run that answered its own
+          questions did something a reader has to know before trusting the
+          `assumed` lists further down. */}
+      {(modeNote !== null || questionNote !== null) && (
         <div className="run-detail-mode-note" data-testid="run-detail-mode-note">
-          {modeNote}
+          {[modeNote, questionNote].filter((part) => part !== null).join(' · ')}
         </div>
       )}
 
@@ -580,7 +731,7 @@ export function RunDetail({
             construction" (design doc's own wording), and printing two more
             zero chips on every archived row would be noise, not information.
             A CRASHED run is the same case (bug-29): its heartbeat is gone, so
-            "active right now" is a claim this pane cannot make for it. */}
+            "active right now" is a claim this sheet cannot make for it. */}
         {liveFresh && (
           <>
             <span className="run-drawer-chip" data-testid="run-detail-chip-active">
@@ -593,17 +744,39 @@ export function RunDetail({
         )}
       </div>
 
-      {fetchFailed && (
-        // The one failure mode this pane can hit on its own (the fetch,
-        // not the poll or the archive listing, both handled upstream): the
-        // rows above are already fully rendered off `summary` regardless,
-        // per the brief's own instruction that a failed tail fetch must
-        // leave them standing — this note says only that one thing behind
-        // them (a still-collapsed or still-open `<details>`) may never
-        // gain a tail.
-        <div className="run-detail-error" data-testid="run-detail-error">
-          couldn't load verification output
-        </div>
+      {/* Attention moves AHEAD of the machine-time rollup, the branches and
+          the items (§8.4.1's body item 4, where it used to sit last): these
+          are the entries that need a person, and a reader who scrolls a
+          forty-item queue to find out whether anything is waiting on them has
+          already been made to work for the one reading this sheet is opened
+          for. The chip above counts them; this is the list. */}
+      <div className="run-detail-heading">Attention</div>
+      {attention.length === 0 ? (
+        <div className="drawer-empty">nothing needs a look</div>
+      ) : (
+        // `i` in the key for the same reason RunDrawer.tsx's own attention
+        // list carries it: RunAttention's doc comment calls this list "a
+        // log of what happened, not a live filter over queue", so the same
+        // item can legitimately earn a second entry later in the same run.
+        attention.map((a, i) => {
+          const row = rows.find((r) => r.id === a.id);
+          return (
+            <div key={`${a.id}-${a.kind}-${i}`} className="run-drawer-attn" data-testid={`run-detail-attention-${a.id}`}>
+              <div className="run-drawer-attn-head">
+                <span className="run-drawer-item-id">{a.id}</span>
+                <span className="run-drawer-attn-kind">{a.kind}</span>
+              </div>
+              <div className="run-drawer-attn-detail">{a.detail}</div>
+              {row !== undefined && row.questions.length > 0 && (
+                <ul className="run-drawer-questions">
+                  {row.questions.map((question) => (
+                    <li key={question}>{question}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })
       )}
 
       {/* The run-level "machine time by stage" rollup (Task 6) — the same
@@ -812,35 +985,6 @@ export function RunDetail({
           );
         })}
       </div>
-
-      <div className="run-detail-heading">Attention</div>
-      {attention.length === 0 ? (
-        <div className="drawer-empty">nothing needs a look</div>
-      ) : (
-        // `i` in the key for the same reason RunDrawer.tsx's own attention
-        // list carries it: RunAttention's doc comment calls this list "a
-        // log of what happened, not a live filter over queue", so the same
-        // item can legitimately earn a second entry later in the same run.
-        attention.map((a, i) => {
-          const row = rows.find((r) => r.id === a.id);
-          return (
-            <div key={`${a.id}-${a.kind}-${i}`} className="run-drawer-attn" data-testid={`run-detail-attention-${a.id}`}>
-              <div className="run-drawer-attn-head">
-                <span className="run-drawer-item-id">{a.id}</span>
-                <span className="run-drawer-attn-kind">{a.kind}</span>
-              </div>
-              <div className="run-drawer-attn-detail">{a.detail}</div>
-              {row !== undefined && row.questions.length > 0 && (
-                <ul className="run-drawer-questions">
-                  {row.questions.map((question) => (
-                    <li key={question}>{question}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          );
-        })
-      )}
     </>
   );
 }

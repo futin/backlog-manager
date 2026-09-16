@@ -81,3 +81,20 @@ describe('ProgressRow', () => {
     expect(screen.getByText('left to save')).toHaveClass('ui-progress-caption');
   });
 });
+
+/**
+ * task-38's `warn` fill — the heartbeat meter past its own stale line
+ * (§8.4.2). A prop rather than an override the Watchdog page paints over
+ * `.ui-progress-fill`, which §12.1 forbids and which would recolour every
+ * meter on the board.
+ */
+describe('ProgressRow · the warn fill', () => {
+  it('lands as its own fill class, leaving the default alone', () => {
+    const { container, rerender } = render(<ProgressRow value={1} max={2} />);
+    expect(container.querySelector('.ui-progress-fill')).toHaveClass('ui-progress-fill-progress');
+
+    rerender(<ProgressRow value={1} max={2} fill="warn" />);
+    expect(container.querySelector('.ui-progress-fill')).toHaveClass('ui-progress-fill-warn');
+    expect(container.querySelector('.ui-progress-fill')).not.toHaveClass('ui-progress-fill-progress');
+  });
+});

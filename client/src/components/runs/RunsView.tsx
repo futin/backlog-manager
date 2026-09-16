@@ -7,11 +7,19 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
-import { RUN_STATUS_GLYPH, mergeModeLabel, runStatusChip } from '../../lib/run-stage';
+import { RUN_STATUS_GLYPH, runDotTone, runStatusChip } from '../../lib/run-stage';
 import { useRunsMode } from '../../hooks/useRunsMode';
-import { MODE_BUTTON, RUNS_MODES } from '../../lib/runs-mode';
 import { aggregateRuns, dayKey, dayLabel, formatUsd, runStageTotals, runUsageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
-import { formatSpanCompact } from '../../lib/run-time';
+import { formatSpanCompact, lastReportedEntry } from '../../lib/run-time';
+import { isCrashed, watchdogClause } from '../../lib/run-watchdog';
+import { Band } from '../ui/Band';
+import { Chip } from '../ui/Chip';
+import { DayKicker } from '../ui/Ledger';
+import { Dot } from '../ui/Dot';
+import { Figure, FigureStrip } from '../ui/Figure';
+import { Pill } from '../ui/Pill';
+import { Segmented } from '../ui/Segmented';
+import { Sheet, SheetHead } from '../ui/Sheet';
 import { RunDetail } from './RunDetail';
 import { StageBars } from './StageBars';
 import { WatchdogMonitor } from './WatchdogMonitor';
@@ -43,14 +51,14 @@ import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, 
  * highlight and the live marker regardless of which component renders the
  * detail pane behind it.
  *
- * Fix round 1: a fresh (still-heartbeating) live run is PINNED above every
- * day group, not merely sorted first by `startedAt` — see `splitPinned`'s
- * own comment for the case a pure chronological sort gets backwards (a run
- * still going since days ago beside a different project's run that merely
- * finished more recently). This was the approved design doc's decision from
- * the start; the task brief that drove this file's first version dropped it
- * in transcription, and it is restored here rather than left as a filed
- * discrepancy.
+ * Fix round 1: a live run leads the page, not merely sorted first by
+ * `startedAt` — see `splitLive`'s own comment for the case a pure
+ * chronological sort gets backwards (a run still going since days ago beside
+ * a different project's run that merely finished more recently). This was the
+ * approved design doc's decision from the start; the task brief that drove
+ * this file's first version dropped it in transcription, and it is restored
+ * here rather than left as a filed discrepancy — as the Live sheet, since
+ * task-38.
  *
  * Fix round 2: a whole-branch review caught this file disagreeing with
  * itself and with `RunDetail` about which source describes a live-backed
@@ -89,8 +97,8 @@ import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, 
  * first, then the project filter narrows `inScope` down to `filtered`
  * exactly as it always narrowed `merged` before this task, so "this
  * project, this week" and "everything, today" are both just the same two
- * filters applied in the same fixed order. The sixth tile, `.runs-tile-wide`
- * (`data-testid="runs-tile-machine"`), sums `runStageTotals` (Task 2) across
+ * filters applied in the same fixed order. The sixth cell (`Figure wide`,
+ * `data-testid="runs-tile-machine"`) sums `runStageTotals` (Task 2) across
  * every run `filtered` currently holds through `StageBars` (Task 4) — the
  * identical "where did the time go" reading `RunDetail`'s own rollup gives
  * for one run, now folded across however many runs the range/project
@@ -100,25 +108,49 @@ import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, 
  * has to come from its fresh live queue, never a stale archive snapshot
  * frozen mid-run.
  *
- * task-18 gives the section two MODES, not one: `Runs` is everything
- * described above, and `Watchdog` replaces the whole body below the bar with
- * `WatchdogMonitor` — the sweeper's state, the runs it is watching, and its
- * activity feed, all of which used to sit on the Settings page nobody has
- * open while a run is going. The switch renders unconditionally (unlike
- * every other tool in this bar, which waits on `merged.length > 0`: the
- * sweeper has a phase to report whether or not this project has ever
- * finished a run) and persists (unlike the range and the project filter,
- * which deliberately do not — see `lib/runs-mode.ts` for that distinction in
- * full). The monitor takes this component's OWN `liveRuns` array as a prop
- * rather than fetching runs itself, so a mode switch adds no request.
+ * task-18 gives the section two PAGES, not one: History is everything
+ * described above, and Watchdog is `WatchdogMonitor` — the sweeper's state,
+ * the runs it is watching, and its activity feed, all of which used to sit on
+ * the Settings page nobody has open while a run is going. Both read this
+ * component's OWN payload (the monitor takes `liveRuns` as a prop rather than
+ * fetching runs itself), so moving between them adds no request.
+ *
+ * task-38 (DESIGN.md §8.4, shape D of `03-runs-shape.html`) redraws that into
+ * what this file is now, and four of its decisions are worth stating here
+ * because each replaces something a reader of the older comments above would
+ * otherwise go looking for:
+ *
+ *  1. **The mode switch is gone from this page.** task-36 gave the rail a
+ *     sub-nav tree naming these same two views, and two controls doing one
+ *     job is exactly what that rail work was for. `useRunsMode` is still the
+ *     shared value; this component only reads it (and writes it once, for the
+ *     Watchdog page's own jump back to History).
+ *  2. **The figures LEAD the page** — band, then the strip, then the split
+ *     (§8.4.1's "the statistics lead"). The six cells are the same six
+ *     readings the old toolbar tiles carried, off the same `aggregateRuns`,
+ *     which is why they keep their `runs-tile-*` test hooks: the tile became
+ *     a `Figure`, the reading did not change, and renaming thirty assertions
+ *     would have churned the suite without pinning anything new.
+ *  3. **Live runs are a SHEET of their own, above history, not a pinned
+ *     region inside it.** `splitPinned` became `splitLive` below, and its
+ *     gate moved with it: the Live sheet holds every run this payload still
+ *     lists as `running` or `paused`, freshness NOT considered, because a
+ *     crashed run is precisely the row a person came here to see (§8.4.1's
+ *     moved-rules table). The old pinned region gated on `isLive` (fresh),
+ *     which is what used to drop a crashed run into history among finished
+ *     ones; `MergedRun.isLive` survives as what it always was, the
+ *     PRESENTATION flag, and is now read only for the breathing dot.
+ *  4. **The detail is a sheet beside the list, never behind a click**, and
+ *     it is the one place any run state offers a Resume — crashed and paused
+ *     alike, through `RunControls` in its head.
  *
  * Emptying the range (or the range-and-project combination) does not empty
- * this whole section the way `merged.length === 0` does: the tiles, the
- * range control and the project select all stay mounted (a range is a VIEW
- * over an unchanged corpus, not a reason to hide that the corpus exists —
- * and a person needs the controls still on screen to widen back out of the
- * empty combination they just created), and only `.runs-list` swaps its
- * pinned-region-plus-day-groups for one `no runs in this range` note.
+ * this whole section the way `merged.length === 0` does: the band and its
+ * controls stay mounted (a range is a VIEW over an unchanged corpus, not a
+ * reason to hide that the corpus exists — and a person needs the controls
+ * still on screen to widen back out of the empty combination they just
+ * created), and the figure strip hides with the list, which swaps its sheets
+ * for one `no runs in this range` note.
  */
 
 /** One row of the merged run list: the archive's own record of the run, plus the live entry backing it, if the live payload has one at all. */
@@ -161,7 +193,8 @@ interface MergedRun {
   /**
    * The PRESENTATION gate: `live?.fresh === true`, i.e. "is the board still
    * hearing from this process right now". Read by the pinned region
-   * (`splitPinned`) and the `runs-row-live` accent, and by nothing that
+   * (`splitLive` until task-38 moved the split off it) and the breathing dot,
+   * and by nothing that
    * decides where a number comes from — that is `live`'s job, above.
    *
    * Kept as its own boolean rather than derived at each call site for the
@@ -241,46 +274,55 @@ function parseStartedAt(iso: string): number {
   return Number.isNaN(at) ? -Infinity : at;
 }
 
-/** Newest first, by `startedAt`. Used within one region at a time (the pinned rows, or the history rows) — see `splitPinned` below for why the two regions are never sorted together. */
+/** Newest first, by `startedAt`. Used within one sheet at a time (the Live rows, or the History rows) — see `splitLive` below for why the two are never sorted together. */
 function sortByStartedAtDesc(rows: readonly MergedRun[]): MergedRun[] {
   return [...rows].sort((a, b) => parseStartedAt(b.run.startedAt) - parseStartedAt(a.run.startedAt));
 }
 
 /**
- * Splits the filtered row list into the pinned region and the history below
- * it — fix round 1's own correction of this file's first version, which
- * sorted every row by `startedAt` alone and only ever put a live run first
- * BY COINCIDENCE (a running run's own `startedAt` is usually the most recent
- * one, since a new run only starts once the last one finished). The design
- * doc's actual decision, restated explicitly here because the task brief
- * that drove the first version of this file dropped it in transcription: "a
- * fresh, running run sorts above all history regardless of its startedAt" —
- * not merely first within its own day, and not merely first because it
- * happens to be newest. The case this earns its keep on is exactly the one
- * a pure timestamp sort gets backwards: a run that has been going since
- * three days ago, sitting beside one project's freshly-finished run from
- * this morning. Chronologically the finished one is "newer"; the one still
- * running is the one a person opened this page to actually watch, and it
- * has to render first regardless.
+ * Splits the filtered row list into the LIVE sheet's rows and the History
+ * sheet's — task-38's redraw of what `splitPinned` used to do for a pinned
+ * region inside one list, with one deliberate change of gate.
  *
- * `isLive` is exactly the gate this needs, not `run.status === 'running'`
- * — see `MergedRun.isLive`'s own doc comment: it is already `run.fresh` as
- * the live poll's own server-side RUN_STALE_MS check computes it, not a
- * bare status read. A `running` run whose heartbeat has gone stale is a
- * crashed process, not a live one, and belongs in history with everything
- * else — pinning it would be presenting a guess (is it still going?) as a
- * fact, the same call RunStrip.tsx's own file comment makes for rendering
- * nothing at all over a stale run rather than a frozen last-known state.
+ * **The gate is "does the payload still list this run as going", not "is its
+ * heartbeat fresh".** A run is a Live row when it has a live entry at all AND
+ * that entry's status is `running` or `paused`. Both halves earn their keep:
  *
- * More than one project can have a fresh run at once, so `pinned` is sorted
- * among ITSELF by `startedAt` descending too — the newest of the currently-
- * running runs still leads the pinned region, which is the one place the
- * old pure-chronological ordering was already correct and is kept.
+ *  - `live !== null` is what "the payload still lists it" means. A run whose
+ *    `run.json` has been archived (`init` does that to the previous run before
+ *    starting the next, paused runs included) has no live entry, so it is a
+ *    past run — which is what makes a `paused` History row a real case rather
+ *    than a contradiction of this sheet, and CLAUDE.md's "`init` archives a
+ *    paused run like a done one" is the rule that produces it.
+ *  - `status === 'running' || status === 'paused'` is the two statuses a run
+ *    can still LEAVE. A run file that has reached `done`/`aborted`/`failed`
+ *    but has not been archived yet is still in the payload, and it belongs in
+ *    History: "a run reaches History when it has finished, not when it has
+ *    stopped reporting" (§8.4.1).
+ *
+ * Freshness is deliberately NOT part of it, and that is the correction: the
+ * old pinned region gated on `isLive` (i.e. `live.fresh`), so a crashed run —
+ * `running` with a dead heartbeat — fell out of the pinned region and landed
+ * in history among finished runs, where a reader scanning for trouble would
+ * not look. §8.4.1's moved-rules table puts that row in the Live sheet with a
+ * `--red` dot, a `crashed` pill and its own second line. `MergedRun.isLive`
+ * still says exactly what it always said (is this board hearing from the
+ * process right now) and is still read for the breathing dot; it is simply no
+ * longer what decides which list a row is in.
+ *
+ * Both halves are sorted newest-first among THEMSELVES, never together. That
+ * is what the pinned region was really for and it survives: a run going since
+ * three days ago has to render above a different project's run that merely
+ * finished this morning, because it is the one a person opened this page to
+ * watch. Sorting the two lists separately makes that structural rather than a
+ * comparator's special case.
  */
-function splitPinned(rows: readonly MergedRun[]): { pinned: MergedRun[]; history: MergedRun[] } {
-  const pinned = sortByStartedAtDesc(rows.filter((r) => r.isLive));
-  const history = sortByStartedAtDesc(rows.filter((r) => !r.isLive));
-  return { pinned, history };
+function splitLive(rows: readonly MergedRun[]): { live: MergedRun[]; history: MergedRun[] } {
+  const going = (r: MergedRun): boolean => r.live !== null && (r.live.status === 'running' || r.live.status === 'paused');
+  return {
+    live: sortByStartedAtDesc(rows.filter(going)),
+    history: sortByStartedAtDesc(rows.filter((r) => !going(r)))
+  };
 }
 
 /** One day's worth of rows under one heading. */
@@ -404,118 +446,116 @@ function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { complete
 }
 
 /**
- * One row of the run list. Its own component (matching RunDrawer.tsx's own
- * split into RowTime/RowStepper/RowStageCaption) rather than inlined into
- * the `.map` below, because a row is not simple: a status chip, a project
- * label, a merged/total count and a wall-time reading are four independently
- * reasoned-about pieces sharing one line, and giving the whole thing a name
- * makes the list's own render method read as "one row per merged run" rather
- * than a wall of JSX.
- *
- * Fix round 2: `merged`/`total`, the status chip, and `wall` are computed
- * off `authority` — `pickAuthority([row.live], run)`, `lib/run-authority.ts`
- * — not off `run` (the archive record) directly. `row.live` is `null`
- * whenever this row is not currently live-backed, in which case `authority`
- * collapses to `run` and every number below is exactly what it always was.
- * When `row.live` IS present, this is the one place that freshest-wins rule
- * actually changes what renders: the live poll's own queue/status/wall
- * time win over whatever the archive snapshot beside them still says,
- * which is what stops this row from printing a different merged count than
- * `RunDetail` reads for the SAME run a few hundred pixels to the right.
- * `run.project`/`run.runId` are read straight off `run` regardless — those
- * are identity fields that cannot change between the two sources for what
- * is, by construction, the same run file.
- *
- * Task 9 adds the mode badge (`mergeModeLabel`, lib/run-stage.ts), read off
- * the SAME `authority` object every other reading on this row already uses
- * — `mergeMode`/`mergeModeEffective` live on both `OrchestratorRun` and
- * `OrchestratorArchiveRun`, so no third field has to be threaded through
- * `pickAuthority` for it. Design §7 asks for this at the LIST level, not
- * just the detail pane behind it, specifically so a downgraded run is
- * "legible at a glance in history" — a person scanning a day's worth of
- * rows should not have to open every one just to learn which runs left
- * branches behind. `mergeModeLabel` returns `null` for a plain merge-mode
- * run, so this adds nothing to the row for the shape of run that made up
- * every row in this list before this feature existed.
+ * The two-tone count §7 gives every "spent over a ceiling" reading on this
+ * board — `1 / 5`, the completed figure in `--ink` and the queue length in
+ * `--ink3` at the same size. One component because both row kinds draw it and
+ * §12.1's rule is that a shape more than one surface draws has one home; a
+ * page-level composition rather than a `ui/` primitive because §12.2's table
+ * does not list it and a task may not add one without amending that section.
  */
-function RunRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: number; isSelected: boolean; onSelect: () => void }): JSX.Element {
+function CountPair({ completed, total }: { completed: number; total: number }): JSX.Element {
+  return (
+    <span className="runs-count">
+      <span className="runs-count-done">{completed}</span>
+      <span className="runs-count-total"> / {total}</span>
+    </span>
+  );
+}
+
+/**
+ * One LIVE row (task-38, DESIGN.md §8.4.1) — a run this payload still lists as
+ * `running` or `paused`, drawn as a **row, not a card**, compact enough for the
+ * 420 px list column.
+ *
+ * What it carries, and nothing more: a `Dot`, the project at 14/500, `⚠ N` in
+ * amber when the run has attention entries, the two-tone count, the elapsed
+ * reading, and a status pill **only where one is earned** — `‖ paused`,
+ * `⚠ crashed`, and nothing at all on a running, fresh run, whose state the
+ * breathing dot and the elapsed reading already carry. Everything C's live
+ * card carried that no longer fits this width — the run id and start clock,
+ * the heartbeat word, `$ · turns · sessions`, the mode pill, `paused after
+ * <id>`, the current item's stage track — is in the detail sheet, which is
+ * beside this list rather than behind a click.
+ *
+ * **A crashed run's three readings travel together or this row says less than
+ * the strip it replaces did** (§8.4.1's moved-rules table): a `--red` dot, a
+ * `crashed` pill, and a second amber line carrying `no heartbeat for <age>`,
+ * then `last reported <id> at <stage>` or `all items at rest`, then
+ * `watchdogClause`'s own sentence. All three are in ONE element (`data-testid`
+ * `runs-live-crashed-<runId>`) precisely so a later edit cannot drop one of
+ * them silently — the suite asserts the line, not three independent nodes.
+ *
+ * Every number comes off `pickAuthority([row.live], run)` — the same
+ * freshest-wins rule the detail sheet applies — so a row and the sheet beside
+ * it can never print different counts for one run (fix rounds 2 and 3).
+ */
+function LiveRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: number; isSelected: boolean; onSelect: () => void }): JSX.Element {
   const { run } = row;
   const authority = pickAuthority([row.live], run);
   // bug-29: the status word, glyph and class, with `running` + a dead
   // heartbeat substituted to `crashed`. Derived from `row.live`, never from
   // `authority` — `authority` can be the archive record, which carries no
-  // `fresh` field at all, and a row with no heartbeat to judge must keep
-  // printing its recorded status. See `runStatusChip` (lib/run-stage.ts) for
-  // why `crashed` stays derived rather than becoming a sixth `RunStatus`.
+  // `fresh` field. See `runStatusChip` (lib/run-stage.ts) for why `crashed`
+  // stays derived rather than becoming a sixth `RunStatus`.
   const status = runStatusChip(authority.status, row.live);
+  const tone = runDotTone(authority.status, row.live);
+  const crashed = row.live !== null && isCrashed(row.live);
   const { completed, total } = queueCounts(authority);
   const wall = runWallMs(authority, now);
-  const modeLabel = mergeModeLabel(authority.mergeMode, authority.mergeModeEffective);
-  // task-27. Off `authority` like every other number on this row, for the
-  // same reason: a live-backed row must not print a total the pane beside it
-  // has already moved past. `null` for every run archived before the feature
-  // existed — those runs carry no `usage` key at all, and this row renders
-  // nothing extra for them rather than a `$0.00` that would read as a claim.
-  // Cost alone here, not cost AND turns: the row has one number's worth of
-  // room in this slot, and "what did it cost" is the question this list is
-  // scanned for. Turns are in the detail pane, per item and per run.
-  const usage = runUsageTotals(authority);
-  const cost = usage === null || usage.costUsd === null ? null : formatUsd(usage.costUsd);
+  const attention = authority.attention.length;
+  // The crashed row's own second line, composed once. `elapsedSince` is the
+  // same ladder the card's in-progress bar and the old strip both read, so
+  // "2m" means the same thing on every surface that prints an age.
+  const age = row.live === null ? null : elapsedSince(row.live.updatedAt, now);
+  // `lastReportedEntry` (lib/run-time.ts), never a hand-written scan: it is
+  // the one implementation of "the entry a crashed run was last working", and
+  // it is what the old crashed strip printed from too.
+  const reported = row.live === null ? null : lastReportedEntry(row.live.queue);
+  const clause = crashed && row.live !== null ? watchdogClause(row.live.watchdog, now) : '';
 
   return (
-    <button
-      type="button"
-      className={row.isLive ? 'runs-row runs-row-live' : 'runs-row'}
-      data-testid={`runs-row-${run.runId}`}
-      aria-current={isSelected ? 'true' : undefined}
-      onClick={onSelect}
-    >
+    <button type="button" className="runs-row" data-testid={`runs-row-${run.runId}`} aria-current={isSelected ? 'true' : undefined} onClick={onSelect}>
       <span className="runs-row-head">
-        <span className={`runs-status ${status.className}`}>
-          {/* aria-hidden: the status word right beside it is the accessible
-              answer, the same "colour and glyph restate the word, never
-              replace it" rule run-stage.ts's own doc comment states for the
-              per-item chips this row deliberately does NOT reuse. */}
-          <span aria-hidden="true">{status.glyph}</span>
-          {status.label}
-        </span>
+        {/* `breathe` only while this board is actually hearing from the
+            process (§8.8): a ring pulsing around a crashed or paused run
+            would be an animation asserting something false. */}
+        {tone === undefined ? <Dot size={10} /> : <Dot size={10} tone={tone} breathe={row.isLive} />}
         <span className="runs-row-project">{projectLabel(run.project)}</span>
-        {modeLabel !== null && (
-          <span className="run-mode-badge" data-testid={`runs-row-mode-${run.runId}`}>
-            {modeLabel}
+        {attention > 0 && (
+          <span className="runs-row-attn" data-testid={`runs-row-attn-${run.runId}`}>
+            <span aria-hidden="true">⚠ </span>
+            {attention}
           </span>
         )}
-        {/* task-17: only a LIVE entry can carry this — `pauseRequested` is
-            derived per request against a run that still exists on disk, and an
-            archived row has no live entry to derive it from. Reuses
-            `.run-mode-badge` rather than minting a class: it is the same
-            register (a small qualifier on the run's own headline) and sits in
-            the same slot.
-              bug-29 widened which rows can reach this, since `row.live` is no
-            longer gated on freshness — a crashed run with an outstanding pause
-            request now carries the badge where it used to be silent. That is
-            right rather than incidental: the request is a real file on this
-            machine's disk waiting at the run's next dispatch gate, and it is
-            still waiting whether or not the run has stamped a heartbeat
-            lately. */}
-        {row.live?.pauseRequested === true && (
-          <span className="run-mode-badge" data-testid={`runs-row-pausing-${run.runId}`}>
-            pausing
-          </span>
+        <CountPair completed={completed} total={total} />
+        <span className="runs-row-wall">{wall === null ? '—' : formatSpanCompact(wall)}</span>
+        {/* Earned, never decorative: a running, fresh run draws no pill at
+            all. `crashed` is `warn`, not `bad` — the run may still be
+            recovered unattended, which is the same call the old strip made
+            for its amber border. */}
+        {crashed ? (
+          <Pill tone="warn">
+            <span aria-hidden="true">⚠ </span>
+            {status.label}
+          </Pill>
+        ) : (
+          authority.status === 'paused' && (
+            <Pill tone="neutral">
+              <span aria-hidden="true">‖ </span>
+              paused
+            </Pill>
+          )
         )}
-        <span className="runs-row-count">
-          {completed}/{total}
-        </span>
       </span>
-      {/* The row's foot line: wall time, and what the run cost. Either half
-          can be known without the other — a run with a corrupt `startedAt`
-          has no honest wall time and still has its transcripts' cost, and
-          every pre-task-27 run is the reverse — so this joins whichever
-          halves exist rather than gating the second on the first. The same
-          null-tolerant join `RunDetail`'s head and lead lines already use. */}
-      {(wall !== null || cost !== null) && (
-        <span className="runs-row-wall" data-testid={`runs-row-foot-${run.runId}`}>
-          {[wall === null ? null : formatSpanCompact(wall), cost].filter((part) => part !== null).join(' · ')}
+      {crashed && (
+        <span className="runs-row-crashed" data-testid={`runs-live-crashed-${run.runId}`}>
+          {[
+            `no heartbeat for ${age ?? '—'}`,
+            reported === null ? 'all items at rest' : `last reported ${reported.id} at ${reported.stage}`,
+            clause === '' ? null : clause
+          ]
+            .filter((part) => part !== null)
+            .join(' · ')}
         </span>
       )}
     </button>
@@ -524,53 +564,115 @@ function RunRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: numbe
 
 /**
  * task-21's placeholder row: a run this server spawned whose `run.json` does
- * not exist yet. `StartingStrip`'s counterpart on this surface, and
- * deliberately a separate component rather than that one reused — a strip is
- * the board's own shape (its own frame, its own progress bar slot, its own
- * `.run-strips` stack), and mounting it inside `.runs-list` would put one
- * row in this list wearing a different layout from every other row in it.
- * What the two DO share is the fact they print and the ladder they print it
- * with: project, the word "starting", and `elapsedSince` — the same
- * formatter, already in `lib/`, so "now"/"2m" means the same thing on both
- * surfaces.
+ * not exist yet. The Live sheet's first rows, above every real one — a run
+ * nobody can see yet is the most recent thing that happened by construction,
+ * and it is the row a person is actively waiting on.
  *
- * Everything `RunRow` above prints comes off a run file, and the whole point
- * of this row is the 1–5 minutes in which that file does not exist: no
- * status chip off `runStatusChip`, no `completed/total`, no wall time. The
- * two facts that DO exist — which project was asked, and how long ago — are
- * the only two it carries, for the reason `StartingStrip`'s own comment
- * gives at length: a 0/0 count or an empty stage would be a claim about a
- * queue nothing has computed yet.
+ * Everything `LiveRow` above prints comes off a run file, and the whole point
+ * of this row is the 1–5 minutes in which that file does not exist: no status
+ * chip, no `completed/total`, no wall time. The two facts that DO exist —
+ * which project was asked, and how long ago — are the only two it carries,
+ * because a `0/0` count or an empty stage would be a claim about a queue
+ * nothing has computed yet.
  *
- * A `<div>`, not the `<button>` `RunRow` is. There is no run to select:
+ * **A `<div>`, not the `<button>` `LiveRow` is, and it CANNOT be selected**
+ * (§8.4.1's moved-rules table states that outright). There is no run to show:
  * `RunDetail` is keyed on project + runId and this row has no runId to give
  * it, so making it focusable would put a stop in the tab order that does
  * nothing when a keyboard reader reaches it. That is also why it takes no
- * `isSelected`/`onSelect` — it is outside `orderedRows` entirely, and
- * nothing about the selection can name it.
+ * `isSelected`/`onSelect` — it is outside `orderedRows` entirely, and nothing
+ * about the selection can name it.
  */
 function StartingRow({ starting, now }: { starting: StartingRun; now: number }): JSX.Element {
   // `null` — an unparseable or future `requestedAt` — prints an em dash
-  // rather than `NaNm`, matching `StartingStrip`'s own `age ?? '—'` and the
-  // `wall !== null` guard `RunRow` uses one component up.
+  // rather than `NaNm`, matching the `wall !== null` guard one component up.
   const age = elapsedSince(starting.requestedAt, now);
 
   return (
     <div className="runs-row runs-row-starting" data-testid={`runs-starting-${starting.project}`}>
       <span className="runs-row-head">
-        <span className="runs-status runs-status-starting">
-          {/* Hollow, never `RUN_STATUS_GLYPH.running`'s filled `●`: that
-              glyph means "this run is reporting a heartbeat right now", and
-              this one has not reported anything at all yet. aria-hidden for
-              the same reason every other chip glyph in this file is — the
-              word beside it is the accessible answer. */}
-          <span aria-hidden="true">○</span>
-          starting
-        </span>
+        {/* No tone: `.ui-dot`'s base `--ink3` is the honest paint for a run
+            that has not reported anything at all yet. Never the live fill,
+            which means "heartbeating right now" everywhere in this app, and
+            never amber — starting is the most ordinary thing a run can be
+            doing, not a state anyone needs to look at. */}
+        <Dot size={10} />
         <span className="runs-row-project">{projectLabel(starting.project)}</span>
-        <span className="runs-row-starting-age">{age ?? '—'}</span>
+        {/* Its OWN class, not `.runs-row-wall`: what a real row prints there
+            is a wall time off a run file, and this row's whole point is the
+            window in which that file does not exist. An age is a different
+            reading and says so. */}
+        <span className="runs-row-starting-age">{`starting… · ${age ?? '—'}`}</span>
       </span>
     </div>
+  );
+}
+
+/**
+ * One HISTORY row (task-38, DESIGN.md §8.4.1) — a past run, at 44 px: the dot
+ * **and the status word** from `runStatusChip`, the project at 14/500, the
+ * two-tone count, the wall time and the cost beside it when usage exists.
+ *
+ * The word is not decoration and this is the one row where that has to be said
+ * outright: a dot alone cannot tell `done`, `aborted` and `failed` apart, and
+ * three colours of the same dot is the encoding §5 rules out — so the dot
+ * carries only whether the run is still a going concern (`runDotTone` returns
+ * no tone for every finished run) and the word carries which ending it was.
+ *
+ * A row **selects** the run into the detail sheet. Nothing opens: there is no
+ * run modal on this page and none anywhere in this redesign.
+ */
+function HistoryRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: number; isSelected: boolean; onSelect: () => void }): JSX.Element {
+  const { run } = row;
+  const authority = pickAuthority([row.live], run);
+  const status = runStatusChip(authority.status, row.live);
+  const tone = runDotTone(authority.status, row.live);
+  const { completed, total } = queueCounts(authority);
+  const wall = runWallMs(authority, now);
+  // task-27. Off `authority` like every other number on this row, for the
+  // same reason: a live-backed row must not print a total the sheet beside it
+  // has already moved past. `null` for every run archived before the feature
+  // existed — those runs carry no `usage` key at all, and this row renders
+  // nothing extra for them rather than a `$0.00` that would read as a claim.
+  // Cost alone here, not cost AND turns: the row has one slot's worth of
+  // room, and "what did it cost" is the question this list is scanned for.
+  // Turns are in the detail sheet, per item and per run.
+  const usage = runUsageTotals(authority);
+  const cost = usage === null || usage.costUsd === null ? null : formatUsd(usage.costUsd);
+
+  return (
+    <button
+      type="button"
+      className="runs-row runs-row-past"
+      data-testid={`runs-row-${run.runId}`}
+      aria-current={isSelected ? 'true' : undefined}
+      onClick={onSelect}
+    >
+      <span className="runs-row-head">
+        {tone === undefined ? <Dot /> : <Dot tone={tone} />}
+        {/* aria-hidden on the glyph alone: the status word right beside it is
+            the accessible answer, the same "colour and glyph restate the
+            word, never replace it" rule run-stage.ts states for every chip
+            in this app. */}
+        <span className={`runs-status ${status.className}`} data-testid={`runs-row-status-${run.runId}`}>
+          <span aria-hidden="true">{status.glyph}</span>
+          {status.label}
+        </span>
+        <span className="runs-row-project">{projectLabel(run.project)}</span>
+        <CountPair completed={completed} total={total} />
+        {/* The row's right-hand reading: wall time, and what the run cost.
+            Either half can be known without the other — a run with a corrupt
+            `startedAt` has no honest wall time and still has its transcripts'
+            cost, and every pre-task-27 run is the reverse — so this joins
+            whichever halves exist rather than gating the second on the
+            first. */}
+        {(wall !== null || cost !== null) && (
+          <span className="runs-row-wall" data-testid={`runs-row-foot-${run.runId}`}>
+            {[wall === null ? null : formatSpanCompact(wall), cost].filter((part) => part !== null).join(' · ')}
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -611,26 +713,26 @@ export default function RunsView() {
   // and `isStale` are each one function to avoid, and the one this repo has
   // already been bitten by twice.
   const { runs: liveRuns, starting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
-  // task-17: the environment half of the resume gate, the same answer the
-  // board derives for its own strips. Read here rather than inside
-  // `RunControls` so the two hosts keep handing the component one prop
-  // rather than each reaching for the hook themselves — `resumeGate` is the
-  // single implementation, and the component stays free of a data source.
+  // task-17: the environment half of the resume gate. Read here rather than
+  // inside `RunControls` so that component stays free of a data source —
+  // `resumeGate` (shared/agent.ts) is the single implementation, and a
+  // component that reached for the hook itself would be a second place the
+  // gate could be derived.
   const { status: agents } = useAgents();
-  // Persisted, unlike the two filters below it — see `lib/runs-mode.ts` for
-  // why a mode is section-like where a filter is not. Read back through
-  // `isRunsMode` because localStorage can hand back anything at all
-  // (an older build, a hand edit, a `JSON.parse` of a number), and the one
-  // outcome this section must never have is rendering neither surface — the
-  // guard now lives inside `useRunsMode`, which is the only thing that
-  // changed here.
+  // Which of the section's two PAGES is showing. Persisted, unlike the two
+  // filters below it — see `lib/runs-mode.ts` for why a view is section-like
+  // where a filter is not — and read back through `isRunsMode` because
+  // localStorage can hand back anything at all (an older build, a hand edit,
+  // a `JSON.parse` of a number); the one outcome this section must never have
+  // is rendering neither page. That guard lives inside `useRunsMode`.
   //
-  // `useRunsMode` rather than `usePersistedState` because task-36 gave the
-  // rail a sub-nav tree naming these same two views (DESIGN.md §8.0), so the
-  // stored mode is now a question two mounted components ask at once. A
-  // `usePersistedState` per caller is a `useState` per caller: the rail's
-  // write would reach localStorage and never reach this component. Nothing
-  // about the key, its guard or its persistence changed.
+  // task-38 took the in-page segmented control that used to WRITE this away:
+  // the rail's sub-nav tree (task-36, DESIGN.md §8.0) is where the two views
+  // are named, and two controls doing one job is exactly what that rail work
+  // was for. The setter survives for one caller — the Watchdog page's own row
+  // click, which jumps to History and selects the run there, because under
+  // shape D the run's detail IS that page's sheet and there is nowhere else
+  // for it to go.
   const [mode, setStoredMode] = useRunsMode();
   const [projectFilter, setProjectFilter] = useState<string>('all');
   // Component state, not persisted — same as `projectFilter` immediately
@@ -751,12 +853,12 @@ export default function RunsView() {
   // `aggregateRuns`/`sumStageTotals` and out of the `projects` option list
   // below. A window that showed a number for it would be inventing one.
   const startingRows = projectFilter === 'all' ? starting : starting.filter((s) => s.project === projectFilter);
-  // Pinning is computed AFTER filtering, not before: a project filter that
-  // hides the only fresh run in scope must not leave a phantom "live" group
-  // heading over an empty rows list, and the design's own "newest VISIBLE
-  // run" wording for the default selection below only makes sense read
-  // against whatever the filter currently shows.
-  const { pinned, history } = splitPinned(filtered);
+  // The split is computed AFTER filtering, not before: a project filter that
+  // hides the only going run in scope must not leave a phantom Live sheet
+  // over an empty rows list, and the design's own "newest VISIBLE run"
+  // wording for the default selection below only makes sense read against
+  // whatever the filter currently shows.
+  const { live: liveRows, history } = splitLive(filtered);
   // task-16's window, and the ONE place it applies. Which lists are windowed
   // and which deliberately are not is the whole rule, and it is the kind of
   // thing fix rounds 2 and 3 in this file already went wrong on (a call site
@@ -765,12 +867,12 @@ export default function RunsView() {
   //
   //   windowed  — `groupByDay`'s input, and nothing else. The list is a
   //               window; every other reader wants the whole corpus.
-  //   NOT       — `pinned`. A run still going since three days ago must
+  //   NOT       — `liveRows`. A run still going since three days ago must
   //               render regardless of its own startedAt, which is the
-  //               entire reason `splitPinned` exists; paging that row away
-  //               is the exact failure that split was written to prevent.
-  //               The "one run per project" invariant caps this region at
-  //               one row per registered project, so it cannot grow the way
+  //               entire reason `splitLive` exists; paging that row away is
+  //               the exact failure that split was written to prevent. The
+  //               "one run per project" invariant caps the Live sheet at one
+  //               row per registered project, so it cannot grow the way
   //               history can and leaves no hole in the bound.
   //   NOT       — `orderedRows`/`selectedRow` (selection survives a reset
   //               that pushes its row out of the window), `filtered` (the
@@ -778,7 +880,7 @@ export default function RunsView() {
   //               is a RENDERING decision and must not move a single number
   //               in the tiles.
   //
-  // The slice lands between `splitPinned` and `groupByDay` and nowhere else,
+  // The slice lands between `splitLive` and `groupByDay` and nowhere else,
   // which is what makes a boundary falling mid-day render correctly: window
   // first, group second, so a partially-revealed day renders its own heading
   // over exactly the rows revealed and the next `load more` extends that
@@ -787,14 +889,14 @@ export default function RunsView() {
   const hiddenCount = history.length - windowed.length;
   const groups = groupByDay(windowed);
 
-  // Reading order top to bottom: the pinned region first (regardless of its
-  // own startedAt — see splitPinned's own comment for why), then history
+  // Reading order top to bottom: the Live sheet first (regardless of its
+  // rows' own startedAt — see splitLive's own comment for why), then history
   // newest-day-first. Selection defaults to whatever leads that order — the
   // fresh run if one is visible, otherwise the newest historical row — which
   // is the concrete, order-following meaning of "the newest run (live one
   // wins if present)" now that "live wins" is a real precedence rather than
   // a same-millisecond tie-break.
-  const orderedRows = [...pinned, ...history];
+  const orderedRows = [...liveRows, ...history];
 
   // The design brief's own wording is "defaulting to the newest VISIBLE run"
   // — visible, not newest overall — which is exactly why this is derived
@@ -810,15 +912,15 @@ export default function RunsView() {
 
   // Fix round 3: this used to be `filtered.map((m) => m.run)` — the
   // ARCHIVE record for every run, live-backed or not. A re-review caught
-  // the consequence: `RunRow` (above) had already been fixed to read
+  // the consequence: the row (above) had already been fixed to read
   // merged/total and status off `pickAuthority([row.live], row.run)`, but
   // the tiles below still summed the raw archive snapshot, so an item
-  // merging mid-run ticked the pinned row's own count up (1/6 -> 2/6) while
+  // merging mid-run ticked the Live row's own count up (1/6 -> 2/6) while
   // this "completed / queued" tile a few tiles away stayed frozen at
   // whatever the last archive fetch saw — the exact I2 defect class (row and
   // tile disagreeing about one run's numbers), relocated from the detail
   // pane to the aggregate tiles rather than fixed everywhere at once. Mapping
-  // through the same `pickAuthority` call `RunRow` already uses closes it
+  // through the same `pickAuthority` call the rows already use closes it
   // the same way: every run in scope contributes its freshest known queue,
   // not whichever snapshot happened to be sitting in the archive payload.
   const aggregates = aggregateRuns(
@@ -840,23 +942,25 @@ export default function RunsView() {
   // `.queue` plucked out on its own.
   const machine = sumStageTotals(filtered.map((m) => runStageTotals(pickAuthority([m.live], m.run), now)));
 
-  // Shared by the pinned region and every day group below: both render the
-  // same kind of thing (a list of `RunRow`s against the one `selectedRow`
-  // and `now` this render already computed), and factoring the `.map` out
-  // once is what keeps the two render sites from drifting on the
-  // `isSelected` comparison — the pin fix (round 1) is exactly the kind of
-  // change that used to have to be applied in two places at once.
+  // Shared by the Live sheet and every day group below: both render a list of
+  // rows against the one `selectedRow` and `now` this render already
+  // computed, and factoring the `.map` out once is what keeps the two render
+  // sites from drifting on the `isSelected` comparison.
   //
   // `key` is `runKey(...)`, not bare `run.runId` — the same M3 fix as
   // `mergeRuns`' own dedupe, and for the identical reason: two different
   // projects' runs could in principle share a `runId` (a second-precision
   // timestamp, not a global counter), and React's own reconciliation reads
   // `key` for identity exactly the way this list already treats it
-  // everywhere else. A bare `runId` key would silently misbehave on a
-  // collision the dedupe fix above no longer drops from the list.
-  const renderRows = (rows: readonly MergedRun[]): JSX.Element[] =>
+  // everywhere else.
+  //
+  // It takes the row COMPONENT rather than branching inside, because the two
+  // rows are genuinely different shapes at the same width (§8.4.1) and a
+  // single component forking on "am I live" would be one element carrying
+  // both designs — the thing this redraw split apart.
+  const renderRows = (rows: readonly MergedRun[], Row: typeof LiveRow): JSX.Element[] =>
     rows.map((row) => (
-      <RunRow
+      <Row
         key={runKey(row.run.project, row.run.runId)}
         row={row}
         now={now}
@@ -865,33 +969,81 @@ export default function RunsView() {
       />
     ));
 
+  // The band's three-state count line (§8.4.1) — `3 live · 1 starting · 28
+  // past`, and the three counts are the three lists actually on this page, so
+  // the line can never disagree with what is under it. A zero segment is
+  // dropped rather than printed: `0 starting` is a fact nobody needs, and the
+  // empty states below already say when there is nothing at all.
+  const countLine =
+    [
+      liveRows.length === 0 ? null : `${liveRows.length} live`,
+      startingRows.length === 0 ? null : `${startingRows.length} starting`,
+      history.length === 0 ? null : `${history.length} past`
+    ]
+      .filter((part) => part !== null)
+      .join(' · ') || undefined;
+
+  if (mode === 'watchdog') {
+    // Its own PAGE, with its own band — not a body swapped in under a shared
+    // header (§8.4.2). `liveRuns` is this component's own array, handed down
+    // rather than re-fetched, so switching pages adds no request.
+    return (
+      <div className="board runs-board">
+        <WatchdogMonitor
+          runs={liveRuns}
+          /* The same three props the detail sheet hands `RunControls`, from
+             the same `resumeGate` call and the same `resuming` mark — so the
+             Resume the Watching sheet draws and the one the detail head draws
+             are one control reading one gate, never two that agree. */
+          gateFor={(project) => resumeGate(agents, project)}
+          resuming={resuming}
+          onChanged={(project, kind) => {
+            if (kind === 'resume') noteResume(project);
+            refreshRuns();
+          }}
+          onSelectRun={(project, runId) => {
+            // Back to History, on that run's detail sheet: a monitor row IS a
+            // run in that list. A key that names no row right now (a
+            // filtered-out or archive-less run) resolves through
+            // `selectedRow`'s existing lookup exactly as any other stale
+            // selection does — the page still switches, and the sheet falls
+            // back to the default row.
+            setStoredMode('runs');
+            setSelected({ project, runId });
+          }}
+        />
+      </div>
+    );
+  }
+
+  const empty = merged.length === 0 && startingRows.length === 0;
+
   return (
     // `runs-board` (task-16) is the modifier that bounds this section to one
     // viewport — see its rule in styles.css for why the height is derived
     // from layout rather than a `calc(100vh - <chrome>px)` constant.
     // BoardView and ArchiveView keep rendering a bare `.board`.
     <div className="board runs-board">
-      <div className="board-bar">
-        <div className="board-title">Runs</div>
-        <div className="board-tools">
-          {mode === 'runs' && merged.length > 0 && (
-            <>
-              {/* The range control (Task 7) — see styles.css's own `.runs-seg`
-                comment for why this is a segmented button group and not a
-                fifth `<select>` beside the project one. `role="group"` +
-                `aria-label` name the whole cluster for assistive tech the
-                way a `<fieldset>` would without that element's own layout;
-                each button's own `aria-pressed` (not a shared radio input)
-                states ITS membership in the group, matching the semantics
-                an exclusive toggle set is supposed to carry. */}
-              <div className="runs-seg" role="group" aria-label="Range" data-testid="runs-range">
-                {RUN_RANGES.map((r) => (
-                  <button key={r} type="button" data-testid={`runs-range-${r}`} aria-pressed={r === range} onClick={() => setRange(r)}>
-                    {RANGE_BUTTON[r]}
-                  </button>
-                ))}
-              </div>
-              <select className="board-select" aria-label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+      <Band title="Runs" sub={countLine}>
+        {/* The controls appear exactly when there is a corpus for them to
+            scope. With none, the band is a title over the empty state below —
+            a range control over nothing is an instrument with no subject. */}
+        {merged.length > 0 && (
+          <>
+            {/* `RUN_RANGES`' four steps as ONE segmented control, not a fifth
+                `<select>`: a select is right for the open-ended list of
+                project names nobody has memorised the position of, and wrong
+                for four FIXED choices a person flips between constantly while
+                reading history — and "always visible" also means the active
+                range reads at a glance, which a collapsed select cannot
+                offer. */}
+            <Segmented value={range} options={RUN_RANGES.map((r) => ({ value: r, label: RANGE_BUTTON[r] }))} onChange={setRange} label="Range" />
+            {/* A `Chip` wrapping its own native `<select>` — the same shape
+                the Board's own filters wear (DESIGN.md §8.3), so a filter
+                looks like a filter on every page. `as: 'label'` is what makes
+                the chip the select's label rather than a button around it. */}
+            <Chip as="label" data-testid="runs-project-chip">
+              <select className="runs-project" aria-label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
                 <option value="all">All projects</option>
                 {projects.map((p) => (
                   <option key={p} value={p}>
@@ -899,67 +1051,13 @@ export default function RunsView() {
                   </option>
                 ))}
               </select>
-              {/* Inert, and inside this fragment on purpose: it appears exactly
-                when the filters do, so watchdog mode never shows an orphan
-                rule beside a lone switch. Its job is grouping — three
-                controls in one row, two of which scope history and one of
-                which picks the surface, should not read as one instrument. */}
-              <span className="board-tools-divider" aria-hidden="true" data-testid="runs-tools-divider" />
-            </>
-          )}
-          {/* task-18's mode switch, and the one tool in this bar that sits
-              OUTSIDE the `merged.length > 0` condition wrapping the two
-              above it: those two scope run history, so with no history
-              there is nothing for them to do, while the watchdog has a
-              phase to report whether or not this project has ever finished
-              a run. Same `.runs-seg` idiom, same `role="group"` +
-              `aria-label` + per-button `aria-pressed` semantics as the
-              range control — see that control's own comment for why a
-              segmented button group and not a fifth `<select>`.
+            </Chip>
+          </>
+        )}
+      </Band>
 
-              task-26 made it the LAST child rather than the first, and that
-              order is load-bearing rather than taste: `.board-tools` is
-              right-anchored (`margin-left: auto`), so a first child slides
-              right by the width of whatever unmounts beside it — clicking
-              Watchdog unmounted the range control and the project select
-              and moved this switch out from under the pointer that had just
-              clicked it, then clicking Runs slid it back. Last, its right
-              edge is pinned by the bar and the two filters come and go on
-              its left. */}
-          <div className="runs-seg" role="group" aria-label="View" data-testid="runs-mode">
-            {RUNS_MODES.map((m) => (
-              <button key={m} type="button" data-testid={`runs-mode-${m}`} aria-pressed={m === mode} onClick={() => setStoredMode(m)}>
-                {MODE_BUTTON[m]}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {mode === 'watchdog' ? (
-        // The whole body, replaced — not a panel wedged above the list. The
-        // two modes answer different questions ("what has this orchestrator
-        // ever done" vs "what is the sweeper doing right now"), and the
-        // alternative designs that kept both on screen at once each spent a
-        // permanent bar or a fake list row on the one a person was not
-        // asking. `liveRuns` is this component's own array, handed down
-        // rather than re-fetched.
-        <WatchdogMonitor
-          runs={liveRuns}
-          onSelectRun={(project, runId) => {
-            // Back to Runs, on that run's detail: a monitor row IS a run in
-            // the list. A key that names no row right now (a filtered-out or
-            // archive-less run) resolves through `selectedRow`'s existing
-            // lookup exactly as any other stale selection does — the mode
-            // still switches, and the pane falls back to the default row.
-            setStoredMode('runs');
-            setSelected({ project, runId });
-          }}
-        />
-      ) : merged.length === 0 && startingRows.length === 0 ? (
-        // Task 5's own final copy for the genuinely-empty case, verbatim —
-        // see this file's own header comment for why this is not
-        // placeholder text being replaced, only reached by a real check now.
+      {empty ? (
+        // Task 5's own final copy for the genuinely-empty case, verbatim.
         //
         // task-21 added the second half of the condition, and it is the whole
         // point of that task: a project's FIRST run, in the 1–5 minutes before
@@ -967,289 +1065,249 @@ export default function RunsView() {
         // payload, so this string was what someone saw right after pressing
         // Orchestrate — "the click did nothing", stated by the one surface a
         // run is meant to be watched from.
-        //
-        // The consequence of falling through with `merged.length === 0` is
-        // deliberate rather than tolerated: the tiles below render zeros and
-        // dashes, the list renders the starting row alone, and the detail pane
-        // renders nothing. Every one of those is true. A separate
-        // starting-only branch was the alternative and was rejected — it would
-        // give the same view two different layouts depending on whether any
-        // history existed, and the zeros are not a lie: this project has run
-        // nothing yet, which is exactly why the row above them says starting.
         <p className="board-note">no runs yet</p>
       ) : (
         <>
-          <div className="runs-tiles" data-testid="runs-tiles">
-            <div className="runs-tile" data-testid="runs-tile-runs">
-              <div className="runs-tile-value">{aggregates.runs}</div>
-              <div className="runs-tile-label">runs</div>
-              <div className="runs-tile-substat">
-                {STATUS_ORDER.map((status) => (
-                  <span key={status} className="runs-tile-substat-item">
-                    <span aria-hidden="true">{RUN_STATUS_GLYPH[status]}</span> {aggregates.byStatus[status]} {status}
+          {/* The figure strip, directly under the band — the statistics lead
+              the page (§8.4.1). Six cells reading `aggregateRuns` and nothing
+              else: no prior-period delta (nothing computes one), no parked
+              count (the aggregate does not keep it), no invented ratio. It
+              hides with the list when the range or project filter empties it,
+              because a row of zeros over `no runs in this range` would be
+              six readings about a set the page has just said is empty. */}
+          {filtered.length > 0 && (
+            <FigureStrip testId="runs-tiles">
+              <Figure
+                testId="runs-tile-runs"
+                label="runs"
+                value={aggregates.runs}
+                line={
+                  <span className="runs-figure-breakdown" data-testid="runs-figure-runs-line">
+                    {STATUS_ORDER.map((status) => (
+                      <span key={status} className="runs-figure-breakdown-item">
+                        <span aria-hidden="true">{RUN_STATUS_GLYPH[status]}</span> {aggregates.byStatus[status]} {status}
+                      </span>
+                    ))}
                   </span>
-                ))}
-              </div>
-            </div>
-            {/* Final whole-branch review, finding 1: this tile's VALUE
-                (`itemsMerged`) already counted `branched` alongside `merged`
-                per spec §4 — `aggregateRuns`'s own doc comment has always
-                said so — but the LABEL still read "merged / queued", so a
-                fully successful branch-mode run (nothing reached `main`)
-                rendered "4/4 merged" over a queue that merged nothing at
-                all. That is the exact failure spec §4 invented `branched` to
-                stop, reappearing one level up in the tile's wording instead
-                of its stored state. "completed" is the word `itemsMerged`'s
-                own doc comment already uses to describe the union of both
-                success exits, so the label now says what the number means
-                instead of naming only one of the two ways to earn it. No
-                arithmetic changed — see `test/runs-view.test.tsx`'s
-                branch-mode fixture, which pins this tile at `2/2` for a run
-                that merged zero of two items. */}
-            <div className="runs-tile" data-testid="runs-tile-merged">
-              <div className="runs-tile-value">
-                {aggregates.itemsMerged}/{aggregates.itemsQueued}
-              </div>
-              <div className="runs-tile-label">completed / queued</div>
-            </div>
-            {/* "avg item work" (Task 7), not "avg item": `avgItemWorkMs`
-                (RunAggregates' own doc comment has the full reasoning) is
-                `itemDurationMs` averaged over completed items — merged or
-                branched alike, per the same finding-1 correction as the tile
-                above — first non-pending arrival to the terminal stamp —
-                which deliberately EXCLUDES the queue-wait interval a bare
-                "avg item" reading would leave a person assuming is included.
-                The substat states the exclusion outright, matching how the
-                wide tile below (and RunDetail's own rollup) already caveat
-                the identical number rather than leaving it implicit. */}
-            <div className="runs-tile" data-testid="runs-tile-avg-item">
-              <div className="runs-tile-value">{aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}</div>
-              <div className="runs-tile-label">avg item work</div>
-              <div className="runs-tile-substat">queue wait excluded</div>
-            </div>
-            {/* "fix loops / merged" read as the MERGED-ONLY reading R1
-                deliberately rejected (`RunAggregates.fixLoopsPerMerged`'s own
-                doc comment): the numerator sums fix loops across every
-                QUEUED item, including ones that never completed, because
-                rework spent on an item that was ultimately parked or
-                fix-exhausted is still cost this run paid on the way to
-                whatever it did finish. The math never changed; only the
-                label was wrong, so a reader who checked the number against
-                the old caption could reasonably conclude a bug that was
-                never there. The `title` below was corrected alongside the
-                tile above (finding 1): it used to say "how many did merge",
-                which is false for a branch-mode run's denominator
-                (`itemsMerged` counts `branched` too) — but that pass fixed
-                only the tooltip, leaving the VISIBLE label reading
-                "rework / merge", the identical mislabel one tile over: a
-                reader who never hovers still sees a claim that every
-                completion reached `main`. This is finding 1's other half.
-                "completed" is the word `itemsMerged`'s own doc comment uses
-                for the union of both success exits, the same word the tile
-                above already adopted, so this label now says what the
-                denominator means instead of naming only one of the two ways
-                to earn it. No arithmetic changed — see
-                `test/runs-view.test.tsx`'s branch-mode fixture, which now
-                pins this label (and its predecessor's) alongside the value
-                each already had pinned. */}
-            <div
-              className="runs-tile"
-              data-testid="runs-tile-fixloops"
-              title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."
-            >
-              <div className="runs-tile-value">{aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}</div>
-              <div className="runs-tile-label">rework / completed</div>
-            </div>
-            <div className="runs-tile" data-testid="runs-tile-verify">
-              <div className="runs-tile-value">{aggregates.verifyPassRate === null ? '—' : `${Math.round(aggregates.verifyPassRate * 100)}%`}</div>
-              <div className="runs-tile-label">verify pass</div>
-            </div>
-            {/* The sixth, wide tile (Task 7) — `machine` (computed above,
-                right beside `aggregates`) summed across whatever `filtered`
-                currently holds, rendered through the identical `StageBars`
-                widget `RunDetail`'s own per-run rollup already uses (Task 4),
-                so the two read as one visual vocabulary at two different
-                scopes: one run there, however many runs the range/project
-                combination leaves in view here. `RANGE_SCOPE[range]` states
-                which scope this particular rendering is, since — unlike
-                RunDetail's rollup, which is always "this one run" — this
-                tile's own meaning changes every time the range control does. */}
-            <div className="runs-tile runs-tile-wide" data-testid="runs-tile-machine">
-              <div className="runs-tile-head">
-                <div className="runs-tile-label">machine time by stage</div>
-                <span className="runs-tile-substat">{RANGE_SCOPE[range]} · queue wait excluded</span>
-              </div>
-              <StageBars totals={machine} testId="runs-tile-machine-bars" />
-            </div>
-          </div>
+                }
+              />
+              {/* "completed", not "merged": `itemsMerged` counts `branched`
+                  alongside `merged` per spec §4, so a fully successful
+                  branch-mode run (nothing reached `main`) used to render
+                  "4/4 merged" over a queue that merged nothing at all — the
+                  exact failure `branched` was invented to stop, reappearing
+                  in a label. The line states the definition rather than
+                  glossing it. */}
+              <Figure
+                testId="runs-tile-merged"
+                label="completed / queued"
+                value={`${aggregates.itemsMerged}/${aggregates.itemsQueued}`}
+                line="merged or branched"
+              />
+              {/* "avg item work", not "avg item": `avgItemWorkMs` is
+                  `itemDurationMs` averaged over completed items, first
+                  non-pending arrival to the terminal stamp, which
+                  deliberately EXCLUDES the queue-wait interval a bare "avg
+                  item" reading would leave a person assuming is included. The
+                  line states the exclusion outright. */}
+              <Figure
+                testId="runs-tile-avg-item"
+                label="avg item work"
+                value={aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}
+                line="queue wait excluded"
+              />
+              <Figure
+                testId="runs-tile-fixloops"
+                label="rework / completed"
+                value={aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}
+                line="fix loops per completed item"
+                title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."
+              />
+              {/* A rate over verification RUNS, not items, and the line says
+                  which — the unit is the whole claim. */}
+              <Figure
+                testId="runs-tile-verify"
+                label="verify pass"
+                value={aggregates.verifyPassRate === null ? '—' : `${Math.round(aggregates.verifyPassRate * 100)}%`}
+                line="of every verification run"
+              />
+              {/* The sixth cell, full width: the same `StageBars` widget the
+                  detail sheet's own per-run rollup uses, so the two read as
+                  one visual vocabulary at two scopes — one run there, however
+                  many runs the range/project combination leaves in view here.
+                  `RANGE_SCOPE[range]` names which scope this rendering is,
+                  since — unlike the sheet's rollup, which is always "this one
+                  run" — this cell's meaning changes every time the range
+                  control does. No `value`: at full width the chart is the
+                  cell's subject rather than a sparkline beside a number. */}
+              <Figure wide testId="runs-tile-machine" label="machine time by stage" line={`${RANGE_SCOPE[range]} · queue wait excluded`}>
+                <div className="runs-figure-bars">
+                  <StageBars totals={machine} testId="runs-tile-machine-bars" />
+                </div>
+              </Figure>
+            </FigureStrip>
+          )}
 
           <div className="runs-split">
-            {/* `tabIndex={-1}` earns its place twice over (task-16): this is
-                now a scrollable region, and a scrollable region needs a
-                programmatic focus target — both for the exhausting-click
-                handoff below and because a keyboard reader who scrolls it
-                needs somewhere for focus to be. It is -1, not 0: the row
-                buttons inside are what keep the region operable via Tab, so
-                adding it to the tab order would only insert an extra stop
-                before them. */}
+            {/* The 420 px list column: the Live sheet, then the History
+                sheet. `tabIndex={-1}` earns its place twice over (task-16):
+                the History sheet inside it is a scroll region and a scroll
+                region needs a programmatic focus target — both for the
+                exhausting-click handoff below and because a keyboard reader
+                who scrolls it needs somewhere for focus to be. It is -1, not
+                0: the row buttons inside are what keep the region operable
+                via Tab, so adding it to the tab order would only insert an
+                extra stop before them. */}
             <div className="runs-list" data-testid="runs-list" ref={listRef} tabIndex={-1}>
-              {/* task-21's placeholders, ABOVE the pinned live region and
-                  therefore above everything: a run nobody can see yet is the
-                  most recent thing that happened by construction, and it is
-                  the one row on this list a person is actively waiting on.
-                  Reading order is starting, then fresh live runs, then history
-                  newest day first.
-
-                  It reuses the `.runs-day` / `.runs-day-heading` /
-                  `.runs-day-rows` chrome the pinned `live` region and every
-                  calendar group already use, for that region's own stated
-                  reason: the heading is what tells a reader this group is not
-                  a day, and a second visual language for "here is a region"
-                  would make three shapes out of one.
-
-                  Outside the `filtered.length === 0` ternary below, not inside
-                  either of its branches — the placeholder has to render
-                  whether or not the current range/project combination left any
-                  RUNS in scope, and those are two independent facts. */}
-              {startingRows.length > 0 && (
-                <div className="runs-day" data-testid="runs-day-starting">
-                  <div className="runs-day-heading">starting</div>
-                  <div className="runs-day-rows">
-                    {startingRows.map((s) => (
-                      <StartingRow key={`starting:${s.project}`} starting={s} now={now} />
+              {/* The Live sheet, drawn only when it has rows. An empty one
+                  would be a heading over nothing — and "nothing is running"
+                  is already what its absence says. Starting placeholders sit
+                  above every real row: a run nobody can see yet is the most
+                  recent thing that happened by construction. */}
+              {(liveRows.length > 0 || startingRows.length > 0) && (
+                <Sheet className="runs-live-sheet">
+                  <SheetHead
+                    title="Live"
+                    sub={[
+                      liveRows.length === 0 ? null : `${liveRows.length} ${liveRows.length === 1 ? 'run' : 'runs'}`,
+                      startingRows.length === 0 ? null : `${startingRows.length} starting`
+                    ]
+                      .filter((part) => part !== null)
+                      .join(' · ')}
+                  />
+                  <div className="runs-rows" data-testid="runs-live-rows">
+                    {startingRows.map((entry) => (
+                      <StartingRow key={`starting:${entry.project}`} starting={entry} now={now} />
                     ))}
+                    {renderRows(liveRows, LiveRow)}
                   </div>
-                </div>
+                </Sheet>
               )}
-              {filtered.length === 0 ? (
-                // Task 7's own empty state — a DIFFERENT fact from "no runs
-                // yet" above (`merged.length === 0`), which stays reachable
-                // only for a project with a genuinely empty history. This one
-                // fires when the range/project combination leaves nothing in
-                // `filtered` even though `merged` is not empty — the tiles,
-                // the range control and the project select all stay mounted
-                // around it (see this file's own header comment for why),
-                // and no day groups render alongside it: `pinned`/`groups`
-                // are themselves derived from `filtered`, so they are already
-                // empty here regardless — this note exists for the READER,
-                // not because the markup below would otherwise render
-                // something wrong.
-                // task-21: suppressed while a placeholder is showing, the
-                // same rule "no runs yet" above follows and for the same
-                // reason — an empty state describes a list with nothing in it,
-                // and this list has a row. The two notes stay separate
-                // conditions rather than one, because they answer different
-                // questions and the starting row can coexist with either.
-                startingRows.length > 0 ? null : (
+
+              <Sheet className="runs-history-sheet">
+                <SheetHead title="History" sub={`${history.length} ${history.length === 1 ? 'run' : 'runs'} · ${RANGE_SCOPE[range]}`} />
+                {/* Three states, and the ORDER of the checks is the whole
+                    rule: an empty History sheet has to say WHY it is empty,
+                    and only one of the three reasons is the range.
+                      `merged.length === 0` is first because it is the one
+                    case where the range cannot possibly be the reason —
+                    there is no corpus to filter. It is reachable only
+                    alongside a starting placeholder (with nothing at all the
+                    page shows `no runs yet` instead), which is exactly the
+                    window task-21 exists for: a project's FIRST run, before
+                    `run.json` is written. Printing `no runs in this range`
+                    there would send a person hunting through a range control
+                    for runs that do not exist yet.
+                      Then the range/project combination, and last the case
+                    where every run in scope is still going. */}
+                {merged.length === 0 ? (
+                  <div className="drawer-empty" data-testid="runs-empty-history">
+                    nothing has finished yet
+                  </div>
+                ) : filtered.length === 0 ? (
+                  // A DIFFERENT fact from "no runs yet" above
+                  // (`merged.length === 0`), which stays reachable only for a
+                  // project with a genuinely empty history. This one fires
+                  // when the range/project combination leaves nothing in
+                  // `filtered` even though `merged` is not empty — the band
+                  // and its controls stay mounted around it, because a person
+                  // needs them on screen to widen back out of the empty
+                  // combination they just created.
                   <div className="drawer-empty" data-testid="runs-empty-range">
                     no runs in this range
                   </div>
-                )
-              ) : (
-                <>
-                  {/* The pinned region: reuses the exact `.runs-day`/
-                      `.runs-day-heading`/`.runs-day-rows` chrome the history
-                      groups below use, rather than inventing a second visual
-                      language for "here is a region" — the "live" heading is
-                      what tells a reader this group is not a calendar day like
-                      its neighbours, the same way `groupByDay`'s own `unknown`
-                      heading already marks an unparseable-date group without a
-                      different box or colour of its own. Rendered only when at
-                      least one row is actually pinned, so a project filter with
-                      no fresh run in scope shows no heading for a region with
-                      nothing under it. */}
-                  {pinned.length > 0 && (
-                    <div className="runs-day" data-testid="runs-day-live">
-                      <div className="runs-day-heading">live</div>
-                      <div className="runs-day-rows">{renderRows(pinned)}</div>
-                    </div>
-                  )}
-                  {groups.map((group) => (
-                    <div key={group.key} className="runs-day" data-testid={`runs-day-${group.key}`}>
-                      <div className="runs-day-heading">{group.label}</div>
-                      <div className="runs-day-rows">{renderRows(group.rows)}</div>
-                    </div>
-                  ))}
-                  {/* task-16's `load more`, at the FOOT of the list and
-                      INSIDE the scroll container — it is the end of the
-                      list, not a fixture beside it, so it should arrive
-                      under the last row rather than sit permanently in view
-                      over a list it may not even apply to.
-                        The label states the remaining count rather than
-                      saying "more", so the button says what it will do — and
-                      it is also what tells a reader that a selection whose
-                      row sits below the window still has list underneath it
-                      (see `selectedRow`'s own note).
-                        The exhausting click is the case worth handling: it
-                      unmounts this button from under the pointer, which
-                      drops focus to <body> and strands a keyboard reader at
-                      the top of the document. Handing focus to the list
-                      container puts them at the region they were just
-                      reading. The check is `hiddenCount <= RUNS_PAGE_SIZE`,
-                      evaluated against the value this click is about to
-                      consume, not a re-read of state that has not updated
-                      yet. */}
-                  {hiddenCount > 0 && (
-                    <button
-                      type="button"
-                      className="runs-load-more"
-                      data-testid="runs-load-more"
-                      onClick={() => {
-                        setWindowSize((n) => n + RUNS_PAGE_SIZE);
-                        if (hiddenCount <= RUNS_PAGE_SIZE) listRef.current?.focus();
-                      }}
-                    >
-                      load more ({hiddenCount} older)
-                    </button>
-                  )}
-                </>
-              )}
+                ) : history.length === 0 ? (
+                  // Third: there IS a corpus and the filters left something in
+                  // scope, but every one of those runs is still going. The
+                  // Live sheet above is showing them; this one has nothing to
+                  // show yet, and the range is not why.
+                  <div className="drawer-empty" data-testid="runs-empty-history">
+                    nothing has finished yet
+                  </div>
+                ) : (
+                  <>
+                    {groups.map((group) => (
+                      <div key={group.key} className="runs-day" data-testid={`runs-day-${group.key}`}>
+                        <DayKicker>{group.label}</DayKicker>
+                        <div className="runs-rows">{renderRows(group.rows, HistoryRow)}</div>
+                      </div>
+                    ))}
+                    {/* task-16's `load more`, at the FOOT of the sheet and
+                        INSIDE its scroll box — it is the end of the list, not
+                        a fixture beside it. The label states the remaining
+                        count rather than saying "more", so the button says
+                        what it will do, and it is also what tells a reader
+                        that a selection whose row sits below the window still
+                        has list underneath it.
+                          The exhausting click is the case worth handling: it
+                        unmounts this control from under the pointer, which
+                        drops focus to <body> and strands a keyboard reader at
+                        the top of the document. Handing focus to the list
+                        container puts them back at the region they were
+                        reading. The check is `hiddenCount <= RUNS_PAGE_SIZE`,
+                        evaluated against the value this click is about to
+                        consume, not a re-read of state that has not updated
+                        yet. */}
+                    {hiddenCount > 0 && (
+                      <div className="runs-load-more">
+                        <Chip
+                          variant="flat"
+                          data-testid="runs-load-more"
+                          onClick={() => {
+                            setWindowSize((n) => n + RUNS_PAGE_SIZE);
+                            if (hiddenCount <= RUNS_PAGE_SIZE) listRef.current?.focus();
+                          }}
+                        >
+                          load more ({hiddenCount} older)
+                        </Chip>
+                      </div>
+                    )}
+                  </>
+                )}
+              </Sheet>
             </div>
 
-            {/* RunDetail (Task 7) owns everything inside this wrapper; the
-                wrapper itself — class and testid — stays here rather than
-                moving into that component, since it is this file's own
-                layout grid (.runs-split) that sizes it, the same reason
-                .runs-list's rows live in this file rather than a component
-                of their own.
-                  `selectedRow` is typed `MergedRun | undefined`, and
-                since task-21 the guard below is a REAL case rather than the
-                defensive typing it used to be. The branch above no longer
-                reads `merged.length === 0` alone: a project whose only entry
-                is a starting placeholder reaches this pane with `orderedRows`
-                genuinely empty, so `orderedRows[0]` is `undefined` and this
-                slot renders nothing at all. That is the designed outcome —
-                `RunDetail` is keyed on project + runId and a placeholder has
-                no runId to give it, so an empty pane beside a starting row is
-                strictly better than a pane inventing a run to describe.
+            {/* The detail sheet — one run, whole, BESIDE the list rather than
+                behind a click. `RunDetail` owns everything inside it,
+                including the head; the sheet and its layout class stay here,
+                since it is this file's own `.runs-split` grid that sizes it.
+                  `selectedRow` is typed `MergedRun | undefined`, and since
+                task-21 the guard below is a REAL case rather than defensive
+                typing: a project whose only entry is a starting placeholder
+                reaches here with `orderedRows` genuinely empty, so
+                `orderedRows[0]` is `undefined` and this sheet renders
+                nothing. That is the designed outcome — `RunDetail` is keyed on
+                project + runId and a placeholder has no runId to give it, so
+                an empty sheet beside a starting row is strictly better than
+                one inventing a run to describe.
                   `selectedRow.live` (fix round 2) — not a fresh lookup into
                 `liveRuns` — is where the LIVE object comes from: `mergeRuns`
-                already did the project-AND-runId-matched lookup once, when
-                it built this row, and carries the result on `MergedRun`
-                itself (see that field's own doc comment for why the object,
-                not a boolean, is what it keeps). Re-deriving the same match
-                here would be a second place that lookup could drift from
-                the first. */}
-            <div className="runs-detail" data-testid="run-detail-slot">
-              {selectedRow !== undefined && (
-                <RunDetail
-                  summary={selectedRow.run}
-                  live={selectedRow.live}
-                  gate={resumeGate(agents, selectedRow.run.project)}
-                  resuming={resuming.has(selectedRow.run.project)}
-                  onChanged={(kind) => {
-                    // `refreshRuns` alone is enough for a pause or a cancel:
-                    // both flip `pauseRequested` on the live entry and change
-                    // nothing the archive holds. A resume additionally needs
-                    // the mark, since a paused run polls nothing by the
-                    // ordinary rule. The archive's own refresh already fires
-                    // when the fresh set changes.
-                    if (kind === 'resume') noteResume(selectedRow.run.project);
-                    refreshRuns();
-                  }}
-                />
-              )}
-            </div>
+                already did the project-AND-runId-matched lookup once, when it
+                built this row, and carries the result on `MergedRun` itself.
+                Re-deriving the same match here would be a second place that
+                lookup could drift from the first. */}
+            <Sheet as="aside" className="runs-detail">
+              <div data-testid="run-detail-slot">
+                {selectedRow !== undefined && (
+                  <RunDetail
+                    summary={selectedRow.run}
+                    live={selectedRow.live}
+                    gate={resumeGate(agents, selectedRow.run.project)}
+                    resuming={resuming.has(selectedRow.run.project)}
+                    onChanged={(kind) => {
+                      // `refreshRuns` alone is enough for a pause or a cancel:
+                      // both flip `pauseRequested` on the live entry and change
+                      // nothing the archive holds. A resume additionally needs
+                      // the mark, since a paused run polls nothing by the
+                      // ordinary rule. The archive's own refresh already fires
+                      // when the fresh set changes.
+                      if (kind === 'resume') noteResume(selectedRow.run.project);
+                      refreshRuns();
+                    }}
+                  />
+                )}
+              </div>
+            </Sheet>
           </div>
         </>
       )}
