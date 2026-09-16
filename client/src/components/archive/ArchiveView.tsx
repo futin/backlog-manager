@@ -11,6 +11,10 @@ import { leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { runClaimBlock } from '../../../../shared/agent';
+import { Band } from '../ui/Band';
+import { Chip } from '../ui/Chip';
+import { BoardColumn } from '../board/BoardColumn';
+import type { BoardColumnSlug } from '../board/BoardColumn';
 import { ItemCard } from '../board/ItemCard';
 import { ItemDrawer } from '../board/ItemDrawer';
 import { LaunchSheet } from '../board/LaunchSheet';
@@ -18,7 +22,7 @@ import type { BacklogItem, Section } from '../../../../shared/types';
 
 /**
  * Archive — the board's second surface: what is still actionable in principle
- * but not actionable now.
+ * but not actionable now (`.claude/DESIGN.md` §8.5).
  *
  * Two populations, and they arrive by different routes. Open refactors, ideas
  * and bugs nobody has touched inside the staleness window fall in on their own,
@@ -51,24 +55,29 @@ const ALL = 'all';
 
 /**
  * Archive's four fixed columns — the design's Refactoring · Ideas · Bugs ·
- * Out of scope.
+ * Out of scope (DESIGN.md §8.5), drawn by the Board's own `BoardColumn`
+ * (task-39) rather than by a header this file restates.
  *
  * Three of the four are the Board's own sections seen from the far side of the
- * window, and they reuse the Board's `.board-col-<slug>` classes deliberately:
- * a refactor is magenta on both surfaces, because the tick is type identity and
- * type does not change when an item goes quiet. Out of scope has no tick colour
- * of its own and falls through to the default grey — correct, since a rejection
- * is a verdict rather than a type, and giving it an accent would put it in the
- * same visual vocabulary as the three columns that are still live work.
+ * window, and they take the Board's own ramp hue for that type — refactors
+ * `--amber`, ideas `--mustard`, bugs `--red` — because the dot names a type,
+ * and a type does not change when an item goes quiet. Out of scope has no ramp
+ * hue at all and falls through to `Dot`'s toneless `--ink3` base, which
+ * `BoardColumn`'s `RAMP_SLUGS` decides and no caller here re-decides: a
+ * rejection is a verdict rather than a type, and giving it an accent would put
+ * it in the same visual vocabulary as the three columns that are still live
+ * work.
  *
  * No Tasks column, and that is the same rule stated from the other side:
  * `leavesBoard` never lets a task leave, so a Tasks column here could only ever
  * be empty.
  *
  * `slug` is the full section name — `oos` was retired along with the Board's
- * out-of-scope column and does not come back here.
+ * out-of-scope column and does not come back here. Typed as `BoardColumnSlug`
+ * rather than `string` since task-39: the slug is what picks the ramp hue, so a
+ * typo in it now reads as an untyped column rather than as a silently grey one.
  */
-const COLUMNS: { section: Section; label: string; slug: string }[] = [
+const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
   { section: 'refactors', label: 'Refactoring', slug: 'refactors' },
   { section: 'ideas', label: 'Ideas', slug: 'ideas' },
   { section: 'bugs', label: 'Bugs', slug: 'bugs' },
@@ -169,6 +178,20 @@ export default function ArchiveView() {
      the month grouping below IS the ordering. */
   const visible = archived.filter((i) => (projectValue === ALL || i.projectPath === projectValue) && (needle === '' || i.title.toLowerCase().includes(needle)));
 
+  /* The band's 13 px count line, the same shape the Board's carries (DESIGN.md
+     §8.2/§8.5) and built the same way — see BoardView's own `countLine` for the
+     two rules restated here: the project half counts the projects the counted
+     items actually belong to (an unreachable one contributes none and is named
+     by the warning line below anyway), and it drops entirely once the filter
+     names one project, because `across 1 project` is true of every board a
+     reader narrowed themselves.
+     The noun is a fixed `archived` where the Board's is its Status filter's
+     word: this surface HAS no status filter, so there is no second reading for
+     the noun to have to track. */
+  const countProjects = new Set(visible.map((i) => i.projectPath)).size;
+  const countLine =
+    projectValue === ALL ? `${visible.length} archived across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}` : `${visible.length} archived`;
+
   const missing = registered.filter((p) => p.missing);
   /* Reported here as well as on the Board. A registered path with no `backlog/`
      is a fact about the corpus rather than about a surface, and Archive can be
@@ -200,18 +223,33 @@ export default function ArchiveView() {
      to arrange here at all. */
   return (
     <div className="board">
-      <div className="board-bar">
-        <div className="board-title">Archive</div>
-        <div className="board-tools">
-          <input
-            type="search"
-            className="board-search"
-            aria-label="Search items"
-            placeholder="search titles"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <select className="board-select" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
+      {/* The page header is a band, not a card (DESIGN.md §8.2/§8.5): the
+          19/500 title over the 13 px count line, then right-aligned the 36 px
+          search field and the project filter chip — and NOTHING else. No status
+          filter and no sort control, deliberately: Archive's contents are
+          defined by staleness and rejection rather than by status, so a status
+          select here would either do nothing or contradict the surface, and the
+          month grouping below already is the ordering a sort control would
+          offer. The band is the same `Band` primitive and the same two control
+          classes the Board's band uses, so the two surfaces cannot drift on the
+          one shape they both draw. */}
+      <Band title="Archive" sub={countLine}>
+        <input
+          type="search"
+          className="board-band-search"
+          aria-label="Search items"
+          placeholder="search titles"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {/* A `Chip` wrapping its own native select — `as: 'label'`, the mode the
+            primitive already has for exactly this. The chip owns the shell and
+            the select owns the value text and the picker, which is what keeps a
+            project list of any length working without this file growing a menu.
+            The `aria-label` stays on the select: it is the control, the chip is
+            only its shell. */}
+        <Chip as="label">
+          <select className="board-filter" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
             <option value={ALL}>All projects</option>
             {/* Valued by path, labelled by name — two checkouts of one repo
                 stay two selectable options. */}
@@ -221,8 +259,14 @@ export default function ArchiveView() {
               </option>
             ))}
           </select>
-        </div>
-      </div>
+          {/* The UA's own arrow went with `appearance: none` on `.board-filter`.
+              This is the design's own, at the board's size and ink; aria-hidden,
+              because the select already announces itself as a combobox. */}
+          <span className="board-filter-mark" aria-hidden="true">
+            ▾
+          </span>
+        </Chip>
+      </Band>
 
       {warnings.length > 0 && (
         <div className="board-warn" data-testid="board-warn">
@@ -257,51 +301,61 @@ export default function ArchiveView() {
                (newest month first, undated last, newest-touched first inside a
                group). See lib/item-month.ts. */
             const groups = groupByMonth(visible.filter((i) => i.section === col.section));
+            /* Summed across the groups rather than taken off the filtered list,
+               because `BoardColumn`'s count is a count of CARDS and what this
+               column wraps them in is month groups — see that component's own
+               note on why the header cannot count its rendered children. */
             const count = groups.reduce((n, g) => n + g.items.length, 0);
             return (
-              <div className={`board-col board-col-${col.slug}`} key={col.section} data-testid="archive-col">
-                <div className="board-col-h">
-                  <span className="board-col-tick" />
-                  <span className="board-col-name" data-testid="col-name">
-                    {col.label}
-                  </span>
-                  <span className="board-col-count" data-testid="col-count">
-                    {count}
-                  </span>
-                </div>
-                <div className="board-col-cards">
-                  {groups.map((group) => (
-                    <div className="archive-group" key={group.key}>
-                      {/* Sticky, so the month a card belongs to is still
+              /* The Board's own column, not a second one (DESIGN.md §8.5):
+                 same 8 px dot, same 15/500 name, same count `Pill` pushed
+                 right, and no rule under the header. Rendered as a direct child
+                 of the `.board-columns` grid with no wrapper around it — a
+                 wrapper would become the grid item and `.board-col`'s own
+                 `min-width: 0` would stop reaching the track, which is what
+                 keeps a long unbroken title shrinking with the column rather
+                 than overflowing it. Its test hook is `BoardColumn`'s own
+                 `board-col`, for the same reason: this surface no longer has a
+                 column of its own to name. */
+              <BoardColumn key={col.section} slug={col.slug} label={col.label} count={count}>
+                {groups.map((group) => (
+                  <div className="archive-group" key={group.key}>
+                    {/* Sticky, so the month a card belongs to is still
                           readable once the column is scrolled past its own
                           heading — which is the entire reason the grouping
                           earns its place here rather than being a sort. */}
-                      <div className="archive-month" data-testid="archive-month">
-                        {group.label}
-                      </div>
-                      {group.items.map((item) => (
-                        <ItemCard
-                          key={item.path}
-                          item={item}
-                          hues={hues}
-                          onOpen={() => setOpen(item)}
-                          agents={agents}
-                          onDispatch={() => setDispatching(item)}
-                          now={now}
-                          /* No `stale` prop, deliberately. Every card in the
+                    <div className="archive-month" data-testid="archive-month">
+                      {group.label}
+                    </div>
+                    {group.items.map((item) => (
+                      <ItemCard
+                        key={item.path}
+                        item={item}
+                        hues={hues}
+                        onOpen={() => setOpen(item)}
+                        agents={agents}
+                        onDispatch={() => setDispatching(item)}
+                        now={now}
+                        /* No `stale` prop, deliberately. Every card in the
                              first three columns here is stale by construction,
                              and a marker that is always on says nothing — the
                              same argument the card already makes for not
                              badging `groomed` on a task. The column heading
-                             carries the fact instead. */
-                          runBlock={runBlockFor(item)}
-                          reverify={reverifyAgents}
-                        />
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
+                             carries the fact instead.
+                             No `run` prop either, and that one is load-bearing
+                             rather than an omission: it is the single reason no
+                             live strip ever paints on this surface (§8.5).
+                             Whatever put a card here already took it off the
+                             Board a run could be holding, so a stage strip here
+                             would be describing work on an item this surface is
+                             claiming has gone quiet. */
+                        runBlock={runBlockFor(item)}
+                        reverify={reverifyAgents}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </BoardColumn>
             );
           })}
         </div>

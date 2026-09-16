@@ -1,9 +1,14 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
+
+import { readStyles, ruleBlock } from './helpers/css-rule';
 
 import ArchiveView from '../client/src/components/archive/ArchiveView';
 import rawFixture from './fixtures/orchestrator-run.json';
@@ -158,9 +163,14 @@ async function renderArchive(items: BacklogItem[] = ITEMS, errors: string[] = []
   await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
 }
 
-/** The column with this heading, or a failure naming what was there instead. */
+/** The column with this heading, or a failure naming what was there instead.
+ *  `board-col` rather than the `archive-col` hook this used until task-39:
+ *  Archive draws the Board's own `BoardColumn` now, so the column element is
+ *  the component's and carries the component's test id. That the two surfaces
+ *  answer to one hook is the point — a second hook here would have been a
+ *  second column. */
 function column(label: string): HTMLElement {
-  const cols = screen.getAllByTestId('archive-col');
+  const cols = screen.getAllByTestId('board-col');
   const found = cols.find((c) => within(c).getByTestId('col-name').textContent === label);
   if (found === undefined) {
     throw new Error(`no ${label} column; found ${cols.map((c) => within(c).getByTestId('col-name').textContent).join(', ')}`);
@@ -179,8 +189,11 @@ describe('ArchiveView', () => {
     // seen from the far side of the window, plus the one it has no column for.
     // No Tasks column: a task never leaves the Board, so one here could only
     // ever be empty.
-    expect(screen.getByText('Archive')).toHaveClass('board-title');
-    expect(screen.getAllByTestId('archive-col').map((c) => within(c).getByTestId('col-name').textContent)).toEqual([
+    // The `Band` primitive's own title, not the `.board-title` div the old
+    // toolbar carried — Archive opens on the same band every other page does
+    // (DESIGN.md §8.2/§8.5).
+    expect(screen.getByText('Archive')).toHaveClass('ui-band-title');
+    expect(screen.getAllByTestId('board-col').map((c) => within(c).getByTestId('col-name').textContent)).toEqual([
       'Refactoring',
       'Ideas',
       'Bugs',
@@ -290,7 +303,7 @@ describe('ArchiveView', () => {
   it('counts what each column actually holds', async () => {
     await renderArchive();
     // refactors 1, ideas 1, bugs 2 (alpha's stale one and beta's), oos 1.
-    expect(screen.getAllByTestId('archive-col').map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['1', '1', '2', '1']);
+    expect(screen.getAllByTestId('board-col').map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['1', '1', '2', '1']);
   });
 
   it('offers project and search, and neither a status nor a sort select', async () => {
@@ -427,5 +440,103 @@ describe('ArchiveView', () => {
     await renderArchive();
     await userEvent.click(within(column('Bugs')).getByText('stale bug'));
     expect(await screen.findByRole('dialog')).toHaveTextContent('stale bug');
+  });
+
+  /*
+   * task-39 — the redraw. Archive reuses the Board's card and column language
+   * (DESIGN.md §8.5) instead of a second one, so what these cases pin is that
+   * the reuse is literal: the same component, the same ramp, and the one place
+   * the two surfaces deliberately differ (the fourth column's dot).
+   */
+
+  /**
+   * The ramp, left to right, in §8.2's order — and the fourth column NOT on it.
+   *
+   * Asserted as the four dot classes in column order rather than one at a time,
+   * for the reason `board-column.test.tsx` gives about the Board's own four: the
+   * ORDER is half the rule, and four correct hues in the wrong columns would
+   * pass four separate assertions. The `out-of-scope` reading is the half this
+   * surface owns — a rejection is a verdict rather than a type, so its dot is
+   * `Dot`'s toneless `--ink3` base and carries no `ui-dot-ramp-*` class at all.
+   */
+  it('heads three columns with the type ramp and out-of-scope with no ramp at all', async () => {
+    await renderArchive();
+    const dots = screen.getAllByTestId('board-col').map((col) => (col.querySelector('.board-col-head .ui-dot') as HTMLElement).className);
+    expect(dots.slice(0, 3)).toEqual([
+      expect.stringContaining('ui-dot-ramp-refactors'),
+      expect.stringContaining('ui-dot-ramp-ideas'),
+      expect.stringContaining('ui-dot-ramp-bugs')
+    ]);
+    expect(dots[3]).not.toMatch(/ui-dot-ramp-/);
+    expect(dots[3].split(' ')).toEqual(['ui-dot', 'ui-dot-8']);
+  });
+
+  /** The count is the Board's `Pill`, in the same span that pushes it right —
+   *  the whole header, not just its dot, is the one the Board draws. */
+  it('carries each column count in a neutral Pill pushed right', async () => {
+    await renderArchive();
+    for (const count of screen.getAllByTestId('col-count')) {
+      expect(count).toHaveClass('board-col-pill');
+      expect(count.querySelector('.ui-pill')).toHaveClass('ui-pill-neutral');
+    }
+  });
+
+  /**
+   * No live strip, ever, and the case is built for the one item that can reach
+   * this surface WHILE a fresh run holds it: an out-of-scope one. Every other
+   * column's contents arrive here by staleness, and `leavesBoard` already pulls
+   * a held item back to the Board — so a rejection, which arrives by section
+   * with no date in it at all, is the only fixture that can be both archived
+   * and claimed at once. `ArchiveView` passes `ItemCard` no `run` prop, which is
+   * the single reason the strip cannot paint; this is that reason asserted
+   * rather than assumed.
+   */
+  it('paints no live strip on a card a fresh run is holding', async () => {
+    await renderArchive(ITEMS, [], [runHolding('oos-1', 'dispatched')]);
+    const card = within(column('Out of scope')).getByText('declined thing').closest('.board-card') as HTMLElement;
+    expect(card.querySelector('.board-card-live')).toBeNull();
+    // And nowhere else on the surface either — a strip drawn on some other
+    // card would pass a card-scoped query.
+    expect(document.querySelector('.board-card-live')).toBeNull();
+  });
+
+  /**
+   * The month kicker's ordering is `groupByMonth`'s and stays `groupByMonth`'s
+   * (the cases above assert it); what task-39 changed is only its face. Read off
+   * the stylesheet rather than off a rendered element, because jsdom applies no
+   * stylesheet — and read as the three things the redraw actually claims: 13/500
+   * `--ink2` on the `--board` ground, with no rule under it.
+   */
+  it('draws the month kicker on the board ground with no rule under it', () => {
+    const block = ruleBlock(readStyles(), '.archive-month') as string;
+    expect(block).toMatch(/font-size: *13px/);
+    expect(block).toMatch(/font-weight: *500/);
+    expect(block).toMatch(/color: *var\(--ink2\)/);
+    expect(block).toMatch(/background: *var\(--board\)/);
+    expect(block).not.toMatch(/border/);
+  });
+
+  /**
+   * "No new derivation" (task-39's own test case 12), as a source guard rather
+   * than a behaviour: the three modules this surface reads — the staleness
+   * split, the month grouping and the action derivation — each have one home,
+   * and the failure this catches is a redraw that quietly grew a second copy of
+   * one of them here. A behavioural test cannot catch that, because a correct
+   * second copy behaves identically until the day the first one changes.
+   *
+   * The `tasks` half is the same rule from the other side: `leavesBoard` never
+   * lets a task leave the Board, so a fifth column here could only ever stand
+   * empty — and a diff that added one would have to have reimplemented the
+   * predicate to make it possible.
+   */
+  it('imports its three derivations and reimplements none of them', () => {
+    const src = readFileSync(join(__dirname, '..', 'client', 'src', 'components', 'archive', 'ArchiveView.tsx'), 'utf8');
+    expect(src).toMatch(/import \{ groupByMonth \} from '\.\.\/\.\.\/lib\/item-month'/);
+    expect(src).toMatch(/import \{ leavesBoard \} from '\.\.\/\.\.\/lib\/item-stale'/);
+    expect(src).toMatch(/import \{ runClaimBlock \} from '\.\.\/\.\.\/\.\.\/\.\.\/shared\/agent'/);
+    // The four columns, and no fifth: the section names this file lists are
+    // exactly the four, with `tasks` absent.
+    const sections = [...src.matchAll(/\{ section: '([a-z-]+)', label:/g)].map((m) => m[1]);
+    expect(sections).toEqual(['refactors', 'ideas', 'bugs', 'out-of-scope']);
   });
 });

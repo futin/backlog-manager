@@ -241,53 +241,6 @@ code, kbd, samp, pre { font-family: inherit }
    toolbar narrows to a project, the columns never do. A card opens the drawer,
    which fetches that one item's body from GET /api/items/body. */
 .board { display: flex; flex-direction: column; gap: var(--group-gap) }
-/* `row-gap` separately from the flex `gap`, because once the toolbar wraps below
-   the title the two lines need less air between them than the 10px that reads
-   right between controls sitting side by side. */
-.board-bar { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; row-gap: 8px }
-.board-title {
-  font-size: 19px; font-weight: 500;
-  color: var(--ink);
-}
-/* The toolbar: search, then project / type / sort. Pushed to the far end of the
-   bar because it states the board's state, so it belongs beside the board rather
-   than next to the section title. Its own wrap is what saves a narrow tablet: the
-   four controls break onto a second line before they start squeezing each other
-   into unreadable widths. `align-items:stretch` rather than `center` because an
-   input and a select do not resolve the same height from the same padding and
-   font — rendered, the search box came out 2px shorter than the selects beside
-   it, which on a 23px control row reads as one misaligned instrument. Stretch
-   levels each flex line to its tallest member and keeps doing so if the padding
-   is ever changed. */
-.board-tools { margin-left: auto; display: flex; align-items: stretch; flex-wrap: wrap; gap: 6px }
-/* One recessed-well look for all four, inherited from the removed .board-scope
-   button: --steel against the --strip cards, a hairline rule, and one type size
-   for all four, so the row reads as instrument panel rather than as a form. (It
-   was 10px mono until task-36 put the board on one face at the 11px floor; the
-   block is what the reading depended on, not the family.) One block rather than
-   four, because the four controls only read as one instrument while their
-   padding, border and type are literally the same declarations. */
-.board-search, .board-select {
-  font-size: 13px;
-  color: var(--ink2); background: var(--steel);
-  border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 4px 8px; transition: color .15s, border-color .15s;
-}
-/* Fixed rather than content-sized: a text field that grows as you type shoves the
-   three selects along the bar with every keystroke. `min-width:0` so the flex
-   line can still shrink it rather than overflowing the bar. */
-.board-search { width: 150px; min-width: 0 }
-.board-search::placeholder { color: var(--ink3) }
-/* A select sizes itself to its widest option, so the project one is as wide as
-   the longest project name in the registry — and a project directory named after
-   a long branch would otherwise push the whole toolbar off the bar. The cap makes
-   the UA truncate that one option instead; the full name is still readable in
-   the open dropdown, and on each card's meta line. */
-.board-select { cursor: pointer; max-width: 190px; text-overflow: ellipsis }
-.board-search:hover, .board-select:hover { color: var(--ink); border-color: var(--hairline2) }
-/* Focus is the cyan rule, matching .set-control's fields in Settings — the UA
-   outline is dropped only because something visible replaces it. */
-.board-search:focus, .board-select:focus { outline: none; color: var(--ink); border-color: var(--cyan) }
 /* Task 13's `.board-orchestrate` — the toolbar's filled cyan "drain this
    project's queue" button — is gone with the toolbar (task-37). The control is
    the page's ONE ink `Chip` now (DESIGN.md §8.3), and both attribute states it
@@ -296,15 +249,16 @@ code, kbd, samp, pre { font-family: inherit }
    is drawn, and bug-16's ordering constraint (busy declared after disabled, so
    the later rule wins at equal specificity) is restated there.
 
-   The four rules above are ARCHIVE's now. `.board-bar`, `.board-title`,
-   `.board-tools`, `.board-search` and `.board-select` are still drawn by
-   `ArchiveView`, whose own band is task 4's to redraw; the Board's band is the
-   `Band` primitive plus the two rules below. That is why nothing above was
-   retuned in place — a page still using a rule is not a page that wants
-   another page's new numbers. */
+   `.board-bar`, `.board-title`, `.board-tools`, `.board-search` and
+   `.board-select` — the old toolbar, kept alive through task-37 because Archive
+   was still drawing it — are gone with task-39, which put Archive on the same
+   `Band` the Board uses. The two rules below are the whole of what either
+   surface's band needs beyond the primitive itself, and they are read by both:
+   one search field and one filter select, declared once, so the two bands
+   cannot come to disagree about a height or a radius. */
 
 /* The band's search field (§8.3): 36 px, 12 px radius, a `--hairline` stroke.
-   Its own class rather than `.board-search`'s retune, per the note above. */
+   Drawn by the Board's band and, since task-39, Archive's. */
 .board-band-search {
   font-family: inherit; font-size: 13px; color: var(--ink);
   height: 36px; width: 200px; min-width: 0; padding: 0 14px;
@@ -370,28 +324,11 @@ code, kbd, samp, pre { font-family: inherit }
   font-size: 11px; line-height: 1.8; color: var(--ink3); text-align: center;
 }
 
-/* Phones: the toolbar gets its own full-width line under the title (the bar wraps
-   it there anyway; `margin-left:auto` is dropped so it starts at the left edge
-   rather than sitting oddly right-aligned on a line of its own). The search takes
-   a whole row and the three selects share the next, each free to shrink — at
-   375px the four cannot share one line without every label truncating. */
-@media (max-width: 700px) {
-  .board-tools { margin-left: 0; width: 100% }
-  .board-search { flex: 1 1 100%; width: auto }
-  /* Thirds of the row, and the cap is off: a select given `max-width` as well as
-     a flex basis stops growing before it has used the room the row gave it.
-
-     At 375px a third is 105px and the UA's dropdown arrow takes 18 of them, so
-     the longest labels ("All projects", "Newest first") lose their last two or
-     three characters to an ellipsis. Left that way on purpose: buying those
-     characters back costs either a third row of controls on the screen with the
-     least vertical room to spare, or labels shortened until "All projects" reads
-     as the category rather than as the current value. A truncated label on a
-     native select is a phone convention — the full text is one tap away in the
-     open dropdown — and the selects only truncate at all while showing the value
-     that filters nothing. */
-  .board-select { flex: 1 1 0; min-width: 0; max-width: none }
-}
+/* The phone block that laid out `.board-tools`, `.board-search` and
+   `.board-select` went with those three in task-39, when Archive — their last
+   reader — moved onto `Band`. A band wraps its own right slot (`.ui-band-right`
+   is `flex-wrap: wrap`), so neither surface needs a second set of rules to fold
+   its controls onto their own line any more. */
 
 /* The card, redrawn at the design's scale (DESIGN.md §8.3): `--strip`, 12 px
    radius, NO stroke and NO shadow. A card is told from the page by its ground
@@ -620,69 +557,168 @@ code, kbd, samp, pre { font-family: inherit }
    back with it. */
 .board-card-live-mark { flex: none; white-space: nowrap }
 
-/* ---------------------------------------------- Settings section */
-.mdetail-label {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 11px; font-weight: 600;
-  color: var(--ink3); margin-top: 4px;
-}
-.set { display: flex; flex-direction: column; gap: 18px; max-width: 640px }
-.set-group { display: flex; flex-direction: column; gap: 2px }
-.set-group > .mdetail-label { margin-bottom: 6px }
-.set-row {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: var(--set-pad); border: 1px solid var(--hairline); border-radius: 2px;
-  background: var(--strip); box-shadow: inset 0 1px 0 var(--edge);
-}
-/* The theme grid is a .set-row's sibling but not one itself, so the adjacency
-   rule above skips the first row after it — Density would sit flush against the
-   swatches without this. */
-.set-row + .set-row, .set-themes + .set-row { margin-top: 5px }
-.set-label { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 }
+/* ---------------------------------------------- Settings section
+   The page is a band over two hand-balanced columns of cards (DESIGN.md §8.6).
+   Every card is the `Sheet` primitive and every control is one of the 36 px
+   family, so what is declared here is only what is genuinely this page's: how
+   the cards are placed, and how a row inside one is laid out. */
+
+/* `.mdetail-label` — the 11/600 kicker `SettingsGroup` drew its title as — is
+   gone with task-39, which made that title a `SheetHead`'s. Settings was its
+   last reader; the name came from the item drawer, which stopped drawing one
+   some tasks ago. */
+/* No gap of its own: the band already carries 16 px of bottom margin, and a
+   second one here would put 32 px between the title and the first card. */
+.set { display: flex; flex-direction: column }
+
+/* Two hand-balanced columns (§8.6). An explicit two-track grid rather than
+   `auto-fit` or a masonry pass: which side a card sits on is a placement this
+   page makes once, in `SettingsView`'s markup, so that a reader who learnt
+   where `Claude Agents` is does not find it on the other side of the page after
+   a knob above it grew a row.
+   1100 px is Settings' OWN breakpoint and is deliberately NOT the 700 px phone
+   break every other split on this board uses (`.board-columns`, `.runs-split`,
+   the rail): a settings row is a label beside a control, so two of them side by
+   side run out of width for the row itself long before the board's columns run
+   out of width for a card. Do not unify it with the others. */
+.set-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start }
+@media (max-width: 1100px) { .set-cols { grid-template-columns: 1fr } }
+.set-col { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+
+/* The card's own layout and nothing else — `Sheet` owns its ground, radius and
+   padding, and a rule here that restated any of them is exactly what guard 7
+   refuses. */
+.set-group { display: flex; flex-direction: column }
+
+/* A boxless row (§8.6): 16 px of vertical padding, a hairline BETWEEN rows, and
+   no fill, stroke or radius of its own. The card under it is what tells the
+   group from the page; a row that drew its own box as well made five boxes
+   inside one box.
+   The rule is drawn on the row's top edge rather than under every row, so the
+   last row in a card does not end on a stroke with nothing beneath it — and
+   `.set-error-row`, which only ever FOLLOWS the control it reports on, is
+   covered by the same adjacency without a rule of its own. */
+.set-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; padding: 16px 0 }
+.set-row + .set-row { border-top: 1px solid var(--hairline) }
+/* `nth-child(2)`, not `:first-of-type`: `SheetHead` renders a `div` too, so it
+   IS the first of that type and the first row is the second child. The head
+   already carries 16 px of bottom margin, so the first row's own top padding
+   would double it. */
+.set-group > .set-row:nth-child(2) { padding-top: 0 }
+.set-group > .set-row:last-child { padding-bottom: 0 }
+/* The two rows that stack their control under the label rather than beside it —
+   the theme picker (five swatched options fit no row's right-hand slot) and the
+   `Setting it up` panel (five numbered lines, which are prose rather than a
+   control at all). */
+/* `flex-start` and a label reset to `auto`, both of which the base row's own
+   declarations make necessary rather than optional: `justify-content:
+   space-between` and `.set-label`'s `flex: 1 1 240px` are written for a ROW,
+   where they push the control right and give the label a 240 px width to wrap
+   in. Turned on their side they mean "push the control to the bottom" and "make
+   the label 240 px TALL", which is a 240 px hole between a theme's name and its
+   swatches. A flex basis has no axis of its own; only the container does. */
+.set-row-stacked { flex-direction: column; align-items: stretch; justify-content: flex-start }
+.set-row-stacked .set-label { flex: 0 0 auto }
+
+.set-label { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 240px }
+/* 15/500 over a 13 px hint (§8.6/§8.1's "row name"), scoped to a settings row
+   rather than declared on `.set-name` itself: the launch and orchestrate sheets
+   borrow that bare class for their own field labels, which §8.1 sizes at 13 as
+   a control label, and those two surfaces are task 5's to redraw. Scoping keeps
+   this task's figures inside this task's surface. */
+/* The bare class, left at the figures it has always had: `LaunchSheet` and
+   `OrchestrateSheet` draw their field labels with it, and those two surfaces
+   are task 5's to redraw. It has no reader in Settings any more — the rule
+   below is what a settings row uses. */
 .set-name { font-size: 12px; font-weight: 600; color: var(--ink) }
-.set-hint { font-size: 12px; color: var(--ink3); line-height: 1.45 }
-.set-hint code { font-size: 12px; color: var(--cyan) }
+.set-row .set-name { font-size: 15px; font-weight: 500; color: var(--ink) }
+.set-hint { font-size: 13px; font-weight: 400; color: var(--ink2); line-height: 1.45 }
+/* A code span on `--steel` (§8.7), not a coloured word: `--cyan` here made a
+   path read as a link in a hint that has none. */
+.set-hint code { font-size: 13px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 0 4px }
 /* A refused `POST /api/agents/watchdog/config` (bug-24), rendered as its own
    row directly under the control that was refused. `var(--red)`, matching
    `.run-controls-error`'s posture rather than `.sheet-error`'s amber: this is
    a write the server actually refused, not a warning about something that
    still happens. Size tracks `.set-hint` — it sits in the same reading
    register as the hint above it, one line explaining the row it follows. */
-.set-error-row { border-color: var(--red) }
-.set-error { font-size: 12px; line-height: 1.45; color: var(--red) }
+/* The message belongs to the row above it, so it is NOT ruled off from it: the
+   hairline `.set-row + .set-row` would otherwise draw between the control that
+   was refused and the sentence explaining the refusal, reading as two
+   unrelated rows. */
+.set-row + .set-error-row { padding-top: 0; border-top: 0 }
+.set-error { font-size: 13px; line-height: 1.45; color: var(--red) }
 .set-dot-green { color: var(--green) }
 .set-dot-amber { color: var(--amber) }
 .set-dot-gray { color: var(--ink3) }
-.set-control { display: flex; align-items: center; gap: 6px; flex-shrink: 0 }
-.set-control select,
-.set-control input[type=number],
-.set-control input[type=text] {
-  font-size: 11px; color: var(--ink);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 5px 8px;
-}
-.set-control select:focus, .set-control input:focus { outline: none; border-color: var(--cyan) }
-.set-control input[type=number] { width: 84px; font-variant-numeric: tabular-nums }
-.set-unit { font-size: 12px; color: var(--ink3) }
+.set-control { display: flex; align-items: center; gap: 8px; flex: none }
 
-.set-themes { display: flex; gap: 8px; flex-wrap: wrap }
-.set-theme {
-  display: flex; flex-direction: column; gap: 6px; width: 104px; padding: 7px;
-  border: 1px solid var(--hairline); border-radius: 2px; background: var(--steel);
-  cursor: pointer; transition: border-color .15s;
+/* The two members of §8.6's 36 px control family that are NOT `ui/` primitives:
+   a text field and a button. Neither is in the design spec's §12.2 table, and
+   §12.4 forbids adding a primitive that table does not list without amending
+   it first — so they are page CSS, sized and stroked to match `.ui-select` and
+   `.ui-number` beside them rather than to match each other. */
+.set-text {
+  font-family: inherit; font-size: 13px; color: var(--ink);
+  height: 36px; width: 220px; max-width: 100%; padding: 0 12px;
+  background: var(--strip); border: 1px solid var(--hairline2); border-radius: 12px;
 }
-.set-theme:hover { border-color: var(--hairline2) }
-.set-theme.on { border-color: var(--cyan); box-shadow: inset 0 0 0 1px var(--cyan) }
-.set-swatch { display: flex; height: 34px; border-radius: 2px; overflow: hidden; border: 1px solid var(--hairline) }
+.set-text:focus { outline: none; border-color: var(--ink3) }
+/* One rule for both the anchor (the dashboard link) and the button (the
+   watchdog card's `Live view`): the two differ only in whether the destination
+   is a URL, and a reader should not be able to tell them apart by looking. */
+.set-link {
+  display: inline-flex; align-items: center;
+  font-family: inherit; font-size: 13px; font-weight: 500; color: var(--ink); text-decoration: none;
+  height: 36px; padding: 0 12px; white-space: nowrap;
+  background: var(--strip); border: 1px solid var(--hairline2); border-radius: 12px;
+  cursor: pointer; transition: background .15s;
+}
+.set-link:hover { background: var(--strip-hi) }
+
+/* The theme picker (§8.6): the `Switch` primitive's track-and-option ground,
+   restated as this page's own layout because a five-option swatch picker is not
+   in §12.2's table and so has no primitive to compose. A recessed `--steel`
+   track holds raised `--strip` options, and the RAISED one is the selected one
+   — §8's standing rule that a raised control marks a state, never a button.
+   Wraps rather than scrolls: at 1100 px and under, the card is the full width
+   of the page and five options still fit two rows without a sideways scroll a
+   touch device would have to discover. */
+.set-themes {
+  display: flex; flex-wrap: wrap; gap: 3px;
+  padding: 3px; border-radius: 12px;
+  background: var(--steel); border: 1px solid var(--hairline);
+}
+.set-theme {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px 5px 5px; border-radius: 10px;
+  background: none; border: 0; cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+}
+.set-theme:hover .set-theme-name { color: var(--ink) }
+.set-theme.on { background: var(--strip); box-shadow: 0 1px 2px var(--shadow) }
+/* 24 px at an 8 px radius — this design's own figure (§8.6), where this was a
+   34 px strip at a 2 px corner. Three bands: board, strip, accent, with the
+   accent kept narrow so the two grounds are what the eye compares. */
+.set-swatch { display: flex; width: 24px; height: 24px; flex: none; border-radius: 8px; overflow: hidden }
 .set-swatch i { flex: 1 }
-.set-swatch i:last-child { flex: 0 0 8px }
-.set-theme-name { font-size: 12px; font-weight: 600; color: var(--ink2); text-align: left; line-height: 1.25 }
+.set-swatch i:last-child { flex: 0 0 6px }
+.set-theme-name { font-size: 13px; font-weight: 500; color: var(--ink3); text-align: left; white-space: nowrap; transition: color .15s }
 .set-theme.on .set-theme-name { color: var(--ink) }
 
+/* Under the phone break a row's control drops below its label and takes the
+   full width — a 36 px select beside a 15/500 name and a 13 px hint has nothing
+   left to be legible in at 400 px. The columns already folded 400 px earlier
+   (1100), so this rule is about the ROW, never about the grid. */
 @media (max-width: 700px) {
-  .set-row { align-items: flex-start; flex-direction: column; gap: 8px }
-  .set-control { width: 100% }
-  .set-theme { width: calc(50% - 4px) }
+  /* The same three resets `.set-row-stacked` needs, and for the same reason its
+     own comment gives: turning the row on its side turns `justify-content` and
+     every flex basis on it through ninety degrees, so the label's 240 px
+     wrapping width becomes a 240 px hole above the control. A basis has no axis
+     of its own; only the container does. */
+  .set-row { align-items: flex-start; flex-direction: column; justify-content: flex-start }
+  .set-label { flex: 0 0 auto }
+  .set-control { width: 100%; flex: 0 0 auto }
 }
 
 /* ---------------------------------------------- quality floor */
@@ -726,37 +762,22 @@ code, kbd, samp, pre { font-family: inherit }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
 .board-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
-/* Column header: the bay header's anatomy (tick, name, count) without the
-   fold — a fixed four-column board has nothing to fold. The tick carries the
-   section's hue, and since the pills went over to project colours it is now the
-   only place that hue appears — which is fine, because the type was always
-   readable from the column a card sits in, and from the prefix on its id. */
-.board-col-h { display: flex; align-items: baseline; gap: 8px; padding-bottom: 5px; border-bottom: 1px solid var(--hairline) }
-.board-col-tick { flex: none; align-self: center; width: 14px; height: 3px; background: var(--ink3) }
-.board-col-bugs .board-col-tick { background: var(--red) }
-.board-col-ideas .board-col-tick { background: var(--mustard) }
-.board-col-tasks .board-col-tick { background: var(--cyan) }
-/* --magenta: the only named hue in the palette with no job on this screen (its
-   documented owner, the Task-subagent marker, belongs to another app sharing
-   theme.css) and one of the few defined in all five themes. It sits nearer
-   --proj-8 than the other three ticks sit to any project hue, which the
-   project-hue note above already concedes is a property of an eight-colour set
-   drawn a step off the reserved five — a tick is a filled 14x3 block and a
-   project pill is a small outline, so the two never read as the same object. */
-.board-col-refactors .board-col-tick { background: var(--magenta) }
 .board-col-name {
   font-size: 15px; font-weight: 500;
   color: var(--ink);
 }
-.board-col-count { font-size: 11px; color: var(--ink3) }
-/* The Board's own column header (DESIGN.md §8.3): an 8 px ramp `Dot`, the name
-   at 15/500, the count `Pill` pushed right — and NO rule under it, which is the
-   whole reason it is a second class rather than a modifier on `.board-col-h`
-   above. The cards' own ground gap is the separation; §8's standing "nothing on
-   `--board` uses `--strip-hi` as its only separator" rule does not apply,
-   because a gap is not a stroke. `.board-col-h` stays for Archive, whose header
-   is task 4's to redraw.
-   `align-items: center` where the old header baselines: a dot has no baseline
+/* The column header (DESIGN.md §8.3): an 8 px ramp `Dot`, the name at 15/500,
+   the count `Pill` pushed right — and NO rule under it. The cards' own ground
+   gap is the separation; §8's standing "nothing on `--board` uses `--strip-hi`
+   as its only separator" rule does not apply, because a gap is not a stroke.
+   `.board-col-h`, `.board-col-tick`, its four per-section hues and
+   `.board-col-count` stood beside this one through task-37 because Archive was
+   still drawing the header they belonged to; task-39 put Archive on
+   `BoardColumn` too, and all six went with the surface that was still asking
+   for them. That leaves `--magenta` with no column job at all — the capture
+   dispatch control (`.dispatch-word.capture`) is now its one reader, which
+   §8.2 already recorded as where the tick's hue was heading.
+   `align-items: center` where the old header baselined: a dot has no baseline
    worth aligning to, and the pill beside the name is a box rather than a word. */
 .board-col-head { display: flex; align-items: center; gap: 8px; min-width: 0 }
 /* The layout half of the count pill — `Pill` owns every part of its look, and a
@@ -783,16 +804,21 @@ code, kbd, samp, pre { font-family: inherit }
    reader is.
    Opaque --board, not a transparent or mixed background: cards scroll UNDER
    this, and anything less than opaque shows a card's title through the heading
-   that is supposed to be labelling it.
-   Register is deliberately below .board-col-name — smaller, --ink3, no weight
-   of its own. It subdivides a column; it must not compete with the column's own
-   name two lines above it. */
+   that is supposed to be labelling it. That the ground is `--board` rather than
+   a fill of its own is the redraw's whole point (DESIGN.md §8.5): at 13/500
+   `--ink2` riding the page's own ground, with no card and no rule under it, the
+   month reads as a rule ABOUT the list rather than as one more card competing
+   with the ones beneath it — which is what the 11 px `--ink3` line under a
+   hairline read as.
+   Register is still deliberately below `.board-col-name` — 13 against the
+   column name's 15, `--ink2` against its `--ink`. It subdivides a column; it
+   must not compete with the column's own name two lines above it. */
 .archive-month {
   position: sticky; top: 0; z-index: 1;
   background: var(--board);
-  padding: 4px 0 3px;
-  font-size: 11px;
-  color: var(--ink3); border-bottom: 1px solid var(--hairline);
+  padding: 6px 0 4px;
+  font-size: 13px; font-weight: 500;
+  color: var(--ink2);
 }
 
 /* Degraded-state line above the board: malformed files skipped by the scan,
@@ -1293,11 +1319,12 @@ code, kbd, samp, pre { font-family: inherit }
    are answering the same underlying question ("what has the orchestrator
    done") at two different distances (live glance vs. browsable history),
    and a reader should not have to relearn what a colour means when they
-   move from one to the other. `.board`/`.board-bar`/`.board-title`/
-   `.board-select`/`.board-note` are reused wholesale from the Board section
-   above for the same reason ArchiveView already reuses them: this is a
-   fourth section header/toolbar shaped exactly like the first one, not a
-   new kind of thing. */
+   move from one to the other. The reuse this paragraph described has moved up
+   a level since: `.board-bar`/`.board-title`/`.board-select` are gone
+   (task-37 put Runs and the Board on the `Band` primitive, task-39 put Archive
+   there too), so what the four sections now share is the primitive itself
+   rather than a set of classes one of them happened to declare first. `.board`
+   and `.board-note` are still read here from the Board section above. */
 
 /* task-16: the modifier that bounds this section — and only this section —
    to one viewport. `.board` is already `display: flex; flex-direction:
@@ -2339,6 +2366,24 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--strip-hi) }
 .ui-seg button:disabled { cursor: default; opacity: .4 }
 .ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
+/* The pill variant (§8.6) — `Segmented`'s `pill` prop, a variant on the
+   primitive rather than a second family a page declares (§12.1). A recessed
+   `--steel` track under a raised `--strip` option: "on" is legible from the
+   geometry before any colour is read, which matters on the amber theme, the one
+   with no second hue to spend on a state. It is the same shape `.ui-switch`
+   draws, which is the point — a two-value picker and a four-value one should not
+   read as two different kinds of control.
+   Settings takes it; the Runs band's range control deliberately does not, and
+   keeps the stroked chip §8.4.1 names it as ("the project select and the range
+   control as chips"). That disagreement between two surfaces is exactly what a
+   variant prop is for, and it is why the skin is not simply applied to `.ui-seg`
+   itself.
+   3 px of track padding plus a 28 px option plus the 1 px stroke is the 36 px
+   the rest of the control family stands at. */
+.ui-seg-pill { gap: 2px; padding: 3px; border-radius: 999px; background: var(--steel); border: 1px solid var(--hairline) }
+.ui-seg-pill button { height: 28px; border-radius: 999px; background: none; border-color: transparent }
+.ui-seg-pill button:hover:not(:disabled) { background: none }
+.ui-seg-pill button.on { background: var(--strip); border-color: transparent; box-shadow: 0 1px 2px var(--shadow) }
 
 /* Select and NumberField — the other two of the 36 px family (§8.6). */
 .ui-select {

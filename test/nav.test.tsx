@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 
 import { App, resolveSection } from '../client/src/App';
 import { SECTIONS } from '../client/src/components/SideRail';
+import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { SETTINGS_STORAGE_KEY, clampSettings } from '../client/src/lib/settings';
 
 /*
@@ -34,9 +35,20 @@ jest.mock('../client/src/components/board/BoardView', () => ({
   __esModule: true,
   default: () => require('react').createElement('div', null, 'board stub')
 }));
+/* The stub forwards `onOpenWatchdog`, which is the whole subject of the
+   `Live view` case below: what that case asserts is what THIS SHELL hands
+   Settings, not what Settings draws with it (test/settings-watchdog.test.tsx
+   owns the button). A stub that swallowed the prop would leave the wiring —
+   the one thing App owns here — untested. */
 jest.mock('../client/src/components/settings/SettingsView', () => ({
   __esModule: true,
-  default: () => require('react').createElement('div', null, 'settings stub')
+  default: ({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) =>
+    require('react').createElement(
+      'div',
+      null,
+      'settings stub',
+      require('react').createElement('button', { type: 'button', onClick: () => onOpenWatchdog?.() }, 'open watchdog')
+    )
 }));
 
 const SECTION_KEY = 'backlog-manager.section';
@@ -227,6 +239,36 @@ describe('the section rail', () => {
     for (const tab of railTabs()) expect(tab).not.toHaveAttribute('aria-expanded');
     // Lets the lazy chunk land inside act() before the test ends.
     expect(await screen.findByText('board stub')).toBeInTheDocument();
+  });
+  /**
+   * task-39 — Settings' watchdog card carries a `Live view` link to Runs ›
+   * Watchdog (DESIGN.md §8.6), and what this case pins is that the shell hands
+   * it the SAME pair the rail's own Watchdog sub-nav entry calls: `setRunsMode`
+   * then the section change.
+   *
+   * Asserted as the state both produce — the stored section, the stored runs
+   * mode and the marked sub-nav entry — rather than as a spy on the setter,
+   * because the claim is "the link and the rail agree", and two call sites
+   * agreeing is only observable in what they leave behind. The Watchdog PAGE is
+   * deliberately not asserted: which page Runs draws is `runs-view`'s subject,
+   * and a case that waited for it here would fail for that surface's reasons.
+   */
+  it("opens Runs › Watchdog from Settings' own link, exactly as the rail's sub-nav does", async () => {
+    storeSection('settings');
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'open watchdog' }));
+
+    expect(storedSection()).toBe('runs');
+    expect(JSON.parse(localStorage.getItem(RUNS_MODE_KEY) ?? 'null')).toBe('watchdog');
+    expect(markedTabs()[0]).toHaveTextContent('Runs');
+    // The rail's own tree entry is what ends up marked — the same element the
+    // reader would have clicked to get here.
+    const tree = screen.getByRole('group', { name: 'Runs views' });
+    const current = within(tree)
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-current') === 'true');
+    expect(current.map((b) => b.textContent)).toEqual(['Watchdog']);
   });
 });
 

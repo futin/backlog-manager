@@ -3,6 +3,10 @@ id: task-39
 title: Archive and Settings: shared card language, restyled settings cards (DESIGN.md 8.5-8.6)
 created: 2026-09-15
 tags: fe-redesign, archive, settings
+updated: 2026-09-16T09:29:49Z
+started: 2026-09-16T08:45:48Z
+execute-elapsed: 2641
+execute-tokens: 411746
 ---
 
 ## Goal
@@ -171,3 +175,97 @@ card/column markup without changing what it asserts about grouping.
   `client/src/components/settings/SettingsRow.tsx`, `client/src/styles.css`,
   and test files. No change to `client/src/lib/item-month.ts`,
   `client/src/lib/item-stale.ts`, or `shared/agent.ts`.
+
+## Outcome
+
+2026-09-16 — done. Archive now draws the Board's own `Band`, `BoardColumn` and `ItemCard` rather than a second set of each, and Settings is a band over two
+columns of borderless `Sheet` cards with every control from `ui/`. Neither page's grouping, filtering or dispatch behaviour changed.
+
+What landed, against the plan:
+
+- **Archive** — `Band` (title, `N archived across M projects`, the 36 px search field and the project `Chip`) replaces the `.board-bar`/`.board-tools`
+  toolbar; the four columns are `BoardColumn`, whose `BoardColumnSlug` gained `out-of-scope` as a fifth member so the reuse is the component rather than a
+  copied header. `RAMP_SLUGS` in that file is the one place deciding which slugs carry a hue, so out-of-scope falls through to `Dot`'s toneless `--ink3`. The
+  month kicker is 13/500 `--ink2` on `--board` with no rule under it; `groupByMonth`'s ordering is untouched.
+- **Settings** — `SettingsGroup` is `Sheet` + `SheetHead` and takes `title` and `scope` separately (`Display` + `this device`), rows are boxless with a
+  hairline between, and every control is `Select`, `Segmented`, `Switch` or one of the two page-CSS members of the 36 px family (`.set-text`, `.set-link`).
+  The theme picker sits on a recessed `--steel` track with 24 px / 8 px radius swatches. Two columns, folding at 1100 px.
+- **`Live view`** is a real link: `App` hands `SettingsView` one `onOpenWatchdog` prop that calls `setRunsMode('watchdog')` then its own `change('runs')` —
+  the same pair, in the same order, that the rail's sub-nav entry calls.
+
+Three deliberate departures from the plan, each because following it literally would have broken a rule the plan does not mention:
+
+1. **`BoardColumn.tsx` and `App.tsx` are in the diff**, beyond the plan's "Done when" file list. `BoardColumn` is what makes "reuses the Board's column
+   language" literal rather than a second header agreeing with the first; `App.tsx` is the only place that can hand Settings the rail's own destination.
+2. **The pill skin is a `pill` prop on `Segmented`, not a restyle of `.ui-seg`.** DESIGN.md §8.6 wants Settings' pickers in `Switch`'s pill shape and §8.4.1
+   wants the Runs band's range control — the same component — as a stroked chip. Restyling the one class family would have silently redrawn task-38's band; a
+   variant prop is what §12.1 prescribes for exactly this.
+3. **`.set-name`'s new 15/500 is scoped to `.set-row`.** `LaunchSheet` and `OrchestrateSheet` borrow that bare class for their own field labels, which §8.1
+   sizes at 13 as control labels, and those two surfaces are task 5's to redraw — so the bare rule keeps its 12/600 and the settings row gets its own.
+
+Two defects found and fixed while screenshotting, both the same mistake: a flex basis has no axis of its own, only the container does. `.set-label`'s
+`flex: 1 1 240px` is a wrapping WIDTH in a row and became a 240 px HEIGHT in both places the row turns on its side — `.set-row-stacked` (the theme picker) and
+the ≤700 px block. Both now reset the label to `flex: 0 0 auto` and the row to `justify-content: flex-start`.
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm test
+Test Suites: 101 passed, 101 total
+Tests:       1681 passed, 1681 total
+# tests 538
+# pass 538
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.05s
+```
+
+Screenshots: Archive and Settings at 1400 px and 400 px, daylight and midnight, taken through the built server on a pid-owned loopback port (4399) and killed
+by that recorded pid. Eight files under the worktree's gitignored `.playwright-mcp/`. They caught both flex-basis defects above.
+
+Contract sweep: 8 sites updated (client/src/styles.css — the dead `.board-tools`/`.board-search`/`.board-select` phone block, the `.mdetail-label` rule with
+no reader left, and the Runs-section comment claiming it reuses the Board's toolbar classes; .claude/DESIGN.md §8.2's "until task 4 redraws it" clause and
+§8.5/§8.6's stale line references, split-title prose, pill-prop reasoning and column-split reasoning; docs/subsystems/board.md's Archive paragraph;
+test/board-column.test.tsx's two assertions about `.board-col-h`/`.board-col-tick` surviving for Archive). Left standing on purpose:
+`backlog/refactors/open/ref-4`'s table still counts `.board-col-refactors .board-col-tick` among `--magenta`'s uses — that tick is gone and
+`.dispatch-word.capture` is now the token's only reader, but editing another backlog item's body is `backlog-groom`'s job, not this skill's, and the item
+reads truer now than it did (its own point was that magenta had a job the comment denied). `backlog/tasks/done/task-37`'s note that those classes "also stay"
+is a done item, i.e. a historical record, and `docs/superpowers/plans/` and the older specs are likewise records of what was planned.
+
+Red proof: 7 tests went red with the change reverted — `ArchiveView.tsx` reverted to `main` (19 archive cases red), `styles.css` reverted to `main` (5 red
+across archive/settings-view/board-column), `SettingsGroup` drawing the old `.mdetail-label` kicker instead of `Sheet`+`SheetHead` (6 red), `WatchdogGroup`'s
+`Live view` back to a bare `<span>` and `Enabled` back to a checkbox (4 red), `App.tsx` reverted to `main` (the nav link case red), `Segmented` dropping the
+`ui-seg-pill` class while keeping the prop (2 red), and `BoardColumn` giving the toneless column a ramp tone (the out-of-scope dot case red). Every revert was
+a file copy restored from `/tmp`, never `git stash`.
+
+Not committed, not pushed — the run owns that. Files changed:
+
+```
+ .claude/DESIGN.md
+ backlog/tasks/open/task-39-…  (this file; moves to done/ next)
+ client/src/App.tsx
+ client/src/components/archive/ArchiveView.tsx
+ client/src/components/board/BoardColumn.tsx
+ client/src/components/settings/SettingsRow.tsx
+ client/src/components/settings/SettingsView.tsx
+ client/src/components/settings/WatchdogGroup.tsx
+ client/src/components/ui/Segmented.tsx
+ client/src/styles.css
+ docs/subsystems/board.md
+ test/archive.test.tsx
+ test/board-column.test.tsx
+ test/nav.test.tsx
+ test/settings-view.test.tsx
+ test/settings-watchdog.test.tsx
+ test/ui-segmented.test.tsx
+```
+
+Contract sweep: 8 sites updated (client/src/styles.css, .claude/DESIGN.md, docs/subsystems/board.md, test/board-column.test.tsx)
+Red proof: 7 tests went red with the change reverted

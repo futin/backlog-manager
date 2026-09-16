@@ -53,4 +53,23 @@ describe('Segmented', () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Compact' })).toBeDisabled();
   });
+  /**
+   * The `pill` variant (DESIGN.md §8.6) — a recessed track under a raised
+   * option, the shape `Switch` draws. A prop rather than a second class family
+   * (the design spec's §12.1), because Settings' pickers want it and the Runs
+   * band's range control, the same component, deliberately does not.
+   *
+   * Asserted as the class landing BESIDE the base one, not replacing it: the
+   * variant is a modifier over `.ui-seg`'s own layout and type, so a build that
+   * swapped the classes would lose both.
+   */
+  it('adds the pill class beside the base one, and only when asked', () => {
+    const { rerender } = render(<Segmented value="cosy" options={OPTIONS} onChange={jest.fn()} label="Density" />);
+    expect(screen.getByRole('group', { name: 'Density' })).toHaveClass('ui-seg');
+    expect(screen.getByRole('group', { name: 'Density' })).not.toHaveClass('ui-seg-pill');
+
+    rerender(<Segmented value="cosy" options={OPTIONS} onChange={jest.fn()} label="Density" pill />);
+    expect(screen.getByRole('group', { name: 'Density' })).toHaveClass('ui-seg');
+    expect(screen.getByRole('group', { name: 'Density' })).toHaveClass('ui-seg-pill');
+  });
 });

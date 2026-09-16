@@ -3,6 +3,7 @@ import { lazy, Suspense, useState } from 'react';
 import { SECTIONS, SideRail, type Section } from './components/SideRail';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { usePersistedState } from './hooks/usePersistedState';
+import { setRunsMode } from './hooks/useRunsMode';
 
 // Lazy: each section's chunk loads only when it is opened.
 const BoardView = lazy(() => import('./components/board/BoardView'));
@@ -103,7 +104,23 @@ function AppShell() {
             {section === 'board' && <BoardView onOpenRuns={() => change('runs')} />}
             {section === 'runs' && <RunsView />}
             {section === 'archive' && <ArchiveView />}
-            {section === 'settings' && <SettingsView />}
+            {/* Settings' watchdog card carries a `Live view` link to Runs ›
+                Watchdog (DESIGN.md §8.6), and this is what it opens with — the
+                same PAIR the rail's own Watchdog sub-nav entry calls, in the
+                same order: `setRunsMode` (the module-level store every mounted
+                reader subscribes to, `hooks/useRunsMode.ts`) and then this
+                shell's own `change`. Handed down rather than reimplemented in
+                Settings, for the reason the board's chip is handed `change`:
+                two expressions of "open Runs › Watchdog" would be two things
+                free to disagree, and the section key is recorded here. */}
+            {section === 'settings' && (
+              <SettingsView
+                onOpenWatchdog={() => {
+                  setRunsMode('watchdog');
+                  change('runs');
+                }}
+              />
+            )}
           </Suspense>
         </div>
       </main>

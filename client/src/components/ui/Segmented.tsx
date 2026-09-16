@@ -19,7 +19,8 @@ export function Segmented<T extends string | number>({
   options,
   onChange,
   disabled,
-  label
+  label,
+  pill
 }: {
   value: T;
   options: { value: T; label: string }[];
@@ -27,9 +28,23 @@ export function Segmented<T extends string | number>({
   /** For a setting the server can't act on — the switch would flip and do nothing. */
   disabled?: boolean;
   label?: string;
+  /**
+   * The pill skin (DESIGN.md §8.6): a recessed `--steel` track under a raised
+   * `--strip` option — the same shape `Switch` draws — instead of the row of
+   * stroked chips this renders by default.
+   *
+   * A variant PROP rather than a restyle of the one class family, which is the
+   * design spec's §12.1 ("a surface that needs a variant adds a prop, never a
+   * second class family") and is load-bearing here rather than ceremonial: §8.6
+   * asks Settings' pickers for the pill shape while §8.4.1 asks the Runs band's
+   * range control, the same component, for a stroked chip. Two surfaces
+   * disagreeing about a look is precisely what a prop settles and what a second
+   * family would let drift.
+   */
+  pill?: boolean;
 }) {
   return (
-    <div className="ui-seg" role="group" aria-label={label}>
+    <div className={pill ? 'ui-seg ui-seg-pill' : 'ui-seg'} role="group" aria-label={label}>
       {options.map((o) => (
         <button
           key={String(o.value)}
