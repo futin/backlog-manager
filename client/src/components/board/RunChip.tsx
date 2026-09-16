@@ -62,7 +62,7 @@ const STATES: { key: 'crashed' | 'paused' | 'starting' | 'live'; word: string; t
 export function runChipReading(
   runs: readonly RunChipState[],
   starting: readonly StartingRun[]
-): { tone: DotTone; line: string; counts: Record<'crashed' | 'paused' | 'starting' | 'live', number> } | null {
+): { tone: DotTone | null; line: string; counts: Record<'crashed' | 'paused' | 'starting' | 'live', number> } | null {
   const counts = {
     /* `isCrashed` (lib/run-watchdog.ts) rather than a second `status ===
        'running' && !fresh` written here: a crashed run renders as crashed and
@@ -89,14 +89,21 @@ export function runChipReading(
   }
 
   /* The first state present in worst-first order IS the dot, so the colour and
-     the words are one derivation rather than two agreeing expressions. A
-     payload that carries only finished runs reaches this with no state at all
-     — the chip still renders (`1 run ›`), because the rule is "absent when the
-     payload carries no run and no starting entry" and a finished run is still
-     a run — and takes the quiet default `Dot` paints with no tone at all. */
+     the words are one derivation rather than two agreeing expressions.
+
+     `null` — no tone — when no state is present at all, which a payload of
+     nothing but finished runs reaches: the chip still renders (`1 run ›`),
+     because the rule is "absent when the payload carries no run and no
+     starting entry" and a finished run is still a run, and its dot takes
+     `.ui-dot`'s base `--ink3`. That is the whole point rather than a fallback:
+     the only other thing the props could have said is `done`, which paints
+     `--fill-progress`, the token §8.3 assigns to a LIVE run — so a board with
+     nothing running would have drawn the same green as one mid-run, told apart
+     only by a missing word and an absent `breathe` ring. A dot that says "no
+     state" has to look like no state. */
   const worst = STATES.find((s) => counts[s.key] > 0);
 
-  return { tone: worst?.tone ?? 'done', line: segments.join(' · '), counts };
+  return { tone: worst?.tone ?? null, line: segments.join(' · '), counts };
 }
 
 /**
@@ -131,8 +138,11 @@ export function RunChip({ runs, starting, onOpen }: { runs: readonly RunChipStat
     <button type="button" className="board-run-chip" onClick={onOpen} data-testid="run-chip">
       {/* `breathe` only while something is actually moving — §8.8's one motion
           mechanism, and a ring pulsing around a crashed or paused run would be
-          an animation asserting something false. */}
-      <Dot tone={reading.tone} breathe={reading.counts.live > 0} />
+          an animation asserting something false.
+          A `null` tone is passed as no tone rather than swapped for a stand-in:
+          see `runChipReading` for why the quiet dot is the reading and not a
+          gap in one. */}
+      {reading.tone === null ? <Dot breathe={false} /> : <Dot tone={reading.tone} breathe={reading.counts.live > 0} />}
       <span className="board-run-chip-line">{reading.line}</span>
       {/* aria-hidden: the accessible name is the reading alone. The glyph is
           the design's own "this opens somewhere" mark and says nothing a

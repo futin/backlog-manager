@@ -221,10 +221,12 @@ export function mergeModeLabel(mergeMode: MergeMode, mergeModeEffective: MergeMo
  *    shape that lets one site get fixed and the other quietly keep lying.
  *
  * `runs-status-warn` (amber) rather than a new `.runs-status-crashed`: it is
- * the list's existing amber slot and it is the same colour
- * `.run-strip-crashed-label` prints the identical word in, so the two
- * surfaces agree on tone as well as wording without a class that would have
- * to be kept in sync with it.
+ * the list's existing amber slot, and amber is the colour every surface that
+ * prints this verdict uses — the Runs detail's own last-reported line
+ * (`.run-detail-crashed-note`) today, and the Board's crashed strip
+ * (`.run-strip-crashed-label`) until task-37 deleted it. So the surfaces agree
+ * on tone as well as wording without a class that would have to be kept in
+ * sync with them.
  */
 export function runStatusChip(
   status: OrchestratorRun['status'],

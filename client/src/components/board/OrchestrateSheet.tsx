@@ -110,11 +110,12 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
  * what IS genuinely shared — `MODELS`/`EFFORTS`/`clampMode`/`modesUpTo`
  * (shared/agent.ts), `useSettings()`'s seeding, the `.sheet*` CSS vocabulary,
  * and `useDialogEscape`, the one owner of the Escape key every dialog in this
- * app now shares (ItemDrawer, LaunchSheet, RunDrawer) — is imported or
+ * app now shares (ItemDrawer, LaunchSheet, and this sheet — three since
+ * task-37 took the run drawer off the Board) — is imported or
  * restated in the same shape those already use, never copy-pasted out of
- * LaunchSheet's own body. That hook is bug-23's fix: the four dialogs each
- * used to bind their own unguarded `window` listener, so a press with two of
- * them open closed both.
+ * LaunchSheet's own body. That hook is bug-23's fix: each of the four dialogs
+ * this app had then used to bind its own unguarded `window` listener, so a
+ * press with two of them open closed both.
  */
 export function OrchestrateSheet({
   project,

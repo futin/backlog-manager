@@ -194,10 +194,11 @@ describe('runStatusChip', () => {
   it('reads crashed for a running run whose live heartbeat has gone stale', () => {
     const chip = runStatusChip('running', { status: 'running', fresh: false });
     expect(chip.label).toBe('crashed');
-    // The strip's own amber for the same verdict — `.run-strip-crashed-label`
-    // (styles.css) is `var(--amber)`, and `runs-status-warn` is this list's
-    // existing amber slot, so the two surfaces agree on colour as well as word
-    // without minting a class.
+    // The same amber every surface prints this verdict in — the Runs detail's
+    // own `.run-detail-crashed-note` (styles.css) is `var(--amber)`, and
+    // `runs-status-warn` is this list's existing amber slot, so the surfaces
+    // agree on colour as well as word without minting a class. (The Board's
+    // `.run-strip-crashed-label` was the third until task-37 deleted it.)
     expect(chip.className).toBe('runs-status-warn');
   });
 

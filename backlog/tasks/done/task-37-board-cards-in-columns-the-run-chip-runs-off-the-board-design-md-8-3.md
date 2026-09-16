@@ -275,3 +275,51 @@ and it is flagged here rather than quietly taken, because the alternative was sh
 7. **The count pill is `Pill`'s own geometry.** §8.3 sizes it 22×20 on `--strip-hi`; `.ui-pill` now carries `min-width: 22px; height: 20px` and the
    `--strip-hi` fill, set on the primitive rather than from the page, because a page rule reaching into `.ui-chip`/`.ui-pill` is what guard 7 refuses. Nothing
    else composes `Pill` yet, so the blast radius is this one call site.
+
+### Fix pass 1 — 2026-09-15, both Important findings from `reviews/task-37-1.md`
+
+**1. `docs/subsystems/invariants.md` — three passages that named a deleted surface or asserted a universal this commit falsified.** `:1153`'s justification for
+`runClaimBlock`'s freshness filter read "freshness is already the rule every other run-derived surface uses — the run strip renders nothing for a stale run",
+and `RunChip` is deliberately not freshness-gated. Rewritten to state the rule as the split it actually is — **a claim about one ITEM is freshness-gated; a
+count of what the RUNS are doing is not** — with the old sentence quoted and the reason it stopped being true, so a future session widening one side does not
+read the section as licence to widen the other. `:1112` (the resume-not-marked paragraph) and `:1135` (the `OrchestrateSheet` 409 sentence, whose source-side
+twin this task had already updated) now name the chip too. That makes the Outcome's `Contract sweep:` line **37 sites**, not 34.
+
+**2. `RunChip.tsx` — the finished-only dot painted the live-run colour.** `tone: worst?.tone ?? 'done'` resolved to `.ui-dot-done`, which is
+`--fill-progress` — the token §8.3 assigns to a LIVE run — so a board on which nothing was running drew the same green as one mid-run, while the comment above
+claimed the opposite. **The comment's reading was the correct one and the code was wrong**, because the dot's whole job on this control is "the worst state
+present" and a payload with no state present must not borrow the colour of the one state that means work is moving.
+
+Fixed at the source rather than by rewording: `runChipReading` returns `tone: DotTone | null`, and `Dot`'s `tone` became optional so `<Dot />` reaches
+`.ui-dot`'s base `--ink3` — a reading the primitive already painted and the props could not previously ask for. The alternative, a ninth tone, would have been
+a rule duplicating the base's one declaration, which is the synonym §8.2 rules out for tokens. The cost is stated in `Dot`'s own comment: a mistyped tone name
+now paints the quiet dot instead of failing to compile.
+
+Three cases pin it, each asserting "no tone class AT ALL" rather than "not `ui-dot-done`", because `ui-dot-undefined` — what an unguarded optional prop
+produces — would slip past the narrower check while painting the right colour for the wrong reason: `test/ui-dot.test.tsx` (the primitive),
+`test/board-run-chip.test.tsx` (the reading, and a live run beside it so the quiet dot means something), and the same file's rendered case.
+
+The four Minor sweep misses the report names were taken with them, since they are the same check: `OrchestrateSheet.tsx`'s dialog list, the four
+`.run-strip-crashed-label` prose references (`lib/run-stage.ts`, `styles.css`, `run-stage.test.ts`, `run-detail-crashed-style.test.ts`), and
+`dispatch-busy-style.test.ts`'s "three rows" against its two entries. No behaviour changed in any of them.
+
+```
+$ pnpm test
+Test Suites: 101 passed, 101 total
+Tests:       1616 passed, 1616 total
+# pass 538
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run typecheck   →  tsc --noEmit, clean
+$ pnpm run build       →  ✓ built in 1.18s
+$ npx prettier --check client shared server test docs .claude CLAUDE.md
+All matched files use Prettier code style!
+```
+
+Contract sweep: 3 sites updated (docs/subsystems/invariants.md — the three passages above; the fix's own four Minor sites are listed in the paragraph before
+the verification block)
+Red proof: 4 tests went red with the change reverted (2 reverts: `runChipReading`'s `?? null` back to `?? 'done'`, and `Dot`'s paint expression back to an
+unconditional `ui-dot-${props.tone}`)

@@ -1109,8 +1109,9 @@ its own line (`1 starting ›`) under the same rule. It is deliberately not a gu
 they are two different runs, and widening rule 3 to `paused` to suppress the second would strip the placeholder from a project that can legitimately start a
 run.
 
-`POST /api/agents/resume` is deliberately not marked: the run it resumes already reads `running`, so the board is already drawing a crashed strip for it and the
-screen was never blank.
+`POST /api/agents/resume` is deliberately not marked: the run it resumes already reads `running`, so the board is already counting it — as a crashed run, since
+its heartbeat is what stopped — and the screen was never blank. That counting was the crashed strip until task-37 and is `RunChip`'s own line
+(`1 run · crashed ›`) now; what makes the rule hold is that a `running` run file is visible either way, not which control draws it.
 
 ### A starting entry blocks what a run file blocks (bug-21)
 
@@ -1132,7 +1133,9 @@ unchanged when `starting` was added: a starting run is a run, and the question i
 The toolbar Orchestrate control **hides** on a starting entry rather than disabling — that is what preserves bug-16's `showOrchestrate` reasoning, in which a
 _rendered_ toolbar button is blocked on project visibility alone. And `POST /api/agents/orchestrate` refuses a starting project with the **same**
 `RUN_IN_PROGRESS_CODE`, beside the `activeRun` throw and therefore still before `resolveIds`: it is the same lock one window earlier, and `OrchestrateSheet`
-already branches on that code to close and hand the screen to the `StartingStrip` — which is exactly right here.
+already branches on that code to close and hand the screen to the board's run chip, which is already counting the starting entry the second press would have
+duplicated — which is exactly right here. (It was `StartingStrip` until task-37; the source-side half of this sentence lives in `OrchestrateSheet.tsx`'s own 409
+comment, and the two are meant to read the same.)
 
 `runHoldsItem` deliberately does NOT gain the parameter: its caller asks "is a run holding THIS item", which a placeholder naming no items cannot answer, and
 the window is ≤15 minutes against a 30-day staleness threshold. Pinned by a test rather than left as prose.
@@ -1149,10 +1152,16 @@ It does the whole lookup — project match, id match and freshness filter togeth
 own lookup. Those three lines are exactly the part a second copy gets subtly wrong, and `environmentBlock`, a few functions above it in the same file, records
 that having already happened once: `orchestrate()` reimplemented one of `dispatchGate`'s five lines and silently dropped the other four.
 
-It filters on `fresh`, not `status === 'running'`. A stale run has stopped reporting, and freshness is already the rule every other run-derived surface uses —
-the run strip renders nothing for a stale run, and the board's badge map is built from fresh runs only. A crashed run may still hold a worktree, so blocking on
-staleness is arguable, but that is a recovery problem `--resume` and `--abort` own, and cards dead until someone runs one of those is a worse failure than the
-double-dispatch this exists to prevent.
+It filters on `fresh`, not `status === 'running'`. A stale run has stopped reporting, and freshness is the rule every surface that makes a claim about an ITEM
+uses: this block, `runHoldsItem` behind `isStale`/`leavesBoard`, and the card's own live strip, all fed from the board's fresh-only map (`freshRuns`,
+`BoardView.tsx`). A crashed run may still hold a worktree, so blocking on staleness is arguable, but that is a recovery problem `--resume` and `--abort` own,
+and cards dead until someone runs one of those is a worse failure than the double-dispatch this exists to prevent.
+
+That is a split, not a universal, and task-37 is where it stopped being both at once. It used to read "freshness is already the rule every other run-derived
+surface uses — the run strip renders nothing for a stale run", and the strip's silence was the evidence. The strip is gone and its replacement is deliberately
+NOT freshness-gated: `runChipReading` (`RunChip.tsx`) counts a stale `running` run through `isCrashed` and draws a chip for it, because "a crashed run renders
+as crashed, never as nothing" is that control's whole job. So the rule to carry forward is per-question rather than per-surface — **a claim about one ITEM is
+freshness-gated; a count of what the RUNS are doing is not** — and a future session widening one must not read this section as licence to widen the other.
 
 ## Every agents POST is guarded by content-type and origin
 

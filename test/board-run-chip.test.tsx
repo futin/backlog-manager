@@ -104,13 +104,32 @@ describe('runChipReading', () => {
 
   /**
    * A payload of nothing but finished runs: still a chip, with no state word
-   * at all. This is the case the "absent only when there is no run and no
-   * starting entry" rule produces and the one a reader is most likely to
-   * mistake for a bug, so it is pinned rather than left to follow from the
-   * examples above.
+   * at all AND no tone at all. This is the case the "absent only when there is
+   * no run and no starting entry" rule produces and the one a reader is most
+   * likely to mistake for a bug, so both halves are pinned rather than left to
+   * follow from the examples above.
+   *
+   * `tone: null` is the assertion that matters. The only thing the props could
+   * otherwise have said here is `done`, which paints `--fill-progress` — the
+   * token §8.3 assigns to a LIVE run — so a board on which nothing is running
+   * would have drawn the same green as one mid-run, told apart only by a
+   * missing word and an absent `breathe` ring. A dot that says "no state" has
+   * to look like no state; the rendered half is pinned below.
    */
-  it('counts a finished run with no state word', () => {
-    expect(runChipReading([finished], [])?.line).toBe('1 run');
+  it('counts a finished run with no state word and no tone', () => {
+    const reading = runChipReading([finished], []);
+    expect(reading?.line).toBe('1 run');
+    expect(reading?.tone).toBeNull();
+  });
+
+  /** ...and the state words are still what separates the two readings: a live
+   *  run and a finished one both count as `1 run`, and only one of them names
+   *  a state or earns a tone. Asserted as a pair, because "the dot is quiet
+   *  for a finished run" only means something beside "the dot is not quiet for
+   *  a live one". */
+  it('tells a finished run from a live one by both the word and the tone', () => {
+    expect(runChipReading([finished], [])).toMatchObject({ line: '1 run', tone: null });
+    expect(runChipReading([live], [])).toMatchObject({ line: '1 run · live', tone: 'done' });
   });
 });
 
@@ -143,6 +162,22 @@ describe('RunChip', () => {
 
     rerender(<RunChip runs={[live]} starting={[]} onOpen={() => {}} />);
     expect(screen.getByTestId('run-chip').querySelector('.ui-dot')).toHaveClass('ui-dot-done');
+  });
+
+  /**
+   * The rendered half of the stateless reading: a finished-only payload draws
+   * `.ui-dot`'s base and NO tone class. The negative is checked as "no tone
+   * class at all" rather than "not `ui-dot-done`", because the failure this
+   * guards is a fallback tone of any name — and `ui-dot-undefined`, which is
+   * what an unguarded optional prop produces, would slip past the narrower
+   * check while painting the right colour for the wrong reason.
+   */
+  it('draws a quiet, toneless dot when every run has finished', () => {
+    render(<RunChip runs={[finished]} starting={[]} onOpen={() => {}} />);
+
+    const dot = screen.getByTestId('run-chip').querySelector('.ui-dot') as HTMLElement;
+    expect(dot).toBeInTheDocument();
+    expect(Array.from(dot.classList).filter((c) => c.startsWith('ui-dot-') && c !== 'ui-dot-8')).toEqual([]);
   });
 
   /* §8.8's one motion mechanism, and the one state it may assert: a ring

@@ -19,14 +19,15 @@ import { readStyles, ruleBlock } from './helpers/css-rule';
  * bug-16 gave the toolbar's Orchestrate button the same re-asking click, from
  * the same hook, and therefore the same pair of rules.
  *
- * task-37 collapsed the three controls into one: `DispatchButton`'s two shapes
+ * task-37 collapsed the three controls into one shape: `DispatchButton`'s two
  * became one 28 px `Chip` and Orchestrate became the band's ink `Chip`
  * (DESIGN.md §8.3), so the pair of rules is declared once, on `.ui-chip`, in
  * the ui primitives block. That is a real simplification and it is also a new
- * way to lose the coverage: the rules are only ON these three controls while
- * the three actually compose a `Chip`. So the suite keeps three rows — they
- * are just source assertions now, one per control, rather than three copies of
- * one stylesheet rule.
+ * way to lose the coverage: the rules reach a control only while that control
+ * actually composes a `Chip`. So the suite keeps a row per SOURCE that draws
+ * one — two of them now, since one component renders both of
+ * `DispatchButton`'s old shapes — as source assertions rather than as copies
+ * of one stylesheet rule.
  */
 const ROOT = join(__dirname, '..');
 const BUSY = "[aria-busy='true']";

@@ -21,10 +21,25 @@ export type DotTone = 'live' | 'paused' | 'crashed' | 'done' | 'ramp-refactors' 
  * family's own explicit `animation: none` in the stylesheet — not by the
  * blanket rule, which freezes an animation on its LAST keyframe rather than
  * cancelling it.
+ *
+ * **No tone is a reading, not a missing prop** (task-37). `.ui-dot`'s base rule
+ * paints `--ink3`, and that quiet grey is the honest answer for a dot whose
+ * subject is in no state worth colouring — the run chip's, when every run in
+ * the payload has finished. Before this, the nearest thing the props could say
+ * was `done`, which is `--fill-progress`: the exact token §8.3 gives a LIVE
+ * run, so a board with nothing running drew the same green as one mid-run. The
+ * cost of the optional prop is that a mistyped tone name now paints the quiet
+ * dot instead of failing to compile; the alternative was a ninth tone whose
+ * rule would have duplicated the base's one declaration, which is the synonym
+ * §8.2 rules out for tokens.
  */
-export function Dot(props: { size?: 8 | 10; breathe?: boolean } & ({ tone: DotTone } | { hue: number })) {
+export function Dot(props: { size?: 8 | 10; breathe?: boolean } & ({ tone?: DotTone } | { hue: number })) {
   const { size = 8, breathe } = props;
-  const paint = 'tone' in props ? `ui-dot-${props.tone}` : `ui-dot-proj-${props.hue}`;
+  /* Keyed on `hue` rather than on `tone`, which is the swap the optional prop
+     forces: `'tone' in props` is false for `<Dot />` AND for a hue dot, so the
+     branch has to test the one member that is still required when it is
+     present. */
+  const paint = 'hue' in props ? `ui-dot-proj-${props.hue}` : props.tone ? `ui-dot-${props.tone}` : null;
   const className = ['ui-dot', paint, size === 10 ? 'ui-dot-10' : 'ui-dot-8', breathe ? 'ui-dot-breathe' : null].filter(Boolean).join(' ');
   return <span className={className} aria-hidden="true" />;
 }

@@ -1877,9 +1877,9 @@ code, kbd, samp, pre { font-family: inherit }
 
 /* bug-29: the pane's "what you are reading below is last-reported" line for
    a run whose heartbeat has gone silent while its file still says `running`.
-   Amber, matching `.run-strip-crashed-label` and the `crashed` status badge
-   in the head right above it — one colour for one verdict across all three
-   surfaces that print it. Boxed like `.run-detail-mode-note` above for the
+   Amber, matching the `crashed` status badge in the head right above it —
+   one colour for one verdict, on every surface that prints it (the Board's
+   crashed strip was the third until task-37 deleted it). Boxed like `.run-detail-mode-note` above for the
    same reason: it has to be seen before the stages it qualifies, not skimmed
    past as another quiet meta line. */
 .run-detail-crashed {
