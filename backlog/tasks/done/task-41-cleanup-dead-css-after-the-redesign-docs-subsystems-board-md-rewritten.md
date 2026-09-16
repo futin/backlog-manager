@@ -3,6 +3,10 @@ id: task-41
 title: Cleanup: dead CSS after the redesign, docs/subsystems/board.md rewritten
 created: 2026-09-15
 tags: fe-redesign, cleanup, docs
+updated: 2026-09-16T11:00:46Z
+started: 2026-09-16T10:38:09Z
+execute-elapsed: 1357
+execute-tokens: 193929
 ---
 
 ## Goal
@@ -156,3 +160,94 @@ any existing suite renders.
   `shared/theme.css`, `docs/subsystems/board.md`, and — only if guard 1 is
   extended — `test/design-guards.test.ts`. No component file, no server
   route, no skill, no `shared/types.ts` or `shared/agent.ts` change.
+
+## Outcome
+
+2026-09-16 — done. The sweep removed 15 dead rules from `client/src/styles.css`, corrected seven comments the removals (or tasks 1–5) left
+asserting something false, deleted the `theme.css` `wrapPage` claim, rewrote `docs/subsystems/board.md` with a Primitives section, and extended
+`test/design-guards.test.ts`'s guard 1 with a second case pinning the removal. No component, server, skill or shared type file changed.
+
+**What was actually dead, versus what the plan expected.** Three of the four "dead CSS" starting points needed no work at all, which the plan
+anticipated ("a task earlier in the queue may already have cleaned up more than the spec anticipated"):
+
+- `.rail-brand` — **live**, not dead. `SideRail.tsx:76` draws it and both its rules (the base rule and the narrow override) are `task-36`'s
+  rewrite, written in §8.0/§8.1's voice. Nothing removed.
+- `.run-strip*` — **already gone**: `task-37` deleted the rules with the components. What remained were prose references, two of which are
+  deliberately historical and one of which (`.run-strip-attention`, cited as a live sibling tone) was false and is now dropped.
+- `--mono` / `--display` — **already zero** in both stylesheets before this task; guard 1's existing case had held them there since `task-36`.
+- `.drawer` panel geometry — **dead as described**, and removed: `.drawer-backdrop`, `.drawer`, `.drawer-head`, `.drawer-head .pill`,
+  `.drawer-title`, `.drawer-close`, `.drawer-close:hover`, `.drawer-meta`, `.drawer-meta .drawer-path`. `.drawer-empty` stays — five components
+  draw it (`ItemModal`, `LaunchSheet`, `OrchestrateSheet`, `RunsView`, `RunDetail`), which is exactly the "classes still doing a job" the plan
+  carved out.
+
+**One family removed that the plan did not name.** `styles.css`'s own comment above `.sheet*`, written by `task-40`, assigned the sheet shell's
+removal to this task by name ("The dead half is spec §7's cleanup, task 6's, not this section's to delete"). Six rules were unreferenced and are
+gone — `.sheet-backdrop`, `.sheet`, `.sheet-head`, `.sheet-body`, `.sheet-actions`, `.sheet-launch`, `.sheet-launch:disabled` — while the twelve
+`.sheet-*` classes both sheets still draw inside `FormSheet` stay. Every one was proven unreferenced by a class-token grep over `client/src` and
+`test/` before removal, and the new guard case now pins all three families at once.
+
+**One rename the file asked for and this task refused.** The `run drawer` section header claimed renaming the live `.run-drawer-*` family was
+"task 6's cleanup". It is not: the rename would edit `RunDetail`, `RunRowTime` and `OrchestrateSheet` plus a test-id prefix for no behaviour
+change, and this item's own "Done when" rules out touching any component file. The comment now says the names stay and why, rather than pointing
+at a task that will never do it.
+
+**One correction to this item's own Plan.** §2 cites "DESIGN.md §8.2" as naming the `wrapPage` removal as task 6's. DESIGN.md does not mention
+`wrapPage` anywhere; the spec does, twice (§2.2's tokens line and §7). The rewritten `theme.css` header cites spec §7. The claim the comment made was
+verified false before removal, as §2 asked: there is no `server/src/render/` directory and no file under `server/src` mentions `theme.css`.
+
+**Drift the Primitives section caught (test case 5).** All 15 files in `client/src/components/ui/` are in the table and the table names no
+component that is not there (`FigureStrip`, `SheetHead` and `DayKicker` are secondary exports of `Figure.tsx`, `Sheet.tsx` and `Ledger.tsx`). Two
+entries disagree with spec §12.2 and the doc records both as code's reading: `StageBars` draws its own bars rather than composing `ProgressRow`,
+and `NumberField` has **no composer at all** — the watchdog's numeric policy rows are `Select` ladders. `NumberField` was kept, not deleted:
+deleting it means deleting its class family and guard 7's entry in the same change, which is a decision with a rendered surface behind it and not
+part of a sweep whose proof is that nothing moved.
+
+**Test case 3 (no visual regression) could not be run as written and was proven another way.** No screenshots from `task-36`–`task-40` are stored
+in this repo, so there was nothing to diff by eye against. What is proven instead: every removed selector was shown unreferenced by a class-token
+grep over `client/src` and `test/` before deletion, `.drawer-empty` and the twelve live `.sheet-*` classes were kept, no component file changed at
+all (`git diff --stat` below), and the 105 jest suites — including every component suite — pass unmodified. A rule nothing renders cannot move a
+pixel.
+
+Verification, run fresh after the last edit:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run test:jest
+Test Suites: 105 passed, 105 total
+Tests:       1705 passed, 1705 total
+Snapshots:   0 total
+Time:        61.657 s, estimated 62 s
+Ran all test suites.
+
+$ pnpm test
+# tests 538
+# pass 538
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run build
+dist/assets/index-C7CBKQCo.js      347.71 kB │ gzip: 104.98 kB
+✓ built in 1.04s
+
+$ pnpm run test:jest -- design-guards
+Tests:       14 passed, 14 total
+
+$ grep -c -- "--mono\|--display" client/src/styles.css shared/theme.css
+client/src/styles.css:0
+shared/theme.css:0
+
+$ git diff --stat
+ backlog/tasks/open/task-41-....md                  |   3 +
+ client/src/styles.css                              | 167 +++++++-------------
+ docs/subsystems/board.md                           | 170 +++++++++++++++------
+ shared/theme.css                                   |  18 ++-
+ test/design-guards.test.ts                         |  50 ++++++
+ 5 files changed, 249 insertions(+), 159 deletions(-)
+```
+
+Contract sweep: 9 sites updated (client/src/styles.css — the file header's "item drawer", the `run drawer` section header, `.orchestrate-step-body`'s `.sheet-body` citation, `.orchestrate-steps`' "monospace" claim, the uncommitted flag's `.run-strip-attention` citation, `.run-detail-mode-note`'s `.run-mode-badge` citation, `.ui-modal`'s "the old drawer's were"; shared/theme.css's header; docs/subsystems/board.md). Two sites left standing on purpose: `client/src/components/board/BoardView.tsx:531,557` cite `.drawer` in explicitly past-tense prose about a hazard that is already recorded as gone, and `backlog/tasks/done/*` items are historical records of finished work.
+Red proof: 1 test went red with the change reverted (two deleted rules appended back to `client/src/styles.css` from a `/tmp` copy, never `git stash`; guard 1's new case failed with 4 offenders, file restored byte-identical and re-run green).
