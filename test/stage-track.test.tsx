@@ -199,9 +199,15 @@ describe('StageTrack', () => {
     expect(screen.getByTestId('run-track-bug-2-merging-val')).toHaveTextContent('12s');
 
     // `fixing` was never visited, but sits between two visited neighbours
-    // (reviewing, verifying) — hollow dot, green line straight through it.
+    // (reviewing, verifying) — an unbroken line straight through it, and
+    // since task-38 the SKIPPED dot rather than the hollow one: the item went
+    // past this stage without needing it, which is a different fact from "not
+    // there yet" and is drawn with a dashed ring rather than the plain one.
+    // `data-node` carries the same verdict as an attribute so a reader (and
+    // the stylesheet) has one value to key on rather than a class list.
     const fixingNode = screen.getByTestId('run-track-bug-2-fixing');
-    expect(fixingNode.querySelector('.run-track-dot')).toHaveClass('run-track-dot-hollow');
+    expect(fixingNode.querySelector('.run-track-dot')).toHaveClass('run-track-dot-skipped');
+    expect(fixingNode).toHaveAttribute('data-node', 'skipped');
     const fixingVal = screen.getByTestId('run-track-bug-2-fixing-val');
     expect(fixingVal).toHaveTextContent('—');
     expect(fixingVal).toHaveClass('run-track-val-none');
@@ -419,5 +425,114 @@ describe('StageTrack', () => {
 
     rerender(<StageTrack item={item} now={T0 + 195_000} live={true} mergeModeEffective="merge" />);
     expect(screen.getByTestId('run-track-bug-9-fixing-val')).toHaveTextContent('3m 00s');
+  });
+});
+
+/**
+ * task-38's fourth drawn node state (DESIGN.md §8.4.3). `StageTrack` derives
+ * `skipped` for itself rather than `stepperDots` growing a member, because it
+ * is a PRESENTATION state: the lib answers "did this item arrive at this
+ * stage" from `stageAt`, and for a fix-free item at `fixing` the honest answer
+ * is `hollow`. What turns that into `skipped` is the hollow-on-green boundary
+ * this component already computes, plus the fix-loop count.
+ *
+ * The pair these cases exist to keep apart is `skipped` and not-reached. Both
+ * are unfilled and both read `—` underneath, so if the component ever stopped
+ * distinguishing them nothing else in this suite would notice.
+ */
+describe('StageTrack — the skipped node', () => {
+  it('draws a fix-free `fixing` node the item has passed as skipped, not as not-reached', () => {
+    render(
+      <StageTrack
+        item={trackItem('s-1', 'merged', {
+          dispatched: at(0),
+          inspecting: at(1_000),
+          reviewing: at(2_000),
+          verifying: at(3_000),
+          merging: at(4_000),
+          merged: at(5_000)
+        })}
+        now={T0 + 10_000}
+        live={false}
+        mergeModeEffective="merge"
+      />
+    );
+    expect(screen.getByTestId('run-track-s-1-fixing')).toHaveAttribute('data-node', 'skipped');
+  });
+
+  /*
+    The condition that keeps the two apart. An item still at `reviewing` has
+    not reached `fixing` either, and drawing THAT as "never needed" would be
+    the component asserting an outcome the run has not had yet.
+  */
+  it('draws a `fixing` node the item has not reached yet as not-reached', () => {
+    render(
+      <StageTrack
+        item={trackItem('s-2', 'reviewing', { dispatched: at(0), inspecting: at(1_000), reviewing: at(2_000) })}
+        now={T0 + 10_000}
+        live={true}
+        mergeModeEffective="merge"
+      />
+    );
+    expect(screen.getByTestId('run-track-s-2-fixing')).toHaveAttribute('data-node', 'hollow');
+  });
+
+  /*
+    A non-zero count on a hollow `fixing` node is a run file that disagrees
+    with itself. The honest rendering of that is the plain not-reached ring —
+    never a claim the stage was never needed, which the count contradicts.
+  */
+  it('refuses to call a `fixing` node skipped when the item recorded fix loops', () => {
+    render(
+      <StageTrack
+        item={trackItem(
+          's-3',
+          'merged',
+          { dispatched: at(0), inspecting: at(1_000), reviewing: at(2_000), verifying: at(3_000), merging: at(4_000), merged: at(5_000) },
+          2
+        )}
+        now={T0 + 10_000}
+        live={false}
+        mergeModeEffective="merge"
+      />
+    );
+    expect(screen.getByTestId('run-track-s-3-fixing')).toHaveAttribute('data-node', 'hollow');
+  });
+
+  /*
+    Only `fixing` is ever skipped — that is the design's own scope, and it
+    matters because every other stage on the track is one the pipeline either
+    ran or has not reached. `inspecting` passed without a stamp is
+    hollow-on-green, which the track already draws as an unbroken line; a
+    dashed ring there would say "never needed" about a stage that is always
+    needed.
+  */
+  it('never calls any other passed-but-unstamped node skipped', () => {
+    render(
+      <StageTrack
+        item={trackItem('s-4', 'merged', { dispatched: at(0), reviewing: at(2_000), verifying: at(3_000), merging: at(4_000), merged: at(5_000) })}
+        now={T0 + 10_000}
+        live={false}
+        mergeModeEffective="merge"
+      />
+    );
+    expect(screen.getByTestId('run-track-s-4-inspecting')).toHaveAttribute('data-node', 'hollow');
+  });
+
+  /*
+    The `×N` badge is a property of the stage it counts and of no other, and
+    it only exists at all above zero — `run-track-<id>-loops` is emitted on
+    the `fixing` node alone.
+  */
+  it('badges the fixing node with ×N only when the item ran fix loops', () => {
+    const stamps = { dispatched: at(0), fixing: at(1_000), merged: at(5_000) };
+    const { unmount } = render(<StageTrack item={trackItem('s-5', 'merged', stamps, 3)} now={T0 + 10_000} live={false} mergeModeEffective="merge" />);
+    const badge = screen.getByTestId('run-track-s-5-loops');
+    expect(badge).toHaveTextContent('×3');
+    expect(screen.getByTestId('run-track-s-5-fixing')).toContainElement(badge);
+    unmount();
+
+    render(<StageTrack item={trackItem('s-6', 'merged', stamps, 0)} now={T0 + 10_000} live={false} mergeModeEffective="merge" />);
+    expect(screen.queryByTestId('run-track-s-6-loops')).toBeNull();
   });
 });

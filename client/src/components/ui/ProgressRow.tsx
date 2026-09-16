@@ -36,7 +36,14 @@ export function ProgressRow({
   caption?: ReactNode;
   hatch?: boolean;
   height?: 10 | 6;
-  fill?: 'progress' | 'ink';
+  /**
+   * `warn` is the heartbeat meter past its own stale line (task-38, §8.4.2):
+   * the bar and the verdict beside it must not be able to point at different
+   * lines, so the amber is a prop on the primitive rather than an override the
+   * Watchdog page paints over `.ui-progress-fill` — which is the restatement
+   * §12.1 forbids, and would also recolour every other meter on the board.
+   */
+  fill?: 'progress' | 'ink' | 'warn';
   /** The right-hand half of §7's two-tone amount — `3 / 8`, `2h of 6h`. */
   valueText?: ReactNode;
 }) {

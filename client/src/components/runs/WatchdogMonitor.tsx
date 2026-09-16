@@ -3,6 +3,14 @@ import { useWatchdog } from '../../hooks/useWatchdog';
 import { projectLabel } from '../../lib/project-label';
 import { formatClock, formatSpanCompact, freshnessFraction, lastReportedEntry } from '../../lib/run-time';
 import { graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../../lib/run-watchdog';
+import { RunControls } from '../RunControls';
+import { Band } from '../ui/Band';
+import { Chip } from '../ui/Chip';
+import { Dot } from '../ui/Dot';
+import { Figure, FigureStrip } from '../ui/Figure';
+import { Ledger } from '../ui/Ledger';
+import { ProgressRow } from '../ui/ProgressRow';
+import { Sheet, SheetHead } from '../ui/Sheet';
 import { RUN_STALE_MS, WATCHDOG_EVENT_CAP } from '../../../../shared/types';
 import type { OrchestratorRunsPayload, RunWatchdog } from '../../../../shared/types';
 
@@ -58,6 +66,25 @@ import type { OrchestratorRunsPayload, RunWatchdog } from '../../../../shared/ty
  * worse than no hint, because a reader uses it to decide whether a short
  * feed means a quiet watchdog or a truncated one.
  *
+ * task-38 (DESIGN.md §8.4.2) makes it a PAGE rather than a body swapped in
+ * under the Runs section's own bar: it opens on its own `Band` (`Runs ·
+ * Watchdog`, the `section · destination` convention the rail's tree sets),
+ * carries three figures where task-26 put three tiles, and holds its watching
+ * rows and its activity feed in a `Sheet` each. Nothing about which payload
+ * says what changed; every join below is task-26's.
+ *
+ * Two additions are genuinely new. The first is §8.4.2's Resume control on a
+ * crashed row — which is `RunControls`, the same component the Runs detail
+ * sheet's head draws, rather than a `Resume now` chip of this page's own. The
+ * design names both surfaces as readers of `watchdogStoodDown`; making them
+ * one COMPONENT rather than two callers is how they read it once. A chip here
+ * would have been a second rendering of that table, a second synchronous
+ * in-flight guard to keep in agreement (bug-19's layer 1), and a second copy
+ * of the 409-is-success rule. The second addition is the `Policy in Settings
+ * ›` chip in the band, flat and inert because the policy is read here and
+ * edited there, and a second editor for the same three numbers is a second
+ * thing to keep in agreement.
+ *
  * task-26 (spec §3) kept every one of those joins and rerendered them.
  * The first shape of this surface was deliberately plain — "a monitor read
  * at a glance while something is going wrong, not a dashboard" — and the
@@ -71,7 +98,29 @@ import type { OrchestratorRunsPayload, RunWatchdog } from '../../../../shared/ty
  * kind-badged feed: the same facts, in shapes that can be read without
  * being parsed.
  */
-export function WatchdogMonitor({ runs, onSelectRun }: { runs: OrchestratorRunsPayload['runs']; onSelectRun: (project: string, runId: string) => void }) {
+export function WatchdogMonitor({
+  runs,
+  onSelectRun,
+  gateFor,
+  resuming,
+  onChanged
+}: {
+  runs: OrchestratorRunsPayload['runs'];
+  onSelectRun: (project: string, runId: string) => void;
+  /** task-38: the environment half of the resume gate, per project —
+   *  `resumeGate` (shared/agent.ts) applied by the one component that holds
+   *  the agents status. Handed down as a function rather than a resolved gate
+   *  because this page draws a row per running run and each is a different
+   *  project; deriving it here would mean this component reaching for
+   *  `useAgents` itself, which is the second data source `RunControls`' own
+   *  prop contract exists to avoid. */
+  gateFor: (project: string) => { canResume: boolean; blockedReason: string | null };
+  /** Projects this board has already asked for a resume of — the same mark
+   *  the detail sheet's head reads, so the two controls cannot disagree about
+   *  whether a resume is already on its way. */
+  resuming: ReadonlySet<string>;
+  onChanged: (project: string, kind: 'pause' | 'cancel' | 'resume') => void;
+}) {
   const { status, error } = useWatchdog();
 
   // Every `running` run, fresh or crashed alike — a crashed run is exactly
@@ -100,17 +149,21 @@ export function WatchdogMonitor({ runs, onSelectRun }: { runs: OrchestratorRunsP
 
   // `useWatchdog` never throws — a failed GET lands in `error` and leaves
   // `status` at `null`. There is nothing honest to render from that: this
-  // whole view reports on the watchdog, so a fallback that looked like a
+  // whole page reports on the watchdog, so a fallback that looked like a
   // reading would tell someone the sweeper is idle when the truth is this
-  // tab could not reach the server.
+  // tab could not reach the server. The band stays, because the page still
+  // has to say which page it is.
   if (status === null) {
     return (
       <div className="watchdog-monitor" data-testid="watchdog-monitor">
-        <div className="watchdog-state" data-testid="watchdog-state">
-          <span className="watchdog-hint">
-            Could not reach the watchdog{error ? ` — ${error}` : ''}. This view will fill in once the API answers <code>GET /api/agents/watchdog</code> again.
-          </span>
-        </div>
+        <Band title="Runs · Watchdog" />
+        <Sheet>
+          <div className="watchdog-state" data-testid="watchdog-state">
+            <span className="watchdog-hint">
+              Could not reach the watchdog{error ? ` — ${error}` : ''}. This page will fill in once the API answers <code>GET /api/agents/watchdog</code> again.
+            </span>
+          </div>
+        </Sheet>
       </div>
     );
   }
@@ -121,234 +174,314 @@ export function WatchdogMonitor({ runs, onSelectRun }: { runs: OrchestratorRunsP
   // no `running` run in this payload accounts for.
   const orphans = status.watching.filter((id) => !running.some((r) => r.runId === id));
 
-  // The three counts the watching tile states once so nobody has to count
-  // chips on the cards below it. All three are derived from the same
-  // `running` array the cards are, so the head and the body cannot disagree.
+  // The three counts the watching figure states once so nobody has to count
+  // rows below it. All three are derived from the same `running` array the
+  // rows are, so the figure and the sheet cannot disagree.
   const crashedCount = running.filter((r) => isCrashed(r)).length;
   const unwatchedCount = running.filter((r) => !watching.has(r.runId)).length;
 
   // `null` for every phase but armed, and for an unreadable tick — see the
   // function's own comment for why no bar at all beats an empty one.
   const sweep = sweepFraction(status, now);
+  // The countdown in seconds, the same arithmetic `stateLine` prints in
+  // words, so the meter and the sentence beside it agree to the second.
+  //
+  // `null` wherever `sweep` is — which is every phase but `armed`, and an
+  // unreadable `nextTickAt` within it. That gate is not defensive tidiness:
+  // `idle` and `off` carry `nextTickAt: null` by construction, `Date.parse`
+  // of it is `NaN`, and a `NaN` here reached both the meter's own value and
+  // the figure's line, where `formatSpanCompact` has no honest answer for it.
+  // Reusing `sweepFraction`'s own verdict rather than re-deriving "is there a
+  // tick to count down to" keeps the bar and the words it sits under from
+  // ever disagreeing about whether there is one.
+  const sweepSeconds = sweep === null ? null : Math.max(0, Math.round((Date.parse(status.nextTickAt as string) - now) / 1000));
 
   return (
     <div className="watchdog-monitor" data-testid="watchdog-monitor">
-      {/* `watchdog-state` stays on the wrapper even though the single state
-          card became three tiles: it is what the unavailable-notice case
-          selects, and the meaning — "the sweeper's own reading, as opposed
-          to any one run's" — survived the shape change intact. */}
-      <div className="watchdog-tiles" data-testid="watchdog-state">
-        <div className="runs-tile">
-          <div className="runs-tile-value watchdog-tile-phase">
-            <span className={`watchdog-lamp watchdog-lamp-${status.phase}`} aria-hidden="true" />
-            <span data-testid="watchdog-phase">{status.phase}</span>
-          </div>
-          <div className="runs-tile-label">sweeper</div>
-          {/* Verbatim, and the reason this component reads a function for it
-              at all: the strip and this surface print one sentence about one
-              sweeper, and two hand-written copies would drift. */}
-          <span className="watchdog-state-line" data-testid="watchdog-state-line">
-            {stateLine(status, now)}
-          </span>
-          {sweep !== null && (
-            // The countdown `stateLine` already prints in words, drawn — a
-            // depleting rule is what makes "armed" read as something
-            // happening rather than a label. `Math.round`, matching that
-            // sentence's own arithmetic, so the bar and the words beside it
-            // agree to the second.
-            <div
-              className="watchdog-sweep"
-              data-testid="watchdog-sweep"
-              role="meter"
-              aria-label="time to next sweep"
-              aria-valuemin={0}
-              aria-valuemax={Math.round(config.tickMs / 1000)}
-              aria-valuenow={Math.max(0, Math.round((Date.parse(status.nextTickAt as string) - now) / 1000))}
-            >
-              <span className="watchdog-sweep-fill" style={{ width: `${sweep * 100}%` }} />
-            </div>
-          )}
-        </div>
+      {/* `stateLine` verbatim as the band's subtitle, and the reason this
+          component reads a function for it at all: two surfaces print one
+          sentence about one sweeper, and two hand-written copies would
+          drift. */}
+      <Band title="Runs · Watchdog" sub={<span data-testid="watchdog-state-line">{stateLine(status, now)}</span>}>
+        {/* Flat and inert: `SettingsView` has no section setter to plumb
+            through for one chip, and the rail is one click away. The knobs are
+            edited in exactly one place. */}
+        <Chip variant="flat" data-testid="watchdog-policy-link" title="Settings › Orchestrator watchdog">
+          Policy in Settings ›
+        </Chip>
+      </Band>
 
-        <div className="runs-tile">
-          <div className="runs-tile-value">
-            {/* `—`, never `0`, while off: nothing is watched at all, and a
-                zero would read as a healthy count taken by a sweeper that is
-                actually not running. */}
-            <span data-testid="watchdog-watching">{status.phase === 'off' ? '—' : running.length}</span>
-            {status.phase !== 'off' && <small className="watchdog-tile-unit">{running.length === 1 ? 'running run' : 'running runs'}</small>}
-          </div>
-          <div className="runs-tile-label">watching</div>
-          <div className="runs-tile-substat">
-            {status.phase === 'off' ? (
-              <span className="runs-tile-substat-item">nothing is watched while off</span>
-            ) : (
-              <>
-                {/* Printed at zero as well as above it, but muted and
-                    glyphless there: the count must always be readable, and
-                    the tile must not cry wolf on a healthy afternoon. */}
-                <span className={`runs-tile-substat-item${crashedCount > 0 ? ' watchdog-warn' : ''}`}>
-                  {crashedCount > 0 && <span aria-hidden="true">⚠ </span>}
-                  {crashedCount} crashed
-                </span>
-                <span className="runs-tile-substat-item">{running.length - crashedCount} fresh</span>
-                {unwatchedCount > 0 && <span className="runs-tile-substat-item">{unwatchedCount} not yet watched</span>}
-              </>
+      {/* `watchdog-state` stays on the strip even though the single state card
+          became three figures: it is what the unavailable-notice case above
+          selects, and the meaning — "the sweeper's own reading, as opposed to
+          any one run's" — survived the shape change intact. */}
+      <div data-testid="watchdog-state">
+        <FigureStrip cols={3}>
+          <Figure
+            label="sweeper"
+            value={
+              <span className="watchdog-tile-phase">
+                <span className={`watchdog-lamp watchdog-lamp-${status.phase}`} aria-hidden="true" />
+                <span data-testid="watchdog-phase">{status.phase}</span>
+              </span>
+            }
+            /* The cadence is printed whether or not a sweep is pending — it
+               is the policy, and a reader wants it in both states — but the
+               countdown half only exists while one is actually running. */
+            line={
+              sweepSeconds === null
+                ? `every ${formatSpanCompact(config.tickMs)}`
+                : `next sweep in ${formatSpanCompact(sweepSeconds * 1000)} · every ${formatSpanCompact(config.tickMs)}`
+            }
+          >
+            {sweep !== null && sweepSeconds !== null && (
+              // The countdown `stateLine` already prints in words, drawn — a
+              // depleting rule is what makes "armed" read as something
+              // happening rather than a label. Drawn only while armed:
+              // `idle` and `off` have no next tick to be partway through, and
+              // an empty bar reads as "a sweep is imminent".
+              //
+              // `hatch` because this one IS a quantity of work — the tick's
+              // own elapsing — which is the distinction `ProgressRow`'s own
+              // comment draws against the heartbeat meter below.
+              <div data-testid="watchdog-sweep">
+                <ProgressRow value={sweepSeconds} max={Math.round(config.tickMs / 1000)} height={6} hatch />
+              </div>
             )}
-          </div>
-        </div>
+          </Figure>
 
-        <div className="runs-tile">
-          {/* The same three words the old one-line sentence used, in rows:
-              the vocabulary is what a reader carries between this tile and
-              the Settings knobs, so it survives the shape change unchanged.
-              Every number prints from `config`, never a literal. */}
-          <div className="watchdog-policy" data-testid="watchdog-config-line">
-            <span className="watchdog-policy-label">check every</span>
-            <span className="watchdog-policy-value">{formatSpanCompact(config.tickMs)}</span>
-            <span className="watchdog-policy-label">leave alone for</span>
-            <span className="watchdog-policy-value">{formatSpanCompact(config.graceMs)}</span>
-            <span className="watchdog-policy-label">give up after</span>
-            <span className="watchdog-policy-value">{config.maxAttempts}</span>
-          </div>
-          <div className="runs-tile-label">policy</div>
-          {/* Plain text, not a link: `SettingsView` has no section setter to
-              plumb through for one sentence, and the side rail is one click
-              away. The knobs are edited in exactly one place. */}
-          <span className="watchdog-hint">Configure in Settings › Orchestrator watchdog.</span>
-        </div>
+          <Figure
+            label="watching"
+            /* `—`, never `0`, while off: nothing is watched at all, and a zero
+               would read as a healthy count taken by a sweeper that is
+               actually not running. */
+            value={<span data-testid="watchdog-watching">{status.phase === 'off' ? '—' : running.length}</span>}
+            unit={status.phase === 'off' ? undefined : running.length === 1 ? 'running run' : 'running runs'}
+            line={
+              status.phase === 'off' ? (
+                'nothing is watched while off'
+              ) : (
+                <span className="watchdog-counts">
+                  {/* Printed at zero as well as above it, but muted and
+                      glyphless there: the count must always be readable, and
+                      the page must not cry wolf on a healthy afternoon. */}
+                  <span className={crashedCount > 0 ? 'watchdog-warn' : undefined}>
+                    {crashedCount > 0 && <span aria-hidden="true">⚠ </span>}
+                    {crashedCount} crashed
+                  </span>
+                  <span>{running.length - crashedCount} fresh</span>
+                  {unwatchedCount > 0 && <span>{unwatchedCount} not yet watched</span>}
+                </span>
+              )
+            }
+          />
+
+          <Figure label="policy">
+            {/* The same three words the old one-line sentence used, in rows:
+                the vocabulary is what a reader carries between this figure and
+                the Settings knobs, so it survives the shape change unchanged.
+                Every number prints from `config`, never a literal — their
+                bounds are `WATCHDOG_LIMITS`, which the Settings ladders and
+                the server's clamp already read as one triple. */}
+            <div className="watchdog-policy" data-testid="watchdog-config-line">
+              <span className="watchdog-policy-label">check every</span>
+              <span className="watchdog-policy-value">{formatSpanCompact(config.tickMs)}</span>
+              <span className="watchdog-policy-label">leave alone for</span>
+              <span className="watchdog-policy-value">{formatSpanCompact(config.graceMs)}</span>
+              <span className="watchdog-policy-label">give up after</span>
+              <span className="watchdog-policy-value">{config.maxAttempts}</span>
+            </div>
+            {/* The enabled switch's state, UNDER the three pairs — the cell's
+                12 px line (§8.4.2), drawn here rather than through `Figure`'s
+                own `line` prop because this cell has no value for that line to
+                sit under, and above the pairs it would read as a caption for
+                the label rather than as the reading it qualifies.
+                  It is named at all because two switches reach this page and
+                they are not interchangeable. `WatchdogConfig.enabled` is the
+                user's Settings toggle and withholds the SPAWN alone — a
+                watchdog disabled there still arms, still ticks, and still
+                reports the crashed run it would have resumed. The phase above
+                reads `off` only when the ENVIRONMENT says so. */}
+            <span className="watchdog-policy-line">
+              {config.enabled ? 'resume spawns on · your switch, not the phase' : 'resume spawns off · your switch, not the phase'}
+            </span>
+          </Figure>
+        </FigureStrip>
       </div>
 
       {/* Omitted entirely while the sweeper is off — nothing is being
-          watched, and the state line has already said why. An empty-rows
-          line here would be a second answer to a question already settled
-          one line up. */}
+          watched, and the band's own state line has already said why. An
+          empty-rows line here would be a second answer to a question already
+          settled one line up. */}
       {status.phase !== 'off' && (
-        <div className="watchdog-rows" data-testid="watchdog-rows">
-          {running.map((run) => {
-            const crashed = isCrashed(run);
-            const clause = crashed ? watchdogClause(run.watchdog, now) : '';
-            const reported = lastReportedEntry(run.queue);
-            const age = Math.max(0, now - Date.parse(run.updatedAt));
-            const beat = Number.isFinite(age) ? `heartbeat ${formatSpanCompact(age)} ago` : 'heartbeat unknown';
-            // `null` for a stamp nobody can read, in which case the meter is
-            // omitted rather than drawn empty — an empty track claims a
-            // heartbeat this instant, the opposite of what an unreadable
-            // stamp says. See `freshnessFraction`'s own comment.
-            const fraction = freshnessFraction(run.updatedAt, now);
-            // Only ever printed on a crashed, annotated card; positive means
-            // the sweeper's own grace window is still open.
-            const grace = crashed && run.watchdog !== undefined ? graceRemainingMs(run.watchdog, config, now) : null;
-            return (
-              <button
-                key={`${run.project} ${run.runId}`}
-                type="button"
-                data-testid="watchdog-row"
-                className={`watchdog-row ${crashed ? 'watchdog-row-crashed' : 'watchdog-row-ok'}`}
-                onClick={() => onSelectRun(run.project, run.runId)}
-              >
-                <span className="watchdog-card-head">
-                  <span className="watchdog-row-project">{projectLabel(run.project)}</span>
-                  <span className="watchdog-row-id">{run.runId}</span>
-                  {!watching.has(run.runId) && <span className="watchdog-row-skew">· not yet watched</span>}
-                  {/* The glyph is a SIBLING of the verdict, not inside it, so
-                      no mark is colour alone AND the verdict element's own
-                      text stays exactly the one word every reader — a person,
-                      assistive tech, or a test — matches on. */}
-                  <span className="watchdog-verdict-glyph" aria-hidden="true">
-                    {crashed ? '⚠' : '●'}
-                  </span>
-                  <span className="watchdog-row-verdict" data-testid="watchdog-verdict">
-                    {crashed ? 'crashed' : 'ok'}
-                  </span>
-                </span>
-
-                <span className="watchdog-card-item">{reported === null ? 'between items' : `${reported.id} · ${reported.stage}`}</span>
-
-                {fraction === null ? (
-                  <span className="watchdog-card-beat">{beat}</span>
-                ) : (
-                  <>
-                    {/* `role="meter"` with real `aria-*` values rather than a
-                        bare styled div: it costs nothing at render and buys
-                        both a reading for assistive tech and tests that
-                        assert a number instead of parsing a style
-                        attribute. The scale is `RUN_STALE_MS` itself, so the
-                        bar can never point at a different line than the
-                        verdict beside it. */}
-                    <div
-                      className="watchdog-meter"
-                      data-testid="watchdog-meter"
-                      role="meter"
-                      aria-label="heartbeat age"
-                      aria-valuemin={0}
-                      aria-valuemax={RUN_STALE_MS / 1000}
-                      aria-valuenow={Math.floor(age / 1000)}
-                      aria-valuetext={beat}
-                    >
-                      <span className="watchdog-meter-fill" style={{ width: `${fraction * 100}%` }} />
-                    </div>
-                    <span className="watchdog-meter-labels">
-                      <span>{beat}</span>
-                      {/* The line prints from the constant, never a typed
-                          "15m": a meter labelled with a literal keeps naming
-                          the old window the day RUN_STALE_MS moves. */}
-                      <span>{crashed ? `past the ${formatSpanCompact(RUN_STALE_MS)} stale line` : `stale at ${formatSpanCompact(RUN_STALE_MS)}`}</span>
+        <Sheet className="watchdog-watching-sheet">
+          <SheetHead title="Watching" sub={`${running.length} ${running.length === 1 ? 'run' : 'runs'} · annotated from the sweeper's own set`} />
+          <div className="watchdog-rows" data-testid="watchdog-rows">
+            {running.map((run) => {
+              const crashed = isCrashed(run);
+              const clause = crashed ? watchdogClause(run.watchdog, now) : '';
+              const reported = lastReportedEntry(run.queue);
+              const age = Math.max(0, now - Date.parse(run.updatedAt));
+              const beat = Number.isFinite(age) ? `heartbeat ${formatSpanCompact(age)} ago` : 'heartbeat unknown';
+              // `null` for a stamp nobody can read, in which case the meter is
+              // omitted rather than drawn empty — an empty track claims a
+              // heartbeat this instant, the opposite of what an unreadable
+              // stamp says. See `freshnessFraction`'s own comment.
+              const fraction = freshnessFraction(run.updatedAt, now);
+              // Only ever printed on a crashed, annotated row; positive means
+              // the sweeper's own grace window is still open.
+              const grace = crashed && run.watchdog !== undefined ? graceRemainingMs(run.watchdog, config, now) : null;
+              return (
+                /* A `<div>` wrapper with the jump as a real `<button>` inside
+                   it and `RunControls` as that button's SIBLING — never
+                   nested. A `<button>` may carry no interactive descendant
+                   and no descendant with a `tabindex`, and jsdom fails on
+                   neither, which is how a green suite once shipped exactly
+                   that shape on the board's crashed strip. Two independent
+                   controls cannot be one element. */
+                <div key={`${run.project} ${run.runId}`} className="watchdog-row">
+                  {/* The row IS a run in the History list, so it jumps there
+                      and selects it — which is what this component has always
+                      done, and under shape D the only place it could send
+                      anyone: the run's detail IS that page's sheet. */}
+                  <button
+                    type="button"
+                    data-testid="watchdog-row"
+                    /* The verdict tone rides the BUTTON rather than the wrapper
+                       div, because the button is the whole informational body —
+                       every element the tone reaches (`.watchdog-row-verdict`,
+                       the glyph) is inside it, and the Resume sibling outside
+                       must not be recoloured by the run's verdict. */
+                    className={`watchdog-row-open ${crashed ? 'watchdog-row-crashed' : 'watchdog-row-ok'}`}
+                    onClick={() => onSelectRun(run.project, run.runId)}
+                  >
+                    <span className="watchdog-card-head">
+                      {crashed ? <Dot tone="crashed" /> : <Dot tone="live" />}
+                      <span className="watchdog-row-project">{projectLabel(run.project)}</span>
+                      <span className="watchdog-row-id">{run.runId}</span>
+                      {!watching.has(run.runId) && <span className="watchdog-row-skew">· not yet watched</span>}
+                      {/* The glyph is a SIBLING of the verdict, not inside it,
+                          so no mark is colour alone AND the verdict element's
+                          own text stays exactly the one word every reader — a
+                          person, assistive tech, or a test — matches on. */}
+                      <span className="watchdog-verdict-glyph" aria-hidden="true">
+                        {crashed ? '⚠' : '●'}
+                      </span>
+                      <span className="watchdog-row-verdict" data-testid="watchdog-verdict">
+                        {crashed ? 'crashed' : 'ok'}
+                      </span>
                     </span>
-                  </>
-                )}
 
-                {/* A crashed run the server has not annotated yet renders the
-                    verdict alone — `watchdogClause(undefined)` is `''`, and an
-                    empty element with a separator in it would read as a
-                    truncated sentence. */}
-                {crashed && run.watchdog !== undefined && (
-                  <span className="watchdog-card-wd">
-                    <span
-                      className="watchdog-attempts"
-                      data-testid="watchdog-attempts"
-                      aria-label={`attempt ${run.watchdog.attempts} of ${run.watchdog.maxAttempts}`}
-                    >
-                      {Array.from({ length: run.watchdog.maxAttempts }, (_unused, i) => (
-                        <i key={i} className={i < (run.watchdog as RunWatchdog).attempts ? 'on' : ''} />
-                      ))}
-                    </span>
-                    {clause !== '' && (
-                      // Verbatim, `watchdog:` prefix and all: it is the one
-                      // sentence the board's crashed strip also prints, and
-                      // ten redundant characters cost less than two surfaces
-                      // that could disagree about one run.
-                      <span data-testid="watchdog-clause">{clause}</span>
+                    <span className="watchdog-card-item">{reported === null ? 'between items' : `${reported.id} · ${reported.stage}`}</span>
+
+                    {fraction === null ? (
+                      <span className="watchdog-card-beat">{beat}</span>
+                    ) : (
+                      <span className="watchdog-meter" data-testid="watchdog-meter">
+                        {/* The scale is `RUN_STALE_MS` itself, so the bar can
+                            never point at a different line than the verdict
+                            beside it. Both labels are FORMATTED FROM THE
+                            CONSTANT at render time, never a typed "15m": a
+                            meter labelled with a literal keeps naming the old
+                            window the day `RUN_STALE_MS` moves, and on that
+                            day the label lies while the meter behind it is
+                            still right. */}
+                        <ProgressRow
+                          name={beat}
+                          valueText={crashed ? `past the ${formatSpanCompact(RUN_STALE_MS)} stale line` : `stale at ${formatSpanCompact(RUN_STALE_MS)}`}
+                          value={Math.floor(age / 1000)}
+                          max={RUN_STALE_MS / 1000}
+                          height={6}
+                          fill={crashed ? 'warn' : 'progress'}
+                        />
+                      </span>
                     )}
-                    {run.watchdog.lastSessionId !== null && <span className="watchdog-card-session">{`→ session ${run.watchdog.lastSessionId}`}</span>}
-                    {grace !== null && grace > 0 && <span data-testid="watchdog-grace">{`leave alone ${formatSpanCompact(grace)} more`}</span>}
-                  </span>
-                )}
-              </button>
-            );
-          })}
 
-          {/* Not a button: there is no run to select. */}
-          {orphans.map((id) => (
-            <div key={id} className="watchdog-row-missing" data-testid="watchdog-row-missing">
-              {`${id} — not in the runs payload`}
-            </div>
-          ))}
+                    {/* A crashed run the server has not annotated yet renders
+                        the verdict alone — `watchdogClause(undefined)` is
+                        `''`, and an empty element with a separator in it would
+                        read as a truncated sentence. */}
+                    {crashed && run.watchdog !== undefined && (
+                      <span className="watchdog-card-wd">
+                        <span
+                          className="watchdog-attempts"
+                          data-testid="watchdog-attempts"
+                          aria-label={`attempt ${run.watchdog.attempts} of ${run.watchdog.maxAttempts}`}
+                        >
+                          {Array.from({ length: run.watchdog.maxAttempts }, (_unused, i) => (
+                            <i key={i} className={i < (run.watchdog as RunWatchdog).attempts ? 'on' : ''} />
+                          ))}
+                        </span>
+                        {clause !== '' && (
+                          // Verbatim, `watchdog:` prefix and all: it is the one
+                          // sentence the Live row also prints, and ten
+                          // redundant characters cost less than two surfaces
+                          // that could disagree about one run.
+                          <span data-testid="watchdog-clause">{clause}</span>
+                        )}
+                        {run.watchdog.lastSessionId !== null && <span className="watchdog-card-session">{`→ session ${run.watchdog.lastSessionId}`}</span>}
+                        {grace !== null && grace > 0 && <span data-testid="watchdog-grace">{`leave alone ${formatSpanCompact(grace)} more`}</span>}
+                      </span>
+                    )}
+                  </button>
 
-          {running.length === 0 && orphans.length === 0 && (
-            <div className="watchdog-rows-empty" data-testid="watchdog-rows-empty">
-              {status.phase === 'idle' ? 'no running run' : 'nothing running in the runs payload yet'}
-            </div>
-          )}
-        </div>
+                  {/* The Resume control §8.4.2 asks for — drawn only once the
+                      sweeper has stood down, whatever the grace clock says,
+                      because grace is a backoff and not a stand-down.
+                        It is `RunControls`, not a chip of this page's own, and
+                      the gate is NOT re-asked here: that component reads
+                      `watchdogStoodDown` itself and renders nothing for a
+                      crashed run the sweeper may still act on. Calling that
+                      predicate a second time around it would be an expression
+                      agreeing with the first, which is
+                      precisely the shape CLAUDE.md's resume-coupling invariant
+                      forbids — "one function, not two agreeing expressions" —
+                      and the shape that once survived a whole branch with
+                      every test green while one half had been quietly widened.
+                        The component also brings the synchronous in-flight
+                      guard (bug-19's layer 1) and the 409-is-success rule with
+                      it, neither of which a hand-written chip here would
+                      have. */}
+                  {crashed && (
+                    <div className="watchdog-row-resume" data-testid="watchdog-resume">
+                      <RunControls
+                        run={run}
+                        gate={gateFor(run.project)}
+                        resuming={resuming.has(run.project)}
+                        onChanged={(kind) => onChanged(run.project, kind)}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Not a button: there is no run to select. */}
+            {orphans.map((id) => (
+              <div key={id} className="watchdog-row-missing" data-testid="watchdog-row-missing">
+                {`${id} — not in the runs payload`}
+              </div>
+            ))}
+
+            {running.length === 0 && orphans.length === 0 && (
+              <div className="watchdog-rows-empty" data-testid="watchdog-rows-empty">
+                {status.phase === 'idle' ? 'no running run' : 'nothing running in the runs payload yet'}
+              </div>
+            )}
+          </div>
+        </Sheet>
       )}
 
-      <div className="watchdog-activity">
-        <span className="watchdog-activity-name">Activity</span>
-        <span className="watchdog-hint" data-testid="watchdog-events-hint">
-          Newest first — what the sweeper itself did (armed, spawned a resume, gave up), not the run's own stage track. The last {WATCHDOG_EVENT_CAP} only, held
-          in the API process's memory: an API restart empties it.
-        </span>
+      <Sheet className="watchdog-activity">
+        <SheetHead
+          title="Activity"
+          sub={
+            <span data-testid="watchdog-events-hint">
+              Newest first — what the sweeper itself did (armed, spawned a resume, gave up), not the run's own stage track. The last {WATCHDOG_EVENT_CAP} only,
+              held in the API process's memory: an API restart empties it.
+            </span>
+          }
+        />
         {status.events.length === 0 ? (
           // Replaces the table rather than heading an empty one: a header row
           // over nothing reads as a list that failed to load.
@@ -360,7 +493,12 @@ export function WatchdogMonitor({ runs, onSelectRun }: { runs: OrchestratorRunsP
           // line here has the same five fields. The 2026-09-02 design rejected
           // a dense ledger table for the RUNS LIST, where a detail pane was
           // the point; nothing in that argument applies to a feed.
-          <div className="watchdog-table-wrap">
+          //
+          // Inside `Ledger`, which owns the overflow box (§8.4's "every table
+          // scrolls inside its own sheet") — with no `columns`, so the table
+          // lays out its own five and the primitive only holds the box. See
+          // `Ledger`'s own comment for why that variant exists.
+          <Ledger label="Sweeper activity">
             <table className="watchdog-table" data-testid="watchdog-events">
               <thead>
                 <tr>
@@ -398,9 +536,9 @@ export function WatchdogMonitor({ runs, onSelectRun }: { runs: OrchestratorRunsP
                 ))}
               </tbody>
             </table>
-          </div>
+          </Ledger>
         )}
-      </div>
+      </Sheet>
     </div>
   );
 }

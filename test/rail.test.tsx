@@ -44,10 +44,11 @@ describe('SideRail · the sub-nav tree', () => {
   });
 
   /*
-    History and Watchdog, not "Runs" and Watchdog: `runs-mode.ts`'s
-    `MODE_BUTTON` labels a control sitting INSIDE the Runs section, where
-    "Runs" is the view you switch back to. In the rail the row directly above
-    already says Runs, so a child repeating it would name its parent.
+    History and Watchdog, not "Runs" and Watchdog: the row directly above
+    already says Runs, so a child repeating it would name its parent. These are
+    the only labels these two views have — task-38 deleted `runs-mode.ts`'s
+    `MODE_BUTTON` pair with the in-page control it named, so there is no second
+    wording to keep this one in agreement with.
   */
   it('names the two views History and Watchdog', () => {
     renderRail('runs');
@@ -60,10 +61,11 @@ describe('SideRail · the sub-nav tree', () => {
   });
 
   /*
-    The one seam this task shares with task 3: the tree is a SECOND writer of
-    the key the in-page segmented control already writes, and it has to write
-    it the way that control does — same key, same guard — or the two disagree
-    about which view is open the moment a reload happens.
+    The seam: the tree writes the key `RunsView` reads, and it has to write it
+    the way that page reads it — same key, same guard — or the two disagree
+    about which view is open the moment a reload happens. Since task-38 the
+    tree is the only control that switches them; `RunsView` writes the key once
+    more, to jump back to History from a Watchdog row.
   */
   it('writes the stored mode through the same key and guard runs-mode.ts owns', async () => {
     renderRail('runs');

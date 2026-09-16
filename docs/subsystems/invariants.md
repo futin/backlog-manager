@@ -1398,19 +1398,21 @@ What keeps them apart is a coincidence of two rules stated in two places: design
 worth: widening the strip's half to `canResume === true` left the whole suite green.
 
 So the rule is now one function, `watchdogStoodDown` (`shared/agent.ts`), called by the client to decide whether to render the control and by
-`watchdog.service.ts`'s `visit()` to decide whether to return without spawning. The client caller was `RunStrip.tsx`; task-37 deleted it and the redesign's
-§8.4.1 makes the Runs detail sheet's head the next one, so between those two merges the sweeper is the only caller — see the crashed-Resume note above for why
-that gap is safe, and `test/watchdog-coupling.test.ts`'s second case for what stops it being forgotten. Its two inputs are single implementations for the same
-reason. `WatchdogStateService.spawningEnabled(config)` is the one answer to "may the watchdog spawn" — it fills the wire's `RunWatchdog.enabled` AND is what the
-sweeper's own gate calls, rather than the sweeper re-testing `config.enabled` under an env check made separately in `sweep()`; that was the second copy of a
-vocabulary, and CLAUDE.md's `isAgentAction` invariant already says which copy goes stale. And `exhausted` is **derived**, never stored — see below.
+`watchdog.service.ts`'s `visit()` to decide whether to return without spawning. The client caller was `RunStrip.tsx`; task-37 deleted it, leaving the sweeper
+the only caller for two merges, and task-38 restored it where §8.4.1 says it belongs: **`RunControls` (`client/src/components/RunControls.tsx`)**, drawn in the
+Runs detail sheet's head. That component is also the Watchdog page's Resume (§8.4.2) — the same component rather than a second control agreeing with it, which
+is why `WatchdogMonitor.tsx` does NOT call the predicate and must not start to: two surfaces, one caller. `test/watchdog-coupling.test.tsx`'s reader-list case
+is what holds that, and it is written as an exact set precisely so a third caller cannot be added quietly. Its two inputs are single implementations for the
+same reason. `WatchdogStateService.spawningEnabled(config)` is the one answer to "may the watchdog spawn" — it fills the wire's `RunWatchdog.enabled` AND is
+what the sweeper's own gate calls, rather than the sweeper re-testing `config.enabled` under an env check made separately in `sweep()`; that was the second copy
+of a vocabulary, and CLAUDE.md's `isAgentAction` invariant already says which copy goes stale. And `exhausted` is **derived**, never stored — see below.
 
 Pinned by two suites and one table, because no single `it` can hold both halves (one needs jsdom and a React tree, the other a real Nest app):
-`test/watchdog-coupling.test.ts` drives the predicate against every row of `test/helpers/watchdog-coupling.ts` — and rendered the strip for each of them until
-task-37 deleted it, which is why that file now also pins WHO reads `watchdogStoodDown`: the moment a client surface does, the rendering leg has to come back
-with it. `test/watchdog-sweep.test.ts`'s own table case arranges the sweeper for the same rows and asserts it spawns iff the row does not stand down. Each row
-carries a hand-checked `standsDown` literal rather than a derived one: without it, both halves would assert only that they agree with `watchdogStoodDown`, which
-a `watchdogStoodDown` broken into a constant would also satisfy — the two sides would move together and stay "coupled" while saying something false. Sharing a
+`test/watchdog-coupling.test.tsx` drives the predicate against every row of `test/helpers/watchdog-coupling.ts`, renders `RunControls` for a crashed run in each
+row's state and asserts the Resume appears on exactly that row's verdict, and pins WHO reads `watchdogStoodDown` as an exact set.
+`test/watchdog-sweep.test.ts`'s own table case arranges the sweeper for the same rows and asserts it spawns iff the row does not stand down. Each row carries a
+hand-checked `standsDown` literal rather than a derived one: without it, both halves would assert only that they agree with `watchdogStoodDown`, which a
+`watchdogStoodDown` broken into a constant would also satisfy — the two sides would move together and stay "coupled" while saying something false. Sharing a
 fixture across suites is against this repo's usual convention, and is the point here: two copies of the table would be two copies of the rule.
 
 ### `exhausted` is derived from `attempts` and `maxAttempts`, never stored
@@ -1505,34 +1507,46 @@ incident actually produced, without also having to get a hook or a skill-prose r
 A crashed run renders as crashed, never as nothing. Supersedes the strip's old doctrine that a stale run must render nothing because its stage can't be trusted
 — right about the stage, wrong that the whole strip had to go silent; a run sat crashed for four hours behind exactly that silence.
 
-The strip states only facts the payload carries: heartbeat age, the _last reported_ stage (never claimed current), and the watchdog's own verdict
+The surface states only facts the payload carries: heartbeat age, the _last reported_ stage (never claimed current), and the watchdog's own verdict
 (`lib/run-watchdog.ts`'s `watchdogClause`). Badges, card run bars and `runClaimBlock` stay freshness-based — a crashed run does not stop being a live claim on
 its item just because the board now says so out loud.
 
+**Where that surface is, since task-38** (DESIGN.md §8.4.1's moved-rules table): the Runs page's **Live sheet row** — a `--red` dot, a `crashed` pill, and a
+second amber line carrying all three readings at once (`no heartbeat for <age>`, then `last reported <id> at <stage>` or `all items at rest`, then
+`watchdogClause`'s sentence). They travel together in ONE element (`runs-live-crashed-<runId>`) on purpose, and the suite asserts the line rather than three
+nodes, because three independent assertions would let a later edit drop one of them silently and the row would then say less than the strip it replaces did. A
+crashed run is a Live row and never a History one — a run reaches History when it has FINISHED, not when it has stopped reporting — and its detail sheet carries
+the rest. The Board keeps its own reading: `RunChip` counts it (`1 run · crashed ›`).
+
 **The Runs view says the same thing off the same payload** (bug-29): `mergeRuns` no longer filters the live map on `fresh`, so `MergedRun.live` is the DATA
-authority ("does the payload have an entry at all") while `MergedRun.isLive` stays the PRESENTATION gate ("`fresh`") — pinning and the `runs-row-live` accent
-still follow freshness and nothing else does. It had to be split because the two fields answer different questions: `status` says whether the run is over,
-`fresh` says whether the heartbeat is recent, and review or merge routinely outlast `RUN_STALE_MS` (57 gaps over 15 minutes across this machine's archived runs,
-worst two 249 and 206 minutes). Gating the data on `fresh` handed those windows to `useOrchestratorArchive`, which by design never polls, while the 5s live poll
-kept arriving and being discarded — so the one surface built to watch a run happen froze until a reload.
+authority ("does the payload have an entry at all") while `MergedRun.isLive` stays the PRESENTATION gate ("`fresh`") — since task-38 the only thing reading it
+is the breathing dot, and nothing else does. Which SHEET a row is in is decided by `splitLive` on "does the payload still list this run as `running` or
+`paused`", freshness deliberately excluded: gating that on `fresh` is what used to drop a crashed run into history among finished ones, where a reader scanning
+for trouble does not look. It had to be split because the two fields answer different questions: `status` says whether the run is over, `fresh` says whether the
+heartbeat is recent, and review or merge routinely outlast `RUN_STALE_MS` (57 gaps over 15 minutes across this machine's archived runs, worst two 249 and 206
+minutes). Gating the data on `fresh` handed those windows to `useOrchestratorArchive`, which by design never polls, while the 5s live poll kept arriving and
+being discarded — so the one surface built to watch a run happen froze until a reload.
 
-Both status badges (`RunsView`'s row, `RunDetail`'s head) read `crashed` through `runStatusChip` (`lib/run-stage.ts`), the one implementation of that
+Both status badges (the Runs row, the detail sheet's `status` fact) read `crashed` through `runStatusChip` (`lib/run-stage.ts`), the one implementation of that
 substitution, derived from the live entry and never from `authority` — an archive record carries no `fresh` field and must keep printing its recorded status.
+The DOT beside each reads `runDotTone` (same file), which is one function for the same reason: three surfaces draw it, and every finished run gets no tone at
+all rather than a third colour, because a dot alone cannot tell `done`, `aborted` and `failed` apart and three shades of one dot is the encoding §5 rules out —
+the WORD carries which ending it was.
 
-`crashed` is **not** a sixth `RunStatus`: `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` stay exhaustive over the five wire statuses, and the aggregate tile's `byStatus`
-substat still counts a crashed run under `running`, because that is a tally over the archived corpus rather than a claim about any run right now.
+`crashed` is **not** a sixth `RunStatus`: `RUN_STATUS_GLYPH`/`RUN_STATUS_CLASS` stay exhaustive over the five wire statuses, and the `runs` figure's own
+five-status line still counts a crashed run under `running`, because that is a tally over the archived corpus rather than a claim about any run right now.
 
 `useOrchestratorRuns` polls while any run is `running`, fresh or not. Widened from "any run is fresh" — a crashed run's attempt counter, error text and the
-moment it goes fresh again would otherwise wait for a window focus, and the crashed strip would read as a screenshot instead of something live.
+moment it goes fresh again would otherwise wait for a window focus, and the crashed row would read as a screenshot instead of something live.
 
 #### Which object describes a run right now — the three tiers behind `pickAuthority`
 
-`pickAuthority` (`client/src/lib/run-authority.ts`) is the ONE rule for "which object describes this run right now", shared by `RunsView.tsx`'s list row and
-`RunDetail.tsx`'s persistent pane beside it. It exists because a whole-branch review found the two disagreeing about exactly that: a live-backed row printed its
-merged/total and status off a minutes-stale archive snapshot while the detail pane beside it read the 5s live poll, and a run that had just finished kept
-reporting `running` in the pane — elapsed time still climbing — because the pane fell back to that same stale snapshot the instant its `live` prop went `null`,
-instead of using the run file it had _already re-fetched_ for exactly that transition. Both defects were one root cause wearing two faces: two call sites each
-hand-rolling their own `??` chain, free to disagree about the order.
+`pickAuthority` (`client/src/lib/run-authority.ts`) is the ONE rule for "which object describes this run right now", shared by `RunsView.tsx`'s Live and History
+rows and `RunDetail.tsx`'s detail sheet beside them. It exists because a whole-branch review found the two disagreeing about exactly that: a live-backed row
+printed its merged/total and status off a minutes-stale archive snapshot while the detail pane beside it read the 5s live poll, and a run that had just finished
+kept reporting `running` in the pane — elapsed time still climbing — because the pane fell back to that same stale snapshot the instant its `live` prop went
+`null`, instead of using the run file it had _already re-fetched_ for exactly that transition. Both defects were one root cause wearing two faces: two call
+sites each hand-rolling their own `??` chain, free to disagree about the order.
 
 Up to three views of the same run can exist at once, in _decreasing_ order of freshness:
 
@@ -1668,6 +1682,10 @@ a numeric field a future CLI renames reads `null`, never `0`; and `usage` is opt
 
 That is why nothing on the path from run file to view defaults it to `[]` — `RunDetail`'s row mapper passes it through undefaulted where it defaults
 `assumptions`, deliberately.
+
+**Where the reading shows up** — unchanged in WHAT is shown, and renamed by task-38 only because the surfaces were: the **History row** (`wall · $`), the detail
+sheet's **facts strip** (`$ · turns · sessions`, its own `cost` cell), and each item's own usage line. The row prints cost alone because it has one slot's worth
+of room and "what did it cost" is what a list is scanned for; turns and sessions are in the sheet, per run and per item.
 
 ## Board-versus-Archive is derived, and "last touched" has three rungs
 

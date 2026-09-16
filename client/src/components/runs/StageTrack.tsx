@@ -103,6 +103,27 @@ import type { MergeMode, RunQueueItem } from '../../../../shared/types';
  * `null` only for `ungroomed` — matching `RowStepper`'s own rule: an item
  * that never entered the pipeline has no progress to draw, and seven hollow
  * dots would draw a track for a run that was never happening.
+ *
+ * FOUR STATES, TOLD APART BY FILL **AND** RING (task-38, DESIGN.md §8.4.3).
+ * The redraw keeps every reading this component already computed and changes
+ * only how the nodes are drawn: reached takes `--fill-progress`, current takes
+ * `--fill-live` under a pulsing 3 px ring, not-reached takes `--steel` with a
+ * `--hairline2` ring, and **skipped** — the `fixing` node on an item that ran
+ * no fix loop — takes a DASHED `--hairline2` ring. Two channels rather than
+ * four shades of one colour, because §5 rules out telling four states apart by
+ * lightness alone, and because the one pair a reader most needs separated is
+ * "never needed" from "not there yet": both are unfilled, and before this the
+ * only thing distinguishing them was the duration underneath, which reads `—`
+ * in both cases.
+ *
+ * `skipped` is derived HERE, not in `stepperDots`, and deliberately: it is a
+ * presentation state, not a stage the run ever recorded. `stepperDots` answers
+ * "did this item arrive at this stage" from the item's own `stageAt`, and the
+ * answer for a fix-free item at `fixing` is honestly `hollow`. What turns that
+ * into `skipped` is the hollow-on-green boundary this file already computes —
+ * `i < lastVisited` means the item went PAST this node — plus `fixLoops === 0`.
+ * Adding a member to the lib's own union would make every other reader of
+ * `StepperDot` classify a state only a track can draw.
  */
 
 /**
@@ -129,6 +150,31 @@ import type { MergeMode, RunQueueItem } from '../../../../shared/types';
  * pass the one number it needs costs less than a second call to recompute
  * an array this function would then throw away.
  */
+/**
+ * The four states a node is DRAWN in — `StepperDot`'s three plus `skipped`,
+ * the one this component derives for itself (see the file header for why it
+ * is not a lib concern).
+ *
+ * Only `fixing` can ever be `skipped`, which is the design's own scope
+ * (§8.4.3: "skipped — `fixing` on a run that ran no fix loop"), and the three
+ * conditions are each load-bearing:
+ *
+ *  - `state === 'hollow'` — a node the item actually arrived at is `filled`
+ *    and says so; there is nothing to reinterpret.
+ *  - `i < lastVisited` — the item is PAST this node. Without it, every item
+ *    still mid-pipeline would draw `fixing` as "never needed" while it is
+ *    simply not there yet, which is precisely the pair this state exists to
+ *    tell apart.
+ *  - `fixLoops === 0` — the count is the fact. A non-zero count on a hollow
+ *    `fixing` node is a run file that disagrees with itself, and the honest
+ *    rendering of that is the plain not-reached ring, not a claim the stage
+ *    was never needed.
+ */
+function nodeState(dot: StepperDot, i: number, lastVisited: number, fixLoops: number): StepperDot['state'] | 'skipped' {
+  if (dot.stage === 'fixing' && dot.state === 'hollow' && i < lastVisited && fixLoops === 0) return 'skipped';
+  return dot.state;
+}
+
 function segmentState(
   i: number,
   lastVisited: number,
@@ -227,12 +273,31 @@ export function StageTrack({
     <div className="run-track" data-testid={`run-track-${item.id}`}>
       {dots.map((dot, i) => {
         const { in: dataIn, out: dataOut } = segmentState(i, lastVisited, dot.state, dots.length);
+        // The DRAWN state, which is `dot.state` for every node but a skipped
+        // `fixing` one. The connector segments above deliberately keep reading
+        // `dot.state`: hollow-on-green paints an unbroken line straight
+        // through a node the item passed without stopping, and a skipped node
+        // is exactly that node — breaking the line to mark it would erase the
+        // reading (`stepperDots`'s own comment calls it "the most useful thing
+        // the row says").
+        const drawn = nodeState(dot, i, lastVisited, item.fixLoops);
         const value = trackValue(dot, item, now, spans, terminal);
         const valueClass = ['run-track-val', value.modifier !== null && `run-track-val-${value.modifier}`].filter(Boolean).join(' ');
 
         return (
-          <div key={dot.stage} className="run-track-node" data-testid={`run-track-${item.id}-${dot.stage}`} data-in={dataIn} data-out={dataOut}>
-            <span className={`run-track-dot run-track-dot-${dot.state}`} aria-hidden="true" />
+          <div
+            key={dot.stage}
+            className="run-track-node"
+            data-testid={`run-track-${item.id}-${dot.stage}`}
+            /* The drawn state as an ATTRIBUTE as well as a class, so a test can
+               assert "these four render distinguishably" by reading one value
+               per node rather than parsing a class list — and so the CSS can
+               key the dashed ring off the node without a second class family. */
+            data-node={drawn}
+            data-in={dataIn}
+            data-out={dataOut}
+          >
+            <span className={`run-track-dot run-track-dot-${drawn}`} aria-hidden="true" />
             {dot.stage === 'fixing' && item.fixLoops > 0 && (
               <span
                 className="run-track-loops"
@@ -249,7 +314,7 @@ export function StageTrack({
                 ×{item.fixLoops}
               </span>
             )}
-            <span className={`run-track-name run-track-name-${dot.state}`}>{dot.stage}</span>
+            <span className={`run-track-name run-track-name-${drawn}`}>{dot.stage}</span>
             <span className={valueClass} data-testid={`run-track-${item.id}-${dot.stage}-val`}>
               {value.text}
             </span>

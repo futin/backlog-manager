@@ -62,11 +62,14 @@ export function SideRail({ section, onChange }: Props) {
   const narrow = useNarrow();
   const [menuOpen, setMenuOpen] = useState(false);
   const hidden = useRailHidden(narrow, menuOpen);
-  // A second writer of the same key the segmented control inside RunsView
-  // already owns — deliberately, and only until task 3 removes that control
-  // (§8.0: the tree replaces it at every width). `useRunsMode` is what keeps
-  // the two in step while both exist; `lib/runs-mode.ts` stays the one home of
-  // the key, the member list and the guard.
+  // The one control that SWITCHES the Runs section's two views since task-38
+  // took the in-page segmented control away (§8.0: the tree replaces it at
+  // every width). It is not the only writer of the key — `RunsView`'s own
+  // Watchdog row click writes `runs` to jump back to History with a run
+  // selected — which is exactly why this goes through `useRunsMode`: a
+  // module-level value every mounted reader subscribes to, so the rail and the
+  // page can never be looking at different views. `lib/runs-mode.ts` stays the
+  // one home of the key, the member list and the guard.
   const [runsMode, setRunsMode] = useRunsMode();
 
   const brand = (
@@ -202,13 +205,17 @@ function RailIcon({ section }: { section: Section }) {
 }
 
 /**
- * The tree's own labels, which are NOT `runs-mode.ts`'s `MODE_BUTTON` pair.
- * That map says "Runs" for the history view because it labels a control sitting
- * INSIDE the Runs section, where "Runs" is the thing you are switching back to.
- * In the rail the row directly above already says Runs, so a child repeating it
- * would name its parent rather than the view; §8.0 names the two entries
- * History and Watchdog. The mode values themselves are `RUNS_MODES`', so the
- * key and its guard stay single implementations either way.
+ * The tree's own labels, and the ONLY labels these two views have: task-38
+ * deleted `runs-mode.ts`'s `MODE_BUTTON` pair along with the in-page control it
+ * named, so there is no second wording left to disagree with this one.
+ *
+ * `History` rather than `Runs` for the first: the row directly above already
+ * says Runs, so a child repeating it would name its parent rather than the
+ * view — and the page under it carries the live runs and the selected run as
+ * well as the past ones, so it is named for what a person is looking for when
+ * they arrive with nothing running (§8.4.1's own "Why the name"). The mode
+ * VALUES are `RUNS_MODES`', so the key and its guard stay single
+ * implementations.
  */
 const RAIL_SUB_LABEL: Record<RunsMode, string> = {
   runs: 'History',

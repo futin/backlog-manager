@@ -1,6 +1,9 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -109,13 +112,35 @@ async function flush(): Promise<void> {
   });
 }
 
+/* task-38: the three props the page gained when §8.4.2's Resume landed on a
+   crashed Watching row. They are `RunControls`' own three, handed down from
+   the one component that holds the agents status — so the Resume this page
+   draws and the one the detail sheet's head draws are the same control
+   reading the same gate. Held OPEN by default here: the environment ladder's
+   own cases live in test/run-controls.test.tsx, and mixing them in would let
+   a case here pass for the wrong reason. */
+const OPEN_GATE = { canResume: true, blockedReason: null };
+
 async function renderMonitor(
   watchdog: WatchdogStatus | 'reject',
   runs: LiveRun[] = [],
-  onSelectRun: (project: string, runId: string) => void = jest.fn()
+  onSelectRun: (project: string, runId: string) => void = jest.fn(),
+  over: Partial<{
+    gateFor: (project: string) => { canResume: boolean; blockedReason: string | null };
+    resuming: ReadonlySet<string>;
+    onChanged: (project: string, kind: 'pause' | 'cancel' | 'resume') => void;
+  }> = {}
 ): Promise<jest.Mock> {
   const fetchMock = stubFetch(watchdog);
-  render(<WatchdogMonitor runs={runs} onSelectRun={onSelectRun} />);
+  render(
+    <WatchdogMonitor
+      runs={runs}
+      onSelectRun={onSelectRun}
+      gateFor={over.gateFor ?? (() => OPEN_GATE)}
+      resuming={over.resuming ?? new Set<string>()}
+      onChanged={over.onChanged ?? jest.fn()}
+    />
+  );
   await flush();
   return fetchMock;
 }
@@ -163,7 +188,10 @@ describe('WatchdogMonitor', () => {
     expect(policy).toHaveTextContent(new RegExp(`check every\\s*${formatSpanCompact(tickMs)}`));
     expect(policy).toHaveTextContent(new RegExp(`leave alone for\\s*${formatSpanCompact(graceMs)}`));
     expect(policy).toHaveTextContent(new RegExp(`give up after\\s*${maxAttempts}`));
-    expect(screen.getByText('Configure in Settings › Orchestrator watchdog.')).toBeInTheDocument();
+    // task-38: the sentence became the band's own flat chip — the policy is
+    // read here and edited in Settings, and one chip says that where a
+    // sentence under the third figure used to.
+    expect(screen.getByTestId('watchdog-policy-link')).toHaveTextContent('Policy in Settings ›');
 
     // Off has no timer at all, so there is no sweep to be partway through —
     // an empty bar would read as "a sweep is imminent".
@@ -221,14 +249,24 @@ describe('WatchdogMonitor', () => {
     // how far this heartbeat has travelled toward the stale line. Asserted
     // through `aria-*` rather than a parsed `style`, which is also what makes
     // it readable to assistive tech.
-    const meter = within(rows[0]).getByTestId('watchdog-meter');
+    //   task-38: the bar is `ProgressRow`, so the numbers live on the
+    // primitive's own `role="progressbar"` element inside this box. The
+    // `aria-valuetext` case went with the shape rather than being deleted:
+    // that attribute existed to give assistive tech the sentence a bare
+    // number could not, and `ProgressRow` prints the sentence as the meter's
+    // own visible LABEL instead — so it is asserted as text on the row below,
+    // which is a stronger claim than the attribute was.
+    const meter = within(within(rows[0]).getByTestId('watchdog-meter')).getByRole('progressbar');
     expect(meter).toHaveAttribute('aria-valuenow', '4');
     expect(meter).toHaveAttribute('aria-valuemax', String(RUN_STALE_MS / 1000));
-    expect(meter).toHaveAttribute('aria-valuetext', 'heartbeat 4s ago');
+    expect(rows[0]).toHaveTextContent('heartbeat 4s ago');
     expect(rows[0]).toHaveTextContent(`stale at ${formatSpanCompact(RUN_STALE_MS)}`);
 
     expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('1');
-    const tile = screen.getByTestId('watchdog-watching').closest('.runs-tile') as HTMLElement;
+    // task-38: the tile became a `Figure` cell, so the ancestor this reads is
+    // the primitive's own `.ui-figure` rather than the page-local tile class
+    // the two pages used to share.
+    const tile = screen.getByTestId('watchdog-watching').closest('.ui-figure') as HTMLElement;
     // `0 crashed` prints muted and glyphless — the tile must not cry wolf on
     // a healthy afternoon — but it prints, so the reading is never absent.
     expect(tile).toHaveTextContent('0 crashed');
@@ -281,8 +319,16 @@ describe('WatchdogMonitor', () => {
     expect(row).toHaveTextContent('session sess-1');
     expect(row).toHaveTextContent(`past the ${formatSpanCompact(RUN_STALE_MS)} stale line`);
 
-    const meter = within(row).getByTestId('watchdog-meter');
-    expect(meter).toHaveAttribute('aria-valuenow', '1020');
+    // task-38: `ProgressRow` clamps `value` against `max`, so a 17m heartbeat
+    // reads the meter's own ceiling (900s) rather than the raw 1020 the hand-
+    // rolled bar used to report past its own track. That is the primitive's
+    // documented rule and the right one for a `progressbar` — a value outside
+    // its declared range is what assistive tech reads as a rendering fault —
+    // and the run's ACTUAL age is not lost: it is the meter's own label, one
+    // assertion above.
+    const meter = within(within(row).getByTestId('watchdog-meter')).getByRole('progressbar');
+    expect(meter).toHaveAttribute('aria-valuenow', String(RUN_STALE_MS / 1000));
+    expect(meter).toHaveAttribute('aria-valuemax', String(RUN_STALE_MS / 1000));
   });
 
   // --- 7b: the grace window has closed --------------------------------------
@@ -501,7 +547,10 @@ describe('WatchdogMonitor', () => {
   it('ages the heartbeat on its own, with no new payload', async () => {
     await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [liveRun({ queue: [queueItem('bug-16', 'dispatched')] })]);
     expect(screen.getByTestId('watchdog-row')).toHaveTextContent('heartbeat 4s ago');
-    expect(screen.getByTestId('watchdog-meter')).toHaveAttribute('aria-valuenow', '4');
+    // task-38: the bar is `ProgressRow` now, so the reading lives on the
+    // primitive's own `role="progressbar"` inside this box rather than on the
+    // box itself — the assertion followed the element that carries it.
+    expect(within(screen.getByTestId('watchdog-meter')).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '4');
 
     await act(async () => {
       await jest.advanceTimersByTimeAsync(5_000);
@@ -512,7 +561,7 @@ describe('WatchdogMonitor', () => {
     expect(screen.getByTestId('watchdog-row')).toHaveTextContent('heartbeat 9s ago');
     // The meter is the same clock in a second form; a bar that stepped only
     // on a new payload would be a screenshot beside a live sentence.
-    expect(screen.getByTestId('watchdog-meter')).toHaveAttribute('aria-valuenow', '9');
+    expect(within(screen.getByTestId('watchdog-meter')).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '9');
   });
   // --- 17: the countdown is a clock in the state a row cannot supply --------
   //
@@ -535,8 +584,11 @@ describe('WatchdogMonitor', () => {
     expect(screen.getByTestId('watchdog-state-line')).toHaveTextContent('next check in 42s');
     // `Math.round`, matching `stateLine`'s own countdown: the bar and the
     // sentence beside it must agree to the second.
-    expect(screen.getByTestId('watchdog-sweep')).toHaveAttribute('aria-valuenow', '42');
-    expect(screen.getByTestId('watchdog-sweep')).toHaveAttribute('aria-valuemax', String(DEFAULT_WATCHDOG_CONFIG.tickMs / 1000));
+    expect(within(screen.getByTestId('watchdog-sweep')).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42');
+    expect(within(screen.getByTestId('watchdog-sweep')).getByRole('progressbar')).toHaveAttribute(
+      'aria-valuemax',
+      String(DEFAULT_WATCHDOG_CONFIG.tickMs / 1000)
+    );
     // Premise of the case, stated so a future fixture edit cannot quietly
     // turn it into case 5 with extra steps: there is no row here to have
     // enabled the clock.
@@ -549,7 +601,7 @@ describe('WatchdogMonitor', () => {
     // The stub keeps answering the identical payload, so `nextTickAt` has not
     // moved — the clock is what advanced.
     expect(screen.getByTestId('watchdog-state-line')).toHaveTextContent('next check in 37s');
-    expect(screen.getByTestId('watchdog-sweep')).toHaveAttribute('aria-valuenow', '37');
+    expect(within(screen.getByTestId('watchdog-sweep')).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37');
   });
 
   // --- 18: the watching tile counts what the cards below it show ------------
@@ -561,7 +613,10 @@ describe('WatchdogMonitor', () => {
       liveRun({ runId: 'run-3', project: '/abs/gamma' })
     ]);
 
-    const tile = screen.getByTestId('watchdog-watching').closest('.runs-tile') as HTMLElement;
+    // task-38: the tile became a `Figure` cell, so the ancestor this reads is
+    // the primitive's own `.ui-figure` rather than the page-local tile class
+    // the two pages used to share.
+    const tile = screen.getByTestId('watchdog-watching').closest('.ui-figure') as HTMLElement;
     expect(screen.getByTestId('watchdog-watching')).toHaveTextContent('3');
     expect(tile).toHaveTextContent('1 crashed');
     expect(tile).toHaveTextContent('2 fresh');
@@ -569,5 +624,55 @@ describe('WatchdogMonitor', () => {
     // `watching`, and the tile says so once rather than leaving a reader to
     // count the `· not yet watched` chips on the cards.
     expect(tile).toHaveTextContent('2 not yet watched');
+  });
+});
+
+/**
+ * task-38, DESIGN.md §8.4.2: the heartbeat meter's two labels are FORMATTED
+ * FROM `RUN_STALE_MS` at render time, never a typed numeral.
+ *
+ * The rendering cases above already compute their expected strings from the
+ * imported constant, which catches a hand-typed "15m" the day someone writes
+ * one. What a rendering case cannot catch is the OTHER way this goes wrong: a
+ * component that read the constant once, at module scope, into a string —
+ * green against a suite that reads the same constant, and wrong the day the
+ * constant moves, which is precisely the failure §8.4.2 describes ("the label
+ * lies while the meter behind it is still right").
+ *
+ * The obvious way to prove that is to move the constant and re-render, and it
+ * does not work here: swapping `shared/types` needs `jest.resetModules`, which
+ * hands the re-imported component a SECOND copy of React while `render` still
+ * holds the first, and every hook throws before a single label is drawn. So
+ * the second mechanism is a source guard over the component's own text —
+ * mechanical, and aimed at exactly the shape a render cannot see: the format
+ * call has to sit inside the JSX that draws the labels, and the file may
+ * contain no literal spelling of the window at all.
+ */
+describe('WatchdogMonitor — the stale line is read, never typed', () => {
+  const src = readFileSync(join(__dirname, '..', 'client', 'src', 'components', 'runs', 'WatchdogMonitor.tsx'), 'utf8');
+
+  it('builds both labels by formatting RUN_STALE_MS where they are drawn', () => {
+    // Both phrasings, each formatting the constant in place. A module-scope
+    // `const staleLabel = formatSpanCompact(RUN_STALE_MS)` would fail this:
+    // the call would not be inside either template.
+    expect(src).toMatch(/past the \$\{formatSpanCompact\(RUN_STALE_MS\)\} stale line/);
+    expect(src).toMatch(/stale at \$\{formatSpanCompact\(RUN_STALE_MS\)\}/);
+  });
+
+  it('spells the window nowhere in the component', () => {
+    // Comments stripped first: this file's prose legitimately discusses the
+    // fifteen-minute window, and a guard that counted that would be
+    // unfixable without deleting the explanation.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    expect(code).not.toMatch(/\b15m\b/);
+    expect(code).not.toMatch(/\b900_?000\b/);
+  });
+
+  // And the meter's SCALE is the same constant, so the bar can never point at
+  // a different line than the label above it — asserted against the imported
+  // value, which is the half a source guard cannot check.
+  it('scales the meter by the same constant the labels name', async () => {
+    await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [liveRun({ queue: [queueItem('bug-1', 'dispatched')] })]);
+    expect(within(screen.getByTestId('watchdog-meter')).getByRole('progressbar')).toHaveAttribute('aria-valuemax', String(RUN_STALE_MS / 1000));
   });
 });

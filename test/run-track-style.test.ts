@@ -80,11 +80,18 @@ describe('stage-track reduced-motion stylesheet rules', () => {
     expect(trackReducedMotion).toBeDefined();
   });
 
-  it('cancels the sweep animation and falls back to a solid cyan fill, not the gradient', () => {
+  /* task-38 repainted the track in the two fill TOKENS (§8.2) rather than the
+     raw `--cyan` it used to name: a reached node takes `--fill-progress` and
+     the current one `--fill-live`, which are the same tokens the stage bars
+     and the board's own dots read. The assertion follows the token, because
+     what it is defending is "the fallback is a SOLID fill, not the gradient",
+     and naming the old colour would pin a decision this task moved. */
+  it('cancels the sweep animation and falls back to a solid fill, not the gradient', () => {
     const rule = ruleBlock(trackReducedMotion as string, '.run-track-node[data-in="live"]::before');
     expect(rule).not.toBeNull();
     expect(rule as string).toMatch(/(^|[\s;])animation\s*:\s*none\b/);
-    expect(rule as string).toMatch(/(^|[\s;])background\s*:\s*var\(--cyan\)/);
+    expect(rule as string).toMatch(/(^|[\s;])background\s*:\s*var\(--fill-live\)/);
+    expect(rule as string).not.toMatch(/linear-gradient/);
   });
 
   it('cancels the current-dot ring outright rather than freezing it on its last frame', () => {
@@ -162,5 +169,89 @@ describe('stalled stage-track stylesheet rules (bug-15)', () => {
     // edit that stops the current dot pulsing has to come back through here.
     expect(current).toMatch(/(^|[\s;])animation\s*:\s*run-track-ring\b/);
     expect(stalled).not.toMatch(/run-track-ring/);
+  });
+});
+
+/**
+ * task-38's four node states (DESIGN.md §8.4.3), and the one property no
+ * render suite can ever prove: that they are told apart by **fill and ring
+ * together**, never by four shades of one colour. `stage-track.test.tsx` pins
+ * which class each node carries; this pins that the four classes actually
+ * paint four distinguishable things — the same split `run-stepper-style` and
+ * the stalled block above already document, applied to the pair this redraw
+ * exists for.
+ *
+ * That pair is `skipped` against not-reached. Both are unfilled; before this
+ * task the only thing separating "never needed" from "not there yet" was the
+ * duration underneath, which reads `—` in both cases. The DASHED stroke is
+ * what carries it, and a dashed stroke is invisible to jsdom.
+ */
+describe('stage-track four-state stylesheet rules (task-38)', () => {
+  const css = readStyles();
+
+  /** Every declaration in a rule, normalised — `prop: value`, one per entry. */
+  const declarations = (rule: string): string[] =>
+    rule
+      .split(';')
+      .map((d) => d.trim().replace(/\s+/g, ' '))
+      .filter((d) => d !== '');
+
+  it('gives the not-reached base a steel fill and a hairline ring', () => {
+    const base = ruleBlock(css, '.run-track-dot') as string;
+    expect(base).not.toBeNull();
+    expect(base).toMatch(/background\s*:\s*var\(--steel\)/);
+    expect(base).toMatch(/box-shadow\s*:[^;]*var\(--hairline2\)/);
+  });
+
+  it('gives reached and current the two fill tokens, never two shades of one', () => {
+    expect(ruleBlock(css, '.run-track-dot-filled') as string).toMatch(/background\s*:\s*var\(--fill-progress\)/);
+    expect(ruleBlock(css, '.run-track-dot-current') as string).toMatch(/background\s*:\s*var\(--fill-live\)/);
+  });
+
+  /*
+    The assertion this whole describe exists for. `dashed` is the word: a
+    skipped node and a not-reached one are both unfilled, so the STROKE is the
+    only channel left, and a solid one on either would collapse the pair.
+  */
+  it('rings a skipped node with a dashed stroke and nothing else', () => {
+    const skipped = ruleBlock(css, '.run-track-dot-skipped') as string;
+    expect(skipped).not.toBeNull();
+    expect(skipped).toMatch(/border\s*:[^;]*\bdashed\b/);
+    expect(skipped).toMatch(/border\s*:[^;]*var\(--hairline2\)/);
+    // No fill: a skipped node that painted anything would read as reached.
+    expect(skipped).toMatch(/background\s*:\s*none/);
+  });
+
+  /*
+    Pairwise, not against one reference: four states that each differ from a
+    base are not necessarily four states that differ from EACH OTHER, and it
+    is the pairs a reader actually compares.
+  */
+  it('draws all four states differently from one another', () => {
+    const base = declarations(ruleBlock(css, '.run-track-dot') as string);
+    const states: Record<string, string[]> = {
+      notReached: base,
+      reached: declarations(ruleBlock(css, '.run-track-dot-filled') as string),
+      current: declarations(ruleBlock(css, '.run-track-dot-current') as string),
+      skipped: declarations(ruleBlock(css, '.run-track-dot-skipped') as string)
+    };
+    const names = Object.keys(states);
+    for (const a of names) {
+      for (const b of names) {
+        if (a >= b) continue;
+        const differing = states[a].filter((d) => !states[b].includes(d));
+        expect({ pair: `${a} vs ${b}`, differs: differing.length > 0 }).toEqual({ pair: `${a} vs ${b}`, differs: true });
+      }
+    }
+  });
+
+  /* The rail the nodes sit on: 2 px `--steel` (§8.4.3), and the reached
+     segments repainted in the same token the reached node wears, so a run's
+     progress reads as one object rather than as dots on an unrelated line. */
+  it('draws the rail in steel and the travelled segments in the reached fill', () => {
+    const rail = ruleBlock(css, '.run-track-node::before') as string;
+    expect(rail).toMatch(/height\s*:\s*2px/);
+    expect(rail).toMatch(/background\s*:\s*var\(--steel\)/);
+    expect(ruleBlock(css, '.run-track-node[data-in="done"]::before') as string).toMatch(/background\s*:\s*var\(--fill-progress\)/);
   });
 });

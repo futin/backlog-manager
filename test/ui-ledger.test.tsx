@@ -33,3 +33,32 @@ describe('DayKicker', () => {
     expect(screen.getByText('15 September')).toHaveClass('ui-ledger-day');
   });
 });
+
+/**
+ * task-38's own variant: with no `columns`, the primitive holds the overflow
+ * box and lays out nothing. Runs › Watchdog's activity feed is a real
+ * `<table>` — five columns of the same five fields on every line, with a
+ * header row a scrolling reader needs — and a `<table>` laid out by this
+ * component's grid would have its columns set by the grid and its semantics by
+ * the element, which is two layouts fighting.
+ */
+describe('Ledger · the box-only variant', () => {
+  it('holds the scroll box and no grid when it is handed no columns', () => {
+    render(
+      <Ledger label="Activity">
+        <table>
+          <tbody>
+            <tr>
+              <td>one</td>
+            </tr>
+          </tbody>
+        </table>
+      </Ledger>
+    );
+
+    const box = screen.getByRole('group', { name: 'Activity' });
+    expect(box).toHaveClass('ui-ledger');
+    expect(box.querySelector('.ui-ledger-grid')).toBeNull();
+    expect(box.querySelector('table')).not.toBeNull();
+  });
+});

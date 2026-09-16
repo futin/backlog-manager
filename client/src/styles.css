@@ -814,31 +814,16 @@ code, kbd, samp, pre { font-family: inherit }
    sheet's head, which is `RunControls` below. */
 
 /* task-17's shared run controls (client/src/components/RunControls.tsx),
-   hosted by both the board's run drawer and the Runs view's detail pane.
-   The button deliberately reuses `.run-strip-resume`'s look rather than
-   inventing a second one — an amber outline pill is already this app's
-   word for "a run-level action a person can take", and the two controls
-   sit inches apart on the same screen when a drawer is open over a strip.
-   Kept as its own class rather than reusing the strip's, because the strip's
-   is sized against a single-line flex row and these live in two different
-   heads. */
-.run-controls { display: inline-flex; align-items: center; gap: 8px }
-.run-controls-btn {
-  flex: none; display: inline-flex; align-items: center;
-  font-size: 13px; font-weight: 600;
-  white-space: nowrap;
-  padding: 2px 8px; margin: 0; background: none;
-  border: 1px solid var(--amber); border-radius: 999px;
-  color: var(--amber); cursor: pointer;
-}
-.run-controls-btn:hover { background: color-mix(in srgb, var(--amber) 12%, transparent) }
-/* `[aria-disabled="true"]`, not `:disabled` — same reason
-   `.run-strip-resume`'s own rule gives: a natively disabled button drops out
-   of the tab order, and this one has to stay readable by a keyboard user
-   who wants to know why it will not act. */
-.run-controls-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed }
-/* `Pausing after <id>` and `Resuming…` — quiet ink, matching
-   `.run-strip-heartbeat`'s register: these are states, not alerts. */
+   drawn in the Runs detail sheet's head and in the Watchdog page's Watching
+   rows — one component, so one layout rule here and no look of its own.
+   task-38 took `.run-controls-btn` away: Pause, Cancel and Resume are 28 px
+   `Chip`s now (DESIGN.md §8.4.1's "drawn as 28 px chips"), and the chip's
+   family — including its `[aria-disabled='true']` rule, which is why a
+   natively disabled button is still never used here — lives once in the ui
+   primitives block. This rule is layout only: the row the controls sit in. */
+.run-controls { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap }
+/* `Pausing after <id>` and `Resuming…` — quiet ink: these are states, not
+   alerts. */
 .run-controls-note { flex: none; font-size: 12px; color: var(--ink2) }
 .run-controls-error { flex: none; font-size: 12px; color: var(--red) }
 
@@ -1329,147 +1314,84 @@ code, kbd, samp, pre { font-family: inherit }
    pads the page above and below this box. */
 .runs-board { height: calc(100vh / var(--font-scale, 1) - var(--body-pad) * 2) }
 
-/* The range control (Task 7, design doc: "Range") — Today / This week /
-   This month / All as a segmented button group sitting in `.board-tools`
-   ahead of the project `<select>`, not a fifth `<select>` beside it. A
-   `<select>` is the right shape for the project filter (an open-ended,
-   growing list of project names nobody has memorised the position of), but
-   the wrong one for four FIXED choices a person flips between constantly
-   while reading history: opening a dropdown, reading four words and closing
-   it again is three actions for what a row of always-visible buttons makes
-   one, and "always visible" also means the CURRENTLY active range reads at a
-   glance, which a collapsed `<select>` cannot offer. `role="group"` +
-   `aria-label="Range"` name the whole cluster for assistive tech the way a
-   `<fieldset>` would without that element's own block layout; each button's
-   own `aria-pressed` (not a shared radio input) states ITS membership in
-   that group, matching the semantics an exclusive toggle-button set is
-   supposed to carry. */
-.runs-seg { display: inline-flex; background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px; overflow: hidden }
-.runs-seg > button {
-  border: 0; background: transparent; font-size: 13px;
-  color: var(--ink2); padding: 4px 10px; cursor: pointer;
-  transition: color .15s, background .15s;
-}
-.runs-seg > button + button { border-left: 1px solid var(--hairline) }
-.runs-seg > button:hover { color: var(--ink) }
-/* The pressed range's own marker is the identical cyan-bottom-rule idiom the
-   rail already wears for "this is the current one" once IT lies down into a
-   horizontal row at phone width (`.rail-link.on` inside that section's own
-   700px block, near the top of this file) — a segmented group is a
-   horizontal row from the moment it exists, so it reaches for that row
-   variant of the idiom directly rather than the rail's own default left-edge
-   bar, which reads as a vertical list's marker, not a row's. */
-.runs-seg > button[aria-pressed="true"] {
-  color: var(--ink); background: var(--strip-hi); box-shadow: inset 0 -2px 0 var(--cyan);
-}
-/* The same cyan-rule-for-focus idiom `.board-select:focus` already uses on
-   the project select beside this group, restated as a `box-shadow` rather
-   than a `border-color` swap: a plain button here carries no border of its
-   own to recolour (only the hairline BETWEEN buttons above), so the ring has
-   to be painted rather than borrowed from an existing edge. */
-.runs-seg > button:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--cyan) }
+/* Runs › Watchdog — the sweeper's own page (WatchdogMonitor.tsx, task-18,
+   rebuilt as a console by task-26, redrawn as a page by task-38). One column:
+   a band, three figures, a Watching sheet, an Activity sheet.
 
-/* task-26. Three controls sit in this bar: two scope run history and one
-   picks the surface, and without a rule between them they read as one
-   instrument. It is drawn inside the filters' own JSX fragment rather than
-   beside the switch, so watchdog mode — where the two filters unmount —
-   never shows a rule beside a lone switch. `align-self: stretch` sizes it
-   from the bar's own height rather than a hard-coded one. */
-.board-tools-divider { width: 1px; background: var(--hairline2); align-self: stretch; margin: 3px 4px }
+   task-38 deleted this section's own tile family (`.watchdog-tiles` and the
+   five `.runs-tile*` rules both pages shared): the figures are `Figure`/
+   `FigureStrip` now, and §12.1's rule is that a shape more than one surface
+   draws has exactly one home in the ui primitives block. What is left here is
+   this page's own layout and the readings no primitive owns — the phase lamp,
+   the policy table, a watching row, the activity table. */
+.watchdog-monitor { display: flex; flex-direction: column; gap: var(--group-gap); flex: 1 1 auto; min-height: 0 }
 
-/* Runs › Watchdog — the sweeper's live surface (WatchdogMonitor.tsx,
-   task-18, rebuilt as a console by task-26). One column: three state tiles,
-   a card per watched run, then the activity feed. The feed's rules came here
-   from the Settings section with the feed itself.
-
-   The first shape of this was deliberately plainer than `.runs-tile` — "a
-   monitor read at a glance while something is going wrong, not a dashboard".
-   That is no longer true, and the spec's own "Why this exists" says why: the
-   plainness encoded no state in FORM, so a crashed run and a healthy one
-   differed by one word and one border colour, and the reading a person
-   watching a live run most wants — how close is this to being called
-   crashed — could not be drawn at all. Reusing `.runs-tile` here rather than
-   minting a second tile idiom is the same choice: one tile, two surfaces. */
-/* task-26: the flex child of `.runs-board` that absorbs the remainder, the
-   role `.runs-split` plays in runs mode — read that rule's own comment for
-   why `min-height: 0` is load-bearing rather than decoration (a flex item's
-   default `min-height: auto` refuses to shrink below its content, so without
-   it this box grows to the full event list and the viewport bound silently
-   does nothing). Before this, watchdog mode was the one section inside
-   `.runs-board` that ignored the bound. */
-.watchdog-monitor { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; flex: 1 1 auto; min-height: 0 }
-
-/* 1.2fr / 1fr / 1.5fr: the sweeper tile carries a sentence and a bar, the
-   watching tile a number and three short counts, the policy tile three
-   label/value rows and a hint — so the widths follow the content rather
-   than an even third each. */
-.watchdog-tiles { display: grid; grid-template-columns: 1.2fr 1fr 1.5fr; gap: 8px }
-
-/* The phase word and its lamp share the tile's value row, so the lamp reads
-   as part of the number rather than as a bullet beside it. */
-.watchdog-tile-phase { display: flex; align-items: center; gap: 7px }
-/* `margin-left` rather than a flex gap: the value row is a plain block (the
-   sweeper tile's is the flex one), so the unit would otherwise sit hard
-   against the digit — `0running runs`. */
-.watchdog-tile-unit { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--ink3) }
+/* The phase word and its lamp share the figure's value row, so the lamp reads
+   as part of the word rather than as a bullet beside it. */
+.watchdog-tile-phase { display: inline-flex; align-items: center; gap: 8px }
 
 /* Cyan and ringed while armed, a flat disc while idle, hollow while off —
    three phases told apart by fill AND outline, never by colour alone, since
-   the phase word sits right beside it in text either way. */
-.watchdog-lamp { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--ink3) }
-.watchdog-lamp-armed { background: var(--cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 22%, transparent); animation: watchdog-lamp-ring 2.4s ease-in-out infinite }
+   the phase word sits right beside it in text either way. Not a `Dot`: a Dot
+   says a status or an identity, and neither of its eight tones is "the
+   sweeper's own phase" — which is a fourth thing, drawn once, here. */
+.watchdog-lamp { flex: none; width: 10px; height: 10px; border-radius: 999px; background: var(--ink3) }
+.watchdog-lamp-armed { background: var(--fill-live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 22%, transparent); animation: watchdog-lamp-ring 2.4s ease-in-out infinite }
 .watchdog-lamp-off { background: transparent; border: 1.5px solid var(--ink3) }
 /* The last keyframe is the RESTING appearance on purpose: the quality-floor
    `prefers-reduced-motion` block runs every animation once, instantly, which
    lands it here — the same trap `.board-card-stage-glyph`'s own carve-out
    documents. The carve-out below cancels it outright anyway. */
 @keyframes watchdog-lamp-ring {
-  0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--cyan) 30%, transparent) }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--cyan) 8%, transparent) }
-  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 22%, transparent) }
+  0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fill-live) 30%, transparent) }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--fill-live) 8%, transparent) }
+  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 22%, transparent) }
 }
 @media (prefers-reduced-motion: reduce) {
   .watchdog-lamp-armed { animation: none !important }
 }
 
-.watchdog-state-line { font-size: 11px; color: var(--ink) }
 .watchdog-hint { font-size: 12px; color: var(--ink3) }
 .watchdog-warn { color: var(--amber) }
-
-/* The armed countdown, drawn. A recessed track so an empty bar still reads
-   as a bar; the fill glides over the 5s the component re-renders on rather
-   than stepping, which is what makes it read as time passing. */
-.watchdog-sweep { height: 5px; background: var(--steel); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden }
-.watchdog-sweep-fill { display: block; height: 100%; background: var(--cyan); transition: width 5s linear }
+/* The watching figure's three counts, on the figure's own line: a row that
+   wraps rather than truncates, because three short readings are worth keeping
+   legible over keeping the cell's height fixed. */
+.watchdog-counts { display: flex; flex-wrap: wrap; gap: 4px 10px }
 
 /* Label/value rows rather than one run-on sentence: the three knobs are read
    as a table ("what is the policy") far more often than as prose. Tabular
-   figures for the same reason `.runs-tile-value` uses them — three values in
-   a column should not shift against each other. */
-.watchdog-policy { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 12px; color: var(--ink3) }
-.watchdog-policy-label { color: var(--ink3) }
-.watchdog-policy-value { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right }
+   figures so three values in a column do not shift against each other. */
+.watchdog-policy { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; font-size: 12px; color: var(--ink3) }
+.watchdog-policy-label { color: var(--ink2) }
+.watchdog-policy-value { font-size: 14px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right }
+/* The policy cell's own 12 px line, under the pairs rather than through
+   `Figure`'s `line` slot — see the component for why this cell places it
+   itself. Same size and tone `.ui-figure-line` gives every other cell's, so
+   the row still reads as one grid. */
+.watchdog-policy-line { font-size: 12px; font-weight: 400; color: var(--ink2) }
 
-/* Cards, not rows (spec §8): a meter wants a line of its own under the facts
-   it qualifies, and a table with a meter in a sixth column is wider than
-   this pane on an ordinary laptop. `auto-fit` so one crashed run gets the
-   full width and four share it. */
-.watchdog-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px }
-
-/* A button, so the card is keyboard-reachable — reset to look like the card
-   it is rather than like a control. `text-align: left` because the browser
-   default centres button text and this is four lines of reading. */
-.watchdog-row {
-  display: flex; flex-direction: column; gap: 7px; align-items: stretch;
-  width: 100%; text-align: left; cursor: pointer;
-  padding: 10px 12px; font-size: 11px;
-  background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
-  color: var(--ink2);
+/* Rows inside the Watching sheet — one per running run, each a `<div>`
+   carrying two independent controls (the jump, and Resume when the sweeper has
+   stood down). A `<button>` may hold neither an interactive descendant nor one
+   with a `tabindex`, and jsdom fails on neither, which is how a green suite
+   once shipped exactly that shape on the board's crashed strip; so the row is
+   a div and the two controls are siblings inside it. */
+.watchdog-rows { display: flex; flex-direction: column; gap: 2px }
+.watchdog-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--hairline) }
+.watchdog-row:first-child { border-top: 0 }
+/* The jump control covers the whole informational body, so a click anywhere
+   across it lands on that run's detail — reset to look like the reading it is
+   rather than like a control. `text-align: left` because the browser centres
+   button text and this is four lines of reading. */
+.watchdog-row-open {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;
+  text-align: left; cursor: pointer; font-size: 12px;
+  background: none; border: 0; padding: 0; color: var(--ink2);
 }
-.watchdog-row:hover { border-color: var(--hairline2) }
-.watchdog-row:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--cyan) }
-.watchdog-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px }
-.watchdog-row-project { font-weight: 600; color: var(--ink) }
+.watchdog-row-open:focus-visible { outline: 2px solid var(--ink3); outline-offset: 2px; border-radius: 4px }
+.watchdog-row-resume { flex: none }
+.watchdog-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.watchdog-row-project { font-size: 14px; font-weight: 500; color: var(--ink) }
 .watchdog-row-id { color: var(--ink3) }
 .watchdog-card-item { color: var(--ink) }
 .watchdog-card-beat { color: var(--ink3) }
@@ -1479,26 +1401,22 @@ code, kbd, samp, pre { font-family: inherit }
    — the one reading a person scans a wall of these for. */
 .watchdog-verdict-glyph { margin-left: auto; font-size: 1.05em; line-height: 1 }
 
-/* The freshness meter: the same 6px recessed track idiom as the sweep bar
-   one tile up, at the size that reads as a measurement rather than a hairline.
-   `min-width` on the fill so a heartbeat one second old still draws something
-   — a track with literally nothing in it reads as broken. */
-.watchdog-meter { height: 6px; background: var(--steel); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden }
-.watchdog-meter-fill { display: block; height: 100%; min-width: 2px; background: var(--cyan); transition: width 5s linear }
-.watchdog-meter-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ink3) }
+/* The heartbeat meter's own box. The BAR is `ProgressRow` (ui primitives) —
+   including its amber `warn` fill past the stale line, which is a prop rather
+   than an override here for the reason §12.1 gives: a page that repainted
+   `.ui-progress-fill` would recolour every meter on the board. This rule only
+   bounds the width, so the meter does not run the full sheet. */
+.watchdog-meter { display: block; max-width: 420px }
 
-/* The same amber the crashed strip uses (see `.run-strip-crashed`'s own
-   comment for why amber and not red): the run may still be recovered
-   unattended. */
-.watchdog-row-crashed { border-color: var(--amber) }
+/* Amber for the same reason the crashed Live row is: the run may still be
+   recovered unattended. */
 .watchdog-row-crashed .watchdog-row-verdict, .watchdog-row-crashed .watchdog-verdict-glyph { color: var(--amber) }
-.watchdog-row-crashed .watchdog-meter-fill { background: var(--amber) }
 .watchdog-row-ok .watchdog-row-verdict, .watchdog-row-ok .watchdog-verdict-glyph { color: var(--ink3) }
 
-/* The watchdog's own line on a crashed card — amber for the same reason the
-   border is, and wrapping because `watchdogClause` can be a long sentence
-   and a session id is 30-odd characters after it. */
-.watchdog-card-wd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--amber) }
+/* The watchdog's own line on a crashed row — amber, and wrapping because
+   `watchdogClause` can be a long sentence and a session id is 30-odd
+   characters after it. */
+.watchdog-card-wd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--amber) }
 .watchdog-card-session { color: var(--ink3) }
 /* Pips, not "1/2": at a glance the filled count against the total says how
    much rope is left without being read as a fraction first. `aria-label`
@@ -1508,356 +1426,223 @@ code, kbd, samp, pre { font-family: inherit }
 .watchdog-attempts i.on { background: var(--amber) }
 
 .watchdog-row-missing, .watchdog-rows-empty {
-  padding: 8px 12px; font-size: 11px; color: var(--ink3);
-  border: 1px dashed var(--hairline); border-radius: 2px;
+  padding: 10px 0; font-size: 12px; color: var(--ink3);
 }
 
-/* The activity block passes the monitor's remaining height down to the table
-   wrapper, which is the one thing on this surface that should scroll: the
-   tiles and the cards are the state, the feed is history. */
-.watchdog-activity { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0 }
-.watchdog-activity-name { font-size: 11px; font-weight: 600; color: var(--ink) }
+/* The Activity sheet is the one thing on this page that should scroll: the
+   figures and the rows are the state, the feed is history. The SHEET carries
+   the box rather than a rule reaching into the `Ledger` inside it — a page may
+   never name a primitive's class (§12.1, and guard 7 in
+   test/design-guards.test.ts refuses it) — and the sheet is the right owner
+   anyway: `th` sticks against its nearest scrolling ancestor, which has to be
+   the element the header scrolls inside. `Ledger` keeps the `overflow-x` half,
+   which is the axis a five-column table actually overflows on; that is why
+   `.watchdog-table-wrap` is gone rather than renamed. */
+.watchdog-activity { flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain }
 .watchdog-events-empty { font-size: 12px; color: var(--ink3) }
 
-/* task-26 replaced the old `max-height: 220px` list with a box that takes
-   whatever the section has left — 220px was a constant that was wrong in
-   both directions, cutting the feed short on a tall screen and still
-   overflowing a short one. `overscroll-behavior: contain` so reaching the
-   end of the feed does not start scrolling the page behind it. */
-.watchdog-table-wrap {
-  flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain;
-  background: var(--panel); border: 1px solid var(--hairline); border-radius: 2px;
-}
-.watchdog-table { width: 100%; border-collapse: collapse; font-size: 12px; color: var(--ink2) }
+.watchdog-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink2) }
 /* Sticky, so scrolling three weeks of sweeper history never leaves a reader
-   guessing which column is which. `--strip-hi` rather than transparent: rows
-   scroll UNDER this. */
+   guessing which column is which. Opaque `--strip` — the sheet's own ground —
+   because rows scroll UNDER this. */
 .watchdog-table th {
-  position: sticky; top: 0; z-index: 1; background: var(--strip-hi);
-  font-size: 11px; font-weight: 600;
-  color: var(--ink3);
-  text-align: left; white-space: nowrap; padding: 5px 10px;
+  position: sticky; top: 0; z-index: 1; background: var(--strip);
+  font-size: 12px; font-weight: 400;
+  color: var(--ink2);
+  text-align: left; white-space: nowrap; padding: 6px 12px 6px 0;
   border-bottom: 1px solid var(--hairline);
 }
 /* `nowrap` on the four keyed columns and wrapping on the detail alone: the
    first four are short tokens whose wrapping would only ever be an accident
    of width, where `detail` is a sentence. */
-.watchdog-table td { padding: 6px 10px; border-top: 1px solid var(--hairline); vertical-align: baseline; white-space: nowrap }
+.watchdog-table td { padding: 7px 12px 7px 0; border-top: 1px solid var(--hairline); vertical-align: baseline; white-space: nowrap }
 .watchdog-table-detail { white-space: normal; color: var(--ink) }
-.watchdog-table time { color: var(--ink3) }
+.watchdog-table time { font-size: 12px; color: var(--ink3) }
 
-/* The stage-chip idiom (see `.board-card-stage`'s own comment for why a full
-   round and why a leading glyph), applied to the kind column. Five tones,
-   each a MEANING rather than a colour name — `WATCHDOG_KIND_TONE` is what
-   decides which kind wears which. */
+/* The stage-chip idiom applied to the kind column. Five tones, each a MEANING
+   rather than a colour name — `WATCHDOG_KIND_TONE` decides which kind wears
+   which. */
 .watchdog-kind {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; font-weight: 600;
+  font-size: 12px; font-weight: 500;
   white-space: nowrap;
-  padding: 1px 7px 1px 5px; border: 1px solid; border-radius: 9px;
 }
-.watchdog-kind-live { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, var(--hairline)) }
-.watchdog-kind-done { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--hairline)) }
-.watchdog-kind-bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline)) }
-.watchdog-kind-warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline)) }
-.watchdog-kind-muted { color: var(--ink3); border-color: var(--hairline2) }
+.watchdog-kind-live { color: var(--fill-live) }
+.watchdog-kind-done { color: var(--green) }
+.watchdog-kind-bad { color: var(--red) }
+.watchdog-kind-warn { color: var(--amber) }
+.watchdog-kind-muted { color: var(--ink3) }
 
-/* Five even tiles plus a sixth, wider one on a wide screen (the sixth is
-   Task 7's own "machine time by stage" tile, added below). `minmax(0, 1fr)`
-   on the first five, unchanged since before Task 7: a tile's own content
-   (the by-status substat line especially) is allowed to be wider than an
-   even sixth of the row, and a bare `1fr` would let that content blow the
-   grid track open instead of wrapping inside it. The sixth column,
-   `minmax(300px, 2.3fr)`, is not just another `1fr` slot: `StageBars`' own
-   80px-label/track/60px-value row (see that widget's own CSS block further
-   down) needs real width to stay legible, so this floors the column at a
-   width it can actually lay that row out in, then lets it claim roughly
-   twice a plain tile's share of whatever space is left over. */
-.runs-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(300px, 2.3fr); gap: 8px; margin-bottom: var(--group-gap) }
-.runs-tile {
-  display: flex; flex-direction: column; gap: 4px; min-width: 0;
-  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 10px 12px;
-}
-/* Tabular figures: five tiles sitting in a row is exactly the layout where a
-   proportional "1" and a proportional "4" claim different amounts of visual
-   weight for the same digit count, which reads as the row being unevenly
-   important rather than as five equally-weighted numbers. */
-.runs-tile-value {
-  font-size: 18px; font-weight: 700; color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-.runs-tile-label {
-  font-size: 11px; font-weight: 600;
-  color: var(--ink3);
-}
-/* The "runs" tile's by-status breakdown — the one tile whose single headline
-   number (a bare run count) says the least on its own, so it is the one that
-   earns a second line. Wraps rather than truncates: four short words are
-   worth keeping legible over keeping the tile's own height fixed. */
-.runs-tile-substat { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 11px; color: var(--ink3) }
-.runs-tile-substat-item { white-space: nowrap }
+/* ---------------------------------------------- Runs › History (task-38)
+   RunsView.tsx, shape D of `03-runs-shape.html`: band, figure strip, then a
+   420 px list column beside one always-visible detail sheet. Every cell, sheet
+   and chip on the page is a ui primitive; what lives here is the page's own
+   LAYOUT (§12.1: a page lays a primitive out and never restates its look) and
+   the row shapes no primitive owns. */
 
-/* The wide sixth tile (Task 7). `.runs-tile-wide` layers onto the plain
-   `.runs-tile` base above rather than replacing it — the same strip/border/
-   radius/padding still apply — overriding only the gap: the plain tiles
-   stack a bare number over a label over an optional substat line, where this
-   one stacks a HEADING ROW over a seven-row `StageBars` widget, and those
-   two blocks want more air between them than a number wants from its own
-   caption. It shares this row's grid rather than getting a row of its own
-   below the other five; the `@media` blocks further down are what peel it
-   back onto its own full-width row once a narrower screen can no longer
-   afford it a whole sixth column. */
-.runs-tile-wide { gap: 8px }
-/* The tile's own heading row: a label on the left (matching every other
-   tile's `.runs-tile-label`) and the range-scoped caveat
-   (`${RANGE_SCOPE[range]} · queue wait excluded`) pushed to the right edge by
-   `margin-left: auto` below — the same "label left, caveat right, one flex
-   row" shape `.run-detail-heading`/`.run-detail-sub` already use for the
-   per-run version of this exact rollup, restated here (rather than shared)
-   because this tile is not a heading over a whole section the way that one
-   is, just the top of one tile among six. */
-.runs-tile-head { display: flex; align-items: baseline; gap: 8px }
-.runs-tile-head .runs-tile-substat { margin-left: auto }
-
-/* A tablet width still has room for three even tiles a row, but not six —
-   the wide tile drops to its own full-width row underneath rather than
-   fighting the other five for a third of a narrowing column, which is
-   exactly the room `StageBars`' 80px-label/track/60px-value row layout needs
-   to stay legible. This block has to come BEFORE the 700px one below in
-   source order: both apply at once under 700px, and the narrower block's own
-   `.runs-tiles` column count has to win the conflict there, the same
-   mobile-first cascade the rest of this file's breakpoints already follow. */
-@media (max-width: 900px) {
-  .runs-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)) }
-  .runs-tile-wide { grid-column: 1 / -1 }
-  /* The policy tile spans rather than shrinking to a third: its three
-     label/value rows are the one tile here whose content is a table, and a
-     narrowed column wraps every label onto two lines. */
-  .watchdog-tiles { grid-template-columns: 1fr 1fr }
-  .watchdog-tiles > .runs-tile:nth-child(3) { grid-column: 1 / -1 }
+/* The one cell of the figure strip this page lays out rather than fills: the
+   wide sixth, whose subject is `StageBars` rather than a number. The bars need
+   real width to stay legible, which is what the strip's `grid-column: 1 / -1`
+   on `.ui-figure-wide` already gives them. */
+.runs-figure-bars { margin-top: 4px }
+/* The `runs` cell's five-status breakdown, on the figure's own 12 px line.
+   Wraps rather than truncates: five short readings are worth keeping legible
+   over keeping the cell's height fixed. */
+.runs-figure-breakdown { display: flex; flex-wrap: wrap; gap: 2px 10px }
+.runs-figure-breakdown-item { white-space: nowrap }
+/* The project filter's native `<select>`, laid inside the `Chip` that is its
+   label — the chip carries every visual decision, so this only strips the
+   control's own chrome. Same shape the Board's own filters wear. */
+.runs-project {
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  color: inherit; background: none; border: 0; padding: 0;
+  cursor: pointer; max-width: 170px; text-overflow: ellipsis;
 }
+.runs-project:focus { outline: none }
 
-@media (max-width: 700px) {
-  /* Two across rather than one: five tiles stacked full-width each would push
-     the list and detail pane (already stacking under this same breakpoint,
-     see .runs-split below) below a full screen of nothing but numbers. */
-  .runs-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)) }
-  /* One column: three tiles side by side on a phone leaves the sweeper's own
-     sentence — the longest string on this surface — three words wide. */
-  .watchdog-tiles { grid-template-columns: 1fr }
-  /* Restated rather than left to inherit silently from the 900px block
-     above (this value does not actually change at this narrower width — the
-     wide tile already spans the full row below 900px, this block only ever
-     changes the OTHER five tiles' column count): a reader landing on THIS
-     block to answer "what does the phone layout do" should not have to also
-     read the 900px block above it to learn the wide tile is still
-     full-width here too. */
-  .runs-tile-wide { grid-column: 1 / -1 }
-}
-
-/* The master-detail split: run list on the left at a fixed width (wide
-   enough for a project label and a merged/total count without wrapping on
-   an ordinary project name, narrow enough that the detail pane — the reason
-   this layout exists at all, per the design doc's own rejection of a dense
-   ledger table — keeps the room). `align-items: start` so a short list does
-   not stretch to match a tall detail pane's height, which would leave a
-   column of empty strip paper under the last day group for no reason. */
+/* The split: a 420 px list column, one detail sheet. 420 px is the figure the
+   row designs answer to — every reading that does not survive that width is in
+   the detail sheet instead, and the list is what has to stay legible when the
+   detail is a scroll away.
+   `flex: 1; min-height: 0` makes this the child of `.runs-board` that absorbs
+   whatever height the band and the strip did not take. `min-height: 0` is not
+   decoration: a flex item's default `min-height: auto` refuses to shrink below
+   its content, so without it this box grows to the full run list and the whole
+   viewport bound silently does nothing. */
 .runs-split {
-  display: grid; grid-template-columns: 200px 1fr; gap: var(--group-gap); align-items: start;
-  /* task-16: the flex child of .runs-board that absorbs whatever height the
-     bar and the tiles above it did not take. `min-height: 0` is not
-     decoration — a flex item's default `min-height: auto` refuses to shrink
-     below its content, so without it this box simply grows to the full run
-     list and the whole bound below silently does nothing. Deriving the
-     remainder from layout (rather than `calc(100vh - <chrome>px)` on the
-     list itself) is what makes this correct at every breakpoint: the tiles
-     row is markedly taller in the 700–900px band, where .runs-tile-wide
-     peels onto its own full-width row, and no constant is right in both
-     bands. */
+  display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: var(--group-gap); align-items: stretch;
   flex: 1; min-height: 0;
 }
-.runs-list { display: flex; flex-direction: column; gap: 14px; min-width: 0 }
-/* task-16: the two halves of the split each scroll their own overflow rather
-   than growing the document. The cap is a PERCENTAGE of the grid area — with
-   .runs-board carrying a definite height, the implicit row stretches to it —
-   so `align-items: start` above still holds for a short list (it sizes to its
-   content and leaves no column of empty paper), and the cap only bites once
-   content actually exceeds the box.
-   `overscroll-behavior: contain` because a nested scroll box that chains its
-   scroll to the document at either end is worse than the unbounded page this
-   replaces: the page would lurch the moment the list bottomed out.
-   The `min-height` floor is the graceful degrade for a viewport so short (or
-   a --font-scale so large) that the bar and tiles alone exceed it — the boxes
-   keep a usable height and the PAGE scrolls again, rather than the list
-   collapsing to nothing. It supersedes .runs-detail's own old 160px floor,
-   which the 700px block below restores once none of this applies. */
-.runs-list, .runs-detail { max-height: 100%; overflow-y: auto; overscroll-behavior: contain; min-height: 240px }
-.runs-day { display: flex; flex-direction: column; gap: 6px }
-/* Sticky against .runs-list's own scroll — the same idiom, and the same
-   reasoning, as .archive-month (see its comment above): once a long list has
-   scrolled past a day's heading, that heading is the only thing left saying
-   where in history the reader is. Sticky works here because a sticky element
-   positions against its nearest SCROLLING ancestor (.runs-list) while
-   un-sticking at the end of its own containing block (.runs-day), which is
-   exactly the wanted behaviour for a group heading.
-   Opaque --board, not a mix or a transparency: rows scroll UNDER this, and
-   anything less shows a row's text through the heading meant to be labelling
-   it. */
-.runs-day-heading {
-  position: sticky; top: 0; z-index: 1; background: var(--board);
-  font-size: 11px; font-weight: 600;
-  color: var(--ink3);
+/* The list column. It does NOT scroll itself — the History sheet inside it
+   does, which is what lets the Live sheet stay put above a long history and
+   what makes a sticky day kicker stick to the top of the list it belongs to
+   rather than to the top of the column. */
+.runs-col, .runs-list { display: flex; flex-direction: column; gap: var(--group-gap); min-width: 0; max-height: 100%; min-height: 0 }
+.runs-live-sheet { flex: none }
+/* The one scroll box in the column. `overscroll-behavior: contain` because a
+   nested scroll box that chains its scroll to the document at either end is
+   worse than an unbounded page: the page would lurch the moment the list
+   bottomed out. The `min-height` floor is the graceful degrade for a viewport
+   so short (or a --font-scale so large) that the band and strip alone exceed
+   it — the box keeps a usable height and the PAGE scrolls again, rather than
+   the list collapsing to nothing. */
+.runs-history-sheet, .runs-detail {
+  max-height: 100%; overflow-y: auto; overscroll-behavior: contain; min-height: 240px;
 }
-.runs-day-rows { display: flex; flex-direction: column; gap: 6px }
+.runs-list:focus { outline: none }
+.runs-rows { display: flex; flex-direction: column }
+.runs-day { display: flex; flex-direction: column }
 
-/* One row, matching the run strip's own button reset and paper surface (the
-   strip left with task-37; the reset is kept) — a real <button> for the free
-   keyboard activation that buys, not a div with a click handler bolted on. */
+/* One row — a real `<button>` for the free keyboard activation that buys, not
+   a div with a click handler bolted on. Rows, not cards (§8.4.1): no paper, no
+   border, no radius of their own — they sit on the sheet they are in, told
+   apart by a hairline, which is what lets 25 of them fit a 420 px column. */
 .runs-row {
   display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
-  font-family: inherit; font-size: 11px; color: var(--ink2);
-  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 7px 10px; cursor: pointer; transition: border-color .15s;
+  font-family: inherit; font-size: 12px; color: var(--ink2);
+  background: none; border: 0; border-top: 1px solid var(--hairline);
+  padding: 10px 0; cursor: pointer;
 }
-.runs-row:hover { border-color: var(--hairline2) }
-/* The selected row's own marker — a cyan rule, not a background fill, so it
-   reads as "this is what the pane on the right is showing" without also
-   competing with the live marker below for the same visual register. */
-.runs-row[aria-current='true'] { border-color: var(--cyan) }
-/* The live marker (Task 6's own case for it): a run that is both matched
-   into the live poll payload AND still reporting a fresh heartbeat gets a
-   left accent bar, the same inset-shadow idiom the rail's own `.rail-link.on`
-   uses for "this is the live one" rather than a border colour, which
-   `[aria-current]` above has already claimed for a different fact (is this
-   the one currently open in the detail pane). A row can be both at once —
-   selected AND live — and the two markers are visually independent for
-   exactly that reason. */
-.runs-row-live { box-shadow: inset 2px 0 0 var(--cyan) }
+.runs-row:first-child { border-top: 0 }
+.runs-row:hover { background: var(--strip-hi) }
+/* 44 px is the History row's own figure (§8.4.1); the Live row is taller
+   because a crashed one carries a second line. */
+.runs-row-past { min-height: 44px; justify-content: center }
+/* The selected row's marker: an ink rule at the row's leading edge, which is
+   the one channel not already carrying a reading — the dot says the run's
+   state and the word says its ending, so selection cannot be a colour. */
+.runs-row[aria-current='true'] { background: var(--strip-hi); box-shadow: inset 2px 0 0 var(--ink) }
 .runs-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
-/* The run-level status chip. Its own small class rather than a reuse of
-   .board-card-stage: see RunsView.tsx's own comment on RUN_STATUS_GLYPH for
-   why a RUN's status (running/done/aborted/failed) and an ITEM's stage
-   (RunStage's fifteen members) are different vocabularies that only
-   happen to share one spelling. The colour tokens are the same four
-   run-stage.ts already uses for its own tones, though — cyan/green/amber/red
-   mean the same thing everywhere in this app. */
-.runs-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600 }
-.runs-status-live { color: var(--cyan) }
-.runs-status-done { color: var(--green) }
+.runs-row-project { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* `⚠ N` — the count and its glyph, which is what `N needs attention`
+   compresses to at this width. Amber because a person has to act. */
+.runs-row-attn { flex: none; color: var(--amber); font-variant-numeric: tabular-nums }
+/* §7's two-tone amount: the completed figure in `--ink`, the queue length in
+   `--ink3`, the same size — used for limits and goals alike, and this is a
+   goal. */
+.runs-count { flex: none; font-variant-numeric: tabular-nums }
+.runs-count-done { font-size: 13px; font-weight: 500; color: var(--ink) }
+.runs-count-total { font-size: 13px; color: var(--ink3) }
+.runs-row-wall { flex: none; font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
+/* The crashed Live row's second line — all three readings (`no heartbeat for
+   <age>`, `last reported <id> at <stage>` or `all items at rest`, and
+   `watchdogClause`'s sentence) in one wrapping amber line, because they travel
+   together or the row says less than the strip it replaces did. */
+.runs-row-crashed { font-size: 12px; color: var(--amber); line-height: 1.45 }
+/* The run-level status word. Its own small class rather than a reuse of
+   `.board-card-stage`: a RUN's status and an ITEM's stage are different
+   vocabularies that only happen to share one spelling. The colour tokens are
+   the four run-stage.ts already uses. */
+.runs-status { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500 }
+.runs-status-live { color: var(--fill-live) }
+.runs-status-done { color: var(--ink3) }
 .runs-status-warn { color: var(--amber) }
 .runs-status-bad { color: var(--red) }
-/* task-17: paused is the one status with no verdict attached — the run was
-   stopped on purpose and can still finish — so it takes the muted ink rather
-   than borrowing amber (a warning) or green (an ending that went well). */
-.runs-status-paused { color: var(--ink3) }
-.runs-row-project {
-  font-size: 12px; font-weight: 600;
-  color: var(--ink);
-}
-/* Pushed to the row's right margin, matching .run-drawer-item-time's own
-   `margin-left: auto` reasoning: a reader scanning the list top to bottom
-   for "which of these got the most done" wants that number in a stable
-   column, not wherever the status word and project label happened to leave
-   room. "Done" here is `RunsView.tsx`'s own `completed` — merged or
-   branched alike, RunStage's two success exits — not `merged` alone. */
-.runs-row-count { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums }
-.runs-row-wall { font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
+/* paused is the one status with no verdict attached — the run was stopped on
+   purpose and can still finish — so it takes the live fill rather than
+   borrowing amber (a warning) or the done ink (an ending). */
+.runs-status-paused { color: var(--fill-live) }
+/* task-21's placeholder row: provisional, and nothing here to click (no run
+   file means no runId, and no runId means no detail sheet to show). `default`
+   rather than `pointer` says the second thing; the dashed rule says the
+   first. */
+.runs-row-starting { border-top-style: dashed; cursor: default }
+/* The placeholder's one reading — an age, never a wall time, which is why it
+   has its own class rather than borrowing `.runs-row-wall`: the row exists
+   for the window in which there is no run file to take a wall time from. */
+.runs-row-starting-age { flex: none; font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
+.runs-row-starting:hover { background: none }
 
-/* task-21's placeholder row (StartingRow, RunsView.tsx) — a run this server
-   spawned whose run.json has not been written yet, in the runs LIST rather
-   than the board's strip stack. Dashed border and `cursor: default` say the
-   same two things `.run-strip-starting` says on the board, in the same two
-   languages: the row is provisional, and there is nothing here to click (no
-   run file means no runId, and no runId means no detail pane to open).
-   The `:hover` rule is not a duplicate of the base one — `.runs-row:hover`
-   outranks a single class on specificity, so without this the row would
-   still light up under the pointer, which is a response to an interaction it
-   does not actually have. */
-.runs-row-starting { border-style: dashed; cursor: default }
-.runs-row-starting:hover { border-color: var(--hairline) }
-/* Quiet ink, never `.runs-status-live`'s cyan: cyan means "heartbeating right
-   now" everywhere in this app and this run has not reported anything at all
-   yet. Not amber either — starting is the most ordinary thing a run can be
-   doing, not a state anyone needs to look at. Same reasoning, same token, as
-   `.run-strip-starting-label`. */
-.runs-status-starting { color: var(--ink2) }
-/* `.runs-row-wall`'s treatment in `.runs-row-count`'s SLOT: the age is the
-   only number this row has, so it takes the right-hand column every other row
-   puts a number in rather than trailing the project name and leaving that
-   column empty. */
-.runs-row-starting-age {
-  margin-left: auto; font-size: 12px;
-  color: var(--ink3); font-variant-numeric: tabular-nums;
-}
+/* `load more` at the foot of the History sheet, INSIDE its scroll box — it is
+   the end of the list, not a fixture beside it, so it arrives under the last
+   row rather than sitting permanently in view over a list it may not apply
+   to. A flat `Chip`, so it reads as the end of the list rather than as one
+   more run in it. */
+.runs-load-more { display: flex; justify-content: center; padding-top: 12px }
 
-/* task-16's `load more`, sitting at the foot of the list INSIDE the scroll
-   box. Deliberately quieter than .runs-row — dashed rather than solid, no
-   paper fill — so it reads as the end of the list rather than as one more
-   run in it, which is the one thing a reader scanning rows must not mistake
-   it for. */
-.runs-load-more {
-  width: 100%; text-align: center; font-size: 13px; color: var(--ink3);
-  background: none; border: 1px dashed var(--hairline); border-radius: 2px;
-  padding: 7px 10px; cursor: pointer; transition: color .15s, border-color .15s;
-}
-.runs-load-more:hover { color: var(--ink2); border-color: var(--hairline2) }
-.runs-load-more:focus-visible { outline: none; border-color: var(--cyan); color: var(--ink2) }
-/* The list container itself is focusable (tabIndex={-1}) only so the
-   exhausting `load more` click has somewhere to hand focus; it is not a
-   control, so it gets no focus ring of its own. */
-.runs-list:focus { outline: none }
+/* The detail sheet's head: the project dot beside the project name, which
+   `SheetHead` renders as its 19/500 title. The sheet's own paper, radius and
+   padding are `Sheet`'s; its scroll bound is the shared rule above. */
+.run-detail-proj { display: inline-flex; align-items: center; gap: 8px; min-width: 0 }
 
-/* The detail pane. Task 7 replaces its contents; the paper-and-hairline
-   surface is what this task owns. Its own `min-height: 160px` (so an
-   empty/placeholder pane does not collapse to a sliver beside a tall run
-   list) moved to the shared bound rule above in task-16 — a second, LATER
-   declaration here would silently win over that 240px floor, which is
-   exactly the bug a leftover would be. The phone block below restates the
-   160px, since none of the bounding applies there. */
-.runs-detail {
-  background: var(--strip); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 12px; font-size: 11px; color: var(--ink3);
-}
-
-/* The same 700px rail breakpoint the rest of the app switches on (see the
-   phone rail rules near the top of this file) — one column, list above
-   detail, rather than a second narrower threshold invented for this
-   section alone. */
-@media (max-width: 700px) {
-  .runs-split { grid-template-columns: 1fr }
-  /* task-16: and the whole one-viewport bound comes off with it. A scroll box
-     nested inside a scrolling page is worse than an unbounded page on a
-     phone — there is no fixed chrome left to preserve here, since the layout
-     is already one column and the tiles scroll away with everything else.
-     .runs-split's `flex: 1; min-height: 0` needs no undoing: with
-     .runs-board back to `height: auto` there is no remainder for it to
-     absorb, and a flex item that may shrink below its content is only
-     observable against a definite container height. task-26's
-     `.watchdog-monitor`/`.watchdog-activity`/`.watchdog-table-wrap` chain
-     needs no undoing here either, and for exactly that reason: with no
-     remainder to absorb, the wrapper sizes to its content and the feed
-     scrolls with the page like everything else. */
+/* Under 1100 px the two columns stack, list first, the detail a scroll away —
+   and the whole one-viewport bound comes off with them: a scroll box nested
+   inside a scrolling page is worse than an unbounded page once the layout is
+   one column, and there is no fixed chrome left to preserve. */
+@media (max-width: 1100px) {
   .runs-board { height: auto }
-  .runs-list, .runs-detail { max-height: none; overflow: visible; min-height: auto }
-  .runs-detail { min-height: 160px }
+  .runs-split { grid-template-columns: minmax(0, 1fr) }
+  .runs-col, .runs-list, .runs-history-sheet, .runs-detail { max-height: none; overflow: visible; min-height: auto }
 }
 
-/* ---------------------------------------------- run detail pane (Task 7)
-   RunDetail.tsx, rendered inside .runs-detail above. Its own chrome is
-   deliberately small: the per-item chips, queue rows, verification
-   <details>, and attention entries all wear the run drawer's own classes
-   verbatim (.run-drawer-chips, .run-drawer-item*, .run-drawer-attn*), and are
-   their only reader since task-37 deleted that component.
-   What is genuinely new here is the header row this pane needs that the
-   drawer's own .drawer-head/.drawer-meta scaffolding does not fit into (this
-   pane is not a <aside role="dialog">, just plain content inside
-   .runs-detail's own bordered box), a small-caps section label to match
-   .runs-day-heading's register without borrowing a component-specific name,
-   an inline fetch-failure note, and the segmented per-item stage bar. */
-.run-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px }
-.run-detail-id { font-size: 11px; font-weight: 600; color: var(--ink) }
-.run-detail-time { font-size: 12px; color: var(--ink3) }
+/* ---------------------------------------------- run detail sheet (task-38)
+   RunDetail.tsx, rendered inside the `.runs-detail` sheet above. Its own
+   chrome is deliberately small: the head is `SheetHead`, the controls are
+   `Chip`s, and the per-item chips, queue rows, verification <details> and
+   attention entries all wear the run drawer's own classes verbatim
+   (.run-drawer-chips, .run-drawer-item*, .run-drawer-attn*) — this sheet has
+   been their only reader since task-37 deleted that component.
+   What is genuinely new here is the FACTS STRIP (task-38, §8.4.1's body item
+   1), which replaced the loose row of spans the old `.run-detail-head`
+   carried: the status chip, the mode pill, the elapsed reading and the cost
+   are facts about the run rather than identity, so they left the head for a
+   grid of label-over-value cells that wraps at the sheet's own width. */
+
+/* Label over value, wrapping — `auto-fit` rather than a fixed column count
+   because the strip's cell COUNT varies per run (a merge-mode run draws no
+   mode cell, a pre-task-27 run no cost cell), and a fixed grid would leave
+   holes for exactly the ordinary runs. */
+.run-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, max-content));
+  gap: 12px 24px; margin: 16px 0;
+}
+.run-fact { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+.run-fact-label { font-size: 12px; font-weight: 400; color: var(--ink2) }
+.run-fact-value { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums }
+/* The `status` cell's second reading — `heartbeat live`, `paused after <id>`,
+   `pausing · finishes <id>`. Quiet ink and a normal weight: it qualifies the
+   chip beside it rather than competing with it. */
+.run-fact-note { font-size: 12px; font-weight: 400; color: var(--ink3) }
 
 /* Task 9's own downgrade explanation (`mergeModeNote`, shown only when it
    differs from the run's own asked-for `mergeMode`) — mustard, matching
@@ -1903,23 +1688,25 @@ code, kbd, samp, pre { font-family: inherit }
   padding: 5px 8px; margin-top: 4px; white-space: nowrap; overflow-x: auto;
 }
 
-/* Matches .runs-day-heading's own small-caps treatment exactly (this pane
-   sits right beside that list, and the two section labels — "live"/a day,
-   "Items"/"Attention" — should read as one visual vocabulary) without
-   reusing that literal class name, which is scoped to a day GROUP in the
-   list rather than a section of THIS pane. */
+/* The sheet's own section labels — "Attention", "Machine time by stage",
+   "Branches to merge", "Items". 13/500 `--ink2`, which is `DayKicker`'s
+   register (§8.5: "the rule ABOUT a list, not a card inside it") rather than
+   the 11/600 small caps this pane wore while it was a bordered box: the
+   labels now sit inside a sheet whose own head is 19/500, and a shouting
+   small-caps line under it read as a second, louder header.
+   Not `DayKicker` itself, though the register is shared: that primitive is
+   the rule about a LIST of rows, and these head blocks of prose, chips and
+   charts. */
 .run-detail-heading {
-  font-size: 11px; font-weight: 600;
-  color: var(--ink3);
-  margin: 14px 0 6px; display: flex; align-items: baseline; gap: 8px;
+  font-size: 13px; font-weight: 500;
+  color: var(--ink2);
+  margin: 20px 0 8px; display: flex; align-items: baseline; gap: 8px;
 }
 /* The "queue wait excluded" caveat riding at the heading's right edge
    (Task 6, "Machine time by stage") — `margin-left: auto` inside the
    heading's own flex layout above pushes it there without a second wrapper
-   element. Deliberately NOT upper-cased/letter-spaced like the heading
-   itself: this is a caveat in prose, not a second section title, so it
-   should read as a normal (if small, if muted) sentence fragment rather
-   than shout alongside the label it is qualifying. */
+   element. Quieter and lighter than the label it qualifies: this is a caveat
+   in prose, not a second section title. */
 .run-detail-sub {
   margin-left: auto;
   font-weight: 400;
@@ -1972,9 +1759,19 @@ code, kbd, samp, pre { font-family: inherit }
 
 /* ---------------------------------------------- run stage bars (Task 4)
    StageBars.tsx: the seven-row "where did the time go" widget, rendered
-   twice — once per run (Task 6, inside .runs-detail) and once summed across
-   a whole visible range (Task 7, the wide toolbar tile) — so its rules live
-   in their own block rather than folding into either caller's own section.
+   twice — once per run (inside the detail sheet) and once summed across a
+   whole visible range (the figure strip's wide sixth cell) — so its rules
+   live in their own block rather than folding into either caller's own
+   section.
+
+   TEN PIXELS TALL, up from the 6 px this shipped until task-38. §3 gives a
+   progress bar 10 px, and §8.4.1 states the reason this widget in particular
+   moves: at the figure strip's full width the bar is the cell's SUBJECT
+   rather than a sparkline beside a number, and a 6 px rule read as a hairline
+   at that size. The per-run instance takes the same height rather than
+   keeping the old one, because the two exist to be compared at a glance —
+   `fixing` sits at row 5 of both, every time — and two heights would make the
+   pair read as two different charts.
 
    ONE SERIES, ONE HUE. Unlike the per-item .run-detail-stagebar (deleted in
    Task 6; its segments were different STAGES packed into the same bar, and
@@ -1982,17 +1779,17 @@ code, kbd, samp, pre { font-family: inherit }
    the same series — one stage's own total on its own row — so there is
    exactly one thing for colour to distinguish (a filled row from an empty
    one), not seven.
-   `--cyan` is not an arbitrary choice for that one hue: it is the tone six
-   of these seven stages already wear on their own item chip (`.board-card-
-   stage`, the `active` tone, above). The only `MACHINE_STAGES` member that
-   chip does NOT colour cyan is `preflight` (it renders `.board-card-stage-
-   idle` there, grouped with the quiet "waiting, not a problem" tone) — but
-   this widget is answering "how much orchestrator time", not "what stage is
-   this item in", and `runStageTotals` already counts `preflight` as machine
-   time on that basis. Lending it the same cyan as its six neighbours keeps
-   the set reading as what it is — one measurement taken seven times — rather
-   than carving out a visual exception for a distinction this widget was
-   never asked to draw.
+   `--fill-progress` is not an arbitrary choice for that one hue: §8.2 gives
+   that token to work that has MOVED — a reached stage node on the track
+   below wears it too — and every millisecond on this chart is work that
+   happened. It is deliberately not `--fill-live`, which means "happening
+   right now": these are totals, including a still-open span, and a chart
+   painted in the live fill would read as seven things in progress.
+   All seven rows share it. `preflight` is not carved out even though the
+   item chip tones it differently, because this widget is answering "how much
+   orchestrator time", not "what stage is this item in", and `runStageTotals`
+   already counts `preflight` as machine time on that basis — one measurement
+   taken seven times.
 
    THE ROW SET IS FIXED AND ORDERED — always all seven `MACHINE_STAGES`
    entries, always in that constant's own pipeline order, whether or not a
@@ -2002,7 +1799,7 @@ code, kbd, samp, pre { font-family: inherit }
    glance: `fixing` sits at row 5 of both, every time, so a reader moving
    from the card to the tile is never re-scanning a reshuffled list.
 
-   THE VALUE IS INK, NOT CYAN. This codebase's colour vocabulary keeps data
+   THE VALUE IS INK, NOT THE FILL'S COLOUR. This codebase's colour vocabulary keeps data
    colour off text on purpose (CONSTRAINTS.md: "text never wears a data
    colour" — values print in --ink/--ink2/--ink3 regardless of what tone the
    thing beside them uses). The bar is the data-coloured element; the number
@@ -2013,32 +1810,34 @@ code, kbd, samp, pre { font-family: inherit }
    uses for "nothing recorded" (`.board-card-stage-idle`, `.run-detail-
    time`), not a new one invented for this widget.
 
-   NO IN-BAR LABEL, NO TRACK BACKGROUND. A label baked into the fill would
+   NO IN-BAR LABEL. A label baked into the fill would
    have to sit on top of it for a long bar and past its end for a short one —
    two layouts fighting for the six pixels of height a widget built to
    summarise seven rows in the space of one has no room to referee. The row's
    own label/value columns already say both things (which stage, how long)
-   in a fixed place. A visible track background would be worse than
-   redundant: an empty track painted the same as a filled one would make
-   "nothing was ever recorded here" indistinguishable from "a value too small
-   to see" — exactly the confusion the `—`/no-fill pairing on an absent stage
-   (StageBars.tsx's `ms > 0` guard) exists to prevent. The 1px `--hairline2`
-   rule on the track's left edge is the one mark every row keeps regardless —
-   a shared baseline the bars grow from, not a value of its own. */
+   in a fixed place.
+   THE TRACK IS A TRACK, not a hairline baseline. §2 says the remainder of a
+   progress bar is a `--steel` track with no hatch, and the reason the old
+   left-edge rule gave for having no track at all — that an empty track would
+   be indistinguishable from "a value too small to see" — is answered by
+   StageBars.tsx's own `ms > 0` guard instead: an absent stage draws NO fill
+   and reads `—` beside it, where a value too small to see still draws the
+   3 px `min-width` floor. Two different renderings, neither of them an empty
+   track pretending to be a measurement. */
 .run-bars { display: flex; flex-direction: column; gap: 5px }
 .run-bars-row {
   display: grid; grid-template-columns: 80px 1fr 60px;
   align-items: center; gap: 8px;
 }
 .run-bars-label { font-size: 12px; color: var(--ink2) }
-.run-bars-track { position: relative; height: 6px; border-left: 1px solid var(--hairline2) }
+.run-bars-track { position: relative; height: 10px; border-radius: 8px; background: var(--steel) }
 /* The same floor `.run-detail-seg` (deleted in Task 6) used to carry, for
    the identical reason: a genuinely brief stage (a few seconds) must stay a
    visible sliver next to one that took most of an hour, not shrink to
    nothing beside it. */
 .run-bars-fill {
-  position: absolute; left: 0; top: 0; height: 6px;
-  background: var(--cyan); border-radius: 0 3px 3px 0; min-width: 2px;
+  position: absolute; left: 0; top: 0; height: 10px;
+  background: var(--fill-progress); border-radius: 8px; min-width: 3px;
 }
 .run-bars-value {
   font-size: 12px; color: var(--ink);
@@ -2107,30 +1906,33 @@ code, kbd, samp, pre { font-family: inherit }
    trap `.board-card-stage-glyph`'s own override (also top of file) already
    hit and fixed with an explicit `animation: none` — this block does the
    same, for the same reason. */
-.run-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-top: 8px }
+.run-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-top: 12px }
 .run-track-node {
   position: relative; display: flex; flex-direction: column; align-items: center;
-  gap: 3px; padding-top: 2px; min-width: 0;
+  gap: 4px; padding-top: 2px; min-width: 0;
 }
+/* The rail: `--steel` at 2 px (§8.4.3), which is the same recessed ground
+   every track and meter on this board grows a fill out of. `top: 8px` is the
+   12 px dot's own vertical centre below this node's `padding-top: 2px`, and
+   `calc(50% ± 7px)` stops each half a pixel clear of the dot's edge. */
 .run-track-node::before, .run-track-node::after {
-  content: ''; position: absolute; top: 6px; height: 2px; background: var(--hairline);
+  content: ''; position: absolute; top: 8px; height: 2px; background: var(--steel);
 }
-.run-track-node::before { left: 0; right: calc(50% + 6px) }
-.run-track-node::after { left: calc(50% + 6px); right: 0 }
+.run-track-node::before { left: 0; right: calc(50% + 7px) }
+.run-track-node::after { left: calc(50% + 7px); right: 0 }
 .run-track-node[data-in="none"]::before, .run-track-node[data-out="none"]::after { display: none }
-.run-track-node[data-in="done"]::before, .run-track-node[data-out="done"]::after { background: var(--good) }
-/* The moving line: a 90°, three-stop gradient (soft cyan / full cyan / soft
-   cyan) at twice the node's own width, slid left across itself. The two
-   soft ends reuse `.run-stepper-dot-current`'s own 35%-cyan-into-transparent
-   mix above rather than a new figure, so the sweep's "dim" reads as the
-   same tone the app already uses for a cyan glow rather than a new one
+.run-track-node[data-in="done"]::before, .run-track-node[data-out="done"]::after { background: var(--fill-progress) }
+/* The moving line: a 90°, three-stop gradient (soft / full / soft) at twice
+   the node's own width, slid left across itself. The two soft ends are the
+   same 35%-into-transparent mix the current dot's ring uses, so the sweep's
+   "dim" reads as the same glow the app already draws rather than a new one
    invented for this animation alone. */
 .run-track-node[data-in="live"]::before {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--cyan) 35%, transparent),
-    var(--cyan),
-    color-mix(in srgb, var(--cyan) 35%, transparent)
+    color-mix(in srgb, var(--fill-live) 35%, transparent),
+    var(--fill-live),
+    color-mix(in srgb, var(--fill-live) 35%, transparent)
   );
   background-size: 200% 100%;
   animation: run-track-sweep 1.6s linear infinite;
@@ -2140,7 +1942,7 @@ code, kbd, samp, pre { font-family: inherit }
   to { background-position: -100% 0 }
 }
 /* The stopped line (bug-15): a flat amber lead-in where a live run would be
-   sweeping cyan. Static for EVERY reader, not just a reduced-motion one — the
+   sweeping. Static for EVERY reader, not just a reduced-motion one — the
    motion is not decoration here, it is the assertion "something is happening
    at the node this segment points at", and for an aborted or crashed run that
    assertion is simply false. `animation: none` is declared rather than merely
@@ -2150,115 +1952,136 @@ code, kbd, samp, pre { font-family: inherit }
   background: color-mix(in srgb, var(--amber) 55%, transparent);
   animation: none;
 }
+
+/* ── The four node states, told apart by FILL AND RING TOGETHER (§8.4.3) ──
+   Never by four shades of one colour: §5 rules that encoding out, and the one
+   pair a reader most needs separated — "never needed" from "not there yet" —
+   is unfilled in both cases, so the stroke has to carry it.
+     `box-shadow` draws every ring rather than `border`, and that is
+   load-bearing: a border would eat into the dot's own 12 px box (or push the
+   seven columns apart if it did not), so the four states would render at
+   three different diameters and the rail would meet them at three different
+   places. A spread shadow sits outside the box and changes nothing about
+   layout. */
 .run-track-dot {
-  width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--hairline2);
-  background: var(--strip); box-sizing: border-box; z-index: 1;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--steel); box-sizing: border-box; z-index: 1;
+  box-shadow: 0 0 0 1px var(--hairline2);
 }
-.run-track-dot-filled { background: var(--good); border-color: var(--good) }
-/* Unlike the drawer's own current dot (`.run-stepper-dot-current`, a static
-   ring), this one pulses: at ten times the footprint, a static ring reads
-   as inert rather than as "still going," and telling a live run apart from
-   a finished one at a glance across the pane's full width is this track's
-   whole job. */
+/* Reached: the fill §8.2 gives work that has moved — the same token the stage
+   bars above and a live run's board dot wear, which is the identical reading
+   seen from three surfaces. */
+.run-track-dot-filled { background: var(--fill-progress); box-shadow: none }
+/* Current: the live fill under a 3 px ring at 30 %, pulsing. Unlike the
+   drawer's own static current dot, this one moves: at this footprint a static
+   ring reads as inert, and telling a live run from a finished one at a glance
+   across the sheet's width is this track's whole job. */
 .run-track-dot-current {
-  background: var(--cyan); border-color: var(--cyan);
+  background: var(--fill-live);
   animation: run-track-ring 2s ease-in-out infinite;
 }
 @keyframes run-track-ring {
-  from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 30%, transparent) }
-  to { box-shadow: 0 0 0 6px color-mix(in srgb, var(--cyan) 10%, transparent) }
+  from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 30%, transparent) }
+  to { box-shadow: 0 0 0 6px color-mix(in srgb, var(--fill-live) 10%, transparent) }
+}
+/* Skipped (task-38): `fixing` on an item that ran no fix loop. A DASHED ring,
+   which is the whole point — "never needed" and "not there yet" are both
+   unfilled, and before this the only thing distinguishing them was the
+   duration underneath, which reads `—` in both cases. A dashed stroke cannot
+   be drawn with `box-shadow`, so this one state uses a `border` and pulls the
+   dot's own box back by the same 1.5 px on each side so it still renders at
+   12 px and still meets the rail where its neighbours do. */
+.run-track-dot-skipped {
+  background: none;
+  box-shadow: none;
+  border: 1.5px dashed var(--hairline2);
 }
 /* Where a stopped run's item was left standing (bug-15). The deliberate
-   opposite of the dot above it in every channel that carries meaning: amber
-   instead of cyan, an unfilled centre instead of a solid one, and no
+   opposite of the current dot in every channel that carries meaning: amber
+   instead of the live fill, an unfilled centre instead of a solid one, and no
    animation at all instead of a pulse. That is what keeps the two apart for a
-   colour-blind and a monochrome reader alike, which is the rule
-   run-stepper-style.test.ts states for the drawer's own dots and
-   run-track-style.test.ts now enforces for these.
-     Not `filled`: green-filled means "went through this stage cleanly", which
-   is the reading the whole hollow-between-filled design rests on (see
-   StageTrack.tsx). This item never left this stage. */
+   colour-blind and a monochrome reader alike.
+     Not `filled`: a filled dot means "went through this stage cleanly", which
+   is the reading the whole hollow-between-filled design rests on. This item
+   never left this stage. */
 .run-track-dot-stalled {
-  background: var(--strip); border-color: var(--amber);
+  background: var(--strip);
+  box-shadow: 0 0 0 2px var(--amber);
   animation: none;
 }
 .run-track-name {
-  font-size: 12px; color: var(--ink2);
-  margin-top: 3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: var(--ink2);
+  margin-top: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.run-track-name-hollow { color: var(--ink3) }
+.run-track-name-hollow, .run-track-name-skipped { color: var(--ink3) }
 .run-track-name-current { color: var(--ink) }
 /* The stage word under a stalled node stays at full `--ink`, like the current
    one's: this is the node a person opening a stopped run is looking for, so
-   dimming it to `--ink2` would bury exactly the line that answers "where did
-   it die". */
+   dimming it would bury exactly the line that answers "where did it die". */
 .run-track-name-stalled { color: var(--ink) }
-/* Values never wear a data colour (CONSTRAINTS.md: "text never wears a data
-   colour") — `--ink` regardless of the dot beside them, the same restraint
-   `.run-bars-value` above keeps for the identical reason. `-when` is its
-   own modifier rather than a reuse of `-none`: a finish clock is a known
-   fact rendered in a different REGISTER (when it happened, not how long it
-   took), not an absent one — `--ink2` says "this is real, just not the
-   number the eye is scanning the row for," where `--ink3` says "nothing was
-   recorded here at all." */
+/* Values never wear a data colour (§2: text never wears one) — `--ink`
+   regardless of the dot beside them, the same restraint `.run-bars-value`
+   keeps for the identical reason. `-when` is its own modifier rather than a
+   reuse of `-none`: a finish clock is a known fact rendered in a different
+   REGISTER (when it happened, not how long it took), not an absent one —
+   `--ink2` says "this is real, just not the number the eye is scanning the
+   row for," where `--ink3` says "nothing was recorded here at all." */
 .run-track-val {
-  font-size: 12px; font-weight: 600; color: var(--ink);
+  font-size: 12px; font-weight: 500; color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 .run-track-val-none { color: var(--ink3); font-weight: 400 }
 .run-track-val-when { color: var(--ink2); font-weight: 400 }
 /* Absolutely positioned beside the dot rather than laid out inline with it:
    the badge only ever appears on one column out of seven (`fixing`), and
-   reserving space for it on every node so the seven names/values still
-   line up under one another would waste the other six columns' worth of it
-   on a badge they can never show. */
+   reserving space for it on every node so the seven names/values still line
+   up under one another would waste the other six columns' worth of it on a
+   badge they can never show. An 11/500 pill on the node it counts, because
+   the number is a property of that stage and nowhere else. */
 .run-track-loops {
-  position: absolute; left: calc(50% + 9px); top: -3px;
-  font-size: 11px; font-weight: 600; color: var(--ink);
-  background: var(--strip-hi); border: 1px solid var(--hairline2); border-radius: 2px;
-  padding: 0 3px; line-height: 14px; z-index: 2;
+  position: absolute; left: calc(50% + 10px); top: -4px;
+  font-size: 11px; font-weight: 500; color: var(--ink);
+  background: var(--strip-hi); border-radius: 999px;
+  padding: 0 6px; line-height: 16px; z-index: 2;
 }
 @media (max-width: 700px) {
-  /* The name and value are what can least afford to wrap or truncate on a
-     seven-column grid at phone width — dropping both half a step keeps
-     `inspecting` (the longest stage name) inside its own column instead of
-     ellipsising into unreadability. */
-  .run-track-name { font-size: 11px }
+  /* The value is what can least afford to wrap or truncate on a seven-column
+     grid at phone width; the name is already at the 11 px floor, so it keeps
+     its size and ellipsises instead. */
   .run-track-val { font-size: 11px }
 }
 /* This section's own reduced-motion carve-out — kept inside the run-track
-   block itself, rather than folded into the blanket rule near the top of
-   the file, so Task 6's later deletion of `.run-detail-stagebar` elsewhere
-   in the file never stranded it.
+   block itself, rather than folded into the blanket rule near the top of the
+   file, so a later deletion elsewhere in the file never strands it.
 
    The sweep needs a rule of its own because the blanket
-   `* { animation-duration: .01ms !important; ... }` cannot reach it at
-   all: `*` matches real elements, never the generated content a
-   `::before`/`::after` paints, and `[data-in="live"]::before` is the first
-   pseudo-element animation this file has ever had — the gap simply was
-   never exercised before it. Left alone, a reduced-motion reader would
-   still watch the gradient slide indefinitely; the blanket rule has no
-   opinion on it either way. The fallback below is a solid `--cyan` fill,
-   the spec's own stated rendering of the entering segment under reduced
-   motion.
+   `* { animation-duration: .01ms !important; ... }` cannot reach it at all:
+   `*` matches real elements, never the generated content a `::before`/
+   `::after` paints, and `[data-in="live"]::before` is the first pseudo-element
+   animation this file has ever had — the gap simply was never exercised
+   before it. Left alone, a reduced-motion reader would still watch the
+   gradient slide indefinitely; the blanket rule has no opinion on it either
+   way. The fallback below is a solid fill, the spec's own stated rendering of
+   the entering segment under reduced motion.
 
-   `.run-track-dot-current` IS a real element, so the blanket rule does
-   reach it — but only far enough to floor `animation-duration` and
-   `animation-iteration-count`, which plays the ring keyframes once,
-   instantly, and parks the dot on the LAST frame rather than stopping it:
-   a permanent 6px, 10%-cyan halo around the current node, not its plain
-   resting state. `.board-card-stage-glyph`'s own override above (this
-   file's only other animated-then-reduced element) hit this identical
-   freeze-vs-cancel gap first; the fix is the one used there too —
-   `animation: none` outright, which the blanket rule can't contest because
-   it never sets `animation-name`, only the timing properties.
+   `.run-track-dot-current` IS a real element, so the blanket rule does reach
+   it — but only far enough to floor `animation-duration` and
+   `animation-iteration-count`, which plays the ring keyframes once, instantly,
+   and parks the dot on the LAST frame rather than stopping it: a permanent
+   6 px, 10 %-tinted halo around the current node, not its plain resting
+   state. `.board-card-stage-glyph`'s own override (top of file) hit this
+   identical freeze-vs-cancel gap first; the fix is the one used there too —
+   `animation: none` outright, which the blanket rule cannot contest because it
+   never sets `animation-name`, only the timing properties. The ring is
+   restated here as a static one rather than dropped, because a current node
+   with no ring at all is a `filled` node to a reader.
 
-   Neither line below needs `!important`: each shares its selector with
-   its own unconditional rule earlier in this section, so plain source
-   order — this block comes after both — is enough to win. */
+   Neither line needs `!important`: each shares its selector with its own
+   unconditional rule earlier in this section, so plain source order — this
+   block comes after both — is enough to win. */
 @media (prefers-reduced-motion: reduce) {
-  .run-track-node[data-in="live"]::before { animation: none; background: var(--cyan) }
-  .run-track-dot-current { animation: none }
+  .run-track-node[data-in="live"]::before { animation: none; background: var(--fill-live) }
+  .run-track-dot-current { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 30%, transparent) }
 }
 
 /* ── ui primitives ────────────────────────────────────────────────────────────
@@ -2332,8 +2155,15 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-figure-good { color: var(--green) }
 .ui-figure-warn { color: var(--mustard) }
 .ui-figure-bad { color: var(--red) }
+/* The three-figure variant (task-38): Runs › Watchdog carries three cells,
+   and three laid into the five-column grid above would leave two empty cells
+   of `--strip` beside the last one, which reads as a figure that failed to
+   load rather than as a row of three. A modifier the component picks with a
+   prop, never a second family a page declares — §12.1's rule. It shares the
+   wrap below, so neither page has its own responsive story. */
+.ui-figure-strip-3 { grid-template-columns: repeat(3, minmax(0, 1fr)) }
 @media (max-width: 1100px) { .ui-figure-strip { grid-template-columns: repeat(3, minmax(0, 1fr)) } }
-@media (max-width: 700px) { .ui-figure-strip { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
+@media (max-width: 700px) { .ui-figure-strip, .ui-figure-strip-3 { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
 /* Chip — §7's filter chip and this board's 32 px control. */
 .ui-chip {
@@ -2465,6 +2295,12 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-progress-fill { display: block; height: 100%; border-radius: 8px; transition: width .2s }
 .ui-progress-fill-progress { background: var(--fill-progress) }
 .ui-progress-fill-ink { background: var(--ink) }
+/* The heartbeat meter past its own stale line (task-38, §8.4.2). Amber
+   because the run may still be recovered unattended — the same verdict
+   colour the crashed Live row and the crashed note both print. A prop on the
+   primitive rather than an override the Watchdog page paints over the fill,
+   which §12.1 forbids and which would recolour every meter on the board. */
+.ui-progress-fill-warn { background: var(--amber) }
 .ui-progress-caption { font-size: 11px; font-weight: 400; color: var(--ink3) }
 
 /* Ledger — "every table scrolls inside its own sheet" (§8.4). This element
@@ -2472,7 +2308,23 @@ code, kbd, samp, pre { font-family: inherit }
    the rail and the band sideways with it. */
 .ui-ledger { overflow-x: auto; min-width: 0 }
 .ui-ledger-grid { display: grid; align-items: center; gap: 0; min-width: min-content }
-.ui-ledger-day { font-size: 13px; font-weight: 500; color: var(--ink2); padding: 12px 0 6px }
+/* Sticky against whichever box is scrolling it (task-38), which on Runs ›
+   History is the sheet the day groups sit in: once a long list has scrolled
+   past a day's kicker, that kicker is the only thing left saying where in
+   history the reader is. Sticky positions against the nearest SCROLLING
+   ancestor while un-sticking at the end of its own containing block (the day
+   group), which is exactly the wanted behaviour for a group heading.
+     It belongs to the primitive rather than to the one page that draws day
+   groups today, for the reason the whole `ui/` directory exists: the next
+   ledger with kickers would otherwise get a non-sticky one, and a page may
+   not restate a primitive's look to fix that.
+     Opaque `--strip` — a sheet's own ground — not a mix or a transparency:
+   rows scroll UNDER this, and anything less shows a row's text through the
+   kicker meant to be labelling it. */
+.ui-ledger-day {
+  position: sticky; top: 0; z-index: 1; background: var(--strip);
+  font-size: 13px; font-weight: 500; color: var(--ink2); padding: 12px 0 6px;
+}
 
 /* Segmented — moved here from `.set-seg` (the design spec's §12.1), wearing the
    36 px control family's skin: 12 px radius, a --hairline2 stroke, --strip. */

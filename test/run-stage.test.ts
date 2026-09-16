@@ -1,4 +1,4 @@
-import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, STAGE_TONE, runStatusChip, stageChipClass, stageGlyph } from '../client/src/lib/run-stage';
+import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, STAGE_TONE, runDotTone, runStatusChip, stageChipClass, stageGlyph } from '../client/src/lib/run-stage';
 import type { OrchestratorRun, RunStage } from '../shared/types';
 
 /** Sorted, so `Object.keys(...).sort()` can be compared against it directly
@@ -220,5 +220,46 @@ describe('runStatusChip', () => {
     expect(Object.keys(RUN_STATUS_CLASS).sort()).toEqual(ALL_RUN_STATUSES);
     expect((RUN_STATUS_GLYPH as Record<string, unknown>).crashed).toBeUndefined();
     expect((RUN_STATUS_CLASS as Record<string, unknown>).crashed).toBeUndefined();
+  });
+});
+
+/**
+ * `runDotTone` (task-38) — the tone of the dot beside a run on all three
+ * surfaces that draw one: the Live row, the History row and the detail
+ * sheet's head. One function because three surfaces draw it, and the one
+ * thing a hand-written map on each would get differently is the finished
+ * case.
+ *
+ * `undefined` for every finished run is the interesting verdict, and it is a
+ * READING rather than a gap: `.ui-dot`'s base rule paints `--ink3`, and
+ * §8.4.1's own argument for printing the status WORD beside the dot is that
+ * "a dot alone cannot tell `done`/`aborted`/`failed` apart, and three colours
+ * of the same dot is the encoding §5 rules out". A map that gave each of the
+ * three a tone would satisfy every rendering test on this board and quietly
+ * undo that argument, which is why it is pinned here rather than left to the
+ * component suites.
+ */
+describe('runDotTone', () => {
+  const live = (status: OrchestratorRun['status'], fresh: boolean): { status: OrchestratorRun['status']; fresh: boolean } => ({ status, fresh });
+
+  it('is crashed for a running run with a dead heartbeat, whatever the record says', () => {
+    expect(runDotTone('running', live('running', false))).toBe('crashed');
+    // Derived from the live entry, never the recorded status — the same
+    // split `runStatusChip` makes, through the same `isCrashed`.
+    expect(runDotTone('done', live('running', false))).toBe('crashed');
+  });
+
+  it('is live while the board is hearing from the process, and paused while it is not moving', () => {
+    expect(runDotTone('running', live('running', true))).toBe('live');
+    expect(runDotTone('paused', live('paused', false))).toBe('paused');
+    // No live entry at all: a run whose file is gone or superseded still has
+    // a recorded status, and there is no heartbeat to reclassify it by.
+    expect(runDotTone('running', null)).toBe('live');
+    expect(runDotTone('paused', null)).toBe('paused');
+  });
+
+  it.each(['done', 'aborted', 'failed'] as const)('gives %s no tone at all, so the word carries which ending it was', (status) => {
+    expect(runDotTone(status, null)).toBeUndefined();
+    expect(runDotTone(status, live(status, false))).toBeUndefined();
   });
 });
