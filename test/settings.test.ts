@@ -1,5 +1,5 @@
 import { SECTIONS } from '../client/src/components/SideRail';
-import { DEFAULT_SETTINGS, FONT_SCALES, LIMITS, STALE_WINDOWS, THEMES, clampSettings } from '../client/src/lib/settings';
+import { CONTENT_WIDTHS, DEFAULT_SETTINGS, FONT_SCALES, LIMITS, SETTINGS_SCOPES, STALE_WINDOWS, THEMES, clampSettings } from '../client/src/lib/settings';
 import { EFFORTS, MODELS } from '../shared/agent';
 
 describe('clampSettings', () => {
@@ -13,7 +13,9 @@ describe('clampSettings', () => {
       dispatchDefaultEffort: 'high',
       staleDays: 14,
       orchestrateDefaultMergeMode: 'branch',
-      orchestrateDefaultQuestionMode: 'decide'
+      orchestrateDefaultQuestionMode: 'decide',
+      settingsScope: 'shared',
+      contentWidth: 'full'
     });
     expect(s).toEqual({
       theme: 'daylight',
@@ -25,7 +27,9 @@ describe('clampSettings', () => {
       dispatchDefaultEffort: 'high',
       staleDays: 14,
       orchestrateDefaultMergeMode: 'branch',
-      orchestrateDefaultQuestionMode: 'decide'
+      orchestrateDefaultQuestionMode: 'decide',
+      settingsScope: 'shared',
+      contentWidth: 'full'
     });
   });
 
@@ -203,4 +207,76 @@ describe('orchestrateDefaultQuestionMode', () => {
     expect(clampSettings({ orchestrateDefaultQuestionMode: 42 }).orchestrateDefaultQuestionMode).toBe('park');
     expect(clampSettings({ orchestrateDefaultQuestionMode: null }).orchestrateDefaultQuestionMode).toBe('park');
   });
+});
+
+/**
+ * `settingsScope` and `contentWidth` — the two keys the Settings split and the
+ * fullscreen measure are built on. Grouped together because what they share is
+ * the only thing worth stating twice: both are per-device, both are closed
+ * two-member unions, and both have to survive a settings blob written before
+ * either existed, since every install already has one.
+ */
+describe('settingsScope', () => {
+  it('defaults to local — the page an install that has never opened Settings shows', () => {
+    expect(DEFAULT_SETTINGS.settingsScope).toBe('local');
+    expect(clampSettings({}).settingsScope).toBe('local');
+  });
+
+  it('keeps the shared page when it is the stored one', () => {
+    expect(clampSettings({ settingsScope: 'shared' }).settingsScope).toBe('shared');
+  });
+
+  /*
+    A view position is still worth clamping: the value picks which of two card
+    sets renders, so an unrecognised one would render neither and leave the
+    page blank under its own band with nothing on screen saying why.
+  */
+  it('clamps an unrecognised value, a number and a null to local', () => {
+    expect(clampSettings({ settingsScope: 'nonsense' }).settingsScope).toBe('local');
+    expect(clampSettings({ settingsScope: 7 }).settingsScope).toBe('local');
+    expect(clampSettings({ settingsScope: null }).settingsScope).toBe('local');
+  });
+});
+
+describe('contentWidth', () => {
+  it('defaults to fixed — the drawn measure, unchanged for every existing install', () => {
+    expect(DEFAULT_SETTINGS.contentWidth).toBe('fixed');
+    expect(clampSettings({}).contentWidth).toBe('fixed');
+  });
+
+  it('keeps full when it is the stored value', () => {
+    expect(clampSettings({ contentWidth: 'full' }).contentWidth).toBe('full');
+  });
+
+  it('clamps an unrecognised string and a number to fixed', () => {
+    expect(clampSettings({ contentWidth: 'wide' }).contentWidth).toBe('fixed');
+    expect(clampSettings({ contentWidth: 1 }).contentWidth).toBe('fixed');
+  });
+});
+
+/**
+ * The two new keys against the rule the whole validator is built on: every
+ * field falls back independently, so one bad sibling cannot discard a good
+ * value beside it. Stated again here rather than left to `falls back per
+ * field` above, because that case passes a blob where EVERY field is bad — it
+ * would go on passing if a new key were dropped outright rather than clamped.
+ */
+it('keeps both new keys when a sibling is bad', () => {
+  const s = clampSettings({ theme: 'chartreuse', settingsScope: 'shared', contentWidth: 'full' });
+  expect(s.theme).toBe('midnight');
+  expect(s.settingsScope).toBe('shared');
+  expect(s.contentWidth).toBe('full');
+});
+
+/**
+ * The member lists themselves, asserted literally.
+ *
+ * These are what the pickers render and what `clampSettings` validates
+ * against, and a test on them is what stops a third member being added in one
+ * place only — the failure that leaves a picker offering an option the
+ * validator throws away on the next load.
+ */
+it('holds exactly two settings scopes and two content widths', () => {
+  expect(SETTINGS_SCOPES).toEqual(['local', 'shared']);
+  expect(CONTENT_WIDTHS).toEqual(['fixed', 'full']);
 });
