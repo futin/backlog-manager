@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react';
 
 import { dispatchAgent, fetchAgentPlan, sessionUrl } from '../../lib/agents';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
-import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { useSettings } from '../../hooks/useSettings';
+import { Chip } from '../ui/Chip';
+import { FormSheet } from '../ui/FormSheet';
+import { Select } from '../ui/Select';
+import { Switch } from '../ui/Switch';
 import type { AgentPlan, BacklogItem, PermissionMode } from '../../../../shared/types';
 
 /**
@@ -59,11 +62,10 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
     };
   }, [item.path]);
 
-  // One stack, one window listener, topmost dialog only — see
-  // hooks/useDialogEscape.ts. Replaced the four copies of this effect this app
-  // used to carry (bug-23: the sheet and the drawer it layers over both closed
-  // on one press).
-  useDialogEscape(onClose);
+  // Escape is `FormSheet`'s now (task-40), not this file's: one stack, one
+  // window listener, topmost dialog only — see hooks/useDialogEscape.ts. The
+  // shell binding it is what keeps bug-23's rule true of both sheets and the
+  // item modal without any of the three remembering to.
 
   const launch = (): void => {
     if (plan === null) return;
@@ -90,118 +92,111 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   };
 
   const blocked = plan?.blocked ?? planError;
+  const form = sessionId === null && (blocked === null || blocked === undefined) && plan !== null;
 
   return (
-    <>
-      <div className="sheet-backdrop" data-testid="sheet-backdrop" onClick={onClose} />
-      <div className="sheet" role="dialog" aria-label={`dispatch ${item.id}`}>
-        <div className="sheet-head">
+    <FormSheet
+      label={`dispatch ${item.id}`}
+      title={
+        <>
           <span className="sheet-kicker">{plan === null ? 'dispatch' : plan.action}</span>
           <span className="sheet-title">
             {item.id} · {item.title}
           </span>
-          <button className="drawer-close" onClick={onClose}>
-            close
-          </button>
-        </div>
+        </>
+      }
+      onClose={onClose}
+      /* Only the form state has actions. A launched session's panel and a
+         blocked one's message both end the sheet's job, and a footer holding
+         nothing but a second `close` beside the shell's own would be two
+         controls for one exit — and, in a suite, two buttons answering to the
+         same accessible name. */
+      footer={
+        form ? (
+          <>
+            <Chip size={28} variant="flat" onClick={onClose}>
+              cancel
+            </Chip>
+            <Chip size={28} variant="ink" disabled={busy || prompt.trim() === ''} onClick={launch}>
+              {busy ? 'launching…' : 'launch'}
+            </Chip>
+          </>
+        ) : null
+      }
+    >
+      {sessionId !== null ? (
+        /* The form is gone on purpose: the session exists, and a second
+           Launch would start a second one on the same item. */
+        <>
+          <div className="sheet-ok">launched · {sessionId}</div>
+          <a className="sheet-link" href={sessionUrl(settings.linkBase, sessionId)} target="_blank" rel="noreferrer">
+            open in dashboard ↗
+          </a>
+          <div className="sheet-note">Its questions appear there — and on your phone, if the dashboard's hooks are installed.</div>
+        </>
+      ) : blocked !== null && blocked !== undefined ? (
+        <div className="sheet-blocked">{blocked}</div>
+      ) : plan === null ? (
+        <div className="drawer-empty">loading…</div>
+      ) : (
+        <>
+          <label className="sheet-field">
+            <span className="set-name">Project</span>
+            <span className="sheet-static">{plan.project}</span>
+          </label>
 
-        {sessionId !== null ? (
-          /* The form is gone on purpose: the session exists, and a second
-             Launch would start a second one on the same item. */
-          <div className="sheet-body">
-            <div className="sheet-ok">launched · {sessionId}</div>
-            <a className="sheet-link" href={sessionUrl(settings.linkBase, sessionId)} target="_blank" rel="noreferrer">
-              open in dashboard ↗
-            </a>
-            <div className="sheet-note">Its questions appear there — and on your phone, if the dashboard's hooks are installed.</div>
-          </div>
-        ) : blocked !== null && blocked !== undefined ? (
-          <div className="sheet-body">
-            <div className="sheet-blocked">{blocked}</div>
-          </div>
-        ) : plan === null ? (
-          <div className="sheet-body">
-            <div className="drawer-empty">loading…</div>
-          </div>
-        ) : (
-          <div className="sheet-body">
+          <label className="sheet-field">
+            <span className="set-name">Prompt</span>
+            <textarea aria-label="Prompt" className="sheet-prompt" rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+          </label>
+
+          {/* One row, three controls: "how should this run" is a single
+              decision, and the dashboard's own launch panel groups the same
+              three the same way. Stacked, they pushed Launch below the fold
+              on a phone — the device this whole feature is aimed at. */}
+          <div className="sheet-row">
             <label className="sheet-field">
-              <span className="set-name">Project</span>
-              <span className="sheet-static">{plan.project}</span>
+              <span className="set-name">Permission mode</span>
+              {/* The 36 px family (§8.2/§8.6), one component per control, so
+                  this sheet cannot drift from a Settings row about what a
+                  select looks like. Only what the host's ceiling can actually
+                  deliver: offering a mode the dashboard would clamp is a
+                  promise this app cannot keep. */}
+              <Select<PermissionMode>
+                label="Permission mode"
+                value={mode}
+                onChange={setMode}
+                options={plan.allowedModes.map((m) => ({ value: m, label: m }))}
+              />
+            </label>
+
+            {/* Same two pickers the dashboard's own launch panel offers, with
+                the same "default" first option, because this sheet is a second
+                front-end onto that one spawn. Neither list is clamped against
+                a host ceiling the way the modes above are — there is none —
+                so an unknown name costs the flag, not the launch. */}
+            <label className="sheet-field">
+              <span className="set-name">Model</span>
+              <Select label="Model" value={model} onChange={setModel} options={[{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))]} />
             </label>
 
             <label className="sheet-field">
-              <span className="set-name">Prompt</span>
-              <textarea aria-label="Prompt" className="sheet-prompt" rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+              <span className="set-name">Effort</span>
+              <Select label="Effort" value={effort} onChange={setEffort} options={[{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))]} />
             </label>
-
-            {/* One row, three controls: "how should this run" is a single
-                decision, and the dashboard's own launch panel groups the same
-                three the same way. Stacked, they pushed Launch below the fold
-                on a phone — the device this whole feature is aimed at. */}
-            <div className="sheet-row">
-              <label className="sheet-field">
-                <span className="set-name">Permission mode</span>
-                <select aria-label="Permission mode" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
-                  {/* Only what the host's ceiling can actually deliver: offering
-                      a mode the dashboard would clamp is a promise this app
-                      cannot keep. */}
-                  {plan.allowedModes.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {/* Same two pickers the dashboard's own launch panel offers, with
-                  the same "default" first option, because this sheet is a second
-                  front-end onto that one spawn. Neither list is clamped against
-                  a host ceiling the way the modes above are — there is none —
-                  so an unknown name costs the flag, not the launch. */}
-              <label className="sheet-field">
-                <span className="set-name">Model</span>
-                <select aria-label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
-                  <option value="">default</option>
-                  {MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="sheet-field">
-                <span className="set-name">Effort</span>
-                <select aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
-                  <option value="">default</option>
-                  {EFFORTS.map((f) => (
-                    <option key={f} value={f}>
-                      {f}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <label className="sheet-check">
-              <input type="checkbox" checked={remoteControl} onChange={(e) => setRemoteControl(e.target.checked)} />
-              <span>remote control — the Claude phone app can see and drive it</span>
-            </label>
-
-            {error !== null && <div className="sheet-error">{error}</div>}
-
-            <div className="sheet-actions">
-              <button className="drawer-close" onClick={onClose}>
-                cancel
-              </button>
-              <button className="sheet-launch" onClick={launch} disabled={busy || prompt.trim() === ''}>
-                {busy ? 'launching…' : 'launch'}
-              </button>
-            </div>
           </div>
-        )}
-      </div>
-    </>
+
+          {/* A Switch, not a checkbox: §8's standing rule is that a raised
+              control marks a STATE, and this is one that persists for the
+              length of the session it launches. */}
+          <div className="sheet-check">
+            <Switch checked={remoteControl} onChange={setRemoteControl} label="remote control" />
+            <span>remote control — the Claude phone app can see and drive it</span>
+          </div>
+
+          {error !== null && <div className="sheet-error">{error}</div>}
+        </>
+      )}
+    </FormSheet>
   );
 }

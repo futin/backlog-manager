@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react';
 
 import { ApiError, fetchMergeCheck, fetchUncommitted, startOrchestrate, type MergeCheckResult, type UncommittedItems } from '../../lib/agents';
 import { EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
-import { useDialogEscape } from '../../hooks/useDialogEscape';
 import { useSettings } from '../../hooks/useSettings';
+import { Chip } from '../ui/Chip';
+import { FormSheet } from '../ui/FormSheet';
+import { Pill } from '../ui/Pill';
+import { Select } from '../ui/Select';
 import { MERGE_MODES, QUESTION_MODES, RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
 import type { BacklogItem, MergeMode, PermissionMode, QuestionMode } from '../../../../shared/types';
 
@@ -109,13 +112,14 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
  * unrelated flow sharing its state. A sibling avoids that;
  * what IS genuinely shared — `MODELS`/`EFFORTS`/`clampMode`/`modesUpTo`
  * (shared/agent.ts), `useSettings()`'s seeding, the `.sheet*` CSS vocabulary,
- * and `useDialogEscape`, the one owner of the Escape key every dialog in this
- * app now shares (ItemDrawer, LaunchSheet, and this sheet — three since
- * task-37 took the run drawer off the Board) — is imported or
- * restated in the same shape those already use, never copy-pasted out of
- * LaunchSheet's own body. That hook is bug-23's fix: each of the four dialogs
- * this app had then used to bind its own unguarded `window` listener, so a
- * press with two of them open closed both.
+ * and `FormSheet`, the shell this sheet and LaunchSheet both wear since
+ * task-40 — is imported or restated in the same shape those already use,
+ * never copy-pasted out of LaunchSheet's own body. `FormSheet` is also where
+ * `useDialogEscape` is called from, the one owner of the Escape key all three
+ * dialogs this app now has share (the item modal and these two sheets — three
+ * since task-37 took the run drawer off the Board). That hook is bug-23's fix:
+ * each of the four dialogs this app had then used to bind its own unguarded
+ * `window` listener, so a press with two of them open closed both.
  */
 export function OrchestrateSheet({
   project,
@@ -279,11 +283,8 @@ export function OrchestrateSheet({
    */
   const [order, setOrder] = useState<string[] | null>(null);
 
-  // One stack, one window listener, topmost dialog only — see
-  // hooks/useDialogEscape.ts. Replaced the four copies of this effect this app
-  // used to carry (bug-23: the sheet and the drawer it layers over both closed
-  // on one press).
-  useDialogEscape(onClose);
+  // Escape is `FormSheet`'s, not this file's — see its header, and
+  // hooks/useDialogEscape.ts for the stack it registers with.
 
   /**
    * The setup hint's data source (§6) — fetched only while `mergeMode` is
@@ -646,30 +647,69 @@ export function OrchestrateSheet({
   };
 
   return (
-    <>
-      <div className="sheet-backdrop" data-testid="orchestrate-sheet-backdrop" onClick={onClose} />
-      <div className="sheet" role="dialog" aria-label={`orchestrate ${projectName}`}>
-        <div className="sheet-head">
+    <FormSheet
+      label={`orchestrate ${projectName}`}
+      title={
+        <>
           <span className="sheet-kicker">orchestrate</span>
           <span className="sheet-title">{projectName}</span>
-          <button className="drawer-close" onClick={onClose}>
-            close
-          </button>
-        </div>
-
-        <div className="sheet-body">
-          {/* The indicator, read off `STEPS` so it cannot disagree with what
-              is actually rendered below. An <ol> rather than a row of spans
-              because that is what it is — three ordered stages, one of them
-              current — and `aria-current="step"` is the attribute a screen
-              reader already knows how to announce for exactly this. */}
-          <ol className="orchestrate-steps" aria-label="orchestrate steps">
-            {STEPS.map((word, i) => (
-              <li key={word} className={`orchestrate-step${i + 1 === step ? ' current' : ''}`} aria-current={i + 1 === step ? 'step' : undefined}>
-                {i + 1} · {word}
-              </li>
-            ))}
-          </ol>
+        </>
+      }
+      /* The stepper is the shell's own slot (§8.7: a 13/500 stepper on a
+         hairline), which is what puts the rule under it rather than under the
+         first step's first paragraph. Read off `STEPS` so it cannot disagree
+         with what is actually rendered below. An <ol> rather than a row of
+         spans because that is what it is — three ordered stages, one of them
+         current — and `aria-current="step"` is the attribute a screen reader
+         already knows how to announce for exactly this. */
+      steps={
+        <ol className="orchestrate-steps" aria-label="orchestrate steps">
+          {STEPS.map((word, i) => (
+            <li key={word} className={`orchestrate-step${i + 1 === step ? ' current' : ''}`} aria-current={i + 1 === step ? 'step' : undefined}>
+              {i + 1} · {word}
+            </li>
+          ))}
+        </ol>
+      }
+      onClose={onClose}
+      /* One actions row for all three steps rather than one per step: cancel
+         is available throughout and Back/Next/Start are the same control in
+         three positions, so a reader's eye never has to find a
+         differently-placed button after each transition. In the shell's
+         footer since task-40, which pins it under the scrolling body — the
+         three-step flow is exactly the shape that could otherwise scroll its
+         own Start out of reach. */
+      footer={
+        <>
+          <Chip size={28} variant="flat" onClick={onClose}>
+            cancel
+          </Chip>
+          {step > 1 && (
+            <Chip size={28} onClick={() => setStep((s) => (s === 3 ? 2 : 1))}>
+              back
+            </Chip>
+          )}
+          {step < 3 && (
+            <Chip
+              size={28}
+              onClick={() => setStep((s) => (s === 1 ? 2 : 3))}
+              /* The same refusal the old Start carried, one screen earlier.
+                 An EMPTY QUEUE is deliberately not this state — there is
+                 nothing to narrow, so the sheet keeps its pre-selector
+                 behaviour and walks all the way to a live Start. */
+              disabled={step === 1 && emptySelection}
+            >
+              next
+            </Chip>
+          )}
+          {step === 3 && (
+            <Chip size={28} variant="ink" onClick={start} disabled={busy || emptySelection}>
+              {busy ? 'starting…' : 'start'}
+            </Chip>
+          )}
+        </>
+      }
+    >
 
           {step === 1 && (
             <div className="orchestrate-step-body" data-testid="orchestrate-step-items">
@@ -753,12 +793,12 @@ export function OrchestrateSheet({
                     <span className="sheet-note">
                       {selectedIds.length} of {queueIds.length} selected
                     </span>
-                    <button type="button" className="drawer-close" onClick={() => setSelected(null)} disabled={!narrowed}>
+                    <Chip size={28} onClick={() => setSelected(null)} disabled={!narrowed}>
                       select all
-                    </button>
-                    <button type="button" className="drawer-close" onClick={() => setSelected(new Set())} disabled={selectedIds.length === 0}>
+                    </Chip>
+                    <Chip size={28} onClick={() => setSelected(new Set())} disabled={selectedIds.length === 0}>
                       select none
-                    </button>
+                    </Chip>
                     {/* Rendered only when there is something to deselect, the
                         same way the note above is: a permanently-disabled
                         fourth button would put a question ("what does that
@@ -768,9 +808,9 @@ export function OrchestrateSheet({
                         pressing it once retires the control rather than
                         leaving it claiming work it has already done. */}
                     {uncommittedSelected.length > 0 && (
-                      <button type="button" className="drawer-close" onClick={deselectUncommitted}>
+                      <Chip size={28} onClick={deselectUncommitted}>
                         deselect uncommitted ({uncommittedSelected.length})
-                      </button>
+                      </Chip>
                     )}
                   </div>
 
@@ -817,7 +857,7 @@ export function OrchestrateSheet({
                               the chip means, and a row whose CHANGES are the
                               uncommitted part is covered by that sentence
                               rather than left to the chip to say alone. */}
-                          {uncommittedPaths.has(item.path) && <span className="orchestrate-preview-flag">uncommitted</span>}
+                          {uncommittedPaths.has(item.path) && <Pill tone="warn">uncommitted</Pill>}
                         </div>
                       </div>
                     ))}
@@ -855,9 +895,8 @@ export function OrchestrateSheet({
 
               <div className="orchestrate-select-actions">
                 <span className="sheet-note">{arranged.length} in this order</span>
-                <button
-                  type="button"
-                  className="drawer-close"
+                <Chip
+                  size={28}
                   onClick={() => setOrder(null)}
                   /* The only control that can return `order` to `null`, and
                      therefore the only way back to the whole-queue request —
@@ -866,7 +905,7 @@ export function OrchestrateSheet({
                   disabled={order === null}
                 >
                   reset order
-                </button>
+                </Chip>
               </div>
 
               {/* No `uncommitted` chip on these rows, and that is a decision
@@ -893,18 +932,12 @@ export function OrchestrateSheet({
                             the accessible name names the row being moved
                             rather than describing the arrow. */}
                         <span className="orchestrate-move">
-                          <button type="button" className="drawer-close" aria-label={`move ${id} up`} onClick={() => move(i, -1)} disabled={i === 0}>
+                          <Chip size={28} aria-label={`move ${id} up`} onClick={() => move(i, -1)} disabled={i === 0}>
                             ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="drawer-close"
-                            aria-label={`move ${id} down`}
-                            onClick={() => move(i, 1)}
-                            disabled={i === arranged.length - 1}
-                          >
+                          </Chip>
+                          <Chip size={28} aria-label={`move ${id} down`} onClick={() => move(i, 1)} disabled={i === arranged.length - 1}>
                             ↓
-                          </button>
+                          </Chip>
                         </span>
                       </div>
                     </div>
@@ -936,59 +969,37 @@ export function OrchestrateSheet({
               <div className="sheet-row">
                 <label className="sheet-field">
                   <span className="set-name">Permission mode</span>
-                  <select aria-label="Permission mode" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
-                    {allowedModes.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                  <Select<PermissionMode> label="Permission mode" value={mode} onChange={setMode} options={allowedModes.map((m) => ({ value: m, label: m }))} />
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Model</span>
-                  <select aria-label="Model" value={model} onChange={(e) => setModel(e.target.value)}>
-                    <option value="">default</option>
-                    {MODELS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                  <Select label="Model" value={model} onChange={setModel} options={[{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))]} />
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Effort</span>
-                  <select aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)}>
-                    <option value="">default</option>
-                    {EFFORTS.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
+                  <Select label="Effort" value={effort} onChange={setEffort} options={[{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))]} />
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Merge mode</span>
-                  <select aria-label="Merge mode" value={mergeMode} onChange={(e) => setMergeMode(e.target.value as MergeMode)}>
-                    {MERGE_MODES.map((m) => (
-                      <option key={m} value={m}>
-                        {MERGE_MODE_LABELS[m]}
-                      </option>
-                    ))}
-                  </select>
+                  <Select<MergeMode>
+                    label="Merge mode"
+                    value={mergeMode}
+                    onChange={setMergeMode}
+                    options={MERGE_MODES.map((m) => ({ value: m, label: MERGE_MODE_LABELS[m] }))}
+                  />
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Question mode</span>
-                  <select aria-label="Question mode" value={questionMode} onChange={(e) => setQuestionMode(e.target.value as QuestionMode)}>
-                    {QUESTION_MODES.map((q) => (
-                      <option key={q} value={q}>
-                        {QUESTION_MODE_LABELS[q]}
-                      </option>
-                    ))}
-                  </select>
+                  <Select<QuestionMode>
+                    label="Question mode"
+                    value={questionMode}
+                    onChange={setQuestionMode}
+                    options={QUESTION_MODES.map((q) => ({ value: q, label: QUESTION_MODE_LABELS[q] }))}
+                  />
                 </label>
               </div>
 
@@ -1045,41 +1056,6 @@ export function OrchestrateSheet({
             </div>
           )}
 
-          {/* One actions row for all three steps rather than one per step:
-              cancel is available throughout and Back/Next/Start are the same
-              control in three positions, so a reader's eye never has to find
-              a differently-placed button after each transition. */}
-          <div className="sheet-actions">
-            <button className="drawer-close" onClick={onClose}>
-              cancel
-            </button>
-            {step > 1 && (
-              <button type="button" className="drawer-close" onClick={() => setStep((s) => (s === 3 ? 2 : 1))}>
-                back
-              </button>
-            )}
-            {step < 3 && (
-              <button
-                type="button"
-                className="drawer-close"
-                onClick={() => setStep((s) => (s === 1 ? 2 : 3))}
-                /* The same refusal the old Start carried, one screen earlier.
-                   An EMPTY QUEUE is deliberately not this state — there is
-                   nothing to narrow, so the sheet keeps its pre-selector
-                   behaviour and walks all the way to a live Start. */
-                disabled={step === 1 && emptySelection}
-              >
-                next
-              </button>
-            )}
-            {step === 3 && (
-              <button className="sheet-launch" onClick={start} disabled={busy || emptySelection}>
-                {busy ? 'starting…' : 'start'}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
+    </FormSheet>
   );
 }

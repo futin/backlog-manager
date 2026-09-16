@@ -233,13 +233,22 @@ describe('guard 6 — one font package, four weights', () => {
 describe('guard 7 — one home per primitive', () => {
   /**
    * The families owned by `client/src/components/ui/`, one per component in the
-   * design spec's §12.2 table minus `Modal` and `FormSheet` (task 5's). The
-   * pairs that ship together share a family on purpose: a `SheetHead` outside a
-   * `Sheet` is not a thing, and neither is a `Figure` outside a `FigureStrip`.
+   * design spec's §12.2 table — `Modal` and `FormSheet` included since task-40
+   * landed the two overlays the table withheld until task 5. The pairs that
+   * ship together share a family on purpose: a `SheetHead` outside a `Sheet` is
+   * not a thing, and neither is a `Figure` outside a `FigureStrip`.
+   *
+   * `.ui-form-sheet` is its own family and not a `.ui-sheet` variant, which the
+   * prefix rule below would otherwise read it as: a sheet is the page's card
+   * (borderless, no lift) and a form sheet is an overlay shell (scrim, the one
+   * shell lift, full-screen under 700 px). They share four letters and nothing
+   * else.
    */
   const FAMILIES = [
     '.ui-band',
     '.ui-sheet',
+    '.ui-modal',
+    '.ui-form-sheet',
     '.ui-figure',
     '.ui-chip',
     '.ui-pill',

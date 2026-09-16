@@ -7,7 +7,7 @@ import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
 import { DispatchButton } from '../client/src/components/board/DispatchButton';
-import { ItemDrawer } from '../client/src/components/board/ItemDrawer';
+import { ItemModal } from '../client/src/components/board/ItemModal';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunStage } from '../shared/types';
@@ -466,19 +466,19 @@ describe('DispatchButton', () => {
   // to race against.
 });
 
-// Coverage gap the brief never touched: `ItemDrawer` gained the same two
+// Coverage gap the brief never touched: `ItemModal` gained the same two
 // optional props as `ItemCard`, but no existing suite ever rendered it WITH
-// them — `test/drawer.test.tsx` only ever calls it bare. Direct-render it
-// here, the same way `test/drawer.test.tsx` does, rather than going through
-// `BoardView`: the question is only "does the drawer render the button it
-// was handed", which needs no board around it.
-describe('ItemDrawer wiring', () => {
+// them — `test/item-modal.test.tsx` only ever calls it bare. Direct-render it
+// here, the same way that suite does, rather than going through `BoardView`:
+// the question is only "does the modal render the button it was handed",
+// which needs no board around it.
+describe('ItemModal wiring', () => {
   const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
 
   const realFetch = global.fetch;
 
   beforeEach(() => {
-    // The drawer always fetches the item body on mount; a resolved stub
+    // The modal always fetches the item body on mount; a resolved stub
     // keeps that effect from rejecting into an unrelated "unavailable" state
     // that has nothing to do with what this test checks.
     global.fetch = jest.fn(() => Promise.resolve({ ok: true, text: () => Promise.resolve('') } as Response)) as jest.Mock;
@@ -489,21 +489,25 @@ describe('ItemDrawer wiring', () => {
   });
 
   /* Both cases await the body landing before asserting. The assertions
-     themselves do not need it — the button is in the head, which renders
-     immediately — but the fetch resolves either way, and a setState after the
-     test has finished is exactly the un-acted update React warns about. */
-  it('renders the dispatch button in the drawer head when the board supplies one', async () => {
-    render(<ItemDrawer item={fakeItem()} hues={HUES} onClose={() => {}} agents={READY} onDispatch={() => {}} />);
+     themselves do not need it — the control is in the facts column, which
+     renders immediately — but the fetch resolves either way, and a setState
+     after the test has finished is exactly the un-acted update React warns
+     about.
+     The control moved with task-40: the old drawer drew it in a head bar, and
+     the modal draws it at the foot of the facts column (§6.1 lists it there,
+     last). Same button, same props, one slot over. */
+  it('renders the dispatch control in the facts column when the board supplies one', async () => {
+    render(<ItemModal item={fakeItem()} hues={HUES} onClose={() => {}} agents={READY} onDispatch={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
-    const head = document.querySelector('.drawer-head') as HTMLElement;
-    expect(within(head).getByRole('button', { name: 'execute' })).toBeInTheDocument();
+    const facts = document.querySelector('.item-facts') as HTMLElement;
+    expect(within(facts).getByRole('button', { name: 'execute' })).toBeInTheDocument();
   });
 
   it('renders nothing extra when agents/onDispatch are absent, same as before this task', async () => {
-    render(<ItemDrawer item={fakeItem()} hues={HUES} onClose={() => {}} />);
+    render(<ItemModal item={fakeItem()} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
-    const head = document.querySelector('.drawer-head') as HTMLElement;
-    expect(within(head).queryByRole('button', { name: /execute|groom/ })).not.toBeInTheDocument();
+    const facts = document.querySelector('.item-facts') as HTMLElement;
+    expect(within(facts).queryByRole('button', { name: /execute|groom/ })).not.toBeInTheDocument();
   });
 });
 
@@ -550,7 +554,7 @@ describe('the board wiring', () => {
     AGENTS = READY;
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      // `text`, not `json`, for this one route — ItemDrawer's effect calls
+      // `text`, not `json`, for this one route — ItemModal's effect calls
       // res.text(). A json-only stub made that effect throw a TypeError its
       // own .catch swallowed, so the drawer sat in its "item file
       // unavailable" state: the drawer test below then proved only that the
@@ -658,12 +662,12 @@ describe('the board wiring', () => {
   });
 
   // `open` and `dispatching` are two separate pieces of state in BoardView
-  // specifically so the sheet can layer over an already-open drawer instead
+  // specifically so the sheet can layer over an already-open item modal instead
   // of replacing it. Clicking a card's own dispatch button (proven above) only
-  // ever exercises the drawer-closed path; this is the other one, and the
+  // ever exercises the modal-closed path; this is the other one, and the
   // only assertion that actually distinguishes "separate state" from "shared
   // state that happens to pass the simpler case".
-  it('opens the sheet from inside the drawer, leaving the drawer open behind it', async () => {
+  it('opens the sheet from inside the item modal, leaving the modal open behind it', async () => {
     render(<BoardView />);
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     await userEvent.click(screen.getByText('a task'));

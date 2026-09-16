@@ -351,13 +351,13 @@ describe('toolbar Orchestrate button', () => {
   });
 
   // --- Dialog mutual exclusion ------------------------------------------
-  // Task 12 made ItemDrawer/RunDrawer mutually exclusive because both are
-  // `.drawer`s with no focus trap of their own — two mounted at once lets a
-  // keyboard user Tab straight through the frontmost one into the other's
-  // controls. OrchestrateSheet reuses LaunchSheet's own `.sheet` shape,
-  // which has exactly the same no-focus-trap property, and this toolbar
-  // button is always reachable at the same time as every card's dispatch
-  // button AND every open drawer's own trigger (a card, a run strip) — so
+  // Task 12 made the item drawer and `RunDrawer` mutually exclusive because
+  // both were `.drawer`s with no focus trap of their own — two mounted at once
+  // lets a keyboard user Tab straight through the frontmost one into the
+  // other's controls. OrchestrateSheet wears the same `FormSheet` shell as
+  // LaunchSheet (task-40), which has exactly the same no-focus-trap property,
+  // and this toolbar button is always reachable at the same time as every
+  // card's dispatch button AND every open overlay's own trigger — so
   // the identical hazard exists for this sheet against all three of the
   // other overlays, not just LaunchSheet's.
   //
@@ -389,11 +389,11 @@ describe('toolbar Orchestrate button', () => {
 
   // Fix round 1 (Important — the gap this task's own review found): the
   // first pass reasoned by analogy from LaunchSheet's proven coexistence
-  // with ItemDrawer that OrchestrateSheet could coexist with the drawers
-  // too, but never actually tested it — and the analogy does not hold, since
-  // LaunchSheet's coexistence is reachable only through a control INSIDE the
-  // drawer it coexists with, while this toolbar button sits outside every
-  // drawer and is clickable (or Tab-reachable past either drawer's own
+  // with the item modal that OrchestrateSheet could coexist with the other
+  // overlays too, but never actually tested it — and the analogy does not
+  // hold, since LaunchSheet's coexistence is reachable only through a control
+  // INSIDE the modal it coexists with, while this toolbar button sits outside
+  // every overlay and is clickable (or Tab-reachable past either one's own
   // untrapped focus) the entire time one is open. See BoardView's own
   // `openOrchestrateSheet` comment for the full reasoning; this pins it.
   it('opening the Orchestrate sheet closes an open item drawer, and vice versa — never more than one dialog', async () => {
@@ -408,7 +408,7 @@ describe('toolbar Orchestrate button', () => {
     await waitFor(() => expect(screen.getByText('a task')).toBeInTheDocument());
     const card = screen.getByText('a task').closest('.board-card') as HTMLElement;
 
-    // The card's face, not its dispatch tab — this opens ItemDrawer, the
+    // The card's face, not its dispatch tab — this opens the item modal, the
     // OTHER overlay from the one the case above already covers.
     await userEvent.click(within(card).getByText('a task'));
     expect(await screen.findByRole('dialog', { name: 'a task' })).toBeInTheDocument();
