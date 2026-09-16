@@ -1,6 +1,6 @@
 /* Ported from ../guide-manager/client/src/styles.css, cut to the two sections
    this app has. Everything for the per-project bays, the guide viewer and its
-   reading aid is gone; the board's four type columns and the item drawer are
+   reading aid is gone; the board's four type columns and the item modal are
    what replaced them.
 
    The five theme palettes are NOT here: they live in shared/theme.css, so the
@@ -882,57 +882,20 @@ code, kbd, samp, pre { font-family: inherit }
    surfaces draw here. */
 .run-detail-controls { display: flex; align-items: center; justify-content: flex-end; min-height: 28px }
 
-/* ---------------------------------------------- item drawer — DEAD since task-40
-   The right-hand panel the item opened in until task-40 made it a modal (§8.7,
-   `.ui-modal` in the ui block at the foot of this file). Nothing renders any of
-   the rules below any more except `.drawer-empty`, which RunsView and RunDetail
-   still draw; the rest is spec §7's cleanup, i.e. task 6's, listed there by
-   name ("`.drawer` panel geometry") rather than removed here.
-   Kept verbatim for that reason, including the note about the /--font-scale
-   division fixed elements inside the zoomed .shell need. */
-.drawer-backdrop { position: fixed; inset: 0; z-index: 60; background: var(--scrim) }
-.drawer {
-  position: fixed; top: 0; right: 0; z-index: 61;
-  height: calc(100dvh / var(--font-scale, 1));
-  width: min(480px, calc(100vw / var(--font-scale, 1)));
-  background: var(--strip); border-left: 1px solid var(--hairline);
-  box-shadow: -12px 0 32px var(--shadow2);
-  display: flex; flex-direction: column;
-}
-.drawer-head {
-  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-  padding: 14px 16px; border-bottom: 1px solid var(--hairline);
-  background: var(--strip-hi); box-shadow: inset 0 1px 0 var(--edge);
-}
-.drawer-head .pill { flex: none }
-.drawer-title { flex: 1; min-width: 0; font-size: 19px; font-weight: 500; color: var(--ink) }
-.drawer-close {
-  font-family: inherit; font-size: 11.5px; color: var(--ink2);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 2px;
-  padding: 5px 10px; cursor: pointer; transition: color .15s, border-color .15s;
-}
-.drawer-close:hover { color: var(--ink); border-color: var(--hairline2) }
-.drawer-meta {
-  display: flex; flex-direction: column; gap: 3px;
-  padding: 10px 16px; border-bottom: 1px solid var(--hairline);
-  font-size: 12px; color: var(--ink2);
-  /* `align-items: flex-start`, not the `stretch` default a column flex
-     container would otherwise apply: every child here used to be plain
-     text (ItemDrawer's one meta span, RunDrawer's past-run/time spans),
-     which looks identical stretched or not because text has no visible
-     box to stretch. RunDrawer's mode badge (`.run-mode-badge` below) broke
-     that coincidence — it has a border, a pill radius and a background, so
-     `stretch` pulled it to the container's full width and rendered a
-     full-width mustard bar instead of a tag. Fixed on the container rather
-     than the badge itself, which is the one thing this rule must NOT do:
-     `.run-mode-badge` is shared verbatim with RunsView's row and
-     RunDetail's header (and with `RunStrip` until task-37), all row-flex parents relying on its default
-     vertical centering, and an `align-self` baked into the shared class
-     would retune their alignment too for a bug that is specific to this
-     one column-flex parent. */
-  align-items: flex-start;
-}
-.drawer-meta .drawer-path { color: var(--ink3); word-break: break-all }
+/* ---------------------------------------------- the empty line
+   All that survives of the item drawer. The right-hand panel the item opened
+   in until task-40 made it a modal (§8.7, `.ui-modal` in the ui block at the
+   foot of this file) left its geometry standing here — `.drawer`, and its
+   backdrop, head, title, close, meta and path — which task-41 removed as spec
+   §7's cleanup once nothing in `client/src` rendered any of it.
+
+   The line below is the exception, and the name is deliberately NOT renamed
+   with the panel: five surfaces draw it for "this pane has nothing in it" —
+   `ItemModal` before its body fetch lands and when the file is unavailable,
+   `LaunchSheet` while it loads, `OrchestrateSheet`'s two empty previews,
+   `RunsView`'s three empty histories and `RunDetail`'s "nothing needs a look"
+   — so renaming it would mean editing five components for a class that is
+   doing its job, which the cleanup's own item rules out. */
 .drawer-empty { font-size: 11px; color: var(--ink3); padding: 20px 2px; text-align: center }
 
 /* ---------------------------------------------- item modal (§8.7)
@@ -979,15 +942,23 @@ code, kbd, samp, pre { font-family: inherit }
 /* ---------------------------------------------- run drawer
    The board's own detail view of a run (RunDrawer.tsx) until task-37 deleted
    it; every rule below is read by `RunDetail.tsx` (the Runs section) now, and
-   only the names still say "drawer" — renaming a live class family is task 6's
-   cleanup, not this one's. The .drawer scaffolding it once REUSED wholesale
-   rather than duplicated — backdrop, the aside itself, .drawer-head,
-   .drawer-close, .drawer-meta, .drawer-body and its h2 "printed label" rule —
-   is gone or going: task-40 turned the item drawer into the item modal and
-   rewrote that markdown block as .item-body, so the only name left shared
-   across the two is .drawer-empty. This section exists only for what a run's content
-   needs that an item's markdown body never did — a stale-run fault note, a
-   pipeline summary, and per-item queue/attention rows. */
+   only the names still say "drawer". They KEEP saying it: task-41's cleanup
+   deletes dead rules, and a rename here is not that — it would edit every
+   component drawing one of these classes (RunDetail, RunRowTime, and
+   OrchestrateSheet's queue preview) plus the `run-drawer-time` test-id prefix
+   RunRowTime defaults to, for no behaviour change, which is the one thing a
+   sweep whose own proof is "no screenshot moves" must not do. A reader
+   meeting the name here should read "the run detail pane".
+
+   The .drawer scaffolding this family once REUSED wholesale rather than
+   duplicated — backdrop, the aside itself, .drawer-head, .drawer-close,
+   .drawer-meta, .drawer-body and its h2 "printed label" rule — is gone:
+   task-40 turned the item drawer into the item modal and rewrote that markdown
+   block as .item-body, task-41 removed the panel geometry that was left, and
+   the only name still shared across the two is .drawer-empty. This section
+   exists only for what a run's content needs that an item's markdown body
+   never did — a stale-run fault note, a pipeline summary, and per-item
+   queue/attention rows. */
 .run-drawer-note {
   font-size: 11px; line-height: 1.5; color: var(--amber);
   background: color-mix(in srgb, var(--amber) 10%, var(--strip));
@@ -1164,7 +1135,7 @@ code, kbd, samp, pre { font-family: inherit }
 /* The uncommitted flag (task-32) — a row whose file on disk is not the file
    the run will read at `main` (which is broader than "cannot see it": see
    uncommitted.util.ts's header for the two fates that has). Amber, this app's
-   established "a person needs to look at this" tone (`.run-strip-attention`, `.board-card-live`, `.board-warn`), rather
+   established "a person needs to look at this" tone (`.board-card-live`, `.board-warn`), rather
    than red: nothing is broken and the launch is not blocked, the run will
    simply spend a gate verdict and move on.
 
@@ -1184,8 +1155,8 @@ code, kbd, samp, pre { font-family: inherit }
   background: color-mix(in srgb, var(--amber) 12%, var(--steel));
 }
 
-/* The three-step chrome (task-20; design §7). A monospace kicker row rather
-   than a progress bar or numbered circles: this app's other "where am I"
+/* The three-step chrome (task-20; design §7). A kicker row rather than a
+   progress bar or numbered circles: this app's other "where am I"
    affordance is `.sheet-kicker`, and matching it keeps the sheet reading as
    one dialog with three screens rather than a wizard bolted on. `.current`
    is the only styled state — a completed step and an unreached one look the
@@ -1197,9 +1168,10 @@ code, kbd, samp, pre { font-family: inherit }
   color: var(--ink3);
 }
 .orchestrate-step.current { color: var(--accent) }
-/* Each step's own body owns the column gap `.sheet-body` used to provide
-   directly, now that one of three children is a step rather than all of
-   them being content. */
+/* Each step's own body owns the column gap the sheet body used to provide
+   directly, now that one of three children is a step rather than all of them
+   being content. (That body is `FormSheet`'s `.ui-form-sheet-body` since
+   task-40; `.sheet-body` itself went with the rest of the old shell.) */
 .orchestrate-step-body { display: flex; flex-direction: column; gap: 10px }
 
 /* The per-row ↑/↓ pair (§7.5). `margin-left: auto` pushes it to the right
@@ -1259,38 +1231,21 @@ code, kbd, samp, pre { font-family: inherit }
 .run-drawer-assumptions-list dt { font-size: 12px; color: var(--ink); line-height: 1.5; margin-top: 4px }
 .run-drawer-assumptions-list dd { font-size: 12px; color: var(--ink2); line-height: 1.5; margin: 0 0 0 12px }
 
-/* ---- dispatch: the card button and the launch sheet -------------------
-   The `.sheet*` family below is HALF dead since task-40: the shell — backdrop,
-   panel, head, actions row, the launch button — is `FormSheet`'s
-   (`.ui-form-sheet`, ui block), and what both sheets still use from here is the
-   field/row/note vocabulary their own bodies are written in. The dead half is
-   spec §7's cleanup, task 6's, not this section's to delete.
-   The old shell's z-index sat above the item drawer's (60/61) because the sheet
-   is opened FROM it as well as from a card; the two shells keep that order. */
-.sheet-backdrop { position: fixed; inset: 0; z-index: 70; background: var(--scrim) }
-.sheet {
-  position: fixed; z-index: 71;
-  top: 50%; left: 50%; transform: translate(-50%, -50%);
-  /* Same /--font-scale division the drawer needs — without it the sheet
-     overflows the viewport at any text size but 100%. */
-  width: min(520px, calc(100vw / var(--font-scale, 1) - 24px));
-  max-height: calc(100dvh / var(--font-scale, 1) - 24px);
-  display: flex; flex-direction: column;
-  background: var(--strip); border: 1px solid var(--hairline); border-radius: 3px;
-  box-shadow: 0 18px 48px var(--shadow2);
-}
-.sheet-head {
-  display: flex; align-items: baseline; gap: 10px;
-  padding: 12px 14px; border-bottom: 1px solid var(--hairline);
-  background: var(--strip-hi); box-shadow: inset 0 1px 0 var(--edge);
-}
+/* ---- dispatch: the card button and the two sheets' own vocabulary ------
+   What is left of the `.sheet*` family after task-40 took the shell. The
+   backdrop, the panel, the head bar, the actions row and the launch button are
+   `FormSheet`'s now (`.ui-form-sheet`, ui block at the foot of this file), and
+   task-41 removed the copies that stood here — spec §7's cleanup — once
+   nothing rendered them. What both sheets still draw from this section is the
+   field/row/note vocabulary their own bodies are written in, plus the kicker
+   and title `FormSheet` takes as its title slot: §12.1's division, where the
+   primitive owns the shell and the page owns what goes in it. */
 .sheet-kicker {
   font-size: 11px;
   color: var(--cyan); flex: none;
 }
 .sheet-title { flex: 1; min-width: 0; font-size: 19px; font-weight: 500; color: var(--ink);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.sheet-body { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px }
 /* `align-items: flex-start`, so a control in a sheet field is as wide as its
    own content and no wider. A column flex container stretches its children by
    default, which is right for the textarea and wrong for every select in the
@@ -1318,13 +1273,6 @@ code, kbd, samp, pre { font-family: inherit }
 .sheet-row { display: flex; flex-wrap: wrap; gap: 10px }
 .sheet-row .sheet-field { flex: 1 1 auto; min-width: 0 }
 .sheet-check { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink2) }
-.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px }
-.sheet-launch {
-  font-family: inherit; font-size: 11.5px; font-weight: 600; color: var(--bg);
-  background: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px;
-  padding: 5px 12px; cursor: pointer;
-}
-.sheet-launch:disabled { opacity: .45; cursor: default }
 .sheet-error, .sheet-blocked { font-size: 12px; line-height: 1.5; color: var(--amber) }
 .sheet-ok { font-size: 12px; color: var(--green, var(--cyan)) }
 .sheet-link { font-size: 12px; color: var(--cyan) }
@@ -1742,10 +1690,11 @@ code, kbd, samp, pre { font-family: inherit }
 .run-fact-note { font-size: 12px; font-weight: 400; color: var(--ink3) }
 
 /* Task 9's own downgrade explanation (`mergeModeNote`, shown only when it
-   differs from the run's own asked-for `mergeMode`) — mustard, matching
-   `.run-mode-badge` right above it in the head: this is prose about the
-   SAME fact that badge names in one word, not a second, unrelated alert
-   needing its own colour. Boxed like `.run-detail-error` right below (same
+   differs from the run's own asked-for `mergeMode`) — mustard, matching the
+   mode pill right above it in the head (a `Pill` with `tone="warn"` since
+   task-38 retired `.run-mode-badge`): this is prose about the SAME fact that
+   pill names in one word, not a second, unrelated alert needing its own
+   colour. Boxed like `.run-detail-error` right below (same
    "the first thing a reader should see" placement, see RunDetail.tsx's own
    comment on why), but never red — a downgrade is exactly the run
    succeeding at what this whole feature exists to make possible, not a
@@ -2502,10 +2451,12 @@ code, kbd, samp, pre { font-family: inherit }
    nothing else on this board floats, which is what keeps the lift meaning
    "this is over the page" rather than "this is a card".
 
-   Both dimensions are divided by --font-scale for the same reason the old
-   drawer's were: fixed elements sit inside the zoomed .shell, so a viewport
-   unit here is a pre-zoom number and the panel hangs off two edges at any text
-   size but 100%. */
+   Both dimensions are divided by --font-scale for the reason `.rail`'s
+   comment near the top of this file states in full, and this is that idiom
+   rather than a second one: a fixed element sits inside the zoomed .shell, so
+   a viewport unit here is a pre-zoom number and the panel hangs off two edges
+   at any text size but 100%. (The drawer this replaced carried the same
+   division; its rules went with spec §7's cleanup.) */
 .ui-modal-scrim { position: fixed; inset: 0; z-index: 60; background: var(--scrim) }
 .ui-modal {
   position: fixed; z-index: 61; top: 50%; left: 50%; transform: translate(-50%, -50%);

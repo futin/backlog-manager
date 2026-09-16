@@ -4,6 +4,10 @@ A React SPA in four sections behind a side rail — Board, Runs, Archive, Settin
 appears on screen is decided here: whether an item is groomed, whether it belongs on the Board or in Archive, how long an item's work took, what a run cost.
 Those derivations live in `client/src/lib/` as one implementation each, so two surfaces cannot disagree about the same item.
 
+The look is not decided here. [`.claude/DESIGN.md`](../../.claude/DESIGN.md) is the visual language — §1–7 the system, §8 how this board applies it, one
+subsection per surface — and every component cites its subsection in a header comment. This document is the mechanism: what each surface is made of, what it
+reads, and which file owns each decision.
+
 ## Mechanism
 
 ### The rail
@@ -11,25 +15,71 @@ Those derivations live in `client/src/lib/` as one implementation each, so two s
 Board / Runs / Archive / Settings, a plain section switch. `SECTIONS` in `SideRail.tsx` is the one runtime list of them, and `resolveSection` in `App.tsx` maps
 a stored value that names no tab — the legacy `'projects'` included — onto Board, so an upgrade never opens on a blank main area.
 
-Runs is the one section with a sub-nav tree under its row — History and Watchdog — drawn only while that section is open (`.claude/DESIGN.md` §8.0). The tree
-and the segmented control still inside `RunsView` are two writers of one stored value, so both go through `useRunsMode` (`client/src/hooks/useRunsMode.ts`),
-which holds the mode for every mounted reader at once; `lib/runs-mode.ts` stays the one home of the key, the member list and the guard. `task-41` is where the
-in-page control goes and this doc is rewritten.
+Runs is the one section with a sub-nav tree under its row — History and Watchdog — and that tree is the **only** control that switches between them: there is no
+in-page mode switch at any width (`.claude/DESIGN.md` §8.0). It is not the only writer of the stored value, though — the Watchdog page's own rows jump back to
+History with a run selected, and the Settings watchdog card's `Live view` link opens Watchdog — so every writer goes through `useRunsMode`
+(`client/src/hooks/useRunsMode.ts`), a module-level value every mounted reader subscribes to, which is what keeps the rail and the page from looking at
+different views. `lib/runs-mode.ts` stays the one home of the key, the member list and the guard.
+
+Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
+JavaScript knows that breakpoint; everything else reads it from there or from a media query.
 
 ### Primitives
 
-`client/src/components/ui/` holds the patterns more than one surface draws — `Band`, `Sheet`, `FigureStrip`, `Chip`, `Pill`, `Dot`, `Marker`, `ProgressRow`,
-`Ledger` and the control family — each owning one class family declared once in `styles.css`'s `/* ── ui primitives` block. Page CSS lays a primitive out and
-never restates its look, which is the same rule `lib/` follows for derivations and for the same reason. The design spec's §12.2 is the table of which primitive
-owns which pattern until this doc carries it.
+`client/src/components/ui/` holds the patterns more than one surface draws. Each is one component owning one class family, declared once inside `styles.css`'s
+`/* ── ui primitives` block: page CSS lays a primitive out — grid, gap, width — and never restates its look, which is the same rule `lib/` follows for
+derivations and for the same reason. A surface that needs a variant adds a prop, never a second family. `test/design-guards.test.ts`'s guard 7 is the
+enforcement half of that rule — it pins the family list, the block's two delimiters, and that no selector outside the block starts with a family name — and this
+table is the documentation half. The two are meant to agree; a primitive added to one belongs in the other in the same change.
+
+| component              | class family      | props                                                                                            | composed by                                                                     |
+| ---------------------- | ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `Band`                 | `.ui-band`        | `title`, `sub?`, `children` (right slot)                                                         | every page: Board, Runs History, Runs Watchdog, Archive, Settings               |
+| `Sheet`, `SheetHead`   | `.ui-sheet`       | `Sheet{children, as?, className?}`; `SheetHead{title, sub?, right?}`                             | Runs (Live, History, detail), Watchdog (Watching, Activity), `SettingsRow`'s card |
+| `FigureStrip`, `Figure`| `.ui-figure`      | `FigureStrip{children, cols?: 3\|5, testId?}`; `Figure{label, value?, unit?, line?, tone?, wide?, title?, testId?, children?}` | Runs History (six cells, the sixth `wide`), Watchdog (three)                     |
+| `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
+| `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
+| `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | rail wordmark, card foot, column header, run chip, Runs rows, modal facts       |
+| `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale`, `children`                                                    | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
+| `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
+| `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
+| `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal` — the only modal in the app                                         |
+| `FormSheet`            | `.ui-form-sheet`  | `label`, `title`, `steps?`, `footer`, `children`, `onClose`                                      | `LaunchSheet`, `OrchestrateSheet`                                               |
+| `Segmented`            | `.ui-seg`         | `value`, `options`, `onChange`, `disabled?`, `label?`, `pill?`                                   | Settings (density, text size, staleness), the Runs range control (stroked, not `pill`) |
+| `Select`               | `.ui-select`      | `value`, `options`, `onChange`, `disabled?`, `label?`                                            | Settings rows, `WatchdogGroup`'s three ladders, both sheets' pickers            |
+| `NumberField`          | `.ui-number`      | `value`, `min`, `max`, `unit?`, `onCommit`, `label?`                                             | nothing today — see below                                                       |
+| `Switch`               | `.ui-switch`      | `checked`, `onChange`, `label?`, `disabled?`, `onLabel?`, `offLabel?`                            | `WatchdogGroup`'s Enabled row, `LaunchSheet`'s toggle                           |
+
+`label` and `title` are separate props on both overlay shells because a dialog's accessible name and its visible title are different strings on every surface
+that draws one, and `title` is a node — a name cannot be derived from it.
+
+Two entries differ from the design spec's §12.2 table on purpose, and both are code's reading rather than the spec's: `StageBars` draws its own bar rows rather
+than composing `ProgressRow` (the spec listed it as a composer), and `NumberField` has **no composer at all** — the watchdog's three numeric policy values are
+`Select` ladders, and Settings' own numeric rows re-seed on commit with the same idiom rather than the component. It is kept because the family is part of the
+36 px control set guard 7 pins, and because a numeric row is the next Settings addition's obvious control; if a reader finds it still unused, deleting it means
+deleting the family and the guard entry together, in one change.
+
+`SettingsRow` and `SettingsGroup` are not primitives — they are the Settings card's own composition of `Sheet` plus rows, and stay under `settings/`. Everything
+else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`, `RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`,
+`StageBars`, `WatchdogMonitor` (runs). `RunControls` and `RunRowTime` sit at the top level of `components/`, like `lib/view-keys.ts`, because two lazy chunks
+read each of them.
 
 ### Board
 
-Toolbar with search plus project/status/sort selects, four fixed columns (refactors/ideas/bugs/tasks), and a click-to-open drawer rendering the item's Markdown
-body. Out-of-scope has no Board column at all; it belongs to Archive.
+A `Band` carrying the count line, then search plus project/status/sort selects and the Orchestrate control as chips, then four fixed columns
+(refactors/ideas/bugs/tasks). Out-of-scope has no Board column at all; it belongs to Archive. A click on a card opens the **item modal** — `ItemModal`
+composing `Modal`: a facts column (project dot and name, id, section, the created / updated / last-commit stamps, `groomed`, tags, the `in progress since`
+reading while a session holds the item, the elapsed and token counters when present, the file path, the dispatch control) beside the item's rendered Markdown
+body, folding above it under 700 px.
 
-A dispatch control — on the card and again in the drawer — opens a launch sheet onto `../claude-agents-dashboard`. A toolbar Orchestrate control opens
-`OrchestrateSheet`, three steps with Start on the last one alone so it never sits under a scroll region whose length is the project's queue:
+Beside the band's title sits the **run chip** (`RunChip`), the Board's whole account of orchestrator runs since the run strip, the starting strip and the run
+drawer left it: a `Dot` taking the worst state present and a count line naming every state in that same order — `2 runs · 1 live ›`, `1 run · crashed ›`,
+`1 starting ›`. Precedence is exact: crashed over paused or starting over live. It renders the payload's `starting` array with no client-side filter, it is
+absent entirely when there is no run and no starting entry, and clicking it switches the section to Runs, where the rest of the reading lives.
+
+A dispatch control — on the card and again in the modal — opens a launch sheet onto `../claude-agents-dashboard`. The toolbar Orchestrate control opens
+`OrchestrateSheet`, three steps inside a `FormSheet`, with Start on the last one alone so it never sits under a scroll region whose length is the project's
+queue:
 
 1. **Items.** Previews the queue and selects a subset of it, flagging with an `uncommitted` chip every row whose file on disk is not the file at `main`, and
    splitting the two fates that has — absent from `main` is skipped in the run's own words (`not committed on main`), present-but-stale is gated and run on
@@ -42,10 +92,8 @@ A dispatch control — on the card and again in the drawer — opens a launch sh
    Permission mode has no stored default and starts at `auto`, clamped down to whatever ceiling the dashboard reports. Plus, in merge mode, a setup hint fed by
    `GET /api/agents/merge-check`.
 
-Above the columns, a run strip (`RunStrip`/`RunDrawer`) showing every project's orchestrator runs. A crashed run — `running`, heartbeat stale — renders as
-crashed with the watchdog's verdict and, when the watchdog is exhausted or off, a Resume control; a `paused` run renders its own strip with its own Resume; a
-fresh run that has been asked to pause gains a `pausing · finishes <id>` chip. The drawer's head hosts `RunControls.tsx`, the one Pause / Cancel / Resume
-component both this surface and the Runs detail pane use — top-level, like `lib/view-keys.ts`, because the two hosts are separate lazy chunks.
+Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
+call `useDialogEscape` for whatever they wrap.
 
 ### What leaves the Board
 
@@ -64,9 +112,10 @@ instead.
 
 Where those land, in four columns — refactoring, ideas, bugs, out of scope — grouped under sticky month subheaders, newest month first. The column is the
 Board's own `BoardColumn` and the card its own `ItemCard`, not a second set: what differs is the fourth column, whose dot carries no type hue at all, because a
-rejection is a verdict rather than a type. It carries a project filter and a search box and nothing else: its contents are defined by staleness and rejection,
-not by status, so a status filter there would either do nothing or contradict the surface. No card here ever paints a live strip — whatever put an item in
-Archive already took it off the Board a run could be holding — which `ArchiveView` guarantees by handing `ItemCard` no run at all.
+rejection is a verdict rather than a type. There is no Tasks column, because a task never leaves the Board to fill one. It carries a project filter and a search
+box and nothing else: its contents are defined by staleness and rejection, not by status, so a status filter there would either do nothing or contradict the
+surface. No card here ever paints a live strip — whatever put an item in Archive already took it off the Board a run could be holding — which `ArchiveView`
+guarantees by handing `ItemCard` no run at all. A card opens the same item modal the Board opens.
 
 Nothing in it is finished, and both halves come back by their own route — a stale item by dispatching a **groom**, which refreshes `updated:` and puts it back
 on the Board at the next load; a rejected one by dispatching a **capture**, which files a _new_ item citing `from: <id>` and leaves the original rejected on the
@@ -75,30 +124,62 @@ spawned session does.
 
 ### Runs
 
-Aggregate stat tiles including a wide "machine time by stage" tile, a Today / This week / This month / All range control (calendar-aligned, local-time windows
-on a run's `startedAt`) that scopes the tiles, the list and the wide tile together, a project filter, and a day-grouped run history with fresh live runs pinned
-above it. Above that pinned region sits a `starting` placeholder group, read straight off the payload, which is what makes a project's first run visible before
-`run.json` exists. A persistent detail pane carries the per-run stage rollup plus a full-width seven-node `StageTrack` per item with durations under each node.
-Cost rides both surfaces: the run total joins the row's foot line beside its wall time, the pane's head adds cost · turns · sessions, and each item gets its own
-line under its track — absent rather than zeroed for a run that predates the recording.
+Two pages under one rail entry, both reading the one `useOrchestratorRuns` payload, so moving between them adds no request and neither owns a second copy of the
+run list.
 
-The section is bounded to one viewport on the wide layout, with the list and the pane each scrolling their own overflow, sticky day headings, and history
-windowed behind a counted `load more` — a render decision over a corpus the client already holds whole, exactly as the staleness window is. Below 700px none of
-the bounding applies.
+**History** — the section's default, and named for what a reader arrives looking for rather than for its contents, which are three parts present and one part
+past. Its band counts all three states at once (`3 live · 1 starting · 28 past`) and carries the project select and the four-step range control (`RUN_RANGES`,
+`lib/run-range.ts`, calendar-aligned local-time windows on a run's `startedAt`), which scopes the figures, both lists and the wide cell together.
 
-Behind a `Runs | Watchdog` mode switch, Watchdog mode replaces the whole body with `WatchdogMonitor`: three tiles (the sweeper's phase, the watched count, the
-read-only policy), one card per `running` run with a heartbeat freshness meter and, on a crashed card, attempt pips, the strip's own verdict verbatim and the
-grace remaining, plus an activity feed. It owns the one live `useWatchdog()` and takes the Runs view's own live runs as a prop, so switching modes adds no
-request.
+Directly under the band, the **figure strip**: five cells — runs, completed / queued, avg item work, rework / completed, verify pass — each a label, a value and
+a line saying what the figure above it means, all read from what `aggregateRuns` (`lib/run-stats.ts`) returns and nothing else. The sixth cell is full width and
+holds `StageBars`: machine time by stage, always the seven `MACHINE_STAGES` rows in pipeline order, `—` for a stage never recorded, queue wait excluded. The
+strip hides with the list when the range or project filter empties it.
+
+Under the strip, the **split**: a 420 px list column carrying the Live sheet over the History sheet, and one always-visible detail sheet beside it. The two
+columns stack under 1100 px, list first; under 700 px the sheets are full width.
+
+- **The Live sheet** holds one row per run that is `running` or `paused`, plus one per `starting` entry — a dot, the project, `⚠ N` when the run carries
+  attention entries, the two-tone `1 / 5`, elapsed, and a status pill only where one is earned. A starting row reads `starting… · <age>`, carries no controls
+  and cannot be selected: there is no run file for the detail sheet to show. A crashed run — `running`, heartbeat stale — is a two-line row carrying all three
+  of its readings together (`no heartbeat for <age>`; `last reported <id> at <stage>` or `all items at rest`; the `watchdogClause` sentence), and it is always a
+  Live row, never a History one: which sheet a row belongs to is `splitLive`'s call on `running`/`paused` presence, with freshness deliberately excluded.
+- **The History sheet** holds one row per finished run under day kickers, newest first: the dot and the status word from `runStatusChip`, the project, the
+  two-tone count, wall time and the cost beside it when usage exists, behind a counted `load more` in pages of 25 — a render decision over a corpus the client
+  already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
+- **The detail sheet** shows the selected run whole: a head with the project, the run id and `RunControls` (Pause, Cancel with its `Pausing after <id>` note,
+  Resume for a paused run, and Resume for a crashed one exactly when `watchdogStoodDown` says the sweeper will not); then the facts strip, the mode and question
+  notes, the chip row, the attention entries, machine time by stage for this run alone, `git merge --no-ff <branch>` per branched item, and the items in
+  pipeline order — each with its stage chip, its `RowTime` reading, its seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last
+  verification as a disclosure, open when failed. Selection is one run across both sheets: the first live run is selected on arrival, and with nothing live the
+  newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
+
+Cost rides all three surfaces — the History row's foot line, the detail head's `$ · N turns · N sessions`, and each item's own line under its track — absent
+rather than zeroed for a run that predates the recording. Empty states are `no runs yet` and `no runs in this range`, the figure strip hidden alongside the
+second.
+
+**Watchdog** — the sweeper's own page (`WatchdogMonitor`), the only surface that additionally mounts `useWatchdog()`. Its band carries `stateLine`'s own
+sentence as its subtitle and a flat `Policy in Settings ›` chip, because the policy is read here and edited there. Three figures: the sweeper's phase as a word
+with a sweep meter under it while armed, the watched count over `⚠ 1 crashed · 2 fresh · 1 not yet watched`, and the three policy values with the enabled
+switch's state as their line. Then the Watching sheet — one row per `running` run, annotated from the sweeper's own set with the skew rendered rather than
+hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row the attempt pips, the clause, the session id, the grace remaining and a
+`Resume now` chip drawn only when `watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last
+`WATCHDOG_EVENT_CAP` events, held in the API process's memory and emptied by a restart, which its subtitle says rather than buries.
 
 ### Settings
 
-Five themes, density, text scale, landing section, the staleness window and the two orchestrator run defaults — all per-device, in `localStorage`, never sent to
-the server. Plus a Claude Agents group — the dashboard's status, the default model and effort every launch sheet seeds from, and the dashboard link base — and
-an Orchestrator watchdog group: the one place Settings writes to the server, four knobs that live in `settings/watchdog.json` beside the registry rather than in
-this browser. Because it is the one write, it is also the one group that can be refused: a rejected `POST /api/agents/watchdog/config` renders one red line in
-its own row directly under the control it was refused for, while every knob keeps showing the value the server actually holds. That is a separate hook field
-(`saveError`) from the failed-GET `error` beside it, because a failed read replaces the whole group and a failed write must not.
+Five cards on two hand-placed columns — `Board`, `Display` and `Claude Agents` left, `Orchestrator · this device` over `Orchestrator watchdog · this server`
+right, because those two are the same subject at two scopes and a reader should meet them in that order. Each card is a title plus a scope (`this device`,
+`this machine`, `this server`) answering a different question from the name: whether changing this affects anybody but the person changing it. Hand-placed
+rather than reflowed, so a card does not move to the other side of the page when its neighbour grows a row; one column under 1100 px.
+
+Themes, density, text scale, landing section, the staleness window and the two orchestrator run defaults are per-device, in `localStorage`, never sent to the
+server. The Claude Agents card adds the dashboard's status, the default model and effort every launch sheet seeds from, and the dashboard link base. The
+watchdog card is the one place Settings writes to the server — four knobs that live in `settings/watchdog.json` beside the registry rather than in this browser,
+plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it is the one write, it is also the one card that can be
+refused: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while every knob keeps
+showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it, because a failed read replaces
+the whole group and a failed write must not.
 
 ## Interfaces
 
@@ -107,18 +188,19 @@ its own row directly under the control it was refused for, while every knob keep
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, or any `starting` entry is present, plus a grace
   window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
+- `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.
 
 ## Invariants
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the three per-item dispatch blocks
-and which one lets a click through, the dialog escape stack, "queue wait is not work" — are in [invariants.md](invariants.md), with the failure each one
-encodes. Not restated here.
+and which one lets a click through, the dialog escape stack and its three entries, a crashed run rendering as crashed, "queue wait is not work" — are in
+[invariants.md](invariants.md), with the failure each one encodes. Not restated here.
 
 <!-- docs-sync:
   sources:
     - client/src
     - shared/types.ts
   kind: subsystem
-  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
+  verified: 5b6b41947305a51632bdfbb64c217a6e232e6f51
 -->

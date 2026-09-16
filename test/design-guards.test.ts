@@ -72,6 +72,56 @@ describe('guard 1 — no second face is named anywhere', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  /**
+   * task-41's half of the same guard: the families the redesign STOPPED
+   * drawing, which is the other way a second look survives a rewrite. The run
+   * strip's rules went with the three components task-37 deleted, the item
+   * drawer's panel geometry with the modal task-40 replaced it by, and the
+   * launch sheet's shell with `FormSheet` — in each case the components went
+   * first and the CSS sat unreferenced behind them, which renders as nothing
+   * and reads as a live alternative to whoever finds it next.
+   *
+   * Stated as SELECTORS, not as text: every one of these names is still in
+   * this file's prose, explaining where the surface went, and a guard that
+   * counted those could only be satisfied by deleting the explanation — the
+   * same trap the `--mono` check above documents.
+   *
+   * The survivors are listed one by one rather than matched by shape, because
+   * "which `.sheet-*` classes are still drawn" is a fact about two components
+   * and not a pattern: `.drawer-empty` is the one line left of the drawer, and
+   * the twelve `.sheet-*` below are the field/row/note vocabulary both sheets
+   * write their bodies in, inside a `FormSheet` that owns the shell. A name
+   * removed from a component belongs off this list and out of the sheet.
+   */
+  const REMOVED_PREFIXES = ['.run-strip', '.drawer', '.sheet'];
+  const SURVIVORS = [
+    '.drawer-empty',
+    '.sheet-kicker',
+    '.sheet-title',
+    '.sheet-field',
+    '.sheet-static',
+    '.sheet-prompt',
+    '.sheet-row',
+    '.sheet-check',
+    '.sheet-error',
+    '.sheet-blocked',
+    '.sheet-ok',
+    '.sheet-link',
+    '.sheet-note'
+  ];
+
+  it('no rule in styles.css draws a surface the redesign deleted', () => {
+    const offenders: string[] = [];
+    for (const rule of styleRules) {
+      for (const token of rule.selector.match(/\.[\w-]+/g) ?? []) {
+        if (SURVIVORS.includes(token)) continue;
+        const prefix = REMOVED_PREFIXES.find((p) => token === p || token.startsWith(`${p}-`));
+        if (prefix) offenders.push(`${rule.selector} (${token}, a ${prefix}* rule)`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });
 
 describe('guard 2 — one --font stack, and nothing else picks a face', () => {

@@ -1,15 +1,19 @@
 /* ── Theme tokens ─────────────────────────────────────────────────────────────
    Ported verbatim from ../claude-agents-dashboard/client/src/styles.css.
 
-   This file is the single palette definition for BOTH surfaces: the React shell
-   imports it, and the server links it into every rendered guide page (see
-   wrapPage in server/src/render/render.util.ts). Keeping one copy is the point —
-   a palette tweak can never leave the guide body and the shell disagreeing.
+   This file is the single palette definition for this app, and it has exactly
+   one consumer: `client/src/styles.css` @imports it. The port's own header
+   claimed a second one — a server `wrapPage` linking it into every rendered
+   guide page — which was true of guide-manager and never of this repo: there
+   is no `server/src/render/` here and no server file mentions this stylesheet.
+   Removed by task-41, the redesign's cleanup, which is where the spec's §7
+   names it; the task that rewrote this file's daylight values deliberately
+   left it standing.
 
    The attribute is stamped on <html> pre-paint by the inline script in
-   client/index.html and by the equivalent script wrapPage injects, then kept in
-   step by the client's useSettings hook. Adding a theme means: redefine the same
-   names, set `color-scheme`, and add the id to the client's THEMES list. */
+   client/index.html, then kept in step by the client's useSettings hook.
+   Adding a theme means: redefine the same names, set `color-scheme`, and add
+   the id to the client's THEMES list. */
 :root,[data-theme="midnight"]{
   color-scheme:dark; /* dark UA scrollbars + form controls on the olive board */
   /* ATC strip board — midnight radar: deep navy scope-room */
