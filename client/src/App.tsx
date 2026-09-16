@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 
-import { SECTIONS, SideRail, type Section } from './components/SideRail';
+import { SideRail } from './components/SideRail';
+import { SECTIONS, type Section } from './lib/sections';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { usePersistedState } from './hooks/usePersistedState';
 import { setRunsMode } from './hooks/useRunsMode';

@@ -14,7 +14,7 @@
 
 import { EFFORTS, MODELS } from '../../../shared/agent';
 import { MERGE_MODES, QUESTION_MODES, type MergeMode, type QuestionMode } from '../../../shared/types';
-import { SECTIONS, type Section } from '../components/SideRail';
+import { SECTIONS, type Section } from './sections';
 
 export const THEMES = [
   { id: 'midnight', label: 'Midnight Radar', hint: 'the original — deep navy scope room' },
@@ -260,8 +260,11 @@ export const CONTENT_WIDTHS: readonly ContentWidth[] = ['fixed', 'full'];
  *
  * Derived now rather than listed. This used to be a hand-copied literal, under
  * a comment warning that a section added to the rail had to be added here too
- * or it stayed unpickable — a warning nothing enforced. `SideRail` exports
- * `SECTIONS` for exactly this, so the warning and the failure mode go together.
+ * or it stayed unpickable — a warning nothing enforced. `lib/sections.ts` is
+ * the one runtime list for exactly this, so the warning and the failure mode
+ * go together. It read that list off `SideRail` itself until task-42, when the
+ * rail gained a `useSettings` read and the two files closed an import cycle —
+ * see `lib/sections.ts` for the whole of it.
  *
  * A stored `landing` naming a section this build no longer has — `'projects'`,
  * from before the rail said Board — falls back to `last` rather than being

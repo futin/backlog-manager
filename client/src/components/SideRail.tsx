@@ -3,36 +3,36 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Dot } from './ui/Dot';
 import { useNarrow } from '../hooks/useNarrow';
 import { useRunsMode } from '../hooks/useRunsMode';
+import { useSettings } from '../hooks/useSettings';
 import { RUNS_MODES, type RunsMode } from '../lib/runs-mode';
+import { SECTIONS, type Section } from '../lib/sections';
+import { SETTINGS_SCOPES, type SettingsScope } from '../lib/settings';
 
 /**
- * The rail's tabs, in rail order — and the one definition of what a section is.
+ * Each section's label in the rail. The LIST and its order live in
+ * `lib/sections.ts`; what belongs here is only the wording, because a label is
+ * presentation and the rail is the only surface that draws one.
  *
- * "Board" rather than the "Projects" this tab shipped as, and rather than
- * "Tasks": a nav entry names a place, not a type, and the place holds bugs,
- * ideas and refactors alongside tasks. Narrowing to one project is a board
- * control and lives in the board toolbar, which is what made "Projects" the
- * wrong word for a section switch in the first place.
- *
- * `as const` so `Section` can be derived from it below. Everything that needs
- * to *check* a value against the list — `resolveSection` in App.tsx, guarding
- * a stored section that outlived the build that wrote it, and `LANDINGS` in
- * lib/settings.ts, clamping the "Opens on" preference — reads `SECTIONS` from
- * here instead of hand-copying the names. A type union alone has no runtime
- * members to iterate, which is why those two used to carry duplicates of this
- * list that could silently fall out of step with the rail.
+ * A `Record<Section, string>` rather than an array of pairs, so a section added
+ * to `SECTIONS` cannot ship without a label — the compiler asks for it. That is
+ * the same guarantee the old arrangement gave from the other direction, when
+ * `SECTIONS` was derived from a `TABS` list that held both halves; see
+ * `lib/sections.ts` for why the halves parted.
  */
-const TABS = [
-  { id: 'board', label: 'Board' },
-  { id: 'runs', label: 'Runs' },
-  { id: 'archive', label: 'Archive' },
-  { id: 'settings', label: 'Settings' }
-] as const;
+const RAIL_LABEL: Record<Section, string> = {
+  board: 'Board',
+  runs: 'Runs',
+  archive: 'Archive',
+  settings: 'Settings'
+};
 
-export type Section = (typeof TABS)[number]['id'];
-
-/** Every section id, runtime-readable. Derived, so the rail cannot drift from it. */
-export const SECTIONS: readonly Section[] = TABS.map((t) => t.id);
+/**
+ * Re-exported so nothing that already asks the rail for the section vocabulary
+ * has to be rewritten to ask `lib/sections.ts` instead — and, more to the
+ * point, so a component reading `Section` keeps reading it from the component
+ * layer. `lib/sections.ts` is the one definition either way.
+ */
+export { SECTIONS, type Section };
 
 interface Props {
   section: Section;
@@ -71,6 +71,13 @@ export function SideRail({ section, onChange }: Props) {
   // page can never be looking at different views. `lib/runs-mode.ts` stays the
   // one home of the key, the member list and the guard.
   const [runsMode, setRunsMode] = useRunsMode();
+  // The Settings tree's own value, and the reason it is a SETTING rather than a
+  // second module-level store beside `useRunsMode`: both of its readers — this
+  // tree and `SettingsView` — already sit inside `SettingsProvider`, so a store
+  // here would be a second mechanism buying nothing. Runs' mode needs the store
+  // because `RunsView` writes it too, from a surface with no settings context
+  // in its way; nothing outside Settings ever writes this one.
+  const { settings, update } = useSettings();
 
   const brand = (
     <h1 className="rail-brand">
@@ -102,47 +109,118 @@ export function SideRail({ section, onChange }: Props) {
       )}
 
       {(!narrow || menuOpen) &&
-        TABS.map((t) => (
-          <div key={t.id}>
-            {t.id === 'settings' && <div className="rail-rule" aria-hidden="true" />}
+        SECTIONS.map((id) => (
+          <div key={id}>
+            {id === 'settings' && <div className="rail-rule" aria-hidden="true" />}
             <button
-              className={section === t.id ? 'rail-link on' : 'rail-link'}
-              aria-current={section === t.id ? 'page' : undefined}
+              className={section === id ? 'rail-link on' : 'rail-link'}
+              aria-current={section === id ? 'page' : undefined}
               onClick={() => {
-                onChange(t.id);
+                onChange(id);
                 setMenuOpen(false);
               }}
             >
-              <RailIcon section={t.id} />
-              {t.label}
+              <RailIcon section={id} />
+              {RAIL_LABEL[id]}
             </button>
-            {t.id === 'runs' && treeOpen('runs') && (
-              /* `aria-current="true"` on the open tree entry, not `"page"`: the
-               section row above it is what holds `page`, and two elements
-               claiming to be the current page would leave a reader with two
-               answers to one question. The tree entry is the current ITEM
-               within that page, which is what the bare `true` means. */
-              <div className="rail-sub" role="group" aria-label="Runs views">
-                {RUNS_MODES.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={runsMode === m && section === 'runs' ? 'rail-sublink on' : 'rail-sublink'}
-                    aria-current={runsMode === m && section === 'runs' ? 'true' : undefined}
-                    onClick={() => {
-                      setRunsMode(m);
-                      onChange('runs');
-                      setMenuOpen(false);
-                    }}
-                  >
-                    {RAIL_SUB_LABEL[m]}
-                  </button>
-                ))}
-              </div>
+            {id === 'runs' && treeOpen('runs') && (
+              <RailTree
+                label="Runs views"
+                section="runs"
+                current={section}
+                items={RUNS_MODES}
+                value={runsMode}
+                labelFor={(m) => RAIL_SUB_LABEL[m]}
+                onPick={setRunsMode}
+                onChange={onChange}
+                closeMenu={() => setMenuOpen(false)}
+              />
+            )}
+            {id === 'settings' && treeOpen('settings') && (
+              <RailTree
+                label="Settings pages"
+                section="settings"
+                current={section}
+                items={SETTINGS_SCOPES}
+                value={settings.settingsScope}
+                labelFor={(v) => RAIL_SCOPE_LABEL[v]}
+                onPick={(settingsScope) => update({ settingsScope })}
+                onChange={onChange}
+                closeMenu={() => setMenuOpen(false)}
+              />
             )}
           </div>
         ))}
     </nav>
+  );
+}
+
+/**
+ * One sub-nav tree, drawn for whichever section has one (§8.0).
+ *
+ * ONE render path rather than a block per section, because the markup carries
+ * three details that must not drift: the `rail-sub`/`rail-sublink` class pair,
+ * `aria-current="true"` rather than `"page"`, and closing the phone menu on a
+ * pick. Copied for a second section those become two things free to disagree,
+ * and the disagreement would be silent — two trees that merely LOOK the same.
+ *
+ * `aria-current="true"` and not `"page"`: the section row above holds `page`,
+ * and two elements claiming to be the current page would leave a reader with
+ * two answers to one question. A tree entry is the current ITEM within that
+ * page, which is what the bare `true` means.
+ *
+ * What legitimately differs per section is only three things, so those are what
+ * the call sites supply: the item list, which of them is current, and what a
+ * pick writes. `current` is the SECTION the reader is actually on, kept apart
+ * from this tree's own `section` because below 700 px every tree is drawn at
+ * once — a tree whose section is not current must mark nothing, or the rail
+ * would announce a current item on a page nobody is looking at.
+ */
+function RailTree<T extends string>({
+  label,
+  section,
+  current,
+  items,
+  value,
+  labelFor,
+  onPick,
+  onChange,
+  closeMenu
+}: {
+  label: string;
+  section: Section;
+  current: Section;
+  items: readonly T[];
+  value: T;
+  labelFor: (item: T) => string;
+  onPick: (item: T) => void;
+  onChange: (s: Section) => void;
+  closeMenu: () => void;
+}) {
+  return (
+    <div className="rail-sub" role="group" aria-label={label}>
+      {items.map((item) => {
+        const on = value === item && current === section;
+        return (
+          <button
+            key={item}
+            type="button"
+            className={on ? 'rail-sublink on' : 'rail-sublink'}
+            aria-current={on ? 'true' : undefined}
+            onClick={() => {
+              onPick(item);
+              // A tree entry is a destination as well as a choice: picked from
+              // another section it has to bring the reader along, or it would
+              // persist a view nobody can see.
+              onChange(section);
+              closeMenu();
+            }}
+          >
+            {labelFor(item)}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -220,6 +298,21 @@ function RailIcon({ section }: { section: Section }) {
 const RAIL_SUB_LABEL: Record<RunsMode, string> = {
   runs: 'History',
   watchdog: 'Watchdog'
+};
+
+/**
+ * The Settings tree's labels, and — exactly like `RAIL_SUB_LABEL` above — the
+ * only labels these two pages have: Settings draws no in-page switch at any
+ * width, so there is no second wording for this one to fall out of step with.
+ *
+ * `Local` and `Shared` name the SCOPE rather than the contents, because that is
+ * the question a reader is answering when they pick one: whether what they are
+ * about to change affects anybody but themselves. The page's own scope pill
+ * spells the same distinction out in words (`this browser` / `this machine`).
+ */
+const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
+  local: 'Local',
+  shared: 'Shared'
 };
 
 const ICON_PATHS: Record<Section, ReactNode> = {

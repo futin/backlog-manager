@@ -1,4 +1,4 @@
-import { SECTIONS } from '../client/src/components/SideRail';
+import { SECTIONS } from '../client/src/lib/sections';
 import { CONTENT_WIDTHS, DEFAULT_SETTINGS, FONT_SCALES, LIMITS, SETTINGS_SCOPES, STALE_WINDOWS, THEMES, clampSettings } from '../client/src/lib/settings';
 import { EFFORTS, MODELS } from '../shared/agent';
 

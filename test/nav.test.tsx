@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { App, resolveSection } from '../client/src/App';
-import { SECTIONS } from '../client/src/components/SideRail';
+import { SECTIONS } from '../client/src/lib/sections';
 import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { SETTINGS_STORAGE_KEY, clampSettings } from '../client/src/lib/settings';
 
