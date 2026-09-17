@@ -3,6 +3,10 @@ id: task-42
 title: Correct the surviving --magenta prose and pin the token's one reader with a source guard
 created: 2026-09-17
 from: ref-4
+updated: 2026-09-17T21:22:00Z
+started: 2026-09-17T20:38:27Z
+execute-elapsed: 2613
+execute-tokens: 90541
 ---
 
 ## Goal
@@ -155,3 +159,75 @@ Run from the repo root. The first three are the red-proofs; every mutation is re
   spec §9 and names `ref-4`.
 - `client/src/styles.css:785-793` and `.claude/DESIGN.md` §8.2 are byte-for-byte unchanged — they were already right.
 - `pnpm test` and `pnpm run typecheck` both exit `0`, and the working tree holds none of the red-proof mutations.
+
+## Outcome
+
+2026-09-17 — done. Step 0's grep re-confirmed the premise exactly as the plan states it: `.dispatch-word.capture` (`client/src/styles.css:1322`) is this app's one
+reader of `var(--magenta)`, all five theme blocks declare the token, and the only false prose left outside `backlog/` was the spec sentence (Step 1) and the
+executed plan's clause (Step 2). Nothing new had appeared, and no step's target text was gone, so all four steps were executed as written.
+
+- **Step 1** — `docs/superpowers/specs/2026-09-15-fe-redesign-design.md` §2.2: the sentence "`--magenta` loses its only job on this screen and stays in the
+  palette for the app that shares it" is replaced by three clauses saying the ramp takes the token's **column** job, that `.dispatch-word.capture` is the job it
+  keeps and this app's only reader, and that the palette-wide declaration is for that as much as for the sibling app's Task-subagent marker. The four ramp
+  assignments in the same paragraph are byte-for-byte unchanged.
+- **Step 2** — `docs/superpowers/plans/2026-09-15-fe-redesign-task0-design-md.md`: the original Step 3 instruction is untouched; a dated correction note sits
+  immediately under the paragraph, citing `ref-4` and `task-42`, naming the four rules that read the token when the clause was written and what §8.2 shipped
+  instead. The note shape was preferable here as the plan predicted — the clause is buried mid-run-on, so a strike-through inside it would have been unreadable
+  and would also have altered the record of what was asked.
+- **Step 3** — `shared/theme.css`: a block comment above `--magenta` states this app's job (the capture dispatch control's tone, hence all five palettes) beside
+  the sibling app's, and points at guard 8. The trailing-comment column on lines 28-34 is untouched; the `/* Task subagent / kaizen */` trailing comment stays
+  exactly as it was.
+- **Step 4** — `test/design-guards.test.ts`: `guard 8`, two `it`s, built on the existing `styleRules` / `themeBlocks` / `stripComments` helpers. The header
+  docblock gains one paragraph saying guard 8 is not from spec §9 and names `ref-4`; the existing seven-versus-six note is intact.
+
+Two deliberate calls worth a reviewer's eye. **New prose is wrapped at 160 columns** (the machine-wide convention for new text) even though the surrounding
+comments in both files sit at ~75 — no existing comment was reflowed, per the same rule's "new text only" half. And **the plan file keeps its false clause on
+purpose** (Step 2's whole point), so a grep for "keeps no job on this screen" still finds one line outside `backlog/`; the correction note two paragraphs below
+it is what makes that line safe to read.
+
+Verification. `pnpm test` and `pnpm run typecheck` could not be run through pnpm in this worktree for two environment reasons that predate this diff and are not
+caused by it: the machine's pnpm is 11.13.0 against `package.json`'s `packageManager: pnpm@12.3.4` pin, which corepack refuses to switch (so every `pnpm`
+invocation in this tree fails, `scripts/test-all.mjs`'s two children included), and the orchestrator worktree has no `node_modules`, which jest's
+`moduleNameMapper` entry for `marked` resolves against `<rootDir>` and so fails 10 suites on resolution alone. Both runners were therefore invoked directly —
+the same two commands `scripts/test-all.mjs` shells out to — with `node_modules` symlinked to the main tree's for the duration of the run and **removed again
+afterwards**; `git status --short` below is the tree as this session leaves it.
+
+```
+$ npx jest --runInBand
+Test Suites: 108 passed, 108 total
+Tests:       1774 passed, 1774 total
+Snapshots:   0 total
+Time:        76.024 s, estimated 78 s
+Ran all test suites.
+
+$ node --test skills/*/tools/*.test.mjs scripts/*.test.mjs
+tests 556
+suites 0
+pass 556
+fail 0
+
+$ npx tsc --noEmit
+JEST_EXIT=0 TSC_EXIT=0 SKILLS_EXIT=0
+
+$ git status --short
+ M backlog/tasks/open/task-42-correct-the-surviving-magenta-prose-and-pin-the-token-s-one-reader-with-a-source-guard.md
+ M docs/superpowers/plans/2026-09-15-fe-redesign-task0-design-md.md
+ M docs/superpowers/specs/2026-09-15-fe-redesign-design.md
+ M shared/theme.css
+ M test/design-guards.test.ts
+```
+
+Test case 4 (guard 5's daylight table unmodified — `--magenta: '#6b52a8'` still in `DAYLIGHT`), case 5 (guards 1, 2, 5 and 8 green with the new `theme.css`
+prose, which `stripComments()` blanks), case 6 (no line outside `backlog/` asserts the token has no job, the annotated plan clause excepted above), cases 7-8
+(both runners, typecheck) all hold. Case 9's no-browser rule was followed: nothing rendered changes.
+
+Contract sweep: none found
+Red proof: 2 tests went red with the change reverted
+
+The red proof ran the plan's three mutations, each reverted from a `/tmp` copy immediately (never `git stash`): `.dispatch-word.capture`'s value changed to
+`var(--cyan)` gave assertion 1 red, the received string naming `.dispatch-word.capture { color: var(--cyan) }`; the whole rule deleted gave assertion 1 red with
+`(no .dispatch-word.capture rule in client/src/styles.css)` rather than a crash; `--magenta` deleted from the graphite block gave assertion 2 red with
+graphite's own selector in `missing`. The sweep found no site outside the diff still carrying an old form: `client/src/styles.css:785-793` and
+`.claude/DESIGN.md` §8.2 were already correct and are byte-for-byte unchanged, and no doc states a guard COUNT that guard 8 would falsify — spec §9's "Six
+source guards land with task 1" is a claim about task 1 and stays true, which the test file's header now says outright.
+

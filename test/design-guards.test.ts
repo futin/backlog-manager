@@ -15,6 +15,9 @@ import { join } from 'node:path';
  *
  * Spec §9 heads this list "six source guards" and then lists seven. That
  * mismatch is the spec's own text; all seven are implemented here.
+ *
+ * Guard 8 is the one below that spec §9 does not ask for at all: it comes from `ref-4`, a stylesheet comment that claimed `--magenta` had no job here while the
+ * capture dispatch control was reading it. Its own docblock carries the reasoning.
  */
 
 const ROOT = join(__dirname, '..');
@@ -360,5 +363,35 @@ describe('guard 7 — one home per primitive', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * Guard 8 is NOT one of spec §9's seven — it comes from `ref-4`, which was filed against a stylesheet comment claiming `--magenta` had "no job on this screen"
+ * while the capture dispatch control was reading it. The comment has since been corrected, but the hazard the item was really about survives a comment fix:
+ * someone reads a stale "this token has no job here" line — `task-42` corrected the ones that existed, and prose drifts again — deletes `--magenta` from
+ * `shared/theme.css`, and silently unstyles `.dispatch-word.capture` in all five themes. Prose cannot stop that; this can.
+ */
+describe('guard 8 — --magenta has a reader here, and a value in every theme (ref-4)', () => {
+  /**
+   * The rule's PRESENCE and its declared value, deliberately not a count of `var(--magenta)` in the sheet: a count goes red the day someone legitimately adds a
+   * second use, and what this pins is that the token is not orphaned rather than that it is used exactly once. The rule is rendered into the expected string so
+   * an absent rule fails as a sentence saying it is absent, rather than as a crash reading `.body` off `undefined`.
+   */
+  it('.dispatch-word.capture is styles.css’s reader of --magenta', () => {
+    const rule = styleRules.find((r) => r.selector === '.dispatch-word.capture');
+    const found = rule ? `.dispatch-word.capture {${rule.body}}` : '(no .dispatch-word.capture rule in client/src/styles.css)';
+    expect(found).toContain('color: var(--magenta)');
+  });
+
+  /**
+   * The same failure guard 5's fill-token case documents, for the same reason: a token declared in four blocks out of five resolves to nothing in the fifth and
+   * paints whatever was inherited. Guard 5 pins `--magenta` in the daylight block alone, by value, so four of the five were unguarded until this. The block's
+   * SELECTOR rides in the failure so a miss names the theme (`[data-theme="graphite"]`) rather than reporting a number, and the block count rides with it so
+   * this cannot pass vacuously on a `themeBlocks` that found nothing.
+   */
+  it('every theme block declares --magenta', () => {
+    const missing = themeBlocks.filter((b) => !/--magenta: *[^;]+/.test(b.body)).map((b) => b.selector);
+    expect({ blocks: themeBlocks.length, missing }).toEqual({ blocks: 5, missing: [] });
   });
 });

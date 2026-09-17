@@ -143,6 +143,12 @@ tasks `--green` — and that `--magenta` keeps no job on this screen; the four d
 and per modal facts column, never on text, name in `--ink2` beside it, `--proj-N` sets unchanged, class not `style` attribute; the **one-home rule** for
 primitives (spec §12.1) in two sentences with a pointer to the spec's §12 table until `docs/subsystems/board.md` carries it (spec §11).
 
+**Correction, 2026-09-17 (`ref-4`, executed as `task-42`):** one clause of the Required content above was false when it was written — "`--magenta` keeps no job
+on this screen". Four rules read the token at the time (`.dispatch-tab.capture` and `.dispatch-chip.capture`, base and hover), against the column tick's one;
+the whole-branch review caught it by counting uses in source. The instruction is left standing because this plan records what was ASKED, and the shipped §8.2
+records the capture dispatch control's tone instead — which `task-37` collapsed into the single `.dispatch-word.capture`, this app's one reader of the token
+since `task-39` took the ticks away with Archive.
+
 - [ ] **Step 4: Check the section**
 
 Run:

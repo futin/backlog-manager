@@ -30,6 +30,11 @@
   --mustard:#d1ba52;          /* incomplete/pending */
   --cyan:#55d0dd;             /* the one interactive accent */
   --red:#e0533f;              /* danger thresholds */
+  /* --magenta has a job in BOTH apps, and the trailing comment below states only the sibling's — which is exactly the reading that makes deleting the token
+     look free from inside this repo (ref-4). HERE it is the capture dispatch control's tone: `.dispatch-word.capture` in client/src/styles.css, this app's one
+     reader of it, which is why the token is declared in all five palettes rather than wherever the dashboard happens to need it. It lost its COLUMN job when
+     task-39 moved Archive onto BoardColumn and the section ticks went with it; that is not the same as losing every job, which is what the prose ref-4 was
+     filed against said. test/design-guards.test.ts's guard 8 pins both halves — the reader exists, and every theme block declares the token. */
   --magenta:#cf6f9e;          /* Task subagent / kaizen */
   --on-accent:#0c1220;        /* ink ON a filled accent (the amber Send button) */
   --scrim:rgba(4,8,16,.66);   /* drawer backdrop */
