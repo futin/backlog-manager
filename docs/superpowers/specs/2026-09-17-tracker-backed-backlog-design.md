@@ -1,7 +1,7 @@
 # Tracker-backed backlog — design
 
-Date: 2026-09-17 Status: draft, awaiting user review (remote decision session: three section cards, eight picks, recorded in §14 beside two calls of the
-author's own). Grooms
+Date: 2026-09-17 Status: approved (user-reviewed via remote decision session the same day: three section cards, eight picks, recorded in §14 beside two calls
+of the author's own; the phase-1 plan lives in the task idea-12 promoted to). Grooms
 `backlog/ideas/open/idea-12-…md`, whose body is the long-form problem statement and the 2026-09-15 direction this spec turns into a design; where the two
 disagree, this file wins and §14 says why.
 
