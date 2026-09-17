@@ -2609,6 +2609,16 @@ code, kbd, samp, pre { font-family: inherit }
   width: min(1080px, calc(100vw / var(--font-scale, 1) - 48px));
   max-height: calc(100dvh / var(--font-scale, 1) - 48px);
   display: grid; grid-template-columns: 290px minmax(0, 1fr);
+  /* The ROW is declared, and clamped, for the same reason the columns are: an implicit row is sized `auto`, an `auto` row is sized to max-content,
+     and a max-content row does not shrink to the `max-height` above it. Left implicit, the row grew to the taller column's full content height, the
+     `overflow: hidden` below clipped it, and NEITHER column's own `overflow-y: auto` ever engaged — because neither column was ever shorter than its
+     own content. Measured on the running board at a 900 px viewport: the panel capped at 852 px over a 1036 px row, the body 1036 px tall over
+     1036 px of content, 184 px of the item's text clipped and unreachable with no scrollbar anywhere to say so.
+     `min-height: 0` on the two columns is NOT this fix, and was measured not to be (1036/1036, unchanged): a grid item whose computed overflow is
+     not `visible` already has an automatic minimum size of zero, so the oversized thing here is the TRACK and never the item's floor. `1fr` is also
+     why this is not a second fixed height kept in step with the `max-height` above — it shrink-wraps a short item exactly as the implicit row did
+     (660, 788 and 812 px panels measured under this rule) and only clamps once the content would pass the cap. */
+  grid-template-rows: minmax(0, 1fr);
   background: var(--strip); border-radius: 16px;
   box-shadow: 0 24px 64px var(--shadow2);
   overflow: hidden;
