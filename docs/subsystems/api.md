@@ -8,11 +8,20 @@ no run file; the only bytes it owns are two files under `~/.backlog-manager/sett
 
 ### `items/`
 
-`GET /api/items` — the whole index, every registered project scanned fresh on each request. `GET /api/projects` — one row per registered project, with open-item
-counts and a `missing` flag for a project whose `backlog/` disappeared. `GET /api/items/body?path=` — one item's Markdown body, resolved through an allowlist
-built from the registry, so a path outside every registered project's `backlog/` 404s. `GET /api/items/uncommitted?project=` — which of one project's item files
-differ from `main`, so the Orchestrate sheet can flag the rows whose bytes on disk are not the bytes a run will read: `{ paths, known }`, `known: false` for
-every git failure alike, 404 for an unregistered project, and nothing cached.
+`GET /api/items` — the whole index, every registered project scanned fresh on each request; every row carries a `source` naming the adapter that produced it.
+`GET /api/projects` — one row per registered project, with open-item counts, a `missing` flag for a project whose `backlog/` disappeared, and that project's
+`source`. `GET /api/items/body?path=` — one item's Markdown body, resolved through an allowlist built from the registry, so a path outside every registered
+project's `backlog/` 404s. `GET /api/items/uncommitted?project=` — which of one project's item files differ from `main`, so the Orchestrate sheet can flag the
+rows whose bytes on disk are not the bytes a run will read: `{ paths, known }`, `known: false` for every git failure alike, 404 for an unregistered project, and
+nothing cached.
+
+A project's source is resolved per request from its own committed `backlog/source.json` (`sources/resolve.util.ts`), never cached and never stored — the same
+rule the registry read follows, for the same reason. No marker means `files`, the implicit source and the only adapter this build registers, so today every
+project resolves to it. A marker that is present and cannot be honoured — malformed, no string `kind`, or a kind with no adapter here — resolves `unsupported`:
+the project contributes **no items** and exactly one error (prefixed with the marker's path, like every scan error), and its `/api/projects` row reads
+`source: 'unsupported'` with zero counts and `missing: false`. It never reads as `files`; a tracker project whose marker this build cannot read would otherwise
+render a stale clone's files as ghosts. A project with no store at all still reads `missing: true` and `source: null`. `ItemsService` dispatches over the
+registered adapters and refuses two claiming one kind at boot.
 
 Two git-backed reads live here and they cache differently on purpose. The last commit touching an item file (`git-dates.util.ts`) is memoised per project
 against the mtimes of `index` and `logs/HEAD` — the files git rewrites whenever the answer can change. The uncommitted read (`uncommitted.util.ts`) is memoised
@@ -77,7 +86,8 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
 ## Interfaces
 
 - **The registry file** — read per request, never written, never cached. Its only writer is `skills/backlog/tools/backlog.mjs`.
-- **Each project's store** — read-only, always. Every write goes through the skills.
+- **Each project's store** — read-only, always. Every write goes through the skills. Its `backlog/source.json`, when present, names the tracker that owns its
+  items ([spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md)).
 - **The run-state directory** — read fresh per request. Its only writer is `skills/backlog-orchestrate/tools/orchestrate.mjs`; the server re-derives the
   directory path with its own copy of the same function rather than importing the `.mjs` tool.
 - **`../claude-agents-dashboard`** — reached only from `agents/`, at an env-only URL, and never by the browser: every call goes board → this API → dashboard.

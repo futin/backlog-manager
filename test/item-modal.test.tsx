@@ -28,7 +28,8 @@ const ITEM: BacklogItem = {
   projectPath: '/abs/alpha',
   groomed: true,
   started: '',
-  path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md'
+  path: '/abs/alpha/backlog/bugs/open/bug-2-groomed-bug.md',
+  source: 'files'
 };
 
 /* The modal renders whatever assignment the board hands it, so the suite

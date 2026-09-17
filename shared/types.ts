@@ -46,6 +46,22 @@ export type Section = 'bugs' | 'ideas' | 'tasks' | 'refactors' | 'out-of-scope';
  *  name a fourth one. */
 export type ItemStatus = 'open' | 'done' | 'terminal';
 
+/**
+ * Which adapter produced an item — the closed list of item sources THIS BUILD
+ * ships, deliberately narrow: `'files'` alone in phase 1 of the tracker-backed
+ * design (docs/superpowers/specs/2026-09-17-tracker-backed-backlog-design.md
+ * §4.2, task-43).
+ *
+ * Closed and narrow because a kind named here without an adapter behind it
+ * would be a lie the resolver could not keep: `resolveSource` answers
+ * `unsupported` for a marker kind no registered adapter serves, and a type
+ * that already admitted `'github'` would let a caller write the field a
+ * server could never produce. Phase 2 widens this to `'files' | 'github'` in
+ * the same commit that registers the GitHub adapter — the union grows with
+ * each adapter, never ahead of one.
+ */
+export type SourceKind = 'files';
+
 export interface BacklogItem {
   id: string;
   title: string;
@@ -195,13 +211,32 @@ export interface BacklogItem {
   groomed: boolean | null;
   /** absolute path of the item's file — the key /api/items/body takes */
   path: string;
+  /**
+   * Which adapter produced this row — beside `path` because the two answer
+   * one question together: where this row came from, and how to ask for its
+   * body. `'files'` for every row this build can produce (see `SourceKind`).
+   *
+   * Required rather than optional, so the shape stays total: every fixture
+   * literal in `test/` has to name its source and the compiler is the
+   * checklist, the same reason `SectionCounts` spells out every section. The
+   * client ignores the field until a second kind exists to draw with it.
+   */
+  source: SourceKind;
 }
 
 export interface ItemsIndex {
   items: BacklogItem[];
-  /** malformed files skipped during the scan, one message per file, each
-   *  prefixed with the file's absolute path — same semantics as
-   *  `backlog.mjs board` exiting 1 with a partial board */
+  /**
+   * What the read could not make sense of, one message per cause, each
+   * prefixed with the absolute path of the file that caused it — same
+   * semantics as `backlog.mjs board` exiting 1 with a partial board.
+   *
+   * Two kinds of entry since task-43, both path-prefixed and deliberately not
+   * distinguished by shape: a malformed ITEM file skipped during a scan, and
+   * a project whose `backlog/source.json` could not be honoured, which
+   * contributes this one message and no items at all. A reader that needs to
+   * tell them apart has the path.
+   */
   errors: string[];
 }
 
@@ -216,6 +251,27 @@ export interface ProjectSummary {
   missing: boolean;
   /** open items per section (out-of-scope counts its terminal items) */
   counts: SectionCounts;
+  /**
+   * Which source owns this project's items, resolved per request from its
+   * committed `backlog/source.json` (spec §3.2, task-43):
+   *
+   * - `null` exactly when `missing` is `true` — no store, so no source. Not a
+   *   fifth string: "this project has no backlog at all" is already `missing`'s
+   *   news, and a second spelling of it would be a second thing to keep true.
+   * - `'unsupported'` when a marker IS present but cannot be honoured —
+   *   malformed, no string `kind`, or a kind no adapter in this build serves.
+   *   The reason travels in `ItemsIndex.errors`, prefixed with the marker's
+   *   path like every other scan error; it never travels here, because a
+   *   summary that carried it would be the second home of a message the index
+   *   already owns.
+   * - otherwise the kind of the adapter that produced this project's items.
+   *
+   * `unsupported` NEVER reads as `'files'`. A tracker project whose marker the
+   * server cannot read would otherwise render whatever stale files a clone
+   * still carries, as ghosts beside the real items on another machine's board
+   * (spec §3.2).
+   */
+  source: SourceKind | 'unsupported' | null;
 }
 
 /**

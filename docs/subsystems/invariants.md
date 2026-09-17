@@ -1799,6 +1799,44 @@ The result is memoised per project against the mtimes of `index` and `logs/HEAD`
 `ItemsService` refuses because it is keyed on the files git rewrites whenever the answer can change; with neither file present there is no key that can move and
 it recomputes instead. It exists because the call costs 84–396ms per project and `scanProject` runs on both `/api/items` and `/api/projects`.
 
+## A project's source is a committed marker, resolved per request, and an unsupported one never falls back to files
+
+Every registered project's items used to be, by definition, the files under its `backlog/`. Phase 1 of the tracker-backed design (task-43,
+[spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md) §3–§4) makes that a question the server asks rather than an assumption it holds:
+`resolveSource` (`server/src/items/sources/resolve.util.ts`) reads the project's own `backlog/source.json` and answers `missing`, `files`, `tracker` or
+`unsupported`, and `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES`. Today exactly one adapter is registered — `FilesSource`, a
+wrapper around the same `scanProject` — so every project on every machine resolves to `files` and the payloads are what they always were plus one `source`
+field each. That is the point: the seam is the change, and a payload diff of exactly those fields is what proves it.
+
+**The marker is per project and committed**, not a per-machine setting, because source is a property of the PROJECT and not of the laptop reading it (spec
+§2.3). A per-machine setting would have to be set again on every clone, and the first machine that had not heard of the tracker would render the repo's stale
+item files as though they were the backlog. Committing it means every clone agrees about who owns the items, and a fresh checkout is correct before anyone
+configures anything. It lives under `backlog/` rather than at the repo root so that `backlog.mjs root`, the `missing` check and every "where is this project's
+backlog" answer keep one home.
+
+**It is read per request and cached nowhere** — one `existsSync`, one `readFileSync`, one `JSON.parse` — which is deliberately the same rule and the same cost
+class as the registry read one module over. The events that change the answer (someone connected a project, someone edited the file) are exactly the events
+that change the registry, so a cache here would go stale on the same events, and it would buy microseconds against a scan that is about to read hundreds of
+files anyway.
+
+**`unsupported` never falls back to `files`.** This is the negative the whole seam rests on, and it is the one a later reader has a plausible reason to
+reverse — "we could not read the marker, so show what is on disk" sounds like graceful degradation. It is not. A project connected to a tracker still has its
+old item files sitting in every clone, and a build that cannot honour the marker would render those files as ghosts beside the real items on another machine's
+board — two boards disagreeing about what is open, with nothing on either saying which is wrong. So an unsupported project contributes no items at all, its
+`/api/projects` row reads `source: 'unsupported'` with all-zero counts, and the reason travels once in `ItemsIndex.errors`, prefixed with the marker's absolute
+path the way a scan error is prefixed with the item file's. `missing` keeps its old meaning exactly — no `backlog/` directory at all — so an unsupported
+project is `missing: false` and a storeless one is `missing: true` with `source: null`. An explicit `{"kind":"files"}` IS honoured: writing the default down
+must not be a way to opt out of it, and `files` never has to be registered for that to work.
+
+**`ItemsService` refuses two adapters of one kind at boot**, with the duplicated kind in the message, rather than letting the last one win. The loser would
+answer nothing, and a board that renders one source's items while another's never appear is wrong without ever saying so; a provider that throws turns that
+into a stack trace at startup.
+
+`SourceKind` is the closed list of adapters THIS BUILD ships — `'files'` alone today — and widens in the same commit that registers the next adapter. A kind
+named in the type with no adapter behind it would be a lie the resolver could not keep. `BacklogItem.source` is required rather than optional for the same
+reason `SectionCounts` spells out every section: the shape stays total, so every fixture literal in `test/` has to name its source and the compiler is the
+checklist.
+
 ## The Orchestrate sheet's uncommitted flag is read from git per request and memoised nowhere
 
 `GET /api/items/uncommitted` (`server/src/items/uncommitted.util.ts`, `ItemsService.uncommitted`, `ItemsController.uncommitted`) answers which of one project's

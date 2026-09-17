@@ -50,7 +50,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   board, not by typing the trigger into a terminal.** → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge.
-- `.claude/rules/` — four path-scoped pointer files, injected into a session the moment it reads a file under their `paths:` glob. Each is one line per anchor
+- `.claude/rules/` — five path-scoped pointer files, injected into a session the moment it reads a file under their `paths:` glob. Each is one line per anchor
   into `docs/subsystems/invariants.md` and nothing else; the reasoning has one home and this is not it.
 - `backlog/` — this repo's own backlog, self-registered like any project.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](docs/workflows/publishing.md)), `test-all.mjs`
@@ -104,6 +104,14 @@ any of these — most encode a failure that already happened.
   the skills, which remain the only writers.
 - **Every server route lives under `/api`**; the Vite proxy has exactly one entry, asserted by `test/vite-proxy.test.ts`.
 - **Item bodies are served through a registry-built allowlist** (`allow.util.ts`); a file outside every registered `backlog/` 404s.
+- **A project's source is a committed marker, resolved per request, and an `unsupported` one never falls back to `files`.** `resolveSource`
+  (`server/src/items/sources/resolve.util.ts`) reads `backlog/source.json` per request, caches nothing, and answers `missing` / `files` / `tracker` /
+  `unsupported`; `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES` and **throws at boot** if two claim one kind. Absent means `files`;
+  an explicit `{"kind":"files"}` is honoured, and `files` never has to be registered. An unsupported marker contributes **no items** and one
+  `ItemsIndex.errors` entry (prefixed with the marker's path), with `source: 'unsupported'`, zero counts and `missing: false` — `missing` still means no
+  `backlog/` at all, whose `source` is `null`. `SourceKind` is the closed list of adapters this build ships (`'files'` today) and widens only with the adapter;
+  `BacklogItem.source` is required so the compiler is the fixture checklist. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-projects-source-is-a-committed-marker-resolved-per-request-and-an-unsupported-one-never-falls-back-to-files)
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,
   refactors and out-of-scope derive `null`, not `false` — grooming is not a state they have, and for the first two the state they wait in is _promoted_.
 - **Board-versus-Archive is derived from `updated ?? lastCommit ?? created` and the run payload, never stored.** `isStale`/`leavesBoard`

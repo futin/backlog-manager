@@ -98,12 +98,35 @@ describe('GET /api/items and /api/projects', () => {
     { leaf: 'ideas/open', filename: 'idea-1-broken.md', content: 'no frontmatter at all\n' }
   ]);
   const beta = makeProject('beta', [{ leaf: 'ideas/open', filename: 'idea-1-someday.md', content: item('idea-1', 'someday', '## Problem\n\np\n') }]);
+  // task-43's two source-marker fixtures, both carrying a real store on disk so
+  // that what the marker changes is visible against a project that would
+  // otherwise scan perfectly well.
+  //
+  // `sourceless` names a kind no adapter in this build serves. Its items —
+  // there is one, deliberately — must NOT reach the index: the whole point of
+  // `unsupported` is that a project whose owner this build cannot identify
+  // contributes nothing rather than its stale files.
+  const sourceless = makeProject(
+    'sourceless',
+    [{ leaf: 'bugs/open', filename: 'bug-9-ghost.md', content: item('bug-9', 'a ghost', '## Symptom\n\nx\n') }],
+    '{"kind":"nope"}'
+  );
+  // `epsilon` spells out the implicit source. It must behave exactly like a
+  // project with no marker at all — writing the default down is not a way to
+  // opt out of it.
+  const epsilon = makeProject(
+    'epsilon',
+    [{ leaf: 'ideas/open', filename: 'idea-2-explicit.md', content: item('idea-2', 'explicit files', '## Problem\n\np\n') }],
+    '{"kind":"files"}'
+  );
 
   beforeAll(async () => {
     const registry = makeRegistry([
       { name: 'alpha', path: alpha },
       { name: 'beta', path: beta },
-      { name: 'ghost', path: '/nowhere/ghost' }
+      { name: 'ghost', path: '/nowhere/ghost' },
+      { name: 'sourceless', path: sourceless },
+      { name: 'epsilon', path: epsilon }
     ]);
     const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
       .overrideProvider(REGISTRY_FILE)
@@ -123,7 +146,10 @@ describe('GET /api/items and /api/projects', () => {
     const index = res.body as ItemsIndex;
     const byId = new Map(index.items.map((i) => [`${i.project}/${i.id}`, i]));
 
-    expect(byId.size).toBe(14);
+    // 14 as before, plus epsilon's one idea. `sourceless`'s bug-9 is NOT in
+    // here: its marker names a kind no adapter serves, so the project
+    // contributes no items at all.
+    expect(byId.size).toBe(15);
     const bug1 = byId.get('alpha/bug-1') as BacklogItem;
     expect(bug1.section).toBe('bugs');
     expect(bug1.status).toBe('open');
@@ -145,8 +171,43 @@ describe('GET /api/items and /api/projects', () => {
   it('reports the malformed file in errors[] and still returns the rest', async () => {
     const res = await request(app.getHttpServer()).get('/api/items').expect(200);
     const index = res.body as ItemsIndex;
-    expect(index.errors).toHaveLength(1);
-    expect(index.errors[0]).toContain('idea-1-broken.md');
+    // Two now: the malformed item file, and `sourceless`'s unreadable marker.
+    // Both found by their content rather than by index — the order is the
+    // registry's, which is not what either case is about.
+    expect(index.errors).toHaveLength(2);
+    expect(index.errors.some((e) => e.includes('idea-1-broken.md'))).toBe(true);
+  });
+
+  // The seam's whole acceptance test (task-43): every row says which adapter
+  // produced it, and in this build there is only one answer.
+  it('stamps every item with its source', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+    expect(index.items.every((i) => i.source === 'files')).toBe(true);
+  });
+
+  // An unsupported marker contributes NO items and exactly one error, and the
+  // error is prefixed with the marker's own path the way a scan error is
+  // prefixed with the item file's. Never a fallback to files: the item under
+  // `sourceless` is real, readable and deliberately absent from the payload.
+  it('drops an unsupported project entirely and reports its marker once', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const index = res.body as ItemsIndex;
+
+    expect(index.items.some((i) => i.projectPath === sourceless)).toBe(false);
+    const reported = index.errors.filter((e) => e.startsWith(join(sourceless, 'backlog', 'source.json')));
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain('nope');
+  });
+
+  // The explicit spelling of the implicit source behaves exactly like no
+  // marker at all — writing the default down is not a way to opt out of it.
+  it('honours an explicit files marker like no marker at all', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const idea = (res.body as ItemsIndex).items.find((i) => i.project === 'epsilon' && i.id === 'idea-2') as BacklogItem;
+    expect(idea.section).toBe('ideas');
+    expect(idea.status).toBe('open');
+    expect(idea.source).toBe('files');
   });
 
   it('summarises projects with open counts and flags missing ones', async () => {
@@ -154,15 +215,39 @@ describe('GET /api/items and /api/projects', () => {
     const projects = res.body as ProjectSummary[];
     const byName = new Map(projects.map((p) => [p.name, p]));
 
-    expect(byName.size).toBe(3);
+    expect(byName.size).toBe(5);
     const a = byName.get('alpha') as ProjectSummary;
     expect(a.missing).toBe(false);
+    expect(a.source).toBe('files');
     // done task-2 is not counted; the malformed idea is not an item
     // refactors counts 2, not 3: ref-3 is done, and done items are history.
     expect(a.counts).toEqual({ bugs: 7, ideas: 0, tasks: 1, refactors: 2, 'out-of-scope': 1 });
     const ghost = byName.get('ghost') as ProjectSummary;
     expect(ghost.missing).toBe(true);
     expect(ghost.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 });
+    // null, not a fifth string: "no store at all" is already `missing`'s news.
+    expect(ghost.source).toBeNull();
+  });
+
+  // `unsupported` is a summary state of its own: the store IS there (so
+  // `missing` stays false, which is what that flag has always meant), the
+  // counts are all zero because no adapter listed anything, and the source
+  // reads `unsupported` rather than `files` — the negative the whole seam
+  // rests on. The REASON is not here; it travels in ItemsIndex.errors.
+  it('summarises an unsupported project as present, empty and unsupported', async () => {
+    const res = await request(app.getHttpServer()).get('/api/projects').expect(200);
+    const byName = new Map((res.body as ProjectSummary[]).map((p) => [p.name, p]));
+
+    const unsupported = byName.get('sourceless') as ProjectSummary;
+    expect(unsupported.source).toBe('unsupported');
+    expect(unsupported.source).not.toBe('files');
+    expect(unsupported.missing).toBe(false);
+    expect(unsupported.counts).toEqual({ bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 });
+
+    const eps = byName.get('epsilon') as ProjectSummary;
+    expect(eps.source).toBe('files');
+    expect(eps.missing).toBe(false);
+    expect(eps.counts.ideas).toBe(1);
   });
 
   // `started` is stored, not derived — the scanner's job is only to surface it
@@ -238,9 +323,10 @@ describe('GET /api/items and /api/projects', () => {
     expect(bug7.executeTokens).toBe(0);
     expect(byId.has('alpha/bug-7')).toBe(true);
 
-    // Still only the one pre-existing malformed file (idea-1-broken.md) —
-    // none of the new fixtures above added themselves to errors[].
-    expect(index.errors).toHaveLength(1);
+    // Still only the one pre-existing malformed file (idea-1-broken.md) plus
+    // `sourceless`'s marker — none of the fixtures above added themselves to
+    // errors[].
+    expect(index.errors).toHaveLength(2);
   });
 
   it('serves an item body as text/plain with the frontmatter stripped', async () => {

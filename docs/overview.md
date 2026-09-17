@@ -21,7 +21,7 @@ touch an item file, and each file that holds state has exactly one writer.
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes                                 |
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
 
-`.claude/rules/` sits beside that table rather than in it: four path-scoped pointer files that a session loads automatically when it reads a file under their
+`.claude/rules/` sits beside that table rather than in it: five path-scoped pointer files that a session loads automatically when it reads a file under their
 `paths:` glob, each one line per anchor into `subsystems/invariants.md` and no prose of its own. They are guarded by `test/claude-rules.test.ts` rather than by
 `/docs-sync`, because what can rot in them is a dead anchor or a glob that matches nothing — both mechanical checks.
 
@@ -50,9 +50,10 @@ guarantee is untouched by it.
 
 Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route under `/api`:
 
-- **`items/`** — walks each registered project's store, parses frontmatter, derives what the board needs, and serves item bodies through a registry-built
-  allowlist so a file outside every registered `backlog/` cannot be read. Two git-backed reads live here: the last commit touching an item file (memoised
-  against the files git rewrites) and which items differ from `main` (memoised nowhere — the edit it reports moves neither of those files).
+- **`items/`** — resolves which source owns each registered project's items (its committed `backlog/source.json`, read per request; absent means the files on
+  disk, which is every project today), lists them through that source's adapter, parses frontmatter, derives what the board needs, and serves item bodies
+  through a registry-built allowlist so a file outside every registered `backlog/` cannot be read. Two git-backed reads live here: the last commit touching an
+  item file (memoised against the files git rewrites) and which items differ from `main` (memoised nowhere — the edit it reports moves neither of those files).
 - **`orchestrator/`** — a read-only view of the run-state directory, current run and archived runs alike, plus two pieces of in-memory bookkeeping that are lost
   on restart on purpose: what the watchdog has done, and which projects this process has just asked to start a run.
 - **`agents/`** — the one module that makes an outbound call, to the local claude-agents-dashboard, and the only one that can start a session. Off unless

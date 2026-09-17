@@ -93,7 +93,11 @@ export function scanProject(project: RegistryProject): { items: BacklogItem[]; e
           project: project.name,
           projectPath: project.path,
           groomed: deriveGroomed(leaf.section, body),
-          path: abs
+          path: abs,
+          // A literal, not a parameter: this function IS the files source, so
+          // every row it produces came from the files adapter by definition
+          // (task-43). A tracker adapter stamps its own kind in its own reader.
+          source: 'files'
         });
       } catch (e) {
         errors.push(`${abs}: ${e instanceof Error ? e.message : String(e)}`);

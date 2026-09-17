@@ -50,14 +50,16 @@ describe('BoardView: card live strips', () => {
       path: '/abs/alpha',
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+      counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 },
+      source: 'files'
     },
     {
       name: 'beta',
       path: '/abs/beta',
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+      source: 'files'
     }
   ];
 
@@ -91,6 +93,7 @@ describe('BoardView: card live strips', () => {
       projectPath: '/abs/alpha',
       groomed: true,
       path: '/abs/alpha/backlog/tasks/open/task-14-wire-the-heartbeat.md',
+      source: 'files',
       ...over
     };
     return base;

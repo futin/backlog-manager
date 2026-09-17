@@ -199,14 +199,16 @@ describe('BoardView: the run chip', () => {
       path: '/abs/alpha',
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
-      counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+      counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+      source: 'files'
     },
     {
       name: 'beta',
       path: '/abs/beta',
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
-      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 }
+      counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+      source: 'files'
     }
   ];
 
@@ -238,7 +240,8 @@ describe('BoardView: the run chip', () => {
     project: 'alpha',
     projectPath: '/abs/alpha',
     groomed: false,
-    path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md'
+    path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
+    source: 'files'
   };
 
   const realFetch = global.fetch;

@@ -43,7 +43,8 @@ function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
     project: 'alpha',
     projectPath: '/abs/alpha',
     groomed: false,
-    path: '/abs/alpha/backlog/bugs/open/bug-1.md'
+    path: '/abs/alpha/backlog/bugs/open/bug-1.md',
+    source: 'files'
   };
   return { ...base, ...over };
 }

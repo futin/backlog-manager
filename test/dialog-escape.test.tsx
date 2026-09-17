@@ -70,7 +70,8 @@ function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
     project: 'alpha',
     projectPath: '/abs/alpha',
     groomed: true,
-    path: '/abs/alpha/backlog/tasks/open/task-1.md'
+    path: '/abs/alpha/backlog/tasks/open/task-1.md',
+    source: 'files'
   };
   return { ...base, ...over };
 }
@@ -81,7 +82,8 @@ const PROJECTS: ProjectSummary[] = [
     path: '/abs/alpha',
     createdAt: '2026-08-26T00:00:00.000Z',
     missing: false,
-    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 }
+    counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 },
+    source: 'files'
   }
 ];
 
