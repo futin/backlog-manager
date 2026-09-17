@@ -151,7 +151,9 @@ The hatch is one utility rule, `.hatch`, over any fill: `repeating-linear-gradie
 The eight `--proj-N` sets stay as they are; on daylight they are dark inks, which an 8 px filled dot on white wants anyway.
 
 **Column ramp.** The four column dots are the design's category ramp read left to right — refactors `--amber`, ideas `--mustard`, bugs `--red`, tasks `--green`
-— replacing today's magenta/mustard/red/cyan ticks. `--magenta` loses its only job on this screen and stays in the palette for the app that shares it.
+— replacing today's magenta/mustard/red/cyan ticks. The ramp takes `--magenta`'s **column** job and leaves the one it keeps: the capture dispatch control's
+tone, `.dispatch-word.capture`, which is now this app's only reader of the token. It stays declared in every palette for that reason as much as for the app that
+shares it, where it is the Task-subagent marker.
 
 The stale comment at the head of `theme.css` about a server `wrapPage` linking the file is removed (task 6): no server code in this repo reads `theme.css`.
 
