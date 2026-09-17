@@ -751,58 +751,6 @@ export function RunDetail({
         )}
       </div>
 
-      {/* Attention moves AHEAD of the machine-time rollup, the branches and
-          the items (§8.4.1's body item 4, where it used to sit last): these
-          are the entries that need a person, and a reader who scrolls a
-          forty-item queue to find out whether anything is waiting on them has
-          already been made to work for the one reading this sheet is opened
-          for. The chip above counts them; this is the list. */}
-      <div className="run-detail-heading">Attention</div>
-      {attention.length === 0 ? (
-        <div className="drawer-empty">nothing needs a look</div>
-      ) : (
-        // `i` in the key for the same reason RunDrawer.tsx's own attention
-        // list carries it: RunAttention's doc comment calls this list "a
-        // log of what happened, not a live filter over queue", so the same
-        // item can legitimately earn a second entry later in the same run.
-        attention.map((a, i) => {
-          const row = rows.find((r) => r.id === a.id);
-          return (
-            <div key={`${a.id}-${a.kind}-${i}`} className="run-drawer-attn" data-testid={`run-detail-attention-${a.id}`}>
-              <div className="run-drawer-attn-head">
-                <span className="run-drawer-item-id">{a.id}</span>
-                <span className="run-drawer-attn-kind">{a.kind}</span>
-              </div>
-              <div className="run-drawer-attn-detail">{a.detail}</div>
-              {row !== undefined && row.questions.length > 0 && (
-                <ul className="run-drawer-questions">
-                  {row.questions.map((question) => (
-                    <li key={question}>{question}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          );
-        })
-      )}
-
-      {/* The run-level "machine time by stage" rollup (Task 6) — the same
-          `StageBars` widget Task 7's wide toolbar tile reuses, here fed
-          `source` (not `authority`) because it needs a real `.queue` and
-          `status` to sum over rather than either's narrower projection.
-          "queue wait excluded" is stated outright rather than left implicit
-          — `runStageTotals` already drops every `pending` span (see that
-          function's own doc comment), but a reader comparing this total
-          against a run's own wall-clock elapsed has no other way to know
-          why the two numbers do not add up. */}
-      <div className="run-detail-heading">
-        Machine time by stage
-        <span className="run-detail-sub">queue wait excluded</span>
-      </div>
-      <div className="run-detail-rollup">
-        <StageBars totals={runStageTotals(source, now)} testId="run-detail-machine" />
-      </div>
-
       {/* Branch mode's own "what do I do next" list (design §7 and §5.2's
           own "the actionable part ... belongs in the finish summary, where
           it is one list rather than N copies of one sentence" — the finish
@@ -992,6 +940,57 @@ export function RunDetail({
           );
         })}
       </div>
+
+      {/* The run-level "machine time by stage" rollup (Task 6) — the same
+          `StageBars` widget Task 7's wide toolbar tile reuses, here fed
+          `source` (not `authority`) because it needs a real `.queue` and
+          `status` to sum over rather than either's narrower projection.
+          "queue wait excluded" is stated outright rather than left implicit
+          — `runStageTotals` already drops every `pending` span (see that
+          function's own doc comment), but a reader comparing this total
+          against a run's own wall-clock elapsed has no other way to know
+          why the two numbers do not add up. */}
+      <div className="run-detail-heading">
+        Machine time by stage
+        <span className="run-detail-sub">queue wait excluded</span>
+      </div>
+      <div className="run-detail-rollup">
+        <StageBars totals={runStageTotals(source, now)} testId="run-detail-machine" />
+      </div>
+
+      {/* Attention sits LAST — the user's call on 2026-09-17, made while picking the wide layout, and a reversal of task-38's move of this block to the
+          top of the body. task-38's argument was that a reader scrolling a forty-item queue to learn whether anything waits on them has been made to work.
+          What won against it is what the sheet looks like on almost every run: an empty list is the common case, so the section was `nothing needs a look`
+          standing between the chips and the items, and the chip row above already carries the count — a reader who sees `0 attention` there has nothing to
+          scroll for, and one who sees `2` knows to. The chip counts; this is the list; the list is only worth the screen when it is not empty. */}
+      <div className="run-detail-heading">Attention</div>
+      {attention.length === 0 ? (
+        <div className="drawer-empty">nothing needs a look</div>
+      ) : (
+        // `i` in the key for the same reason RunDrawer.tsx's own attention
+        // list carries it: RunAttention's doc comment calls this list "a
+        // log of what happened, not a live filter over queue", so the same
+        // item can legitimately earn a second entry later in the same run.
+        attention.map((a, i) => {
+          const row = rows.find((r) => r.id === a.id);
+          return (
+            <div key={`${a.id}-${a.kind}-${i}`} className="run-drawer-attn" data-testid={`run-detail-attention-${a.id}`}>
+              <div className="run-drawer-attn-head">
+                <span className="run-drawer-item-id">{a.id}</span>
+                <span className="run-drawer-attn-kind">{a.kind}</span>
+              </div>
+              <div className="run-drawer-attn-detail">{a.detail}</div>
+              {row !== undefined && row.questions.length > 0 && (
+                <ul className="run-drawer-questions">
+                  {row.questions.map((question) => (
+                    <li key={question}>{question}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })
+      )}
     </>
   );
 }

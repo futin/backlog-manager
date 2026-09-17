@@ -33,9 +33,13 @@ export type FigureTone = 'ink' | 'live' | 'good' | 'warn' | 'bad';
  * through the same 1100/700 breakpoints, so neither page has its own
  * responsive story to keep in agreement with the other.
  */
-export function FigureStrip({ children, cols = 5, testId }: { children: ReactNode; cols?: 3 | 5; testId?: string }) {
+/* `className` is the page's own LAYOUT class and never a second look — see `Band`'s own note for the contract, which is `Sheet`'s. `cols` stays a prop
+   because 3-vs-5 is a fact about the CONTENT (how many cells there are); where the strip stands is a fact about the page, and the two must not be
+   confused into one knob. */
+export function FigureStrip({ children, cols = 5, testId, className }: { children: ReactNode; cols?: 3 | 5; testId?: string; className?: string }) {
+  const base = cols === 3 ? 'ui-figure-strip ui-figure-strip-3' : 'ui-figure-strip';
   return (
-    <div className={cols === 3 ? 'ui-figure-strip ui-figure-strip-3' : 'ui-figure-strip'} data-testid={testId}>
+    <div className={className ? `${base} ${className}` : base} data-testid={testId}>
       {children}
     </div>
   );
