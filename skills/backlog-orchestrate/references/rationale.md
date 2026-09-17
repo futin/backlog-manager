@@ -49,8 +49,9 @@ calls a crashed session, parks the item, and moves on — for every item in the 
 ### Why `--permission-mode auto`, and not the rung above it
 
 What makes running an unattended session tolerable is not trust in the session, it is the four walls around it: the session can only write inside a **disposable
-worktree** created seconds ago from `main`; its output faces an **independent review** before anything moves; it faces **verification commands** that must come
-back green; and the **merge is the only door back to `main`**, walked by this skill, never by the session. Remove any one of those four and dispatching
+worktree** created seconds ago from the run's **base** (`main` unless the run was started with `--base`); its output faces an **independent review** before
+anything moves; it faces **verification commands** that must come back green; and the **merge is the only door back into the base**, walked by this skill,
+never by the session. Remove any one of those four and dispatching
 unattended stops being defensible at any rung.
 
 Those four walls are what the run is safe _because of_. They were never an argument for reaching the top of the ladder specifically, and `auto` already clears
@@ -101,8 +102,8 @@ The failure that produces is precise, and it is the worst one this skill can pro
 writes nothing; the probe reads the stale `0`; the section says _merge_. A green merge gate on a verification that never finished — the one thing this whole
 design exists to make impossible.
 
-It is reachable unattended without anybody doing anything unusual. §9 parks an item _after_ a green verify when the main tree is not on `main` or the merge
-conflicts; the item stays open with its branch; the next run resumes it at Inspect — where its verify is the second attempt.
+It is reachable unattended without anybody doing anything unusual. §9 parks an item _after_ a green verify when the tree holding the base is not on `<base>`
+or the merge conflicts; the item stays open with its branch; the next run resumes it at Inspect — where its verify is the second attempt.
 
 `.out` and `.pid` are cleared on the same rule: a stale `.pid` would be polled as though it were this attempt's child (and pids are recycled), and a stale
 `.out` would satisfy `watch`'s missing-file check for a run that never started.
@@ -189,8 +190,8 @@ searches, finds the one copy that _does_ exist — in the main tree — and work
 item gets archived as a loose uncommitted change in somebody else's tree, and every stage of the run reports success.
 
 §1's gate refuses an uncommitted item before a run ever starts, so on the ordinary path the probe never fires. It is there because it catches strictly more than
-the gate can: a project root the gate could not read as a git work tree at all (it falls back to the working copy there, deliberately), a main tree not actually
-on `main`, an item committed only on some other branch, a race between the gate and the checkout, and any future drift between the ref `worktree add` uses and
+the gate can: a project root the gate could not read as a git work tree at all (it falls back to the working copy there, deliberately), a base tree not
+actually on `<base>`, an item committed only on some other branch, a race between the gate and the checkout, and any future drift between the ref `worktree add` uses and
 the one the gate defaults to.
 
 ### Why `info/exclude`, `--git-common-dir`, and a check before the append
@@ -201,7 +202,7 @@ the one the gate defaults to.
 - **`grep -qxF`** — whole line (`-x`), fixed string (`-F`). A substring or regex match would either miss an existing entry or match an unrelated one and skip an
   append that was actually needed.
 - **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it would be an uncommitted change in the user's repo at best, and a stray commit
-  riding a merge into `main` at worst. `info/exclude` is local, untracked, and reversible by deleting a line.
+  riding a merge into the base at worst. `info/exclude` is local, untracked, and reversible by deleting a line.
 
 ---
 

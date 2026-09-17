@@ -133,9 +133,22 @@ any of these — most encode a failure that already happened.
   an unattributable count writes no key, never `0`. `updated:` is stamped by every `start` and every `stop`, never by `move`. Written only by `start`/`stop`,
   which round-trip unknown keys and the body byte-for-byte; "in progress" is decided in the client. Why:
   [invariants.md](docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status)
-- **`backlog-orchestrate` is the only skill that commits or merges.** Inside a per-item worktree, on `backlog/<id>` alone; merged into `main` in the main tree,
-  `--no-ff` only, only once the main tree is verified to have `main` actually checked out. No other skill touches git history at all. Why:
+- **`backlog-orchestrate` is the only skill that commits or merges.** Inside a per-item worktree, on `backlog/<id>` alone; merged into the run's **base branch**
+  (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base is verified to have it actually checked out. No other skill
+  touches git history at all. Why:
   [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-commits-or-merges)
+- **The merge happens in whichever tree holds the base, and the run removes only the tree it made.** git refuses one branch in two trees and `--force` is not
+  the way round it, so the merge site is resolved per merge (`git worktree list --porcelain`) into three exhaustive outcomes: a tree holds it → merge there; none
+  does → create `.worktrees/_base-<sanitised ref>`, merge, remove at the end of the run; none does and `worktree add` refuses → park. Outcome 3 is detected by
+  the create failing, never by the scan, because a worktree **mid-rebase reports `detached`** and so is invisible to it. A base worktree the run did not create
+  is never removed — the same sentence as "authority stops at worktrees it created itself". **"The main tree" and "the tree holding `main`" are not synonyms**:
+  the `symbolic-ref` precondition and the dirty-path probe both follow the merge into the BASE tree. `base` is required on `OrchestratorRun`, carried spawn →
+  prompt → `init` → run file, and an older run file's absent `base` is resolved to `'main'` **once**, in `sanitizeMergeFields`. Validity is checked twice, same
+  order both times (`resolveBase`, `assertUsableBase`): legal ref name first, then `refs/heads/<base>` exists. The ordering is for what the value does NEXT, not
+  for the existence check — `refs/heads/<base>` can never start with a `-`, and membership alone refuses every value the name check does; the base is
+  substituted for `<base>` in SKILL.md's shell commands, which is where a leading `-` or whitespace would bite. Neither check alone is the rule:
+  `check-ref-format --branch` accepts `origin/main`, a SHA and any unknown name. A missing branch is a refusal, never a create. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made)
 - **Merge mode is run-scoped: chosen per launch, defaulted from Settings, and carried spawn → prompt → `init` → run file.** `MergeMode` (`shared/types.ts`) is
   `merge | branch`, `isMergeMode` its one guard. The sheet sends `mergeMode` on **every** launch; `init` writes `mergeMode`, `mergeModeEffective` (moves `merge`
   → `branch` once, never back) and `mergeModeNote`. **Absent means `merge`; present-but-invalid is a 400, never a clamp.** Why:
@@ -225,9 +238,12 @@ any of these — most encode a failure that already happened.
   [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
 - **The orchestrate spawn prompt is composed server-side.** `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal `/backlog-orchestrate`; the request body
   has no `prompt` field, so a caller-supplied one is never read. What a caller can influence is enumerated by the composition in `orchestrate()` and nowhere
-  else: `ids` (each proven by `isItemId` and a per-project scan; 400 for a malformed list, 409 for a disagreeing one; absent means the whole queue, explicitly
-  empty is a 400), then the compile-time literals ` --merge-mode branch` and ` --question-mode decide`, each appended only off its guard, each default appending
-  nothing, in that order. Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-spawn-prompt-is-composed-server-side)
+  else, in this order: `ids` first (each proven by `isItemId` and a per-project scan; 400 for a malformed list, 409 for a disagreeing one; absent means the whole
+  queue, explicitly empty is a 400) — ids must stay first, because bare tokens parse as ids and a flag ahead of them swallows the first one — then the
+  compile-time literals ` --merge-mode branch` and ` --question-mode decide`, then ` --base <ref>`. Each is appended only off its guard and each default appends
+  nothing. **They are not all the same kind of safe**: the two mode flags append compile-time literals, so no caller character reaches the prompt, while `base`
+  is the one member whose caller text is appended verbatim and is therefore *proved* (`resolveBase`) rather than clamped. Do not restore any claim that every
+  appended flag is a literal. Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-spawn-prompt-is-composed-server-side)
 - **The browser never talks to the dashboard.** Every call goes board → this API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off — and
   **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/compose-env.test.ts`). `BM_AGENTS_URL` beside it is
   stack topology, not a policy default, so compose overrides it under a **second key** and never interpolates `BM_AGENTS_URL` itself:

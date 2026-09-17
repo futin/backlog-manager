@@ -97,6 +97,14 @@ function stub(answer: UncommittedAnswer): { url: string; body: unknown }[] {
       const body = answer === 'malformed' ? { known: true } : answer === 'malformed-type' ? { known: true, paths: 5 } : answer;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
     }
+    // task-44's on-mount read, answered and kept OUT of `calls` for the same
+    // reason this stub already keeps `uncommitted` out of it: `calls` records
+    // the launch, and a second row in it fails every `toHaveLength(1)` in this
+    // file — none of which has anything to do with the base picker. The
+    // picker's own cases live in orchestrator-start-ui.test.tsx.
+    if (url.includes('/api/agents/branches')) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ branches: ['main'] }) } as Response);
+    }
     if (url.includes('/api/agents/merge-check')) {
       return Promise.resolve({
         ok: true,
@@ -283,7 +291,9 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
       project: '/abs/alpha',
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
-      questionMode: 'park'
+      questionMode: 'park',
+      // task-44: the sheet sends its base on every launch, `'main'` included.
+      base: 'main'
     });
     expect(Object.keys(calls[0].body as object)).not.toContain('ids');
   });
@@ -313,6 +323,8 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
       questionMode: 'park',
+      // task-44: the sheet sends its base on every launch, `'main'` included.
+      base: 'main',
       ids: ['bug-1', 'task-3']
     });
   });

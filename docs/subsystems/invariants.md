@@ -252,13 +252,68 @@ clicked again: that is occurrence 1 of bug-19, three spawns inside ten seconds. 
 Every other skill in this repo edits item files and nothing else; `backlog-orchestrate` is the first, and by this rule the only, one that touches git history at
 all. It can, because of what it alone controls: `backlog-execute`'s "never commits, never pushes" limit exists because a headless execute session runs inside a
 tree it does not own, and staging there could sweep up work that has nothing to do with it — an unscoped `git add` in the user's own checkout is not a call any
-skill gets to make. The orchestrator's worktree is different by construction: `git worktree add .worktrees/<id> -b backlog/<id> main` creates a tree that holds
-exactly one item's work and nothing else, so `add -A` inside it is safe in a way it never is in the main tree — the skill says so explicitly at the commit step
-rather than leaving the asymmetry to be inferred. The commit itself is conventional-commit shaped, names the orchestrator as committer in the body (so `git log`
-never implies a human read the diff before it existed), and lands on `backlog/<id>` alone. The merge is `git merge --no-ff --no-edit backlog/<id>` run against
-whatever the main tree has checked out, and it is refused — parked, not forced — unless that is first verified to be `refs/heads/main`; a run never checks out a
-branch in the tree it does not own, either. No other branch is ever a merge target and no other tree is ever committed to. Force-push, history rewrite, and push
+skill gets to make. The orchestrator's worktree is different by construction: `git worktree add .worktrees/<id> -b backlog/<id> <base>` creates a tree that
+holds exactly one item's work and nothing else, so `add -A` inside it is safe in a way it never is in the main tree — the skill says so explicitly at the commit
+step rather than leaving the asymmetry to be inferred. The commit itself is conventional-commit shaped, names the orchestrator as committer in the body (so
+`git log` never implies a human read the diff before it existed), and lands on `backlog/<id>` alone.
+
+The merge target is **derived, not fixed**. It is `git -C "<base tree>" merge --no-ff --no-edit backlog/<id>`, where `<base>` is the run's own recorded base
+branch (`main` for a run that asked for nothing else) and `<base tree>` is whichever working tree currently has `<base>` checked out — see
+[the merge happens in whichever tree holds the base](#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made) for why that
+tree has to be found rather than created. It is refused — parked, not forced — unless that tree is first verified to be on `refs/heads/<base>`; a run never
+checks out a branch in a tree it does not own, either. No branch other than the run's base is ever a merge target, and no tree other than the one holding it is
+ever committed to. Force-push, history rewrite, and push
 of any kind stay off the table entirely — publishing to a remote is the user's call, not this skill's, merge commits or otherwise.
+
+## The merge happens in whichever tree holds the base, and the run removes only the tree it made
+
+A run's **base** is the branch it gates its queue at, cuts each item worktree from, and merges each finished item into — `main` unless the run was started with
+`--base <ref>`. It exists so a phased experiment (the tracker-backed backlog, the FE redesign) can be built item by item, each one starting from the previous
+one's result, without `main` being written to until a human decides it should be. Branch mode is not a substitute: it leaves every item on its own
+`backlog/<id>` branch with nothing integrating them, so the second item never builds on the first.
+
+**A worktree dedicated to the base cannot be the uniform answer, because git refuses to check one branch out twice.** Measured, not assumed:
+
+```
+$ git worktree add /tmp/probe-main main
+fatal: 'main' is already used by worktree at '/Users/andrejajevtic/Documents/custom-projects/backlog-manager'
+```
+
+`--force` is not the way round it. Two trees on one branch is exactly the state the skill's "this run's authority stops at worktrees it created itself" rule
+exists to avoid: the second tree's HEAD moves under the first, and an unattended run has no way to know what the person in the first tree was doing. So the rule
+is not "merge in a base worktree", it is **merge in whichever tree has `<base>` checked out** — resolved per merge with `git worktree list --porcelain`, into
+three outcomes that are exhaustive:
+
+1. **A tree holds it** — merge there. For a `main`-based run on an ordinary machine that is the main tree, so the resulting commands are byte-identical to the
+   pre-`--base` ones except for an explicit `-C`.
+2. **No tree holds it, and one can be created** — the run creates `.worktrees/_base-<sanitised ref>`, merges there, and removes it when the run finishes. The
+   ref is sanitised (every character outside `A-Za-z0-9._-` becomes a `-`) because a branch name may contain `/`; the `_base-` prefix cannot collide with an
+   item worktree, since every id `backlog.mjs` mints begins with `bug-`, `idea-`, `task-`, `ref-` or `oos-` and none begins with `_`.
+3. **No tree holds it and one cannot be created** — park. This is the case that is easy to miss and the reason the resolution is not a single scan: a worktree
+   **mid-rebase reports `detached`** in `--porcelain`, so the branch-line scan finds nothing, while git still knows that tree owns the branch and refuses the
+   `worktree add` with `fatal: '<base>' is already used by worktree at '<path>'`. Measured. So outcome 3 is detected by the create failing, never by the scan,
+   and the park detail quotes git's own message because it names the tree the scan could not.
+
+**The run removes a base worktree only if it created it** — outcome 2 and nothing else. This is not a second rule beside "authority stops at worktrees it
+created itself"; it is that same sentence applied to a directory that happens to hold the base. A worktree the person made is theirs, however convenient it
+would be to tidy up, and a run that removed one would be deleting a working tree its owner may have uncommitted work in.
+
+**"The main tree" and "the tree holding `main`" are not synonyms**, and conflating them is the defect this whole section exists to prevent. The main tree is the
+project's original checkout — the one the registry points at, the one `orchestrate.mjs` refuses to run outside of — and it stays the main tree whatever branch
+it holds. The base tree is wherever `<base>` happens to be right now. On a default run they are one directory; on a `--base` run they are two, and every rule
+below has to name the right one: the `symbolic-ref` precondition and the dirty-path overlap probe both follow the merge into the **base** tree, because what can
+refuse a merge is the state of the tree being written to. A dirty main tree cannot block a merge that is not happening there.
+
+Both halves of the base's own validity are checked twice, in the same order, by `resolveBase` (`agents.service.ts`) on the way in and `assertUsableBase`
+(`orchestrate.mjs`) at `init`. Neither copy is redundant: the endpoint's exists to refuse a bad request **before** it spawns a headless session, and the tool's
+exists because a terminal is not the endpoint. The order is deliberate, and the honest reason is a downstream one: `git check-ref-format --branch` runs first
+**not** because `git show-ref --verify` would otherwise read the value as an option — it interpolates into `refs/heads/<base>`, which can never begin with a
+`-`, and measuring confirms that check alone refuses every value the name check does — but because a base that survives validation is substituted for `<base>`
+in SKILL.md's own shell commands (`git worktree add … <base>`, `git -C … merge --no-edit <base>`), where a leading `-` or embedded whitespace genuinely would
+be read as an option or split an argument. Proving the string well-formed before anything records or composes it is what keeps that safe; running the check
+first is also what makes a refusal say "that is not a ref name" rather than "no such branch". Neither check alone is the rule: measured,
+`check-ref-format --branch` **accepts** `origin/main`, a 40-hex SHA and any unknown name, all three of which only `git show-ref --verify` then refuses. A run merges **into** its base, and only a local branch can move — so a tag, a SHA and a remote-tracking ref are all refused, and a missing branch is a
+refusal rather than an instruction to create one.
 
 ## Undoing an already-completed orchestrator merge is `git revert -m 1`, never `git reset --hard`
 
@@ -335,7 +390,7 @@ run's `mergeModeEffective`, because a run downgraded at item 3 must not redraw i
 
 Not every `branched` stamp was written by the run that did the work. `SKILL.md` §3's "Recognise a leftover branched item" step, run before pre-flight on every
 item, can find a branch a _previous_ run finished and left waiting on a hand-merge, confirm it with an archive-move probe
-(`git diff --name-only main...backlog/<id> | grep -q "/done/<id>-"`), and stage it `branched` in the **current** run's own file without ever dispatching,
+(`git diff --name-only <base>...backlog/<id> | grep -q "/done/<id>-"`), and stage it `branched` in the **current** run's own file without ever dispatching,
 reviewing or verifying it. This is deliberate — re-running that pipeline over already-green work would spend a whole item's budget re-proving what a prior run
 already proved — but it does mean a `branched` entry in a run's history is not proof that run executed the item, only that it correctly recognised the item was
 already done.
@@ -868,15 +923,25 @@ its `trigger:`, so the constant is that declaration, not an invention on the ser
 derived action (groom vs. execute) is a client-editable default the launch sheet composes and a human reader may reword before sending; `orchestrate` has no
 equivalent decision to leave open — it always means the same thing, "hand this project's whole groomed queue to the skill," so there is nothing legitimate for a
 caller to vary. `AgentOrchestrateRequest` (the body shape `POST /api/agents/orchestrate` accepts) has no `prompt` field to begin with, and `AgentsController`'s
-handler rebuilds the service call field by field from `project`, `model`, `effort`, `permissionMode` and `ids` alone — so a `prompt` sent in the request body is
-not validated and rejected, it is simply never read. That is the same mechanism `dispatch` already relies on for every field outside its own request type,
+handler rebuilds the service call field by field from `project`, `model`, `effort`, `permissionMode`, `ids`, `mergeMode`, `questionMode` and `base` alone — so a
+`prompt` sent in the request body is not validated and rejected, it is simply never read. That is the same mechanism `dispatch` already relies on for every field outside its own request type,
 applied here to the one field that would otherwise be the sole way an attacker-controlled cross-origin request could make an unattended, headless session do
 anything at all.
 
-`ids` was the first thing a caller could put into that string (merge mode and question mode joined it later — see the end of this section), and it is not an
-exception to the rule above so much as the clearest statement of it. The board's Orchestrate sheet can narrow a run to a subset of the queue, which means the
+`ids` was the first thing a caller could put into that string (merge mode, question mode and the base joined it later — see the end of this section), and it is
+not an exception to the rule above so much as the clearest statement of it.
+
+**The four influences are not all the same kind of safe, and the difference has to be stated rather than averaged over.** `mergeMode` and `questionMode` are the
+tightest: each appends one of exactly two compile-time literals selected by a guard, so no caller-supplied character reaches the prompt through either channel
+at all. An `ids` entry is looser — caller text that passed a shape check and was then proved against a closed vocabulary. **`base` is the first and only member
+whose caller-supplied text is appended verbatim**, which is why it is proved the way an id is (a ref-name check, then membership in this project's own local
+branches — see
+[the merge happens in whichever tree holds the base](#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made)) rather than
+clamped the way a two-member enum is. Any statement here that every appended flag is a compile-time literal is therefore false and must not be restored: it was
+true of two flags out of three and is true of two out of four. Each is appended only off its own guard, and each default appends nothing, so a request written
+before any of these fields existed composes the byte-identical prompt it always did. The board's Orchestrate sheet can narrow a run to a subset of the queue, which means the
 spawned session has to be told `/backlog-orchestrate task-3 bug-7` rather than the bare trigger — `--ids` is a flag `orchestrate.mjs`'s own `init` and `plan`
-have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N]`. What makes that safe is that the server never _accepts_
+have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch] [--question-mode decide]`. What makes that safe is that the server never _accepts_
 prompt text, it _composes_ the prompt out of the constant plus values that have passed two independent checks (`resolveIds`, `agents.service.ts`):
 
 1. **Shape** — `isItemId` (`shared/agent.ts`), the same `^[a-z]+-\d+$` `backlog.mjs`'s own `ID_SHAPE` enforces. What survives is a bare identifier: no
@@ -901,11 +966,15 @@ What a caller can influence is enumerated by the prompt composition in `orchestr
 the shape of line that already went stale once here. The first influence is `ids`, the board's item selection, and only after `resolveIds` proves every entry
 both _is_ an id (`isItemId`, `shared/agent.ts` — the same `^[a-z]+-\d+$` `backlog.mjs` enforces, so no whitespace, path separator, shell metacharacter or
 newline survives) and _names_ an open bug or task in **this** project (a per-request scan scoped to `req.project`, deliberately not `findItem`'s registry-wide
-walk). The others are `mergeMode` and `questionMode`, tighter surfaces still and identical in shape: each appends a compile-time literal selected by a guard
+walk). Next are `mergeMode` and `questionMode`, tighter surfaces still and identical in shape: each appends a compile-time literal selected by a guard
 (` --merge-mode branch` by `isMergeMode`, ` --question-mode decide` by `isQuestionMode`), with no caller string in it at all, and each one's DEFAULT appends
-nothing — `merge` there, `park` here — so a default run's prompt stays byte-identical to what shipped before either field existed. Order is ids, then
-`--merge-mode`, then `--question-mode`: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first one, and
-`--question-mode` last so every prompt this endpoint composed before it existed stays a byte-exact prefix of what it composes now.
+nothing — `merge` there, `park` here — so a default run's prompt stays byte-identical to what shipped before either field existed.
+
+The fourth is `base` (task-44), and it is the loosest of the four in form: it appends the caller's OWN text, ` --base <ref>`, where the other two append
+literals. What makes it acceptable is that `resolveBase` proves it the way `resolveIds` proves an id — a ref-name check, then membership in this project's own
+local branches — before anything is composed. Its default `'main'` appends nothing, like the other two. Order is ids, then `--merge-mode`, then
+`--question-mode`, then `--base`: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first one, and each later flag
+appended after the ones that predate it so every prompt this endpoint composed before a given field existed stays a byte-exact prefix of what it composes now.
 
 ## The browser never talks to the dashboard
 
@@ -1241,7 +1310,7 @@ bug-19. On 2026-09-05 two live sessions held one crashed run (`run-20260905-1138
 sessions were spawned against it inside ten seconds. The three were harmless only because a spend limit killed all of them ~600ms in, before any of them reached
 a heartbeat — the design did not stop them.
 
-Two `--resume` sessions on one `run.json` is not a cosmetic race. Both reconcile, both stage-write, and both end in a merge to `main`; `run.json`'s
+Two `--resume` sessions on one `run.json` is not a cosmetic race. Both reconcile, both stage-write, and both end in a merge into the run's base; `run.json`'s
 single-writer guarantee is a statement about which PROGRAM writes it, which two instances of that program satisfy while destroying each other's state.
 
 **Why one check could never have been enough.** `--resume` is not a command. `orchestrate.mjs`'s dispatch table has no `resume` entry: it is a prose flow in

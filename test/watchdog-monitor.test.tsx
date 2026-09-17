@@ -75,6 +75,7 @@ function liveRun(over: Partial<LiveRun> = {}): LiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    base: 'main',
     questionMode: 'park',
     queue: [],
     attention: [],

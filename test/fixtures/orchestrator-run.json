@@ -8,6 +8,7 @@
   "mergeMode": "merge",
   "mergeModeEffective": "merge",
   "mergeModeNote": null,
+  "base": "main",
   "questionMode": "park",
   "driver": null,
   "queue": [

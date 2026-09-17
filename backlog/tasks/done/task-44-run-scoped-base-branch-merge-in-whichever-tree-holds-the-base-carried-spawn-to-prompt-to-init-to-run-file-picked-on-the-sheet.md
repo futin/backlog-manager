@@ -4,6 +4,10 @@ title: Run-scoped base branch: merge in whichever tree holds the base, carried s
 created: 2026-09-17
 from: idea-13
 runner-fix: true
+updated: 2026-09-17T17:36:24Z
+started: 2026-09-17T15:30:52Z
+execute-elapsed: 7532
+execute-tokens: 563002
 ---
 
 ## Goal
@@ -224,3 +228,100 @@ Cases are in `## Test cases`. Two placement rules that are easy to get wrong her
 - Groups A–F pass; `pnpm test`, `pnpm run typecheck` and `pnpm run build` are green.
 - `CLAUDE.md`, `docs/subsystems/invariants.md`, `docs/subsystems/api.md` and `.claude/rules/orchestrator.md` carry the Step 6 text.
 - `## Outcome` quotes the green `pnpm test` summary line and names which of the three base-tree outcomes the end-to-end check actually exercised.
+
+## Outcome
+
+2026-09-17 — implemented across all seven steps and verified. The base is run-scoped end to end: picked on the sheet, proved by the endpoint, composed into the
+prompt, validated and recorded by `init`, read back from the run file downstream, and — the substance of the task — merged in whichever tree holds it.
+
+### Step 0: the four premises, two of which had moved
+
+- **`git worktree add` refuses a branch checked out elsewhere** — re-run rather than trusted: `fatal: 'main' is already used by worktree at
+  '/Users/andrejajevtic/Documents/custom-projects/backlog-manager'`, with a free-branch control succeeding, proving the refusal is about the branch not the path.
+- **`agents.service.ts`'s composition order and its comment** — confirmed as described.
+- **MOVED: `BASE_REF_DEFAULT`'s own comment stated the opposite of this task.** It read "Deliberately NOT recorded in run.json: that would be a shared/types.ts
+  schema change for a value the loop can just pass on each `plan` call" — right while the base was a queue gate, false the moment it became the merge target.
+  Rewritten to say what changed and why. The `--base ''` comment beside it ("resolves to nothing and takes the fallback") was likewise falsified by Step 2's
+  refusal and rewritten.
+- **MOVED: `.worktrees/` is no longer one directory per item id.** `.worktrees/tracker` holds `feature/tracker-backed`. The `_base-` collision claim still holds
+  (no id `SECTIONS` mints begins with `_`), and that directory is a live instance of outcome 1 — a `feature/tracker-backed` run merges in the worktree already
+  there rather than creating one.
+
+### Decisions the plan did not anticipate
+
+1. **`init` accepts an unborn base that HEAD already points at.** The plan's strict two checks would refuse `--base main` in a repository with no commits — every
+   `orchestrate.test.mjs` fixture — changing `init`'s tested behaviour there from "write a run with an empty queue" to exit 1, for a base nobody chose. Adding a
+   commit to the fixture was not available either: `blobReaderAt` returns `null` for a commitless repo, which is exactly what lets those fixtures gate on
+   working-copy content. The allowance is narrow (the base must be the branch HEAD is on), has its own test, and does not claim such a base can be merged into.
+2. **An explicit `base: 'main'` short-circuits with absent at the endpoint.** The sheet sends `base` on every launch, so validating `'main'` would `show-ref` on
+   every ordinary run and 400 all of them in a repository whose trunk is named something else — a regression caused purely by the client becoming explicit.
+   `'main'` appends nothing, so there is no caller text for the checks to protect. The tool still checks it at `init`.
+3. **The base-tree prose is pinned in `orchestrate.test.mjs`, not `backlog.test.mjs`.** The plan named the latter, but that suite holds prose for the two skills
+   with no `tools/` of their own plus genuine cross-skill seams, and §9's existing prose pins all live in `orchestrate.test.mjs`. The one seam that IS
+   cross-skill — the orchestrator handing the reviewer its base — did go in `backlog.test.mjs`, beside the reviewer/execute pair it matches in shape.
+4. **The server suite is `test/base-branch.test.ts`, not rows in `agents-prompt.test.ts`.** That file covers `composePrompt`, the DISPATCH prompt. task-19 hit
+   the identical plan instruction, made the identical departure, and recorded it in `question-mode.test.ts`'s header; this follows that precedent.
+
+### What the checks caught that the implementation had wrong
+
+- **The controller never passed `base` to the service.** It rebuilds the orchestrate body field by field, so the field was silently dropped: every base composed
+  nothing and every invalid base returned 201. Caught by seven failing cases, not by reading.
+- **The reviewer diffed the wrong ref.** `agents/backlog-reviewer.md` hardcoded `main...<branch>` in all four of its git commands. On a `--base` run that folds
+  in the base's whole divergence from `main` and reviews a change set the item's author never wrote — silently, as a larger diff that still looks legitimate.
+  Found by the contract sweep. The agent now takes `base` as a fifth field, SKILL.md §7 hands it, and both halves are pinned together.
+- **Two claims in my own comments were false.** The ref-name check is not what stops `show-ref` reading the value as an option — `refs/heads/<base>` can never
+  begin with `-`, and measurement showed membership alone refuses every value the name check does. The ordering earns its place downstream, where the base is
+  substituted for `<base>` in SKILL.md's shell commands. Corrected in `resolveBase`, `assertUsableBase`, CLAUDE.md and `invariants.md` rather than left standing.
+
+### End-to-end check — which base-tree outcomes it exercised
+
+**All three**, against real repositories, by running the exact commands §9 prescribes. Not through a board-started run: this is a `runner-fix:` item, so its
+SKILL.md and `orchestrate.mjs` changes are inert until committed, pushed and `pnpm run plugin:sync` has run — and this skill never commits or pushes. A run
+started now would execute the *installed* copy and prove nothing about this branch. What was verified directly instead:
+
+- **Outcome 2 (no tree holds the base):** the scan returned empty, `.worktrees/_base-feature-tracker-backed` was created (sanitisation applied to the `/`),
+  `symbolic-ref HEAD` printed `refs/heads/feature/tracker-backed`, the overlap probe was empty, and `git -C "<base tree>" merge --no-ff --no-edit backlog/task-x`
+  landed the merge on the base. Then §10 removed the worktree the run created (`remove=0`).
+- **Outcome 1 (a tree already holds it):** with a hand-made worktree on the base, the scan resolved to it, no `_base-` directory was created, and a second item
+  merged there — building on the first, which is the property the whole feature exists for.
+- **Outcome 3 (the holding tree is unusable):** with that tree mid-rebase it reported `detached`, so the scan returned empty, and `worktree add` refused with
+  `fatal: 'feature/tracker-backed' is already used by worktree at '<path>'` — confirming the detection is the *create* failing, never the scan.
+
+`main` was untouched throughout all three:
+
+```
+main..feature/tracker-backed  ->
+ea681f3 Merge branch 'backlog/task-y' into feature/tracker-backed
+b2ddb46 task-y: more work
+1b2d53a Merge branch 'backlog/task-x' into feature/tracker-backed
+dde7321 task-x: the item's work
+main -1 -> 1ad29ff initial on main     (unchanged from before the run)
+```
+
+### Deliberately left standing
+
+`UNCOMMITTED_BASE_REF = 'main'` (`server/src/items/uncommitted.util.ts`). The sheet's uncommitted flag still asks "differs from `main`", so on a `--base` run it
+warns against the wrong ref. Not oversight: that read is keyed on `[project]` and fires once on sheet open, *before* the base is picked in step 3, and CLAUDE.md
+pins both that cadence and that it is memoised nowhere. Making it base-aware means re-fetching per base pick — a design change neither the spec nor the plan
+asked for. Worth a follow-up item.
+
+### Verification
+
+```
+$ pnpm test
+Test Suites: 108 passed, 108 total
+Tests:       1772 passed, 1772 total
+# tests 556
+# pass 556
+# fail 0
+pnpm test: both runners passed.
+
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run build
+✓ built in 1.28s
+```
+
+Contract sweep: 14 sites updated (skills/backlog-groom/SKILL.md, skills/backlog-orchestrate/references/rationale.md, skills/backlog-orchestrate/references/recovery.md, agents/backlog-reviewer.md, skills/backlog-orchestrate/tools/orchestrate.mjs, server/src/orchestrator/orchestrator.service.ts, client/src/components/board/OrchestrateSheet.tsx, CLAUDE.md, .claude/rules/orchestrator.md, docs/subsystems/invariants.md, docs/subsystems/api.md, docs/subsystems/board.md, docs/subsystems/skills.md, README.md); `docs/superpowers/specs/` and `docs/superpowers/plans/` left unchanged on purpose, as dated records of decisions rather than statements of current behaviour.
+Red proof: 10 tests went red with the change reverted (2 of the 10 stayed green on the first attempt — the absent-`base` resolution in `sanitizeMergeFields`, and `check-ref-format`'s unique coverage — and each gained a case that fails without it).

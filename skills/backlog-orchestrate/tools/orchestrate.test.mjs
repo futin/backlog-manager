@@ -50,7 +50,7 @@ const FIXTURE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..
 function orchFixture(t) {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-home-')));
   const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-project-')));
-  spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' });
+  spawnSync('git', ['-C', project, 'init', '-q', '-b', 'main'], { encoding: 'utf8' });
   // task-17: the pause-request directory, derived from `home` rather than
   // mkdtemp'd separately so `run()` below can pin it from the one argument
   // every existing call already passes — the alternative was a signature
@@ -1753,7 +1753,13 @@ test('plan: a ## Done when command not found in verify.json or package.json is a
 // buildGatedQueue (e.g. reintroducing its own copy of the ordering or the
 // --max cutoff) even though every `plan`-specific case above is green.
 test('init builds its queue from the real gate: bugs oldest-first then tasks oldest-first, and --max excludes items beyond the cap', (t) => {
-  const { home, project } = planFixture(t);
+  // task-44: `planGitFixture`, not `planFixture`. `init` now resolves its base
+  // against the repository, and `planFixture`'s project is deliberately NOT a
+  // git repo — that is the working-copy fallback's own regression fixture and
+  // must stay that way. Every item in the store is committed by this fixture,
+  // so the gate reads identical bytes from `main` and the ordering/--max
+  // verdicts this case asserts are unchanged.
+  const { home, project } = planGitFixture(t);
 
   const out = run(project, home, 'init', '--project', project, '--max', '2');
 
@@ -1789,7 +1795,7 @@ test('init builds its queue from the real gate: bugs oldest-first then tasks old
 // exactly as it is — those are the fallback's regression test.
 function planGitFixture(t) {
   const { home, project } = planFixture(t);
-  spawnSync('git', ['-C', project, 'init', '-q'], { encoding: 'utf8' });
+  spawnSync('git', ['-C', project, 'init', '-q', '-b', 'main'], { encoding: 'utf8' });
   spawnSync('git', ['-C', project, 'symbolic-ref', 'HEAD', 'refs/heads/main'], { encoding: 'utf8' });
   fs.writeFileSync(path.join(project, 'README.md'), 'fixture store\n');
   commitEverything(project, 'fixture store');
@@ -3280,25 +3286,37 @@ test('SKILL.md keeps merge --abort under the conflict branch only', () => {
   assert.ok(text.includes('would be overwritten by merge'), 'step 9 no longer names the pre-merge refusal as a distinct failure');
 });
 
-test('step 9 probes the main tree for paths the branch also touches', () => {
+test('step 9 probes the base tree for paths the branch also touches', () => {
   // The precondition used to be "is HEAD refs/heads/main" and nothing else,
   // so an item could pass review and verification and then have its merge
   // refused by uncommitted work — observed live on bug-4, run-20260901-112815.
   // `diff --cached` is the half most likely to be dropped as redundant: a
   // STAGED change refuses the merge exactly as an unstaged one does.
+  //
+  // task-44 moved both halves off `main`/`$PWD` and onto `<base>`/`<base tree>`:
+  // the dirt that can refuse a merge is the dirt in the tree being WRITTEN to,
+  // and on a `--base` run that is not the main tree. A probe that still read
+  // `$PWD` would pass every default run and silently read the wrong tree on
+  // exactly the runs this feature exists for, so the `-C` is asserted too.
   const text = fs.readFileSync(SKILL_MD, 'utf8');
-  assert.ok(text.includes('diff --name-only main...backlog/<id>'), 'step 9 lost the branch-paths probe');
-  assert.ok(text.includes('diff --cached --name-only'), 'step 9 lost the staged half of the dirty-paths probe');
+  assert.ok(text.includes('diff --name-only <base>...backlog/<id>'), 'step 9 lost the branch-paths probe');
+  assert.ok(text.includes('git -C "<base tree>" diff --name-only <base>...backlog/<id>'), 'the branch-paths probe no longer runs in the base tree');
+  assert.ok(text.includes('git -C "<base tree>" diff --cached --name-only'), 'step 9 lost the staged half of the dirty-paths probe, or it left the base tree');
   assert.ok(text.includes('comm -12'), 'step 9 lost the intersection of the two path lists');
 });
 
 test('step 9 documents resolving on the branch side before parking', () => {
-  // Merging into a `main` that moved after step 8 puts content into main that
+  // Merging into a base that moved after step 8 puts content into it that
   // nothing green ever ran — every step green, the combination untested. The
-  // recovery (merge main INTO the worktree, re-verify there, merge out) is
+  // recovery (merge the base INTO the worktree, re-verify there, merge out) is
   // what keeps "never merges red" true, so it has to stay written down.
+  //
+  // task-44: the ref pulled into the worktree is `<base>`, not the literal
+  // `main`. A `--base` run that pulled `main` here would verify the item
+  // against a branch it is not merging into — the exact hole this recovery
+  // exists to close, reopened.
   const text = fs.readFileSync(SKILL_MD, 'utf8');
-  assert.ok(text.includes('.worktrees/<id>" merge --no-edit main'), 'step 9 lost the worktree-side merge of main');
+  assert.ok(text.includes('.worktrees/<id>" merge --no-edit <base>'), 'step 9 lost the worktree-side merge of the base');
   assert.ok(/re-run \*\*all of step 8\*\*/.test(text), 'step 9 no longer requires re-verification after the worktree-side merge');
 });
 
@@ -4015,7 +4033,19 @@ const NOTE_PLACEHOLDERS = new Map([
   ['<dir>', 'the run-state directory this run resolved'],
   ['<path>', 'a worktree path this run created'],
   ['<paths>', 'paths git printed as dirty'],
-  ['<ref>', 'the ref the main tree has checked out'],
+  ['<ref>', 'the ref the base tree has checked out'],
+  // task-44. Both are read out of git, never composed by a model: `<base>` is
+  // the run's own recorded base, which `assertUsableBase` proved is a legal
+  // ref name before `init` wrote it, and `<base tree>` is a path `git worktree
+  // list --porcelain` printed. Neither can carry a backtick or an apostrophe
+  // by construction — a ref name cannot contain one, and a worktree path that
+  // did would already have broken every `git -C` in this file.
+  ['<base>', "the run's own recorded base branch"],
+  ['<base tree>', 'a worktree path git printed for the base'],
+  // The one word of a park detail that is genuinely git's: outcome 3's refusal
+  // names the tree holding the base, and quoting git is the whole point — the
+  // scan above cannot see that it is a quote, so it is declared here.
+  ['<message>', "git's own refusal message, quoted"],
   // Composed by the tool in this repo, not by a model: `plan --json`'s own
   // fixed refusal strings.
   ["<the gate's own reason>", "the ungroomed gate's own fixed wording"],
@@ -5182,4 +5212,202 @@ test('a status --json larger than the pipe buffer arrives whole', (t) => {
   const bytes = Buffer.byteLength(out.stdout, 'utf8');
   assert.ok(bytes > 65536, `only ${bytes} bytes reached the pipe`);
   assert.equal(JSON.parse(out.stdout).queue.length, count);
+});
+
+// --- task-44: the run-scoped base -------------------------------------------
+// `--base` used to be a queue gate and nothing else; it is now the ref item
+// worktrees are cut from and finished items are merged INTO, so `init` has to
+// prove it is a branch that can actually receive a merge, and has to record it
+// where every later command (and every resumed session) reads it back.
+//
+// `basedFixture` is `orchFixture` plus one commit, because a base check needs
+// real refs to resolve against. Kept separate rather than folded into
+// orchFixture: a commit there would give every OTHER test in this file a
+// `blobReaderAt` that resolves, flipping the whole suite's gating from
+// working-copy content to committed content.
+function basedFixture(t) {
+  const fx = orchFixture(t);
+  fs.writeFileSync(path.join(fx.project, 'README.md'), 'base fixture\n');
+  commitEverything(fx.project, 'base fixture');
+  return fx;
+}
+
+test('init --base records an existing local branch in the run file', (t) => {
+  const { home, project } = basedFixture(t);
+  assert.equal(spawnSync('git', ['-C', project, 'branch', 'feature/x'], { encoding: 'utf8' }).status, 0);
+
+  const out = run(project, home, 'init', '--project', project, '--base', 'feature/x');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).base, 'feature/x');
+});
+
+test('init with no --base records "main"', (t) => {
+  const { home, project } = basedFixture(t);
+
+  const out = run(project, home, 'init', '--project', project);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).base, 'main');
+});
+
+test('init --base accepts a branch with slashes and records it verbatim', (t) => {
+  const { home, project } = basedFixture(t);
+  assert.equal(spawnSync('git', ['-C', project, 'branch', 'feature/a/b'], { encoding: 'utf8' }).status, 0);
+
+  const out = run(project, home, 'init', '--project', project, '--base', 'feature/a/b');
+
+  assert.equal(out.status, 0, out.stderr);
+  // Verbatim: nothing sanitises the RECORDED value. The sanitising in SKILL.md
+  // §9 names a directory, and a base that came back as `feature-a-b` here
+  // would be a ref that does not exist.
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).base, 'feature/a/b');
+});
+
+// One case per refusal rather than a loop, so a failure names which input
+// regressed. All six share the same three assertions: exit 1, the value echoed
+// back, and — the half that matters most — NO run file written, because
+// `cmdInit` archives any existing run before writing and a check that ran
+// after that point would destroy a real run for a call that never succeeds.
+for (const [label, value, why] of [
+  ['a tag', 'v1.0.0', 'a tag cannot move, and a run merges into its base'],
+  ['a 40-hex SHA', '0123456789012345678901234567890123456789', 'a commit is not a branch'],
+  ['a remote-tracking ref', 'origin/main', 'passes check-ref-format and is caught only by show-ref'],
+  ['a branch that does not exist', 'no-such-branch', 'a typo is a refusal, never a create'],
+  ['an empty string', '', 'a flag whose argv slot is empty is a different mistake from a misspelled one'],
+  ['a leading dash', '-x', 'must never reach git as an option']
+]) {
+  test(`init --base refuses ${label} — exit 1, nothing written (${why})`, (t) => {
+    const { home, project } = basedFixture(t);
+    // The tag is real, so this case proves the REF KIND is refused rather than
+    // merely that the name is unknown — the trap a nonexistent-name-only test
+    // would fall into.
+    if (label === 'a tag') assert.equal(spawnSync('git', ['-C', project, 'tag', value], { encoding: 'utf8' }).status, 0);
+
+    const out = run(project, home, 'init', '--project', project, '--base', value);
+
+    assert.equal(out.status, 1, `expected exit 1, got ${out.status}: ${out.stdout}${out.stderr}`);
+    assert.ok(out.stderr.includes(JSON.stringify(value)), `the refusal does not name the offending value: ${out.stderr}`);
+    assert.equal(fs.existsSync(runFile(home, project)), false, 'init wrote a run file for a base it refused');
+  });
+}
+
+test('init --base refuses a base that is neither a branch nor the branch HEAD is on, even in a repo with no commits', (t) => {
+  // The narrow half of the unborn-HEAD allowance: a commitless repo accepts
+  // the branch HEAD points at, and nothing else. Without this case the
+  // allowance could widen to "any base in a commitless repo" and no test
+  // would notice.
+  const { home, project } = orchFixture(t);
+
+  const out = run(project, home, 'init', '--project', project, '--base', 'feature/x');
+
+  assert.equal(out.status, 1, `expected exit 1, got ${out.status}: ${out.stdout}${out.stderr}`);
+  assert.equal(fs.existsSync(runFile(home, project)), false);
+});
+
+test('a run file written before task-44 has no base, and stage/heartbeat/attention neither need one nor add one', (t) => {
+  const { home, project } = basedFixture(t);
+  seedReadyTask(project, 'task-1', 'An item');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  // Strip `base` back off, reproducing a run file this tool wrote before the
+  // field existed — the state every archived run on every machine is in.
+  const file = runFile(home, project);
+  const before = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete before.base;
+  fs.writeFileSync(file, JSON.stringify(before));
+
+  for (const args of [
+    ['stage', 'task-1', 'preflight'],
+    ['heartbeat'],
+    ['attention', 'task-1', '--kind', 'parked', '--detail', 'a detail']
+  ]) {
+    const out = run(project, home, ...args);
+    assert.equal(out.status, 0, `${args[0]} failed on a run file with no base: ${out.stderr}`);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    // Neither invents one. Resolving an absent base is the SERVER reader's job
+    // and happens in exactly one place (`sanitizeMergeFields`); a tool that
+    // wrote `main` back into the file would be a second writer of that
+    // decision, and would rewrite history for a run that never chose it.
+    assert.equal('base' in after, false, `${args[0]} wrote a base into a run file that had none`);
+  }
+});
+
+test('claim leaves a recorded base alone — a resumed run does not fall back to main', (t) => {
+  // `--resume` is a prose flow rather than a command (SKILL.md §10), and
+  // `claim` is the one write it opens with, so this is where "a resumed run
+  // keeps its base" is actually testable. Asserting the VALUE in the file
+  // afterwards, not `claim`'s own output, is the point: the failure this
+  // guards against is a later command re-deriving BASE_REF_DEFAULT.
+  const { home, project } = basedFixture(t);
+  assert.equal(spawnSync('git', ['-C', project, 'branch', 'feature/x'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'init', '--project', project, '--base', 'feature/x').status, 0);
+
+  const out = run(project, home, 'claim');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).base, 'feature/x');
+});
+
+// --- task-44: the base-tree resolution is prose, so it is pinned as prose ----
+// This is the one piece of the feature that lives in SKILL.md rather than in
+// the tool: the run resolves where to merge by reading `git worktree list`,
+// and no code in this file does that. A rule that exists only in prose is
+// exactly the kind that drifts, so it is pinned here — beside §9's other prose
+// cases, rather than in backlog.test.mjs, which holds prose for the two skills
+// that have no tools/ suite of their own plus the genuine cross-skill seams.
+
+test('step 9 resolves the merge site from git rather than assuming the main tree', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(text.includes('worktree list --porcelain'), 'step 9 no longer resolves the base tree from git');
+  // The merge itself must carry `-C`. Without it the command lands wherever
+  // cwd happens to be — correct only while the base is `main`, which is why
+  // this would pass every default run and fail exactly the runs the feature
+  // exists for.
+  assert.ok(text.includes('git -C "<base tree>" merge --no-ff --no-edit backlog/<id>'), 'the merge no longer names the base tree explicitly');
+  assert.ok(text.includes('git -C "<base tree>" symbolic-ref HEAD'), 'the checked-out precondition no longer runs in the base tree');
+});
+
+test('step 9 states all three base-tree outcomes, including the one the scan cannot see', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  // 1 and 2 are the ordinary pair. 3 is the one a careful reader still gets
+  // wrong: a worktree mid-rebase reports `detached`, so the branch-line scan
+  // finds nothing and the run would happily try to create a base worktree —
+  // which git then refuses. Detected by the CREATE failing, never by the scan.
+  assert.ok(/a tree already holds/i.test(text), 'outcome 1 (a tree holds the base) is no longer stated');
+  assert.ok(text.includes('.worktrees/_base-'), 'outcome 2 (create a base worktree) is no longer stated');
+  assert.ok(/detached/.test(text) && /mid-rebase/.test(text), 'outcome 3 no longer explains why a mid-rebase tree is invisible to the scan');
+  assert.ok(text.includes("fatal: '<base>' is already used by worktree at"), 'outcome 3 no longer quotes the refusal that detects it');
+});
+
+test('step 9 states the sanitisation of a base worktree name exactly, not vaguely', () => {
+  // A branch may contain `/`, so the directory name cannot be the ref. Stating
+  // the rule rather than gesturing at it is the whole point: "sanitised" alone
+  // would leave the next implementer to invent a second, different scheme.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(text.includes('A-Za-z0-9._-'), 'the sanitisation rule is no longer stated as an explicit character set');
+  assert.ok(text.includes('feature/tracker-backed'), 'the sanitisation rule no longer shows a worked example');
+});
+
+test('step 9 and the hard limits both say the run removes only a base worktree it created', () => {
+  // The boundary that keeps an unattended run from deleting someone's working
+  // tree. Asserted in BOTH places because §9 is read during a run and the hard
+  // limits are what a skimming reader stops at — a rule that survived in only
+  // one of them would be half a rule.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(/removes a base worktree \*\*only if it created it\*\*|removes a base worktree only if it created it/.test(text), '§9 lost the removes-only-what-it-created rule');
+  assert.ok(/remove only a base worktree this run created/.test(text), 'the hard limits lost the removes-only-what-it-created rule');
+  // Tied back to the existing sentence rather than standing as a new rule —
+  // the two must read as one boundary, not two that could drift apart.
+  assert.ok(text.includes('authority stops at worktrees it created itself'), 'the base-worktree rule is no longer tied to the existing authority sentence');
+});
+
+test('step 10 removes a run-created base worktree without failing the run', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(text.includes('worktree remove "$PWD/.worktrees/_base-'), 'finishing no longer removes the base worktree this run created');
+  // Flattened before matching, for the reason `noteValues` above already
+  // gives: this sentence wraps mid-phrase in the prose, and a raw scan misses
+  // it — a missed site reads as a missing rule.
+  const flat = text.replace(/\s*\n\s*/g, ' ');
+  assert.ok(/does not fail the run/.test(flat), 'a failed base-worktree removal is no longer explicitly non-fatal');
 });

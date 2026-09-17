@@ -824,6 +824,37 @@ export interface OrchestratorRun {
   /** The `--max` the run was started with, or `null` for "work the whole gated queue". */
   maxItems: number | null;
   /**
+   * The branch this run gates its queue at, cuts each item worktree from, and
+   * merges each finished item into — `init --base`'s value, or `'main'` when
+   * the flag was omitted. It is the run's answer to "where did this work
+   * land", and after the fact nothing else can answer it: the merge commits
+   * themselves are on the base, not in any file this app keeps.
+   *
+   * **Required, not optional**, unlike `unpausedAt` and `driver` below, and
+   * that is the whole reason it is declared this way. An optional `base`
+   * would make every reader — the detail sheet, the archive, any predicate
+   * that ever wants to know which branch a run wrote to — re-implement
+   * `?? 'main'` for itself, and the first one to forget would silently read
+   * a `feature/x` run as a `main` run. That is exactly the mistake
+   * `mergeModeEffective` one field below exists to prevent, so this field
+   * declines to repeat it.
+   *
+   * A run file written before task-44 has no `base` on disk. That absence is
+   * resolved to `'main'` **once**, in the server's run reader
+   * (`orchestrator.service.ts`), at the point it parses the file — which is
+   * what makes this required field total for every consumer above that
+   * layer. The mode those older runs actually had was `main` and nothing
+   * else, so the resolution is a statement of fact rather than a default
+   * papering over an unknown. Nothing rewrites an archived run on disk.
+   *
+   * There is deliberately no `baseEffective` and no `baseNote` beside it, the
+   * three-field shape `mergeMode` needs directly below. Nothing degrades a
+   * base mid-run: a base that cannot be merged into parks the item, and a
+   * parked item is already a recorded state with its own detail. A second
+   * field here would record a divergence that cannot occur.
+   */
+  base: string;
+  /**
    * What this run was ASKED to do — `init --merge-mode`'s value, or
    * `'merge'` when the flag was omitted. Never rewritten after `init`: it is
    * the answer to "what did the user request", and `mergeModeEffective`

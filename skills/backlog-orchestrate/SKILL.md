@@ -2,9 +2,11 @@
 name: backlog-orchestrate
 description: >
   Drain a project's groomed backlog unattended: every ready bug and task, one at a time, each in its own git worktree and its own headless backlog-execute
-  session, then committed, reviewed, verified and merged to main before the next item starts — or, told to leave branches instead, stopped at a reviewed git
-  branch per item with main never touched. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7, drain the
-  backlog but leave me branches to merge by hand, or to --resume or --abort a run that was interrupted. It is the only skill that commits or merges — execute
+  session, then committed, reviewed, verified and merged into the run's base branch before the next item starts — main unless the run was told otherwise, so a
+  whole phased feature can be drained onto a branch without main being written at all — or, told to leave branches instead, stopped at a reviewed git branch per
+  item with nothing merged. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7, drain the backlog onto
+  feature/x, work the queue on a branch instead of main, drain the backlog but leave me branches to merge by hand, or to --resume or --abort a run that was
+  interrupted. It is the only skill that commits or merges — execute
   still does the work, groom still writes the plans, and neither of them ever touches git. Trigger: /backlog-orchestrate
 trigger: /backlog-orchestrate
 ---
@@ -12,23 +14,26 @@ trigger: /backlog-orchestrate
 # /backlog-orchestrate — drain the queue, one verified item at a time
 
 Orchestrate is the loop around `backlog-execute`, and only the loop. For every groomed bug and task in a project's backlog it creates a worktree, runs one fresh
-headless `backlog-execute` session inside it, commits what that session produced, has it reviewed, proves it with real commands, and merges it to `main` — then
-starts the next item from the updated `main`. Under `--merge-mode branch` a verified item stops at its reviewed branch instead and `main` is never written
-(section 2). Execute keeps doing the work, groom keeps writing the plans, capture keeps filing new items.
+headless `backlog-execute` session inside it, commits what that session produced, has it reviewed, proves it with real commands, and merges it into the run's
+**base branch** — then starts the next item from the updated base. The base is `main` unless the run was started with `--base <ref>`, and it is the one ref this
+whole file turns on: items are gated at it, worktrees are cut from it, and merges land in it (section 2). Under `--merge-mode branch` a verified item stops at
+its reviewed branch instead and nothing is merged anywhere (section 2). Execute keeps doing the work, groom keeps writing the plans, capture keeps filing new items.
 
 Two things make this skill different from its three siblings, and both are worth having in mind before the first command runs:
 
 - **It commits and merges.** No other backlog skill touches git at all; execute's "never commits, never pushes" hard limit is unchanged and still holds _inside_
-  the sessions this skill spawns. The orchestrator is the committer, on `backlog/<id>` branches and on `main`, by merge commit only.
+  the sessions this skill spawns. The orchestrator is the committer, on `backlog/<id>` branches and on the run's base, by merge commit only.
 - **It runs unattended.** The person who started it is usually not watching. So every rule below that looks paranoid — park rather than merge, ask best-effort
   rather than block, never `reset --hard` — is there because the failure it prevents would otherwise happen silently, hours after anyone could have caught it.
 
-The trigger carries the whole invocation surface: `/backlog-orchestrate [ids…] [--max N] [--merge-mode branch] [--question-mode decide] [--resume] [--abort]`.
-Ids and `--max` shape the queue (section 1); `--merge-mode` decides whether a verified item is merged to `main` or stops at its reviewed branch (section 2);
+The trigger carries the whole invocation surface:
+`/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch] [--question-mode decide] [--resume] [--abort]`.
+Ids and `--max` shape the queue (section 1); `--base` names the branch this run gates at, cuts worktrees from and merges into, defaulting to `main`
+(section 2); `--merge-mode` decides whether a verified item is merged into that base or stops at its reviewed branch (section 2);
 `--question-mode` decides what happens to an item whose open questions nobody is there to answer — `park` (the default: record them, skip the item, keep
 draining) or `decide` (answer them yourself, write the answers into the item, record what you assumed, and execute it), section 3; `--resume` takes over a run
 that was interrupted and `--abort` ends one (section 10). With none of them, the run is every ready item in the project's backlog, in the board's own order,
-merged, parking anything it cannot get an answer for.
+merged into `main`, parking anything it cannot get an answer for.
 
 The run's state lives in a machine-local run file, and `skills/backlog-orchestrate/tools/orchestrate.mjs` is its **only** writer — the same single-writer
 discipline `backlog.mjs` keeps for the registry and for item files. This skill never edits that file by hand, and never writes item files either, except for one
@@ -76,7 +81,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 `6` and `7` are the two codes whose reaction is neither a fix nor a retry, which is exactly why neither is a `1`. A `1` means "this call was wrong". A `6` means
 "this call was right and the run is being asked to stop": never retry it, never work around it, go to §10. A `7` means "this call was right and this session is
 no longer the one driving this run": another `--resume` session claimed it, and two sessions past that point both stage-write one `run.json` and both end in a
-merge to `main`. Stop — do not retry, do not re-claim, do not finish the run. (That prohibition is about a session refused mid-run. It does not touch `--abort`,
+merge into the base. Stop — do not retry, do not re-claim, do not finish the run. (That prohibition is about a session refused mid-run. It does not touch `--abort`,
 which opens by taking the run over on purpose: see `references/recovery.md`.) `references/recovery.md` has the whole of the lease, including the `claim` a
 resume opens with.
 
@@ -114,12 +119,16 @@ not spent on an item execute would refuse in its first minute:
   named here rather than discover it missing later.
 
   One of those reasons is not a grooming problem at all and reads differently:
-  `not committed on main — the worktree this run creates from main would not contain backlog/…`. The gate reads each candidate's content **at the ref a worktree
-  is created from**, not off the working copy, because that ref's bytes are the only ones a dispatched session will ever see. An item groomed a minute ago and
-  not yet committed is therefore refused, and the fix is a `git commit` of `backlog/` on `main`, not a groom. This is the same seam `backlog-groom` closes on,
-  in its own `Groomed on disk only` line — one sentence, two skills, one wording. The orchestrator will not make that commit for you: it commits inside a
-  per-item worktree, on `backlog/<id>` alone, and nowhere else. (`plan` and `init` both take `--base <ref>` for a repository whose trunk is not called `main`;
-  nothing in this file passes it, and the default is the same literal `main` §4's `worktree add` uses.)
+  `not committed on <base> — the worktree this run creates from <base> would not contain backlog/…`. The gate reads each candidate's content **at the ref a
+  worktree is created from**, not off the working copy, because that ref's bytes are the only ones a dispatched session will ever see. An item groomed a minute
+  ago and not yet committed is therefore refused, and the fix is a `git commit` of `backlog/` on `<base>`, not a groom. This is the same seam `backlog-groom`
+  closes on, in its own `Groomed on disk only` line — one sentence, two skills, one wording. The orchestrator will not make that commit for you: it commits
+  inside a per-item worktree, on `backlog/<id>` alone, and nowhere else.
+
+  `<base>` there is the run's base branch, `main` unless the trigger carried `--base <ref>` (section 2). Pass the same `--base` to `plan` that the run will be
+  started with, or the preview gates at a different ref from the run and can disagree with it item for item — an item committed on `main` but not on
+  `feature/x` reads `ready` in a default preview and `ungroomed` in the run that follows. This is the one place in this file where forgetting a flag produces a
+  wrong answer rather than an error.
 
 - **`needs-answers`** — the gate passed, but the item still carries an open question (a `TBD`, a question line in the plan, a `## Done when` naming a command
   this project cannot resolve). Still a candidate; see pre-flight.
@@ -176,7 +185,7 @@ Same flags, same queue, now written down. `init` prints one JSON line:
 
 **Keep `dir`.** It is this run's own state directory, outside the repo, and it is where every artifact this skill produces belongs: session transcripts, pid
 files, question payloads, reviewer reports. Nothing this skill generates is ever written into the repo — an artifact inside the tree would land in the very diff
-being reviewed and ride the merge into `main`. Create the subdirectories as you need them (`mkdir -p "<dir>/logs"`), and stay out of `<dir>/runs/`, which is the
+being reviewed and ride the merge into the base. Create the subdirectories as you need them (`mkdir -p "<dir>/logs"`), and stay out of `<dir>/runs/`, which is the
 tool's own archive of finished runs.
 
 Those flat subdirectories are always **this** run's, and always start empty: the `init` that opened this run swept the previous run's sidecars into
@@ -192,6 +201,34 @@ show the user, then take the run over with `--resume` or end it with `--abort` �
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
 ```
 
+### The base branch
+
+When the trigger carries `--base <ref>`, add that flag to the `init` above — and to every `plan` you ran to agree the queue (§1). Absent, the base is `main` and
+the run behaves exactly as every run before this flag existed.
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project "$PWD" --base feature/tracker-backed
+```
+
+`init` refuses anything that is not an **existing local branch** — a tag, a commit SHA, a remote-tracking ref like `origin/main`, a branch that does not exist,
+or a malformed name — with exit `1` and nothing written. It will not create the branch for you: a run merges *into* its base, only a local branch can move, and
+inventing a ref is not something an unattended run should do on a guess. Create it yourself first, then start the run.
+
+The base is recorded in the run file as `base` and **read from there by everything downstream**, which is what makes `--resume` safe: a resumed session takes
+the base off the file rather than off whatever flag the person resuming happened to type. `status --json` carries it.
+
+What the base changes, in one list, so a run reading this on turn 300 does not have to reconstruct it:
+
+- §1's gate reads each candidate at `<base>`.
+- §4 cuts each item worktree from `<base>`.
+- §9 merges each verified item into `<base>`, **in whichever working tree has `<base>` checked out** — which is usually the main tree and is not always, and is
+  the whole of that section's first half.
+- §9's conflict recovery brings `<base>` into the item worktree.
+- Each item starts from the updated `<base>`, so a phased feature builds on itself item by item. That is the reason this flag exists.
+
+What it does **not** change: nothing is pushed, on any branch; the base is never merged into anything else — landing `feature/x` on `main` when the experiment
+is proven is a human act, not this run's; and `branch` mode is unaffected, since it writes to no tree at all.
+
 ### Merge mode, and the probe before item 1
 
 When the trigger carries `--merge-mode branch`, add that flag to the `init` above and change nothing else. Absent, the run is `merge` mode — today's behaviour
@@ -202,8 +239,8 @@ behaviour byte for byte. Kept as its own sentence rather than merged into the on
 sentence about two flags is where one of them gets dropped. The mode is run-level — set at `init`, applied to the whole queue, and only ever moved one way
 afterwards (`merge` → `branch`, below). `status --json` carries it as `mergeModeEffective`, which is where a resumed session reads it.
 
-- **`merge`** — each verified item is merged to `main`, then its worktree and branch are cleaned up (§9).
-- **`branch`** — each verified item stops at its reviewed `backlog/<id>` branch and `main` is never written. Review and verification are unchanged: the mode
+- **`merge`** — each verified item is merged into the run's base, then its worktree and branch are cleaned up (§9).
+- **`branch`** — each verified item stops at its reviewed `backlog/<id>` branch and the base is never written. Review and verification are unchanged: the mode
   decides where a _successful_ item stops, nothing else.
 
 **In `merge` mode only, probe once, here, before item 1:**
@@ -238,7 +275,7 @@ which is precisely why §9 carries a degrade path of its own. Skip the probe in 
 
 Then work the queue **strictly one item at a time**, in the order `status --json` lists it. Sequential is not a performance compromise to be optimised away
 later: one worktree and one session in flight is what keeps each item's diff attributable and each session's context clean, and two items forfeit both. In
-`merge` mode the merge between items adds a second reason — each item starts from the updated `main`. Branch mode gives up that half and only that half (§9);
+`merge` mode the merge between items adds a second reason — each item starts from the updated `<base>`. Branch mode gives up that half and only that half (§9);
 the rule itself is unconditional.
 
 ## 3. Pre-flight, per item
@@ -263,7 +300,7 @@ comment there has the full reasoning for both.)
 - **`branch=0 worktree=1 dir=1`** (branch exists, worktree does not — what a _finished_ branch-mode item leaves behind) — confirm it actually finished:
 
   ```bash
-  git -C "$PWD" diff --name-only main...backlog/<id> | grep -q "/done/<id>-"; echo "archived=$?"
+  git -C "$PWD" diff --name-only <base>...backlog/<id> | grep -q "/done/<id>-"; echo "archived=$?"
   ```
 
   - **`archived=0`** — finished, waiting on a hand-merge. Stage it and move straight to the **next** item; do not re-gate, hunt, dispatch, review or verify it
@@ -347,7 +384,7 @@ item being treated as still in flight. Then continue with the next item; a `need
 
 1. Answer every question, using the item, the repo's `CLAUDE.md` and the code as it actually is. Prefer the smallest answer that lets the plan proceed.
 2. Write those answers into the item body through the **same** path an answered question takes — "Writing an answer into the item" below, inside the worktree,
-   in step 4. That is what makes the answer ride the branch into `main` and show up in the item's own diff, instead of living only in a run file nobody reads.
+   in step 4. That is what makes the answer ride the branch into the base and show up in the item's own diff, instead of living only in a run file nobody reads.
 3. Record the pairs on the queue item, so the archive can answer months later whether this item's plan was written by a human or filled in by the runner:
 
 Write `<dir>/questions/<id>-assumed.json` with the **Write tool** too — an array of `{"question":…,"answer":…}` pairs,
@@ -384,10 +421,10 @@ rules, which exist because the file is round-tripped by tools that must not lose
 - leave the rest of the body byte-for-byte identical — write the answer under the section it clarifies, do not reflow, retitle, or tidy anything else;
 - write before any move (nothing here moves a file, but the rule is the same one, and it is what keeps a half-written item from ever existing).
 
-**Write it inside the worktree, after the worktree exists — not in the main tree.** Two reasons, both hard-won: a worktree checks out `main`'s _commit_, so an
-uncommitted amendment sitting in the main tree would never reach the session that needs it; and worse, that same uncommitted change to the item's own path is
+**Write it inside the worktree, after the worktree exists — not in the main tree.** Two reasons, both hard-won: a worktree checks out `<base>`'s _commit_, so
+an uncommitted amendment sitting in the main tree would never reach the session that needs it; and worse, that same uncommitted change to the item's own path is
 what makes `git merge` refuse later ("your local changes would be overwritten"), because the item file is exactly the path the branch also touches when execute
-archives it. Amending inside the worktree instead means the answer rides the branch and reaches `main` through the merge, like every other change this item
+archives it. Amending inside the worktree instead means the answer rides the branch and reaches the base through the merge, like every other change this item
 makes. So: hunt and ask here, write in step 4.
 
 ## 4. The loop — worktree, dispatch, watch
@@ -395,7 +432,7 @@ makes. So: hunt and ask here, write in step 4.
 ### Create the worktree
 
 **Probe for leftovers before creating anything.** Every park path in this file keeps the item's branch _and_ its worktree on purpose — fix-exhausted (§7),
-nothing to verify with (§8), a merge conflict and a main tree not on `main` (§9) — and `finish` cleans up none of it. The item most likely to be queued by the
+nothing to verify with (§8), a merge conflict and a base tree not on `<base>` (§9) — and `finish` cleans up none of it. The item most likely to be queued by the
 _next_ run is therefore exactly the one that already has both on disk, because parking is what leaves it open. `worktree add` fails on either: the directory is
 already there, and the branch answers `fatal: a branch named 'backlog/<id>' already exists`.
 
@@ -416,7 +453,7 @@ no longer knows about, and `worktree add` refuses that just as hard as one it do
 
   ```bash
   git -C "$PWD/.worktrees/<id>" status
-  git -C "$PWD" log --oneline main..backlog/<id>
+  git -C "$PWD" log --oneline <base>..backlog/<id>
   ```
 
   — then ask, best-effort, exactly as pre-flight does, and take one of two answers:
@@ -452,14 +489,18 @@ no longer knows about, and `worktree add` refuses that just as hard as one it do
   `worktree prune`, do not `branch -D`, do not `--force` anything — this run's authority stops at worktrees it created itself.
 
 ```bash
-git -C "$PWD" worktree add .worktrees/<id> -b backlog/<id> main
+git -C "$PWD" worktree add .worktrees/<id> -b backlog/<id> <base>
 ```
 
-The main working tree is never touched by this, and a dirty main tree does not block it: the new worktree checks out `main`'s HEAD commit, not the working copy.
-Creating a worktree on a _new_ branch while `main` itself is checked out in the main tree is legal — the branches differ, so nothing is locked.
+`<base>` is the run's base branch (§2) — `main` unless the run was started with `--base`. Read it off `status --json` rather than assuming, because a resumed
+session is exactly the one that would assume wrong.
+
+The main working tree is never touched by this, and a dirty main tree does not block it: the new worktree checks out `<base>`'s HEAD commit, not the working
+copy. Creating a worktree on a _new_ branch while `<base>` itself is checked out somewhere is legal — the branches differ, so nothing is locked. (It is the
+_same branch_ twice that git refuses, which is why §9 has to find the base rather than check it out again.)
 
 **Then prove the item survived the checkout, before writing any pre-flight answer and before dispatching anything.** That same sentence — the worktree checks
-out `main`'s _commit_, not the working copy — is also how an item can be missing from the tree the session is about to run in: an item groomed but never
+out `<base>`'s _commit_, not the working copy — is also how an item can be missing from the tree the session is about to run in: an item groomed but never
 committed, which is the normal state of an item the moment grooming finishes, exists only in the main tree. Ask `backlog.mjs` from inside the new worktree, so
 its own `.git`-ancestor walk resolves to the worktree and not to the main tree (a subshell, per the rules at the top of this file):
 
@@ -472,7 +513,7 @@ its own `.git`-ancestor walk resolves to the worktree and not to the main tree (
   `-D` nothing.
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<id> is not present in the worktree checked out from main — commit backlog/ on main, then re-run"
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<id> is not present in the worktree checked out from <base> — commit backlog/ on <base>, then re-run"
   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
@@ -495,7 +536,7 @@ Run that from the project root (the path `git rev-parse` prints is relative to c
   duplicates in a file the user owns and changes `git status` repo-wide.
 - **`grep -qxF`** — whole line, fixed string. Anything looser either misses an existing entry or matches an unrelated one and skips a needed append.
 - **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it is an uncommitted change in the user's repo at best, and a stray commit riding a
-  merge into `main` at worst.
+  merge into the base at worst.
 
 Now write any pre-flight answer into the worktree's copy of the item file (see above), and record the worktree on the run:
 
@@ -607,8 +648,8 @@ also what _produces_ the event stream at all. Leaving it off is the quietest fai
 the run merges nothing. `references/rationale.md` has the exact error and the full chain.
 
 **`--permission-mode auto`, and not the rung above it.** What makes an unattended session tolerable is not trust in the session, it is four walls: a
-**disposable worktree** created seconds ago from `main`, an **independent review** before anything moves, **verification commands** that must come back green,
-and the **merge as the only door back to `main`**, walked by this skill and never by the session. Remove any one and dispatching unattended stops being
+**disposable worktree** created seconds ago from `<base>`, an **independent review** before anything moves, **verification commands** that must come back
+green, and the **merge as the only door back into the base**, walked by this skill and never by the session. Remove any one and dispatching unattended stops being
 defensible at any rung.
 
 `auto` is the lowest rung that clears an execute session's real workload — `acceptEdits` below it still prompts on `pnpm test` and on `git`. Do **not**
@@ -735,6 +776,9 @@ Dispatch the plugin's own reviewer, `backlog-manager:backlog-reviewer`, with the
 
 - `worktree` — `"$PWD/.worktrees/<id>"`
 - `branch` — `backlog/<id>`
+- `base` — this run's base branch (`main` unless `--base` said otherwise). The reviewer takes every diff against it, so handing `main` to a `--base` run would
+  have it review that branch's whole divergence instead of this item's work — a much larger diff that still looks legitimate. Both halves of this pair are
+  pinned by a test; change neither alone.
 - `item file path` — the item's absolute path _inside the worktree_
 - `report path` — `<dir>/reviews/<id>-1.md` (`-2` on the second loop)
 
@@ -916,7 +960,7 @@ On an exit `1`, read the rows themselves (`status --json`) before spending a loo
 other red row and it gates the merge identically, but sending a fix loop after the _code_ over it wastes a session on an item nothing was ever tested against.
 Fix the command or the environment, or park the item with that row quoted in the detail.
 
-## 9. Merge — the only door to `main`
+## 9. Merge — the only door into the base
 
 **In `branch` mode this whole section collapses to two commands. Take them and skip the rest of it:**
 
@@ -925,8 +969,8 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
-No `stage <id> merging` — nothing is merging. No `symbolic-ref` precondition and no dirty-path probe: both exist to protect a write to the main tree, and there
-is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy of this item's work anywhere. `remove` stays plain and never `--force`; if
+No `stage <id> merging` — nothing is merging. No base tree to resolve, no `symbolic-ref` precondition and no dirty-path probe: all three exist to protect a
+write to the tree holding the base, and there is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy of this item's work anywhere. `remove` stays plain and never `--force`; if
 it does not exit `0`, the item stays `branched` and is never re-staged — read git's message and record the leftover exactly as the merge path's own removal
 outcome does at the end of this section, which branches on that message into a park and a finish-the-delete (with `branched` in place of `merged` wherever a
 detail is written) — and carry on.
@@ -934,42 +978,93 @@ detail is written) — and carry on.
 `branched` is a success exit in the same terminal position `merged` occupies: the item is finished and the run holds nothing. The pairing is enforced by the
 tool, not by this sentence — `stage <id> merged` under a branch-mode run exits `1` and writes nothing.
 
-The next item still branches from an **unchanged `main`**, so two items in this run that touch the same files produce two branches that will conflict with each
+The next item still branches from an **unchanged base**, so two items in this run that touch the same files produce two branches that will conflict with each
 other at hand-merge time. That is inherent to not merging; the run cannot fix it and must not pretend to. §10's summary names the merge order and flags the
 overlapping pairs, and that is the whole of what can be done here.
 
 **Everything below is the `merge` path.**
 
+### Find the base tree first
+
+**The merge happens in whichever working tree has `<base>` checked out — not, in general, in the main tree.** For a `main`-based run on an ordinary machine
+those are the same directory and everything below is byte-identical to what this file always did; for a `--base feature/x` run they are not, and merging in the
+wrong one is how a run writes an item into a branch nobody asked for.
+
+A worktree dedicated to the base cannot be the uniform answer, because **git refuses to check one branch out twice** —
+`fatal: '<base>' is already used by worktree at '<path>'` — and `--force` is not the way round it: two trees on one branch is exactly the state this skill's
+"authority stops at worktrees it created itself" rule exists to avoid. So resolve, rather than create:
+
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merging
-git -C "$PWD" symbolic-ref HEAD
+git -C "$PWD" worktree list --porcelain | awk -v r="refs/heads/<base>" '/^worktree /{w=substr($0,10)} $0=="branch "r{print w; exit}'
 ```
 
-**Precondition: the main tree must actually have `main` checked out** — that command must print `refs/heads/main`, and it must succeed. Two distinct failures,
-and both mean the same thing here:
+Three outcomes, and they are exhaustive:
+
+1. **It prints a path — a tree already holds `<base>`.** That is the base tree. Merge there. For a `main`-based run it prints the main tree, and for a
+   `feature/x` run it prints whatever worktree the person already made for it.
+2. **It prints nothing, and a worktree can be created.** No tree holds the base, so make one, merge in it, and remove it in §10:
+
+   ```bash
+   BASE_WT="$PWD/.worktrees/_base-$(printf '%s' "<base>" | tr -c 'A-Za-z0-9._-' '-')"
+   git -C "$PWD" worktree add "$BASE_WT" <base>; echo "add=$?"
+   ```
+
+   The name is sanitised because a branch name may contain `/`: **every character outside `A-Za-z0-9._-` becomes a single `-`**, so `feature/tracker-backed`
+   becomes `.worktrees/_base-feature-tracker-backed`. The `_base-` prefix cannot collide with an item worktree — those are `.worktrees/<id>`, and no id
+   `backlog.mjs` mints (`bug-`, `idea-`, `task-`, `ref-`, `oos-`) begins with `_`. If that path already exists and does **not** hold `<base>` — two branches
+   that sanitise to one name, or a leftover from a crashed run on a different base — park rather than guess, with the path named. A leftover holding `<base>`
+   itself is not a leak: outcome 1 finds it and reuses it, which is correct.
+3. **It prints nothing and `worktree add` refuses.** The branch is held by a tree that is mid-rebase, mid-bisect, or otherwise not sitting on it cleanly —
+   measured: such a tree reports `detached` in `--porcelain`, so it is invisible to the scan above, while git still knows it owns the branch and answers
+   `fatal: '<base>' is already used by worktree at '<path>'`. That is the same class of failure as the detached-HEAD precondition below and takes the same
+   answer — park, quoting git's message, which names the tree:
+
+   ```bash
+   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<base> is checked out at <path> but not cleanly (git: <message>) — branch backlog/<id> kept for a manual merge"
+   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+   ```
+
+**The run removes a base worktree only if it created it** — outcome 2 and nothing else. A worktree the person made is theirs, and this is the same sentence as
+"this run's authority stops at worktrees it created itself", not a second rule beside it. Track which outcome you took; §10 needs it.
+
+`<base tree>` below means whichever path the three outcomes settled on.
+
+### The two preconditions, in the base tree
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merging
+git -C "<base tree>" symbolic-ref HEAD
+```
+
+**Precondition: the base tree must actually have `<base>` checked out** — that command must print `refs/heads/<base>`, and it must succeed. It is re-asked here
+even though the scan above just answered it, because the seconds in between are enough for the person whose repo this is to switch branches. Two distinct
+failures, and both mean the same thing here:
 
 - it prints another ref (`refs/heads/some-feature`) — the user switched branches mid-run;
-- it prints **nothing at all and exits non-zero**, with `fatal: ref HEAD is not a symbolic ref` on stderr — the main tree is on a detached HEAD (mid-rebase,
-  mid-bisect, or checked out at a tag). Check the exit status, not just the output: a bare "does it equal `refs/heads/main`" comparison reads an empty string
+- it prints **nothing at all and exits non-zero**, with `fatal: ref HEAD is not a symbolic ref` on stderr — the base tree is on a detached HEAD (mid-rebase,
+  mid-bisect, or checked out at a tag). Check the exit status, not just the output: a bare "does it equal `refs/heads/<base>`" comparison reads an empty string
   here and, written carelessly, can look like a mismatch you handled rather than a command that failed.
 
-In either case do **not** check out `main` yourself: their working tree is theirs, and this run's authority stops at its own worktrees. Park instead and
+In either case do **not** check out `<base>` yourself: their working tree is theirs, and this run's authority stops at its own worktrees. Park instead and
 continue:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "main tree is on <ref>, not refs/heads/main — branch backlog/<id> kept for a manual merge"
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "base tree <base tree> is on <ref>, not refs/heads/<base> — branch backlog/<id> kept for a manual merge"
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
 ```
 
-**Second precondition: the main tree's uncommitted paths must not overlap the branch's.** A dirty main tree is fine — this run does not get to demand a clean
+**Second precondition: the base tree's uncommitted paths must not overlap the branch's.** A dirty base tree is fine — this run does not get to demand a clean
 one — but only as long as the dirt sits somewhere the branch does not touch. Test that rather than assuming it, because the answer changes during a run: the
 person whose repo this is may edit anything at any moment, and the item most likely to collide is the one whose subsystem they are working in.
 
 ```bash
-git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
-{ git -C "$PWD" diff --name-only; git -C "$PWD" diff --cached --name-only; } | sort -u > "<dir>/verify/<id>.dirty-paths"
+git -C "<base tree>" diff --name-only <base>...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
+{ git -C "<base tree>" diff --name-only; git -C "<base tree>" diff --cached --name-only; } | sort -u > "<dir>/verify/<id>.dirty-paths"
 comm -12 "<dir>/verify/<id>.branch-paths" "<dir>/verify/<id>.dirty-paths"
 ```
+
+Both halves run in the **base tree**, not the main tree: the dirt that can refuse this merge is the dirt in the tree being written to, and on a `--base` run
+those are different directories. A dirty main tree cannot block a merge that is not happening there.
 
 Empty output means merge. Non-empty output names the exact files that will refuse, and it is what makes the park detail actionable — "merge refused" sends the
 user hunting, "`ItemCard.tsx` is uncommitted and this branch also touches it" does not. Both scratch files go under the run's `<dir>`, never `/tmp` and never
@@ -980,18 +1075,19 @@ On a non-empty intersection, do not stash, commit, or check anything out on the 
 abort's preservation branch draws. Take the worktree-side resolve below if it applies, otherwise park with the overlapping paths named:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "merge would be refused: <paths> are uncommitted in the main tree and this branch also touches them — commit or stash them, then merge backlog/<id> by hand"
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "merge would be refused: <paths> are uncommitted in <base tree> and this branch also touches them — commit or stash them, then merge backlog/<id> by hand"
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
 ```
 
 Otherwise merge:
 
 ```bash
-git merge --no-ff --no-edit backlog/<id>
+git -C "<base tree>" merge --no-ff --no-edit backlog/<id>
 ```
 
-`--no-ff` so every item is one identifiable merge commit in `main`'s history even when it could have fast-forwarded; `--no-edit` so no editor opens in a session
-that has no terminal to open one in.
+`--no-ff` so every item is one identifiable merge commit in the base's history even when it could have fast-forwarded; `--no-edit` so no editor opens in a
+session that has no terminal to open one in. The explicit `-C` is what makes this land in the base tree — the version of this command before run-scoped bases
+had none and relied on the main tree being the cwd, which is true only while the base is `main`.
 
 **Three different failures, and they take different commands. Do not conflate them: only the first one degrades the run, and the other two park the item exactly
 as they always have.**
@@ -1003,7 +1099,7 @@ Permission for this action was denied by the Claude Code auto mode
 classifier. Reason: Blocked by classifier.
 ```
 
-Nothing was attempted, `main` is untouched, and **the work is fine** — every step before this one was green and the last step of the pipeline was refused. That
+Nothing was attempted, the base is untouched, and **the work is fine** — every step before this one was green and the last step of the pipeline was refused. That
 is not something a human must look at, so this item takes the _branch_ outcome instead of a park, and the rest of the queue stops attempting a merge that has
 just been shown to fail:
 
@@ -1037,27 +1133,28 @@ in the seconds since. Handle it exactly as the probe's non-empty branch does —
 **A conflict** — the merge started and left markers behind:
 
 ```bash
-git -C "$PWD" merge --abort
+git -C "<base tree>" merge --abort
 ```
 
-then `attention <id> --kind parked --detail "merge conflict with main — worktree and branch kept"`, `stage <id> parked`, keep the worktree and the branch
-exactly as they are, and continue with the next item. A conflict means `main` moved under the run (the user pushed, or an earlier item in this same run touched
-the same lines); resolving it is a human's judgement call, and the branch is the thing that makes that possible later.
+then `attention <id> --kind parked --detail "merge conflict with <base> — worktree and branch kept"`, `stage <id> parked`, keep the worktree and the branch
+exactly as they are, and continue with the next item. A conflict means the base moved under the run (the user pushed, or an earlier item in this same run
+touched the same lines); resolving it is a human's judgement call, and the branch is the thing that makes that possible later.
 
-**When `main` moved under the run, resolving on the _branch_ side is better than parking — and it is the only option that keeps the merge gate honest.** Those
-two failures — the refusal and the conflict, not the denial above them — have the same root cause: `main` is no longer the commit this item was verified
-against. Merging into it anyway would put content into `main` that nothing green ever ran — every individual step was green, and the combination was never
-tested. That is a hole in the "never merges red" hard limit which is invisible precisely because nothing reports red.
+**When the base moved under the run, resolving on the _branch_ side is better than parking — and it is the only option that keeps the merge gate honest.** Those
+two failures — the refusal and the conflict, not the denial above them — have the same root cause: `<base>` is no longer the commit this item was verified
+against. Merging into it anyway would put content into the base that nothing green ever ran — every individual step was green, and the combination was never
+tested. That is a hole in the "never merges red" hard limit which is invisible precisely because nothing reports red. A `--base` run is *more* exposed to this,
+not less: a feature branch is likelier to be touched by a human mid-run than `main` is.
 
-So bring `main` into the worktree, prove the combination there, and only then merge out:
+So bring `<base>` into the worktree, prove the combination there, and only then merge out:
 
 ```bash
-git -C "$PWD/.worktrees/<id>" merge --no-edit main
+git -C "$PWD/.worktrees/<id>" merge --no-edit <base>
 ```
 
 - **It merges cleanly** — re-run **all of step 8** against the combined content, starting with its `rm -f`. This is exactly the second-attempt case that rule
-  exists for, and skipping it reads the first attempt's `0` for a suite that never saw `main`'s changes. Green, then merge to `main` as above, which is now
-  conflict-free. Red, then it is an ordinary §8 failure: a fix loop if the shared ceiling allows one, a park if it does not.
+  exists for, and skipping it reads the first attempt's `0` for a suite that never saw the base's changes. Green, then merge into the base as above, which is
+  now conflict-free. Red, then it is an ordinary §8 failure: a fix loop if the shared ceiling allows one, a park if it does not.
 - **It conflicts** — park, per the conflict branch above. Resolving real content conflicts is a human judgement call and that has not changed; what changed is
   that this is now the _second_ thing tried, not the first.
 
@@ -1066,8 +1163,8 @@ reason the pre-flight amendment rule insists the item file is only ever edited t
 
 **Undoing a merge that already completed is `git revert -m 1 <merge-sha>`, never `git reset --hard`.** `reset --hard` was measured destroying an unrelated,
 uncommitted modification in the main tree along with the merge, unrecoverably; the same undo by revert left it byte-for-byte intact. An unattended run can never
-rule out that the user has uncommitted work in their main tree, so the noisier history is the price, knowingly paid. `-m 1` names the first parent — `main` as
-it was before this merge. (`references/rationale.md`, §9, has the measurement.)
+rule out that the user has uncommitted work in the tree it is writing to, so the noisier history is the price, knowingly paid. `-m 1` names the first parent —
+`<base>` as it was before this merge. (`references/rationale.md`, §9, has the measurement.)
 
 **On success**, record it and clean up. Capture the removal's status — the rest of this section branches on it, and on what git printed:
 
@@ -1081,7 +1178,7 @@ Plain `remove`, never `--force`. **`remove=0` is the ordinary case and needs not
 step 8's build wrote, which removes cleanly and takes the build output with it (measured; `references/rationale.md`, §9).
 
 **What happens to the item when that removal does not return `0`: nothing happens to the _item_. It stays `merged`.** The `stage <id> merged` above already
-landed and it was true — the branch is in `main` — so do not re-stage it to `parked` on either branch below, which would tell the board and the run summary that
+landed and it was true — the branch is in the base — so do not re-stage it to `parked` on either branch below, which would tell the board and the run summary that
 an item which actually merged did not. What differs between the two is only whether a human is paged, and **that is decided by git's own message, never by
 looking at what is left in the directory**: the leftovers of a half-finished delete are whatever the pass happened to miss, which carries no information at all.
 
@@ -1118,14 +1215,15 @@ that _is_ a human's problem.
   ever finishes what git already committed to.
 
 Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a branch that is actually merged, so a refusal here is real information — the merge
-you think happened did not, and that _is_ worth stopping to understand before the next item builds on a `main` you may have misread.
+you think happened did not, and that _is_ worth stopping to understand before the next item builds on a base you may have misread.
 
-Then the next item starts from the updated `main`, so later items build on earlier ones.
+Then the next item starts from the updated `<base>`, so later items build on earlier ones. On a `--base` run that is the whole point: item by item, a phased
+feature accumulates on its own branch and `main` is never written until a human decides it should be.
 
 ### After a runner-fix item lands
 
 A merged fix does **not** reach this run on its own. Every skill body and every `orchestrate.mjs` invocation here resolves through `$CLAUDE_PLUGIN_ROOT` — the
-_installed plugin copy_ — while the merge just landed in this repo's `main`. Hoisting the item to the front of the queue (§1) buys ordering and nothing else
+_installed plugin copy_ — while the merge just landed in this repo's base branch. Hoisting the item to the front of the queue (§1) buys ordering and nothing else
 unless the run is told, once, to follow the repo's copy for the rest of the run.
 
 So after every merge, print what it brought in:
@@ -1172,24 +1270,36 @@ When the queue is drained:
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status done
 ```
 
+**If this run created a base worktree (§9, outcome 2), remove it first — and only if this run created it.**
+
+```bash
+git -C "$PWD" worktree remove "$PWD/.worktrees/_base-<sanitised ref>"; echo "remove=$?"
+```
+
+Plain `remove`, never `--force`, exactly as the item worktree's own removal is. A removal that does not exit `0` is recorded in the summary and **does not fail
+the run** — the items merged, the base holds their work, and a leftover directory is a tidying job rather than a reason to report a red run. Say the path out
+loud in the summary so whoever tidies it knows which one it is. A base worktree the run did **not** create is never touched here, however convenient it looks:
+it is someone's working tree, and this run's authority stops at worktrees it created itself.
+
 `--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits `1`. Then summarise for the user from `status --json`: what merged or branched,
 what parked and why, what was skipped as `ungroomed` or `needs-answers` and therefore wants a groom pass before the next run. A clean item — no fix loops, no
 retries, green first try — should have produced no ping at all along the way; the summary is where it finally gets mentioned.
 
-**Any item that finished `branched` owes the user a merge list.** Name those branches in queue order — each was verified against the `main` its predecessor
-started from, and one carried over from an earlier run (§3's own recognition step) against that run's — with the literal command per branch:
+**Any item that finished `branched` owes the user a merge list.** Name those branches in queue order — each was verified against the base its predecessor
+started from, and one carried over from an earlier run (§3's own recognition step) against that run's — with the literal command per branch, and say which
+branch to run it on when the base is not `main`:
 
 ```bash
 git merge --no-ff backlog/<id>
 ```
 
-Then flag the pairs that will fight: two branches that touch a common path mean a conflict for whichever is merged second, regardless of which `main` each one
-actually started from — a carried-over branch (§3) can predate this run by days, and a run that downgraded mid-queue means `main` itself moved (the items that
-merged before the denial) before it froze. Write each branch's paths into the run's own `<dir>` and intersect them — the three-dot diff each file is built from
+Then flag the pairs that will fight: two branches that touch a common path mean a conflict for whichever is merged second, regardless of which base commit
+each one actually started from — a carried-over branch (§3) can predate this run by days, and a run that downgraded mid-queue means the base itself moved (the
+items that merged before the denial) before it froze. Write each branch's paths into the run's own `<dir>` and intersect them — the three-dot diff each file is built from
 is merge-base relative, so it isolates each branch's own changes correctly regardless of any of that:
 
 ```bash
-git -C "$PWD" diff --name-only main...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
+git -C "$PWD" diff --name-only <base>...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
 comm -12 "<dir>/verify/<a>.branch-paths" "<dir>/verify/<b>.branch-paths"
 ```
 
@@ -1240,6 +1350,10 @@ Two rules stay here, because a reader who stops at this line still has to know t
 
 - **`--resume` starts from what is on disk, not from what the run file hoped.** `orchestrate.mjs reconcile` is read-only and prints one of four suggestions per
   item; deciding what to do with each is this skill's job, not the tool's.
+- **A resumed run takes its base from the run file, and re-resolves the base tree before its next merge.** The base itself is fixed — `status --json` carries
+  it, and it is never re-derived from a flag the person resuming happened to type — but *which tree holds it* is a fact about right now, and the interruption is
+  exactly the gap in which someone checks the base out somewhere else, removes the worktree that had it, or leaves a rebase half-finished in it. Walk §9's
+  three outcomes again rather than reusing a path from before the interruption.
 - **`--abort` runs before any marker is cleared, never after.** Clearing a mid-flight item's marker first makes `abort` classify that item as safe and
   `git worktree remove --force` it — which deletes uncommitted work that was never committed and never staged, with no reflog entry to recover it from.
 
@@ -1251,10 +1365,13 @@ Two rules stay here, because a reader who stops at this line still has to know t
   the isolation, and parallelism forfeits it (§2).
 - **Never merges red.** Verification failure parks the item exactly like a conflict does. Nothing green-lights a merge except the commands passing — not a clean
   review, not a confident `## Outcome`, not "the failure looks unrelated."
-- **Branch mode never writes `main`, and a denied merge never parks.** The mode is set at `init`, applies to the whole queue, and only ever moves one way
+- **Branch mode never writes the base, and a denied merge never parks.** The mode is set at `init`, applies to the whole queue, and only ever moves one way
   afterwards (`merge` → `branch`, never back — §2, §9). `branched` is a success exit, not a failure — the tool refuses `stage <id> merged` under branch mode so
   the run file cannot say otherwise.
-- **Never force-pushes, never rewrites `main`'s history, never pushes at all.** Merge commits only; undoing one is `git revert -m 1`, never `git reset --hard`
+- **The merge site is derived, never assumed: merge in whichever tree has `<base>` checked out, and remove only a base worktree this run created.** git
+  refuses one branch in two trees and `--force` is not the way round it (§9). A tree the person made is theirs — the same sentence as "this run's authority
+  stops at worktrees it created itself", not a second rule beside it.
+- **Never force-pushes, never rewrites the base's history, never pushes at all.** Merge commits only; undoing one is `git revert -m 1`, never `git reset --hard`
   (step 9). Publishing anything is the user's call.
 - **Never writes the registry.** `~/.backlog-manager/registry.json` keeps its single writer (`backlog.mjs` `init`/`new`), untouched by anything here.
 - **Item bodies: pre-flight answers only.** Nothing else in the item lifecycle belongs to this skill — `start`, `## Outcome`, and the archive move all belong to

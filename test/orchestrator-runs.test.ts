@@ -189,6 +189,40 @@ describe('GET /api/orchestrator/runs', () => {
     expect(res.body.runs[0].mergeModeNote).toBeNull();
   });
 
+  it('resolves an absent base to main for a run file written before task-44', async () => {
+    // The same shape as the merge-fields case above and for the same reason:
+    // every run file written before task-44 lacks `base` entirely, and those
+    // runs could merge nowhere but `main`, so resolving to it is a statement
+    // of what they actually did rather than a guess.
+    //
+    // This case exists because a red-proof found the resolution UNPINNED —
+    // deleting it from `sanitizeMergeFields` broke nothing. That absence is
+    // what lets `OrchestratorRun.base` be declared required: if this reader
+    // stopped totalising it, every consumer above would start receiving
+    // `undefined` through a field typed `string`, and the first one to render
+    // it would print nothing where a branch name belongs.
+    const { base: _base, ...legacyRun } = fixture;
+    const dir = projectDir(fixture.project);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...legacyRun, updatedAt: new Date().toISOString() }, null, 2));
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].base).toBe('main');
+  });
+
+  it('reads a real base off disk rather than defaulting it', async () => {
+    // The other half, and the one the case above cannot make on its own:
+    // `'main'` is also this reader's default, so a sanitiser that ignored the
+    // file entirely would pass it. A run that merged into `feature/x` must
+    // come back saying so — that value is the only record of where the work
+    // landed.
+    const run: OrchestratorRun = { ...fixture, updatedAt: new Date().toISOString(), base: 'feature/x' };
+    writeRun(run);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].base).toBe('feature/x');
+  });
+
   it('falls back to merge for a nonsense mergeMode on disk rather than throwing', async () => {
     // This reader sanitises a file another process wrote; it does not trust
     // it. A hand-edited file, a future build's mode this server has never

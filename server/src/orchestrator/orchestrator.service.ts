@@ -43,10 +43,11 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
 }
 
 /**
- * Defaults the three merge-mode fields (`OrchestratorRun.mergeMode` /
- * `mergeModeEffective` / `mergeModeNote`, shared/types.ts §2.5 of the design)
- * to the pre-feature behaviour — a plain merge to `main`, no note — whenever
- * the run file doesn't hold a value this reader recognises. Two distinct
+ * Totalises the run file's merge-shaped fields — `OrchestratorRun.mergeMode` /
+ * `mergeModeEffective` / `mergeModeNote` (shared/types.ts §2.5 of the design)
+ * and, since task-44, `base` — to the pre-feature behaviour, a plain merge to
+ * `main` with no note, whenever the run file doesn't hold a value this reader
+ * recognises. Two distinct
  * inputs collapse to that same default, deliberately not distinguished any
  * further:
  *
@@ -83,13 +84,35 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
  * handful of fields this service touches directly," not "every field is
  * valid," and conflating the two would make a merge-mode typo reject an
  * otherwise-perfectly-good run the same way a missing `runId` does.
+ *
+ * `base` (task-44) is the fourth field and is here rather than in a reader of
+ * its own for all three of the reasons above at once: it is absent from every
+ * run file written before task-44, it is read at exactly these same sites, and
+ * a run that has already happened is a reading to be degraded rather than an
+ * instruction to be refused. Absent resolves to `'main'`, which is not a
+ * guess — a run that predates the field could merge nowhere else, so this is a
+ * statement of what those runs actually did. **This is the one place that
+ * resolution happens**, which is what lets `OrchestratorRun.base` be declared
+ * required and lets every consumer above this layer read it without its own
+ * `?? 'main'`; see that field's own comment for why a fifth reader
+ * re-implementing the default is the failure this prevents.
+ *
+ * Note the narrower check `base` gets: any non-string degrades, but a string
+ * is taken **verbatim**, with no attempt to confirm the branch still exists.
+ * That is deliberate and is the same historical-reading argument one paragraph
+ * up — the branch a finished run merged into may well have been deleted since,
+ * and a run list that hid such a run, or rewrote its base to `main`, would be
+ * lying about where that work actually landed. Validating a base against the
+ * repository is `POST /api/agents/orchestrate`'s job, on the way in, where the
+ * value is still an instruction (`resolveBase`, agents.service.ts).
  */
 function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
   return {
     ...run,
     mergeMode: isMergeMode(run.mergeMode) ? run.mergeMode : 'merge',
     mergeModeEffective: isMergeMode(run.mergeModeEffective) ? run.mergeModeEffective : 'merge',
-    mergeModeNote: typeof run.mergeModeNote === 'string' ? run.mergeModeNote : null
+    mergeModeNote: typeof run.mergeModeNote === 'string' ? run.mergeModeNote : null,
+    base: typeof run.base === 'string' && run.base !== '' ? run.base : 'main'
   };
 }
 
