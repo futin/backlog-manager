@@ -1672,6 +1672,94 @@ code, kbd, samp, pre { font-family: inherit }
   .runs-col, .runs-list, .runs-history-sheet, .runs-detail { max-height: none; overflow: visible; min-height: auto }
 }
 
+/* ---------------------------------------------- the wide board (2026-09-17)
+   Runs › History on a screen wide enough for three columns: the 420 px list
+   and the detail sheet stay exactly where they are, and the figure strip
+   LEAVES the top of the page to stand as a 320 px rail on the right, its five
+   figures in one column over the range's machine-time bars.
+
+   A CONTAINER query, not a media query, and the difference is not stylistic.
+   What decides whether three columns fit is the width of the BOARD, and the
+   board is the window minus the 280 px rail, minus --body-pad twice, minus
+   whatever `.wrap`'s cap is doing — all of it divided by `.shell`'s `zoom`,
+   since a zoomed element's children measure in pre-zoom pixels. At 120% text
+   a 1920 px window leaves about 1112 CSS px here, and a
+   `@media (min-width: 1920px)` would lay three columns into it and let the
+   detail's seven-node stage track collapse. The container measures what is
+   actually there.
+
+   The container is `.runs-frame`, which RunsView renders around this section
+   and nothing else — deliberately not `.wrap`, `.main` or `.shell`.
+   `container-type: inline-size` applies LAYOUT CONTAINMENT, and a
+   layout-contained element becomes the containing block for every
+   `position: fixed` descendant: the item modal and the form sheets are fixed
+   and render inside `.wrap` with no portal, so a container up there would pin
+   them to the section rather than the viewport — a break invisible to every
+   test in this repo, since none opens an overlay at 1400 px. Nothing under
+   Runs is fixed today; whatever becomes so must portal to `body`.
+
+   1400 px is 420 (list) + ~600 (the width below which the stage track stops
+   being legible) + 320 (rail) + two `--group-gap`. The 1280 px `.wrap.wide`
+   cap is under it by design, so this layout is reachable only with Settings ›
+   Display › content width set to full, and there only on a window around
+   1728 px or wider at 100% text.
+
+   The strip and the band are placed through the page's OWN classes —
+   `.runs-stats` and `.runs-band`, passed to the primitives as `className` the
+   way `Sheet` has taken `.runs-history-sheet` and `.runs-detail` since
+   task-38 — rather than by selecting `.ui-figure-strip` from here. Where a
+   primitive stands is a fact about this page at this width, which the
+   component cannot know; and guard 7 of test/design-guards.test.ts forbids a
+   page naming a primitive's family in a selector at all, because that is how
+   two surfaces come to disagree about a radius. */
+.runs-frame { container-type: inline-size }
+
+@container (min-width: 1400px) {
+  /* Two rows, not one: the band spans the full width above both columns, so
+     the range control and the project select stay where a reader's eye
+     already goes rather than sliding above a 1258 px column. The second row
+     is `minmax(0, 1fr)` so it absorbs the height `.runs-board`'s own rule
+     bounds — the flex mechanism this replaces at this width did that with
+     `flex: 1`, and `.runs-split` keeps that declaration for the narrow
+     case. */
+  .runs-board {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--group-gap);
+  }
+  .runs-band { grid-column: 1 / -1 }
+  .runs-board > .runs-split { grid-column: 1; grid-row: 2 }
+  /* The strip hides with the list when the range or project filter empties it
+     (RunsView renders it only over a non-empty corpus), and an empty state
+     beside a 320 px column of nothing reads as a panel that failed to load.
+     `:has()` asks the question directly — "is a strip in here" — rather than
+     making RunsView also write a modifier on the board saying so, which would
+     be a second copy of a fact the DOM already carries and one more thing to
+     keep in agreement. */
+  .runs-board:not(:has(> .runs-stats)) > .runs-split { grid-column: 1 / -1 }
+  /* One figure wide, top-aligned, and scrolling itself when the six cells
+     exceed the board — the same bound-and-scroll the two sheets beside it
+     take, and for the same reason: the band must not scroll away from a
+     reader deep in the rail. The sixth cell's own `grid-column: 1 / -1` needs
+     no override here because in a one-column grid it resolves to exactly the
+     one column; widening this rail to two would need that revisited. */
+  .runs-stats {
+    grid-column: 2;
+    grid-row: 2;
+    grid-template-columns: minmax(0, 1fr);
+    align-self: start;
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  /* The bars' label and value columns narrow so the track keeps ~140 px at
+     the cell's 280 px inner width — below about 120 px a seven-row chart
+     stops being comparable, which is the only thing the chart is for. The
+     detail sheet's own instance keeps 80/60 (see `.run-detail-rollup`). */
+  .runs-stats .run-bars-row { grid-template-columns: 72px 1fr 56px }
+}
+
 /* ---------------------------------------------- run detail sheet (task-38)
    RunDetail.tsx, rendered inside the `.runs-detail` sheet above. Its own
    chrome is deliberately small: the head is `SheetHead`, the controls are

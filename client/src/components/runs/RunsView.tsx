@@ -1019,298 +1019,310 @@ export default function RunsView() {
   const empty = merged.length === 0 && startingRows.length === 0;
 
   return (
-    // `runs-board` (task-16) is the modifier that bounds this section to one
-    // viewport — see its rule in styles.css for why the height is derived
-    // from layout rather than a `calc(100vh - <chrome>px)` constant.
-    // BoardView and ArchiveView keep rendering a bare `.board`.
-    <div className="board runs-board">
-      <Band title="Runs" sub={countLine}>
-        {/* The controls appear exactly when there is a corpus for them to
-            scope. With none, the band is a title over the empty state below —
-            a range control over nothing is an instrument with no subject. */}
-        {merged.length > 0 && (
-          <>
-            {/* `RUN_RANGES`' four steps as ONE segmented control, not a fifth
-                `<select>`: a select is right for the open-ended list of
-                project names nobody has memorised the position of, and wrong
-                for four FIXED choices a person flips between constantly while
-                reading history — and "always visible" also means the active
-                range reads at a glance, which a collapsed select cannot
-                offer. */}
-            <Segmented value={range} options={RUN_RANGES.map((r) => ({ value: r, label: RANGE_BUTTON[r] }))} onChange={setRange} label="Range" />
-            {/* A `Chip` wrapping its own native `<select>` — the same shape
-                the Board's own filters wear (DESIGN.md §8.3), so a filter
-                looks like a filter on every page. `as: 'label'` is what makes
-                the chip the select's label rather than a button around it. */}
-            <Chip as="label" data-testid="runs-project-chip">
-              <select className="runs-project" aria-label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-                <option value="all">All projects</option>
-                {projects.map((p) => (
-                  <option key={p} value={p}>
-                    {projectLabel(p)}
-                  </option>
-                ))}
-              </select>
-            </Chip>
-          </>
-        )}
-      </Band>
-
-      {empty ? (
-        // Task 5's own final copy for the genuinely-empty case, verbatim.
-        //
-        // task-21 added the second half of the condition, and it is the whole
-        // point of that task: a project's FIRST run, in the 1–5 minutes before
-        // `init` writes `run.json`, has an empty archive and an empty live
-        // payload, so this string was what someone saw right after pressing
-        // Orchestrate — "the click did nothing", stated by the one surface a
-        // run is meant to be watched from.
-        <p className="board-note">no runs yet</p>
-      ) : (
-        <>
-          {/* The figure strip, directly under the band — the statistics lead
-              the page (§8.4.1). Six cells reading `aggregateRuns` and nothing
-              else: no prior-period delta (nothing computes one), no parked
-              count (the aggregate does not keep it), no invented ratio. It
-              hides with the list when the range or project filter empties it,
-              because a row of zeros over `no runs in this range` would be
-              six readings about a set the page has just said is empty. */}
-          {filtered.length > 0 && (
-            <FigureStrip testId="runs-tiles">
-              <Figure
-                testId="runs-tile-runs"
-                label="runs"
-                value={aggregates.runs}
-                line={
-                  <span className="runs-figure-breakdown" data-testid="runs-figure-runs-line">
-                    {STATUS_ORDER.map((status) => (
-                      <span key={status} className="runs-figure-breakdown-item">
-                        <span aria-hidden="true">{RUN_STATUS_GLYPH[status]}</span> {aggregates.byStatus[status]} {status}
-                      </span>
-                    ))}
-                  </span>
-                }
-              />
-              {/* "completed", not "merged": `itemsMerged` counts `branched`
-                  alongside `merged` per spec §4, so a fully successful
-                  branch-mode run (nothing reached `main`) used to render
-                  "4/4 merged" over a queue that merged nothing at all — the
-                  exact failure `branched` was invented to stop, reappearing
-                  in a label. The line states the definition rather than
-                  glossing it. */}
-              <Figure
-                testId="runs-tile-merged"
-                label="completed / queued"
-                value={`${aggregates.itemsMerged}/${aggregates.itemsQueued}`}
-                line="merged or branched"
-              />
-              {/* "avg item work", not "avg item": `avgItemWorkMs` is
-                  `itemDurationMs` averaged over completed items, first
-                  non-pending arrival to the terminal stamp, which
-                  deliberately EXCLUDES the queue-wait interval a bare "avg
-                  item" reading would leave a person assuming is included. The
-                  line states the exclusion outright. */}
-              <Figure
-                testId="runs-tile-avg-item"
-                label="avg item work"
-                value={aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}
-                line="queue wait excluded"
-              />
-              <Figure
-                testId="runs-tile-fixloops"
-                label="rework / completed"
-                value={aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}
-                line="fix loops per completed item"
-                title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."
-              />
-              {/* A rate over verification RUNS, not items, and the line says
-                  which — the unit is the whole claim. */}
-              <Figure
-                testId="runs-tile-verify"
-                label="verify pass"
-                value={aggregates.verifyPassRate === null ? '—' : `${Math.round(aggregates.verifyPassRate * 100)}%`}
-                line="of every verification run"
-              />
-              {/* The sixth cell, full width: the same `StageBars` widget the
-                  detail sheet's own per-run rollup uses, so the two read as
-                  one visual vocabulary at two scopes — one run there, however
-                  many runs the range/project combination leaves in view here.
-                  `RANGE_SCOPE[range]` names which scope this rendering is,
-                  since — unlike the sheet's rollup, which is always "this one
-                  run" — this cell's meaning changes every time the range
-                  control does. No `value`: at full width the chart is the
-                  cell's subject rather than a sparkline beside a number. */}
-              <Figure wide testId="runs-tile-machine" label="machine time by stage" line={`${RANGE_SCOPE[range]} · queue wait excluded`}>
-                <div className="runs-figure-bars">
-                  <StageBars totals={machine} testId="runs-tile-machine-bars" />
-                </div>
-              </Figure>
-            </FigureStrip>
+    // `runs-frame` (2026-09-17, DESIGN.md §8.4.1 "Wide") is a measuring element and nothing else: no padding, no background, no border. It carries
+    // `container-type: inline-size` so the rule below it can ask how wide this SECTION actually is — which a media query cannot answer here, because the
+    // board's width is the window minus a 280 px rail, minus `--body-pad` twice, minus whatever `.wrap`'s cap is doing, all of it divided by `.shell`'s
+    // `zoom`. At 120% text a 1920 px window leaves about 1112 CSS px of board, and a media query would happily lay three columns into it.
+    //   It wraps History alone. Watchdog returns above this point and renders no frame: it has no figure strip to stand as a rail, and a container nobody
+    // queries is a containment boundary for free.
+    //   The frame is HERE rather than on `.wrap` or `.main` for a reason worth stating where someone might "simplify" it: `container-type: inline-size`
+    // applies layout containment, and a layout-contained element becomes the containing block for every `position: fixed` descendant. The item modal and
+    // the form sheets are fixed and render inside `.wrap` with no portal, so a container up there would pin them to the section instead of the viewport.
+    // Nothing under Runs positions itself fixed today; whatever does must portal to `body`.
+    <div className="runs-frame">
+      {/* `runs-board` (task-16) is the modifier that bounds this section to one
+          viewport — see its rule in styles.css for why the height is derived
+          from layout rather than a `calc(100vh - <chrome>px)` constant.
+          BoardView and ArchiveView keep rendering a bare `.board`. */}
+      <div className="board runs-board">
+        <Band title="Runs" sub={countLine} className="runs-band">
+          {/* The controls appear exactly when there is a corpus for them to
+              scope. With none, the band is a title over the empty state below —
+              a range control over nothing is an instrument with no subject. */}
+          {merged.length > 0 && (
+            <>
+              {/* `RUN_RANGES`' four steps as ONE segmented control, not a fifth
+                  `<select>`: a select is right for the open-ended list of
+                  project names nobody has memorised the position of, and wrong
+                  for four FIXED choices a person flips between constantly while
+                  reading history — and "always visible" also means the active
+                  range reads at a glance, which a collapsed select cannot
+                  offer. */}
+              <Segmented value={range} options={RUN_RANGES.map((r) => ({ value: r, label: RANGE_BUTTON[r] }))} onChange={setRange} label="Range" />
+              {/* A `Chip` wrapping its own native `<select>` — the same shape
+                  the Board's own filters wear (DESIGN.md §8.3), so a filter
+                  looks like a filter on every page. `as: 'label'` is what makes
+                  the chip the select's label rather than a button around it. */}
+              <Chip as="label" data-testid="runs-project-chip">
+                <select className="runs-project" aria-label="Project" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+                  <option value="all">All projects</option>
+                  {projects.map((p) => (
+                    <option key={p} value={p}>
+                      {projectLabel(p)}
+                    </option>
+                  ))}
+                </select>
+              </Chip>
+            </>
           )}
+        </Band>
 
-          <div className="runs-split">
-            {/* The 420 px list column: the Live sheet, then the History
-                sheet. `tabIndex={-1}` earns its place twice over (task-16):
-                the History sheet inside it is a scroll region and a scroll
-                region needs a programmatic focus target — both for the
-                exhausting-click handoff below and because a keyboard reader
-                who scrolls it needs somewhere for focus to be. It is -1, not
-                0: the row buttons inside are what keep the region operable
-                via Tab, so adding it to the tab order would only insert an
-                extra stop before them. */}
-            <div className="runs-list" data-testid="runs-list" ref={listRef} tabIndex={-1}>
-              {/* The Live sheet, drawn only when it has rows. An empty one
-                  would be a heading over nothing — and "nothing is running"
-                  is already what its absence says. Starting placeholders sit
-                  above every real row: a run nobody can see yet is the most
-                  recent thing that happened by construction. */}
-              {(liveRows.length > 0 || startingRows.length > 0) && (
-                <Sheet className="runs-live-sheet">
-                  <SheetHead
-                    title="Live"
-                    sub={[
-                      liveRows.length === 0 ? null : `${liveRows.length} ${liveRows.length === 1 ? 'run' : 'runs'}`,
-                      startingRows.length === 0 ? null : `${startingRows.length} starting`
-                    ]
-                      .filter((part) => part !== null)
-                      .join(' · ')}
-                  />
-                  <div className="runs-rows" data-testid="runs-live-rows">
-                    {startingRows.map((entry) => (
-                      <StartingRow key={`starting:${entry.project}`} starting={entry} now={now} />
-                    ))}
-                    {renderRows(liveRows, LiveRow)}
+        {empty ? (
+          // Task 5's own final copy for the genuinely-empty case, verbatim.
+          //
+          // task-21 added the second half of the condition, and it is the whole
+          // point of that task: a project's FIRST run, in the 1–5 minutes before
+          // `init` writes `run.json`, has an empty archive and an empty live
+          // payload, so this string was what someone saw right after pressing
+          // Orchestrate — "the click did nothing", stated by the one surface a
+          // run is meant to be watched from.
+          <p className="board-note">no runs yet</p>
+        ) : (
+          <>
+            {/* The figure strip, directly under the band — the statistics lead
+                the page (§8.4.1). Six cells reading `aggregateRuns` and nothing
+                else: no prior-period delta (nothing computes one), no parked
+                count (the aggregate does not keep it), no invented ratio. It
+                hides with the list when the range or project filter empties it,
+                because a row of zeros over `no runs in this range` would be
+                six readings about a set the page has just said is empty. */}
+            {filtered.length > 0 && (
+              <FigureStrip testId="runs-tiles" className="runs-stats">
+                <Figure
+                  testId="runs-tile-runs"
+                  label="runs"
+                  value={aggregates.runs}
+                  line={
+                    <span className="runs-figure-breakdown" data-testid="runs-figure-runs-line">
+                      {STATUS_ORDER.map((status) => (
+                        <span key={status} className="runs-figure-breakdown-item">
+                          <span aria-hidden="true">{RUN_STATUS_GLYPH[status]}</span> {aggregates.byStatus[status]} {status}
+                        </span>
+                      ))}
+                    </span>
+                  }
+                />
+                {/* "completed", not "merged": `itemsMerged` counts `branched`
+                    alongside `merged` per spec §4, so a fully successful
+                    branch-mode run (nothing reached `main`) used to render
+                    "4/4 merged" over a queue that merged nothing at all — the
+                    exact failure `branched` was invented to stop, reappearing
+                    in a label. The line states the definition rather than
+                    glossing it. */}
+                <Figure
+                  testId="runs-tile-merged"
+                  label="completed / queued"
+                  value={`${aggregates.itemsMerged}/${aggregates.itemsQueued}`}
+                  line="merged or branched"
+                />
+                {/* "avg item work", not "avg item": `avgItemWorkMs` is
+                    `itemDurationMs` averaged over completed items, first
+                    non-pending arrival to the terminal stamp, which
+                    deliberately EXCLUDES the queue-wait interval a bare "avg
+                    item" reading would leave a person assuming is included. The
+                    line states the exclusion outright. */}
+                <Figure
+                  testId="runs-tile-avg-item"
+                  label="avg item work"
+                  value={aggregates.avgItemWorkMs === null ? '—' : formatSpanCompact(aggregates.avgItemWorkMs)}
+                  line="queue wait excluded"
+                />
+                <Figure
+                  testId="runs-tile-fixloops"
+                  label="rework / completed"
+                  value={aggregates.fixLoopsPerMerged === null ? '—' : aggregates.fixLoopsPerMerged.toFixed(1)}
+                  line="fix loops per completed item"
+                  title="Total fix loops across every queued item, including ones that never finished, divided by how many completed — merged or branched — what each completion cost in rework."
+                />
+                {/* A rate over verification RUNS, not items, and the line says
+                    which — the unit is the whole claim. */}
+                <Figure
+                  testId="runs-tile-verify"
+                  label="verify pass"
+                  value={aggregates.verifyPassRate === null ? '—' : `${Math.round(aggregates.verifyPassRate * 100)}%`}
+                  line="of every verification run"
+                />
+                {/* The sixth cell, full width: the same `StageBars` widget the
+                    detail sheet's own per-run rollup uses, so the two read as
+                    one visual vocabulary at two scopes — one run there, however
+                    many runs the range/project combination leaves in view here.
+                    `RANGE_SCOPE[range]` names which scope this rendering is,
+                    since — unlike the sheet's rollup, which is always "this one
+                    run" — this cell's meaning changes every time the range
+                    control does. No `value`: at full width the chart is the
+                    cell's subject rather than a sparkline beside a number. */}
+                <Figure wide testId="runs-tile-machine" label="machine time by stage" line={`${RANGE_SCOPE[range]} · queue wait excluded`}>
+                  <div className="runs-figure-bars">
+                    <StageBars totals={machine} testId="runs-tile-machine-bars" />
                   </div>
-                </Sheet>
-              )}
+                </Figure>
+              </FigureStrip>
+            )}
 
-              <Sheet className="runs-history-sheet">
-                <SheetHead title="History" sub={`${history.length} ${history.length === 1 ? 'run' : 'runs'} · ${RANGE_SCOPE[range]}`} />
-                {/* Three states, and the ORDER of the checks is the whole
-                    rule: an empty History sheet has to say WHY it is empty,
-                    and only one of the three reasons is the range.
-                      `merged.length === 0` is first because it is the one
-                    case where the range cannot possibly be the reason —
-                    there is no corpus to filter. It is reachable only
-                    alongside a starting placeholder (with nothing at all the
-                    page shows `no runs yet` instead), which is exactly the
-                    window task-21 exists for: a project's FIRST run, before
-                    `run.json` is written. Printing `no runs in this range`
-                    there would send a person hunting through a range control
-                    for runs that do not exist yet.
-                      Then the range/project combination, and last the case
-                    where every run in scope is still going. */}
-                {merged.length === 0 ? (
-                  <div className="drawer-empty" data-testid="runs-empty-history">
-                    nothing has finished yet
-                  </div>
-                ) : filtered.length === 0 ? (
-                  // A DIFFERENT fact from "no runs yet" above
-                  // (`merged.length === 0`), which stays reachable only for a
-                  // project with a genuinely empty history. This one fires
-                  // when the range/project combination leaves nothing in
-                  // `filtered` even though `merged` is not empty — the band
-                  // and its controls stay mounted around it, because a person
-                  // needs them on screen to widen back out of the empty
-                  // combination they just created.
-                  <div className="drawer-empty" data-testid="runs-empty-range">
-                    no runs in this range
-                  </div>
-                ) : history.length === 0 ? (
-                  // Third: there IS a corpus and the filters left something in
-                  // scope, but every one of those runs is still going. The
-                  // Live sheet above is showing them; this one has nothing to
-                  // show yet, and the range is not why.
-                  <div className="drawer-empty" data-testid="runs-empty-history">
-                    nothing has finished yet
-                  </div>
-                ) : (
-                  <>
-                    {groups.map((group) => (
-                      <div key={group.key} className="runs-day" data-testid={`runs-day-${group.key}`}>
-                        <DayKicker>{group.label}</DayKicker>
-                        <div className="runs-rows">{renderRows(group.rows, HistoryRow)}</div>
-                      </div>
-                    ))}
-                    {/* task-16's `load more`, at the FOOT of the sheet and
-                        INSIDE its scroll box — it is the end of the list, not
-                        a fixture beside it. The label states the remaining
-                        count rather than saying "more", so the button says
-                        what it will do, and it is also what tells a reader
-                        that a selection whose row sits below the window still
-                        has list underneath it.
-                          The exhausting click is the case worth handling: it
-                        unmounts this control from under the pointer, which
-                        drops focus to <body> and strands a keyboard reader at
-                        the top of the document. Handing focus to the list
-                        container puts them back at the region they were
-                        reading. The check is `hiddenCount <= RUNS_PAGE_SIZE`,
-                        evaluated against the value this click is about to
-                        consume, not a re-read of state that has not updated
-                        yet. */}
-                    {hiddenCount > 0 && (
-                      <div className="runs-load-more">
-                        <Chip
-                          variant="flat"
-                          data-testid="runs-load-more"
-                          onClick={() => {
-                            setWindowSize((n) => n + RUNS_PAGE_SIZE);
-                            if (hiddenCount <= RUNS_PAGE_SIZE) listRef.current?.focus();
-                          }}
-                        >
-                          load more ({hiddenCount} older)
-                        </Chip>
-                      </div>
-                    )}
-                  </>
+            <div className="runs-split">
+              {/* The 420 px list column: the Live sheet, then the History
+                  sheet. `tabIndex={-1}` earns its place twice over (task-16):
+                  the History sheet inside it is a scroll region and a scroll
+                  region needs a programmatic focus target — both for the
+                  exhausting-click handoff below and because a keyboard reader
+                  who scrolls it needs somewhere for focus to be. It is -1, not
+                  0: the row buttons inside are what keep the region operable
+                  via Tab, so adding it to the tab order would only insert an
+                  extra stop before them. */}
+              <div className="runs-list" data-testid="runs-list" ref={listRef} tabIndex={-1}>
+                {/* The Live sheet, drawn only when it has rows. An empty one
+                    would be a heading over nothing — and "nothing is running"
+                    is already what its absence says. Starting placeholders sit
+                    above every real row: a run nobody can see yet is the most
+                    recent thing that happened by construction. */}
+                {(liveRows.length > 0 || startingRows.length > 0) && (
+                  <Sheet className="runs-live-sheet">
+                    <SheetHead
+                      title="Live"
+                      sub={[
+                        liveRows.length === 0 ? null : `${liveRows.length} ${liveRows.length === 1 ? 'run' : 'runs'}`,
+                        startingRows.length === 0 ? null : `${startingRows.length} starting`
+                      ]
+                        .filter((part) => part !== null)
+                        .join(' · ')}
+                    />
+                    <div className="runs-rows" data-testid="runs-live-rows">
+                      {startingRows.map((entry) => (
+                        <StartingRow key={`starting:${entry.project}`} starting={entry} now={now} />
+                      ))}
+                      {renderRows(liveRows, LiveRow)}
+                    </div>
+                  </Sheet>
                 )}
+
+                <Sheet className="runs-history-sheet">
+                  <SheetHead title="History" sub={`${history.length} ${history.length === 1 ? 'run' : 'runs'} · ${RANGE_SCOPE[range]}`} />
+                  {/* Three states, and the ORDER of the checks is the whole
+                      rule: an empty History sheet has to say WHY it is empty,
+                      and only one of the three reasons is the range.
+                        `merged.length === 0` is first because it is the one
+                      case where the range cannot possibly be the reason —
+                      there is no corpus to filter. It is reachable only
+                      alongside a starting placeholder (with nothing at all the
+                      page shows `no runs yet` instead), which is exactly the
+                      window task-21 exists for: a project's FIRST run, before
+                      `run.json` is written. Printing `no runs in this range`
+                      there would send a person hunting through a range control
+                      for runs that do not exist yet.
+                        Then the range/project combination, and last the case
+                      where every run in scope is still going. */}
+                  {merged.length === 0 ? (
+                    <div className="drawer-empty" data-testid="runs-empty-history">
+                      nothing has finished yet
+                    </div>
+                  ) : filtered.length === 0 ? (
+                    // A DIFFERENT fact from "no runs yet" above
+                    // (`merged.length === 0`), which stays reachable only for a
+                    // project with a genuinely empty history. This one fires
+                    // when the range/project combination leaves nothing in
+                    // `filtered` even though `merged` is not empty — the band
+                    // and its controls stay mounted around it, because a person
+                    // needs them on screen to widen back out of the empty
+                    // combination they just created.
+                    <div className="drawer-empty" data-testid="runs-empty-range">
+                      no runs in this range
+                    </div>
+                  ) : history.length === 0 ? (
+                    // Third: there IS a corpus and the filters left something in
+                    // scope, but every one of those runs is still going. The
+                    // Live sheet above is showing them; this one has nothing to
+                    // show yet, and the range is not why.
+                    <div className="drawer-empty" data-testid="runs-empty-history">
+                      nothing has finished yet
+                    </div>
+                  ) : (
+                    <>
+                      {groups.map((group) => (
+                        <div key={group.key} className="runs-day" data-testid={`runs-day-${group.key}`}>
+                          <DayKicker>{group.label}</DayKicker>
+                          <div className="runs-rows">{renderRows(group.rows, HistoryRow)}</div>
+                        </div>
+                      ))}
+                      {/* task-16's `load more`, at the FOOT of the sheet and
+                          INSIDE its scroll box — it is the end of the list, not
+                          a fixture beside it. The label states the remaining
+                          count rather than saying "more", so the button says
+                          what it will do, and it is also what tells a reader
+                          that a selection whose row sits below the window still
+                          has list underneath it.
+                            The exhausting click is the case worth handling: it
+                          unmounts this control from under the pointer, which
+                          drops focus to <body> and strands a keyboard reader at
+                          the top of the document. Handing focus to the list
+                          container puts them back at the region they were
+                          reading. The check is `hiddenCount <= RUNS_PAGE_SIZE`,
+                          evaluated against the value this click is about to
+                          consume, not a re-read of state that has not updated
+                          yet. */}
+                      {hiddenCount > 0 && (
+                        <div className="runs-load-more">
+                          <Chip
+                            variant="flat"
+                            data-testid="runs-load-more"
+                            onClick={() => {
+                              setWindowSize((n) => n + RUNS_PAGE_SIZE);
+                              if (hiddenCount <= RUNS_PAGE_SIZE) listRef.current?.focus();
+                            }}
+                          >
+                            load more ({hiddenCount} older)
+                          </Chip>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </Sheet>
+              </div>
+
+              {/* The detail sheet — one run, whole, BESIDE the list rather than
+                  behind a click. `RunDetail` owns everything inside it,
+                  including the head; the sheet and its layout class stay here,
+                  since it is this file's own `.runs-split` grid that sizes it.
+                    `selectedRow` is typed `MergedRun | undefined`, and since
+                  task-21 the guard below is a REAL case rather than defensive
+                  typing: a project whose only entry is a starting placeholder
+                  reaches here with `orderedRows` genuinely empty, so
+                  `orderedRows[0]` is `undefined` and this sheet renders
+                  nothing. That is the designed outcome — `RunDetail` is keyed on
+                  project + runId and a placeholder has no runId to give it, so
+                  an empty sheet beside a starting row is strictly better than
+                  one inventing a run to describe.
+                    `selectedRow.live` (fix round 2) — not a fresh lookup into
+                  `liveRuns` — is where the LIVE object comes from: `mergeRuns`
+                  already did the project-AND-runId-matched lookup once, when it
+                  built this row, and carries the result on `MergedRun` itself.
+                  Re-deriving the same match here would be a second place that
+                  lookup could drift from the first. */}
+              <Sheet as="aside" className="runs-detail">
+                <div data-testid="run-detail-slot">
+                  {selectedRow !== undefined && (
+                    <RunDetail
+                      summary={selectedRow.run}
+                      live={selectedRow.live}
+                      gate={resumeGate(agents, selectedRow.run.project)}
+                      resuming={resuming.has(selectedRow.run.project)}
+                      onChanged={(kind) => {
+                        // `refreshRuns` alone is enough for a pause or a cancel:
+                        // both flip `pauseRequested` on the live entry and change
+                        // nothing the archive holds. A resume additionally needs
+                        // the mark, since a paused run polls nothing by the
+                        // ordinary rule. The archive's own refresh already fires
+                        // when the fresh set changes.
+                        if (kind === 'resume') noteResume(selectedRow.run.project);
+                        refreshRuns();
+                      }}
+                    />
+                  )}
+                </div>
               </Sheet>
             </div>
-
-            {/* The detail sheet — one run, whole, BESIDE the list rather than
-                behind a click. `RunDetail` owns everything inside it,
-                including the head; the sheet and its layout class stay here,
-                since it is this file's own `.runs-split` grid that sizes it.
-                  `selectedRow` is typed `MergedRun | undefined`, and since
-                task-21 the guard below is a REAL case rather than defensive
-                typing: a project whose only entry is a starting placeholder
-                reaches here with `orderedRows` genuinely empty, so
-                `orderedRows[0]` is `undefined` and this sheet renders
-                nothing. That is the designed outcome — `RunDetail` is keyed on
-                project + runId and a placeholder has no runId to give it, so
-                an empty sheet beside a starting row is strictly better than
-                one inventing a run to describe.
-                  `selectedRow.live` (fix round 2) — not a fresh lookup into
-                `liveRuns` — is where the LIVE object comes from: `mergeRuns`
-                already did the project-AND-runId-matched lookup once, when it
-                built this row, and carries the result on `MergedRun` itself.
-                Re-deriving the same match here would be a second place that
-                lookup could drift from the first. */}
-            <Sheet as="aside" className="runs-detail">
-              <div data-testid="run-detail-slot">
-                {selectedRow !== undefined && (
-                  <RunDetail
-                    summary={selectedRow.run}
-                    live={selectedRow.live}
-                    gate={resumeGate(agents, selectedRow.run.project)}
-                    resuming={resuming.has(selectedRow.run.project)}
-                    onChanged={(kind) => {
-                      // `refreshRuns` alone is enough for a pause or a cancel:
-                      // both flip `pauseRequested` on the live entry and change
-                      // nothing the archive holds. A resume additionally needs
-                      // the mark, since a paused run polls nothing by the
-                      // ordinary rule. The archive's own refresh already fires
-                      // when the fresh set changes.
-                      if (kind === 'resume') noteResume(selectedRow.run.project);
-                      refreshRuns();
-                    }}
-                  />
-                )}
-              </div>
-            </Sheet>
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

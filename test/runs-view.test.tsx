@@ -1704,6 +1704,18 @@ describe('RunsView history paging (task-16)', () => {
     expect(screen.getByTestId('watchdog-state')).toBeInTheDocument();
   });
 
+  // 2026-09-17: the measuring frame the wide-board container query reads (styles.css `.runs-frame`, DESIGN.md §8.4.1 "Wide") wraps HISTORY alone —
+  // Watchdog has no strip to stand as a rail and renders none. A frame is a plain block a later edit can drop without any render changing under 1400 px,
+  // which is every jsdom width, so the wrapping itself is pinned here rather than left to the stylesheet guard alone.
+  it('History renders inside the measuring frame; Watchdog does not', async () => {
+    const { container } = await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(container.querySelector('.runs-frame > .board.runs-board')).not.toBeNull();
+
+    act(() => setRunsMode('watchdog'));
+    await screen.findByTestId('watchdog-phase');
+    expect(container.querySelector('.runs-frame')).toBeNull();
+  });
+
   it('keeps the selection across a trip through Watchdog', async () => {
     await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
     await userEvent.click(screen.getByTestId(`runs-row-${RUN_DONE_BETA.runId}`));
