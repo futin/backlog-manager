@@ -34,7 +34,9 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   the server does write), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is
   gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), one run chip in the board's band, and the three-step
-  Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet) and
+Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
+  on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
+
   Watchdog — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
   surface draws has one home in `components/ui/`. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must

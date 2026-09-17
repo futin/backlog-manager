@@ -41,9 +41,9 @@ table is the documentation half. The two are meant to agree; a primitive added t
 
 | component              | class family      | props                                                                                            | composed by                                                                     |
 | ---------------------- | ----------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| `Band`                 | `.ui-band`        | `title`, `sub?`, `children` (right slot)                                                         | every page: Board, Runs History, Runs Watchdog, Archive, Settings               |
+| `Band`                 | `.ui-band`        | `title`, `sub?`, `children` (right slot), `className?` (the page's layout class)                 | every page: Board, Runs History, Runs Watchdog, Archive, Settings               |
 | `Sheet`, `SheetHead`   | `.ui-sheet`       | `Sheet{children, as?, className?}`; `SheetHead{title, sub?, right?}`                             | Runs (Live, History, detail), Watchdog (Watching, Activity), `SettingsRow`'s card |
-| `FigureStrip`, `Figure`| `.ui-figure`      | `FigureStrip{children, cols?: 3\|5, testId?}`; `Figure{label, value?, unit?, line?, tone?, wide?, title?, testId?, children?}` | Runs History (six cells, the sixth `wide`), Watchdog (three)                     |
+| `FigureStrip`, `Figure`| `.ui-figure`      | `FigureStrip{children, cols?: 3\|5, testId?, className?}`; `Figure{label, value?, unit?, line?, tone?, wide?, title?, testId?, children?}` | Runs History (six cells, the sixth `wide`), Watchdog (three)                     |
 | `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | rail wordmark, card foot, column header, run chip, Runs rows, modal facts       |
@@ -146,6 +146,12 @@ strip hides with the list when the range or project filter empties it.
 Under the strip, the **split**: a 420 px list column carrying the Live sheet over the History sheet, and one always-visible detail sheet beside it. The two
 columns stack under 1100 px, list first; under 700 px the sheets are full width.
 
+Once the **board** is 1400 px or wider the strip leaves the top of the page and stands as a 320 px rail on the right, one figure wide, the split keeping the
+first column unchanged and the band spanning both. The switch is a container query on `.runs-frame`, the measuring wrapper History renders around itself —
+a media query cannot see the rail, the measure cap, the padding or `.shell`'s `zoom`, and the container cannot sit on `.wrap` or `.main` because layout
+containment would make either the containing block for the fixed overlays rendered inside them. The 1280 px measure cap sits under the threshold, so the
+rail appears only with content width set to full. Watchdog renders no wrapper.
+
 - **The Live sheet** holds one row per run that is `running` or `paused`, plus one per `starting` entry — a dot, the project, `⚠ N` when the run carries
   attention entries, the two-tone `1 / 5`, elapsed, and a status pill only where one is earned. A starting row reads `starting… · <age>`, carries no controls
   and cannot be selected: there is no run file for the detail sheet to show. A crashed run — `running`, heartbeat stale — is a two-line row carrying all three
@@ -156,10 +162,12 @@ columns stack under 1100 px, list first; under 700 px the sheets are full width.
   already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
 - **The detail sheet** shows the selected run whole: a head with the project, the run id and `RunControls` (Pause, Cancel with its `Pausing after <id>` note,
   Resume for a paused run, and Resume for a crashed one exactly when `watchdogStoodDown` says the sweeper will not); then the facts strip, the mode and question
-  notes, the chip row, the attention entries, machine time by stage for this run alone, `git merge --no-ff <branch>` per branched item, and the items in
-  pipeline order — each with its stage chip, its `RowTime` reading, its seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last
-  verification as a disclosure, open when failed. Selection is one run across both sheets: the first live run is selected on arrival, and with nothing live the
-  newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
+  notes, the chip row, `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with its stage chip, its `RowTime` reading, its
+  seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
+  for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
+  its count, so the section earns the screen only when it has something in it. Selection is one run across both sheets: the first live run is selected on
+  arrival, and with nothing live the newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
+
 
 Cost rides all three surfaces — the History row's foot line, the detail head's `$ · N turns · N sessions`, and each item's own line under its track — absent
 rather than zeroed for a run that predates the recording. Empty states are `no runs yet` and `no runs in this range`, the figure strip hidden alongside the
