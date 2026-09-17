@@ -976,3 +976,52 @@ describe('RunDetail · crashed marker', () => {
     expect(note).toHaveTextContent('every stage below is last reported, not current');
   });
 });
+
+/* 2026-09-17: the ORDER of the body is a design decision (DESIGN.md §8.4.1), picked with the wide layout — the selected run's own statistics go to the foot,
+   and Attention goes last, reversing task-38's move of it to the top. An order is exactly the kind of thing a later hand "tidies" back without a test going
+   red, because every block still renders and every other case here reads its block by test id, not by position. So these three read position and nothing
+   else: what each block contains is the other describes' business. */
+describe('RunDetail · body order (2026-09-17)', () => {
+  /** The section labels in document order. The machine-time heading carries its `queue wait excluded` caveat as a second child, so this reads each heading's
+   *  FIRST node rather than its whole text — the label is what is being ordered, the caveat is another case's. */
+  function headings(): string[] {
+    return Array.from(document.querySelectorAll('.run-detail-heading')).map((h) => (h.childNodes[0]?.textContent ?? '').trim());
+  }
+
+  function precedes(a: Element, b: Element): boolean {
+    return (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  }
+
+  it('renders items, then this run’s machine time, then attention last', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
+
+    expect(headings()).toEqual(['Items', 'Machine time by stage', 'Attention']);
+    expect(precedes(screen.getByTestId('run-detail-items'), screen.getByTestId('run-detail-machine'))).toBe(true);
+    expect(precedes(screen.getByTestId('run-detail-machine'), screen.getByTestId('run-detail-attention-a-2'))).toBe(true);
+  });
+
+  it('puts branches to merge first when the run has any', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    const summary: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      mergeMode: 'branch',
+      mergeModeEffective: 'branch',
+      mergeModeNote: null,
+      questionMode: 'park',
+      queue: [archiveItem('h-1', 'branched', { branch: 'backlog/h-1' }), archiveItem('h-2', 'branched', { branch: 'backlog/h-2' })]
+    };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    expect(headings()).toEqual(['Branches to merge', 'Items', 'Machine time by stage', 'Attention']);
+  });
+
+  it('keeps the empty attention state at the foot', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    render(<RunDetail summary={{ ...primarySummary(), attention: [] }} live={null} {...CONTROL_PROPS} />);
+
+    const empty = screen.getByText('nothing needs a look');
+    expect(empty).toHaveClass('drawer-empty');
+    expect(precedes(screen.getByTestId('run-detail-machine'), empty)).toBe(true);
+  });
+});
