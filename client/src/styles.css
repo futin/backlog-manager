@@ -1743,8 +1743,17 @@ code, kbd, samp, pre { font-family: inherit }
      take, and for the same reason: the band must not scroll away from a
      reader deep in the rail. The sixth cell's own `grid-column: 1 / -1` needs
      no override here because in a one-column grid it resolves to exactly the
-     one column; widening this rail to two would need that revisited. */
-  .runs-stats {
+     one column; widening this rail to two would need that revisited.
+       `.runs-board >` is NOT decoration, and dropping it silently reverts
+     this cell to five squeezed columns behind a clipped overflow. Two of
+     these declarations contradict `.ui-figure-strip`'s own
+     (`grid-template-columns: repeat(5, …)` and `overflow: hidden`), that rule
+     is declared LATER in this file — the ui primitives block sits last by
+     design — and an at-rule adds no specificity, so a bare `.runs-stats`
+     ties at (0,1,0) and loses on source order. The child combinator makes it
+     (0,2,0). Stated here because the page class is otherwise the whole point
+     of the pattern, and the obvious tidy is to drop the parent. */
+  .runs-board > .runs-stats {
     grid-column: 2;
     grid-row: 2;
     grid-template-columns: minmax(0, 1fr);
@@ -1757,7 +1766,7 @@ code, kbd, samp, pre { font-family: inherit }
      the cell's 280 px inner width — below about 120 px a seven-row chart
      stops being comparable, which is the only thing the chart is for. The
      detail sheet's own instance keeps 80/60 (see `.run-detail-rollup`). */
-  .runs-stats .run-bars-row { grid-template-columns: 72px 1fr 56px }
+  .runs-board > .runs-stats .run-bars-row { grid-template-columns: 72px 1fr 56px }
 }
 
 /* ---------------------------------------------- run detail sheet (task-38)

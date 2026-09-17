@@ -220,7 +220,10 @@ describe('runs wide layout — the stats rail (2026-09-17)', () => {
   it('the strip stands in column two, one figure wide, scrolling itself', () => {
     // The page's own class on the primitive, never the primitive's family — guard 7 of design-guards.test.ts is the other half of that rule, and this
     // selector is what keeps this section honest about which half it is on.
-    const strip = '.runs-stats';
+    //   `.runs-board >` is part of the assertion, not incidental: two of the declarations below contradict `.ui-figure-strip`'s own, that rule is declared
+    // later in the sheet (the primitives block sits last), and an at-rule adds no specificity — so a bare `.runs-stats` ties and loses on source order,
+    // which renders as five squeezed columns behind a clipped overflow. Caught by eye on the first build; pinned here so it is caught by test on the next.
+    const strip = '.runs-board > .runs-stats';
     expect(declares(wide, strip, /(^|[\s;])grid-column\s*:\s*2\s*(;|$)/)).toBe(true);
     expect(declares(wide, strip, /grid-template-columns\s*:\s*minmax\(0, 1fr\)\s*(;|$)/)).toBe(true);
     expect(declares(wide, strip, /(^|[\s;])max-height\s*:\s*100%/)).toBe(true);
