@@ -4,6 +4,10 @@ title: styles.css comment claims --magenta has no job on this screen, but the ca
 created: 2026-09-15
 kind: chore
 tags: css, theme, docs-accuracy
+updated: 2026-09-17T12:14:56Z
+promoted-to: task-42
+groom-elapsed: 344
+groom-tokens: 64465
 ---
 
 ## What exists today
