@@ -1586,6 +1586,37 @@ code, kbd, samp, pre { font-family: inherit }
 .runs-history-sheet, .runs-detail {
   max-height: 100%; overflow-y: auto; overscroll-behavior: contain; min-height: 240px;
 }
+/* The History sheet is BOTH the card and the scroll box, and that combination
+   has one consequence worth stating outright, because it was reported from
+   the running app as "the date is moving across the text when I scroll".
+     A sticky child of a scroll container comes to rest at the container's
+   CONTENT edge — 24 px below the box's top, since `.ui-sheet` pads by that —
+   while content scrolling past stays VISIBLE in the padding band above it,
+   padding being inside the scrollport rather than a border on it. So the day
+   kicker parked a quarter-inch down the list with a live row showing over its
+   head, and each row slid under the kicker's own text on the way past
+   (measured in Chrome at scrollTop 150: the kicker resting at y=24, a row at
+   y=17).
+     The fix takes the top padding off the BOX and puts it back as the first
+   thing inside the scrolled CONTENT: the kicker then rests flush at the
+   scrollport edge, where everything above it is clipped. A `::before` rather
+   than a margin on the head, because the head is a primitive's element
+   (`.ui-sheet-head`) and a page may not name a primitive's family in a
+   selector — guard 7 of test/design-guards.test.ts. The height is the sheet's
+   own 24 px: this restores the gap, it does not change it.
+     Only this sheet needs it. `.runs-detail` scrolls too but has no sticky
+   child; the Archive's month heading sticks against the PAGE, whose ground it
+   takes; and `DayKicker` has exactly one caller.
+     `.runs-list >` is load-bearing, and dropping it makes this rule a no-op
+   that no render test would notice: `.ui-sheet`'s own `padding: 24px`
+   shorthand is declared LATER in this file (the primitives block sits last),
+   so a bare `.runs-history-sheet` ties at one class and loses on source order
+   — which is exactly how the first attempt at this fix shipped green and
+   changed nothing on screen. The child combinator makes it two. The rules
+   above this one need no such scoping: they declare properties `.ui-sheet`
+   does not. */
+.runs-list > .runs-history-sheet { padding-top: 0 }
+.runs-list > .runs-history-sheet::before { content: ''; display: block; height: 24px }
 .runs-list:focus { outline: none }
 .runs-rows { display: flex; flex-direction: column }
 .runs-day { display: flex; flex-direction: column }
@@ -1598,7 +1629,13 @@ code, kbd, samp, pre { font-family: inherit }
   display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
   font-family: inherit; font-size: 12px; color: var(--ink2);
   background: none; border: 0; border-top: 1px solid var(--hairline);
-  padding: 10px 0; cursor: pointer;
+  /* 12 px of inline padding so the dot clears the row's leading edge and the
+     2 px selection marker inset on it, rather than sitting on both. The row
+     keeps its full width, so the hover and selection background still span
+     the sheet's content box and the day kicker still starts at that box's own
+     edge: what moves is the row's CONTENTS, which reads as the rows being
+     indented under the date that labels them. */
+  padding: 10px 12px; cursor: pointer;
 }
 .runs-row:first-child { border-top: 0 }
 .runs-row:hover { background: var(--strip-hi) }

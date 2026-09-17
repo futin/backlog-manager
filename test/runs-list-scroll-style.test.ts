@@ -71,6 +71,23 @@ function declares(source: string, selector: string, pattern: RegExp): boolean {
   return ruleBlocks(source, selector).some((block) => pattern.test(block));
 }
 
+// The file has more than one `@media (max-width: 1100px)` block (the figure
+// strip's own wrap, and this section's). Picking the one that actually
+// mentions `.runs-split` — rather than an index or a position — keeps this
+// correct however the file is reordered.
+const stackBlocks = mediaBlocks(css, '@media (max-width: 1100px)');
+const runsPhoneBlock = stackBlocks.find((block) => block.includes('.runs-split'));
+
+/**
+ * Everything OUTSIDE that stacking block. The un-bounding rules there name
+ * the exact same selectors as the bounding rules here and declare the
+ * opposite values, so a search over the whole sheet would let either half
+ * satisfy an assertion meant for the other — the phone block's
+ * `max-height: none` would happily answer "does `.runs-list` declare a
+ * max-height".
+ */
+const base = runsPhoneBlock === undefined ? css : css.replace(runsPhoneBlock, '');
+
 describe('runs list bounded-scroll stylesheet rules (task-16)', () => {
   /*
     task-38 moved three of these selectors and the breakpoint, and every case
@@ -96,22 +113,6 @@ describe('runs list bounded-scroll stylesheet rules (task-16)', () => {
                         a scroll box nested inside a scrolling page is worse
                         than an unbounded page once the layout is one column.
   */
-  // The file has more than one `@media (max-width: 1100px)` block (the figure
-  // strip's own wrap, and this section's). Picking the one that actually
-  // mentions `.runs-split` — rather than an index or a position — keeps this
-  // correct however the file is reordered.
-  const stackBlocks = mediaBlocks(css, '@media (max-width: 1100px)');
-  const runsPhoneBlock = stackBlocks.find((block) => block.includes('.runs-split'));
-
-  /**
-   * Everything OUTSIDE that stacking block. The un-bounding rules there name
-   * the exact same selectors as the bounding rules here and declare the
-   * opposite values, so a search over the whole sheet would let either half
-   * satisfy an assertion meant for the other — the phone block's
-   * `max-height: none` would happily answer "does `.runs-list` declare a
-   * max-height".
-   */
-  const base = runsPhoneBlock === undefined ? css : css.replace(runsPhoneBlock, '');
 
   it('gives .runs-board a definite height derived from 100vh DIVIDED by --font-scale', () => {
     // The division is the assertion, not the presence of `100vh`: a plain
@@ -237,5 +238,33 @@ describe('runs wide layout — the stats rail (2026-09-17)', () => {
     // The strip hides with the list when the range or project filter empties it (RunsView renders it only over a non-empty corpus); without this the
     // empty states would sit beside a 320 px column of nothing.
     expect(declares(wide, '.runs-board:not(:has(> .runs-stats)) > .runs-split', /grid-column\s*:\s*1 \/ -1/)).toBe(true);
+  });
+});
+
+/* 2026-09-17, reported from the running app: "the date is moving across the text when I scroll", and the status dot sitting on the row's leading edge.
+
+   The first is one fact about scroll boxes that no render test can see. The History sheet is BOTH the card (`.ui-sheet`, 24 px of padding) and the scroll
+   box, and a sticky child of a scroll container comes to rest at that container's CONTENT edge — 24 px below its top — while content scrolling past stays
+   visible in the padding band above it. So the day kicker parked 24 px down the list with a live row showing over its head, and every row slid under the
+   kicker's own text on the way past. Measured in Chrome at scrollTop 150: kicker at y=24, a row at y=17.
+
+   The fix takes the top padding off the scroll box and puts it back as the first thing INSIDE the scroll content, so the kicker rests flush at the
+   scrollport edge and anything above it is clipped by the box. Both halves are asserted, because either one alone is the bug: the padding still declared on
+   the box, or the gap never restored (the sheet's title would then sit hard against the card's top edge). */
+describe('runs history sticky kicker — the padding band (2026-09-17)', () => {
+  it('takes the top padding off the scroll box and restores it inside the scroll content', () => {
+    // The parent is part of the assertion. `.ui-sheet` declares `padding: 24px` as a shorthand LATER in the sheet, so a bare `.runs-history-sheet`
+    // ties at one class and loses on source order — the first attempt at this fix did exactly that: every case here passed and the page did not move.
+    expect(declares(base, '.runs-list > .runs-history-sheet', /(^|[\s;])padding-top\s*:\s*0\b/)).toBe(true);
+    expect(declares(base, '.runs-list > .runs-history-sheet::before', /(^|[\s;])height\s*:\s*24px/)).toBe(true);
+    expect(declares(base, '.runs-list > .runs-history-sheet::before', /(^|[\s;])content\s*:\s*''/)).toBe(true);
+  });
+
+  /* The dot sat at the row's leading edge because the row declared no horizontal padding at all — `padding: 10px 0`. 12 px inside it, so the dot clears the
+     edge and the 2 px selection marker both. The row keeps its full width, so the hover and selection background still span the sheet's content box: the
+     inset is the row's contents moving, never the highlight shrinking. */
+  it('insets the row contents from the leading edge without moving the highlight', () => {
+    expect(declares(base, '.runs-row', /(^|[\s;])padding\s*:\s*10px 12px/)).toBe(true);
+    expect(declares(base, '.runs-row', /(^|[\s;])width\s*:\s*100%/)).toBe(true);
   });
 });
