@@ -1130,13 +1130,26 @@ function parseIdsArg(idsArg) {
     .filter((s) => s !== '');
 }
 
-// The ref a worktree is created from, and therefore the ref the gate reads.
-// SKILL.md §4 hardcodes the same literal in its `git worktree add
-// .worktrees/<id> -b backlog/<id> main`; `--base` exists so that coupling is
-// explicit and so a repository whose trunk is named something else is
-// workable. Deliberately NOT recorded in run.json: that would be a
-// shared/types.ts schema change for a value the loop can just pass on each
-// `plan` call.
+// The ref the gate reads, the item worktree is cut from, and the finished
+// item is merged into — a run's base. `main` for a run that asked for nothing
+// else, which is every run started before task-44.
+//
+// **This value IS recorded in run.json, as `OrchestratorRun.base`** (task-44).
+// The comment that stood here until then said the opposite — "deliberately NOT
+// recorded … a value the loop can just pass on each `plan` call" — and that was
+// right for as long as the base was a queue gate and nothing else: a gate is
+// re-derivable from the flag on every call, so storing it bought nothing but a
+// schema change. It stopped being right the moment the base became the ref the
+// merge targets. Which branch a run wrote to is not re-derivable from anything
+// afterwards — the merge commits are on the base, not in any file this tool
+// keeps — so a run that did not record it could not tell anyone where its work
+// landed, and `--resume` would have to take the base on trust from whoever
+// resumed it rather than from the run's own file. See shared/types.ts's
+// `OrchestratorRun.base` for the reader-side half of the same argument.
+//
+// Still a constant rather than a per-call default: `buildGatedQueue` keeps it
+// for a direct hand call, but every command belonging to a RUN reads the
+// recorded value out of run.json instead of re-deriving this one.
 const BASE_REF_DEFAULT = 'main';
 
 // Generous, because the failure mode of the default 1MB is a truncated blob
@@ -1450,6 +1463,84 @@ function branchExists(projectRoot, branch) {
   return spawnSync('git', ['-C', projectRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0;
 }
 
+// task-44: the two checks a run-scoped base must pass, in this order, before
+// `init` writes anything. A base is not just a gate any more — it is the ref
+// item worktrees are cut from and finished items are merged INTO — so only an
+// existing LOCAL branch will do. A tag and a SHA cannot move; a
+// remote-tracking ref like `origin/main` is not a thing this repository can
+// merge into; and a branch that does not exist is a typo, not an instruction
+// to create one (creating the base is a stated non-goal of the design).
+//
+// The order is deliberate, and the reason is worth stating accurately rather
+// than flatteringly. It is NOT that `branchExists` below would otherwise read
+// the value as an option — it interpolates into `refs/heads/${base}`, which
+// can never begin with a `-`, and measuring confirms that check alone refuses
+// every value the format check does. The format check runs first because the
+// base this function accepts goes on to be substituted for `<base>` in
+// SKILL.md's own shell commands (`git worktree add … <base>`, `git -C …
+// merge --no-edit <base>`), where a leading `-` or embedded whitespace WOULD
+// be read as an option or split an argument. Proving the string is well
+// formed before anything records it is what keeps that safe, and running it
+// first is also what makes the refusal say "not a ref name" rather than "no
+// such branch".
+//
+// Measured on this machine's git before any of it was relied on: `--branch`
+// refuses `''`, `-x`, `has space`, `a..b` and `a~1` with exit 128, and
+// ACCEPTS `origin/main`, a 40-hex SHA and any unknown name with exit 0 — all
+// three of which are then refused by `branchExists`. So neither check alone
+// is the rule; the pair is.
+//
+// A leading `-` is refused here in JS as well, rather than left to git. That
+// same probe showed git treats `--branch`'s value positionally and so already
+// rejects `-x`, but the guarantee we want is "this function never hands git an
+// argument that could be read as a flag", and a guarantee borrowed from
+// another program's argument parser is one that can be revised by that
+// program's next release. `git check-ref-format` has no `--` separator to fall
+// back on (it exits 129 on one), so this is the only way to own the property.
+function assertUsableBase(projectRoot, base) {
+  if (typeof base !== 'string' || base === '' || base.startsWith('-')) {
+    throw new OrchestrateError(`--base must be an existing local branch: ${JSON.stringify(base ?? null)} is not a valid branch name`, 1);
+  }
+  if (spawnSync('git', ['check-ref-format', '--branch', base]).status !== 0) {
+    throw new OrchestrateError(`--base must be an existing local branch: ${JSON.stringify(base)} is not a valid branch name`, 1);
+  }
+  if (!branchExists(projectRoot, base) && !isUnbornHead(projectRoot, base)) {
+    throw new OrchestrateError(
+      `--base must be an existing local branch: ${JSON.stringify(base)} is not a branch in ${projectRoot} ` +
+        `(a tag, a commit SHA and a remote-tracking ref such as origin/main are all refused — a run merges INTO its base, and only a local branch can move)`,
+      1
+    );
+  }
+}
+
+// The third accepted case, and the one a two-line version of this rule gets
+// wrong: a branch that HEAD already points at but which has no commit yet.
+//
+// `git init` leaves HEAD at `refs/heads/main` (or whatever `init.defaultBranch`
+// says) with no such ref on disk, so `show-ref` correctly answers "no" for a
+// repository nobody has committed to. Refusing that would change `init`'s
+// behaviour in a fresh repository from "write a run with an empty queue" —
+// which is tested, and is the state every `orchestrate.test.mjs` fixture is in
+// — to exit 1, for a base nobody chose and that names the branch the
+// repository is literally on. That is a regression dressed up as strictness.
+//
+// It stays narrow on purpose: the base must be the branch HEAD points at, not
+// merely absent. `--base feature/x` in a commitless repo is still refused,
+// because HEAD is on `main`; `--base main` in a repo whose HEAD is on `master`
+// is still refused, for the mirror-image reason. So the typo this check exists
+// to keep catching is still caught.
+//
+// Honest about what it does NOT promise: an unborn base cannot actually be
+// merged into, and a run that reached §9 with one would fail there. Nothing
+// about task-44 made that worse — `worktree add` from an unborn `main` has
+// always failed the same way — and pretending otherwise by refusing at `init`
+// would trade a clear late failure for a confusing early one in the one case
+// where the base is not the user's choice at all.
+function isUnbornHead(projectRoot, base) {
+  const head = spawnSync('git', ['-C', projectRoot, 'symbolic-ref', '--quiet', 'HEAD'], { encoding: 'utf8' });
+  return head.status === 0 && head.stdout.trim() === `refs/heads/${base}`;
+}
+
 // --- commands ----------------------------------------------------------
 // Each cmdXxx function is the CLI's own contract for one command: parse
 // this command's flags, validate everything that can be validated before
@@ -1467,8 +1558,15 @@ function cmdInit(argv) {
   let idsArg;
   let maxArg;
   // Defaulted at the flag rather than left undefined for buildGatedQueue to
-  // fill in, so that `--base ''` is a base ref of '' (which resolves to
-  // nothing and takes the fallback) rather than silently meaning `main`.
+  // fill in, so that an ABSENT `--base` and an EXPLICIT one are the same value
+  // by the time anything reads it. `--base ''` is no longer the "resolves to
+  // nothing and takes the fallback" case this comment used to describe: since
+  // task-44 the base is merged into, not merely read at, so `assertUsableBase`
+  // below refuses `''` outright (exit 1, nothing written) rather than letting
+  // it silently mean `main`. The server never sends that value — it treats an
+  // empty `base` in a request as absent and appends no flag at all — so the
+  // refusal is aimed at a hand call, which is exactly the caller that benefits
+  // from being told its flag had no argument.
   let base = BASE_REF_DEFAULT;
   // Same reasoning as `base` above: defaulted right here so an absent flag
   // reads as the literal value 'merge' everywhere below rather than as
@@ -1548,6 +1646,23 @@ function cmdInit(argv) {
       1
     );
   }
+
+  // task-44, and in this same pre-write block for the reason --question-mode's
+  // comment directly above gives in full: cmdInit ARCHIVES any existing
+  // run.json before it writes the new one, so a base validated after that
+  // point would destroy a real run's file on behalf of a call that was never
+  // going to succeed. It goes last of the four because it is the only one that
+  // touches the filesystem — the other three are membership tests against
+  // constants — and there is no reason to shell out to git twice before a
+  // misspelled --merge-mode has even been caught.
+  //
+  // Re-checked here rather than trusted from the caller because this tool is
+  // driven by hand as well as by POST /api/agents/orchestrate. The endpoint
+  // runs its own copy of the same two checks (`resolveBase`,
+  // agents.service.ts) and that is not redundancy to be collapsed: the
+  // endpoint's copy exists to refuse a bad request BEFORE it spawns a headless
+  // session, and this one exists because a terminal is not the endpoint.
+  assertUsableBase(project, base);
 
   let maxItems = null;
   if (maxArg !== undefined) {
@@ -1700,6 +1815,18 @@ function cmdInit(argv) {
     startedAt: stamp,
     updatedAt: stamp,
     maxItems,
+    // The branch this run gates at, cuts each item worktree from, and merges
+    // each finished item into — proved by `assertUsableBase` above to be an
+    // existing local branch before this object was built, so every later
+    // command can read it without re-checking. Recorded once and never
+    // rewritten: unlike `mergeMode` directly below, nothing degrades a base
+    // mid-run, because a base that cannot be merged into parks the item and a
+    // parked item is already a recorded state with its own detail. See
+    // shared/types.ts's OrchestratorRun.base for the fuller rationale this
+    // file may not import but still has to uphold byte for byte, and
+    // BASE_REF_DEFAULT's own comment for why this is recorded at all when the
+    // gate-only version of the flag deliberately was not.
+    base,
     // What this run was ASKED to do (never rewritten after this line — see
     // the `merge-mode` command below, which only ever moves the EFFECTIVE
     // field) and what it is actually doing right now. The two start equal,

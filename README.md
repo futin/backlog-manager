@@ -11,7 +11,8 @@ and it lives in Archive.
 
 `/backlog-orchestrate` is the largest of the six and the only one that touches git. Told to drain a project's groomed queue, it works every ready bug and task
 one at a time — each in its own git worktree and its own headless `/backlog-execute` session — then commits that item, has it reviewed and verified, and merges
-it to `main` before the next one starts. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and never touches `main` at all.
+it into the run's base branch before the next one starts — `main` unless the run was started with `--base <ref>`, which lets a whole phased feature be drained
+onto a branch with `main` never written. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
 A run's state lives in a `run.json` outside the repo, under `~/.backlog-manager/orchestrator/`; the app reads that file to render live runs, run history, and
 the watchdog that resumes a crashed run.
 

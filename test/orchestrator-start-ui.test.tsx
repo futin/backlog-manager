@@ -531,7 +531,10 @@ describe('OrchestrateSheet', () => {
    */
   function stubOrchestrate(
     res: { ok: boolean; status: number; body: unknown },
-    mergeCheck: { covered: boolean; source: string | null } | 'fail' = { covered: true, source: null }
+    mergeCheck: { covered: boolean; source: string | null } | 'fail' = { covered: true, source: null },
+    // task-44. Defaulted to 'ok' so every case above is untouched; 'fail'
+    // is what lets one case prove a failed branch read still launches.
+    branches: 'ok' | 'fail' = 'ok'
   ): { url: string; body: unknown }[] {
     const calls: { url: string; body: unknown }[] = [];
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -555,6 +558,15 @@ describe('OrchestrateSheet', () => {
           status: 200,
           json: () => Promise.resolve({ paths: [], known: true })
         } as Response);
+      }
+      // task-44's on-mount read, answered and kept OUT of `calls` for exactly
+      // the reason the two above are. Two branches so the picker has something
+      // to pick, without which the base cases below could not tell "the picker
+      // works" apart from "the list was empty and it fell back to main".
+      if (url.includes('/api/agents/branches')) {
+        return branches === 'fail'
+          ? Promise.reject(new Error('network down'))
+          : Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ branches: ['main', 'feature/x'] }) } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       return Promise.resolve({ ok: res.ok, status: res.status, json: () => Promise.resolve(res.body) } as Response);
@@ -701,7 +713,7 @@ describe('OrchestrateSheet', () => {
       effort: 'high',
       permissionMode: 'plan',
       mergeMode: 'merge',
-      questionMode: 'park'
+      questionMode: 'park', base: 'main'
     });
     expect(onClose).toHaveBeenCalled();
   });
@@ -712,7 +724,7 @@ describe('OrchestrateSheet', () => {
     await toModes();
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
   });
 
   // --- Test case 7 ---------------------------------------------------
@@ -865,7 +877,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
   });
 
   it('sends exactly the still-checked ids, in board order, once one is unchecked', async () => {
@@ -882,6 +894,7 @@ describe('OrchestrateSheet', () => {
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
       questionMode: 'park',
+      base: 'main',
       ids: ['bug-1', 'task-2']
     });
   });
@@ -925,6 +938,7 @@ describe('OrchestrateSheet', () => {
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
       questionMode: 'park',
+      base: 'main',
       ids: ['task-2']
     });
   });
@@ -946,7 +960,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
   });
 
   /* An ungroomed item is a legal pick. The run really will queue it, gate
@@ -981,6 +995,7 @@ describe('OrchestrateSheet', () => {
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
       questionMode: 'park',
+      base: 'main',
       ids: ['bug-2']
     });
   });
@@ -1031,7 +1046,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
   });
 
   // =====================================================================
@@ -1070,7 +1085,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
   });
 
   // --- Test case 3 -----------------------------------------------------
@@ -1087,7 +1102,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park' });
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
   });
 
   // --- Test case 4 -----------------------------------------------------
@@ -1216,12 +1231,20 @@ describe('OrchestrateSheet', () => {
     // one is deliberately NOT gated on any mode — its answer is about
     // someone's working tree, which branch mode does not change. Naming the
     // endpoint keeps this case's claim exactly what it always was, and the
-    // second assertion is stronger than the old blanket one: it pins that
-    // this sheet fires precisely one request in branch mode, so a future
-    // third fetch has to come here and be accounted for.
+    // second assertion is stronger than the old blanket one: it pins exactly
+    // which requests this sheet fires in branch mode, so a further one has to
+    // come here and be accounted for.
+    //
+    // task-44 is that accounting, arriving as this comment predicted:
+    // `/api/agents/branches` is the third on-mount read and is ungated for the
+    // same reason `uncommitted` is — which branches exist is a fact about the
+    // repository, and no mode on this sheet changes it. The claim this case
+    // actually makes is unchanged: merge-check, and only merge-check, is
+    // gated on merge mode.
     const urls = fetchSpy.mock.calls.map(([input]) => String(input));
+    const ungated = (url: string): boolean => url.includes('/api/items/uncommitted') || url.includes('/api/agents/branches');
     expect(urls.filter((url) => url.includes('/api/agents/merge-check'))).toEqual([]);
-    expect(urls.filter((url) => !url.includes('/api/items/uncommitted'))).toEqual([]);
+    expect(urls.filter((url) => !ungated(url))).toEqual([]);
     expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
   });
 
@@ -1255,6 +1278,17 @@ describe('OrchestrateSheet', () => {
           ok: true,
           status: 200,
           json: () => Promise.resolve({ paths: [], known: true })
+        } as Response);
+      }
+      // task-44's on-mount read, answered and kept OUT of `calls` for exactly
+      // the reason the two above are. Two branches so the picker has something
+      // to pick, without which the base cases below could not tell "the picker
+      // works" apart from "the list was empty and it fell back to main".
+      if (url.includes('/api/agents/branches')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ branches: ['main', 'feature/x'] })
         } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
@@ -1401,7 +1435,7 @@ describe('OrchestrateSheet', () => {
       project: '/abs/alpha',
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
-      questionMode: 'decide'
+      questionMode: 'decide', base: 'main'
     });
   });
 
@@ -1462,6 +1496,7 @@ describe('OrchestrateSheet', () => {
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
       questionMode: 'park',
+      base: 'main',
       ids: ['task-1', 'bug-1', 'task-2']
     });
   });
@@ -1489,7 +1524,7 @@ describe('OrchestrateSheet', () => {
       project: '/abs/alpha',
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
-      questionMode: 'park'
+      questionMode: 'park', base: 'main'
     });
   });
 
@@ -1523,6 +1558,7 @@ describe('OrchestrateSheet', () => {
       permissionMode: 'acceptEdits',
       mergeMode: 'merge',
       questionMode: 'park',
+      base: 'main',
       ids: ['bug-1', 'task-2', 'task-3']
     });
   });
@@ -1546,5 +1582,74 @@ describe('OrchestrateSheet', () => {
     const { onClose } = renderSheet();
     await userEvent.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
+  });
+  // --- task-44: the base picker ---------------------------------------
+  //
+  // The payload cases above already pin that `base` rides along on every
+  // launch. These pin the picker itself: that it offers what the branch read
+  // returned, that a pick reaches the request, that it is seeded from the
+  // literal `'main'` rather than from Settings, and — the one most worth
+  // having — that a failed branch read never blocks a launch.
+
+  it('offers the branches the read returned and sends the picked one', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0].body as { base: string }).base).toBe('feature/x');
+  });
+
+  it("seeds the base from the literal 'main', never from Settings", async () => {
+    // The deliberate departure from its two neighbouring pickers. A stored
+    // base would outlive the experiment it was set for and silently send a
+    // later run onto a stale feature branch — so a Settings key that looks
+    // like one must have no effect here. Both spellings are set, since the
+    // failure this guards against is someone adding either.
+    localStorage.setItem(
+      'backlog-manager.settings',
+      JSON.stringify({ orchestrateDefaultBase: 'feature/x', orchestrateDefaultMergeMode: 'merge' })
+    );
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    expect((screen.getByLabelText('Base branch') as HTMLSelectElement).value).toBe('main');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0].body as { base: string }).base).toBe('main');
+  });
+
+  it('still launches on main when the branch read fails', async () => {
+    // The strongest form of this sheet's silent-catch rule: the other two
+    // reads exist to WARN, so losing one costs a warning. This one exists to
+    // offer alternatives to the default, so losing it must cost only the
+    // alternatives — a sheet that refused to start here would fail every
+    // ordinary run over a feature that run never used.
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: true, source: null }, 'fail');
+    renderSheet();
+    await toModes();
+
+    expect((screen.getByLabelText('Base branch') as HTMLSelectElement).value).toBe('main');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0].body as { base: string }).base).toBe('main');
+  });
+
+  it('says what a non-main base means, and says nothing at all for main', async () => {
+    // Shown only for a non-default base, unlike the question-mode note beside
+    // it: that note is about a CHOICE and so is true of both its values, while
+    // this one is about a consequence only one value has.
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+    expect(screen.queryByText(/is never written/i)).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
+
+    expect(screen.getByText(/is never written/i)).toBeInTheDocument();
   });
 });

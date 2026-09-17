@@ -18,8 +18,9 @@ drift.
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
 
 `backlog-orchestrate` is the largest of the six and the only one that touches git. Told to drain a queue, it works every ready bug and task one at a time — each
-in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it to `main` before the
-next one starts. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and never touches `main` at all.
+in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's base
+branch before the next one starts. The base is `main` unless the run was started with `--base <ref>`, and it is the ref items are gated at, worktrees are cut
+from and merges land in. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
 
 `backlog-execute` never commits and never pushes; `backlog-groom` lands on disk only, so an item has to be committed before an orchestrator run can read it.
 

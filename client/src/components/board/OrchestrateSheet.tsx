@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 
-import { ApiError, fetchMergeCheck, fetchUncommitted, startOrchestrate, type MergeCheckResult, type UncommittedItems } from '../../lib/agents';
+import {
+  ApiError,
+  fetchBranches,
+  fetchMergeCheck,
+  fetchUncommitted,
+  startOrchestrate,
+  type MergeCheckResult,
+  type UncommittedItems
+} from '../../lib/agents';
 import { EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
 import { useSettings } from '../../hooks/useSettings';
 import { Chip } from '../ui/Chip';
@@ -204,6 +212,26 @@ export function OrchestrateSheet({
    */
   const [questionMode, setQuestionMode] = useState<QuestionMode>(settings.orchestrateDefaultQuestionMode);
   /**
+   * The base picker (task-44) — the branch this run gates at, cuts worktrees
+   * from and merges into.
+   *
+   * **Seeded to the literal `'main'`, NOT from Settings**, and that is a
+   * deliberate departure from both pickers directly above rather than an
+   * oversight to be tidied up into consistency later. `mergeMode` and
+   * `questionMode` each have two permanently sensible values, so a stored
+   * preference stays true indefinitely. A base is temporary by construction:
+   * it names one experiment's branch, and a stored one would outlive that
+   * experiment and silently send a later run onto a stale feature branch —
+   * a worse failure than re-picking it, because nothing about the sheet would
+   * look wrong at the time. Per launch, every time (design, non-goals).
+   */
+  const [base, setBase] = useState<string>('main');
+  /**
+   * The picker's options. `['main']` until the fetch lands, and `['main']`
+   * forever if it never does — see the effect below.
+   */
+  const [branches, setBranches] = useState<string[]>(['main']);
+  /**
    * Which of the three steps is on screen (design §7). Held here rather than
    * derived from anything, because it is the one piece of this sheet's state
    * that is genuinely about the screen and not about the run: pick, arrange,
@@ -289,7 +317,7 @@ export function OrchestrateSheet({
   /**
    * The setup hint's data source (§6) — fetched only while `mergeMode` is
    * actually `'merge'` (brief case 6: branch mode fetches nothing at all).
-   * Branch mode never touches `main`, so this project's `git merge`
+   * Branch mode never touches the base, so this project's `git merge`
    * coverage is none of its business — asking anyway would spend a request
    * nobody reads the answer to, and risk a hint flashing into view for the
    * one instant between picking 'merge' and picking 'branch' right back.
@@ -359,6 +387,40 @@ export function OrchestrateSheet({
       })
       .catch(() => {
         if (alive) setUncommitted(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [project]);
+
+  /**
+   * The base picker's options (task-44) — `GET /api/agents/branches`, the
+   * same shape the two effects above take, `alive` guard and silent `.catch`
+   * included, keyed on `[project]` so it runs once per sheet open and never
+   * again as modes are picked or steps walked.
+   *
+   * **A failure here leaves the picker holding `'main'` alone and never
+   * blocks a launch.** That is the strongest form of the silent-`.catch` rule
+   * this file already follows twice: the other two reads exist to warn, so
+   * losing one costs a warning, while this one exists to offer alternatives
+   * to the default — so losing it costs the alternatives and leaves the
+   * default, which is exactly what a run that asked for nothing else wants.
+   * A sheet that refused to start because it could not list branches would
+   * fail every ordinary `main` run over a feature nobody in that run used.
+   *
+   * `'main'` is unioned in rather than assumed present, because a repository
+   * whose trunk is named something else has no `main` branch at all — the
+   * picker still has to offer the value the run will default to, and the
+   * server still refuses it if it does not exist, which is the honest answer.
+   */
+  useEffect(() => {
+    let alive = true;
+    fetchBranches(project)
+      .then((list) => {
+        if (alive) setBranches(list.includes('main') ? list : ['main', ...list]);
+      })
+      .catch(() => {
+        if (alive) setBranches(['main']);
       });
     return () => {
       alive = false;
@@ -580,6 +642,13 @@ export function OrchestrateSheet({
       // different claim from "nobody said". The sheet always knows which of
       // the two it is, so it always says.
       questionMode,
+      // Unconditional for the same reason as its two neighbours above, with
+      // one extra consequence of its own: which branch a run wrote to is not
+      // recoverable from anything afterwards, so a launch that stayed silent
+      // about it would leave the archive unable to answer where that work
+      // landed. `'main'` is sent explicitly and the server appends no flag
+      // for it, so the prompt is byte-identical to a pre-task-44 one.
+      base,
       // The same absent-not-empty convention, for the field it matters most
       // on: `ids` rides along ONLY for a strict subset. A full list would be
       // a different instruction from no list at all (see `selected` and
@@ -1001,7 +1070,34 @@ export function OrchestrateSheet({
                     options={QUESTION_MODES.map((q) => ({ value: q, label: QUESTION_MODE_LABELS[q] }))}
                   />
                 </label>
+
+                {/* The base picker (task-44), beside its two neighbours
+                    because it answers the same "how should this run" question
+                    they do — but seeded from neither Settings nor the last
+                    launch; see the `base` state's own comment for why a
+                    remembered base is a worse failure than a re-picked one.
+                    Options come from the branch list this sheet fetched on
+                    open, which falls back to `['main']` alone and never
+                    blocks a launch. */}
+                <label className="sheet-field">
+                  <span className="set-name">Base branch</span>
+                  <Select label="Base branch" value={base} onChange={setBase} options={branches.map((b) => ({ value: b, label: b }))} />
+                </label>
               </div>
+
+              {/* Shown only for a base that is not `main`, unlike the question-
+                  mode note above it, and the asymmetry is the point: that note
+                  is about a CHOICE and so is true of both its values, while
+                  this one is about a consequence only one value has. A `main`
+                  run behaves exactly as every run did before this picker
+                  existed, and a permanent line saying so would be noise on the
+                  screen almost every run passes through. */}
+              {base !== 'main' && (
+                <div className="sheet-note">
+                  this run gates, branches and merges on <code>{base}</code> — <code>main</code> is never written. Items not committed on <code>{base}</code> are
+                  skipped, and merging <code>{base}</code> into <code>main</code> afterwards stays yours to do by hand.
+                </div>
+              )}
 
               {/* The doctrine, in the third of the four places a reader can
                   arrive at this feature first (the others are Settings' own

@@ -128,6 +128,7 @@ function primarySummary(): OrchestratorArchiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    base: 'main',
     questionMode: 'park',
     current: false,
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
@@ -165,6 +166,7 @@ function primaryFull(overTails: { a1?: string; a2?: string } = {}): LiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    base: 'main',
     questionMode: 'park',
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
     queue: [
@@ -334,6 +336,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       current: true,
       attention: [],
@@ -356,6 +359,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       attention: [],
       queue: [
@@ -380,6 +384,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       attention: [],
       queue: [
@@ -601,6 +606,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       attention: [],
       queue: [liveItem('f-1', 'fixing', { stageAt: { fixing: fixingAt } })]
@@ -726,6 +732,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'branch',
       mergeModeNote: 'classifier denied the merge on g-1',
+      base: 'main',
       questionMode: 'park',
       queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
     };
@@ -754,6 +761,7 @@ describe('RunDetail', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       queue: [archiveItem('g-1', 'branched', { branch: 'backlog/g-1' })]
     };
@@ -764,6 +772,37 @@ describe('RunDetail', () => {
     expect(badge).toHaveTextContent('branch mode');
     expect(badge).not.toHaveTextContent('downgraded');
     expect(screen.queryByTestId('run-detail-mode-note')).not.toBeInTheDocument();
+  });
+
+  // --- task-44: the base ------------------------------------------------
+  //
+  // Which branch a run wrote to is not recoverable from anything else after
+  // the fact — the merge commits are on the base, not in any file this app
+  // keeps — so a runs history that omitted it would lie by omission.
+
+  it('renders the run base', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = { ...primarySummary(), base: 'feature/x' };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.getByTestId('run-detail-base')).toHaveTextContent('feature/x');
+  });
+
+  it('renders the base for a main run too, unlike the mode pill', () => {
+    // The deliberate asymmetry with `run-detail-mode` directly above, which
+    // hides itself for a plain merge-mode run. A mode pill marks a run that
+    // DEVIATED, so its absence is itself a reading; a base is where the work
+    // went, and a field that appeared only sometimes would read as an anomaly
+    // on the runs that had it. Asserted together so a future "tidy-up" that
+    // made base behave like mode fails here rather than silently.
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = { ...primarySummary(), base: 'main', mergeMode: 'merge', mergeModeEffective: 'merge', mergeModeNote: null };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.getByTestId('run-detail-base')).toHaveTextContent('main');
+    expect(screen.queryByTestId('run-detail-mode')).not.toBeInTheDocument();
   });
 
   // Brief case 4: the detail pane for a branch-mode run lists the branches
@@ -779,6 +818,7 @@ describe('RunDetail', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       queue: [archiveItem('h-1', 'branched', { branch: 'backlog/h-1' }), archiveItem('h-2', 'branched', { branch: 'backlog/h-2' })]
     };
@@ -804,6 +844,7 @@ describe('RunDetail', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       queue: [archiveItem('h-3', 'branched', { branch: null })]
     };
@@ -827,6 +868,7 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'branch',
       mergeModeNote: 'classifier denied the merge on k-3',
+      base: 'main',
       questionMode: 'park',
       attention: [],
       queue: [
@@ -1008,6 +1050,7 @@ describe('RunDetail · body order (2026-09-17)', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      base: 'main',
       questionMode: 'park',
       queue: [archiveItem('h-1', 'branched', { branch: 'backlog/h-1' }), archiveItem('h-2', 'branched', { branch: 'backlog/h-2' })]
     };

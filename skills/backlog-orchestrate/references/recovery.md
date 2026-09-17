@@ -30,7 +30,7 @@ driving the run. Do not follow it with a separate `heartbeat`.
 If `claim` exits non-zero, **another session has taken this run over. Stop immediately: write nothing, and exit.** The same is true of a refusal from any later
 `heartbeat`, `stage`, `attention`, `merge-mode`, `verify`, `watch` or `finish` in this run: exit `7` means a different session claimed the run after you did, so
 it — not you — is the one carrying the queue forward. (`unpause` and `abort` are the two commands that TAKE the lease rather than checking it, for reasons this
-file gives at each of them; every other write checks it.) Two sessions past this point both stage-write one `run.json` and both end in a merge to `main`; that
+file gives at each of them; every other write checks it.) Two sessions past this point both stage-write one `run.json` and both end in a merge into the base; that
 is the failure the lease exists to make impossible, and it only works if the loser stops on the first refusal instead of retrying.
 
 **`paused`** — this run was not crashed, it was stopped on purpose at an item boundary (SKILL.md §10, _Pausing_). Put it back to `running` first:

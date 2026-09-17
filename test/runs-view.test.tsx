@@ -172,6 +172,7 @@ function run(
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    base: 'main',
     questionMode: 'park',
     attention: [],
     current: false,
@@ -340,6 +341,7 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
     mergeModeEffective: 'merge',
     questionMode: 'park',
     mergeModeNote: null,
+    base: 'main',
     queue: [
       liveQueueItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: '' }] }),
       // live-ahead-of-archive: the archive's own a-2 is still "reviewing".
@@ -854,6 +856,7 @@ describe('RunsView', () => {
       mergeModeEffective: 'merge',
       questionMode: 'park',
       mergeModeNote: null,
+      base: 'main',
       attention: [],
       queue: [
         liveQueueItem('g-1', 'merged'),
@@ -912,6 +915,7 @@ describe('RunsView', () => {
       mergeModeEffective: 'merge',
       questionMode: 'park',
       mergeModeNote: null,
+      base: 'main',
       attention: [],
       queue: [
         liveQueueItem('g-1', 'merged'),
@@ -999,6 +1003,7 @@ describe('RunsView', () => {
         mergeModeEffective: 'merge',
         questionMode: 'park',
         mergeModeNote: null,
+        base: 'main',
         queue: [],
         attention: [],
         fresh: true,
@@ -1034,6 +1039,7 @@ describe('RunsView', () => {
         mergeModeEffective: 'merge',
         questionMode: 'park',
         mergeModeNote: null,
+        base: 'main',
         queue: [],
         attention: [],
         fresh: true,
@@ -1177,6 +1183,7 @@ describe('RunsView', () => {
       mergeMode: 'branch',
       mergeModeEffective: 'branch',
       mergeModeNote: null,
+      base: 'main',
       current: false,
       queue: [item('c-1', 'branched'), item('c-2', 'branched')]
     });
@@ -1242,6 +1249,7 @@ describe('RunsView', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'branch',
       mergeModeNote: 'classifier denied the merge on d-2',
+      base: 'main',
       current: false,
       queue: [item('d-1', 'merged'), item('d-2', 'branched')]
     });
@@ -1266,6 +1274,7 @@ describe('RunsView', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'branch',
       mergeModeNote: 'classifier denied the merge on e-3',
+      base: 'main',
       current: false,
       queue: [item('e-1', 'merged'), item('e-2', 'merged'), item('e-3', 'branched'), item('e-4', 'branched')]
     });
@@ -1435,6 +1444,7 @@ describe('RunsView history paging (task-16)', () => {
       mergeModeEffective: 'merge',
       questionMode: 'park',
       mergeModeNote: null,
+      base: 'main',
       queue: [liveQueueItem('pl-1', 'dispatched')],
       attention: [],
       fresh: true,
@@ -1867,6 +1877,7 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
         mergeModeEffective: 'merge',
         questionMode: 'park',
         mergeModeNote: null,
+        base: 'main',
         queue: [liveQueueItem('d-1', 'reviewing')],
         attention: [],
         fresh: false,
@@ -1909,6 +1920,7 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
             mergeModeEffective: 'merge',
             questionMode: 'park',
             mergeModeNote: null,
+            base: 'main',
             queue: [liveQueueItem('e-1', stage)],
             attention: [],
             fresh: false,

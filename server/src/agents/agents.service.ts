@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
@@ -94,41 +95,59 @@ const PROMPT_MAX = 8_000;
 
 /**
  * The base of every prompt `orchestrate()` will ever send — never accepted
- * from the request body, and never anything but this literal plus, at most,
- * a list of ids that `resolveIds` has already proved name open bugs or tasks
- * in the project being orchestrated (see that method for both checks and for
- * why shape alone would not be enough), and a trailing ` --merge-mode
- * branch` when `resolveMergeMode` (Task 4) has resolved the request's
- * `mergeMode` to `'branch'`. `--ids` is a flag `orchestrate.mjs` has always
- * taken and SKILL.md has always documented on the trigger
- * (`/backlog-orchestrate [ids…] [--max N]`), so composing them on here is
- * speaking the skill's own invocation surface, not inventing a channel — and
- * the same is true of `--merge-mode`, which `orchestrate.mjs init` has taken
- * since Task 3. `dispatch`'s prompt varies by design: the action the item
- * needs (groom vs. execute) is derived from the item file, but WHAT to say
- * about it is a client-editable default the launch sheet composes
- * (composePrompt, prompt.util.ts) and the reader may reword before sending.
- * Orchestrate has no per-request PROSE to make room for: it always means
- * "hand this project's whole groomed queue to the backlog-orchestrate skill
- * and let orchestrate.mjs run it" — but what a caller can influence has
- * grown from a validated id list alone to a validated id list plus a
- * two-valued enum. A `prompt` field, were it honoured, would still be the
- * one way an attacker-controlled request could make an unattended, headless
- * session do anything at all (see origin.guard.ts's own reasoning for why
- * that is exactly the threat these POST routes exist to prevent). A `prompt`
- * in the body is therefore dropped the same way dispatch drops any field
- * outside AgentDispatchRequest: by never being read. Note the asymmetry that
- * makes `ids` and `mergeMode` acceptable where a `prompt` would not be: a
- * prompt is free text and there is no check that could make it safe, while
- * an id is a closed vocabulary — this project's own open items — and a
- * merge mode is an even smaller closed vocabulary (`MERGE_MODES`, exactly
- * two members) that the server can enumerate or check membership against
- * for itself. `mergeMode` is in fact a TIGHTER injection surface than `ids`:
- * the text it can append is one of exactly two compile-time constants
- * selected by a guard (`resolveMergeMode`) — this literal alone, or this
- * literal plus the fixed ` --merge-mode branch` suffix — with no
- * caller-supplied character reaching the prompt through that channel at
- * all, unlike an id, which is caller text that merely passed a shape check.
+ * from the request body. What a caller can influence is exactly four things,
+ * enumerated here and composed in `orchestrate()` and nowhere else:
+ *
+ *   1. **`ids`** — a list `resolveIds` has already proved name open bugs or
+ *      tasks in the project being orchestrated (see that method for both
+ *      checks and for why shape alone would not be enough).
+ *   2. **` --merge-mode branch`** — appended when `resolveMergeMode` (Task 4)
+ *      resolved the request's `mergeMode` to `'branch'`.
+ *   3. **` --question-mode decide`** — appended when `resolveQuestionMode`
+ *      (task-19) resolved `questionMode` to `'decide'`.
+ *   4. **` --base <ref>`** — appended when `resolveBase` (task-44) resolved
+ *      `base` to anything other than `'main'`.
+ *
+ * Each is appended only off its own guard and each default appends nothing,
+ * so a request written before any of these fields existed composes the
+ * byte-identical prompt it always did. All four are flags `orchestrate.mjs`
+ * takes and SKILL.md documents on the trigger, so composing them here is
+ * speaking the skill's own invocation surface rather than inventing a
+ * channel.
+ *
+ * **They are not all the same kind of safe, and the difference is worth
+ * stating rather than averaging over.** Members 2 and 3 are the tightest: the
+ * text each can append is one of exactly two compile-time constants selected
+ * by a guard, so no caller-supplied character reaches the prompt through
+ * either channel at all. An id (1) is looser — caller text that passed a
+ * shape check and was then proved against a closed vocabulary, this project's
+ * own open items. A base (4) is looser still in form and is the reason this
+ * comment can no longer say "no caller text reaches the prompt": it appends
+ * the caller's own string. What makes it acceptable is that it, too, is
+ * proved against a closed vocabulary before composition — the branches that
+ * exist in this one project — plus a ref-name check that runs first precisely
+ * so the value cannot be read as an option. An earlier version of this
+ * comment claimed every appended flag was a compile-time literal; that was
+ * true of two of the three flags and is now true of two of four, and a
+ * comment that lists some of the influences is worse than one that lists
+ * none.
+ *
+ * `dispatch`'s prompt varies by design: the action the item needs (groom vs.
+ * execute) is derived from the item file, but WHAT to say about it is a
+ * client-editable default the launch sheet composes (composePrompt,
+ * prompt.util.ts) and the reader may reword before sending. Orchestrate has
+ * no per-request PROSE to make room for: it always means "hand this project's
+ * whole groomed queue to the backlog-orchestrate skill and let
+ * orchestrate.mjs run it". A `prompt` field, were it honoured, would still be
+ * the one way an attacker-controlled request could make an unattended,
+ * headless session do anything at all (see origin.guard.ts's own reasoning
+ * for why that is exactly the threat these POST routes exist to prevent). A
+ * `prompt` in the body is therefore dropped the same way dispatch drops any
+ * field outside AgentDispatchRequest: by never being read. The asymmetry that
+ * makes all four members above acceptable where a `prompt` would not be is
+ * the same one in every case: a prompt is free text and there is no check
+ * that could make it safe, while each of these is checked against something
+ * the server can enumerate for itself.
  *
  * The leading slash is deliberate and differs from prompt.util.ts's own
  * choice for groom/execute (natural language, not a slash command — see that
@@ -196,6 +215,20 @@ export interface AgentOrchestrateRequest {
    * than a drop.
    */
   questionMode?: string;
+  /**
+   * The branch this run should gate at, cut worktrees from and merge into.
+   * Absent means `main`.
+   *
+   * `string | undefined` for the same untrusted-body reason `mergeMode` and
+   * `questionMode` above are, but note where the resemblance stops:
+   * `resolveBase` validates this against a closed vocabulary it cannot
+   * enumerate in advance — the branches that happen to exist in one
+   * registered project right now — so it is proved the way `ids` is proved,
+   * not clamped the way a two-member enum is. That difference is the whole
+   * of `resolveBase`'s doc comment and it matters, because this is the first
+   * field whose CALLER-SUPPLIED TEXT reaches the composed prompt.
+   */
+  base?: string;
   /** The board's item selection, or absent for "the whole queue".
    *
    *  `unknown` rather than `string[]`: this arrives straight off a request
@@ -613,21 +646,27 @@ export class AgentsService {
     // with what the run should contain, not with whether it may start, so
     // the coded RUN_IN_PROGRESS_CODE 409 must still win over it.
     const questionMode = this.resolveQuestionMode(req.questionMode);
+    // Beside the other two resolvers and after the lock, for the identical
+    // reason both comments above give: a base naming no branch is a problem
+    // with what the run should contain, not with whether it may start, so the
+    // coded RUN_IN_PROGRESS_CODE 409 must still win over it.
+    const base = this.resolveBase(req.base, req.project);
 
     return this.spawn(cfg, {
       project: dirName,
-      // The composition, and the whole of what `ids` and `mergeMode` can
-      // influence: a bare constant for a full-queue, merge-mode run, that
-      // same constant followed by ids that have each been proved to name an
-      // open bug or task in THIS project, and/or a trailing ` --merge-mode
-      // branch` when the request asked for branch mode. Nothing a caller
-      // sends is ever concatenated in unchecked — see resolveIds,
-      // resolveMergeMode, and ORCHESTRATE_PROMPT's own comment for why a
-      // `prompt` field remains unreadable rather than merely validated. Ids
-      // first, the merge-mode flag last: `orchestrate.mjs`'s own argv
-      // parsing reads bare tokens as ids and `--merge-mode` as a flag with
-      // an argument, so a flag ahead of the ids would swallow the first id
-      // as `--merge-mode`'s value instead.
+      // The composition, and the whole of what a caller can influence: a
+      // bare constant for a full-queue, merge-mode, main-based run, that same
+      // constant followed by ids that have each been proved to name an open
+      // bug or task in THIS project, and then up to three flags, each
+      // appended only off its own guard and each default appending nothing.
+      // Nothing a caller sends is ever concatenated in unchecked — see
+      // resolveIds, resolveMergeMode, resolveBase, and ORCHESTRATE_PROMPT's
+      // own comment for why a `prompt` field remains unreadable rather than
+      // merely validated.
+      //
+      // Ids first, every flag after: `orchestrate.mjs`'s own argv parsing
+      // reads bare tokens as ids and each `--flag` as taking an argument, so
+      // a flag ahead of the ids would swallow the first id as its value.
       prompt: [
         ORCHESTRATE_PROMPT,
         ...(ids === undefined ? [] : ids),
@@ -640,7 +679,15 @@ export class AgentsService {
         // nothing. As with `--merge-mode`, the appended text is two
         // compile-time literals selected by a guard, so no caller-supplied
         // character reaches the prompt through this channel either.
-        ...(questionMode === 'decide' ? ['--question-mode', 'decide'] : [])
+        ...(questionMode === 'decide' ? ['--question-mode', 'decide'] : []),
+        // The third and last, and the ONE place caller-supplied text reaches
+        // this prompt. `resolveBase` has already proved it is a legal ref
+        // name AND an existing local branch in this project, which is why it
+        // can be appended at all; `'main'` appends nothing, so a request
+        // written before this field existed composes the byte-identical
+        // prompt it composed then. See resolveBase's doc comment for why
+        // proving is the rule here where its two neighbours merely clamp.
+        ...(base === 'main' ? [] : ['--base', base])
       ].join(' '),
       // Unlike dispatch, which names a session after the one item it is
       // working (sessionName, prompt.util.ts), there is no item here to
@@ -1230,6 +1277,130 @@ export class AgentsService {
       if (!seen.includes(id)) seen.push(id);
     }
     return seen;
+  }
+
+  /**
+   * `req.base`, turned into a branch name `orchestrate.mjs init` can be told
+   * to run with, or a 400 if it cannot be. Task-44 / design §3.1.
+   *
+   * - absent (`undefined` or `''`) → `'main'` — today's behaviour, for every
+   *   caller written before this field existed.
+   * - an existing local branch in THIS project → that value.
+   * - anything else, of any type → reject.
+   *
+   * **This is `resolveIds`' kind of proof, not `resolveMergeMode`'s kind of
+   * clamp, and the distinction is the reason this method is as long as it
+   * is.** `mergeMode` and `questionMode` each append a COMPILE-TIME LITERAL
+   * chosen by a guard: whatever the caller sent, the only text that can reach
+   * the prompt is ` --merge-mode branch`, spelled in this file. No
+   * caller-supplied character survives that channel, so validating the input
+   * is about selecting the right outcome, and a clamp would do. A base is
+   * different in kind: the caller's own text is what gets appended. It
+   * therefore has to be *proved* the way an id is — against the real world,
+   * before composition — rather than merely recognised.
+   *
+   * Two checks, in this order, mirroring `assertUsableBase` in
+   * `orchestrate.mjs` (the tool re-checks because it is also driven by hand;
+   * neither copy is redundant, see that function):
+   *
+   *   1. **It is a legal branch name** (`git check-ref-format --branch`, plus
+   *      a leading-`-` refusal in JS before git is asked at all).
+   *
+   *      First, deliberately — but the reason is NOT that check 2 would
+   *      otherwise read it as an option. It would not: `refs/heads/${base}`
+   *      can never begin with a `-` however the caller spells the base, and
+   *      measuring confirms membership alone refuses every value this check
+   *      does. The ordering earns its place downstream. A base that survives
+   *      this method is composed into the spawn prompt and then substituted
+   *      for `<base>` in SKILL.md's own shell commands — `git worktree add
+   *      … <base>`, `git -C … merge --no-edit <base>` — where a leading `-`
+   *      or embedded whitespace genuinely would be read as an option or split
+   *      an argument. Proving well-formedness BEFORE composition is what
+   *      keeps that safe, and running it first is what makes the refusal say
+   *      "that is not a ref name" rather than "no such branch".
+   *
+   *      So: belt-and-braces for this call, load-bearing for what the value
+   *      goes on to do. Both are pinned by message in base-branch.test.ts,
+   *      because a status-only assertion cannot tell the two checks apart.
+   *   2. **`refs/heads/<base>` exists in this project** (`git show-ref
+   *      --verify --quiet`). A tag, a 40-hex SHA and `origin/main` all PASS
+   *      check 1 — measured, not assumed — and are refused only here. That is
+   *      why neither check alone is the rule. A run merges INTO its base, and
+   *      only a local branch can move.
+   *
+   * The project is resolved through the registry with the same raw string
+   * compare `resolveIds` uses, deliberately not realpath (CLAUDE.md). An
+   * unregistered `project` has no branches, so every base then gets the same
+   * honest refusal — which is the right answer, since such a project cannot
+   * be orchestrated at all.
+   *
+   * **Never creates the branch.** A missing base is a refusal, not an
+   * instruction: an endpoint that spawns unattended sessions is not an
+   * endpoint that invents refs (design, non-goals).
+   *
+   * Uncoded 400, like `resolveMergeMode`'s and for the same reason —
+   * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
+   * gives.
+   */
+  private resolveBase(base: string | undefined, project: string): string {
+    // `'main'` short-circuits with absent and `''`, and this is load-bearing
+    // rather than an optimisation. The composition appends NOTHING for
+    // `'main'`, so there is no caller text for the two checks below to
+    // protect — they exist to prove a string that is about to be concatenated
+    // into a prompt, and this one never is. Absent and `'main'` are therefore
+    // exactly as safe as each other, and must behave identically.
+    //
+    // Treating them differently would also be a live regression: the
+    // Orchestrate sheet sends `base` on EVERY launch, `'main'` included, so a
+    // validated `'main'` would run `show-ref refs/heads/main` against the
+    // project on every ordinary run — and 400 every one of them in a
+    // repository whose trunk is named something else. That board worked
+    // before this field existed and must keep working; the client becoming
+    // explicit about a default is not a reason to start refusing it.
+    //
+    // The tool still checks it at `init` (`assertUsableBase`), which is the
+    // right place: that is where the run actually happens, and it has the
+    // repository in hand rather than a registry entry.
+    if (base === undefined || base === '' || base === 'main') return 'main';
+    // Echoed back truncated and JSON-quoted, the convention resolveIds,
+    // resolveMergeMode and resolveQuestionMode all share. JSON.stringify also
+    // renders a non-string (a `42` a Partial-typed body cannot rule out) as
+    // `42` rather than `"42"`, which a template interpolation would not.
+    const shown = JSON.stringify(typeof base === 'string' ? base.slice(0, 40) : base);
+    if (typeof base !== 'string' || base.startsWith('-')) {
+      throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);
+    }
+    if (spawnSync('git', ['check-ref-format', '--branch', base]).status !== 0) {
+      throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);
+    }
+    const entry = this.registry.load().projects.find((p) => p.path === project);
+    if (entry === undefined || spawnSync('git', ['-C', entry.path, 'show-ref', '--verify', '--quiet', `refs/heads/${base}`]).status !== 0) {
+      throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a branch in this project` }, 400);
+    }
+    return base;
+  }
+
+  /**
+   * This project's local branch names, for the Orchestrate sheet's base
+   * picker. `git for-each-ref` rather than `git branch --list`: plumbing with
+   * script-shaped output instead of porcelain that marks the checked-out one
+   * with an asterisk and may abbreviate.
+   *
+   * Read per request and cached nowhere — the same rule `uncommitted` follows
+   * and for the same reason: a branch created in the seconds since the sheet
+   * opened must be pickable without restarting the server.
+   *
+   * Deliberately NOT annotated with which tree holds which branch. The sheet
+   * needs names; "where is this branch checked out" is a question about
+   * merge time, and §9 of SKILL.md answers it then, from the run, rather than
+   * from a snapshot taken when a picker was drawn.
+   */
+  branches(project: string): { branches: string[] } {
+    const entry = this.registry.load().projects.find((p) => p.path === project);
+    if (entry === undefined) throw new HttpException({ error: 'project is not registered' }, 404);
+    const out = spawnSync('git', ['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/'], { encoding: 'utf8' });
+    if (out.status !== 0) return { branches: [] };
+    return { branches: out.stdout.split('\n').map((b) => b.trim()).filter((b) => b !== '') };
   }
 
   /**

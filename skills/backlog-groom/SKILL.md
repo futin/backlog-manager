@@ -322,7 +322,8 @@ Print the path rather than describing it: that's what lets a `git add` be pasted
 
 Why a fixed line and not a judgement call: `backlog-orchestrate`'s gate reads each candidate's content **at the ref its worktree is created from**, never off
 the working tree, because those are the only bytes a dispatched session will ever see. An item groomed a minute ago and not committed therefore arrives at that
-gate as ungroomed and is skipped — `not committed on main — the worktree this run creates from main would not contain backlog/…`. That verdict fired five times
+gate as ungroomed and is skipped — `not committed on <base> — the worktree this run creates from <base> would not contain backlog/…`, where `<base>` is the
+branch that run was started on (`main` unless it was told otherwise). That verdict fired five times
 across three projects in the 2026-09-06 sweep, and each one cost a run slot and a person a second trip. This skill is what creates the uncommitted state, so it
 is the only place the sentence can be said at the moment it becomes true. It stops there: the commit is the user's own act, since no skill but
 `backlog-orchestrate` touches git history, and `backlog.mjs` has no notion of whether a file is committed — giving it one would make the registry's writer a git

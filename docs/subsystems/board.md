@@ -94,10 +94,13 @@ queue:
    `known: false` or a failed/malformed answer, and deliberately changing no default: an untouched sheet still posts no `ids`.
 2. **Order.** Hand-orders that selection with ↑/↓ and a reset (`order: string[] | null`, `null` meaning queue order, reconciled against the live queue every
    render, never stored resolved). The screen says a `runner-fix:` item may still hoist above the chosen order, and that it cannot tell which.
-3. **Modes.** All five pickers — permission mode, model, effort, merge mode, question mode. Every one but permission mode seeds from Settings: model and effort
-   off the same `dispatchDefaultModel` / `dispatchDefaultEffort` keys the launch sheet reads, merge and question mode off the two orchestrator defaults.
-   Permission mode has no stored default and starts at `auto`, clamped down to whatever ceiling the dashboard reports. Plus, in merge mode, a setup hint fed by
-   `GET /api/agents/merge-check`.
+3. **Modes.** Six pickers — permission mode, model, effort, merge mode, question mode, base branch. Four of the six seed from Settings: model and effort off
+   the same `dispatchDefaultModel` / `dispatchDefaultEffort` keys the launch sheet reads, merge and question mode off the two orchestrator defaults. The other
+   two deliberately do not, for opposite reasons. Permission mode has no stored default and starts at `auto`, clamped down to whatever ceiling the dashboard
+   reports. **Base branch seeds from the literal `'main'`, never from Settings** (task-44): its two neighbours have permanently sensible values, while a base
+   names one experiment's branch, so a stored one would outlive that experiment and silently send a later run onto a stale feature branch. Its options come
+   from `GET /api/agents/branches`, fetched once per sheet open, falling back to `['main']` alone on any failure and never blocking a launch. Plus, in merge
+   mode, a setup hint fed by `GET /api/agents/merge-check`, and, for a non-`main` base, a note saying `main` will not be written.
 
 Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
 call `useDialogEscape` for whatever they wrap.

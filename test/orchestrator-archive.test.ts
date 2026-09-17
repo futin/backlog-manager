@@ -69,6 +69,7 @@ function makeRun(overrides: Partial<OrchestratorRun> = {}): OrchestratorRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    base: 'main',
     questionMode: 'park',
     queue: [queueItem()],
     attention: [],

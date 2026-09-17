@@ -632,6 +632,32 @@ export function RunDetail({
             {questionMode}
           </span>
         </div>
+        {/* task-44: which branch this run gated at, cut its worktrees from and
+            merged into.
+
+            **Rendered for every run, `main` ones included**, deliberately
+            unlike the `mode` fact directly above, which hides itself for a
+            plain merge-mode run. The two are different kinds of fact: a mode
+            pill marks a run that DEVIATED, so its absence is itself a reading
+            ("this run merged, as asked"). A base is where the work went, and a
+            field that appeared only sometimes would read as an anomaly on the
+            runs that had it rather than as ordinary metadata — and would leave
+            the reader of a `main` run unsure whether the field was missing or
+            the run predated it.
+
+            Unrecoverable from anything else after the fact, which is the whole
+            reason it is drawn: the merge commits are on the base, not in any
+            file this app keeps, so a runs history that omitted it would lie by
+            omission. `source.base` is total for every run — the server's
+            reader resolves an older run file's absent `base` to `'main'` once
+            (`sanitizeMergeFields`), so there is no `?? 'main'` to re-implement
+            here. */}
+        <div className="run-fact">
+          <span className="run-fact-label">base</span>
+          <span className="run-fact-value" data-testid="run-detail-base">
+            <code>{source.base}</code>
+          </span>
+        </div>
         {/* task-27: what the whole run cost, summed off the per-transcript
             entries `orchestrate.mjs usage` wrote. `runUsageTotals` returns
             `null` for every run archived before that command existed, so this

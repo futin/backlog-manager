@@ -2983,6 +2983,46 @@ test('backlog-reviewer reads both lines and calls a missing pair Important', () 
   )
 })
 
+// --- task-44: the orchestrator hands the reviewer its base -------------------
+//
+// Another two-files-one-contract seam, the same shape as the pair above and
+// living here for the same reason: `backlog-orchestrate/SKILL.md` §7 composes
+// the dispatch and `agents/backlog-reviewer.md` declares what it expects, and
+// a suite reading only one half cannot catch them drifting apart.
+//
+// What makes this one worth pinning rather than trusting: if the orchestrator
+// stops handing `base`, or the reviewer goes back to a literal `main`, nothing
+// fails and nothing errors. The reviewer simply diffs against the wrong ref on
+// a `--base` run and reviews that branch's entire divergence from `main` as
+// though it were one item's work — a much larger diff that still reads like a
+// legitimate one, approved or rejected on content this item's author never
+// wrote. Silent, and only on the runs the feature exists for.
+
+test('backlog-orchestrate hands the reviewer a base and the reviewer diffs against it', () => {
+  const skill = flat(ORCHESTRATE_SKILL_MD)
+  const reviewer = flat(REVIEWER_MD)
+
+  assert.ok(/- `base` — this run's base branch/.test(skill), 'backlog-orchestrate/SKILL.md §7 no longer hands the reviewer a base')
+  assert.ok(/\*\*`base`\*\* —/.test(reviewer), 'backlog-reviewer.md no longer declares a base among the fields the dispatch gives it')
+
+  // The diff commands are the whole point of the field, so they are asserted
+  // directly rather than inferred from the field being mentioned.
+  assert.ok(reviewer.includes('git -C <worktree> diff <base>...<branch>'), 'backlog-reviewer.md no longer takes its diff against the base')
+  assert.ok(
+    !/git -C <worktree> diff main\.\.\.<branch>/.test(reviewer),
+    'backlog-reviewer.md still has a diff hardcoded against main — on a --base run that reviews the wrong change set',
+  )
+  assert.ok(
+    !/git -C <worktree> log --oneline main\.\./.test(reviewer),
+    'backlog-reviewer.md still has a log hardcoded against main',
+  )
+
+  // Both halves must agree on the count, or the reviewer's own "if any is
+  // missing, stop" rule silently stops checking for one of them.
+  assert.ok(/Five fields, always/.test(reviewer), 'backlog-reviewer.md no longer says how many fields the dispatch gives it')
+  assert.ok(/If any of the five is missing/.test(reviewer), "backlog-reviewer.md's missing-field rule no longer matches its own field count")
+})
+
 // --- backlog-groom's closing "on disk only" line -----------------------------
 //
 // The seam: `backlog-orchestrate`'s gate reads each candidate at the ref its
@@ -3085,10 +3125,21 @@ test('backlog-groom says the boundary in its own description of what it does not
 test('backlog-orchestrate points its "not committed" verdict back at groom line', () => {
   // The two skills describe one seam, and the whole value of the line is that
   // the person reading either file meets the same words.
+  // task-44 made the ref the gate reads run-scoped, so the verdict names
+  // `<base>` rather than the literal `main`. BOTH skills are read here, not
+  // just orchestrate's: this case exists because the two files state one
+  // sentence, and a version that checked only one half would have let
+  // task-44 update orchestrate and leave groom quoting a verdict the tool no
+  // longer prints — which is exactly what it caught.
   const text = flatQuoted(ORCHESTRATE_SKILL_MD)
+  const groom = flatQuoted(GROOM_SKILL_MD)
   assert.ok(
-    text.includes('not committed on main'),
-    'backlog-orchestrate/SKILL.md no longer explains the "not committed on main" verdict',
+    text.includes('not committed on <base>'),
+    'backlog-orchestrate/SKILL.md no longer explains the "not committed on <base>" verdict',
+  )
+  assert.ok(
+    groom.includes('not committed on <base>'),
+    'backlog-groom/SKILL.md quotes a different "not committed" verdict from backlog-orchestrate/SKILL.md — one sentence, two skills, one wording',
   )
   assert.ok(
     /Groomed on disk only/.test(text),

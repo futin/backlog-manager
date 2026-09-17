@@ -325,6 +325,20 @@ export interface StartOrchestrateRequest {
    * runner was told to park" and "nobody said" are different claims.
    */
   questionMode?: QuestionMode;
+  /**
+   * The branch this run gates at, cuts worktrees from and merges into.
+   *
+   * Plain `string`, not a union — unlike `mergeMode` and `questionMode`
+   * above, whose vocabularies are fixed and compiled in. A branch list is a
+   * fact about one project at one moment, so there is nothing for the client
+   * to narrow against; the server proves the value instead (`resolveBase`).
+   *
+   * Sent on every launch, including the untouched `'main'`, for the same
+   * reason its two neighbours are: the request is the sheet's explicit answer
+   * to "what should this run do", and an omitted field would put that one
+   * decision in two places.
+   */
+  base?: string;
   /** The board's item selection, sent ONLY when it is a strict subset of the
    *  project's queue — an absent `ids` means "drain everything", and the two
    *  are genuinely different instructions rather than two spellings of one
@@ -478,6 +492,25 @@ function isMergeCheckResult(data: unknown): data is MergeCheckResult {
     typeof (data as MergeCheckResult).covered === 'boolean' &&
     (typeof (data as MergeCheckResult).source === 'string' || (data as MergeCheckResult).source === null)
   );
+}
+
+/**
+ * This project's local branch names, for the Orchestrate sheet's base picker
+ * (task-44) — `GET /api/agents/branches`.
+ *
+ * A malformed payload resolves to an EMPTY list rather than throwing, which
+ * is the opposite of `fetchMergeCheck` directly below and deliberate: a
+ * merge-check result that lies changes what the sheet TELLS the user, while a
+ * missing branch list only shortens a picker that always offers `'main'`
+ * anyway. The sheet's own effect swallows the failure on the same reasoning —
+ * a run onto `main` must never be blocked by a read that is only there to
+ * offer alternatives to it.
+ */
+export async function fetchBranches(project: string): Promise<string[]> {
+  const data = await unwrap<{ branches?: unknown }>(await fetch(`/api/agents/branches?project=${encodeURIComponent(project)}`));
+  const list = (data as { branches?: unknown }).branches;
+  if (!Array.isArray(list)) return [];
+  return list.filter((b): b is string => typeof b === 'string' && b !== '');
 }
 
 export async function fetchMergeCheck(project: string): Promise<MergeCheckResult> {

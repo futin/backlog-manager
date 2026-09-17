@@ -169,6 +169,15 @@ export class AgentsController {
       // typo quietly resolving to the default would put a claim there that
       // nobody made.
       questionMode: body?.questionMode,
+      // Same posture again, and this one has the sharpest reason of the three
+      // to be judged in the service rather than here: `resolveBase` needs the
+      // PROJECT to judge the value at all — a base is proved against the
+      // branches that exist in that one repository, not against a compiled-in
+      // vocabulary — and this controller has a path string, not a registry
+      // entry. A shape check here would be the weak half of that rule wearing
+      // its name. Absent (and `'main'`, which appends nothing either way)
+      // defaults; present-and-unknown is a 400.
+      base: body?.base,
       // Also unvalidated here, and the most important one to leave alone:
       // `resolveIds` (in the service) is the single place this becomes a
       // list of strings, because it is the only place that can also check
@@ -452,5 +461,27 @@ export class AgentsController {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
     return this.agents.mergeCheck(trimmed);
+  }
+
+  /**
+   * This project's local branch names, for the Orchestrate sheet's base
+   * picker (task-44). Read fresh per request and cached nowhere, the same
+   * cadence `uncommitted` and `merge-check` keep.
+   *
+   * A blank `project` is a 400 and an unregistered one a 404 — told apart
+   * deliberately, unlike `resolveIds`' single message for its four failures,
+   * because these two are the caller's own two distinguishable mistakes and
+   * the sheet does different things about them.
+   *
+   * No guard, for the reason `merge-check` above states in full: it starts
+   * nothing and reads no caller-supplied path. It reads one registered
+   * project's own branch list, which discloses no more to a same-origin
+   * reader than `/api/projects` already does.
+   */
+  @Get('branches')
+  branches(@Query('project') project: string | undefined): { branches: string[] } {
+    const trimmed = typeof project === 'string' ? project.trim() : '';
+    if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
+    return this.agents.branches(trimmed);
   }
 }
