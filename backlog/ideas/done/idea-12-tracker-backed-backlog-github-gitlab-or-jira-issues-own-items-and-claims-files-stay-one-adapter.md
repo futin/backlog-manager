@@ -3,6 +3,10 @@ id: idea-12
 title: Tracker-backed backlog: GitHub, GitLab or Jira issues own items and claims; files stay one adapter
 created: 2026-09-09
 tags: architecture, multi-user, multi-machine, tracker, github
+updated: 2026-09-17T14:09:16Z
+promoted-to: task-43
+groom-elapsed: 4509
+groom-tokens: 266060
 ---
 
 ## Problem
