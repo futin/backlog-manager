@@ -117,18 +117,24 @@ One interface in `server/src/items/sources/`, one implementation per `kind`:
   fills; the `files` adapter wraps today's synchronous `scanProject` and resolves immediately.
 - `body(ref)` → the item's body text or `null`. For `files` the ref is a filesystem path checked against the registry-built allowlist exactly as today; for a
   tracker the ref is a URN and the body comes from the cache.
-- `summary(project)` → what `ProjectSummary` needs beyond the registry entry: counts, and for a tracker the connection state (§5.4).
+- `summary(project)` → what `ProjectSummary` needs beyond the registry entry for a tracker: the connection state (§5.4). Added by phase 2, which is the first
+  phase with a value for it; phase 1 derives counts from `list` in the service, as today.
 
-`ItemsService` resolves each registered project's source (§3.2) and dispatches; the `unsupported` case is handled in the service, not in an adapter. The
-controller's three read routes keep their paths and payloads; `index()` and `projects()` become asynchronous.
+`list` takes the resolved marker beside the project (`null` for `files`), because a tracker adapter reads its repo off the marker and the seam's signature
+should not change when the first tracker arrives. `ItemsService` resolves each registered project's source (§3.2) and dispatches over a map keyed by `kind`,
+built from the registered adapters and refusing a duplicate kind at construction; the `unsupported` case is handled in the service, not in an adapter. The
+controller's three read routes keep their paths and payloads; `index()`, `projects()` and `body()` become asynchronous.
 
 ### 4.2 What phase 1 changes in the shared shapes
 
 Two additions, nothing removed:
 
 - `RegistryProject` — unchanged.
-- `ProjectSummary.source: 'files' | 'github' | 'unsupported'`.
-- `BacklogItem.source: 'files' | 'github'`.
+- `SourceKind` — the closed list of adapters this build ships, so it is `'files'` in phase 1 and widens to `'files' | 'github'` when phase 2 registers the
+  adapter: a kind named in the type without an adapter behind it would be a lie the resolver could not keep.
+- `ProjectSummary.source: SourceKind | 'unsupported' | null` — `null` exactly when `missing` (no store, no source), `'unsupported'` for a marker the server
+  cannot honour (§3.2), the reason travelling in `ItemsIndex.errors`.
+- `BacklogItem.source: SourceKind`, required — a total shape, so every fixture literal in `test/` names its source and the compiler is the checklist.
 
 In phase 1 every value is `'files'`. The client ignores the field until phase 2 has something to draw with it. Everything else a tracker item needs — `url`,
 `assignee`, `untyped` — is added by the phase that first fills it (§5.3), so no field ships ahead of its first real value.
