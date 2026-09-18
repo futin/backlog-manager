@@ -119,7 +119,8 @@ Three changes to `skills/backlog-orchestrate/SKILL.md` §9:
 
 Every other `git -C "$PWD"` command in the file was checked and none is affected: `show-ref --verify refs/heads/…`, every `worktree` verb (`add`, `remove`,
 `list`) and the `diff`/`log` calls given an explicit `<base>...backlog/<id>` range are all HEAD-independent, so the project root is the right place for them.
-"Names HEAD" turned out to be exactly the line between the two kinds, which is what the fourth guard below pins. The branch-mode path keeps its branch on
+The line between the two kinds is whether a command **depends on** the invoking tree's HEAD, which is not the same as naming it — see the re-review below,
+where that distinction was got wrong first time round. The branch-mode path keeps its branch on
 purpose and was not touched, and `references/recovery.md`'s abort path uses `-D`, which does not test reachability and so is not affected either.
 
 Four guards added to `skills/backlog-orchestrate/tools/orchestrate.test.mjs`. They read the SKILL's text rather than exercising behaviour because the SKILL body
@@ -128,7 +129,7 @@ Four guards added to `skills/backlog-orchestrate/tools/orchestrate.test.mjs`. Th
 - `no branch delete in SKILL.md runs in the project root`
 - `the runner-fix pickup diffs the merge commit, which is the base tree's HEAD`
 - `SKILL.md reads a branch -d refusal against the tree it was run in`
-- `no git command in SKILL.md reads HEAD out of the project root` — the general shape, for the command nobody has written yet
+- `every project-root git command in SKILL.md is on the HEAD-independent allowlist` — the general guard (rewritten at re-review; see below)
 
 Verification (`node scripts/test-all.mjs`, both runners):
 
@@ -155,3 +156,59 @@ item's history to match a later fix would make the archive a worse record, not a
 
 Not fixed here, and out of this item's scope: this is inert for the *next* run until this repo's HEAD is pushed and `pnpm run plugin:sync` has run — the run
 that merges it can pick it up within-run through §9's runner-fix path, which is itself one of the two things repaired above.
+
+### Re-review — 2026-09-18, three Important findings, all accepted
+
+The reviewer returned `verdict: fix` on one defect stated in three places, and it was a real one. The criterion I wrote into `CLAUDE.md`,
+`docs/subsystems/invariants.md` and the fourth guard was **syntactic** — "the commands that may stay at the project root are the ones that never name HEAD" —
+where the property that decides it is **semantic**: does the command depend on the HEAD of the tree it runs in. `git branch -d backlog/<id>` contains no
+`HEAD` anywhere and is wholly HEAD-relative, so the rule as written licensed the exact command this item exists to move. Measured, old criterion against the
+reviewer's four counterexamples:
+
+```
+### the OLD guard's criterion, applied to the counterexamples:
+PASSES   git -C "$PWD" branch -d backlog/<id>
+PASSES   git -C "$PWD" branch --merged <base>
+PASSES   git -C "$PWD" branch --contains backlog/<id>
+PASSES   git -C "$PWD" status --short
+
+### the NEW guard, same counterexamples injected into SKILL.md one at a time:
+CAUGHT   git -C "$PWD" branch -d backlog/<id>
+CAUGHT   git -C "$PWD" branch --merged <base>
+CAUGHT   git -C "$PWD" branch --contains backlog/<id>
+CAUGHT   git -C "$PWD" status --short
+```
+
+`CLAUDE.md` and `invariants.md` now state the criterion as *depends on* HEAD, naming `branch -d` as the case that depends on it without naming it, and keep the
+three permitted shapes as a list of things that are HEAD-independent by construction rather than as an instance of the wrong rule.
+
+The fourth guard is rewritten as a **closed allowlist**, which is the honest answer to what a text guard can pin here. "Depends on the invoking tree's HEAD" is
+a fact about git's semantics, not about the string, so no regex over a markdown file can detect it; what a text guard can do is fail closed. Every
+`git -C "$PWD"` line in SKILL.md must now match one of four shapes — `show-ref --verify`, the `worktree` verbs, and `diff`/`log` given an explicit
+`<base>...backlog/<id>` range — each recorded in the test with the reason it is HEAD-independent, and anything else is red until whoever adds it decides which
+side of the line it falls on. Its comment says exactly that and no longer claims to detect HEAD-dependence. The three earlier guards are unchanged, and
+SKILL.md §9 is untouched by this pass — the reviewer did not object to it and it is already committed in `af3c115`.
+
+Also taken from the review's Minor notes: two lines this diff had left over `printWidth: 160` were rewrapped (`invariants.md`'s runner-fix paragraph, which I
+had widened by inserting into an existing line, and the `CLAUDE.md` bullet). The `<base tree>`-under-branch-mode ambiguity the reviewer raised is left alone
+deliberately — it is pre-existing, `§9` reads as unreachable in branch mode, and widening this item into it is not what it was groomed for.
+
+Verification after the re-review, both runners (`node scripts/test-all.mjs`):
+
+```
+Test Suites: 118 passed, 118 total
+Tests:       1878 passed, 1878 total
+
+# tests 582
+# pass 582
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+Contract sweep: 3 sites updated (CLAUDE.md, docs/subsystems/invariants.md ×2) — the same three sites as the first pass, restated with the corrected criterion
+Red proof: 4 tests went red with the change reverted — and the fourth additionally goes red on `git -C "$PWD" branch -d backlog/<id>`, which is the case the
+version the reviewer rejected let through

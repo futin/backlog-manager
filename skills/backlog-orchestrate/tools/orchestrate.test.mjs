@@ -5586,23 +5586,67 @@ test('SKILL.md reads a branch -d refusal against the tree it was run in', () => 
   );
 });
 
-test('no git command in SKILL.md reads HEAD out of the project root', () => {
-  // The general shape, for the command nobody has written yet. Both halves
-  // of bug-38 were one command reading `HEAD` — implicitly for `branch -d`,
-  // explicitly for `HEAD^1 HEAD` — from `$PWD`, which is the project root
-  // and therefore `main` on a `--base` run.
+test('every project-root git command in SKILL.md is on the HEAD-independent allowlist', () => {
+  // The general guard, and it is an ALLOWLIST rather than a search for the
+  // bad shape — because the property that matters cannot be seen in the
+  // string.
   //
-  // The complement of this guard is what makes it safe to state rather than
-  // just narrow: every OTHER `git -C "$PWD"` line in this file is
-  // HEAD-independent by construction — `show-ref --verify refs/heads/…` and
-  // the `worktree` verbs are repo-wide, and `diff`/`log` there are always
-  // given an explicit `<base>...backlog/<id>` range. So "names HEAD" is
-  // exactly the line between the commands that may run in the project root
-  // and the ones that must follow the merge into the base tree.
+  // The first version of this guard looked for lines that both named `$PWD`
+  // and mentioned `HEAD`, on the theory that "names HEAD" marked the
+  // commands that must follow the merge into the base tree. That is wrong
+  // for the exact command bug-38 is about: `git branch -d backlog/<id>`
+  // contains no `HEAD` anywhere, yet it tests reachability from the HEAD of
+  // the repository it runs in, because it has no `--merged-into` and so the
+  // invoking tree IS the parameter. The reverted bug would have passed that
+  // guard. So would `branch --merged`, `branch --contains`, a bare `diff`
+  // and a `status`.
+  //
+  // "Depends on the HEAD of the tree it runs in" is a fact about git's
+  // semantics, not about the text, and no regex over a markdown file can
+  // decide it. What a text guard CAN do honestly is fail closed: enumerate
+  // the command shapes somebody has already checked are HEAD-independent,
+  // and refuse everything else. A new `git -C "$PWD" …` line then goes red
+  // until its author comes here, works out whether it depends on the
+  // invoking tree's HEAD, and either moves it to `<base tree>` or adds it
+  // below with the reason it is safe.
+  //
+  // That is the whole claim. This guard does not detect HEAD-dependence and
+  // is not a substitute for the three above it, which pin the two specific
+  // commands bug-38 moved and the prose that reads their refusals.
+  const allowed = [
+    // A ref lookup by full name. Reads `refs/heads/…` directly; HEAD is not
+    // consulted, and refs are shared by every tree in the repository.
+    { why: 'ref lookup by full name', re: /^show-ref --verify\b/ },
+    // Worktree administration is repo-wide by definition — the list, and the
+    // directories added and removed, belong to the repository rather than to
+    // whichever tree the command was typed in.
+    { why: 'repo-wide worktree administration', re: /^worktree (list|add|remove)\b/ },
+    // Given an explicit two-ref range, so no endpoint is resolved through
+    // HEAD. The range is part of the allowlisted shape, not incidental to
+    // it: `git -C "$PWD" diff --name-only` with the range dropped would be
+    // HEAD-relative and must fail this guard.
+    { why: 'diff over an explicit <base>...branch range', re: /^diff --name-only <base>\.\.\.backlog\/<id>(?=\s|$)/ },
+    { why: 'log over an explicit <base>..branch range', re: /^log --oneline <base>\.\.backlog\/<id>(?=\s|$)/ },
+  ];
+
   const text = fs.readFileSync(SKILL_MD, 'utf8');
-  const offenders = text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => /^git\b/.test(l) && l.includes('"$PWD"') && /\bHEAD\b/.test(l));
-  assert.deepEqual(offenders, [], `a git command reads HEAD from the project root:\n${offenders.join('\n')}`);
+  const marker = 'git -C "$PWD" ';
+  const offenders = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const at = line.indexOf(marker);
+    // Command lines only — `^git` for a plain invocation, and the `(` and
+    // `&&` forms a fenced block uses when it wraps one in a subshell.
+    if (at === -1 || !/^[(\s]*(git|.*&&\s*git)\b/.test(line.slice(0, at + 4))) continue;
+    const rest = line.slice(at + marker.length);
+    if (!allowed.some((a) => a.re.test(rest))) offenders.push(line);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'a git command runs in the project root without being on the HEAD-independent allowlist.\n' +
+      'Work out whether it depends on the HEAD of the tree it runs in: if it does, point it at "<base tree>";\n' +
+      'if it does not, add its shape to the allowlist in this test with the reason.\n' +
+      offenders.join('\n'),
+  );
 });

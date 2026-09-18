@@ -179,9 +179,13 @@ any of these — most encode a failure that already happened.
   the `symbolic-ref` precondition and the dirty-path probe both follow the merge into the BASE tree, and so does **every cleanup command that follows a merge**
   (bug-38) — `branch -d` and the runner-fix pickup's `diff HEAD^1 HEAD` are both HEAD-relative and were both reading `main` on a `--base` run. A `branch -d`
   refusal is evidence of a missing merge ONLY from the base tree; from anywhere else it is evidence of a misaimed command, and `git branch --merged <base>`
-  settles which. The commands that may stay at the project root are the ones that never name HEAD: `show-ref`, the `worktree` verbs, and a `diff`/`log` given
-  an explicit `<base>...backlog/<id>` range. `base` is required on `OrchestratorRun`, carried spawn →
-  prompt → `init` → run file, and an older run file's absent `base` is resolved to `'main'` **once**, in `sanitizeMergeFields`. Validity is checked twice, same
+  settles which. The line is whether a command **depends on** the HEAD of the tree it runs in, NEVER whether it names it — `branch -d` names no HEAD and is
+  wholly HEAD-relative, as are `branch --merged`, `branch --contains`, a bare `diff` and a `status`, so a "names HEAD" criterion would reinstate this bug. The
+  three shapes that may stay at the project root are HEAD-independent by construction: `show-ref --verify refs/heads/…`, the `worktree` verbs, and a
+  `diff`/`log` given an explicit `<base>...backlog/<id>` range. `orchestrate.test.mjs` pins exactly that list as a closed allowlist — a text guard cannot
+  decide HEAD-dependence, so it fails closed and a new `git -C "$PWD"` line goes red until someone adds it with its reason. `base` is required on
+  `OrchestratorRun`, carried spawn → prompt → `init` → run file, and an older run file's absent `base` is resolved to `'main'` **once**, in
+  `sanitizeMergeFields`. Validity is checked twice, same
   order both times (`resolveBase`, `assertUsableBase`): legal ref name first, then `refs/heads/<base>` exists. The ordering is for what the value does NEXT, not
   for the existence check — `refs/heads/<base>` can never start with a `-`, and membership alone refuses every value the name check does; the base is
   substituted for `<base>` in SKILL.md's shell commands, which is where a leading `-` or whitespace would bite. Neither check alone is the rule:
