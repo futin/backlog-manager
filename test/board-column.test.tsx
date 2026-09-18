@@ -32,7 +32,11 @@ const PROJECTS: ProjectSummary[] = [
     createdAt: '2026-08-26T00:00:00.000Z',
     missing: false,
     counts: { bugs: 1, ideas: 1, tasks: 1, refactors: 1, 'out-of-scope': 0 },
-    source: 'files'
+    source: 'files',
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null
   }
 ];
 
@@ -70,6 +74,9 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     groomed: false,
     path: '/abs/alpha/backlog/bugs/open/bug-1.md',
     source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false,
     ...over
   };
   return { ...base, path: over.path ?? `/abs/alpha/backlog/${base.section}/open/${base.id}.md` };

@@ -70,6 +70,26 @@ reworded is a board the next reader can't trust to be complete.
   path is named on stderr). Show whatever printed anyway — that's a real, partial board,
   not a failed command.
 
+## Connecting a project to GitHub
+
+`backlog.mjs` carries one command this skill does not print a board with, and it is here because this
+file is where the tool's commands are documented:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" connect github [owner/repo] [--no-forms]
+```
+
+It writes `backlog/source.json` — the committed marker that tells every machine's board this project's
+items are GitHub issues rather than files — and, unless `--no-forms`, four issue forms under
+`.github/ISSUE_TEMPLATE/`, one per type, each pre-applying its `type:*` label and carrying that
+section's `## ` headings so an issue filed in the web UI has the skeleton the board reads. It prints
+the files to commit and writes nothing else: the registry is untouched, no network call is made, and
+the marker does nothing until it is committed and the machine running the board has pulled it.
+
+It refuses rather than guesses: inside a linked worktree, outside a git repository, with no
+`owner/repo` argument and no GitHub `origin` to take one from, on a project that still has item files
+under `backlog/` (importing those is a later phase's job), and on a project that already has a marker.
+
 ## Next
 
 An item on the board is rarely done being planned:

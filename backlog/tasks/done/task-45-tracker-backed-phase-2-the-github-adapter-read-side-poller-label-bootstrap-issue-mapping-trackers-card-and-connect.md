@@ -4,6 +4,10 @@ title: Tracker-backed phase 2: the GitHub adapter read side - poller, label boot
 created: 2026-09-18
 from: idea-12
 tags: architecture, multi-machine, tracker, github, poller, settings
+updated: 2026-09-18T09:20:00Z
+started: 2026-09-18T08:16:05Z
+execute-elapsed: 3835
+execute-tokens: 641464
 ---
 
 ## Goal
@@ -244,3 +248,103 @@ Authoritative. Where this section and the Plan disagree, this section wins.
 
 **Not in this phase, on purpose**: any write route, the claim protocol, `backlog.mjs` API mode, dispatch against a tracker project, run state as a claim comment,
 `import`, and deleting the files path. Those are phases 3–6, each captured as its own task `from: idea-12` when its turn comes.
+
+## Outcome
+
+2026-09-18 — done. Phase 2 of the tracker-backed direction landed: GitHub issues now render on the board beside file items, from one `/api/items` payload, with
+a poll age stating how old the view is; a tracker project gets no dispatch control at all; and `backlog.mjs connect github` writes the marker that connects one.
+
+**What landed, by step.** (1) `SourceKind` widened to `'files' | 'github'` and both casts in `items.service.ts` are gone — the map is keyed by `string` and the
+summary's `source` is read off `adapter.kind`, which is the typed answer to the question the field asks; `BacklogItem` gained `url`/`assignee`/`untyped` and
+`ProjectSummary` gained `repo`/`polledAt`/`access`/`detail`, all required, which named 31 fixture literals across 17 test files. (2) `server/src/tracker/` —
+`token.util.ts` (read per call, never cached), `github.client.ts` (one constant host, no Nest decorators, rate-limit headers recorded from every response
+including a `304`, no throw on any status). (3) `poller.service.ts` — a `setTimeout` chain in the watchdog's shape, `TRACKER_POLL_MS = 15_000`, armed only while
+a project resolves to `github` and a token is present, two conditional requests per repo per tick, first-sync pagination, inclusive-`since` upsert, PRs dropped,
+rate-limit sleep and a 60 s secondary backoff. (4) `labels.ts` — the eight, created idempotently and case-insensitively on a repo's first successful sync. (5)
+`sources/github.source.ts`, registered by appending two lines to `items.module.ts`; `ItemSource` gained `summary`. (6) the client: band poll-age line, card
+`untyped`/assignee/link-out, modal age beside the cached body, dispatch hidden, `uncommitted` `known: false`. (7) the `Trackers` card on Shared Settings, behind
+the read-only `GET /api/trackers`. (8) `connect github [owner/repo] [--no-forms]` (implemented by a delegated session, reviewed here). (9) docs.
+
+**`items.service.ts`'s control flow is unchanged for listing** — `index()` and `projects()` dispatch over the adapters exactly as phase 1 wrote them; the only
+behavioural additions to that file are the two the plan asked for, both outside the listing path: `body()`'s ref-shape test (which phase 1's own comment named
+this phase as the place for) and `uncommitted()`'s tracker answer. The seam's claim held.
+
+**Verification.**
+
+```
+$ pnpm test
+Test Suites: 117 passed, 117 total
+Tests:       1872 passed, 1872 total
+# tests 575
+# pass 575
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+
+$ pnpm run typecheck
+$ tsc --noEmit                      (no output — clean)
+
+$ pnpm run build
+✓ built in 1.17s
+```
+
+**Live read-only probe against the real API** (`cli/cli`, through `GithubClient` + `mapIssue`, token from `gh auth token`, no writes):
+
+```
+status 200 etag true next true rate {"limit":5000,"remaining":4997,"reset":1789726568}
+rows 100 items 30 pull requests dropped 70
+sections {"ideas":30}
+untyped 30 assigned 8 closed 30
+conditional status 304 rate after {"limit":5000,"remaining":4997,"reset":1789726568}
+labels status 200 count 83
+```
+
+That is the mapping and the budget rule against real payloads: 70 pull requests dropped out of 100 rows, every issue in a repo with no `type:*` labels landing
+in `ideas` with `untyped: true`, and the conditional re-request answering `304` with `remaining` unmoved — a `304` costs nothing, measured rather than assumed.
+
+Contract sweep: 17 sites updated (CLAUDE.md, docs/subsystems/invariants.md, docs/subsystems/api.md, docs/subsystems/board.md, docs/subsystems/skills.md,
+docs/overview.md, .claude/DESIGN.md, .claude/rules/{items,board}.md, README.md, .env.example, shared/types.ts, server/src/items/items.service.ts,
+server/src/items/sources/source.ts, server/src/items/uncommitted.util.ts, client/src/components/settings/SettingsView.tsx, test/claude-rules.test.ts,
+test/settings-view.test.tsx, skills/backlog/SKILL.md)
+Red proof: 29 tests went red with the change reverted
+
+One site left standing on purpose: `docs/superpowers/plans/2026-09-04-orchestrator-watchdog.md` still calls `agents/` "the one outbound-calling module". It is a
+dated plan document — `docs/superpowers/` is deliberately outside `/docs-sync`'s tracking as specs, plans and decision logs — and editing it would falsify a
+record of what was true when it was written. Every NORMATIVE statement of that claim (CLAUDE.md, overview.md, api.md) was updated.
+
+Two red proofs initially stayed green and both were test defects, fixed rather than noted: the `uncommitted` case passed because its fixture was not a git repo
+at all (it now `git init`s the fixture and asserts the files answer would be `known: true`), and the body-route case passed because the unconnected repo was
+also absent from the cache (a second case now disconnects a CACHED repo by rewriting the registry, so only the registry gate can produce the 404). A third
+mutation exposed a real hole in the comments-per-tick case, which now drives a `304` tick.
+
+**Decisions and disagreements a reviewer should see.**
+
+1. **A `304` leaves `polledAt` unchanged** — this item's `## Test cases` says so in those words; the spec's §12.2 says a `304` MOVES `polledAt`. The item won,
+   being the work order, and the code carries a comment at the branch saying so. The consequence is real: the rendered age means "how old are these items", not
+   "how long since we last checked", so a repo nobody edits reads as increasingly stale while the poller is in fact healthy. Worth settling in phase 3; the
+   spec's reading is the better product behaviour and this is a one-line change.
+2. **"No per-open fetch" in the item modal is a fetch to THIS app, not to GitHub.** The literal test-case wording ("renders the cached body with no fetch on
+   open") cannot be satisfied without shipping every issue body inside `/api/items`, which the board re-reads every 15 s while a tracker is registered — and it
+   would contradict Step 5, which requires the URN to reach `ItemsService.body()`'s new shape test. The modal therefore makes one request to
+   `/api/items/body?path=gh:owner/repo%2331`, answered out of the poller's cache with no network call; the test asserts that one call and that nothing in the
+   browser ever names `api.github.com`.
+3. **`ItemSource.summary` takes `(project, marker)`**, not `(project)` as Step 5 wrote it: the adapter reads its repo off the marker exactly as `list` does, and
+   a `summary` that found the repo another way would be a second resolution path for the question `resolveSource` already answered.
+4. **`runnerFix` does not reach `BacklogItem`.** The `runner-fix` label is consumed (never a tag) and travels on the mapper's own result, because Step 1 fixes
+   the three fields `BacklogItem` gains and nothing on the read side renders this one — phase 2 has no dispatch against a tracker project at all. Phase 3 is
+   where it acquires a reader.
+5. **The board polls while a tracker is registered** (`BOARD_TRACKER_POLL_MS`, 15 s, pinned equal to the server's `TRACKER_POLL_MS` by a test). Not in the plan,
+   but without it `useBoard`'s mount-and-focus cadence would leave `polledAt` frozen and the band's live reading would be a lie. No tracker registered means no
+   interval at all — the same "poll only while something is moving" shape `useOrchestratorRuns` has.
+6. **`test/claude-rules.test.ts` now matches globs against tracked PLUS untracked-not-ignored files.** A rule file added in the same commit as the directory it
+   scopes — which is how `.claude/rules/tracker.md` arrived — was a false red under a tracked-only universe. A typo'd glob still matches nothing either way.
+7. **The client's `/api/trackers` body is shape-checked** (`isTrackersPayload`) before anything renders from it, the way `fetchAgentsStatus` already does. This
+   was not defensive programming: the unguarded first version crashed the whole Shared Settings page in the existing settings suite, which stubs `fetch` with a
+   single payload for every URL.
+
+**Not done, deliberately: the live end-to-end connect.** The `## Done when` list asks for a real repo connected end to end — `connect`, commit the marker,
+restart the stack, watch the issues render, and the eight labels created on the first sync. Two of those steps are writes to a real GitHub repository (the label
+bootstrap) and to a machine's running stack, and this was an unattended orchestrator run with nobody to authorise them. The read-only probe above is what stands
+in for the network half; the mapping, the poller's branches, the label bootstrap's create-only-what-is-missing arithmetic and the whole `/api/items` payload are
+covered by hermetic suites (`tracker-map`, `tracker-poll`, `tracker-items`, `tracker-labels`, `tracker-origin`, `tracker-lib`, `tracker-board`). A person with a
+token should run the connect on one real repo before this is treated as proven in the field.

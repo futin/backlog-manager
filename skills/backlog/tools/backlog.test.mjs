@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince } from './backlog.mjs'
+import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles } from './backlog.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
@@ -3216,4 +3216,305 @@ test('all three skill CLIs end through process.exitCode, never process.exit', ()
       `${name} calls process.exit(), which truncates a --json payload larger than the pipe buffer`,
     )
   }
+})
+
+// --- task-45 step 8: connect github ------------------------------------------
+// `connect` writes the project's own committed source marker — `backlog/source.json` — which is what the server's `resolveSource` reads per request to decide
+// whether a project's items come from files or from a tracker's API. Two things make these cases worth their length. First, every refusal has to leave the
+// project byte-identical: a marker is committed and pulled by every machine, so a half-connected project is a project whose items are invisible on somebody
+// else's board with nothing to say why. Second, the marker is interpolated into an api.github.com URL path by the server, which is why the repo value is
+// PROVED here on the way in rather than clamped or trusted.
+//
+// The CLI cases spawn the real tool exactly as every other CLI case here does; the parsing cases call the exported function directly, because origin URL
+// shapes are a table and a table is cheaper to read than a dozen `git remote add`s.
+
+// A repo with an optional origin remote. `backlogFixture` already gives a real `git init`, so the remote is a real remote and `git remote get-url` is really
+// what answers — the point of the derive-from-origin cases is precisely that this tool asks git rather than parsing `.git/config` itself.
+function connectFixture(originUrl) {
+  const { dir, backlog } = backlogFixture()
+  if (originUrl !== undefined) {
+    const added = spawnSync('git', ['-C', dir, 'remote', 'add', 'origin', originUrl], { encoding: 'utf8' })
+    assert.equal(added.status, 0, added.stderr)
+  }
+  return { dir, backlog }
+}
+
+// The paths printed under the "commit these files" header, which is the command's actual last step: the marker does nothing until the board's machine has
+// pulled it. Sliced off the header rather than matched line by line so a test that expects a file to be listed fails on the LIST, not on some other line of
+// output that happens to mention the same path.
+function commitList(stdout) {
+  const lines = stdout.split('\n')
+  const header = lines.findIndex((line) => line.startsWith('commit these files'))
+  assert.notEqual(header, -1, `no "commit these files" header in:\n${stdout}`)
+  return lines.slice(header + 1).filter((line) => line !== '')
+}
+
+const FORM_FILES = ['bug.yml', 'idea.yml', 'task.yml', 'refactor.yml']
+const formPath = (dir, file) => path.join(dir, '.github', 'ISSUE_TEMPLATE', file)
+
+test('parseOriginRepo reads both shapes git writes for a GitHub remote', () => {
+  assert.equal(parseOriginRepo('git@github.com:futin/backlog-manager.git'), 'futin/backlog-manager')
+  assert.equal(parseOriginRepo('ssh://git@github.com/futin/backlog-manager.git'), 'futin/backlog-manager')
+  assert.equal(parseOriginRepo('https://github.com/futin/backlog-manager.git'), 'futin/backlog-manager')
+  assert.equal(parseOriginRepo('https://github.com/futin/backlog-manager'), 'futin/backlog-manager')
+  assert.equal(parseOriginRepo('https://github.com/futin/backlog-manager/'), 'futin/backlog-manager')
+  // A token in the URL is a credential someone pasted into their remote; the repository it names is still the right answer, and the token is not carried into
+  // anything this command writes.
+  assert.equal(parseOriginRepo('https://x-access-token:secret@github.com/futin/backlog-manager.git'), 'futin/backlog-manager')
+  assert.equal(parseOriginRepo('  git@github.com:futin/x.git  '), 'futin/x')
+})
+
+test('parseOriginRepo answers null for anything it cannot honestly name', () => {
+  // Not github.com: deriving `owner/repo` off another host would write a marker naming a repository that does not exist on GitHub.
+  assert.equal(parseOriginRepo('git@gitlab.com:futin/backlog-manager.git'), null)
+  assert.equal(parseOriginRepo('https://bitbucket.org/futin/x.git'), null)
+  // More than two path segments — truncating to the first two would invent a repository name out of a URL that never named one.
+  assert.equal(parseOriginRepo('https://github.com/futin/x/tree/main'), null)
+  assert.equal(parseOriginRepo('/srv/mirrors/backlog-manager.git'), null)
+  assert.equal(parseOriginRepo(''), null)
+  assert.equal(parseOriginRepo(undefined), null)
+})
+
+test('isValidRepo takes exactly one slash and the characters GitHub allows', () => {
+  assert.equal(isValidRepo('futin/backlog-manager'), true)
+  assert.equal(isValidRepo('futin.dev/my_repo.v2'), true)
+  assert.equal(isValidRepo('futin'), false)
+  assert.equal(isValidRepo('futin/x/y'), false)
+  assert.equal(isValidRepo('futin/ x'), false)
+  assert.equal(isValidRepo('futin/../etc'), false)
+  assert.equal(isValidRepo(undefined), false)
+})
+
+test('backlogItemFiles counts items in the nine leaf directories and ignores the store furniture', () => {
+  const { backlog } = backlogFixture()
+  init(backlog)
+  fs.writeFileSync(path.join(backlog, 'source.json'), '{}\n')
+
+  // A freshly `init`ed store has a README and (here) a marker, and neither is an item — connecting a project that has been initialised and never captured into
+  // is exactly the case this command is for.
+  assert.deepEqual(backlogItemFiles(backlog), [])
+
+  writeItem(backlog, 'bugs/open', 'bug-1', 'Something broke')
+  writeItem(backlog, 'out-of-scope', 'oos-2', 'Declined')
+
+  assert.deepEqual(backlogItemFiles(backlog), ['bugs/open/bug-1-something-broke.md', 'out-of-scope/oos-2-declined.md'])
+})
+
+test('backlogItemFiles answers empty for a project with no backlog/ at all', () => {
+  const { backlog } = backlogFixture()
+
+  assert.deepEqual(backlogItemFiles(backlog), [])
+})
+
+test('CLI connect refuses inside a linked worktree, naming the worktree and the project root', () => {
+  const { project, worktree } = worktreeFixture('task-45-connect')
+
+  const out = run(worktree, 'connect', 'github', 'futin/x')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /linked git worktree/)
+  assert.ok(out.stderr.includes(worktree), `the refusal must name the worktree:\n${out.stderr}`)
+  assert.ok(out.stderr.includes(project), `the refusal must name the project root to re-run from:\n${out.stderr}`)
+  // Nothing written, in either tree: a worktree is deleted the moment its item merges, so a marker written there would connect a directory that stops existing
+  // while the project everyone else pulls stays on files.
+  assert.equal(fs.existsSync(path.join(worktree, 'backlog', 'source.json')), false)
+  assert.equal(fs.existsSync(path.join(project, 'backlog', 'source.json')), false)
+  assert.equal(fs.existsSync(path.join(worktree, '.github')), false)
+})
+
+test('CLI connect exits 2 outside a git repository and creates nothing', () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-no-git-')))
+
+  const out = run(dir, 'connect', 'github', 'futin/x')
+
+  // Code 2 is resolveRootOrFail's, reused rather than re-worded: "you are not in a repo" reads the same from every command in this tool.
+  assert.equal(out.status, 2)
+  assert.match(out.stderr, /\.git/)
+  assert.deepEqual(fs.readdirSync(dir), [])
+})
+
+test('CLI connect refuses with no argument and no origin to derive one from', () => {
+  const { dir, backlog } = connectFixture()
+
+  const out = run(dir, 'connect', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /origin/)
+  assert.match(out.stderr, /connect github <owner>\/<repo>/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('CLI connect refuses a non-GitHub origin the same way, naming the URL it found', () => {
+  const { dir, backlog } = connectFixture('git@gitlab.com:futin/x.git')
+
+  const out = run(dir, 'connect', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /github\.com remote/)
+  assert.ok(out.stderr.includes('git@gitlab.com:futin/x.git'), `the refusal must name the origin it rejected:\n${out.stderr}`)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('CLI connect refuses a project that still has item files, naming import', () => {
+  const { dir, backlog } = connectFixture('git@github.com:futin/x.git')
+  init(backlog)
+  writeItem(backlog, 'tasks/open', 'task-3', 'Still a file item')
+
+  const out = run(dir, 'connect', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /import/)
+  assert.ok(out.stderr.includes('task-3-still-a-file-item.md'), `the refusal must name at least one of the files blocking it:\n${out.stderr}`)
+  // The whole reason this is a refusal rather than a connect-and-leave-them: a connected project contributes no file items, so these files would not be
+  // deleted, they would simply stop being visible anywhere.
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+  assert.equal(fs.existsSync(path.join(dir, '.github')), false)
+})
+
+test('CLI connect writes the marker and the four forms, prints them to commit, and never touches the registry', () => {
+  const { dir, backlog } = connectFixture('git@github.com:futin/backlog-manager.git')
+  // An `init`ed but empty store: the README is store furniture, not an item, and must not read as one.
+  init(backlog)
+  const registry = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-connect-registry-'))), 'registry.json')
+
+  const out = runWithRegistry(dir, registry, 'connect', 'github')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8')), { kind: 'github', repo: 'futin/backlog-manager' })
+  // Pretty-printed with a trailing newline, like every other JSON this tool writes: the file is committed and read in diffs.
+  assert.match(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), /^\{\n {2}"kind": "github",\n {2}"repo": "futin\/backlog-manager"\n\}\n$/)
+  for (const file of FORM_FILES) {
+    assert.ok(fs.existsSync(formPath(dir, file)), `${file} was not written`)
+  }
+  assert.deepEqual(commitList(out.stdout), [
+    'backlog/source.json',
+    '.github/ISSUE_TEMPLATE/bug.yml',
+    '.github/ISSUE_TEMPLATE/idea.yml',
+    '.github/ISSUE_TEMPLATE/task.yml',
+    '.github/ISSUE_TEMPLATE/refactor.yml',
+  ])
+  // `connect` writes the project's own marker and nothing per machine. The registry's single-writer relationship with this tool stands, but registration
+  // answers a different question ("does this machine's board know this project at all") and connecting must not silently re-answer it — so the file this run's
+  // registry points at is never even created.
+  assert.equal(fs.existsSync(registry), false, 'connect wrote to the registry')
+})
+
+test('CLI connect --no-forms writes the marker and no issue forms', () => {
+  const { dir, backlog } = connectFixture('https://github.com/futin/backlog-manager.git')
+
+  const out = run(dir, 'connect', 'github', '--no-forms')
+
+  assert.equal(out.status, 0, out.stderr)
+  // The https shape derives the same repo the ssh one does — asserted through the CLI as well as in the parsing table above, because this is the path where
+  // the value actually comes back from git.
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8')), { kind: 'github', repo: 'futin/backlog-manager' })
+  assert.equal(fs.existsSync(path.join(dir, '.github')), false)
+  assert.deepEqual(commitList(out.stdout), ['backlog/source.json'])
+})
+
+test('CLI connect takes an explicit owner/repo over the origin remote', () => {
+  const { dir, backlog } = connectFixture('git@github.com:futin/from-origin.git')
+
+  const out = run(dir, 'connect', 'github', 'futin/explicit', '--no-forms')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8')), { kind: 'github', repo: 'futin/explicit' })
+})
+
+test('CLI connect refuses a malformed owner/repo argument rather than writing it', () => {
+  const { dir, backlog } = connectFixture('git@github.com:futin/x.git')
+
+  const out = run(dir, 'connect', 'github', 'futin/../../etc')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /owner\/repo/)
+  // The server interpolates this value into an api.github.com URL path on every machine that reads the marker, so a bad one is refused here rather than
+  // committed and discovered on somebody else's laptop.
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('CLI connect refuses to overwrite an existing source.json and leaves it byte-identical', () => {
+  const { dir, backlog } = connectFixture('git@github.com:futin/x.git')
+  fs.mkdirSync(backlog, { recursive: true })
+  const existing = '{ "kind": "github", "repo": "someone/else" }\n'
+  fs.writeFileSync(path.join(backlog, 'source.json'), existing)
+
+  const out = run(dir, 'connect', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /already connected/)
+  assert.equal(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), existing)
+})
+
+test('CLI connect skips an issue form that already exists, leaves it untouched, and keeps it out of the commit list', () => {
+  const { dir, backlog } = connectFixture('git@github.com:futin/x.git')
+  fs.mkdirSync(path.join(dir, '.github', 'ISSUE_TEMPLATE'), { recursive: true })
+  const mine = 'name: My own bug form\n'
+  fs.writeFileSync(formPath(dir, 'bug.yml'), mine)
+
+  const out = run(dir, 'connect', 'github')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(formPath(dir, 'bug.yml'), 'utf8'), mine, 'a hand-written form must never be overwritten')
+  assert.match(out.stdout, /skipped \.github\/ISSUE_TEMPLATE\/bug\.yml/)
+  // A skipped file is not this run's output, and a path in the commit list that turns out to be unchanged teaches the operator to ignore the list.
+  assert.deepEqual(commitList(out.stdout), [
+    'backlog/source.json',
+    '.github/ISSUE_TEMPLATE/idea.yml',
+    '.github/ISSUE_TEMPLATE/task.yml',
+    '.github/ISSUE_TEMPLATE/refactor.yml',
+  ])
+  assert.ok(fs.existsSync(path.join(backlog, 'source.json')))
+})
+
+test('each issue form pre-applies its type label and carries its section headings at level two', () => {
+  const { dir } = connectFixture('git@github.com:futin/x.git')
+
+  const out = run(dir, 'connect', 'github')
+  assert.equal(out.status, 0, out.stderr)
+
+  const expected = {
+    'bug.yml': { label: 'type:bug', headings: ['## Symptom', '## Repro', '## Affects', '## Cause', '## Fix'] },
+    'idea.yml': { label: 'type:idea', headings: ['## Problem', '## Rough shape', '## Open questions'] },
+    'task.yml': { label: 'type:task', headings: ['## Goal', '## Plan', '## Test cases', '## Done when'] },
+    'refactor.yml': { label: 'type:refactor', headings: ['## What exists today', '## Why it should change', '## Rough shape'] },
+  }
+  for (const [file, { label, headings }] of Object.entries(expected)) {
+    const text = fs.readFileSync(formPath(dir, file), 'utf8')
+    assert.match(text, new RegExp(`^ {2}- "${label}"$`, 'm'), `${file} does not pre-apply ${label}`)
+    for (const heading of headings) {
+      // Level TWO, inside the textarea's value. GitHub renders a form field's answer under `### <field label>`, so a field per heading would produce `### Cause`
+      // and `sectionText` — which matches `## ` exactly — would read every bug as having no Cause at all. The headings have to survive into the issue body at
+      // the level `deriveGroomed` reads, which is why they live in one pre-filled textarea.
+      assert.match(text, new RegExp(`^ {8}${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), `${file} is missing ${heading}`)
+    }
+  }
+  // The two headings `deriveGroomed` actually reads for a bug come pre-filled with `unknown`, exactly as backlog-capture writes them: a reporter filing through
+  // the web UI does not know the cause, and a form that left them empty would derive the same "ungroomed" answer by accident rather than by statement.
+  const bug = fs.readFileSync(formPath(dir, 'bug.yml'), 'utf8')
+  assert.match(bug, /^ {8}## Cause\n\n {8}unknown$/m)
+  assert.match(bug, /^ {8}## Fix\n\n {8}unknown$/m)
+})
+
+test('CLI connect refuses an unknown platform and two repo arguments with its usage line', () => {
+  const { dir, backlog } = connectFixture('git@github.com:futin/x.git')
+
+  const gitlab = run(dir, 'connect', 'gitlab', 'futin/x')
+  assert.equal(gitlab.status, 1)
+  assert.match(gitlab.stderr, /usage: backlog\.mjs connect github/)
+
+  const two = run(dir, 'connect', 'github', 'futin/x', 'futin/y')
+  assert.equal(two.status, 1)
+  assert.match(two.stderr, /usage: backlog\.mjs connect github/)
+
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('connect appears in the top-level usage block', () => {
+  const { dir } = backlogFixture()
+
+  const out = run(dir, 'nonsense')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /^ {2}connect {5}/m)
 })

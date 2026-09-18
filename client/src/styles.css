@@ -383,6 +383,18 @@ code, kbd, samp, pre { font-family: inherit }
   margin-left: auto; flex: none;
   font-size: 12px; font-weight: 400; color: var(--ink3); white-space: nowrap;
 }
+/* task-45, the two tracker readings on the foot line. The assignee sits with
+   the project (left half) because it is a fact about who, not about when; it
+   ellipsises like the project name beside it, since a long login must not push
+   the id and date off the row. The link-out is 12 px of ink3 that takes the
+   accent on hover — the one control on this line, and the only place the card
+   admits a pointer that is not the card itself. */
+.board-card-assignee {
+  font-size: 12px; font-weight: 400; color: var(--ink3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.board-card-link { flex: none; font-size: 12px; line-height: 1; color: var(--ink3); text-decoration: none }
+.board-card-link:hover { color: var(--ink) }
 /* The marker row (DESIGN.md §8.3), drawn whenever a marker applies OR dispatch
    is available — ItemCard decides which, through `dispatchAvailable`. The words
    are `Marker`'s (a `ui/` primitive); this rule only lays them out and pushes
@@ -2474,6 +2486,18 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-marker-kind { color: var(--ink3) }
 .ui-marker-done { color: var(--ink3) }
 .ui-marker-stale { color: var(--amber) }
+/* task-45: an untyped tracker issue. Same ink as `stale` deliberately — both
+   mark an item a person still has to act on for the board to be right about
+   it — and no rule of its own beyond the colour, because a marker is a weight
+   and an ink and nothing else (§8.3). */
+.ui-marker-untyped { color: var(--amber) }
+
+/* task-45's two tracker readings outside the card: the board band's poll-age
+   clause, and the same line under the item modal's title. Both are 12/400
+   --ink3, the sub-line ink this design already uses for anything that is
+   context rather than content (§8.1). */
+.board-band-tracker { margin-left: 10px; color: var(--ink3) }
+.item-body-tracker { margin: -4px 0 12px; font-size: 12px; font-weight: 400; color: var(--ink3) }
 
 /* ProgressRow — §7's progress row: name + value, a 10 px bar, a caption under.
    The track is flat --steel with no hatch and the fill carries it (§2). */

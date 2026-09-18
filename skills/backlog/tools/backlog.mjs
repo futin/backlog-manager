@@ -11,6 +11,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+// `connect` asks git for the origin remote rather than hand-parsing `.git/config`, and spawnSync is the only way to do that. It is SYNCHRONOUS on purpose:
+// see this file's closing entry-guard comment for why nothing here may hold the event loop open, and CLAUDE.md's "all three skill CLIs exit through
+// process.exitCode" invariant, which names `spawnSync` children as one of the three shapes that stay safe under that rule (a spawnSync child is reaped before
+// the call returns, so it never keeps a handle open past main()).
+import { spawnSync } from 'node:child_process'
 
 // Section name -> id prefix. Fixed and exported so every later command (ids,
 // board, move) keys off this one map instead of re-deriving prefixes.
@@ -376,6 +381,221 @@ export function init(backlog) {
     created.push(readme)
   }
   return created
+}
+
+// --- connect: pointing a project at a tracker --------------------------------
+// `connect github [owner/repo]` writes the project's OWN committed source marker — `backlog/source.json` — which is what the server's `resolveSource` reads per
+// request to decide whether this project's items come from files on disk or from a tracker's API. It is the marker's first writer (`import`, phase 5, is the
+// second and the one that moves a populated store across); both live here rather than in the server because the marker is committed in the project, and the
+// tool is the only thing that writes inside a project's `backlog/`.
+//
+// Three things this command deliberately does NOT do:
+//
+//   - it does not touch `~/.backlog-manager/registry.json`. That file's one-writer relationship with this tool stands, but registration answers "does this
+//     machine's board know about this project at all", which is per machine and unchanged by connecting; the marker answers "where do this project's items
+//     come from", which is per project and committed. Conflating the two would make connecting a project on one machine silently re-register it there;
+//   - it makes no network call and needs no server running. The eight labels the issue→item mapping depends on are created by the board's poller on its first
+//     successful sync (spec §5.2), so a `connect` run on a laptop with no token still produces a correct, committable marker;
+//   - it does not create the labels' issue forms' *labels*, only forms that REQUEST them. A form naming a label that does not exist yet is not an error on
+//     GitHub's side — the label is applied once it exists, and the poller creates it before anyone can file through the form in anger.
+const SOURCE_MARKER = 'source.json'
+
+// `owner/repo`, the same shape the spec pins (§3.1) and the server validates before interpolating it into an `api.github.com` URL path. Validated HERE as well,
+// on the way in, because a marker is committed and then read on every machine: a value that only fails at request time on someone else's laptop is a defect
+// this side had every chance to refuse. Exactly one slash, and each half limited to the characters GitHub actually allows in a login or a repository name —
+// notably no whitespace, no `..`, no `%`, nothing that could change the shape of the URL path it lands in.
+const REPO_SHAPE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
+
+export function isValidRepo(value) {
+  return typeof value === 'string' && REPO_SHAPE.test(value)
+}
+
+// The two URL shapes git writes for a GitHub remote, parsed rather than pattern-matched loosely, because the answer becomes a committed identity:
+//
+//   git@github.com:owner/repo.git          the scp-like shape `git clone git@…` produces (and `ssh://git@github.com/owner/repo.git`, its explicit-scheme form)
+//   https://github.com/owner/repo.git      the shape `git clone https://…` produces, with or without the `.git` suffix and with or without a trailing slash
+//
+// A remote pointing anywhere but github.com answers null, which the caller reports as the same refusal as "no origin at all": a GitLab origin means this
+// project is not connectable to GitHub by derivation, and guessing `owner/repo` off a different host would write a marker naming a repository that does not
+// exist. `www.github.com` is accepted as the one host alias, since a hand-typed clone URL occasionally carries it and it names the same repository.
+const URL_LIKE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)(?::\d+)?\/(.+)$/
+const SCP_LIKE = /^(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):(?!\/\/)(.+)$/
+
+export function parseOriginRepo(url) {
+  const trimmed = typeof url === 'string' ? url.trim() : ''
+  if (trimmed === '') return null
+
+  const match = URL_LIKE.exec(trimmed) ?? SCP_LIKE.exec(trimmed)
+  if (!match) return null
+
+  const host = match[1].toLowerCase().replace(/^www\./, '')
+  if (host !== 'github.com') return null
+
+  // Strip the leading slash an ssh:// path carries, the `.git` suffix and any trailing slash, then let REPO_SHAPE decide. A path with more than two segments
+  // (a Gist, a deep link someone pasted into the remote) fails the shape check rather than being truncated to its first two, because truncating would invent
+  // a repository name out of a URL that never named one.
+  const repo = match[2].replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/, '')
+  return isValidRepo(repo) ? repo : null
+}
+
+// `git remote get-url origin`, asked of git rather than read out of `.git/config` by hand. The config file is not the whole answer — git resolves the value
+// through `url.<base>.insteadOf` rewrites and, in a worktree, through the shared config one directory over — and this file already carries two hand-written
+// git-plumbing parsers (`resolveRoot`'s walk and `linkedWorktreeInfo`'s gitdir chase), each of which exists only because there was no cheap way to ask git
+// instead. There is one here, so it is used.
+//
+// Every failure is null, never a throw: git missing from PATH (status null and `error` set), no origin configured (exit 2), a repository git refuses to read.
+// The caller turns all of them into one refusal that tells the operator to pass `owner/repo` explicitly, which is a working answer in every one of those cases.
+function originRemoteUrl(root) {
+  const out = spawnSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8' })
+  if (out.status !== 0) return null
+  const url = (out.stdout ?? '').trim()
+  return url === '' ? null : url
+}
+
+// Every `*.md` under the nine leaf directories, repo-relative to `backlog/` and sorted, for the refusal that keeps `connect` off a populated store.
+//
+// Scoped to LEAF_DIRS rather than "every .md under backlog/" so the store's own furniture does not read as content: `README.md` at the store root is written by
+// `init` and says nothing about whether this project has items, and `source.json` is the very file being written. A project that has been `init`ed and never
+// captured into is exactly the case `connect` is for, and it must not have to be deleted first.
+export function backlogItemFiles(backlog) {
+  const found = []
+  for (const rel of LEAF_DIRS) {
+    let entries
+    try {
+      entries = fs.readdirSync(path.join(backlog, rel))
+    } catch {
+      // An absent leaf directory is not an error here: `connect` accepts a project with no `backlog/` at all, so "the directory is missing" and "the directory
+      // is empty" have to give the same answer.
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.endsWith('.md')) found.push(`${rel}/${entry}`)
+    }
+  }
+  return found.sort()
+}
+
+// The four GitHub issue forms, one per type section, each pre-applying that section's `type:*` label so an issue filed through the web UI arrives already
+// mapped to a section — and carrying that section's headings, verbatim from `backlog-capture`'s table, so the issue body is the same skeleton a captured file
+// has and `deriveGroomed` reads the same answer off both.
+//
+// Why ONE textarea per form holding the whole skeleton, rather than one field per heading, which is the obvious shape: GitHub renders a form's answers by
+// emitting `### <field label>` above each response. A field per heading would therefore produce `### Cause`, and `deriveGroomed` reads `## Cause` — level two,
+// via `sectionText`, which matches `## ` exactly. The headings have to live INSIDE a field's value to survive into the body at the level the server reads, so
+// the form pre-fills one textarea with the skeleton and the reporter types between the headings. The single `### ` line GitHub puts above it is inert: it is
+// not a `## ` line, so it neither opens nor closes a section.
+//
+// `type:*` is spelled out per entry rather than derived from SECTIONS' id prefixes: the prefix for refactors is `ref` (a board-column width constraint, see
+// SECTIONS) while the label is `type:refactor` (the spec's set, §5.2, which the poller creates and the adapter reads). Deriving one from the other would tie a
+// GitHub label to a CSS measurement.
+const ISSUE_FORMS = [
+  {
+    file: 'bug.yml',
+    name: 'Bug',
+    description: 'Something in shipped code behaves wrong',
+    label: 'type:bug',
+    field: 'Bug',
+    headings: ['Symptom', 'Repro', 'Affects', 'Cause', 'Fix'],
+    // `unknown` under Cause and Fix, which is exactly what `backlog-capture` writes for a freshly filed bug and exactly what makes it read as UNGROOMED. A
+    // reporter filing through the web UI does not know the cause, and a form that left those two headings empty would produce the same `deriveGroomed` answer
+    // by accident rather than by statement — worse, an empty Cause invites a reporter to delete the heading, and then the item has no skeleton at all.
+    prefilled: { Cause: 'unknown', Fix: 'unknown' },
+  },
+  {
+    file: 'idea.yml',
+    name: 'Idea',
+    description: 'Future work whose shape is not settled yet',
+    label: 'type:idea',
+    field: 'Idea',
+    headings: ['Problem', 'Rough shape', 'Open questions'],
+    prefilled: {},
+  },
+  {
+    file: 'task.yml',
+    name: 'Task',
+    description: 'Future work whose plan is already known',
+    label: 'type:task',
+    field: 'Task',
+    headings: ['Goal', 'Plan', 'Test cases', 'Done when'],
+    prefilled: {},
+  },
+  {
+    file: 'refactor.yml',
+    name: 'Refactor',
+    description: 'Existing code that works but should be improved',
+    label: 'type:refactor',
+    field: 'Refactor',
+    headings: ['What exists today', 'Why it should change', 'Rough shape'],
+    prefilled: {},
+  },
+]
+
+// Repo-relative and spelled with forward slashes on purpose: this string is printed (in the "commit these files" list) and pasted into a `git add`, where the
+// posix spelling is what git itself wants on every platform. The absolute path is built with path.join below.
+const ISSUE_TEMPLATE_DIR = '.github/ISSUE_TEMPLATE'
+
+function issueSkeleton(headings, prefilled) {
+  return headings.map((heading) => (prefilled[heading] ? `## ${heading}\n\n${prefilled[heading]}` : `## ${heading}`)).join('\n\n')
+}
+
+// Indents a block for embedding under a YAML `|` literal scalar. Blank lines stay genuinely blank — trailing whitespace on them is legal YAML but shows up as
+// trailing whitespace in every issue body the form produces, and in the diff of the form file itself.
+function indentBlock(text, spaces) {
+  const pad = ' '.repeat(spaces)
+  return text
+    .split('\n')
+    .map((line) => (line === '' ? '' : pad + line))
+    .join('\n')
+}
+
+function issueFormText(form) {
+  return `# Written by \`backlog.mjs connect github\`. Safe to edit: nothing re-reads this file, and \`connect\` never overwrites one that already exists.
+#
+# The \`## \` headings in the textarea below are the skeleton the board reads — a bug's \`## Cause\` and \`## Fix\` and a task's \`## Plan\` are what decide
+# whether an item shows as groomed. Keep them at level two; GitHub's own \`### \` field heading above them is ignored.
+name: ${form.name}
+description: ${form.description}
+labels:
+  - "${form.label}"
+body:
+  - type: textarea
+    id: item
+    attributes:
+      label: ${form.field}
+      description: Fill in each section. Leave \`unknown\` where the answer is not known yet — that is a real answer, and the board reads it as ungroomed.
+      value: |
+${indentBlock(issueSkeleton(form.headings, form.prefilled), 8)}
+    validations:
+      required: true
+`
+}
+
+// Writes any of the four forms that are absent and reports both halves. An existing file is never overwritten and never silently skipped either — the caller
+// prints the skip — because these are hand-editable files that a project may well have written its own version of, and a tool that quietly replaced one would
+// destroy work nobody asked it to touch. The skipped ones are also kept OUT of the "commit these files" list: they are not this run's output, and a path in
+// that list that turns out to be unchanged teaches the operator to ignore the list.
+function writeIssueForms(root) {
+  const written = []
+  const skipped = []
+  const dir = path.join(root, '.github', 'ISSUE_TEMPLATE')
+  fs.mkdirSync(dir, { recursive: true })
+  for (const form of ISSUE_FORMS) {
+    const abs = path.join(dir, form.file)
+    const rel = `${ISSUE_TEMPLATE_DIR}/${form.file}`
+    if (fs.existsSync(abs)) {
+      skipped.push(rel)
+      continue
+    }
+    fs.writeFileSync(abs, issueFormText(form))
+    written.push(rel)
+  }
+  return { written, skipped }
+}
+
+// Pretty-printed with a trailing newline, the same shape every other JSON this file writes has, because this one is committed and read in diffs.
+function writeSourceMarker(backlog, repo) {
+  fs.mkdirSync(backlog, { recursive: true })
+  fs.writeFileSync(path.join(backlog, SOURCE_MARKER), JSON.stringify({ kind: 'github', repo }, null, 2) + '\n')
 }
 
 // Frontmatter is a `key: value` line splitter, not a YAML subset: one fenced
@@ -1480,6 +1700,7 @@ commands:
   move        move an item into done or out-of-scope
   start       mark an open bug or task as in progress
   stop        clear the in-progress marker
+  connect     point this project's backlog at a tracker (github)
   unregister  drop a project from the board registry by path`
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
@@ -1507,6 +1728,11 @@ const UNREGISTER_USAGE = `usage: backlog.mjs unregister <project path>`
 // opposite of what that verb actually accepts.
 const START_STOP_USAGE = `usage: backlog.mjs start <id> [--as groom|execute]
        backlog.mjs stop <id> [--abandon] [--keep-started]`
+
+// `github` is spelled out as a positional rather than accepted implicitly, even though it is the only value this build knows: the marker's `kind` names a
+// platform, GitLab and Jira are named as later platforms in the same spec, and a command that has to grow a second one later would otherwise have to break its
+// own call shape to do it. `owner/repo` is optional (derived from `origin` when absent) and shown in brackets to say so.
+const CONNECT_USAGE = `usage: backlog.mjs connect github [owner/repo] [--no-forms]`
 
 export function main(argv) {
   const [cmd] = argv
@@ -1808,6 +2034,117 @@ export function main(argv) {
     return 0
   }
 
+  // `connect github [owner/repo] [--no-forms]` — the first writer of the committed source marker.
+  //
+  // The refusals below run in a fixed order, and the order is the point: each one is cheaper and more certain than the next, and every one of them happens
+  // BEFORE anything is written, so a refused connect leaves the project byte-identical. Nothing here is a partial write that a later refusal has to undo.
+  //
+  //   1. no git root            resolveRootOrFail, exit 2 — reused rather than re-worded, so "you are not in a repo" reads the same from every command
+  //   2. a linked worktree      exit 1 — the marker belongs to the main tree the worktree merges back into; see below
+  //   3. no repo and no origin  exit 1 — the one refusal with an obvious fix, so it names it
+  //   4. item files on disk     exit 1 — `import`'s job, phase 5
+  //   5. a marker already here  exit 1 — overwriting one silently changes a project's identity on every machine that pulls it
+  if (cmd === 'connect') {
+    const platform = argv[1]
+
+    // Flags are scanned out of the tail rather than read positionally because `--no-forms` may legitimately appear where `owner/repo` would (`connect github
+    // --no-forms` is the derive-from-origin spelling of it), and reading argv[2] blindly would take the flag for a repository name and then refuse it as a
+    // malformed one — a refusal naming the wrong problem. More than one positional is a usage error rather than a "last one wins": two repo arguments mean the
+    // caller believes something about this command that is not true, and picking one would write a marker they did not ask for.
+    let forms = true
+    const positional = []
+    for (let i = 2; i < argv.length; i++) {
+      if (argv[i] === '--no-forms') forms = false
+      else positional.push(argv[i])
+    }
+    if (platform !== 'github' || positional.length > 1) {
+      console.error(CONNECT_USAGE)
+      return 1
+    }
+
+    const r = resolveRootOrFail()
+    if (!r.ok) return r.code
+    const { root, backlog } = r.resolved
+
+    // The same refusal orchestrate.mjs makes, for a sibling reason and in its wording: a linked worktree is not a project root. The marker is committed and
+    // read by every machine that clones this repo, and a per-item worktree is a temporary checkout that is deleted the moment its item merges — writing the
+    // marker there would connect a directory that stops existing, while the project everyone else pulls stays on files. `linkedWorktreeInfo` is this file's
+    // own helper and the discriminator is a `commondir` entry in the gitdir the `.git` file points at, never "`.git` is a file" (a submodule's is a file too,
+    // and a submodule working tree IS a project root).
+    const worktree = linkedWorktreeInfo(root)
+    if (worktree) {
+      const where = worktree.projectRoot
+        ? `its project root is ${worktree.projectRoot} — re-run this command from there`
+        : `its shared git dir is ${worktree.gitdir}, whose main working tree could not be determined (a bare main repo?) — re-run this command from the project root`
+      console.error(
+        `${worktree.worktree} is a linked git worktree, not a project root; ${where}. connect writes the project's own committed source marker, which belongs to the main tree a worktree merges back into`,
+      )
+      return 1
+    }
+
+    let repo = positional[0]
+    if (repo === undefined) {
+      const url = originRemoteUrl(root)
+      if (url === null) {
+        console.error(`no owner/repo given and ${root} has no origin remote to derive one from — pass it: backlog.mjs connect github <owner>/<repo>`)
+        return 1
+      }
+      repo = parseOriginRepo(url)
+      if (repo === null) {
+        console.error(`no owner/repo given and origin (${url}) is not a github.com remote to derive one from — pass it: backlog.mjs connect github <owner>/<repo>`)
+        return 1
+      }
+    }
+    // Validated whichever way it arrived — a derived value has already passed REPO_SHAPE inside parseOriginRepo, so in practice this catches the hand-typed
+    // one, and it is left covering both because the marker it writes is interpolated into an api.github.com URL path on every machine that reads it.
+    if (!isValidRepo(repo)) {
+      console.error(`not an owner/repo pair: ${JSON.stringify(repo)} — expected one slash, and only letters, digits, dot, dash and underscore either side`)
+      return 1
+    }
+
+    // The populated-store refusal. `connect` is for an empty or absent store; a project whose items are already files needs them MOVED to the tracker, which
+    // is `import`'s job (phase 5) and is not built yet. Refusing outright rather than connecting-and-leaving-the-files is the safe direction: the server reads
+    // the marker per request and a connected project contributes no file items at all, so the files would not be deleted, they would simply stop being
+    // visible anywhere — the worst possible failure for a backlog, since nothing would report them missing.
+    const items = backlogItemFiles(backlog)
+    if (items.length > 0) {
+      const shown = items.slice(0, 3).join(', ')
+      console.error(
+        `${root} still has ${items.length} item file(s) under backlog/ (${shown}${items.length > 3 ? ', …' : ''}) — connect is for an empty or absent store; moving a populated one onto a tracker is \`import\`'s job, which is not built yet`,
+      )
+      return 1
+    }
+
+    // An existing marker is never overwritten, by this command or any other. The marker IS the project's source identity, committed and pulled by every
+    // machine; rewriting it in place would move a project between sources with no record of the change beyond a diff nobody was told to look at, and the one
+    // legitimate case (a repository that was renamed) is a one-line hand edit the operator can see and commit deliberately.
+    const marker = path.join(backlog, SOURCE_MARKER)
+    if (fs.existsSync(marker)) {
+      console.error(`already connected: ${marker} exists — edit or delete it by hand to change this project's source`)
+      return 1
+    }
+
+    writeSourceMarker(backlog, repo)
+    const committable = [`backlog/${SOURCE_MARKER}`]
+    let skipped = []
+    if (forms) {
+      const result = writeIssueForms(root)
+      committable.push(...result.written)
+      skipped = result.skipped
+    }
+
+    console.log(`connected ${root} to github ${repo}`)
+    for (const rel of committable) console.log(`  wrote ${rel}`)
+    for (const rel of skipped) console.log(`  skipped ${rel} (already present, left untouched)`)
+    // The marker takes effect on the machine running the board, which is not necessarily this one and in the multi-machine case is the whole point — so it
+    // does nothing at all until it is committed and pulled there. That makes the file list the actual last step of this command rather than a courtesy, which
+    // is why it gets its own header and why the paths are printed bare: they are meant to be pasted into a `git add`.
+    console.log('')
+    console.log('commit these files — the marker does nothing until the machine running the board has pulled it:')
+    for (const rel of committable) console.log(rel)
+    return 0
+  }
+
   // The registry's one removal path, and the only command in this file that
   // takes a project path instead of deriving one. That is deliberate: every
   // other verb here acts on the repo you are standing in, but a bare
@@ -1856,10 +2193,11 @@ export function main(argv) {
 // and a `--json` payload is cut at exactly 65,536 bytes, while a `> file.json`
 // redirect — synchronous on POSIX — stays perfectly fine, which is why every
 // hand check passed. Safe for THIS file specifically because nothing in it
-// holds the event loop open: every read is synchronous `fs`, and there is no
-// timer, no child process and no server anywhere in it. A future edit that
-// adds one must close its handle rather than restore `process.exit()`, which
-// would bring the truncation back with it.
+// holds the event loop open: every read is synchronous `fs`, its one child
+// process (`connect`'s `git remote get-url`) is a `spawnSync` that is reaped
+// before the call returns, and there is no timer and no server anywhere in it.
+// A future edit that adds one must close its handle rather than restore
+// `process.exit()`, which would bring the truncation back with it.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2))
 }

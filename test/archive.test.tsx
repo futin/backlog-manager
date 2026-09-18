@@ -67,6 +67,9 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     groomed: false,
     path: '/abs/alpha/backlog/bugs/open/bug-1.md',
     source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false,
     ...over
   };
   // Derived after the spread so every fixture has a unique key — ArchiveView
@@ -81,7 +84,11 @@ const PROJECTS: ProjectSummary[] = [
     createdAt: '2026-08-26T00:00:00.000Z',
     missing: false,
     counts: { bugs: 1, ideas: 1, tasks: 0, refactors: 1, 'out-of-scope': 1 },
-    source: 'files'
+    source: 'files',
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null
   },
   {
     name: 'beta',
@@ -89,7 +96,11 @@ const PROJECTS: ProjectSummary[] = [
     createdAt: '2026-08-26T00:00:00.000Z',
     missing: false,
     counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
-    source: 'files'
+    source: 'files',
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null
   }
 ];
 

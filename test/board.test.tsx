@@ -67,6 +67,9 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     groomed: false,
     path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
     source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false,
     ...over
   };
   return { ...base, path: over.path ?? `${base.projectPath}/backlog/${base.section}/${base.status}/${base.id}.md` };
@@ -96,7 +99,11 @@ const PROJECTS: ProjectSummary[] = [
     createdAt: '2026-08-26T00:00:00.000Z',
     missing: false,
     counts: { bugs: 2, ideas: 1, tasks: 0, refactors: 0, 'out-of-scope': 1 },
-    source: 'files'
+    source: 'files',
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null
   },
   {
     name: 'beta',
@@ -104,7 +111,11 @@ const PROJECTS: ProjectSummary[] = [
     createdAt: '2026-08-26T00:00:00.000Z',
     missing: false,
     counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 },
-    source: 'files'
+    source: 'files',
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null
   },
   {
     name: 'ghost',
@@ -112,7 +123,11 @@ const PROJECTS: ProjectSummary[] = [
     createdAt: '2026-08-26T00:00:00.000Z',
     missing: true,
     counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
-    source: null
+    source: null,
+    repo: null,
+    polledAt: null,
+    access: null,
+    detail: null
   }
 ];
 

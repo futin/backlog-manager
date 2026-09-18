@@ -29,7 +29,10 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
     projectPath: '/abs/alpha',
     groomed: false,
     path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
-    source: 'files'
+    source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false
   };
   return { ...base, ...over };
 }

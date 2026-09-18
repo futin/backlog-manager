@@ -2,9 +2,10 @@ import { HttpException, Inject, Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
 import { resolveSource } from './sources/resolve.util';
-import { ITEM_SOURCES, type ItemSource } from './sources/source';
+import { parseUrn } from '../tracker/map-issue';
+import { ITEM_SOURCES, type ItemSource, type SourceSummary } from './sources/source';
 import { uncommittedItemPaths, type UncommittedItems } from './uncommitted.util';
-import type { ItemsIndex, ProjectSummary, SectionCounts, SourceKind } from '../../../shared/types';
+import type { ItemsIndex, ProjectSummary, SectionCounts } from '../../../shared/types';
 
 /**
  * All reads walk the registry and the stores per request, like guide-manager's
@@ -15,14 +16,25 @@ import type { ItemsIndex, ProjectSummary, SectionCounts, SourceKind } from '../.
  * Since task-43 the scan is reached through the item-source seam rather than
  * called directly: each registered project's source is resolved from its own
  * committed `backlog/source.json` (per request, same rule as the registry) and
- * the matching adapter answers. Today exactly one adapter is registered, so
- * every project resolves to `files` and the payloads are what they always
- * were plus the `source` field — the seam is the change, not the behaviour.
+ * the matching adapter answers. Two adapters are registered since task-45 —
+ * `files` and `github` — and this file did not change to accept the second
+ * one, which was the seam's whole claim. What it did gain is the body route's
+ * shape test (see `body` below), which phase 1 named this phase as the place
+ * for.
  */
 @Injectable()
 export class ItemsService {
-  /** The registered adapters, keyed by the marker value each one serves. */
-  private readonly sources: ReadonlyMap<SourceKind, ItemSource>;
+  /**
+   * The registered adapters, keyed by the marker value each one serves. Keyed
+   * by `string` rather than by `SourceKind`, deliberately: the lookup key is a
+   * `kind` read off a marker file on disk, which is a string until an adapter
+   * claims it, and typing the key as the union forced a cast at every call
+   * site that could never be anything but true. The VALUES still carry their
+   * own `kind: SourceKind`, so the union is where it belongs — on the adapter
+   * that has to be in it — and `adapter.kind` is the typed answer to "which
+   * kind produced this", with no cast anywhere (task-45).
+   */
+  private readonly sources: ReadonlyMap<string, ItemSource>;
   /** The key set, handed to `resolveSource` as the kinds this build can honour. */
   private readonly known: ReadonlySet<string>;
 
@@ -30,7 +42,7 @@ export class ItemsService {
     private readonly registry: RegistryService,
     @Inject(ITEM_SOURCES) sources: ItemSource[]
   ) {
-    const map = new Map<SourceKind, ItemSource>();
+    const map = new Map<string, ItemSource>();
     for (const source of sources) {
       // Throw rather than last-wins: the loser would answer nothing, and a
       // board that silently renders one source's items while another's never
@@ -51,13 +63,12 @@ export class ItemsService {
    * the CALLER's to render (skipped, or a summary with zero counts).
    */
   private adapterFor(resolved: { kind: 'files' } | { kind: 'tracker'; marker: { kind: string } }): ItemSource | undefined {
-    // The cast is the seam's one piece of dishonesty in this phase, and it is
-    // contained: `SourceKind` is `'files'` alone today, while the resolver
-    // answers `tracker` only for a kind in `known`, which IS this map's key
-    // set. So the string is always a registered key at runtime; the compiler
-    // simply has no `'github'` to be told about yet. Phase 2 widens the union
-    // and this line stops needing it.
-    return this.sources.get(resolved.kind === 'files' ? 'files' : (resolved.marker.kind as SourceKind));
+    // No cast since task-45 widened `SourceKind`: the map is keyed by a string
+    // union, `get` takes a string, and the resolver only ever answers
+    // `tracker` for a kind in `known` — which IS this map's key set — so a
+    // lookup that misses is the unreachable case the callers already report
+    // rather than a type hole.
+    return this.sources.get(resolved.kind === 'files' ? 'files' : resolved.marker.kind);
   }
 
   async index(): Promise<ItemsIndex> {
@@ -107,6 +118,10 @@ export class ItemsService {
       // exactly the reminder a new section should get.
       const counts: SectionCounts = { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 };
       let source: ProjectSummary['source'] = null;
+      // The four connection fields default to their non-tracker answer, which
+      // is also the right answer for `missing` and for `unsupported`: neither
+      // has an adapter to ask, and neither has a connection.
+      let connection: SourceSummary = { repo: null, polledAt: null, access: null, detail: null };
 
       if (resolved.kind === 'unsupported') {
         // Counts stay at zero and the reason is NOT repeated here: it travels
@@ -114,21 +129,36 @@ export class ItemsService {
         // contributed nothing". `'unsupported'` never reads as `'files'`.
         source = 'unsupported';
       } else if (resolved.kind !== 'missing') {
-        source = resolved.kind === 'files' ? 'files' : (resolved.marker.kind as SourceKind);
         const adapter = this.adapterFor(resolved);
         if (adapter === undefined) {
+          // Unreachable while `known` is built from this same map, and the
+          // same belt `index()` wears: a kind nobody serves reads as
+          // `unsupported` here rather than as a summary claiming a source
+          // that answered nothing.
           source = 'unsupported';
         } else {
-          for (const it of (await adapter.list(project, resolved.kind === 'tracker' ? resolved.marker : null)).items) {
+          // The adapter's own `kind`, not the marker's string — the summary
+          // field means "which adapter produced this project's items", so
+          // reading it off the adapter that just produced them is the honest
+          // answer AND the one the compiler can check. This is where the
+          // second of task-43's two casts used to be (task-45).
+          source = adapter.kind;
+          const marker = resolved.kind === 'tracker' ? resolved.marker : null;
+          for (const it of (await adapter.list(project, marker)).items) {
             // "open" counts: done items are history. out-of-scope is terminal
             // and counts as itself — its number is how many were declined.
             if (it.status === 'done') continue;
             counts[it.section]++;
           }
+          // The connection half (spec §5.4), asked of the same adapter in the
+          // same pass: four nulls from files, the live tracker state from a
+          // tracker. Spread rather than copied field by field, so a fifth
+          // field on `SourceSummary` reaches the payload without an edit here.
+          connection = await adapter.summary(project, marker);
         }
       }
 
-      summaries.push({ name: project.name, path: project.path, createdAt: project.createdAt, missing, counts, source });
+      summaries.push({ name: project.name, path: project.path, createdAt: project.createdAt, missing, counts, source, ...connection });
     }
     return summaries;
   }
@@ -160,6 +190,17 @@ export class ItemsService {
   uncommitted(project: string): UncommittedItems {
     const entry = this.registry.load().projects.find((p) => p.path === project);
     if (entry === undefined) throw new HttpException({ error: 'not found' }, 404);
+    // A tracker project has no item files, so "which of them differ from
+    // `main`" is not a question with a wrong answer — it is a question with no
+    // meaning, and `known: false` is precisely the shape this endpoint already
+    // has for that (task-45, spec §5.5). The sheet's existing `known` gate
+    // keeps the chip off; nothing new was added on the client for this.
+    //
+    // Note what does NOT change: `uncommitted` stays a sibling endpoint rather
+    // than a `BacklogItem` field, nothing derived reads it, and it still
+    // changes no default selection. The rule this answers is CLAUDE.md's, and
+    // answering it earlier for one kind of project does not move it.
+    if (resolveSource(entry.path, this.known).kind === 'tracker') return { paths: [], known: false };
     return uncommittedItemPaths(entry.path);
   }
 
@@ -169,14 +210,22 @@ export class ItemsService {
    * stripped, `null` on every failure so the caller answers 404 without
    * learning why.
    *
-   * Phase 2 dispatches on the ref's SHAPE here — a URN goes to the tracker
-   * adapter, a filesystem path to files — and this is the seam's one place for
-   * that decision. It is a single delegation today because there is no URN yet
-   * to dispatch on, and a shape test with one shape is a guess written down.
+   * Since task-45 it dispatches on the ref's SHAPE, exactly where phase 1 said
+   * it would: a `gh:<owner>/<repo>#<n>` URN goes to the tracker adapter, and
+   * anything else is a filesystem path and goes to files. This is the seam's
+   * ONE home for that decision — the controller does not repeat it, and
+   * neither does any adapter: each still answers `null` for a ref it will not
+   * serve, which is what makes an unconnected repo's URN a 404 rather than a
+   * files-allowlist lookup.
+   *
+   * The shape test is the ref's, never the caller's: nothing in the request
+   * says which source to ask, so a caller cannot route its own path to an
+   * adapter by asserting a kind. That is the same rule "dispatch derives the
+   * action, it never accepts one" states for the agents routes.
    */
   async body(requestPath: string): Promise<string | null> {
-    const files = this.sources.get('files');
-    if (files === undefined) return null;
-    return files.body(requestPath, this.registry.load());
+    const adapter = this.sources.get(parseUrn(requestPath) === null ? 'files' : 'github');
+    if (adapter === undefined) return null;
+    return adapter.body(requestPath, this.registry.load());
   }
 }

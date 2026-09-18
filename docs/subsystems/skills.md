@@ -26,7 +26,9 @@ from and merges land in. Told to leave branches instead, it stops at a reviewed 
 
 ### The three CLIs
 
-- `skills/backlog/tools/backlog.mjs` — the CLI every skill calls, and the registry's only writer.
+- `skills/backlog/tools/backlog.mjs` — the CLI every skill calls, and the registry's only writer. Since task-45 it also carries `connect github [owner/repo]`,
+  which writes a project's committed `backlog/source.json` marker (and, by default, four GitHub issue forms) and touches the registry not at all — the marker is
+  the project's, not the machine's.
 - `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer.
 - `skills/backlog-retro/tools/retro.mjs` — `backlog-retro`'s own CLI, and the only writer of `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`). It is the one of
   the three that writes nothing anybody else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by

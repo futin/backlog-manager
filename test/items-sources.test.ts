@@ -1,6 +1,6 @@
 import { ItemsService } from '../server/src/items/items.service';
 import { FilesSource } from '../server/src/items/sources/files.source';
-import type { ItemSource } from '../server/src/items/sources/source';
+import type { ItemSource, SourceSummary } from '../server/src/items/sources/source';
 import type { RegistryService } from '../server/src/registry/registry.service';
 
 /**
@@ -16,7 +16,10 @@ import type { RegistryService } from '../server/src/registry/registry.service';
 /** Enough of RegistryService for a constructor that never reads it here. */
 const registry = { load: () => ({ projects: [] }) } as unknown as RegistryService;
 
-/** A second adapter claiming `files`, which is the only kind this build has. */
+/** A second adapter claiming `files` — the duplicate this suite exists to
+ *  refuse. `github` is a real kind since task-45, so the duplicate is spelled
+ *  `files` deliberately: the rule is one adapter per kind, and the case has to
+ *  collide with an adapter the module actually registers. */
 class DuplicateFilesSource implements ItemSource {
   readonly kind = 'files' as const;
   async list(): Promise<{ items: []; errors: [] }> {
@@ -24,6 +27,9 @@ class DuplicateFilesSource implements ItemSource {
   }
   async body(): Promise<null> {
     return null;
+  }
+  async summary(): Promise<SourceSummary> {
+    return { repo: null, polledAt: null, access: null, detail: null };
   }
 }
 

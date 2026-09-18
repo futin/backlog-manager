@@ -97,7 +97,17 @@ export function scanProject(project: RegistryProject): { items: BacklogItem[]; e
           // A literal, not a parameter: this function IS the files source, so
           // every row it produces came from the files adapter by definition
           // (task-43). A tracker adapter stamps its own kind in its own reader.
-          source: 'files'
+          source: 'files',
+          // The three tracker fields task-45 added, at their files values and
+          // all three literals for the same reason `source` is one: a file has
+          // nowhere to link to, nobody assigned to it, and a section that came
+          // from the directory it lives in rather than from a label that could
+          // be missing. See BacklogItem in shared/types.ts for why `url` and
+          // `assignee` are `null` rather than `''` and why nothing derived may
+          // read `untyped`.
+          url: null,
+          assignee: null,
+          untyped: false
         });
       } catch (e) {
         errors.push(`${abs}: ${e instanceof Error ? e.message : String(e)}`);
