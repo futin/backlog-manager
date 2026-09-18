@@ -2,6 +2,10 @@
 id: bug-37
 title: A root-level node_modules symlink is committed onto an item branch, because gitignore's node_modules/ pattern cannot match a symlink
 created: 2026-09-18
+updated: 2026-09-18T11:23:18Z
+started: 2026-09-18T11:03:46Z
+execute-elapsed: 1172
+execute-tokens: 87534
 ---
 
 ## Symptom
@@ -71,3 +75,58 @@ not enumerable in advance, which is the whole point of the worktree. The exclude
 
 This item is a candidate for `runner-fix: true` at grooming time — it repairs machinery a run itself depends on, and a run that queues it behind other items will
 keep committing the symlink until it lands. That marker is a human's call during grooming, so it is named here rather than written.
+
+## Outcome
+
+2026-09-18 — fixed as written, both halves. `.gitignore`'s `node_modules/` became a bare `node_modules` (with a comment saying why the slash is absent, so a
+later tidy-up does not "restore" it), and `backlog-orchestrate` §4's `info/exclude` block became a loop over a list — `.worktrees/` and `node_modules` — under
+a fourth bullet stating the rule as a rule: whatever the run writes into a worktree to make verification possible is excluded locally, before the first
+dispatch, and is never committed. §6's `add -A` is unchanged, as the item argued; its safety sentence is not, because "a fresh checkout that nothing else has
+written to" was the false half — it now says the tree holds this item's work and nothing else, and names §4's exclude as what keeps that claim true.
+
+The cause was confirmed against git itself before anything was changed, in a scratch repo so this machine's hand-added `info/exclude` entry could not answer for
+`.gitignore`: with `node_modules/`, a `node_modules` symlink reported `NOT IGNORED (symlink)` and `git add -A` staged it as `120000 02d9ad6… 0 node_modules`,
+while `node_modules/pkg.js` matched `.gitignore:1` as it always has. With a bare `node_modules`, both forms match and `add -A` stages nothing.
+
+Five new cases, all watched red first:
+
+- `test/gitignore-node-modules.test.ts` (jest) — runs git for real against a scratch repo seeded with this repo's `.gitignore`, with `GIT_CONFIG_GLOBAL`
+  and `GIT_CONFIG_NOSYSTEM` neutered so a developer's own `core.excludesFile` cannot answer instead. Red before the fix: `ignores a node_modules symlink at the
+  repo root` (`Expected: true / Received: false`) and `keeps a node_modules symlink out of git add -A` (received `120000 … node_modules`). The third case, the
+  directory form, was green both sides on purpose — it pins that widening the pattern did not cost the case the pattern was written for.
+- `skills/backlog-orchestrate/tools/orchestrate.test.mjs` (node) — three cases that EXECUTE §4's block out of SKILL.md in a scratch repo rather than reading it
+  for a pattern: it must leave both whole lines in `info/exclude`, `node_modules` must be bare (a trailing slash cannot match a symlink), the general rule must
+  still be stated in prose, and three runs must leave one line each. All three red before the SKILL.md edit (`# fail 3`).
+
+Verification, in full:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run test:jest
+Test Suites: 118 passed, 118 total
+Tests:       1878 passed, 1878 total
+Time:        178.342 s, estimated 195 s
+
+$ pnpm test
+1..578
+# tests 578
+# pass 578
+# fail 0
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+Contract sweep: 2 sites updated (skills/backlog-orchestrate/SKILL.md §6's `add -A` safety sentence, skills/backlog-orchestrate/references/rationale.md §4 —
+which SKILL.md's "Four details, all explained in references/rationale.md (§4)" now points at, so the new bullet needed its story there). Three sites were left
+standing deliberately: `docs/superpowers/plans/2026-08-31-backlog-orchestrate.md` and `docs/superpowers/specs/2026-08-31-backlog-orchestrate-design.md` are the
+origin plan and spec, records of what was designed then (the spec still describes the `--dangerously-skip-permissions` v1 that bug-3 removed), not live
+contracts; and `.dockerignore`'s `node_modules/` is a different matcher on a build context that only ever sees the real directory at the repo root. No CLAUDE.md
+invariant was added either: this rule governs one skill's own procedure, and SKILL.md plus `references/rationale.md` is where that skill's contract lives, now
+pinned by tests in its own suite.
+
+Red proof: 5 tests went red with the change reverted (2 jest, 3 node) — measured before the fix existed rather than by reverting it afterwards.

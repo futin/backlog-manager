@@ -1,5 +1,8 @@
 registry.json
-node_modules/
+# No trailing slash, deliberately (bug-37): `node_modules/` would match the directory only, and git stores a symlink as a blob with mode 120000 — so an
+# orchestrator worktree's `node_modules` link into the main tree went unignored and rode onto an item branch under `git add -A`. The bare pattern matches
+# both forms, and nothing in this repo is legitimately named `node_modules`.
+node_modules
 *.log
 .DS_Store
 .idea/
