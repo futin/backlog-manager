@@ -3,6 +3,10 @@ id: task-43
 title: Item-source seam: resolve the committed source marker per request and put the files scanner behind the first adapter
 created: 2026-09-17
 from: idea-12
+updated: 2026-09-17T14:50:06Z
+started: 2026-09-17T14:16:37Z
+execute-elapsed: 2009
+execute-tokens: 198488
 ---
 
 ## Goal
@@ -220,3 +224,65 @@ Every case runs under `pnpm run test:jest`; nothing here needs a browser.
 - `docs/subsystems/api.md`, `docs/subsystems/invariants.md`, `CLAUDE.md` and `.claude/rules/items.md` carry the Step 7 text, and the `docs-sync` stamp in
   `api.md` is untouched.
 - `## Outcome` names the count of fixture literals Step 5 touched and quotes the green `pnpm test` summary line.
+
+## Outcome
+
+2026-09-17 — done, on branch `backlog/task-43` in `.worktrees/task-43`. The seam is in: `resolveSource` reads each project's `backlog/source.json` per request,
+`FilesSource` is the one registered adapter behind `ItemSource`, `ItemsService` dispatches over a kind-keyed map it refuses to build twice for one kind, and the
+three read routes are asynchronous. Nothing on the board changed.
+
+**The acceptance test, run for real.** Both builds were served against the live registry (five registered projects, 240 items) — the pre-change code on
+`127.0.0.1:4398`, this branch on `:4399` — and the payloads compared with the new field stripped:
+
+```
+=== /api/items: new minus the source field vs old ===
+IDENTICAL once source is removed
+=== the only new keys on /api/items ===
+["files"]
+item count: 240
+=== /api/projects: new minus source vs old ===
+IDENTICAL once source is removed
+=== each project's name, missing, source ===
+backlog-manager	missing=false	source=files
+claude-agents-dashboard	missing=false	source=files
+guide-manager	missing=false	source=files
+ixray	missing=false	source=files
+finance-manager	missing=false	source=files
+```
+
+The diff is exactly the two `source` fields. No registered project on this machine is `missing` or carries a marker, so `source: null` and
+`source: 'unsupported'` are proved by the e2e fixtures (`ghost`, `sourceless`) rather than by a live row — the live registry was not edited to manufacture one.
+
+**Gates.**
+
+```
+Test Suites: 108 passed, 108 total
+Tests:       1761 passed, 1761 total
+# pass 538
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
+
+`pnpm run typecheck` clean; `pnpm run build` green (server + client). `test/claude-rules.test.ts` green with the fifth rules file.
+
+**Step 5 touched 31 fixture literals across 19 test files** — 30 gained `source: 'files'`, one (`board.test.tsx`'s missing project) `source: null`. The list came
+from the compiler, not from grep, and 7 of the 31 were the inline `{ ...fields, ...over }` factories the "property is missing" error never names: those surface
+as "`'files' | undefined` is not assignable", and the field has to go BEFORE the spread so an override can still replace it.
+
+Contract sweep: 4 sites updated (shared/types.ts `ItemsIndex.errors` doc — an entry is no longer always a malformed item file; CLAUDE.md and docs/overview.md
+both said `.claude/rules/` holds "four" pointer files, now five; docs/overview.md's `items/` bullet said the module walks each project's store, which is now
+what the resolver decides). Prettier violations already present at HEAD in `CLAUDE.md`, `docs/subsystems/invariants.md` and `test/dialog-escape.test.tsx` were
+left standing on purpose — they predate this branch, and one of them is a JSX line prettier tried to reflow while formatting my own edit, reverted so the diff
+carries no unrelated blame.
+
+Red proof: 9 tests went red with the change reverted, across three separate reverts — the unsupported-kind branch falling back to `files` (6), the
+duplicate-kind throw removed (1), and the scanner stamping a different source (2).
+
+**Two deviations from the plan, both deliberate.** The unsupported fixture is named `sourceless`, not `gamma`: `test/items.test.ts` already binds `gamma` in its
+second `describe`, and a second one in the first block would read as the same project. And `test/nav.test.tsx`, which the plan listed as a fixture site, was
+never named by the compiler — its literal already satisfied the type — so it is untouched, per the plan's own rule that the compiler's list is the checklist.
+
+Contract sweep: 4 sites updated (shared/types.ts, CLAUDE.md, docs/overview.md ×2)
+Red proof: 9 tests went red with the change reverted
