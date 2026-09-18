@@ -3,6 +3,9 @@ id: bug-36
 title: Orchestrate sheet merge-mode label says "Merge to main" for any base
 created: 2026-09-18
 tags: ui, orchestrate
+updated: 2026-09-18T15:08:39Z
+groom-elapsed: 279
+groom-tokens: 71370
 ---
 
 ## Symptom
@@ -43,18 +46,73 @@ fields away without revisiting the sentence beside it. The `Record<MergeMode, st
 build the file the day `MergeMode` gains a third member), and nothing about that shape is at fault — a third member would still need a name. What the shape
 does not survive is a label whose correct text depends on component state.
 
+Confirmed while grooming, and it sharpens the blast radius: the stale string `'Merge to main'` exists in **four** places, not two — `OrchestrateSheet.tsx:33`,
+`SettingsView.tsx:375` (the picker option), `SettingsView.tsx:369` (the hint sentence, which quotes the label by hand) and
+`test/orchestrator-start-ui.test.tsx:1085`, which pins it. Each copy was typed independently, which is why task-44 could correct the note and leave all four
+untouched. Nothing downstream reads any of them: the sheet already sends `base` as its own request field (`OrchestrateSheet.tsx:651`) and no derived value reads
+a picker label, so the defect is confined to what a reader is told. `client/src/lib/run-stage.ts:184`'s `mergeModeLabel` is a different thing entirely — the
+badge word for a run that has already started — and is correct as written.
+
 ## Fix
 
-unknown — the wording is grooming's call, not capture's. Two candidates, with what each costs:
+**Decision: derive the sheet's label from the picked base — `Merge to <base>` — and give Settings the same function's base-less wording, `Merge into the base
+branch`.** Chosen over the static `"Merge"`/`"Merge into the base branch"`-everywhere candidate because the note that would have to carry the destination
+instead is rendered only for a non-`main` base, so the smaller change leaves the commonest run — a `main` one — with no statement of the destination anywhere on
+the screen; and because `MERGE_MODE_LABELS`'s own rule (design §2.2, quoted in its doc comment) is that each option names the **outcome** a successful run ends
+in, and "merge to feature/tracker-backed" is that outcome stated exactly. The item's stated cost of this candidate — that it cannot be shared with Settings — is
+avoidable and is not paid: one function serves both surfaces, with `null` for "no base is knowable here".
 
-- **Derive from the base — "Merge to `<base>`".** Most informative, and it makes the control agree with the note word for word. Costs: `MERGE_MODE_LABELS` stops
-  being a module constant and becomes a function of `base` (or the label is composed at the `Select` call site), so the compile-time exhaustiveness the constant
-  buys has to be preserved deliberately rather than inherited; and it cannot be shared with Settings, which has no base to derive from — so Settings keeps its
-  own wording and the two surfaces stop reading from one string.
-- **Drop the branch name — "Merge".** Smallest change, keeps the constant a constant, keeps one string shared with Settings, and cannot go stale again because
-  it no longer asserts a branch. Costs: the option loses the one word that told a reader what the mode actually does, leaning entirely on the note below it —
-  which is rendered only for a non-`main` base, so a `main` run would be left with a bare "Merge" and no statement of the destination anywhere on the screen.
-  A variant worth considering is "Merge into the base branch", which stays static and shared while still naming the destination by role.
+`AskUserQuestion` was not available in this session, so the wording above is a groom-time call rather than a confirmed pick. It is one function's two string
+literals; overturning it later is a one-line edit plus the tests below.
 
-Whichever is picked, the Settings hint at `SettingsView.tsx:359` needs its own correction in the same pass — "what every run does today" is false independently
-of this label, and leaving it would just move the disagreement one screen over.
+Not `runner-fix:`. The change touches `client/` and `test/` only — none of `backlog-orchestrate`'s SKILL.md, `orchestrate.mjs`, `agents/backlog-reviewer.md` or
+`server/src/agents/`.
+
+1. **New `client/src/lib/merge-mode.ts`** — `export function mergeModeOptionLabels(base: string | null): Record<MergeMode, string>`. The returned record's
+   `merge` entry is `Merge into the base branch` when `base` is `null`, and the base's own name after `Merge to ` otherwise; its `branch` entry is
+   `Leave branches for me` either way. Three things this must keep:
+   - the `Record<MergeMode, string>` **return type**, which is the whole of what the deleted constant's shape bought — a third `MergeMode` member still fails
+     the build here, exactly as its doc comment promises;
+   - `null` meaning "no base is knowable at this point", never "main". Settings picks a default before any run exists; defaulting `null` to `'main'` would
+     reinstate this same bug on the one surface that genuinely cannot know the answer;
+   - a header comment carrying over the surviving half of `MERGE_MODE_LABELS`'s reasoning (the outcome-not-the-flag rule, and why a `Record` rather than a pair
+     of literals), plus one sentence distinguishing it from `mergeModeLabel` (`client/src/lib/run-stage.ts:184`) — and one sentence added to **that** function's
+     doc comment pointing back here. Two near-homonyms in one `lib/` is how the next edit lands in the wrong file.
+
+2. **`client/src/components/board/OrchestrateSheet.tsx`** — delete `MERGE_MODE_LABELS` and its doc comment (lines 22-35); render the Merge mode `Select`'s
+   options from `mergeModeOptionLabels(base)` at the call site (lines ~1054-1062) so the labels re-derive on every `setBase`.
+
+3. **`client/src/components/settings/SettingsView.tsx`** — in `OrchestratorGroup`, take `const labels = mergeModeOptionLabels(null)` once; use `labels.merge` /
+   `labels.branch` for the two option labels (lines 375-376) **and interpolate the same two values into the hint** (line 369) rather than retyping them. The
+   hand-typed quote is what produced this bug's third copy. The hint's claim also has to go: "is what every run does today" is false since task-44. Suggested
+   replacement — `Preselected in the Orchestrate sheet. “${labels.merge}” merges each item into the branch the run was started on, which is main unless the
+   launch picked another; “${labels.branch}” stops at a reviewed git branch per item instead. Overridable per launch.`
+
+4. **Nothing else.** The two `docs/superpowers/` hits are the merge-mode spec and plan — historical records of what was decided in 2026-09-04, left as written —
+   and no `docs/subsystems/` doc quotes the string (checked).
+
+### Test cases
+
+- **New `test/merge-mode-labels.test.ts`** (plain jest, no jsdom). A new file rather than cases added to `test/merge-mode.test.ts`, which is the server
+  `POST /api/agents/orchestrate` suite and shares only the words:
+  - `mergeModeOptionLabels('main').merge` → `'Merge to main'`
+  - `mergeModeOptionLabels('feature/tracker-backed').merge` → `'Merge to feature/tracker-backed'`
+  - `mergeModeOptionLabels(null).merge` → `'Merge into the base branch'`, asserted as that string — a case that also has to state it is **not**
+    `'Merge to main'`, since that is the wrong answer this bug is about
+  - `.branch` → `'Leave branches for me'` for all three inputs above
+- **`test/orchestrator-start-ui.test.tsx`**:
+  - case 1 (line ~1085) keeps `['Merge to main', 'Leave branches for me']` **unchanged** — the `base` state defaults to `'main'` (line 228), so that existing
+    assertion becomes the regression guard proving a `main` run reads exactly as it did before.
+  - a new case beside it: the suite's stub already answers `/api/agents/branches` with `['main', 'feature/x']` (line ~583), so
+    `await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x')` then expect the Merge mode picker's option text to equal
+    `['Merge to feature/x', 'Leave branches for me']`. This is the case that fails today.
+  - in that same new case, also assert the note beneath the row still names `feature/x` — what was filed is two statements disagreeing, so the test has to pin
+    them **agreeing**, not merely pin the new string.
+- **`test/settings-view.test.tsx`** — extend `offers a default merge mode, starting on merge, and persists a pick` (line 451) to assert option **text** as well
+  as value: `['Merge into the base branch', 'Leave branches for me']`; and assert the row's hint no longer contains `every run does today`.
+- Full verification: `pnpm test` (both runners) and `pnpm run typecheck`.
+
+In the browser (playwright MCP tools): with the app on `http://127.0.0.1:5177`, open the Board, pick this project, click the toolbar **Orchestrate**, step
+through to step 3 (modes), and set **Base branch** to a non-`main` branch (`feature/tracker-backed`). The **Merge mode** combobox's `merge` option must read
+`Merge to feature/tracker-backed` — the same branch the note directly beneath the row names. Then set **Base branch** back to `main` and confirm the option
+reads `Merge to main` and the note is gone.
