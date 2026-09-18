@@ -96,27 +96,25 @@ export function isQuestionMode(value: unknown): value is QuestionMode {
  * task fallback), so the branch had to be widened.
  */
 export function deriveAction(item: BacklogItem): AgentAction | null {
-  // A tracker item has no next step this build can take, and the check is
-  // FIRST for the same reason the section check below is: every line after it
-  // would otherwise answer, and `capture` in particular would answer for a
-  // closed issue. Dispatch spawns a session that runs the file-writing skills
-  // (`backlog-groom`, `backlog-execute`) against a project with NO item files,
-  // so every one of the three actions is wrong here rather than merely
-  // premature — the session would find nothing to read and write into a store
-  // that does not exist.
+  // Nothing about the item's SOURCE is asked here, and that is the whole of
+  // what task-46 changed (the dispatch lift).
   //
-  // Answered here rather than as a fourth disabled state in `DispatchButton`
-  // because that is the distinction CLAUDE.md pins: an environment-level block
-  // HIDES the control and a per-item one disables it, and "this project's
-  // items do not live in files" is a fact about the project, not about the
-  // item. A card in a tracker project therefore draws no dispatch chip at all
-  // (task-45, spec §5.5).
+  // Task-45 opened this function with `if (item.source !== 'files') return
+  // null`, because a spawned session would have run the file-writing skills
+  // against a project with no item files. Phase 3 is what made that false: the
+  // skills detect a tracker project from its own committed marker and write
+  // through the API instead, the claim protocol gives a tracker item a `started`
+  // for `progressBlock` to read, and `ItemsService.find` resolves a URN to the
+  // same `BacklogItem` a files path resolves to. A tracker item now has exactly
+  // the next steps a files item has, derived from exactly the same three facts
+  // below.
   //
-  // One implementation, both sides: this is the module the server validates
-  // dispatch with, so the same line that hides the control also refuses a
-  // hand-made POST. Phase 3 lifts this — the claim protocol is what gives a
-  // tracker item a next step — and lifting it is this one branch.
-  if (item.source !== 'files') return null;
+  // What did NOT come back with the lift is the orchestrator: a tracker project
+  // cannot be orchestrated until phase 4, and that refusal has its own gate
+  // (`projectIsFiles` on the client, a check in `AgentsService.orchestrate` on
+  // the server) rather than riding on this function. The two were one line
+  // while `deriveAction` answered `null` for every tracker item; they are two
+  // rules and they are now stated twice, once each.
   if (item.section === 'out-of-scope') return 'capture';
   if (item.status !== 'open') return null;
   if (item.section === 'ideas') return 'groom';
@@ -544,12 +542,35 @@ export function runHoldsItem(item: BacklogItem, runs: OrchestratorRunsPayload['r
 const ITEM_ID_SHAPE = /^[a-z]+-\d+$/;
 
 /**
+ * A tracker item's id, in the two spellings a tracker project uses (task-46):
+ * the short `#31` a person types, and the `gh:<owner>/<repo>#31` URN that IS
+ * `BacklogItem.path` for a GitHub row. Both are anchored, both end in digits,
+ * and the repo half is GitHub's own character set — the same class
+ * `parseUrn` (`server/src/tracker/map-issue.ts`) and `isRepo`
+ * (`server/src/tracker/github.client.ts`) enforce, restated here for the same
+ * reason `ITEM_ID_SHAPE` restates `backlog.mjs`'s: shared/ cannot import from
+ * either side.
+ *
+ * `#` is the one metacharacter these admit, and it reaches no shell anywhere
+ * in this build — see the predicate's own comment below.
+ */
+const TRACKER_ID_SHAPE = /^#\d+$/;
+const TRACKER_URN_SHAPE = /^gh:[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+$/;
+
+/**
  * Longer than any id this store can mint and short enough that nothing
  * absurd reaches the directory scan behind it. Not a security boundary — the
  * anchoring above already rules out every dangerous character — just a cap on
  * how much nonsense a caller can make the server walk over.
+ *
+ * Raised from 64 with the URN shape (task-46), and the number moved rather
+ * than a second cap added: GitHub allows a 39-character owner and a
+ * 100-character name, so `gh:<owner>/<name>#<n>` can legitimately run to ~154
+ * characters and a 64-cap would answer `false` for a real issue's real URN.
+ * One number keeps the two nonsense cases this cap exists for — a 500-character
+ * blob, a `task-` followed by 500 digits — refused exactly as before.
  */
-const ITEM_ID_MAX = 64;
+const ITEM_ID_MAX = 200;
 
 /**
  * Is this value syntactically an item id?
@@ -558,17 +579,36 @@ const ITEM_ID_MAX = 64;
  * reason that route can compose a prompt out of caller-supplied strings at all
  * without weakening the "the orchestrate spawn prompt is a server-side
  * constant" invariant: what survives this predicate is a bare identifier —
- * no whitespace, no path separator, no shell metacharacter, no newline to
- * split the one-line prompt with — and what survives the membership check
- * after it is the id of a real open item in the project being orchestrated.
- * Free text never gets near the prompt either way.
+ * no whitespace, no path separator, no newline to split the one-line prompt
+ * with — and what survives the membership check after it is the id of a real
+ * open item in the project being orchestrated. Free text never gets near the
+ * prompt either way.
+ *
+ * ## What survives this predicate, restated for the two tracker shapes (task-46)
+ *
+ * `#31` and `gh:futin/x#31` add exactly ONE character to that set: `#`. Every
+ * other property holds unchanged — no whitespace, no path separator outside the
+ * single slash inside a repo name, no newline, no quote, no `;`, no `$`, no
+ * backtick.
+ *
+ * `#` is a shell metacharacter (a comment introducer), so it is worth saying
+ * plainly why admitting it is safe HERE rather than trusting that it happens to
+ * be: nothing this predicate guards reaches a shell. The dispatch prompt is
+ * prose handed to a spawned session over JSON (`composePrompt`), and the
+ * orchestrate prompt — the one composition that concatenates caller text at all
+ * — refuses a tracker project outright before `resolveIds` is ever called
+ * (`AgentsService.orchestrate`, task-46 Step 8), so a `#`-bearing id cannot be
+ * appended to it. If that refusal is ever lifted, this paragraph is the thing
+ * to re-check first: `orchestrate.mjs` reads its argv as tokens, and a `#` in
+ * one would need proving safe against THAT reader, not against this one.
  *
  * Takes `unknown` for the same reason `pickFrom` does: the server is
  * narrowing a body it cannot trust, so the type guard is the point rather
  * than an afterthought at the call site.
  */
 export function isItemId(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= ITEM_ID_MAX && ITEM_ID_SHAPE.test(value);
+  if (typeof value !== 'string' || value.length > ITEM_ID_MAX) return false;
+  return ITEM_ID_SHAPE.test(value) || TRACKER_ID_SHAPE.test(value) || TRACKER_URN_SHAPE.test(value);
 }
 
 /**

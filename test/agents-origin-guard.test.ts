@@ -88,19 +88,65 @@ describe('the agents POST guard', () => {
   // project at all (AgentsController.watchdogConfig) — so the loop below
   // needs a route-aware body rather than body() itself, which stays exactly
   // as every pre-existing plan/dispatch call site here already uses it.
-  const bodyFor = (route: string): Record<string, unknown> =>
-    route === 'orchestrate' || route === 'resume' || route === 'pause' ? { project: projectPath } : route === 'watchdog/config' ? { enabled: true } : body();
+  //
+  // task-46: the seven `/api/items/*` write routes joined the list, so the loop
+  // is keyed by a FULL PATH rather than by a name under one prefix — the
+  // guarded set now spans two controllers, and a list that could only express
+  // one of them would be a list that stopped being the place the set lives.
+  // Their bodies all name a `project` and an `id`; none of them is ever reached
+  // here, because the guard refuses every case in this loop before a handler
+  // runs.
+  const bodyFor = (route: string): Record<string, unknown> => {
+    // Every field any of the seven needs, in one object: the routes validate
+    // the BODY before they ask which project this is, so a body missing a field
+    // would be refused for the wrong reason and the case below would pass on a
+    // 400 that says nothing about the project gate.
+    if (route.startsWith('/api/items/')) {
+      return {
+        project: projectPath,
+        id: '#1',
+        title: 't',
+        section: 'bugs',
+        body: 'x',
+        status: 'done',
+        phase: 'groom',
+        session: 'A',
+        commentId: 100,
+        reason: 'stopped',
+        ifUpdatedAt: '2026-09-18T10:00:00Z'
+      };
+    }
+    const verb = route.slice('/api/agents/'.length);
+    return verb === 'orchestrate' || verb === 'resume' || verb === 'pause' ? { project: projectPath } : verb === 'watchdog/config' ? { enabled: true } : body();
+  };
 
   // This array, not a count in CLAUDE.md's prose, is where the guarded set
-  // actually lives — `pause` (task-17) is the fifth member.
-  for (const route of ['plan', 'dispatch', 'orchestrate', 'resume', 'watchdog/config', 'pause']) {
+  // actually lives — six agents routes (`pause` is task-17's) and the seven
+  // item-write routes task-46 added.
+  const GUARDED = [
+    '/api/agents/plan',
+    '/api/agents/dispatch',
+    '/api/agents/orchestrate',
+    '/api/agents/resume',
+    '/api/agents/watchdog/config',
+    '/api/agents/pause',
+    '/api/items/create',
+    '/api/items/state',
+    '/api/items/claim',
+    '/api/items/release',
+    '/api/items/heartbeat',
+    '/api/items/body',
+    '/api/items/comment'
+  ];
+
+  for (const route of GUARDED) {
     /* The exact shape of a cross-origin form auto-submit: the one content type
        that needs no preflight, carrying a body Nest's unconditional urlencoded
        parser is happy to parse. */
     it('403s a urlencoded POST to ' + route + ' without any outbound call', async () => {
       const sent = recordFetches();
       const res = await request(app.getHttpServer())
-        .post('/api/agents/' + route)
+        .post(route)
         .type('form')
         .send({ itemPath: bugPath(), action: 'execute', prompt: 'do something else entirely' })
         .expect(403);
@@ -111,7 +157,7 @@ describe('the agents POST guard', () => {
     it('403s a cross-origin JSON POST to ' + route + ' without any outbound call', async () => {
       const sent = recordFetches();
       const res = await request(app.getHttpServer())
-        .post('/api/agents/' + route)
+        .post(route)
         .set('origin', 'http://evil.example')
         .send(bodyFor(route))
         .expect(403);
@@ -125,10 +171,28 @@ describe('the agents POST guard', () => {
     it('403s an Origin: null POST to ' + route, async () => {
       const sent = recordFetches();
       await request(app.getHttpServer())
-        .post('/api/agents/' + route)
+        .post(route)
         .set('origin', 'null')
         .send(bodyFor(route))
         .expect(403);
+      expect(sent).toEqual([]);
+    });
+  }
+
+  /* The CLI's exact shape: a JSON POST with no `Origin` at all, which the guard
+     allows on purpose (see `origin.guard.ts`). Asserted for each of the seven
+     write routes rather than only for `plan`, because `backlog.mjs` in API mode
+     is that caller for all seven and a guard tightened to require an origin
+     would break every skill while adding nothing a browser cannot forge.
+
+     Each gets past the GUARD and is then refused by the route's own project
+     gate — `alpha` is a files project — which is a 400, never a 403. The
+     assertion is on that distinction: 403 would mean the guard fired. */
+  for (const route of GUARDED.filter((r) => r.startsWith('/api/items/'))) {
+    it('lets a JSON POST with no origin at all reach ' + route + ' — the CLI is that caller', async () => {
+      const sent = recordFetches();
+      const res = await request(app.getHttpServer()).post(route).send(bodyFor(route)).expect(400);
+      expect(res.body.error).toMatch(/files/);
       expect(sent).toEqual([]);
     });
   }

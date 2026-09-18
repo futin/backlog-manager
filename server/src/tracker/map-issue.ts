@@ -1,6 +1,7 @@
 import { deriveGroomed } from '../items/parse.util';
+import { newestClaim, type ParsedClaim } from './claim';
 import type { GithubIssue } from './github.client';
-import type { BacklogItem, RegistryProject, Section } from '../../../shared/types';
+import type { BacklogItem, ClaimCounters, RegistryProject, Section } from '../../../shared/types';
 
 /**
  * One GitHub issue → one `BacklogItem`, per the table in spec §5.3 (task-45).
@@ -34,7 +35,7 @@ import type { BacklogItem, RegistryProject, Section } from '../../../shared/type
 
 /** `gh:<owner>/<repo>#<n>` — the URN that stands in for a filesystem path on a
  *  tracker row. `/api/items/body` takes it, `ItemsService.body` dispatches on
- *  its shape, and from phase 3 the dispatch request carries it. */
+ *  its shape, and since task-46 the dispatch request carries it. */
 export const URN_PREFIX = 'gh:';
 
 export function issueUrn(repo: string, number: number): string {
@@ -56,6 +57,32 @@ export function parseUrn(ref: string): { repo: string; number: number } | null {
   if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) return null;
   if (!Number.isInteger(number) || number <= 0) return null;
   return { repo, number };
+}
+
+/**
+ * The issue number a write route's `id` names, or `null` (task-46).
+ *
+ * Three spellings mean one issue, because three different callers reach these
+ * routes with three different handles: a person types `31`, a skill's prose
+ * says `#31`, and the board posts `BacklogItem.path`, which is the URN. One
+ * function rather than each route being tolerant in its own way — that is how
+ * two routes end up disagreeing about whether `31` is an id.
+ *
+ * A URN for ANOTHER repo is `null`, not the number inside it, and that is the
+ * load-bearing case: the route has already resolved which project (and so which
+ * repo) it is writing to from the registry, so a URN naming a different repo is
+ * a caller asking this project's credential to write somewhere else. Refusing
+ * it here means no route has to remember to compare.
+ */
+export function issueNumberFor(id: string, repo: string): number | null {
+  if (id.startsWith(URN_PREFIX)) {
+    const parsed = parseUrn(id);
+    return parsed === null || parsed.repo !== repo ? null : parsed.number;
+  }
+  const digits = id.startsWith('#') ? id.slice(1) : id;
+  if (!/^\d+$/.test(digits)) return null;
+  const number = Number(digits);
+  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 /**
@@ -95,7 +122,7 @@ const SECTION_BY_LABEL: Record<string, Section> = {
  * lifecycle this board knows, and one arriving as an untyped idea would put a
  * row on the board that nobody filed.
  */
-export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProject): MappedIssue | null {
+export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProject, claims: readonly ParsedClaim[]): MappedIssue | null {
   if (issue.pull_request !== undefined && issue.pull_request !== null) return null;
 
   const errors: string[] = [];
@@ -116,13 +143,16 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   const kind = kindLabel === undefined ? '' : kindLabel.slice('kind:'.length);
   const runnerFix = names.includes('runner-fix');
 
-  // Every label that is not a type, a kind or the runner-fix marker. Those
-  // three are CONSUMED — they are structure, and leaving them in `tags` would
-  // draw them twice on a card, once as the thing they mean and once as a word.
-  // `in-progress` is deliberately NOT consumed here: nothing in phase 2 reads
-  // it (the claim protocol is phase 3), so hiding it would be hiding a label
-  // this build has no other way to show.
-  const tags = names.filter((n) => !(n in SECTION_BY_LABEL) && !n.startsWith('kind:') && n !== 'runner-fix');
+  // Every label that is not a type, a kind, the runner-fix marker or the
+  // in-progress flag. All four are CONSUMED — they are structure, and leaving
+  // one in `tags` would draw it twice on a card, once as the thing it means and
+  // once as a word.
+  //
+  // `in-progress` joined them in task-46 and only then. In phase 2 nothing read
+  // it, so hiding it would have been hiding a label this build had no other way
+  // to show; now the claim protocol sets it and `started`/`phase` below render
+  // it as the in-progress bar every other item gets.
+  const tags = names.filter((n) => !(n in SECTION_BY_LABEL) && !n.startsWith('kind:') && n !== 'runner-fix' && n !== 'in-progress');
 
   const closed = issue.state === 'closed';
   const reason = typeof issue.state_reason === 'string' ? issue.state_reason : null;
@@ -133,6 +163,25 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   const status = !closed ? 'open' : reason === null || reason === 'completed' ? 'done' : 'terminal';
   if (status === 'terminal') section = 'out-of-scope';
 
+  // The newest claim on this issue — the one with the highest comment id,
+  // released or not. It answers two independent questions, and keeping them
+  // apart is the rule (task-46):
+  //
+  //   * **Is somebody holding this right now?** Only an UNRELEASED claim fills
+  //     `started`/`phase`. Its heartbeat age is deliberately NOT consulted: the
+  //     board's rule for a files item is "ANY stamp, fresh or stale" (see
+  //     `progressBlock`), and the thing that retires a stale claim is the
+  //     protocol, at the moment another session contests the issue. A mapper
+  //     that expired claims on its own would show an item as free while the
+  //     next `claim` call still had to fight for it.
+  //   * **What has this item accumulated?** The counters come off the newest
+  //     claim whether or not it is released, because they are the item's running
+  //     totals — the tracker's answer to the four frontmatter counters, which a
+  //     files item keeps after a `stop` too.
+  const newest = newestClaim(claims);
+  const held = newest !== null && newest.record.released === undefined;
+  const counters: ClaimCounters = newest?.record.counters ?? { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 };
+
   const item: BacklogItem = {
     id: `#${issue.number}`,
     title: issue.title,
@@ -140,10 +189,10 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // frontmatter — `created` is a `YYYY-MM-DD` on every other row and the
     // client's age arithmetic parses it as one.
     created: issue.created_at.slice(0, 10),
-    // Phase 2 has no claim protocol, so nobody holds a tracker item: `started`
-    // and `phase` are empty and the four counters are zero. Asserted in the
-    // tests precisely so phase 3 has a red case the day it fills them.
-    started: '',
+    // Filled from the claim since task-46 — see `newest` above for which
+    // question each of these answers. An issue nobody has ever claimed reads
+    // exactly as it did in phase 2: `''`, `''`, four zeros.
+    started: held ? newest.record.at : '',
     updated: issue.updated_at,
     // Always `''`. There is no commit behind an issue, so the client's
     // `lastTouched` precedence (`updated ?? lastCommit ?? created`) falls
@@ -151,11 +200,11 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // rather than, say, `created_at`: a value here would be a git date that
     // no git ever produced.
     lastCommit: '',
-    phase: '',
-    groomElapsed: 0,
-    executeElapsed: 0,
-    groomTokens: 0,
-    executeTokens: 0,
+    phase: held ? newest.record.phase : '',
+    groomElapsed: counters.groomElapsed,
+    executeElapsed: counters.executeElapsed,
+    groomTokens: counters.groomTokens,
+    executeTokens: counters.executeTokens,
     kind,
     tags,
     section,

@@ -69,7 +69,9 @@ interface RepoState {
   /** Issues by number — the cache proper. A `Map` so `since`'s inclusive
    *  re-send is an upsert rather than a duplicate (spec §5.1). */
   issues: Map<number, GithubIssue>;
-  /** Comments by id. Written in phase 2, read by nothing until phase 3. */
+  /** Comments by id. Written since phase 2; read since task-46 by `comments()`
+   *  below, which is what the claim protocol maps an item's `started`/`phase`
+   *  and counters from. */
   comments: Map<number, GithubComment>;
   /** The newest `updated_at` seen, sent as the next poll's `since`. `null`
    *  before the first sync, which is what makes that sync a full one. */
@@ -192,6 +194,28 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     };
   }
 
+  /**
+   * The authenticated login, fetching it once if this process has not got one
+   * for this token yet (task-46) — what the claim protocol assigns an issue to.
+   *
+   * Reuses the SAME `identity` field the sweep fills, deliberately: the login
+   * is "who does this token authenticate as", a question with one answer per
+   * token per process, and a second cache of it would be a second thing to
+   * invalidate when `BM_GITHUB_TOKEN` changes. A claim made before the first
+   * sweep (a fresh process, someone's first `start`) pays one request for it;
+   * every claim after that pays none.
+   *
+   * `null` when the credential cannot be read back. The protocol treats that as
+   * "no assignee to set" and carries on: the claim comment is the claim, and
+   * the assignee is a courtesy to a person looking at the issue in the web UI.
+   */
+  async viewerLogin(token: string): Promise<string | null> {
+    if (this.identity !== null && this.identity.token === token) return this.identity.login;
+    const viewer = await this.client.viewer(token);
+    this.identity = { token, login: viewer.data?.login ?? null };
+    return this.identity.login;
+  }
+
   /** Every cached issue of one repo, in ascending issue number so the board's
    *  order is a property of the data rather than of the order GitHub answered
    *  in. Empty for a repo that has never synced — which renders as a project
@@ -205,6 +229,74 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   /** One cached issue, or `undefined` — the body route's whole lookup. */
   issue(repo: string, number: number): GithubIssue | undefined {
     return this.repos.get(repo)?.issues.get(number);
+  }
+
+  /**
+   * Every cached comment of one repo (task-46) — the claim protocol's read on
+   * the BOARD path, where a per-issue fetch is out of the question: one board
+   * render touches every issue of every connected project, and the hourly rate
+   * limit would be gone in a minute. `claimsFor` filters this repository-wide
+   * bag down to one issue's claims.
+   *
+   * This is what phase 2's otherwise-unread `comments()` call was for, and it
+   * is why that call was made a phase before it had a reader: the polling
+   * loop's shape, its budget and its tests were settled without the claim
+   * protocol also being new in the same commit.
+   *
+   * The PROTOCOL itself does not read this — it reads the network, fresh,
+   * because a claim posted a second ago has to be visible to the session
+   * deciding who won. This accessor is for rendering, where up-to-one-poll-old
+   * is the price `polledAt` already advertises.
+   */
+  comments(repo: string): Iterable<GithubComment> {
+    const state = this.repos.get(repo);
+    return state === undefined ? [] : state.comments.values();
+  }
+
+  /**
+   * Take one issue straight off a write's response into the cache (task-46,
+   * §6.2's "absorption").
+   *
+   * Without this a capture would not appear on the board until the next poll —
+   * up to fifteen seconds of a person watching an issue they just filed not
+   * exist. With it, the very next `GET /api/items` lists it.
+   *
+   * Shares `absorbIssues`' rules rather than restating them: pull requests are
+   * dropped (the one write that could ever hand one back is none of them, and
+   * the rule costs a line) and the high-water mark moves, which matters because
+   * the next poll sends it as `since` — an absorbed issue whose `updated_at` is
+   * newer than the mark would otherwise pull the whole window back on the next
+   * request.
+   *
+   * `polledAt` is deliberately NOT moved: nothing was polled. The board's age
+   * line answers "when did we last read this repo", and a write is not a read —
+   * moving it would report a freshness the other 99 issues in the cache do not
+   * have.
+   */
+  absorbIssue(repo: string, issue: GithubIssue): void {
+    this.absorbIssues(this.stateOf(repo), [issue]);
+  }
+
+  /** The comment half of the same absorption: a claim this process just posted
+   *  or edited is in the cache before the request that made it returns, so the
+   *  next board read maps the item as claimed. Keyed by comment id, so an edit
+   *  replaces rather than duplicates — the same upsert `syncRepo` does. */
+  absorbComment(repo: string, comment: GithubComment): void {
+    this.stateOf(repo).comments.set(comment.id, comment);
+  }
+
+  /**
+   * Drop one comment from the cache — the deletion half, for the ONE thing the
+   * protocol deletes: a claim that lost the race, seconds after posting it.
+   *
+   * Needed because the poller's comment read is conditional and incremental
+   * (`since` plus an ETag), so a comment that no longer exists is never
+   * mentioned again by any later response: without this, a losing claim would
+   * sit in the cache being counted as a live claim by the mapper until the
+   * process restarted.
+   */
+  forgetComment(repo: string, commentId: number): void {
+    this.repos.get(repo)?.comments.delete(commentId);
   }
 
   /**
@@ -341,12 +433,20 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     if (this.handleFailure(state, first)) return;
 
     if (first.status === 304) {
-      // Nothing changed. The cache and `polledAt` both stay exactly as they
-      // were — the task item's authoritative test case says so in those words.
-      // (Spec §12.2 says a 304 MOVES `polledAt`, which would make the rendered
-      // age "how long since we last checked" rather than "how old these items
-      // are". The item won, being the work order; the disagreement is recorded
-      // in its Outcome so phase 3 can settle it rather than rediscover it.)
+      // Nothing changed, so the CACHE stays exactly as it was — and `polledAt`
+      // moves anyway, because the age the board renders means "since we last
+      // successfully checked", not "how old these items are". A conditional
+      // request that came back `304` IS a successful check: it proves the repo
+      // is reachable, the token works, and nothing has changed since. Freezing
+      // the age on a repo nobody is editing would make a healthy connection
+      // look progressively more broken, which is the opposite of what the
+      // rendered age exists to tell an operator.
+      //
+      // Task-45 shipped the other reading — its authoritative test case said
+      // the cache AND `polledAt` both stay put, disagreeing with spec §12.2 —
+      // and recorded the disagreement for this phase to settle rather than
+      // rediscover. Settled here, 2026-09-18, in the spec's favour (task-46).
+      state.polledAt = new Date().toISOString();
       state.access = 'ok';
       state.detail = null;
     } else if (first.status === 200) {
@@ -368,10 +468,12 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       state.detail = null;
     }
 
-    // Made on EVERY tick that got past the issues read, including a 304 one,
-    // and read by nothing until phase 3 (spec §5.1). Skipping it while it has
-    // no reader would move the polling loop's shape, its budget and its tests
-    // into the phase that also introduces the claim protocol they feed.
+    // Made on EVERY tick that got past the issues read, including a 304 one
+    // (spec §5.1). It had no reader at all in phase 2, deliberately: skipping
+    // it while it had none would have moved the polling loop's shape, its
+    // budget and its tests into the phase that also introduced the claim
+    // protocol they feed. Since task-46 `comments()` reads this cache, and the
+    // loop itself did not have to change.
     const comments = await this.client.comments(repo, { token, since: state.hwm, etag: state.commentsEtag });
     if (this.handleFailure(state, comments)) return;
     if (comments.status === 200) {

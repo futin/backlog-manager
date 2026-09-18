@@ -10,3 +10,4 @@ paths: ["skills/**", "agents/**"]
 - Before changing files here, read docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state
 - Before changing files here, read docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status
 - Before changing files here, read docs/subsystems/invariants.md#pnpm-test-is-the-union-of-both-runners
+- Before changing files here, read docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up

@@ -229,11 +229,20 @@ merely rendered by the components:
 
 - **The band** prints one line per connected project — `futin/x · polled 12 s ago`, with the access reason in place of the age when the connection is not `ok`.
   The band already carries the run chip, so it is the board's status line; a freshness fact about a whole project must not be repeated on forty cards.
-- **The card** gains three things and loses one: an `untyped` marker (amber, like `stale` — both mark something a person must do before the board can be
-  trusted), the assignee's login on the foot line (NOT on the live strip: phase 2 has no claim protocol, and drawing it there would claim someone is working
-  the item), a link-out to the issue that stops its click from opening the modal behind it — and **no dispatch control at all**, hidden the environment-level
-  way because a spawned session would run the file-writing skills against a project with no files.
+- **The card** gains three things: an `untyped` marker (amber, like `stale` — both mark something a person must do before the board can be trusted), the
+  assignee's login on the foot line (NOT on the live strip — it records who owns the issue, not who is working it right now; that is the claim's job), and a
+  link-out to the issue that stops its click from opening the modal behind it.
 - **The item modal** prints the same line under the title, because the body it shows came out of the poller's cache rather than from GitHub on open.
+
+**Dispatch is drawn exactly as it is for a files item (task-46).** Task-45 hid the control here, because a spawned session would have run the file-writing
+skills against a project with no files; phase 3 made that false — the skills write through the API — so `deriveAction` asks nothing about an item's `source`
+and a tracker card gets the same chip on the same rules. The per-item block that stops a CLAIMED item is the ordinary one: `progressBlock` reads the `started`
+the mapper fills from a live claim, with no tracker-specific branch anywhere, and disables the control with its usual sentence.
+
+What is still hidden is the toolbar's **Orchestrate** control, which `projectIsFiles` (`lib/tracker.ts`) keeps off a tracker project until phase 4 — hidden
+rather than disabled, because there is nothing a reader could do to make it appear. It is a fifth condition beside the four `showOrchestrate` already had, and
+it needs to be one only BECAUSE of the lift: the two rules rode on `deriveAction`'s removed first line and are now stated once each, here and in
+`AgentsService.orchestrate`.
 
 ## Interfaces
 

@@ -1462,3 +1462,229 @@ export type OrchestratorArchiveRun = Omit<OrchestratorRun, 'queue'> & {
 export interface OrchestratorArchivePayload {
   runs: OrchestratorArchiveRun[];
 }
+
+/* ===========================================================================
+ * The write side of a tracker project (task-46, spec §6) — the claim protocol's
+ * vocabulary and the seven write routes' request/response shapes.
+ *
+ * It sits at the END of this file, after `RUN_STALE_MS`, for one mechanical
+ * reason worth stating rather than rediscovering: `CLAIM_STALE_MS` is an ALIAS
+ * of that constant, and a `const` that reads another `const` declared further
+ * down the module hits the temporal dead zone at import time. Everything else
+ * in this block is a type, which is erased and could live anywhere; keeping the
+ * vocabulary in one place beat splitting it across two sections of the file.
+ * =========================================================================== */
+
+/**
+ * The four accumulating counters a files item keeps in frontmatter
+ * (`groom-elapsed:`, `execute-elapsed:`, `groom-tokens:`, `execute-tokens:`),
+ * carried inside a tracker item's claim comment instead.
+ *
+ * They live in the CLAIM rather than in the issue body because spec §6.4 is
+ * explicit that counters never live in the body: the body is the item's text,
+ * groom rewrites it wholesale, and a number embedded in prose somebody edits in
+ * the web UI is a number that silently resets. A claim comment is machine-owned
+ * — this app writes it, this app reads it — which is exactly the property
+ * frontmatter has for a files item.
+ *
+ * Four non-negative integers, always all four present, for the same reason
+ * `SectionCounts` spells out every section: the totals are read as a group, and
+ * an absent key would have to be defaulted at every one of the (server, CLI,
+ * mapper) sites that touch them.
+ */
+export interface ClaimCounters {
+  groomElapsed: number;
+  executeElapsed: number;
+  groomTokens: number;
+  executeTokens: number;
+}
+
+/**
+ * The fenced JSON inside a claim comment — the one machine-readable shape
+ * phases 3 and 4 share (spec §6.3).
+ *
+ * A COMMENT rather than a label or an assignee because a comment is the only
+ * thing GitHub gives that is append-only, timestamped, editable in place, and
+ * ordered by an id every machine agrees on. That last property is the whole
+ * protocol: two sessions on two machines both post a claim, both list the
+ * comments, and both compute the same winner — the LOWEST live comment id —
+ * without a lock, a lease server, or a clock they have to agree on.
+ *
+ * `run` and `state` are phase 4's (§7.1) and are carried opaque here. They are
+ * declared NOW, as `unknown`, so the phase-4 shape does not force `v: 2`: a
+ * reader of this version round-trips them untouched, which is what makes a
+ * mixed-version pair of machines safe rather than merely lucky.
+ */
+export interface ClaimRecord {
+  /** The protocol version. `1` is the only value this build writes or accepts;
+   *  `parseClaim` answers `null` for anything else, which reads as "not a
+   *  claim" — deliberately, so a future version's comment is ignored by an old
+   *  build rather than half-understood by it. */
+  v: 1;
+  /** Who holds it: `CLAUDE_CODE_SESSION_ID`, or `<user>@<host>` when a session
+   *  has none. Never a GitHub login — two sessions on one machine under one
+   *  account are two claimants, and the login cannot tell them apart. */
+  session: string;
+  /** Which skill phase is running, the same vocabulary `BacklogItem.phase`
+   *  carries and for the same reason: it decides which pair of counters a
+   *  `release` bills into. */
+  phase: 'groom' | 'execute';
+  /** When the claim was made — ISO 8601. Becomes `BacklogItem.started`, so it
+   *  is the moment work began and it never moves, not even across a heartbeat. */
+  at: string;
+  /** Re-stamped by `heartbeat`. `isLive` measures THIS against
+   *  `CLAIM_STALE_MS`, never `at`: a groom that has run for an hour with
+   *  heartbeats is alive, and one that stopped answering four minutes in is
+   *  not. */
+  heartbeat: string;
+  counters: ClaimCounters;
+  /** Set once, by `release`, and never unset — which is what makes a claim
+   *  comment a permanent record of one session's work rather than a mutable
+   *  flag. `by` is the session that released it, which is NOT always the
+   *  holder: a dead claim may be retired by whoever next contests the issue,
+   *  with `reason: 'stale'`. */
+  released?: { at: string; reason: string; by: string };
+  /** Phase 4's (§7.1). Opaque here — read by nothing, written by nothing, and
+   *  round-tripped verbatim by `heartbeat`'s `state` field and by every edit
+   *  this build makes. */
+  run?: unknown;
+  state?: unknown;
+}
+
+/**
+ * The marker that makes a comment a claim. One constant, one home: a comment IS
+ * a claim if and only if its body contains this string, which is why it is an
+ * HTML comment — invisible in GitHub's rendered view, so the claim comment
+ * reads as the human sentence under it and nothing else.
+ */
+export const CLAIM_MARKER = '<!-- bm:claim -->';
+
+/**
+ * How long a claim stays live without a heartbeat.
+ *
+ * A named ALIAS of `RUN_STALE_MS`, deliberately not a second `15 * 60 * 1000`:
+ * the two answer different questions — "is the orchestrator run alive" and "is
+ * the session holding this issue alive" — and today's answer is the same
+ * number. The alias exists so phase 4 can give a hand-driven skill claim a
+ * longer window (nothing heartbeats a hand groom automatically; see the item's
+ * Decision 8) without touching run semantics, which is exactly what a shared
+ * literal would have made impossible to do safely.
+ */
+export const CLAIM_STALE_MS = RUN_STALE_MS;
+
+/**
+ * The seven write routes' request bodies (spec §6.2). Declared here so the
+ * server's validation and the CLI's expectations are checked against ONE
+ * declaration rather than against each other.
+ *
+ * `skills/backlog/tools/backlog.mjs` cannot import them — a plugin skill's
+ * `tools/` is installed as a standalone copy of what was pushed, with no build
+ * step and no path back into this repo, which is the same boundary
+ * `tracker/labels.ts` documents for the label list. It reads the fields by
+ * name, and `backlog.test.mjs`'s API-mode suite asserts the exact bodies it
+ * sends, which is the mechanical half of the same arrangement.
+ *
+ * Every one of them carries `project` — the registry `path` string, which the
+ * server compares raw (never realpath), the same gate `uncommitted` and
+ * `dispatchGate` use.
+ */
+export interface ItemWriteRequest {
+  project: string;
+}
+
+/** `POST /api/items/create`. `section` is the store's own vocabulary, not
+ *  GitHub's: the adapter turns it into the `type:*` label, and `out-of-scope`
+ *  into a close with `state_reason: 'not_planned'` and no type label at all. */
+export interface ItemCreateRequest extends ItemWriteRequest {
+  section: Section;
+  title: string;
+  body: string;
+  /** A refactor's flavour — `chore` or `debt`, becoming `kind:<kind>`. Any
+   *  other value is a 400, never a dropped field: a caller that asked for a
+   *  label this build does not know has made a mistake worth hearing about. */
+  kind?: string;
+  /** `true` adds the `runner-fix` label. Strictly `=== true`, the same parse
+   *  rule `remoteControl` follows. */
+  runnerFix?: boolean;
+  /** The item this one came from — a promotion or a revive. Prepended to the
+   *  body as `_From #<n>._`, which is the GitHub-native cross-link; nothing
+   *  derived reads it, exactly as nothing derived read `from:` in frontmatter. */
+  from?: string;
+}
+
+/** `POST /api/items/state` — the tracker spelling of `move <id> done|out-of-scope`. */
+export interface ItemStateRequest extends ItemWriteRequest {
+  id: string;
+  status: 'done' | 'out-of-scope';
+  /** Posted as a comment BEFORE the close, so the issue's timeline reads in
+   *  the order the work happened. Empty means no comment at all. */
+  outcome?: string;
+}
+
+/** `POST /api/items/claim` — the protocol's entry point. */
+export interface ItemClaimRequest extends ItemWriteRequest {
+  id: string;
+  phase: 'groom' | 'execute';
+  session: string;
+}
+
+/** `POST /api/items/release`. `counters` are the CLI's totals, written
+ *  verbatim: the CLI is the biller (it holds the transcript and the clock), and
+ *  the server never computes a counter of its own. */
+export interface ItemReleaseRequest extends ItemWriteRequest {
+  id: string;
+  commentId: number;
+  session: string;
+  reason: string;
+  counters?: ClaimCounters;
+}
+
+/** `POST /api/items/heartbeat`. `state` is phase 4's opaque blob, round-tripped
+ *  into the record when given. */
+export interface ItemHeartbeatRequest extends ItemWriteRequest {
+  id: string;
+  commentId: number;
+  state?: unknown;
+}
+
+/**
+ * `POST /api/items/body` — groom's route, and the ONE route that rewrites an
+ * issue body (§6.4). `ifUpdatedAt` is the optimistic-concurrency token: the
+ * `updated_at` the caller read, checked against a FRESH `GET` before the patch,
+ * so two grooms on two machines cannot silently overwrite each other.
+ */
+export interface ItemBodyRequest extends ItemWriteRequest {
+  id: string;
+  body: string;
+  ifUpdatedAt: string;
+}
+
+/** `POST /api/items/comment` — appends a comment and nothing else. Execute's
+ *  failure path uses it: the Outcome is recorded and the item does not move. */
+export interface ItemCommentRequest extends ItemWriteRequest {
+  id: string;
+  body: string;
+}
+
+/** What `claim`, `release` and `heartbeat` answer on success: the comment that
+ *  IS the claim, and the record now inside it. */
+export interface ClaimResult {
+  commentId: number;
+  record: ClaimRecord;
+}
+
+/**
+ * What `claim` answers with a 409, and what `release` answers when the claim it
+ * names is live and held by someone else. `ageMs` is the heartbeat's age at the
+ * moment of refusal — computed here rather than left to the caller, because the
+ * caller's clock is not the one the liveness decision was made on.
+ */
+export interface ClaimRefused {
+  error: string;
+  holder: {
+    session: string;
+    heartbeat: string;
+    ageMs: number;
+    commentId: number;
+  };
+}

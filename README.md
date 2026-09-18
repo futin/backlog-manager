@@ -12,9 +12,9 @@ and it lives in Archive.
 `/backlog-orchestrate` is the largest of the six and the only one that touches git. Told to drain a project's groomed queue, it works every ready bug and task
 one at a time — each in its own git worktree and its own headless `/backlog-execute` session — then commits that item, has it reviewed and verified, and merges
 it into the run's base branch before the next one starts — `main` unless the run was started with `--base <ref>`, which lets a whole phased feature be drained
-onto a branch with `main` never written. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
-A run's state lives in a `run.json` outside the repo, under `~/.backlog-manager/orchestrator/`; the app reads that file to render live runs, run history, and
-the watchdog that resumes a crashed run.
+onto a branch with `main` never written. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all. A
+run's state lives in a `run.json` outside the repo, under `~/.backlog-manager/orchestrator/`; the app reads that file to render live runs, run history, and the
+watchdog that resumes a crashed run.
 
 - **No auth, no database.** The registry file and each project's `backlog/` directory ARE the data; there is nothing here to log into.
 - **The app writes no item files.** Filing, grooming, executing and moving items all happen through the skills — at the CLI, inside Claude Code, or in a session
@@ -85,7 +85,7 @@ and `.env.example` does not carry.
 | `BM_REGISTRY_FILE`            | `~/.backlog-manager/registry.json`                  | Where `backlog.mjs` writes                                                                                                                                                                                                                                                                                                                           |
 | `BM_BIND`                     | `127.0.0.1`                                         | Interface both processes bind. Compose sets `0.0.0.0` inside the containers, where the loopback publish is the boundary                                                                                                                                                                                                                              |
 | `BM_ALLOWED_HOSTS`            | empty                                               | Extra `Host` names this API answers to, comma-separated (a leading `.` is a suffix match). IP literals, `localhost` and `.ts.net` names are always allowed; everything else is refused with 403, because a `Host` allowlist is what a DNS-rebound page cannot pass                                                                                   |
-| `BM_WEB_PORT` / `BM_API_PORT` | `5177` / `4322`                                     | Host-side ports, for when something else already holds one                                                                                                                                                                                                                                                                                           |
+| `BM_WEB_PORT` / `BM_API_PORT` | `5177` / `4322`                                     | Host-side ports, for when something else already holds one. `BM_API_PORT` is also what the skills dial in a tracker-connected project — `backlog.mjs` routes every command through it, because the GitHub credential lives in the server process and nowhere else                                                                                    |
 | `BM_PROJECT_ROOT`             | `~/Documents/custom-projects`                       | The tree mounted read-only into the server container                                                                                                                                                                                                                                                                                                 |
 | `BM_AGENTS`                   | off                                                 | Turns on dispatching backlog items to `../claude-agents-dashboard`                                                                                                                                                                                                                                                                                   |
 | `BM_AGENTS_URL`               | `http://127.0.0.1:4173`                             | The dashboard's API origin — its `PORT`, not its Vite port. The host-side answer; compose deliberately never interpolates this key                                                                                                                                                                                                                   |
@@ -217,10 +217,11 @@ node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init
 | Types                                   | `pnpm run typecheck`                            |
 | Production build                        | `pnpm run build`                                |
 
-Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in `.env` — inside the compose stack they are fixed. On the host
-both processes bind `127.0.0.1`, and under compose both ports publish on `127.0.0.1` — nothing here has auth in front of it, so loopback is the access control.
-`BM_BIND` moves the bind if you really need to; to reach the board from another device, put a `tailscale serve` in front of the loopback port instead —
-`pnpm run tailnet` is that command, see [Read it from your phone](#read-it-from-your-phone).
+Ports: API `4322`, Vite `5177`. Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in `.env` — inside the compose stack they are fixed. In a project
+connected to a tracker, `BM_API_PORT` is also what the skills dial, so the stack has to be up for any `backlog.mjs` command there. On the host both processes
+bind `127.0.0.1`, and under compose both ports publish on `127.0.0.1` — nothing here has auth in front of it, so loopback is the access control. `BM_BIND` moves
+the bind if you really need to; to reach the board from another device, put a `tailscale serve` in front of the loopback port instead — `pnpm run tailnet` is
+that command, see [Read it from your phone](#read-it-from-your-phone).
 
 ## Architecture
 
@@ -239,6 +240,11 @@ skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/
                                                         v
       skill (backlog-retro)        ->  retro.mjs      ->  ~/.backlog-manager/retro/
 ```
+
+A project connected to a tracker takes one detour through that picture and nothing else changes: its items are GitHub issues rather than files, so `backlog.mjs`
+routes every command through the API (which holds `BM_GITHUB_TOKEN` and does the writing) instead of touching `<project>/backlog/*.md`. The board, the skills
+and the orchestrator read exactly the same shapes either way. Connect one with `backlog.mjs connect github <owner>/<repo>`; the stack has to be running for any
+command in a connected project, and a refused connection is exit `5` saying so.
 
 Four seams, one doc each:
 

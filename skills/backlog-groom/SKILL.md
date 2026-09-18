@@ -41,6 +41,47 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" show <id>
 This prints the item's absolute path on line 1, then its frontmatter block — **never the body**. Read the file at that printed path yourself to see the actual
 headings and content; there's no tool command that prints the body, and none is needed.
 
+## In a tracker project
+
+A project whose `backlog/source.json` says `github` has no item files: the three verdicts below are unchanged in every judgement they ask you to make, and
+every WRITE goes through the API instead of through a file. The differences are these, and they are worth reading before you pick a verdict rather than after.
+
+**`show <id>` prints the body.** In a files project it deliberately prints the path and the frontmatter only, and you open the file yourself; here there is no
+file, so `show` is the whole item. Use `show <id> --json` when you are about to patch the body — you need the `updatedAt` it carries.
+
+**Only groom patches a body, and it does so through one command:**
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt from show --json>
+```
+
+`--if-updated-at` is not ceremony. It is what stops two machines' grooms from silently overwriting each other: the server re-reads the issue and refuses if it
+moved since you read it. **A refusal means re-read and re-apply** — `show --json` again, redo your edit against the body you get back, and call `body` again
+with the new stamp. Never work around it.
+
+**Promote** is two calls rather than a write-then-move: file the new task with `new tasks "<title>" --body /tmp/task.md --from #<n>`, then close the original
+with `move #<n> done --outcome /tmp/promoted.md`, whose text is `Promoted to #45.` The closing comment is what `promoted-to:` was in frontmatter; the server
+prepends the matching `_From #<n>._` line to the new issue.
+
+**Reject** is `move <id> out-of-scope --outcome /tmp/rejection.md`, carrying the three rejection headings as the closing comment — and it does **not** rewrite
+the body. That is deliberate: the body is what was asked for, the comment is the decision about it, and a rejection that edited the original would destroy the
+record it exists to make.
+
+**Plan the fix** is `body`, above, and nothing else.
+
+**"Already in progress" reads differently here.** The refusal names the holder's session and how long ago its heartbeat was:
+
+- **Stale past 15 minutes** — the protocol retires it for you the moment you claim. The takeover is `start <id> --as groom` alone; do **not** `stop --abandon`
+  first, and do not ask the user. A dead claim is litter, not somebody's property.
+- **Live** — that is another session working right now, on this machine or another one. This is the three-way question this skill has always asked the user,
+  unchanged, and the answer is theirs.
+
+**`Groomed on disk only` is NOT printed for a tracker project.** There is nothing on disk and nothing to commit: the groom is on GitHub the moment the call
+returns, visible to every machine, and an orchestrator run reads it from there. Printing it would send the user looking for a file to `git add` that does not
+exist. The line and its whole section below apply to a files project only.
+
+**Heartbeat between long steps.** A groom that spends ten minutes reading code with no `heartbeat <id>` has a claim another session is entitled to retire.
+
 ## Refusals — rule these out before picking a verdict
 
 - **Unknown id.** `show` and `move` both exit `1` naming it. Relay that message; don't guess a path yourself.
