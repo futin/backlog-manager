@@ -26,6 +26,12 @@ import type { TrackerPlatform, TrackerProjectRow } from '../../../../shared/type
  */
 export function TrackersGroup() {
   const { data, loading, error } = useTrackers();
+  // One instant for the whole card, read here and passed down, because
+  // `lib/tracker.ts` states the rule its own header carries: nothing in that
+  // module reads a clock, so every age on one surface is aged against one
+  // moment. This card has no ticking clock of its own — it re-reads on window
+  // focus like `useAgents` — so "now" is the moment it rendered.
+  const now = Date.now();
 
   return (
     <SettingsGroup title="Trackers" scope="this machine">
@@ -37,7 +43,7 @@ export function TrackersGroup() {
             <SettingsRow key={platform.kind} name={platformName(platform.kind)} hint={platformLine(platform)} />
           ))}
           {data.projects.map((project) => (
-            <SettingsRow key={project.path} name={project.name} hint={<ProjectLine project={project} />} />
+            <SettingsRow key={project.path} name={project.name} hint={<ProjectLine project={project} now={now} />} />
           ))}
           {data.projects.length === 0 && <SettingsRow name="Projects" hint="nothing registered yet" />}
         </>
@@ -85,10 +91,10 @@ function resetClock(reset: number): string {
  * whose `origin` is on GitHub — the command that would connect it, as copyable
  * text.
  */
-function ProjectLine({ project }: { project: TrackerProjectRow }) {
+function ProjectLine({ project, now }: { project: TrackerProjectRow; now: number }) {
   if (project.source === 'github') {
     const reason = accessReason(project);
-    const age = pollAge(project.polledAt);
+    const age = pollAge(project.polledAt, now);
     return (
       <>
         github {project.repo} · {reason ?? (age === null ? 'connecting…' : `polled ${age} ago`)}

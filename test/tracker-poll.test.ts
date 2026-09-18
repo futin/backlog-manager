@@ -369,6 +369,21 @@ describe('the label bootstrap', () => {
     p.disarm();
   });
 
+  it('survives a labels body that is not a list, and keeps ticking', async () => {
+    const { poller: p } = poller(registryOf(githubProject()), [
+      ['/issues?', { status: 200, body: [] }],
+      // A 200 carrying valid JSON that is not the array the endpoint
+      // documents. This runs inside the timer chain, where a `TypeError` is an
+      // unhandled rejection that kills the poll loop rather than costing one
+      // tick — so the read is guarded by `Array.isArray`, like every other
+      // list read in the file, and the repo stays `ok` rather than blowing up.
+      ['GET /labels', { status: 200, body: { message: 'not a list' } }]
+    ]);
+    await expect(p.tick()).resolves.toBeUndefined();
+    expect(p.summary('futin/x').access).toBe('ok');
+    p.disarm();
+  });
+
   it('retries on the next tick when a create fails, and stops once it succeeds', async () => {
     const { poller: p, calls } = poller(registryOf(githubProject()), [
       ['/issues?', { status: 200, body: [] }],

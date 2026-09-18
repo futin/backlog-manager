@@ -348,3 +348,51 @@ bootstrap) and to a machine's running stack, and this was an unattended orchestr
 in for the network half; the mapping, the poller's branches, the label bootstrap's create-only-what-is-missing arithmetic and the whole `/api/items` payload are
 covered by hermetic suites (`tracker-map`, `tracker-poll`, `tracker-items`, `tracker-labels`, `tracker-origin`, `tracker-lib`, `tracker-board`). A person with a
 token should run the connect on one real repo before this is treated as proven in the field.
+
+### Fix pass — 2026-09-18, after review
+
+Verdict `fix`; every Important and Minor finding addressed, none disputed. The reviewer was right about the shape of the miss on the Important one: the sweep
+walked the section of `invariants.md` this task changed and stopped one paragraph short of the sentence naming the very type it widened.
+
+**Important — `SourceKind`'s three homes, plus the claim about who reads `source`.** Four sentence edits: `CLAUDE.md`'s source-marker invariant and
+`docs/subsystems/invariants.md`'s matching paragraph now read `'files' | 'github'` (both keep "widens only with the adapter, never ahead of one"), and
+`BacklogItem.source`'s doc comment in `shared/types.ts` says what each value means for `path` (a filesystem path against a URN) and replaces "the client
+ignores the field until a second kind exists" with the two readers it now has — `deriveAction`'s first line, which is what hides dispatch on a tracker project,
+and `lib/tracker.ts`, which reads `ProjectSummary.source` rather than this one.
+
+**Minor, all five.**
+
+- `TrackersPayload`'s comment pointed at `test/tracker-token.test.ts`, which was never written; it now names `test/tracker-items.test.ts`'s
+  `never puts the token in a payload` and the three routes that case covers.
+- `shouldPoll`'s comment claimed `sweep()` "re-reads both halves after every await". It does not: it reads them once at the top of every tick. The comment now
+  says that, and says what it buys — a token removed mid-tick costs at most the requests already in flight, because the next tick cannot start before this one
+  finishes.
+- `ensureLabels` was the one list read in the file not using `Array.isArray`, against the rule the two reads above it state in full. Fixed, and pinned by a new
+  case (`survives a labels body that is not a list, and keeps ticking`): a 200 carrying valid non-array JSON now leaves the repo `ok` and the chain alive
+  instead of throwing an unhandled rejection out of the timer. Red-proved — the case fails with the old `!== null` guard.
+- `TrackersGroup` called `pollAge` with no `now`, the only call site not keeping the rule `lib/tracker.ts`'s header states. The card now reads the clock once
+  per render and threads it down.
+- The token guard's sentinel was `'tok'`, three characters that a legitimate payload could carry (a `detail` echoing GitHub's own "Bad credentials"). Now
+  `ghp_task45SentinelValueNoPayloadMayCarry` — it could never have gone falsely green, but it could have gone falsely red.
+
+The `304`/`polledAt` finding stands as implemented, per the item's own authoritative test case and the reviewer's own note.
+
+```
+$ pnpm test
+Test Suites: 117 passed, 117 total
+Tests:       1873 passed, 1873 total
+# tests 575
+# pass 575
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+
+$ pnpm run typecheck
+$ tsc --noEmit                      (no output — clean)
+
+$ pnpm run build
+✓ built in 1.19s
+```
+
+Contract sweep (fix pass): 3 sites updated (CLAUDE.md, docs/subsystems/invariants.md, shared/types.ts)
+Red proof (fix pass): 1 test went red with the change reverted

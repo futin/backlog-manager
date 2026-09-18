@@ -112,7 +112,7 @@ any of these — most encode a failure that already happened.
   `unsupported`; `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES` and **throws at boot** if two claim one kind. Absent means `files`;
   an explicit `{"kind":"files"}` is honoured, and `files` never has to be registered. An unsupported marker contributes **no items** and one
   `ItemsIndex.errors` entry (prefixed with the marker's path), with `source: 'unsupported'`, zero counts and `missing: false` — `missing` still means no
-  `backlog/` at all, whose `source` is `null`. `SourceKind` is the closed list of adapters this build ships (`'files'` today) and widens only with the adapter;
+  `backlog/` at all, whose `source` is `null`. `SourceKind` is the closed list of adapters this build ships (`'files' | 'github'` since task-45) and widens only with the adapter;
   `BacklogItem.source` is required so the compiler is the fixture checklist. Why:
   [invariants.md](docs/subsystems/invariants.md#a-projects-source-is-a-committed-marker-resolved-per-request-and-an-unsupported-one-never-falls-back-to-files)
 - **The GitHub token never leaves the server, and the poller is armed only while something is connected.** `BM_GITHUB_TOKEN` is read by `githubToken()`

@@ -244,12 +244,16 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
 
   /**
    * Whether `arm()` should start a chain at all — a cheap early-out, not the
-   * rule. The RULE is enforced in `sweep()`, which re-reads both halves after
-   * every await and returns without scheduling a successor when either is
-   * missing; that is the check `test/tracker-poll.test.ts` drives, and it is
-   * the one that has to be right, because either half can change between two
-   * ticks. This one only saves kicking off a tick that would immediately
-   * discover it has nothing to do.
+   * rule. The RULE is enforced in `sweep()`, which reads both halves fresh at
+   * the top of EVERY tick and returns without scheduling a successor when
+   * either is missing; that is what disarms a chain when the token is removed
+   * or the last connected project is unregistered, and it is the check
+   * `test/tracker-poll.test.ts`'s four arming cases drive. (Within one tick
+   * the pair is read once, before the awaits, and deliberately not re-read
+   * afterwards: a token removed mid-tick costs at most the requests of the
+   * tick already in flight, and the next tick — which cannot start before
+   * this one finishes — sees it.) This early-out only saves kicking off a
+   * tick that would immediately discover it has nothing to do.
    */
   private shouldPoll(): boolean {
     return githubToken() !== null && this.connectedRepos().length > 0;
@@ -474,7 +478,14 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    */
   private async ensureLabels(repo: string, token: string, state: RepoState): Promise<void> {
     const listed = await this.client.labels(repo, { token });
-    if (listed.status !== 200 || listed.data === null) return;
+    // `Array.isArray`, not `!== null`, for the reason the issues and comments
+    // reads above give: this runs from the timer chain, where a throw is an
+    // unhandled rejection that kills the poll loop rather than one bad tick.
+    // A 200 whose body is valid JSON but not an array is the only way to get
+    // here with something unmappable (a non-JSON body already leaves `data`
+    // null, since the client's own `JSON.parse` catch handles it) — unlikely,
+    // and cheaper to rule out than to reason about.
+    if (listed.status !== 200 || !Array.isArray(listed.data)) return;
 
     // Case-insensitively: GitHub label names preserve case but collide without
     // it, so a repo carrying `Type:Bug` HAS `type:bug` and creating it again

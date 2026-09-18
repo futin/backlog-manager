@@ -124,8 +124,17 @@ function gitInit(root: string): void {
 
 const GITHUB_MARKER = JSON.stringify({ kind: 'github', repo: 'futin/x' });
 
+/**
+ * The token every case in this file runs with, and a deliberately unmistakable
+ * one: the guard below asserts the value appears in no payload, so a SHORT
+ * sentinel like `tok` would go red the day any response legitimately carried
+ * the substring — a `detail` echoing GitHub's own "Bad credentials", say. It
+ * cannot produce a false green either way; this only removes the false red.
+ */
+const TOKEN_SENTINEL = 'ghp_task45SentinelValueNoPayloadMayCarry';
+
 beforeEach(() => {
-  process.env[GITHUB_TOKEN_ENV] = 'tok';
+  process.env[GITHUB_TOKEN_ENV] = TOKEN_SENTINEL;
 });
 
 afterEach(() => {
@@ -236,7 +245,7 @@ describe('both adapters in one payload', () => {
     // handler (spec §11).
     for (const path of ['/api/items', '/api/projects', '/api/trackers']) {
       const res = await request(app.getHttpServer()).get(path).expect(200);
-      expect(JSON.stringify(res.body)).not.toContain('tok');
+      expect(JSON.stringify(res.body)).not.toContain(TOKEN_SENTINEL);
     }
   });
 });

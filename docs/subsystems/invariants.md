@@ -1836,8 +1836,9 @@ must not be a way to opt out of it, and `files` never has to be registered for t
 answer nothing, and a board that renders one source's items while another's never appear is wrong without ever saying so; a provider that throws turns that
 into a stack trace at startup.
 
-`SourceKind` is the closed list of adapters THIS BUILD ships — `'files'` alone today — and widens in the same commit that registers the next adapter. A kind
-named in the type with no adapter behind it would be a lie the resolver could not keep. `BacklogItem.source` is required rather than optional for the same
+`SourceKind` is the closed list of adapters THIS BUILD ships — `'files'` alone in phase 1, `'files' | 'github'` since task-45 registered the second one — and it
+widens in the same commit that registers the next adapter, never ahead of one. A kind named in the type with no adapter behind it would be a lie the resolver
+could not keep. `BacklogItem.source` is required rather than optional for the same
 reason `SectionCounts` spells out every section: the shape stays total, so every fixture literal in `test/` has to name its source and the compiler is the
 checklist.
 

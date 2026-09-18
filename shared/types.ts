@@ -216,12 +216,21 @@ export interface BacklogItem {
   /**
    * Which adapter produced this row — beside `path` because the two answer
    * one question together: where this row came from, and how to ask for its
-   * body. `'files'` for every row this build can produce (see `SourceKind`).
+   * body. `'files'` for a row off the store on disk, `'github'` for one the
+   * tracker poller's cache produced (see `SourceKind`), and the two answer
+   * `path` differently: a filesystem path against a URN.
    *
    * Required rather than optional, so the shape stays total: every fixture
    * literal in `test/` has to name its source and the compiler is the
-   * checklist, the same reason `SectionCounts` spells out every section. The
-   * client ignores the field until a second kind exists to draw with it.
+   * checklist, the same reason `SectionCounts` spells out every section.
+   *
+   * Two readers on the client since task-45, and they are the two worth
+   * knowing about: `deriveAction` (`shared/agent.ts`) answers `null` for any
+   * row that is not `'files'`, which is what hides the dispatch control on a
+   * tracker project, and `lib/tracker.ts` reads `ProjectSummary.source` (not
+   * this one) to decide which projects get a poll-age line. Nothing else
+   * branches on it — the board draws a tracker row exactly as it draws a file
+   * row.
    */
   source: SourceKind;
   /**
@@ -380,8 +389,10 @@ export interface ProjectSummary {
  * **The token is not in this payload and never will be.** It is process-only
  * (spec §11): `hasToken` says whether one is configured and `login` says who
  * it authenticates as, which is what an operator needs in order to know
- * whether the right credential is loaded. `test/tracker-token.test.ts` asserts
- * the value appears in no response at all.
+ * whether the right credential is loaded. `test/tracker-items.test.ts`'s
+ * `never puts the token in a payload` asserts the value appears in no response
+ * of any route this module serves — `/api/items`, `/api/projects` and
+ * `/api/trackers` alike.
  */
 export interface TrackersPayload {
   platforms: TrackerPlatform[];
