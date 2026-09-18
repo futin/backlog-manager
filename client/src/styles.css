@@ -427,13 +427,16 @@ code, kbd, samp, pre { font-family: inherit }
 .pill-proj-6 { color: var(--proj-6); border-color: var(--proj-6) }
 .pill-proj-7 { color: var(--proj-7); border-color: var(--proj-7) }
 .pill-proj-8 { color: var(--proj-8); border-color: var(--proj-8) }
-/* The four foot markers — groomed, done, kind, stale — were four rules here
-   until task-37. They are `Marker`'s tones now (`components/ui/Marker.tsx`,
-   DESIGN.md §8.3), declared once in the ui primitives block at the end of this
-   file, because the Archive card draws the same words and two surfaces must
-   not be free to disagree about what `stale` looks like. The tokens did not
-   move with them: groomed is still `--green`, kind and done `--ink3`, stale
-   `--mustard`.
+/* The foot markers — groomed, done, kind, stale, and `untyped` since task-45 —
+   were four rules here until task-37. They are `Marker`'s tones now
+   (`components/ui/Marker.tsx`, DESIGN.md §8.3), declared once in the ui
+   primitives block at the end of this file, because the Archive card draws the
+   same words and two surfaces must not be free to disagree about what `stale`
+   looks like. That is also why this comment names the set rather than counting
+   it: the list grows there, and a number here would be the thing that goes
+   stale. The tokens did not move with them: groomed is still `--green`, kind
+   and done `--ink3`, stale and `untyped` both `--amber` (the tone this design gives
+   anything a person still has to act on).
 
 /* Task 11: the orchestrator's own per-stage chip — the one marker whose source
    is a run payload rather than an item file, and the reason it is shaped as an

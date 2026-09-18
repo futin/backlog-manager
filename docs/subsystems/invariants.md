@@ -2243,19 +2243,6 @@ stylesheet, so a rendered assertion on the released measure would pass whether o
 toggles cleanly and changes nothing on screen. `client/index.html` is never loaded by any suite at all, so React's own stamp would keep every case green while
 the pre-paint half was missing. Neither is a detail a reader would think to check by hand, which is exactly why they are checked mechanically.
 
-<!-- docs-sync:
-  sources:
-    - server/src
-    - client/src
-    - shared
-    - skills
-    - agents
-    - scripts
-    - test
-    - docker-compose.yml
-  kind: subsystem
-  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
--->
 
 ## The GitHub token never leaves the server, and the poller is armed only while something is connected
 
@@ -2356,3 +2343,17 @@ label alphabetically AND an entry naming the issue joins `ItemsIndex.errors`, th
 A closed issue's section can change while its labels never do: `completed` (or no reason at all, which GitHub sent before 2022) is `done` with its section
 intact, and any other reason is `terminal` in `out-of-scope`. The `type:*` label stays on the issue, so the original type is recoverable — which the file store
 cannot do, since a rejected item moves into a flat directory that forgets it.
+
+<!-- docs-sync:
+  sources:
+    - server/src
+    - client/src
+    - shared
+    - skills
+    - agents
+    - scripts
+    - test
+    - docker-compose.yml
+  kind: subsystem
+  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
+-->

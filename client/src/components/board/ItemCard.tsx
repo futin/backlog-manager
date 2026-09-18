@@ -383,11 +383,31 @@ export function ItemCard({
             {created === '' ? '' : ` · ${created}`}
           </span>
           {/* The link out to the issue, drawn exactly when the item has a URL
-              — every tracker row, no files row (task-45). `stopPropagation`
-              because the whole card is a button: without it, opening the issue
-              would also open the modal behind it. `rel="noreferrer"` with
-              `target="_blank"` for the usual reason, and an aria-label because
-              the glyph is the only content. */}
+              — every tracker row, no files row (task-45). `rel="noreferrer"`
+              with `target="_blank"` for the usual reason, and an aria-label
+              because the glyph is the only content.
+
+              BOTH halves of `DispatchButton`'s guard, not just the click one,
+              and that component's own comment carries the full reasoning —
+              this is the second control to sit inside the card and it meets
+              the same two hazards:
+
+              `stopPropagation` on click, because the whole card is a
+              role="button" that opens the modal and without it one click opens
+              the issue AND the modal.
+
+              On keydown, bounded to the two keys the card's own handler acts
+              on and no further. The card's `onKeyDown` bubbles from ANY
+              descendant and unconditionally calls `preventDefault()` +
+              `onOpen()`. Left unstopped, Enter on this link would have that
+              handler run first — and `preventDefault()` there cancels the
+              ANCHOR'S OWN activation, which the browser runs as the default
+              action of that keydown — so the modal would open and GitHub would
+              never be reached, with no other keyboard path to the issue.
+              Stopping every key instead was a real bug when `DispatchButton`
+              tried it: React delegates keydown at the root, so a synthetic
+              stopPropagation also stops the native event and Escape stopped
+              reaching the dialog stack. */}
           {item.url !== null && (
             <a
               className="board-card-link"
@@ -396,6 +416,9 @@ export function ItemCard({
               rel="noreferrer"
               aria-label={`open ${item.id} in the tracker`}
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+              }}
             >
               ↗
             </a>

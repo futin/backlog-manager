@@ -490,7 +490,15 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // Case-insensitively: GitHub label names preserve case but collide without
     // it, so a repo carrying `Type:Bug` HAS `type:bug` and creating it again
     // would be a 422 on every tick forever.
-    const present = new Set(listed.data.map((l) => l.name.toLowerCase()));
+    // Filtered to the elements that actually carry a string `name`, not just
+    // to "the container is an array": `[1]` or `[{}]` would throw on
+    // `undefined.toLowerCase()` one line down, which is the same
+    // unhandled-rejection-kills-the-timer-chain hazard the guard above exists
+    // for, one level in. An element this drops is a label this process cannot
+    // name, so it cannot be compared against the eight either way.
+    const present = new Set(
+      listed.data.filter((l): l is { name: string } => typeof (l as { name?: unknown })?.name === 'string').map((l) => l.name.toLowerCase())
+    );
     const missing = TRACKER_LABELS.filter((l) => !present.has(l.name.toLowerCase()));
 
     let ok = true;

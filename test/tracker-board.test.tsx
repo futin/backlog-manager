@@ -181,12 +181,26 @@ describe('the card’s three tracker readings', () => {
     expect(within(card('nobody')).queryByText(/^@/)).toBeNull();
   });
 
-  it('opening the issue does not open the item modal behind it', async () => {
+  it('opening the issue does not open the item modal behind it, by click or by key', async () => {
     await renderBoard([issueItem()]);
     const link = within(card('an issue')).getByRole('link', { name: /open #31/i });
-    await userEvent.click(link);
+
     // The whole card is a button; without `stopPropagation` the click would
     // open the modal as well as the issue.
+    await userEvent.click(link);
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // And the keyboard path, which is the half a click-only case cannot see:
+    // the card's `onKeyDown` bubbles from any descendant and calls
+    // `preventDefault()` + `onOpen()`, so an unstopped Enter would cancel the
+    // anchor's own activation AND open the modal — the issue unreachable from
+    // the keyboard entirely.
+    link.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    // Space too: the card acts on both keys, so the guard has to cover both.
+    await userEvent.keyboard(' ');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

@@ -396,3 +396,51 @@ $ pnpm run build
 
 Contract sweep (fix pass): 3 sites updated (CLAUDE.md, docs/subsystems/invariants.md, shared/types.ts)
 Red proof (fix pass): 1 test went red with the change reverted
+
+#### Second fix pass — 2026-09-18
+
+Verdict `fix` again; all six findings addressed, none disputed.
+
+**Important — the link-out was half a pattern this repo had already written down.** The card's own `onKeyDown` bubbles from any descendant and calls
+`preventDefault()` + `onOpen()`, and `preventDefault` on that keydown cancels the ANCHOR'S activation, so Enter on the focused link opened the modal and never
+reached GitHub — with no other keyboard path to the issue, since the modal draws the tracker line but no link. The anchor now carries the same two-key guard
+`DispatchButton` documents in full (`Enter`/`Space` only — stopping every key was itself a real bug there, because React delegates keydown at the root and
+Escape stopped reaching the dialog stack). `test/tracker-board.test.tsx`'s case drives click, Enter AND Space now, and is **red-proved**: with the handler
+emptied, the Enter assertion fails with the modal in the DOM.
+
+**Minor, all five.**
+
+- `ensureLabels` guarded the container and not the element: `[1]` or `[{}]` still threw on `undefined.toLowerCase()` inside the timer chain — the same hazard
+  one level down. It now filters to elements carrying a string `name`, which is also the only element it could compare against the eight.
+- `docs/subsystems/invariants.md`'s `docs-sync` block was left ~110 lines from the end by the first pass's append. Moved back to the last thing in the file,
+  where `api.md`, `board.md` and `skills.md` keep theirs.
+- The two origin parsers disagreed — the skill accepted `www.github.com` and any URL scheme, the server accepted neither, so the Trackers card stayed silent
+  about a project `connect` would have connected. `parseGithubRemote` now uses the skill's grammar character for character (including the leading-slash /
+  trailing-slash / `.git` strip ORDER, which only reduces `…/repo.git/` correctly one way), and the split is now guarded the way `labels.ts`'s is: a new case
+  RUNS the skill's own `parseOriginRepo` in a node child over a file URL against a shared table of 20 remotes and asserts every answer matches — never an
+  import, so the "one skill's `tools/` may not be imported" rule is untouched. A second case pins what they agree ON, so the pair cannot both be wrong in the
+  same way and pass.
+- `pollAge` and `trackerLine` lost their `now = Date.now()` defaults. Every call site already passed one; the default was the remaining way for the next call
+  site to read its own clock silently, which is exactly the rule the module's header states.
+- `styles.css`'s "four foot markers" now names the set rather than counting it (the count is what goes stale) and corrects the tone claim: `stale` and
+  `untyped` are both `--amber`, not `--mustard`.
+
+```
+$ pnpm test
+Test Suites: 117 passed, 117 total
+Tests:       1875 passed, 1875 total
+# tests 575
+# pass 575
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+
+$ pnpm run typecheck
+$ tsc --noEmit                      (no output — clean)
+
+$ pnpm run build
+✓ built in 1.56s
+```
+
+Contract sweep (second fix pass): 1 site updated (client/src/styles.css — the marker-set comment)
+Red proof (second fix pass): 1 test went red with the change reverted

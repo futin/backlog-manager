@@ -9,9 +9,12 @@ import type { ProjectSummary, TrackersPayload } from '../../../shared/types';
  * copies of "is this `ok`, and if not what do I say" is three chances to
  * describe one connection two ways on one screen.
  *
- * Nothing here reads a clock of its own. `now` is passed in, the same
- * discipline `item-age.ts` follows, so a board renders every age against one
- * instant.
+ * Nothing here reads a clock of its own. `now` is passed in — REQUIRED, with
+ * no `Date.now()` default, which is the difference between a rule and a
+ * request: a default is how the next call site reads its own clock without
+ * noticing, and then one surface ages two readings against two instants. The
+ * discipline is `item-age.ts`'s, made non-optional because this module has
+ * three call sites across two surfaces rather than one.
  */
 
 const MS_PER_MINUTE = 60_000;
@@ -28,7 +31,7 @@ const MS_PER_MINUTE = 60_000;
  * say nothing about whether polling is actually happening. Above a minute it
  * delegates, so the board's vocabulary stays one vocabulary.
  */
-export function pollAge(polledAt: string | null, now: number = Date.now()): string | null {
+export function pollAge(polledAt: string | null, now: number): string | null {
   if (polledAt === null || polledAt === '') return null;
   const then = Date.parse(polledAt);
   if (Number.isNaN(then)) return null;
@@ -75,7 +78,7 @@ export function accessReason(project: Pick<ProjectSummary, 'access' | 'detail'>)
  * rather than re-asking `source`, so "which projects does this line exist for"
  * has one answer.
  */
-export function trackerLine(project: ProjectSummary, now: number = Date.now()): string | null {
+export function trackerLine(project: ProjectSummary, now: number): string | null {
   if (project.source !== 'github') return null;
   const repo = project.repo ?? project.name;
   const reason = accessReason(project);
