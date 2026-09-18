@@ -100,7 +100,10 @@ queue:
    reports. **Base branch seeds from the literal `'main'`, never from Settings** (task-44): its two neighbours have permanently sensible values, while a base
    names one experiment's branch, so a stored one would outlive that experiment and silently send a later run onto a stale feature branch. Its options come
    from `GET /api/agents/branches`, fetched once per sheet open, falling back to `['main']` alone on any failure and never blocking a launch. Plus, in merge
-   mode, a setup hint fed by `GET /api/agents/merge-check`, and, for a non-`main` base, a note saying `main` will not be written.
+   mode, a setup hint fed by `GET /api/agents/merge-check`, and, for a non-`main` base, a note saying `main` will not be written. The merge-mode picker's own
+   option words come from `mergeModeOptionLabels` (`lib/merge-mode.ts`) and are **derived from the picked base** — `Merge to <base>` — so the control and that
+   note are one statement rather than two that can disagree (bug-36). Settings, picking a default before any run and so before any base exists, calls the same
+   function with `null` and gets `Merge into the base branch`; `null` there means "no base is knowable", never `main`.
 
 Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
 call `useDialogEscape` for whatever they wrap.

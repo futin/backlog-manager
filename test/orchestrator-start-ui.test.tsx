@@ -1085,6 +1085,29 @@ describe('OrchestrateSheet', () => {
     expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me']);
   });
 
+  // --- Test case 1b (bug-36) -------------------------------------------
+  // The case above is now also the regression guard for the DEFAULT base:
+  // `base` seeds from the literal 'main', so those words are what a `main`
+  // run must keep reading. This one is the half that was wrong — the label
+  // has to follow the Base branch picker two fields away, and it has to
+  // agree with the note rendered directly beneath the same row. What was
+  // filed was two statements of one fact disagreeing on one screen, so
+  // asserting the new string alone would pin only half of it.
+  it('names the picked base in the merge-mode label, agreeing with the note below it', async () => {
+    // Stubbed rather than bare like case 1 above, because this case needs the
+    // branch read answered — that is what puts a second branch in the Base
+    // picker for it to select, the same setup the base-picker cases below use.
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet();
+    await toModes();
+
+    await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
+
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to feature/x', 'Leave branches for me']);
+    expect(screen.getByText(/this run gates, branches and merges on/).textContent).toContain('feature/x');
+  });
+
   // --- Test case 2 -----------------------------------------------------
   // Seeded on 'branch' specifically (not the Settings default of 'merge')
   // so a passing assertion can only mean the OVERRIDE was sent, never a

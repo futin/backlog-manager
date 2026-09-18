@@ -11,6 +11,7 @@ import {
 } from '../../lib/agents';
 import { EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
 import { useSettings } from '../../hooks/useSettings';
+import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { Pill } from '../ui/Pill';
@@ -19,25 +20,9 @@ import { MERGE_MODES, QUESTION_MODES, RUN_IN_PROGRESS_CODE } from '../../../../s
 import type { BacklogItem, MergeMode, PermissionMode, QuestionMode } from '../../../../shared/types';
 
 /**
- * The merge-mode picker's own words (design §2.2): each names the OUTCOME a
- * successful run ends in, never the flag a caller would type — "why would I
- * pick 'branch'" is a worse question for this control to answer than "why
- * would I pick 'leave branches for me'". A `Record<MergeMode, string>`
- * rather than an ordered pair of literal strings, for the same reason
- * `isMergeMode` is a guard rather than an inline comparison chain
- * (shared/agent.ts): the compiler refuses to build this file the day
- * `MergeMode` gains a third member and nobody has decided what this control
- * calls it.
- */
-const MERGE_MODE_LABELS: Record<MergeMode, string> = {
-  merge: 'Merge to main',
-  branch: 'Leave branches for me'
-};
-
-/**
  * The question-mode picker's own words (design §7), built the same way
- * `MERGE_MODE_LABELS` above is and for the identical reason: a
- * `Record<QuestionMode, string>` stops this file compiling the day
+ * `mergeModeOptionLabels` (`lib/merge-mode.ts`) is and for the identical
+ * reason: a `Record<QuestionMode, string>` stops this file compiling the day
  * `QuestionMode` gains a third member and nobody has decided what this
  * control calls it, which an ordered pair of literal strings would not.
  *
@@ -715,6 +700,16 @@ export function OrchestrateSheet({
       });
   };
 
+  /*
+   * bug-36. Derived here, in render, rather than read off a module constant:
+   * `merge`'s label names the branch this run would merge into, so it has to
+   * re-derive on every `setBase`. A plain call rather than a `useMemo` — it
+   * builds two strings, and memoising it would cost more than it saves while
+   * adding a dependency list that could silently go stale on exactly the
+   * state this bug was about.
+   */
+  const mergeModeLabels = mergeModeOptionLabels(base);
+
   return (
     <FormSheet
       label={`orchestrate ${projectName}`}
@@ -1053,11 +1048,18 @@ export function OrchestrateSheet({
 
                 <label className="sheet-field">
                   <span className="set-name">Merge mode</span>
+                  {/* bug-36: the labels are derived from `base` at the call
+                      site rather than read off a module constant, so picking
+                      a branch two fields below re-renders this option text
+                      with it. The picker and the note beneath the row are two
+                      statements of one fact, and what was filed was them
+                      disagreeing — the note named the picked branch while
+                      this read "Merge to main" whatever the base was. */}
                   <Select<MergeMode>
                     label="Merge mode"
                     value={mergeMode}
                     onChange={setMergeMode}
-                    options={MERGE_MODES.map((m) => ({ value: m, label: MERGE_MODE_LABELS[m] }))}
+                    options={MERGE_MODES.map((m) => ({ value: m, label: mergeModeLabels[m] }))}
                   />
                 </label>
 

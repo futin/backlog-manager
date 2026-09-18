@@ -180,6 +180,12 @@ export const RUN_STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
  * sits next to it. RunDetail (the one surface with room for prose) reads
  * `mergeModeNote` directly for that half; this function is only ever the
  * short badge word.
+ *
+ * Not `mergeModeOptionLabels` (`lib/merge-mode.ts`), one character away in
+ * the same directory: that one is the PICKER's option text, chosen before a
+ * run exists and derived from the base a launch is about to use. This one is
+ * read off a run that already ran. An edit meant for the words a person
+ * chooses between belongs there, not here (bug-36).
  */
 export function mergeModeLabel(mergeMode: MergeMode, mergeModeEffective: MergeMode): string | null {
   if (mergeModeEffective !== 'branch') return null;

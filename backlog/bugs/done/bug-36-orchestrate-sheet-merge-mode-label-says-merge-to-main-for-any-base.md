@@ -3,9 +3,12 @@ id: bug-36
 title: Orchestrate sheet merge-mode label says "Merge to main" for any base
 created: 2026-09-18
 tags: ui, orchestrate
-updated: 2026-09-18T15:08:39Z
+updated: 2026-09-18T15:42:59Z
 groom-elapsed: 279
 groom-tokens: 71370
+started: 2026-09-18T15:10:41Z
+execute-elapsed: 1938
+execute-tokens: 105937
 ---
 
 ## Symptom
@@ -116,3 +119,60 @@ In the browser (playwright MCP tools): with the app on `http://127.0.0.1:5177`, 
 through to step 3 (modes), and set **Base branch** to a non-`main` branch (`feature/tracker-backed`). The **Merge mode** combobox's `merge` option must read
 `Merge to feature/tracker-backed` — the same branch the note directly beneath the row names. Then set **Base branch** back to `main` and confirm the option
 reads `Merge to main` and the note is gone.
+
+## Outcome
+
+2026-09-18 — fixed as groomed. The picker's option words are now derived rather than declared: `mergeModeOptionLabels(base)` in the new
+`client/src/lib/merge-mode.ts` answers `Merge to <base>` for a known base and `Merge into the base branch` for `null`, and both surfaces call it — the
+Orchestrate sheet with its live `base` state (so the label re-derives on every `setBase`), Settings with `null`, because a default is picked before any run and
+so before any base exists. `MERGE_MODE_LABELS` and its doc comment are gone from `OrchestrateSheet.tsx`; the surviving half of their reasoning (the
+outcome-not-the-flag rule, and why a `Record<MergeMode, string>` return type rather than two literals) moved into the new module's header, which also
+distinguishes itself from `mergeModeLabel` (`lib/run-stage.ts:184`) — and that function's doc comment now points back, since the two names are one character
+apart in one directory. Settings' hint interpolates `labels.merge`/`labels.branch` instead of retyping them (the hand-typed quote is how this bug got a third
+independent copy) and its "is what every run does today" claim, false since task-44, is replaced by "merges each item into the branch the run was started on,
+which is main unless the launch picked another".
+
+Four copies of the stale string existed; three were live code/test and are gone or now derived, and the fourth — `test/orchestrator-start-ui.test.tsx:1085` —
+is deliberately unchanged, because `base` seeds from the literal `'main'`, so that assertion is now the regression guard proving a `main` run still reads
+exactly as it did before.
+
+Verified in the running app as the item asked (docker stack on `http://127.0.0.1:5177`, Playwright): on step 3 with base `main`, the Merge mode picker reads
+`["Merge to main", "Leave branches for me"]` and no base note renders; after selecting `feature/tracker` the picker reads
+`["Merge to feature/tracker", "Leave branches for me"]` and the note beneath the same row reads "this run gates, branches and merges on feature/tracker — main
+is never written" — the two statements this bug was filed about, now agreeing. The sheet was closed with Escape; no run was started. On Settings → Local →
+Orchestrator, the Default merge mode row reads `["Merge into the base branch", "Leave branches for me"]` with the rewritten hint.
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit
+
+$ pnpm run test:jest
+Test Suites: 119 passed, 119 total
+Tests:       1883 passed, 1883 total
+Snapshots:   0 total
+Time:        108.112 s
+
+$ pnpm test
+# tests 582
+# pass 582
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+```
+
+Contract sweep: 1 site updated (docs/subsystems/board.md — step 3's picker paragraph now states that the merge-mode labels are derived from the picked base and
+that Settings passes `null`). Three sites were found and deliberately left standing: `docs/superpowers/specs/2026-09-04-orchestrator-merge-mode-design.md:87`
+and `docs/superpowers/plans/2026-09-04-orchestrator-merge-mode.md:527` quote "Merge to main" as what was decided in 2026-09-04, and
+`docs/superpowers/specs/2026-09-05-orchestrate-question-mode-design.md:74` names `MERGE_MODE_LABELS` — a now-removed identifier — in the same historical
+register. All three are records of a past decision rather than statements about the current build, which is the rule §4 of the Fix states for
+`docs/superpowers/`; the third was not on the Fix's list of two and is left for the same reason. No `docs/subsystems/` doc other than `board.md`, and no
+`CLAUDE.md` invariant, quotes either label. `.claude/rules/board.md`'s glob (`client/src/**`) already covers the new module, and `test/design-guards.test.ts`
+reads only the stylesheets, `main.tsx` and `package.json`, so a new `lib/` file adds no guard obligation.
+
+Red proof: 4 tests went red with the change reverted. Reverting `mergeModeOptionLabels`'s `merge` entry to the static `'Merge to main'` (file copied aside,
+never `git stash`) failed `test/merge-mode-labels.test.ts`'s "names whatever branch the base actually is"
+and "says 'the base branch' — never 'main' — when no base is knowable",
+`test/orchestrator-start-ui.test.tsx`'s "names the picked base in the merge-mode label, agreeing with the note below it", and
+`test/settings-view.test.tsx`'s "offers a default merge mode, starting on merge, and persists a pick" — 4 failed, 93 passed across the three suites; restoring
+the file returned all 97 to green.

@@ -453,6 +453,17 @@ describe('SettingsView', () => {
       const select = (await screen.findByLabelText('Default merge mode')) as HTMLSelectElement;
       expect(select.value).toBe('merge');
       expect([...select.options].map((o) => o.value)).toEqual(['merge', 'branch']);
+      // bug-36. Text as well as value, because the text is what was wrong:
+      // this row picks a default BEFORE any run exists, so it cannot know a
+      // base and must not name one. 'Merge to main' here was a claim about
+      // where every future run would land, which task-44 made false.
+      expect([...select.options].map((o) => o.textContent)).toEqual(['Merge into the base branch', 'Leave branches for me']);
+      // The hint's own claim, separately false since task-44 whatever the
+      // picker is called: a run merges into the branch it was STARTED on, not
+      // into main. Asserted as an absence because the replacement sentence's
+      // exact wording is not what this row is for — the falsehood leaving is.
+      const hint = select.closest('.set-row')?.querySelector('.set-hint')?.textContent ?? '';
+      expect(hint).not.toContain('every run does today');
 
       await userEvent.selectOptions(select, 'branch');
       const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');

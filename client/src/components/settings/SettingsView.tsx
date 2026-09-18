@@ -7,6 +7,7 @@ import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
+import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import type { AgentsStatus, MergeMode, QuestionMode } from '../../../../shared/types';
@@ -362,18 +363,31 @@ function LocalPage() {
 function OrchestratorGroup() {
   const { settings, update } = useSettings();
 
+  /*
+   * bug-36. `null`, and emphatically not `'main'`: this row picks a DEFAULT,
+   * at a moment when no run and therefore no base exists, so there is no
+   * destination for the label to name and the base-less wording is the honest
+   * one. The same function serves the Orchestrate sheet, where a base IS
+   * known and the label names it — which is the whole reason the words live
+   * in one place now. The hint interpolates these same two values rather than
+   * quoting them by hand; the hand-typed quote below is how the stale string
+   * came to exist in four independent copies, one of which task-44 could not
+   * have found by searching for the other.
+   */
+  const labels = mergeModeOptionLabels(null);
+
   return (
     <SettingsGroup title="Orchestrator" scope="this device">
       <SettingsRow
         name="Default merge mode"
-        hint="Preselected in the Orchestrate sheet. “Merge to main” is what every run does today; “Leave branches for me” stops at a reviewed git branch per item instead. Overridable per launch."
+        hint={`Preselected in the Orchestrate sheet. “${labels.merge}” merges each item into the branch the run was started on, which is main unless the launch picked another; “${labels.branch}” stops at a reviewed git branch per item instead. Overridable per launch.`}
       >
         <Select
           label="Default merge mode"
           value={settings.orchestrateDefaultMergeMode}
           options={[
-            { value: 'merge' as MergeMode, label: 'Merge to main' },
-            { value: 'branch' as MergeMode, label: 'Leave branches for me' }
+            { value: 'merge' as MergeMode, label: labels.merge },
+            { value: 'branch' as MergeMode, label: labels.branch }
           ]}
           onChange={(orchestrateDefaultMergeMode) => update({ orchestrateDefaultMergeMode })}
         />
