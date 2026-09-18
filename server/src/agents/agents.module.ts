@@ -5,6 +5,7 @@ import { AgentsService } from './agents.service';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { RegistryModule } from '../registry/registry.module';
+import { ItemsModule } from '../items/items.module';
 import { OrchestratorModule } from '../orchestrator/orchestrator.module';
 
 /**
@@ -13,10 +14,13 @@ import { OrchestratorModule } from '../orchestrator/orchestrator.module';
  * provider — the guard has no dependencies today, and this is what keeps
  * giving it one from being a surprise.
  *
- * The registry is the only injected dependency item lookup needs: it goes
- * through the same allowlist and scanner the items module uses, but as plain
- * function calls (they are pure utilities, not providers), so there is
- * nothing to import from ItemsModule for that.
+ * ItemsModule arrived in task-46, with the dispatch lift. `AgentsService` used
+ * to find an item through the allowlist and the scanner as plain function
+ * calls — a private second copy of the files adapter, which is precisely why a
+ * tracker item had no dispatch — and now delegates to `ItemsService.find`,
+ * which dispatches on the ref's shape over the registered adapters. The edge
+ * runs agents → items and never back: nothing in `ItemsModule` knows dispatch
+ * exists, so there is no cycle for Nest to refuse.
  *
  * OrchestratorModule is imported for the same reason RegistryModule is:
  * AgentsService.orchestrate() (POST /api/agents/orchestrate) injects its
@@ -41,7 +45,7 @@ import { OrchestratorModule } from '../orchestrator/orchestrator.module';
  * payload reads the sweeper's state back out).
  */
 @Module({
-  imports: [RegistryModule, OrchestratorModule],
+  imports: [RegistryModule, ItemsModule, OrchestratorModule],
   controllers: [AgentsController],
   providers: [AgentsService, SameOriginPostGuard, WatchdogService]
 })

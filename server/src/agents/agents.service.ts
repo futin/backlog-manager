@@ -1,13 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { HttpException, Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
-import { buildAllowlist, resolveAllowed } from '../items/allow.util';
+import { ItemsService } from '../items/items.service';
 import { scanProject } from '../items/scan.util';
+import { resolveSource } from '../items/sources/resolve.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
@@ -272,7 +272,19 @@ export class AgentsService {
      * has no such edge — it is a plain in-memory record, provided and
      * exported by `OrchestratorModule`, which `AgentsModule` already imports.
      */
-    private readonly watchdogState: WatchdogStateService
+    private readonly watchdogState: WatchdogStateService,
+    /**
+     * task-46 — the dispatch lift. `findItem` used to be a private copy of the
+     * files adapter's allowlist-and-scan living in this file, which is why
+     * `plan` and `dispatch` could only ever see an item on disk. It is now a
+     * one-line delegate to `ItemsService.find`, which dispatches on the ref's
+     * shape over the same adapters `/api/items` reads through — so a URN
+     * resolves to exactly the `BacklogItem` the board drew its button from.
+     *
+     * The edge runs agents → items and never back: `ItemsModule` knows nothing
+     * about dispatch, so there is no cycle for Nest to refuse.
+     */
+    private readonly items: ItemsService
   ) {}
 
   async status(): Promise<AgentsStatus> {
@@ -324,7 +336,7 @@ export class AgentsService {
    * nothing to show a sheet about.
    */
   async plan(itemPath: string): Promise<AgentPlan> {
-    const item = this.findItem(itemPath);
+    const item = await this.findItem(itemPath);
     if (item === null) throw new HttpException({ error: 'not found' }, 404);
     const action = deriveAction(item);
     if (action === null) {
@@ -380,7 +392,7 @@ export class AgentsService {
       throw new HttpException({ error: 'prompt is too long' }, 400);
     }
 
-    const item = this.findItem(req.itemPath);
+    const item = await this.findItem(req.itemPath);
     if (item === null) throw new HttpException({ error: 'not found' }, 404);
     const action = deriveAction(item);
     if (action === null) {
@@ -527,6 +539,25 @@ export class AgentsService {
       // `projectDispatchGate`'s own wording, identical to what this line
       // built by hand before the hoist.
       throw new HttpException({ error: gate.reason }, 409);
+    }
+
+    /* A tracker project cannot be orchestrated yet (task-46, spec §7 — phase 4).
+       400, here with the environment gates rather than down with `resolveIds`,
+       because it answers the same question they do: may this project be
+       orchestrated AT ALL. Everything past the locks answers "what should the
+       run contain", and this is not that.
+
+       It needs its own gate now, and that is a consequence of the dispatch lift
+       rather than a feature. Until task-46 this case was covered for free by
+       `deriveAction` answering `null` for every tracker item: no item had a next
+       step, so no id could ever be runnable. With the lift every tracker item
+       has one, and without this line `resolveIds` — which scans FILES — would
+       find none of them and 409 each id as "not an open bug or task in this
+       project", which is both wrong and unactionable. The client's half of the
+       same rule is `projectIsFiles` (`client/src/lib/tracker.ts`), which hides
+       the toolbar control; this is the half that refuses a hand-made POST. */
+    if (this.items.isTrackerProject(req.project)) {
+      throw new HttpException({ error: 'orchestrating a tracker project arrives in phase 4' }, 400);
     }
 
     // The lock. orchestrate.mjs's own `init` already refuses to start a
@@ -1497,10 +1528,10 @@ export class AgentsService {
   /**
    * GET /api/agents/merge-check's whole implementation. Registry-gated
    * first, exactly like `resolveIds` above: a raw string compare against
-   * the registry's own `path` field, not `samePath`'s realpath compare —
+   * the registry's own `path` field, not a realpath compare —
    * matching the "deliberately not realpath" rule CLAUDE.md pins on
    * `dispatchGate`'s membership check. That choice is load-bearing here in
-   * a way it merely mirrors there: `realpathSync`-ing an unregistered path
+   * a way it merely mirrors there: realpath-ing an unregistered path
    * before comparing it would itself BE the filesystem touch
    * test/merge-check.test.ts's unregistered-project case proves never
    * happens — the gate has to stay a pure in-memory compare against a
@@ -1520,20 +1551,19 @@ export class AgentsService {
     return checkMergeCoverage(entry.path, homedir());
   }
 
-  private findItem(requestPath: string): BacklogItem | null {
-    const registry = this.registry.load();
-    const real = resolveAllowed(requestPath, buildAllowlist(registry));
-    if (real === null || !real.endsWith('.md')) return null;
-    for (const project of registry.projects) {
-      for (const candidate of scanProject(project).items) {
-        // Both sides through realpath: resolveAllowed already resolved
-        // symlinks, scanProject did not, and on macOS the temp roots the test
-        // fixtures live under are themselves symlinks (/var → /private/var).
-        // A plain string compare would find nothing there.
-        if (samePath(candidate.path, real)) return candidate;
-      }
-    }
-    return null;
+  /**
+   * One item by the ref a request named — a filesystem path or, since task-46,
+   * a `gh:<owner>/<repo>#<n>` URN.
+   *
+   * A delegate and nothing else. The lookup itself belongs to the item sources:
+   * "resolve against the allowlist, then scan every project" is a statement
+   * about ITEM FILES, and this module holding a private copy of it was exactly
+   * why a tracker item had no dispatch. Now the REF'S SHAPE picks the adapter,
+   * in `ItemsService.find`, which is the same one decision `/api/items/body`
+   * already made — one home, two callers.
+   */
+  private async findItem(requestPath: string): Promise<BacklogItem | null> {
+    return this.items.find(requestPath);
   }
 
   private async get<T>(cfg: AgentsConfig, path: string, timeoutMs: number): Promise<T> {
@@ -1604,15 +1634,6 @@ function orchestrateSessionName(projectPath: string): string {
 export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
   const prefix = origin === 'watchdog' ? 'watchdog resume' : 'resume';
   return `${prefix} ${basename(projectPath)}`.slice(0, 60);
-}
-
-/** Never throws — used only to build messages and to compare paths. */
-function samePath(a: string, b: string): boolean {
-  try {
-    return realpathSync(a) === realpathSync(b);
-  } catch {
-    return false;
-  }
 }
 
 /**

@@ -4,6 +4,10 @@ title: Tracker-backed phase 3: write-back through the API - seven write routes, 
 created: 2026-09-18
 from: idea-12
 tags: architecture, multi-machine, tracker, github, api, claim, skills, dispatch
+updated: 2026-09-18T18:01:43Z
+started: 2026-09-18T15:49:01Z
+execute-elapsed: 7962
+execute-tokens: 736921
 ---
 
 ## Goal
@@ -419,3 +423,178 @@ on an ephemeral port that records every request and answers canned bodies.
 **Not in this phase, on purpose**: the claim comment as run state, derived runs, push/pull, the orchestrator gate via the API (phase 4 — the Orchestrate
 control and route refuse a tracker project until then), `import` (phase 5), deleting the files path (phase 6), any GitLab or Jira writer, a GitHub App
 identity, and any client control beyond the dispatch button that already exists.
+
+## Outcome
+
+2026-09-18. Phase 3 landed whole: the seven write routes, the claim protocol, `backlog.mjs` API mode, the dispatch lift and the four skills' prose, plus the
+`304`/`polledAt` disagreement task-45 left open (settled in the spec's favour). 44 files changed, 7 added.
+
+```
+$ pnpm run typecheck
+(clean, no output)
+
+$ pnpm test
+Test Suites: 123 passed, 123 total
+Tests:       2007 passed, 2007 total
+# tests 619
+# pass 619
+# fail 0
+────────────────────────────────────────────────────────────
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.23s   (nest build + vite build, exit 0)
+
+$ git diff --quiet feature/tracker...HEAD -- skills/backlog-orchestrate && echo "no diff"
+no diff
+
+$ grep -rn "phase 3" server/src client/src shared docs/subsystems skills CLAUDE.md README.md .claude
+server/src/items/sources/github.source.ts:44: * Since phase 3 this class is also its own `ItemWriter`, and the writes DO call
+docs/subsystems/board.md:238:skills against a project with no files; phase 3 made that false — …
+(both are statements about what phase 3 DID, not forward references)
+
+$ git diff server/src/items/items.service.ts | grep '^-' | grep -v '^---'
+-import { ITEM_SOURCES, type ItemSource, type SourceSummary } from './sources/source';
+-import type { ItemsIndex, ProjectSummary, SectionCounts } from '../../../shared/types';
+-    const adapter = this.sources.get(parseUrn(requestPath) === null ? 'files' : 'github');
+(two imports and one line hoisted into `adapterForRef` — `index()`/`projects()` control flow is unchanged)
+```
+
+Contract sweep: 29 sites updated (CLAUDE.md, docs/subsystems/{invariants,api,board,skills}.md, docs/overview.md, README.md, .env.example,
+.claude/rules/{tracker,items,board,skills,dispatch-watchdog}.md, server/src/tracker/{poller.service,github.client,map-issue,labels}.ts,
+client/src/components/board/ItemCard.tsx, test/{agents-origin-guard,agents-shared,items-sources,tracker-map,tracker-poll,tracker-board}.*,
+skills/backlog/tools/backlog.test.mjs, skills/{backlog,backlog-capture,backlog-groom,backlog-execute}/SKILL.md)
+Red proof: 19 tests went red with the change reverted
+
+The red proof reverted nineteen production changes one at a time and ran the suite each pinned: the `304` stamp, the mapper's `started` and its
+`in-progress` consumption, `deriveAction`'s lift, `isItemId`'s widening, `isLive`'s `<` boundary, the client's repo guard, the write routes' `files` refusal,
+the losing claim's own deletion, the board's Orchestrate gate, the orchestrate route's gate, the CLI's marker fallback / exit `5` / `--body` requirement /
+counter accumulation / `--abandon` absence, the awaited entry guard, and two prose sentences. All nineteen went red. The awaited entry guard is the one worth
+naming: the SOURCE guard stays green when it is reverted (it accepts both shapes for this file by design), and 86 existing behaviour cases go red instead —
+`process.exitCode = <Promise>` makes every exit code `0`.
+
+### The ten Decisions the plan took, and what happened to each
+
+1. **`init` registers and exits `0`** — as specified. `backlog-capture` runs `init` unconditionally, so a refusal would make capturing into a tracker project
+   impossible.
+2. **`heartbeat`, `comment`, `body` beyond §6.5's table** — added, each refused in files mode with its own sentence rather than a shared "unknown command".
+3. **`move --outcome` carries the closing comment; Reject never rewrites the body** — as specified.
+4. **`promoted-to:` → the closing comment; `from:` → a `_From #n._` line the server prepends** — as specified.
+5. **The server seeds a new claim's counters; the CLI sends totals on release** — as specified.
+6. **`release` takes `session` and refuses another session's LIVE claim; a dead one may be released by anyone** — as specified.
+7. **Write responses are absorbed; `polledAt` is not moved by a write** — as specified, and asserted by removing the token before the read so no poll is
+   possible at all.
+8. **A skill-phase claim goes stale after `CLAIM_STALE_MS` (= `RUN_STALE_MS`)** — as specified, alias and all. Recorded as a known tension: nothing heartbeats
+   a hand groom, so the prose asks for `heartbeat` between long steps and both `backlog-groom` and `backlog-execute` say so.
+9. **The Orchestrate control and route gained their own tracker gate** — `projectIsFiles` (`client/src/lib/tracker.ts`) and a check in
+   `AgentsService.orchestrate` before `resolveIds`.
+10. **`section: 'out-of-scope'` creates untyped and closes `not_planned` in one call** — as specified, in two requests (GitHub's create endpoint takes no
+    `state`).
+
+### Eight deviations this branch took, for phase 4 to read
+
+1. **There is an EIGHTH route: `GET /api/items/claim`.** §6.2 names seven and the plan follows it, but `start` and `stop` are two PROCESSES — `claim` answers
+   the comment id, and the `stop` that must `release` it has no other way to rediscover one. Without it the CLI could take an item and never give it back, and
+   `show --json`'s specified `claim` field would have had no source. It is a READ, unguarded like every other GET, answered from the cache with no network
+   call.
+2. **`mapIssue` takes `ParsedClaim[]`, not `ClaimRecord[]`.** The plan gives the latter and then asks the mapper to call `newestClaim`, which is defined by
+   COMMENT ID — a bare record does not carry one. `ParsedClaim` is `{ commentId, record }` and every claim function takes it.
+3. **`ItemWriter.body` is named `patchBody`.** `GithubSource` implements `ItemSource` and `ItemWriter` in one class (they share the URN vocabulary and the
+   registry gate), and TypeScript cannot give one method name two signatures across two interfaces. The ROUTE is still `/api/items/body`.
+4. **The claim sequence lists BEFORE posting**, where the plan wrote list-after-post. The request count is identical (two listings either way) and the union
+   still spans both, so the race semantics are untouched — but the counter seed is then read fresh instead of out of a cache up to a poll interval stale, or
+   forced into a second edit of the comment just written.
+5. **`new --kind chore|debt` was added.** `backlog-capture` writes `kind:` for every refactor and the `create` route accepts it, but §6.5's CLI table omits the
+   flag — with no file to add a frontmatter line to, a refactor's flavour would have been unreachable. Refused in files mode, like `--body`.
+6. **`ITEM_ID_MAX` moved from 64 to 200.** GitHub allows a 39-character owner and a 100-character name, so a real URN can run to ~154 and the old cap would
+   have answered `false` for one. Both nonsense cases the cap exists for are still refused.
+7. **The Test cases' "a URN whose issue has a live claim → `plan.blocked` names the in-progress stamp and `dispatch` 409s" was NOT built.** The server has
+   never enforced `progressBlock` — for a files item either: `plan.blocked` is `dispatchBlock ?? runClaimBlock`, and `progressBlock` is the CLIENT's second of
+   three per-item blocks. Building it for tracker items alone would have been new asymmetric behaviour, enforced for an issue and not for a file. What IS
+   asserted: the server carries the `started`/`phase` a live claim fills (`test/tracker-dispatch.test.ts`) and the board disables the control on it
+   (`test/tracker-board.test.tsx`). If phase 4 wants a server-side block, it should be added for both sources at once.
+8. **No `--runner-fix` flag on the CLI.** The `create` route accepts `runnerFix`, but the marker only matters to an orchestrator run and a tracker project
+   cannot be orchestrated until phase 4 — and `backlog-groom`'s tracker path patches a BODY, where a files groom writes frontmatter. Phase 4's problem, with
+   the route already waiting for it.
+
+### Fix loop 1 — 2026-09-18, after review `task-46-1.md` (verdict: fix)
+
+Two findings, both real, both fixed. The review's five Minors are fixed too; none needed a judgement call.
+
+```
+$ pnpm run typecheck
+(clean, no output)
+
+$ pnpm test
+Test Suites: 124 passed, 124 total
+Tests:       2016 passed, 2016 total
+# tests 620
+# pass 620
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.11s   (exit 0)
+
+$ git diff --quiet feature/tracker...HEAD -- skills/backlog-orchestrate && echo "no diff"
+no diff
+```
+
+Contract sweep: 5 sites updated (CLAUDE.md, docs/subsystems/{invariants,api}.md, server/src/items/sources/source.ts,
+server/src/items/items.controller.ts)
+Red proof: 4 tests went red with the change reverted
+
+**Critical — the comment cache could not contain a claim made before the process started.** The reviewer was right about the mechanism and about
+its reach. `syncRepo` reads issues first, `absorbIssues` advances `hwm` to the newest issue's `updated_at`, and the comments request then sent THAT
+as its `since` — so a claim on an issue anything else had outlived was invisible to a fresh process, permanently, because no later response ever
+mentions an unedited comment again. Both of this branch's new readers rest on that cache, so after any restart the board drew a held item as free
+and `backlog.mjs stop` printed `not in progress` and exited 1, orphaning the claim with its counters lost.
+
+Fixed at the source AND at the reader, because they cover different states:
+
+- `RepoState.commentsHwm` is a separate mark, moved only by `absorbComments` from what the comments responses themselves return, and the comments
+  read now follows `Link` to the end exactly as the issues loop always did. This is what fixes the BOARD, whose mapper reads the cache and has no
+  fallback to fall back to.
+- `readClaim` falls back to one fresh per-issue read on a cache miss (`allClaims`, which already paginates and absorbs). This is what fixes a
+  server nobody has opened the board on, whose poller has never been armed at all — a state no amount of correct polling reaches, and the exact
+  state a first `backlog.mjs stop` after a restart is in.
+
+`test/tracker-cold-cache.test.ts` is new and drives the scenario rather than the reordering: #5 claimed at 10:00, #9 edited at 10:05, a fresh app
+whose poller is held down across `init()` so each case controls its own sweeps. Eight cases — the board's reading and the route's after one sweep,
+the first sweep sending no `since` at all, the second sending the newest COMMENT's stamp, a claim on page 2 behind `pageSize = 1`, the route
+answering with NO sweep anywhere, `null` for a genuinely unclaimed item, and no request at all when the cache already holds it.
+
+The fake had to become faithful first, and that is the part worth carrying forward: `test/helpers/github.ts` ignored `since` and never paginated,
+so a caller sending a wrong `since` or reading one page looked identical to a correct one. It now filters by `since`, sorts ascending, and sends a
+`Link` header past `pageSize`. That is why the bug reached review — no test COULD have caught it.
+
+**Important — the release path's "a `removeLabel` 404 is a success" was specified and unasserted.** Now pinned by `succeeds when in-progress is
+already gone, on a 404 from the label removal`, which seeds an issue with no `in-progress` label and asserts both the 201 and that the DELETE was
+actually attempted (an outcome-only assertion would pass a release that skipped the call). The discard in `github.source.ts` is now explained
+rather than silent: no status justifies failing there, because by that point the claim comment is already edited and the release HAS happened —
+refusing would report a release that occurred as one that did not, and the caller's retry would hit `claim … is already released` and wedge the
+item shut.
+
+**Minors, all five:** the orphaned `samePath` docblock left behind in `agents.service.ts` is gone; `backlog.mjs` names its `CLAIM_STALE_MS` mirror
+instead of an inline `15 * 60 * 1000`, with a note pointing at the server constant it copies; the claim path's two unexplained choices (not
+deleting the posted comment when the SECOND listing fails, and reading "is it closed" from the cache) now carry the reasoning for each; and the CLI
+suite gained `stop --keep-started is identical to a plain stop`, which was inert by construction and therefore unasserted.
+
+**One correction to this Outcome itself:** the verification block above originally pasted the orchestrate-diff check as `main...HEAD`. The run's
+base is `feature/tracker`; the claim was true against both, but the transcript named the wrong ref and has been corrected in place.
+
+**Carried into phase 4's item** (the reviewer endorsed deviation 8 and asked for this): the `create` route accepts `runnerFix` and no CLI flag
+sends it, because the marker only matters to an orchestrator run and a tracker project cannot have one until phase 4. Phase 4 should add the flag
+or drop the field rather than leave the route caller-less indefinitely.
+
+### Still to be done by a person with a token
+
+An unattended run cannot authorise writes to a real repository, so the "live end to end" step in **Done when** was not performed — exactly as task-45's Outcome
+recorded for its own. The hermetic suites stand in: `test/tracker-write.test.ts` drives all seven routes and the whole protocol against an in-memory GitHub
+behind a real `GithubClient`, and `skills/backlog/tools/backlog.test.mjs` spawns the real CLI against a fake API. What a person must still do, on one real
+connected repo: `new`, `show`, `start --as groom`, `heartbeat`, `body`, `stop`, `move done --outcome`, then check the issue's timeline shows ONE claim comment
+edited in place (never a second one), `in-progress` on and then off, the assignee set, and the closing comment carrying the Outcome.

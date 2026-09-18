@@ -15,14 +15,19 @@ import { RegistryModule } from '../registry/registry.module';
  * `fetch` is bound and the one place a suite overrides to intercept every
  * outbound call this server can make.
  *
- * Exported so `ItemsModule` can inject the poller into `GithubSource`. The
- * dependency runs one way only — items depend on the tracker, never the
+ * Both are exported so `ItemsModule` can inject them into `GithubSource`: the
+ * poller for every read (the cache IS the read side) and, since task-46, the
+ * client for every write. ONE client instance across the process is what makes
+ * the rate-limit headers a single reading — two would each report half the
+ * budget and the Trackers card would show whichever was asked last.
+ *
+ * The dependency runs one way only — items depend on the tracker, never the
  * reverse — which is what keeps the adapter a plain reader over a cache.
  */
 @Module({
   imports: [RegistryModule],
   controllers: [TrackerController],
   providers: [TrackerPollerService, { provide: GithubClient, useFactory: () => new GithubClient() }],
-  exports: [TrackerPollerService]
+  exports: [TrackerPollerService, GithubClient]
 })
 export class TrackerModule {}

@@ -598,6 +598,198 @@ function writeSourceMarker(backlog, repo) {
   fs.writeFileSync(path.join(backlog, SOURCE_MARKER), JSON.stringify({ kind: 'github', repo }, null, 2) + '\n')
 }
 
+// --- API mode ---------------------------------------------------------------
+//
+// A project whose committed marker says `github` has NO ITEM FILES (spec §6.5). Every command below that would have read or written one instead speaks to the
+// backlog-manager API on this machine, which holds the credential and does the writing. `files` mode runs today's code byte for byte: the branch is taken on
+// the marker alone, and a project with no marker never reaches any of this.
+//
+// Three properties worth stating before the code, because each one is a decision rather than an accident:
+//
+//   * **The token is never here.** It lives in the server process (`BM_GITHUB_TOKEN`) and no response carries it. A skill therefore needs no credential of its
+//     own, on any machine, which is the whole point of routing writes through the API rather than calling GitHub from here.
+//   * **The stack must be running.** There is no offline fallback and there deliberately is not one: a queued write would be a second source of truth for an
+//     item's state, on one laptop, invisible to every other machine. A refused connection is exit `5` with the two commands that start the stack named.
+//   * **Nothing is cached.** Every command makes its calls fresh, the same posture the server takes toward the registry and the marker.
+//
+// `BM_API_PORT` is the same variable compose reads, so a stack on a non-default port needs no second setting for the skills.
+
+// The one place the default port is written. `4322` is this app's API port (CLAUDE.md, Ports); `BM_API_PORT` moves the HOST side only, exactly as compose
+// reads it, so a `.env` that moves the port moves the skills with it.
+function apiBase() {
+  const port = process.env.BM_API_PORT || '4322'
+  return `http://127.0.0.1:${port}`
+}
+
+// Exit 5, and its sentence. A new code rather than reusing 1: "the store said no" and "there is no store reachable at all" are different things to a caller,
+// and the second one has a fix that is the same every time — start the stack. Named here so both the message and the code have one home.
+const API_DOWN_CODE = 5
+
+// How long a claim stays live without a heartbeat, mirroring the server's `CLAIM_STALE_MS` (`shared/types.ts`), which is itself a named alias of
+// `RUN_STALE_MS`. The CLI genuinely cannot import it — a plugin skill's `tools/` is a standalone copy of what was pushed, with no path back into the repo —
+// so this is the second copy, and it is NAMED for the reason the server's is: the invariant says the window exists as an alias precisely so phase 4 can give
+// a skill claim a longer one, and an unnamed literal buried in `stop` is the copy that would silently disagree when it moves. Only `stop` reads it, to decide
+// whether another session's claim is still somebody's property or merely litter; the authority on that question is the server, which re-decides it on every
+// `claim`.
+const CLAIM_STALE_MS = 15 * 60 * 1000
+
+function apiDownMessage() {
+  return `the backlog-manager API is not running on ${apiBase().replace('http://', '')} — start it with \`pnpm run dev\` or \`pnpm run docker:up\`; a tracker project needs the stack up for every command`
+}
+
+// One request, and the only place this file touches the network.
+//
+// `connection: close` so no socket is kept alive past the call: this file's entry guard requires that nothing hold the event loop open (see its comment, and
+// CLAUDE.md's "all three skill CLIs exit through process.exitCode" invariant), and an agent-pooled keep-alive socket is exactly the handle that would.
+//
+// No `Origin` header at all, deliberately. `SameOriginPostGuard` allows an absent origin — a non-browser caller cannot forge its way past a check a browser
+// enforces — and sending a made-up one would be this file claiming to be a page it is not.
+//
+// A transport failure is exit 5 and is the ONLY failure translated here; every HTTP status is handed back as a value for the caller to read, the same posture
+// `GithubClient` takes on the server side.
+async function apiRequest(method, path, body) {
+  let res
+  try {
+    res = await fetch(`${apiBase()}${path}`, {
+      method,
+      headers: body === undefined ? { connection: 'close' } : { 'content-type': 'application/json', connection: 'close' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    // Every transport failure reads the same: ECONNREFUSED for nothing listening, a `TypeError` from `fetch` for a malformed base, EHOSTUNREACH for a
+    // half-configured port. All three mean "there is no API here", which is one thing to fix.
+    throw new BacklogError(apiDownMessage(), API_DOWN_CODE)
+  }
+  const text = await res.text()
+  let payload = null
+  try {
+    payload = text === '' ? null : JSON.parse(text)
+  } catch {
+    // A body that is not JSON is not a body this file can act on. Left null; the caller reports the status. `text` is still carried, because one route —
+    // `/api/items/body` — answers `text/plain` and IS the item's Markdown.
+  }
+  return { status: res.status, body: payload, text }
+}
+
+// A write, or a BacklogError carrying the server's own sentence. The server composes every refusal (it is the only side that knows what GitHub said), so this
+// copies the sentence rather than inventing a second wording for the same fact.
+async function apiPost(route, payload) {
+  const res = await apiRequest('POST', `/api/items/${route}`, payload)
+  if (res.status >= 200 && res.status < 300) return res.body
+  const message = res.body && typeof res.body.error === 'string' ? res.body.error : `the API answered ${res.status}`
+  const err = new BacklogError(message, 1)
+  err.status = res.status
+  err.payload = res.body
+  throw err
+}
+
+async function apiGet(path) {
+  const res = await apiRequest('GET', path, undefined)
+  if (res.status >= 200 && res.status < 300) return res.body
+  const message = res.body && typeof res.body.error === 'string' ? res.body.error : `the API answered ${res.status}`
+  throw new BacklogError(message, 1)
+}
+
+// `GET /api/items/body` answers `text/plain`, because the payload IS the Markdown and wrapping it would make every caller unwrap it. Its own reader for that
+// reason: routing it through `apiGet` would hand back `null` for every well-formed body that is not also valid JSON.
+async function apiGetText(path) {
+  const res = await apiRequest('GET', path, undefined)
+  if (res.status >= 200 && res.status < 300) return res.text
+  const message = res.body && typeof res.body.error === 'string' ? res.body.error : `the API answered ${res.status}`
+  throw new BacklogError(message, 1)
+}
+
+// Which mode a resolved store is in, read from the committed marker and nothing else — the CLI's copy of the server's `resolveSource`, restated rather than
+// imported for the reason `labels.ts` documents at length: a plugin skill's `tools/` is installed as a standalone copy of what was pushed, with no build step
+// and no path back into the repo.
+//
+// Three answers. `files` for no marker and for an explicit `{"kind":"files"}` — the implicit case is every project on this machine today. `api` for a `github`
+// marker with a usable repo. `bad` for everything else, INCLUDING a `github` marker whose repo is malformed: the load-bearing negative is the same one
+// `resolveSource` carries, that an unreadable marker must never fall back to files. Falling back would make this tool write item files into a project whose
+// items live on GitHub, on one machine, where nothing would ever report them.
+function sourceMode(backlog) {
+  const marker = path.join(backlog, SOURCE_MARKER)
+  if (!fs.existsSync(marker)) return { kind: 'files' }
+
+  let parsed
+  try {
+    parsed = JSON.parse(fs.readFileSync(marker, 'utf8'))
+  } catch (e) {
+    return { kind: 'bad', message: `${marker}: cannot be read as JSON (${e.message})` }
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { kind: 'bad', message: `${marker}: expected an object with a string "kind"` }
+  }
+  if (parsed.kind === 'files') return { kind: 'files' }
+  if (parsed.kind === 'github') {
+    if (!isValidRepo(parsed.repo)) return { kind: 'bad', message: `${marker}: names kind "github" with no valid "repo" (expected "owner/name")` }
+    return { kind: 'api', repo: parsed.repo }
+  }
+  return { kind: 'bad', message: `${marker} names source kind ${JSON.stringify(String(parsed.kind))}, which this tool cannot write to` }
+}
+
+// `requireBacklog` plus the mode. Every command that acts on an item goes through this one function, so "which mode am I in" is asked once per command and in
+// one place — a second resolution path is how one verb ends up writing a file in a project every other verb treats as a tracker.
+function requireStore() {
+  const r = requireBacklog()
+  if (!r.ok) return r
+  const mode = sourceMode(r.resolved.backlog)
+  if (mode.kind === 'bad') {
+    console.error(mode.message)
+    return { ok: false, code: 1 }
+  }
+  return { ...r, mode }
+}
+
+// The id a tracker project's routes take, from whatever the caller typed. `31`, `#31` and this project's own URN all mean `#31`.
+//
+// A FILE-shaped id is refused with its own sentence rather than falling through to "not an issue": `task-31` in a tracker project is somebody carrying a habit
+// across from a files project, and naming that is more use than a shape complaint. A URN for another repo is refused too — this project's credential does not
+// write to somebody else's repository.
+function trackerId(id, repo) {
+  if (/^[a-z]+-\d+$/.test(id)) {
+    throw new BacklogError(`in a tracker project an item is #<n> — ${id} is a file id`, 1)
+  }
+  if (id.startsWith('gh:')) {
+    const m = /^gh:([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)#(\d+)$/.exec(id)
+    if (m === null) throw new BacklogError(`not an item id: ${JSON.stringify(id)}`, 1)
+    if (m[1] !== repo) throw new BacklogError(`${id} names ${m[1]}, but this project is connected to ${repo}`, 1)
+    return `#${m[2]}`
+  }
+  const digits = id.startsWith('#') ? id.slice(1) : id
+  if (!/^\d+$/.test(digits) || Number(digits) <= 0) throw new BacklogError(`not an item id: ${JSON.stringify(id)}`, 1)
+  return `#${digits}`
+}
+
+// Who this session is, for the claim protocol. `CLAUDE_CODE_SESSION_ID` when there is one — the same identity `sessionTokensSince` reads a transcript by, so a
+// claim and its token bill name the same session. Otherwise `<user>@<host>`, which is stable across the two PROCESSES `start` and `stop` run in and honest
+// about who it names: a person at a terminal, on one machine, rather than a session that does not exist.
+function sessionIdentity(env = process.env) {
+  const id = env.CLAUDE_CODE_SESSION_ID
+  if (typeof id === 'string' && id.trim() !== '') return id.trim()
+  return `${os.userInfo().username}@${os.hostname()}`
+}
+
+// Read a file the caller named, as bytes, for the flags that carry an item's text (`--body`, `--outcome`). Its own helper so every one of them reports a
+// missing file the same way — and so none of them silently sends an empty body, which for `body` would blank an issue.
+function readTextFile(file, flag) {
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch (e) {
+    throw new BacklogError(`cannot read ${flag} file ${file}: ${e.message}`, 1)
+  }
+}
+
+// `4m`, `2h`, `36s` — the age a refusal prints for a holder's heartbeat. Rough on purpose: the question it answers is "is that session plausibly still alive",
+// and a caller deciding whether to wait does not need seconds past a minute.
+function roughAge(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.floor(minutes / 60)}h`
+}
+
 // Frontmatter is a `key: value` line splitter, not a YAML subset: one fenced
 // block of scalar lines between two `---` markers. `tags` is the one key
 // that becomes a list, by splitting its scalar value on commas — it never
@@ -1701,17 +1893,24 @@ commands:
   start       mark an open bug or task as in progress
   stop        clear the in-progress marker
   connect     point this project's backlog at a tracker (github)
-  unregister  drop a project from the board registry by path`
+  unregister  drop a project from the board registry by path
+
+tracker projects only (backlog/source.json names github):
+  heartbeat   say this session still holds an item
+  comment     append a comment to an item
+  body        replace an item's body (groom's only write)`
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
+       backlog.mjs new <section> <title> --body <file> [--from <id>] [--kind chore|debt]   (tracker projects)
 
 sections: bugs, ideas, tasks, refactors, out-of-scope`
 
 const BOARD_USAGE = `usage: backlog.mjs board [--section <bugs|ideas|tasks|refactors>] [--json]`
 
-const SHOW_USAGE = `usage: backlog.mjs show <id>`
+const SHOW_USAGE = `usage: backlog.mjs show <id> [--json]`
 
-const MOVE_USAGE = `usage: backlog.mjs move <id> done|out-of-scope`
+const MOVE_USAGE = `usage: backlog.mjs move <id> done|out-of-scope
+       backlog.mjs move <id> done|out-of-scope [--outcome <file>]   (tracker projects)`
 
 // The path is spelled out in the usage line because it is mandatory: see the
 // CLI block below for why this verb has no cwd default when every other one
@@ -1734,7 +1933,19 @@ const START_STOP_USAGE = `usage: backlog.mjs start <id> [--as groom|execute]
 // own call shape to do it. `owner/repo` is optional (derived from `origin` when absent) and shown in brackets to say so.
 const CONNECT_USAGE = `usage: backlog.mjs connect github [owner/repo] [--no-forms]`
 
-export function main(argv) {
+// The three verbs that exist only in a tracker project. Each names the routes it needs, which is why they are not in files mode: there is no item file to
+// heartbeat, no timeline to comment on, and a files body is edited by whoever is holding the file.
+const HEARTBEAT_USAGE = `usage: backlog.mjs heartbeat <id>`
+const COMMENT_USAGE = `usage: backlog.mjs comment <id> --body <file>`
+const BODY_USAGE = `usage: backlog.mjs body <id> --body <file> --if-updated-at <iso>`
+
+// `async` since task-46: a tracker project routes every command through the local API, and `fetch` is asynchronous. `files` mode makes no call at all, so a
+// project with no marker runs exactly the synchronous code it always did — the `await`s below are never reached.
+//
+// The entry guard at the bottom of this file becomes `process.exitCode = await main(...)`, which is safe for the identical reason the synchronous form was:
+// every asynchronous thing this file starts is awaited to completion before `main` returns, and the one socket it opens is closed by `connection: close`. See
+// that guard's own comment.
+export async function main(argv) {
   const [cmd] = argv
 
   if (cmd === 'root') {
@@ -1747,6 +1958,22 @@ export function main(argv) {
   if (cmd === 'init') {
     const r = resolveRootOrFail()
     if (!r.ok) return r.code
+
+    // A connected project is already initialised, and `init` says so and stops rather than creating nine empty directories beside a marker that says the
+    // items are somewhere else. It still REGISTERS, which is the one thing a fresh clone needs before the board can serve it — and is why this is exit 0
+    // rather than a refusal: `backlog-capture` runs `init` unconditionally as its first step, on every project, and a refusal here would make capturing into
+    // a tracker project impossible. (Spec §6.5 says `init` refuses; the deviation is recorded in the task item's Outcome.)
+    const mode = sourceMode(r.resolved.backlog)
+    if (mode.kind === 'bad') {
+      console.error(mode.message)
+      return 1
+    }
+    if (mode.kind === 'api') {
+      console.log(`already connected: ${r.resolved.root} → github ${mode.repo}`)
+      registerBestEffort(r.resolved.root)
+      return 0
+    }
+
     const created = init(r.resolved.backlog)
     if (created.length === 0) {
       console.log(`already initialized: ${r.resolved.backlog}`)
@@ -1775,15 +2002,64 @@ export function main(argv) {
     }
 
     let from
+    let bodyFile
+    let kind
     for (let i = 3; i < argv.length; i++) {
       if (argv[i] === '--from') {
         from = argv[i + 1]
+        i++
+      } else if (argv[i] === '--body') {
+        bodyFile = argv[i + 1]
+        i++
+      } else if (argv[i] === '--kind') {
+        kind = argv[i + 1]
         i++
       }
     }
 
     const r = resolveRootOrFail()
     if (!r.ok) return r.code
+
+    const mode = sourceMode(r.resolved.backlog)
+    if (mode.kind === 'bad') {
+      console.error(mode.message)
+      return 1
+    }
+
+    /* A tracker project has no path for a caller to write to, so `new` stops being "print what to write" and becomes the write itself — which is why `--body`
+       is REQUIRED here and REFUSED in files mode. The two modes' contracts are opposites and deliberately so: in files mode the skill composes the body and
+       writes the file, and a `--body` flag would be a second writer of item files; in API mode there is no file, so the body has to travel with the request. */
+    if (mode.kind === 'api') {
+      if (!bodyFile) {
+        console.error(NEW_USAGE)
+        return 1
+      }
+      try {
+        const body = readTextFile(bodyFile, '--body')
+        // `--from` accepts whatever `<id>` spelling the caller has; the server prepends `_From #<n>._` to the body.
+        const payload = { project: registryRoot(r.resolved.root), section, title, body }
+        if (from) payload.from = trackerId(from, mode.repo)
+        /* A refactor's flavour, which a files capture writes as a `kind:` frontmatter line and a tracker carries as a `kind:*` label. It needs a flag because
+           there is no file for the caller to add the line to. An unknown value is REFUSED by the server rather than dropped — GitHub creates an unknown label
+           silently on first use, so a dropped one would surface as a mystery grey label instead of a complaint. */
+        if (kind) payload.kind = kind
+        const created = await apiPost('create', payload)
+        console.log(created.id)
+        console.log(created.url)
+        console.log(created.urn)
+      } catch (e) {
+        if (!(e instanceof BacklogError)) throw e
+        console.error(e.message)
+        return e.code
+      }
+      registerBestEffort(r.resolved.root)
+      return 0
+    }
+
+    if (bodyFile || kind) {
+      console.error(NEW_USAGE)
+      return 1
+    }
 
     let fullId, filename
     try {
@@ -1843,14 +2119,36 @@ export function main(argv) {
       return 1
     }
 
-    const r = requireBacklog()
+    const r = requireStore()
     if (!r.ok) return r.code
 
     // Tolerant on purpose (see readOpenItems): a malformed item is reported
     // on stderr rather than aborting the whole board, so it never hides the
     // items that ARE readable. `problems` is checked once at the very end,
     // after whatever output below could still be produced.
-    const { items: openItems, problems } = readOpenItems(r.resolved.backlog)
+    //
+    // A tracker project reads the same board off `GET /api/items` and lands in the SAME rows: `{ id, section, title, created, ageDays, started }` is what the
+    // printer below takes, and building it in two places keeps one printer rather than two that drift. The API's own `errors` array is this mode's
+    // `problems`, which is the same tolerant contract one layer up — each entry is already subject-prefixed.
+    let openItems
+    let problems
+    if (r.mode.kind === 'api') {
+      const project = registryRoot(r.resolved.root)
+      let index
+      try {
+        index = await apiGet('/api/items')
+      } catch (e) {
+        if (!(e instanceof BacklogError)) throw e
+        console.error(e.message)
+        return e.code
+      }
+      openItems = (index.items ?? [])
+        .filter((it) => it.projectPath === project && it.status === 'open')
+        .map((it) => ({ id: it.id, section: it.section, title: it.title, created: it.created, path: it.path, data: { started: it.started } }))
+      problems = index.errors ?? []
+    } else {
+      ;({ items: openItems, problems } = readOpenItems(r.resolved.backlog))
+    }
     let items = openItems.map((item) => ({ ...item, ageDays: ageDaysSince(item.created), started: item.data.started ?? '' }))
     if (sectionFlag !== undefined) {
       items = items.filter((item) => item.section === sectionFlag)
@@ -1895,9 +2193,56 @@ export function main(argv) {
       console.error(SHOW_USAGE)
       return 1
     }
+    const json = argv.includes('--json')
 
-    const r = requireBacklog()
+    const r = requireStore()
     if (!r.ok) return r.code
+
+    /* In a tracker project `show` prints the BODY as well, and that is the one place its contract differs between the two modes — for the reason spec §6.5
+       gives: there is no file for the skill to read afterwards. In files mode `show` deliberately prints the path and the frontmatter only, and the skill
+       reads the file itself; here the three reads this makes (the item, its body, its claim) are the whole of what a skill can learn about an item. */
+    if (r.mode.kind === 'api') {
+      try {
+        const project = registryRoot(r.resolved.root)
+        const wanted = trackerId(id, r.mode.repo)
+        const index = await apiGet('/api/items')
+        const item = (index.items ?? []).find((it) => it.projectPath === project && it.id === wanted)
+        if (item === undefined) throw new BacklogError(`no item ${wanted} in ${project}`, 1)
+
+        const body = await apiGetText(`/api/items/body?path=${encodeURIComponent(item.path)}`)
+        const claim = await apiGet(`/api/items/claim?project=${encodeURIComponent(project)}&id=${encodeURIComponent(wanted)}`)
+
+        if (json) {
+          console.log(JSON.stringify({ urn: item.path, item, body, updatedAt: item.updated, claim }))
+          return 0
+        }
+
+        // A frontmatter-SHAPED block rather than real frontmatter: an issue has none, and this is the one rendering that lets a skill written against the
+        // files store read a tracker item without learning a second format. The keys are the ones a skill actually reads.
+        console.log(item.path)
+        console.log('---')
+        console.log(`id: ${item.id}`)
+        console.log(`title: ${item.title}`)
+        console.log(`created: ${item.created}`)
+        console.log(`updated: ${item.updated}`)
+        console.log(`started: ${item.started}`)
+        console.log(`phase: ${item.phase}`)
+        console.log(`groom-elapsed: ${item.groomElapsed}`)
+        console.log(`execute-elapsed: ${item.executeElapsed}`)
+        console.log(`groom-tokens: ${item.groomTokens}`)
+        console.log(`execute-tokens: ${item.executeTokens}`)
+        console.log(`assignee: ${item.assignee ?? ''}`)
+        console.log(`labels: ${(item.tags ?? []).join(', ')}`)
+        console.log('---')
+        console.log('')
+        process.stdout.write(body)
+      } catch (e) {
+        if (!(e instanceof BacklogError)) throw e
+        console.error(e.message)
+        return e.code
+      }
+      return 0
+    }
 
     let item
     try {
@@ -1925,8 +2270,38 @@ export function main(argv) {
       return 1
     }
 
-    const r = requireBacklog()
+    let outcomeFile
+    for (let i = 3; i < argv.length; i++) {
+      if (argv[i] === '--outcome') {
+        outcomeFile = argv[i + 1]
+        i++
+      }
+    }
+
+    const r = requireStore()
     if (!r.ok) return r.code
+
+    /* `--outcome` is API-mode only, and refused in files mode for the same reason `new --body` is: in a files project the Outcome is already IN the file the
+       caller wrote before calling `move`, and accepting a second copy of it here would make this command a writer of item bodies. On a tracker there is no
+       file, so the closing comment is the only place that text can live. */
+    if (r.mode.kind === 'api') {
+      try {
+        const payload = { project: registryRoot(r.resolved.root), id: trackerId(id, r.mode.repo), status: dest }
+        if (outcomeFile) payload.outcome = readTextFile(outcomeFile, '--outcome')
+        const moved = await apiPost('state', payload)
+        console.log(moved.url)
+      } catch (e) {
+        if (!(e instanceof BacklogError)) throw e
+        console.error(e.message)
+        return e.code
+      }
+      return 0
+    }
+
+    if (outcomeFile) {
+      console.error(MOVE_USAGE)
+      return 1
+    }
 
     let newPath
     try {
@@ -2016,8 +2391,93 @@ export function main(argv) {
       return 1
     }
 
-    const r = requireBacklog()
+    const r = requireStore()
     if (!r.ok) return r.code
+
+    /* The tracker's start/stop is the claim protocol (spec §6.3), and it reproduces `startItem`/`stopItem`'s billing semantics exactly — the same four
+       accumulating counters behind the same one gate — with the claim comment standing in for frontmatter, since a tracker item has none.
+       Three differences from files mode, each of them forced rather than chosen:
+
+         * `--as` is REQUIRED. The route needs a phase to bill against, where a files `start` can legitimately stamp `started:` with nothing to bill.
+         * `stop` has to REDISCOVER the claim, because `start` and `stop` are two processes and the comment id is what identifies it. `GET /api/items/claim`
+           is that read.
+         * The CLI is the biller and sends totals. The server seeds a new claim from the newest prior one, so one comment is a whole history, and the side
+           holding the clock and the transcript is the side that computes — exactly where `stopItem` already is. */
+    if (r.mode.kind === 'api') {
+      try {
+        const project = registryRoot(r.resolved.root)
+        const wanted = trackerId(id, r.mode.repo)
+        const urn = `gh:${r.mode.repo}${wanted}`
+
+        if (cmd === 'start') {
+          if (phase === undefined) {
+            console.error(`${START_STOP_USAGE}\n\nin a tracker project start needs --as: the claim records which phase is running`)
+            return 1
+          }
+          let claimed
+          try {
+            claimed = await apiPost('claim', { project, id: wanted, phase, session: sessionIdentity() })
+          } catch (e) {
+            /* A lost race is reported with the AGE of the holder's heartbeat, which the server computed on its own clock and put in the payload — the CLI
+               must not subtract two clocks to get it. The age is the whole of what a reader needs in order to decide what to do: fresh means wait or ask,
+               stale past fifteen minutes means claim again and let the protocol retire it. */
+            if (e instanceof BacklogError && e.status === 409 && e.payload && e.payload.holder) {
+              const h = e.payload.holder
+              console.error(`${wanted} is already in progress (session ${h.session}, heartbeat ${roughAge(h.ageMs)} ago)`)
+              return 1
+            }
+            throw e
+          }
+          console.log(urn)
+          console.log(`claim ${claimed.commentId}`)
+          // Said every time rather than in the skill's prose alone, because the failure it prevents is silent: a claim that stops answering is retired by the
+          // next session that contests it, and the work carries on believing it still holds the item.
+          console.log(`a claim reads stale after 15 min without a heartbeat — run backlog.mjs heartbeat ${wanted} between long steps`)
+          return 0
+        }
+
+        const held = await apiGet(`/api/items/claim?project=${encodeURIComponent(project)}&id=${encodeURIComponent(wanted)}`)
+        if (held === null || held.record.released !== undefined) {
+          console.error(`${wanted} is not in progress`)
+          return 1
+        }
+
+        const session = sessionIdentity()
+        const ageMs = Math.max(0, Date.now() - Date.parse(held.record.heartbeat))
+        if (held.record.session !== session && ageMs < CLAIM_STALE_MS) {
+          console.error(`${wanted} is held by session ${held.record.session} (heartbeat ${roughAge(ageMs)} ago) — not this one`)
+          return 1
+        }
+
+        const payload = { project, id: wanted, commentId: held.commentId, session, reason: sawAbandonFlag ? 'abandoned' : 'stopped' }
+        /* `--abandon` sends NO counters at all, which is not the same as sending zeros: the server keeps whatever the claim was seeded with, and zeros would
+           erase every earlier session's work on the item. Same reasoning `stopItem`'s own abandon branch carries — the interval was not work anyone did.
+           `--keep-started` is accepted and inert here: a claim's `at` is permanent, so there is nothing for it to preserve. */
+        if (!sawAbandonFlag) {
+          const stamp = new Date().toISOString()
+          const seconds = Math.max(0, Math.floor((Date.parse(stamp) - Date.parse(held.record.at)) / 1000))
+          const counters = { ...held.record.counters }
+          const elapsedKey = held.record.phase === 'execute' ? 'executeElapsed' : 'groomElapsed'
+          const tokenKey = held.record.phase === 'execute' ? 'executeTokens' : 'groomTokens'
+          counters[elapsedKey] = (counters[elapsedKey] ?? 0) + seconds
+          // An unattributable count adds nothing rather than zero, the same rule `stopItem` follows: absence is a value, and `0` would read as a session that
+          // spent nothing.
+          const tokens = sessionTokensSince(held.record.at, stamp)
+          if (typeof tokens === 'number' && Number.isFinite(tokens)) {
+            counters[tokenKey] = (counters[tokenKey] ?? 0) + Math.max(0, Math.floor(tokens))
+          }
+          payload.counters = counters
+        }
+
+        await apiPost('release', payload)
+        console.log(urn)
+      } catch (e) {
+        if (!(e instanceof BacklogError)) throw e
+        console.error(e.message)
+        return e.code
+      }
+      return 0
+    }
 
     let itemPath
     try {
@@ -2032,6 +2492,96 @@ export function main(argv) {
 
     console.log(itemPath)
     return 0
+  }
+
+  /* The three verbs that exist only in a tracker project (task-46, Decision 2 of the item). Each one exists because one of §6.2's routes needs a caller:
+     execute's failure-path Outcome (`comment`), groom's body patch (`body`), and liveness (`heartbeat`).
+
+     In files mode each is exit 1 with its own sentence rather than a shared "unknown command", because the command IS known — it just has no meaning against a
+     store on disk, and saying which is more use than pretending the verb does not exist. */
+  if (cmd === 'heartbeat' || cmd === 'comment' || cmd === 'body') {
+    const id = argv[1]
+    const usage = cmd === 'heartbeat' ? HEARTBEAT_USAGE : cmd === 'comment' ? COMMENT_USAGE : BODY_USAGE
+    if (!id) {
+      console.error(usage)
+      return 1
+    }
+
+    let bodyFile
+    let ifUpdatedAt
+    for (let i = 2; i < argv.length; i++) {
+      if (argv[i] === '--body') {
+        bodyFile = argv[i + 1]
+        i++
+      } else if (argv[i] === '--if-updated-at') {
+        ifUpdatedAt = argv[i + 1]
+        i++
+      }
+    }
+    if ((cmd === 'comment' || cmd === 'body') && !bodyFile) {
+      console.error(usage)
+      return 1
+    }
+    if (cmd === 'body' && !ifUpdatedAt) {
+      console.error(usage)
+      return 1
+    }
+
+    const r = requireStore()
+    if (!r.ok) return r.code
+
+    if (r.mode.kind !== 'api') {
+      const why =
+        cmd === 'heartbeat'
+          ? 'files projects have no heartbeat: a `started:` stamp in the item file is the marker, and nothing expires it'
+          : cmd === 'comment'
+            ? 'files projects have no comment timeline: write the text into the item file instead'
+            : "files projects have no body route: edit the item file, which is the store's only writable surface"
+      console.error(why)
+      return 1
+    }
+
+    try {
+      const project = registryRoot(r.resolved.root)
+      const wanted = trackerId(id, r.mode.repo)
+
+      if (cmd === 'heartbeat') {
+        const held = await apiGet(`/api/items/claim?project=${encodeURIComponent(project)}&id=${encodeURIComponent(wanted)}`)
+        if (held === null || held.record.released !== undefined) {
+          console.error(`${wanted} is not in progress`)
+          return 1
+        }
+        await apiPost('heartbeat', { project, id: wanted, commentId: held.commentId })
+        console.log(`gh:${r.mode.repo}${wanted}`)
+        return 0
+      }
+
+      const body = readTextFile(bodyFile, '--body')
+      if (cmd === 'comment') {
+        const posted = await apiPost('comment', { project, id: wanted, body })
+        console.log(posted.url)
+        return 0
+      }
+
+      /* Groom's write, and the ONE route that rewrites a body (§6.4). A 409 means somebody edited the issue between the `show --json` this caller read and
+         this call — re-read and re-apply is the only safe answer, and the message says so rather than offering a force. */
+      try {
+        const patched = await apiPost('body', { project, id: wanted, body, ifUpdatedAt })
+        console.log(patched.updatedAt)
+      } catch (e) {
+        if (e instanceof BacklogError && e.status === 409) {
+          const now = e.payload && typeof e.payload.updatedAt === 'string' ? e.payload.updatedAt : 'unknown'
+          console.error(`${wanted} changed since you read it (now ${now}) — show it again and re-apply`)
+          return 1
+        }
+        throw e
+      }
+      return 0
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
   }
 
   // `connect github [owner/repo] [--no-forms]` — the first writer of the committed source marker.
@@ -2198,6 +2748,11 @@ export function main(argv) {
 // before the call returns, and there is no timer and no server anywhere in it.
 // A future edit that adds one must close its handle rather than restore
 // `process.exit()`, which would bring the truncation back with it.
+//
+// `await main(...)` since task-46, and the invariant's reasoning is untouched by the `await` — it is `process.exit()` that truncates a pipe, not asynchrony.
+// What the rule actually requires is that nothing be left holding the event loop open when `main` returns, and API mode keeps that: every `fetch` is awaited
+// to completion before the value comes back, and each one sends `connection: close`, so no pooled socket outlives the call. Assert it rather than trust it —
+// `backlog.test.mjs`'s API-mode children are expected to EXIT, not to hang.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exitCode = main(process.argv.slice(2))
+  process.exitCode = await main(process.argv.slice(2))
 }

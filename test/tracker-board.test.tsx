@@ -13,13 +13,23 @@ import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, Pr
 /**
  * What a tracker project looks like ON THE BOARD (task-45, spec §5.5): the
  * band's poll age, the card's untyped badge, its link-out and its assignee,
- * the item modal's age beside the cached body — and, most load-bearing of the
- * six, NO dispatch control at all.
+ * the item modal's age beside the cached body — and, since task-46, a dispatch
+ * control exactly like every other card's.
+ *
+ * That last one is INVERTED from what this suite asserted in phase 2, and the
+ * inversion is the dispatch lift. Task-45 hid the control because a spawned
+ * session would have run the file-writing skills against a project with no
+ * files; phase 3 made that false — the skills write through the API and the
+ * claim protocol gives a tracker item a `started` for `progressBlock` to read —
+ * so `deriveAction` no longer asks what an item's source is.
+ *
+ * What did NOT come back with it is the ORCHESTRATOR, whose control still hides
+ * for a tracker project until phase 4. The two used to be one line and are now
+ * two rules, so this suite states both.
  *
  * One files project beside one GitHub project in every render, deliberately.
- * Each case then asserts both halves of its rule at once — the tracker card has
- * no dispatch button AND the files card still does — which is the only shape
- * that can catch a change that hides the control for everybody.
+ * Each case then asserts both halves of its rule at once — which is the only
+ * shape that can catch a change that applies to everybody.
  */
 
 const FILES_PATH = '/abs/alpha';
@@ -147,17 +157,48 @@ function card(title: string): HTMLElement {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  // The board persists its project filter to `localStorage` (`lib/settings.ts`),
+  // and jsdom keeps one store for the whole file — so the Orchestrate case
+  // below, which narrows the filter to make the control appear at all, would
+  // otherwise leave every later case rendering ONE project's cards and failing
+  // on the other's. Cleared here rather than in that one case, because the next
+  // test to touch a persisted setting would rediscover this the hard way.
+  localStorage.clear();
 });
 
 describe('dispatch on a tracker project', () => {
-  it('draws no dispatch control at all, while a files card in the same render still has one', async () => {
+  it('draws a dispatch control, exactly as a files card in the same render does', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true })]);
+
+    expect(within(card('an issue')).getByRole('button', { name: /execute/i })).toBeInTheDocument();
+    expect(within(card('a files bug')).getByRole('button', { name: /execute/i })).toBeInTheDocument();
+  });
+
+  /* The per-item blocks work for a tracker item for free, which is the other
+     half of the lift: `progressBlock` reads the `started` a live claim fills,
+     with no tracker-specific branch anywhere. DISABLED rather than hidden —
+     CLAUDE.md's rule — because it is a fact about the item, not the project. */
+  it('disables the control for an item a live claim holds', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true, started: new Date().toISOString(), phase: 'groom' })]);
+
+    const button = within(card('an issue')).getByRole('button', { name: /execute/i });
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  /* The orchestrator half, which did NOT lift. Hidden rather than disabled:
+     there is nothing a reader could do to make it appear before phase 4, so a
+     disabled button with a reason would invite waiting for something that is
+     not coming. Both directions in one case, because a change that hid the
+     control for everybody would pass either half alone. */
+  it('hides the Orchestrate control for a tracker project and keeps it for a files one', async () => {
     await renderBoard([item({}), issueItem()]);
 
-    // Absence, not a disabled control: a spawned session would run the
-    // file-writing skills against a project with no files, so this is an
-    // environment-level block and CLAUDE.md's rule is that those HIDE.
-    expect(within(card('an issue')).queryByRole('button', { name: /groom|execute|capture/i })).toBeNull();
-    expect(within(card('a files bug')).getByRole('button', { name: /execute/i })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Project'), FILES_PATH);
+    expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText('Project'), TRACKER_PATH);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument());
   });
 });
 

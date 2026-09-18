@@ -940,10 +940,12 @@ there too.
 The controller rebuilds the dispatch body field by field — a new field reaches the service only when added there too — and checks `action` with `isAgentAction`,
 never a hand-written comparison chain: that chain is a second copy of the vocabulary, and it is the copy that goes stale. **`AgentAction` has three members**,
 and the third is why the two archives no longer share a branch: `deriveAction` returns `capture` for an out-of-scope item, checked by SECTION and BEFORE the
-`status !== 'open'` line that would otherwise swallow a `terminal` item. Since task-45 one check runs ahead of even that: an item whose `source` is not `files`
-derives `null`, because a dispatched session runs the file-writing skills and a tracker project has no files for them to write — see
-[a tracker project has no item files](#a-tracker-project-has-no-item-files-and-that-shows-up-in-four-places) for why that answer lives here rather than in
-`DispatchButton`. A `done/` item still derives `null` — history genuinely has no next step, where a
+`status !== 'open'` line that would otherwise swallow a `terminal` item. Task-45 put one check ahead of even that — an item whose `source` was not
+`files` derived `null` — and task-46's dispatch lift REMOVED it: the skills write a tracker project's items through the API, so all three actions are now as
+available for an issue as for a file, and `deriveAction` asks nothing about `source`. See
+[a tracker project has no item files](#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places) for what replaced it, and for why the
+orchestrator's own refusal — which did not lift — is now a gate of its own on each side rather than a consequence of this function. A `done/` item still
+derives `null` — history genuinely has no next step, where a
 rejection does. Capture spawns `backlog-capture` for a **new** item citing `from: <id>`; the original stays rejected and `moveItem` still refuses every move out
 of `out-of-scope/`. Archive's Out of scope column is the only surface that renders the control.
 
@@ -2316,15 +2318,33 @@ board would exhaust 5,000 requests an hour in minutes. It is kept honest by bein
 age (`futin/x · polled 12 s ago`), the item modal prints it beside the body it drew from that same cache, and the Trackers card prints it per project. A cache
 whose staleness is on screen is a different object from one that is not.
 
-**A `304` leaves the cache and `polledAt` exactly as they were.** Every tick sends `If-None-Match`, and an unchanged repo answers `304` at no cost against the
-budget. The task item's authoritative test case says the age does not move on one; spec §12.2 says it does. The item won, being the work order, and the
-consequence is stated here so the next phase settles it rather than rediscovering it: the rendered age currently means "how old are these items", not "how long
-since we last checked", and those differ on a repo nobody is editing.
+**A `304` leaves the cache unchanged and MOVES `polledAt`.** Every tick sends `If-None-Match`, and an unchanged repo answers `304` at no cost against the
+budget. Task-45 shipped the opposite reading — its authoritative test case said the age did not move, against spec §12.2, and the disagreement was recorded for
+the next phase to settle rather than rediscover. Task-46 settled it in the spec's favour, on 2026-09-18, and this paragraph is the record of why.
 
-**The comments request is made on every tick and read by nothing.** One conditional request covers every comment in the repo, including edits, which is what
-makes phase 3's per-item claim watching cheap. Making the call now means the polling loop's shape, its budget and its tests do not move in the phase that also
-introduces the protocol they feed. `test/tracker-poll.test.ts` asserts the call explicitly, precisely because a call with no reader is what a later edit deletes
-as dead.
+The argument that won: a `304` IS a successful check. It proves the repo is reachable, the token works, and nothing has changed since — which is exactly what
+the rendered age is read for. Under the old reading a healthy connection to a repo nobody is editing looked progressively more broken, its age climbing past an
+hour while the poller was in fact confirming the state every fifteen seconds. That is the opposite of what a visible age exists to tell an operator, and it is
+the failure mode that outweighs the other reading's one merit — that "how old are these items" is also a true thing somebody might want. It is still available
+(an item's own `updated` is on every row) and it is not what the band's line claims.
+
+**Issues and comments each have their own high-water mark, and each read paginates to the end.** They are two streams with independent clocks, and treating
+them as one was a defect task-46's own review caught before it merged: `syncRepo` reads issues first, `absorbIssues` advances the mark to the newest issue's
+`updated_at`, and the comments request then sent THAT as its `since` — asking for "every comment at or after the most recently touched issue's timestamp". A
+claim on an issue that anything else has outlived was therefore invisible to a fresh process, permanently, because no later response ever mentions an unedited
+comment again. Nothing read the cache before task-46, so the gap had been harmless and silent; the moment the board's `started`/`phase` and `backlog.mjs stop`
+started reading it, it meant a held item drawn as free and a claim the CLI could not give back. Pagination is the same rule one step on: the issues loop always
+followed `Link` and the comments read did not, so a claim past the first page was lost the same way.
+
+That is also why `readClaim` does not trust a cache MISS. A miss means "this process has not seen it", never "nobody holds it" — a server that started after
+the claim, or a second machine's server, has every right to one — so it falls back to a single fresh per-issue read. The cache stays the fast path and the
+common one; the fallback is what makes the answer safe to act on.
+
+**The comments request is made on every tick, and since task-46 it has a reader.** One conditional request covers every comment in the repo, including edits,
+which is what makes per-item claim watching cheap. Phase 2 made the call with nothing reading it, deliberately, so that the polling loop's shape, its budget and
+its tests would not move in the phase that also introduced the protocol they feed — and that bet paid: task-46 added `TrackerPollerService.comments()` over the
+same cache and changed nothing about the loop. `test/tracker-poll.test.ts` asserted the call explicitly while it had no reader, precisely because a call with no
+reader is what a later edit deletes as dead.
 
 **Rate limits are a state, not an exception.** Nothing in `github.client.ts` throws on an HTTP status: every response — including a transport failure, which
 surfaces as `status: 0` — comes back as a value the poller turns into `access` and `detail`, because every one of them is something the board renders rather
@@ -2340,24 +2360,35 @@ than a lifecycle write: the issue→item mapping cannot work without the set. `s
 four `type:*` labels and CANNOT import that module — a skill's `tools/` is a standalone copy of what was pushed — so the agreement is enforced the other way
 round: `test/tracker-labels.test.ts` reads the skill's source as text and asserts the two lists match. A comment asking two files to stay in step is what drifts.
 
-## A tracker project has no item files, and that shows up in four places
+## A tracker project has no item files, and that shows up in three places
 
-An issue is not a file, and four separate surfaces would each have got that wrong on their own (task-45, spec §5.3/§5.5).
+An issue is not a file, and three separate surfaces would each have got that wrong on their own (task-45, spec §5.3/§5.5). It was FOUR until task-46: dispatch
+was the fourth, and the section below records what happened to it, because "this used to be a consequence of having no files and is not one any more" is
+exactly the kind of fact a reader needs stated rather than silently removed.
 
-**Dispatch is hidden, not disabled.** `deriveAction` (`shared/agent.ts`) answers `null` for any item whose `source` is not `files`, as its FIRST line — ahead of
-the out-of-scope check, which would otherwise answer `capture` for a closed issue. A dispatched session runs the file-writing skills against a project with no
-files, so all three actions are wrong here rather than merely premature. It is answered there rather than as a fourth disabled state in `DispatchButton` because
-that is the distinction CLAUDE.md already pins: an environment-level block hides the control, a per-item one disables it, and "this project's items do not live
-in files" is a fact about the project. One implementation covers both sides — it is the module the server validates dispatch with — so the same line that hides
-the chip refuses a hand-made POST. Phase 3 lifts exactly this branch.
+**Dispatch is derived like any other item's, and its per-item block is the live claim (task-46).** Task-45 opened `deriveAction` with
+`if (item.source !== 'files') return null`, ahead of every other branch, because a dispatched session would have run the file-writing skills against a project
+with no files — all three actions were wrong there rather than merely premature. Phase 3 made that false in three separate ways at once, which is why the line
+came out rather than being loosened: the skills detect a tracker project from its own committed marker and write through the API (`backlog.mjs` in API mode),
+the claim protocol gives a tracker item a `started` for `progressBlock` to read, and `ItemsService.find` resolves a URN to the same `BacklogItem` a filesystem
+path resolves to, so `plan` and `dispatch` re-derive the action from exactly the object the board drew its button from.
+
+What did NOT lift with it is the ORCHESTRATOR, and the split is worth stating because the two used to be one line. A tracker project cannot be orchestrated
+until phase 4, so that refusal now needs a gate of its own on each side: `projectIsFiles` (`client/src/lib/tracker.ts`) hides the toolbar control — hidden, not
+disabled, because there is nothing a reader can do to make it appear — and `AgentsService.orchestrate` answers 400 `orchestrating a tracker project arrives in
+phase 4` BEFORE `resolveIds`. That ordering is load-bearing: `resolveIds` scans files, so without the gate it would find none of a tracker project's ids and
+409 each one as "not an open bug or task in this project", which is both wrong and unactionable.
 
 **`GET /api/items/uncommitted` answers `known: false`.** "Which item files differ from `main`" is not a question with a wrong answer for a tracker project; it is
 a question with no meaning, and `known: false` is the shape this endpoint already has for that. The Orchestrate sheet's existing `known` gate keeps the chip
 off, so nothing on the client changed. What did not change either: `uncommitted` stays a sibling endpoint rather than a `BacklogItem` field, and nothing derived
 reads it.
 
-**The body route dispatches on the ref's SHAPE, in one place.** `ItemsService.body` sends a `gh:<owner>/<repo>#<n>` URN to the GitHub adapter and anything else
-to files — the seam's one home for that decision, exactly where phase 1's comment said it would arrive. The shape test is the ref's and never the caller's:
+**The body route dispatches on the ref's SHAPE, in one place — and since task-46 so does the item lookup.** `ItemsService.body` sends a
+`gh:<owner>/<repo>#<n>` URN to the GitHub adapter and anything else to files — the seam's one home for that decision, exactly where phase 1's comment said it
+would arrive — and `ItemsService.find` makes the identical dispatch for the agents routes. `AgentsService.findItem`, which used to hold a private copy of the
+files adapter's allowlist-and-scan, is now a one-line delegate to it; that private copy was precisely why a tracker item had no dispatch, and removing it is
+half of the lift. The shape test is the ref's and never the caller's:
 nothing in the request says which source to ask, so a caller cannot route its own filesystem path to an adapter by asserting a kind, which is the same rule
 "dispatch derives the action, it never accepts one" states for the agents routes. The adapter then gates on the REGISTRY, exactly as the files allowlist does: a
 URN naming a repo no registered project is connected to answers `null` and the route 404s, rather than a repo merely sitting in the cache being readable.
@@ -2371,6 +2402,125 @@ label alphabetically AND an entry naming the issue joins `ItemsIndex.errors`, th
 A closed issue's section can change while its labels never do: `completed` (or no reason at all, which GitHub sent before 2022) is `done` with its section
 intact, and any other reason is `terminal` in `out-of-scope`. The `type:*` label stays on the issue, so the original type is recoverable — which the file store
 cannot do, since a rejected item moves into a flat directory that forgets it.
+
+## The seven item-write routes are guarded, refused for `files`, and serialised per item
+
+Task-46, spec §6.2. Until this branch every route in this server either read something or spawned a session; these seven CREATE AND CLOSE ISSUES in somebody's
+repository, with a credential the browser never sees. That is a strictly larger consequence than the dispatch route the origin guard was written for, which is
+why every one of them carries `@UseGuards(SameOriginPostGuard)` — one decorator on `ItemsWriteController`, so "is this route guarded" cannot become a
+per-method question. `test/agents-origin-guard.test.ts`'s list is where the guarded set lives, now keyed by full path because it spans two controllers.
+
+A JSON POST with NO `Origin` still passes, by the guard's existing rule, and that is not a hole this branch widened: `backlog.mjs` in API mode is exactly that
+caller. It is a Node process, not a browser; requiring an origin would break every skill while adding nothing a browser cannot forge anyway. The check that
+actually stops a cross-origin form is the content type, which a form cannot send without a preflight there is no CORS to answer.
+
+**One gate, four answers, and none of them makes a network call.** `ItemsService.writerFor(projectPath)` is the whole of it: a raw string compare against the
+registry's own `path` (deliberately not realpath — the `uncommitted` rule, and load-bearing for the same reason: realpath-ing an unregistered path would itself
+be a filesystem touch on a path this server was never given), then `resolveSource` per request, then the adapter's `writer`. It answers `unregistered` → 404,
+`files` → 400 `this project's items are files — the skills write them directly`, `unsupported` → 400 carrying `resolveSource`'s own path-prefixed reason, and
+otherwise the writer. `FilesSource` has NO `writer` field at all, and that absence is the rule rather than a gap: item files are written by the skills and by
+nothing else, and the one check that reads the field is what makes that true for all seven routes at once instead of seven routes each remembering to ask.
+
+**Every refusal is a value.** `ItemWriter` answers `WriteOutcome`, never throws, and `GithubClient` beneath it answers a `GithubResponse` for every status —
+the same posture, one layer down. The controller is the only place a `refused` becomes a status: `no-token` 503, `not-found` 404, `conflict` 409,
+`rate-limited` 429 with the reset TIME, anything else 502 carrying GitHub's own status. Each was chosen for what the READER can do about it — fix the
+environment, fix the id, re-read and retry, wait, or nothing local at all.
+
+**Serialised per item, absorbed into the cache, and `polledAt` untouched.** `GithubSource` keeps a `Map<urn, Promise>` and every write to one URN awaits the
+previous write to that URN: two local sessions (a groom and an execute in two terminals) would otherwise interleave inside the claim protocol's settle window
+and produce two live claims nobody resolves. Across machines the protocol itself is the guard. Each write's response is then upserted into the poller's cache,
+so a capture is on the board on the next read rather than up to fifteen seconds later — but `polledAt` does NOT move, because nothing was polled and the other
+issues in that cache do not have the freshness a moved stamp would claim for them.
+
+**The token never leaves the process.** It is read per call inside the adapter, and no response shape here carries it; a project with no token gets a 503
+naming the ENVIRONMENT VARIABLE, which is the thing an operator can act on.
+
+**There is an eighth route, and it is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
+every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
+`backlog.mjs stop` are two PROCESSES: `claim` answers the comment id that identifies the claim, and the `stop` that must release it has no other way to
+rediscover it. Without it the CLI could take an item and never give it back. Spec §6.2 names seven routes and not this one; the deviation is recorded in
+task-46's Outcome.
+
+## The claim protocol: lowest live comment id wins
+
+Task-46, spec §6.3. A claim has to be readable by every machine, editable in place, ordered consistently, and visible to a PERSON looking at the issue in
+GitHub's web UI. A label is not ordered; an assignee cannot carry counters; a hidden field does not exist. A comment is all four — which is why `renderClaim`
+writes a human sentence under the fenced JSON: somebody reading the timeline should see who holds the issue without knowing this protocol exists.
+
+**Why the LOWEST live comment id, and not the highest.** GitHub assigns comment ids monotonically, so lowest means "posted first", and every reader of the same
+comment list reaches the same verdict with no lock, no lease server and no clock they have to agree on. Highest — last writer wins — is not convergent at all:
+a third claimant arriving mid-race would change the answer for everyone who had already decided.
+
+**The sequence is list · post · settle · list · UNION, and the union is what decides.** GitHub's comment listing is eventually consistent by a fraction of a
+second, so a concurrent claimant can be absent from one list and present in the other; taking the second list alone would let both racers believe they won.
+`settleMs` is one second in production and is set to `0` by the suites, whose cases are about which comments are in the union rather than about waiting.
+
+The plan for task-46 wrote the first listing as happening AFTER the post. It is done before, and the difference is the counters: a seed read from a list made
+after our own post would have to come from the cache (up to a poll interval stale) or force a second edit of the comment just written. Listing first costs
+nothing — two listings either way — and the union still spans both, so the race semantics are untouched.
+
+**A loser DELETES its own comment; a stale claim is RELEASED, never deleted.** That distinction is the whole reason a claim is a comment rather than a flag. A
+losing claim is litter this call chain created seconds ago and nobody has read. A stale claim is the permanent record of work somebody did, carrying the
+counters to prove it — deleting one to tidy up a flag would erase the only evidence that the work happened. The retiring session writes
+`released: { reason: 'stale', by: <itself> }`, so the record even says who retired it.
+
+**Who may release: the holder always, ANYONE once the claim is dead.** The asymmetry is the same rule seen from the other side. A dead claim is not somebody's
+property, and requiring the original session to come back and clear it would wedge an issue on the crash of a process that is never returning.
+
+**The counters live in the claim, the server seeds and the CLI bills.** Spec §6.4 is explicit that counters never live in the body: the body is the item's text,
+groom rewrites it wholesale, and a number embedded in prose somebody edits in the web UI is a number that silently resets. A claim comment is machine-owned,
+which is the property frontmatter has for a files item. The server seeds a new claim from the newest prior one so that ONE comment is a whole history; the CLI
+computes the totals on release, because it holds the clock the session started on and the transcript the tokens are read from — exactly where `stopItem`
+already is. `--abandon` sends no `counters` key at all, and that is not the same as sending zeros: zeros would overwrite the seeded totals and erase every
+earlier session's work on the item.
+
+**`CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second fifteen minutes.** The two answer different questions — is the orchestrator run alive, is
+the session holding this issue alive — and today's answer is the same number. The alias exists so phase 4 can give a hand-driven skill claim a longer window
+without touching run semantics. It is a known tension rather than a solved problem: nothing heartbeats a hand groom automatically, so the skills' prose asks
+for `heartbeat` between long steps and the protocol retires whatever stops answering.
+
+**The mapper reads liveness NOWHERE.** `mapIssue` fills `started`/`phase` from an UNRELEASED claim without consulting its heartbeat, because the board's rule
+for a files item is "ANY stamp, fresh or stale" (`progressBlock`), and what retires a stale claim is the PROTOCOL, at the moment another session contests the
+issue. A mapper that expired claims on its own would show an item as free while the next `claim` call still had to fight for it. The counters come off the
+newest claim whether or not it is released, because they are the item's running totals rather than a fact about who holds it.
+
+## `isItemId` accepts three shapes
+
+Task-46. The predicate now admits `[a-z]+-\d+` (a files id), `#\d+` and `gh:<owner>/<repo>#\d+`, and the cap moved from 64 to 200 characters because GitHub
+allows a 39-character owner and a 100-character name, so a real issue's real URN can run to ~154 and a 64-cap would have answered `false` for it. The two
+nonsense cases the cap exists for — a 500-character blob, a `task-` followed by 500 digits — are refused exactly as before.
+
+`#` is the one shell metacharacter these shapes add, and it is worth saying plainly why that is safe HERE rather than trusting that it happens to be: nothing
+this predicate guards reaches a shell. The dispatch prompt is prose handed to a spawned session over JSON, and the orchestrate prompt — the ONE composition in
+this build that concatenates caller-supplied text — refuses a tracker project outright before `resolveIds` is ever called. If that refusal is ever lifted, this
+paragraph is the first thing to re-check: `orchestrate.mjs` reads its argv as tokens, and a `#` in one would need proving safe against THAT reader, not
+against this one.
+
+## `backlog.mjs` in a tracker project needs the stack up
+
+Task-46, spec §6.5. A project whose committed marker says `github` has no item files, so every command routes through the backlog-manager API on this machine,
+which holds the credential and does the writing. A project with no marker never reaches any of that code: `files` mode runs the same synchronous path it always
+did, and `test/…/backlog.test.mjs` asserts a files fixture makes zero HTTP requests across `init`/`new`/`show`/`board`/`start`/`stop`/`move`.
+
+**Mode is read from the marker and nothing else**, by `sourceMode` — the CLI's own copy of `resolveSource`, restated rather than imported for the reason the
+label list is: a plugin skill's `tools/` is a standalone copy of what was pushed, with no build step and no path back into this repo. It carries the same
+load-bearing negative: a marker this tool cannot read is exit `1`, NEVER a fallback to files. Falling back would write item files into a project whose items
+live on GitHub, on one machine, where nothing would ever report them missing.
+
+**There is no offline queue, deliberately.** A write parked on one laptop would be a second source of truth for an item's state, invisible to every other
+machine — which is the exact failure the tracker-backed direction exists to remove. A refused connection is exit `5`, a new code, naming the port and both ways
+to start the stack. A new code rather than reusing `1` because "the store said no" and "there is no store reachable at all" are different things to a caller and
+the second has the same fix every time.
+
+**`main` is async, and the entry guard awaits it.** The "all three skill CLIs exit through `process.exitCode`" rule is about `process.exit()` truncating a
+pipe, which asynchrony has nothing to do with; what it actually requires is that nothing hold the event loop open when `main` returns. Every `fetch` here is
+awaited to completion and each carries `connection: close`, so no pooled socket outlives the call. The source guard accepts `= await main(` for this file alone
+and still requires the synchronous form of the other two, which hold no asynchronous work at all.
+
+**Three spellings, one issue.** `31`, `#31` and this project's own URN all name the same item, because three different callers arrive with three different
+handles — a person types the number, a skill's prose says `#31`, and the board posts `BacklogItem.path`. A file-shaped id (`task-31`) and a URN naming another
+repository are each refused with their own sentence: the first is a habit carried across from a files project, the second is a caller asking this project's
+credential to write somewhere else.
 
 <!-- docs-sync:
   sources:

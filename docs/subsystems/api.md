@@ -1,9 +1,9 @@
 # The API
 
-Nest, one process, every route under `/api`. It owns five things: reading the registry, listing each registered project's items through whichever
-source owns them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, and —
-behind a switch that is off by default — asking another local process to start a Claude Code session. It writes no item file and
-no run file; the only bytes it owns are two files under `~/.backlog-manager/settings/`.
+Nest, one process, every route under `/api`. It owns five things: reading the registry, listing each registered project's items through whichever source owns
+them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, and — behind a switch
+that is off by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are two
+files under `~/.backlog-manager/settings/`.
 
 ## Modules
 
@@ -18,33 +18,63 @@ the question has no meaning — 404 for an unregistered project, and nothing cac
 
 A project's source is resolved per request from its own committed `backlog/source.json` (`sources/resolve.util.ts`), never cached and never stored — the same
 rule the registry read follows, for the same reason. No marker means `files`, the implicit source, which never has to be registered for that to work; a
-`{"kind":"github","repo":"owner/name"}` marker resolves to the GitHub adapter (task-45). A marker that is present and cannot be honoured — malformed, no string `kind`, or a kind with no adapter here — resolves `unsupported`:
-the project contributes **no items** and exactly one error (prefixed with the marker's path, like every scan error), and its `/api/projects` row reads
-`source: 'unsupported'` with zero counts and `missing: false`. It never reads as `files`; a tracker project whose marker this build cannot read would otherwise
-render a stale clone's files as ghosts. A project with no store at all still reads `missing: true` and `source: null`. `ItemsService` dispatches over the
-registered adapters and refuses two claiming one kind at boot.
+`{"kind":"github","repo":"owner/name"}` marker resolves to the GitHub adapter (task-45). A marker that is present and cannot be honoured — malformed, no string
+`kind`, or a kind with no adapter here — resolves `unsupported`: the project contributes **no items** and exactly one error (prefixed with the marker's path,
+like every scan error), and its `/api/projects` row reads `source: 'unsupported'` with zero counts and `missing: false`. It never reads as `files`; a tracker
+project whose marker this build cannot read would otherwise render a stale clone's files as ghosts. A project with no store at all still reads `missing: true`
+and `source: null`. `ItemsService` dispatches over the registered adapters and refuses two claiming one kind at boot.
 
 Two git-backed reads live here and they cache differently on purpose. The last commit touching an item file (`git-dates.util.ts`) is memoised per project
 against the mtimes of `index` and `logs/HEAD` — the files git rewrites whenever the answer can change. The uncommitted read (`uncommitted.util.ts`) is memoised
 **nowhere**: a working-tree edit, the exact event it reports, moves neither of those files, so the same key would answer "clean" forever after its first hit.
 
 Two adapters are registered (`sources/files.source.ts`, `sources/github.source.ts`). `GET /api/items/body` dispatches on the ref's SHAPE, in `ItemsService` and
-nowhere else: a `gh:<owner>/<repo>#<n>` URN goes to the GitHub adapter, anything else is a filesystem path and goes to files. The GitHub adapter answers from
-the poller's cache and makes no network call of its own; a URN naming a repo no registered project is connected to answers `null`, so the route 404s. Each
-adapter also answers `summary(project, marker)` — the four connection fields (`repo`, `polledAt`, `access`, `detail`) on `ProjectSummary`, four `null`s from
-files. `GET /api/items/uncommitted` answers `known: false` for a tracker project: the question has no meaning where there are no item files.
+nowhere else: a `gh:<owner>/<repo>#<n>` URN goes to the GitHub adapter, anything else is a filesystem path and goes to files. `ItemsService.find` makes the
+identical dispatch for the agents routes (task-46), which is why `AgentsService.findItem` is now a one-line delegate rather than a private second copy of the
+files adapter. The GitHub adapter answers both from the poller's cache and makes no network call of its own; a URN naming a repo no registered project is
+connected to answers `null`, so the route 404s. Each adapter also answers `summary(project, marker)` — the four connection fields (`repo`, `polledAt`, `access`,
+`detail`) on `ProjectSummary`, four `null`s from files. `GET /api/items/uncommitted` answers `known: false` for a tracker project: the question has no meaning
+where there are no item files.
+
+#### The write side (task-46, spec §6.2)
+
+Seven POST routes under `/api/items/`, in `items-write.controller.ts`, each a thin pass-through to one `ItemWriter` method:
+
+| Route       | Body                                                      | Does                                                                                                                                                 | Answers                                        |
+| ----------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `create`    | `project, section, title, body, kind?, runnerFix?, from?` | labels from the section (`type:*`), `kind:*` and `runner-fix`; `from` prepends `_From #n._`; `out-of-scope` creates untyped and closes `not_planned` | 201 `{ id, urn, url, number }`                 |
+| `state`     | `project, id, status, outcome?`                           | posts `outcome` as a comment FIRST, then closes `completed`/`not_planned`. Labels and claims untouched                                               | 200 `{ id, status, url }`                      |
+| `claim`     | `project, id, phase, session`                             | the claim protocol (§6.3)                                                                                                                            | 200 `{ commentId, record }` / 409 `{ holder }` |
+| `release`   | `project, id, commentId, session, reason, counters?`      | edits `released` into the claim, writes `counters` verbatim, removes `in-progress`                                                                   | 200 `{ commentId, record }`                    |
+| `heartbeat` | `project, id, commentId, state?`                          | re-stamps `heartbeat`; carries phase 4's opaque `state`                                                                                              | 200 `{ commentId, record }`                    |
+| `body`      | `project, id, body, ifUpdatedAt`                          | one fresh `GET`, then `PATCH` only if the stamp matches                                                                                              | 200 `{ id, updatedAt }` / 409 `{ updatedAt }`  |
+| `comment`   | `project, id, body`                                       | appends a comment                                                                                                                                    | 201 `{ commentId, url }`                       |
+
+Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `agents/` — these create and close issues with a credential the browser never sees, which is
+a larger consequence than the dispatch route the guard was written for. A JSON POST with no `Origin` still passes, because `backlog.mjs` in API mode is exactly
+that caller.
+
+`ItemsService.writerFor(projectPath)` is the one gate: registry compare (raw string, never realpath), `resolveSource` per request, then the adapter's `writer` —
+answering `unregistered` (404), `files` (400, `this project's items are files — the skills write them directly`), `unsupported` (400, `resolveSource`'s own
+reason) or the call. None of those four makes a network request. `FilesSource` has no writer at all. Refusals travel as values (`WriteRefusal`) and the
+controller alone maps them: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · anything else 502.
+
+Writes to one item are serialised in-process (`Map<urn, Promise>`), and every response is absorbed into the poller's cache so the next board read shows it —
+`polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the eighth route and a READ, unguarded like every other GET,
+answering who holds one item out of the cache; `backlog.mjs stop` needs it because `start` ran in a different process.
 
 ### `tracker/`
 
 The second outbound-calling module, and the only other one. `github.client.ts` is a thin client over `fetch` with no Nest decorators — one constant host
 (`api.github.com`), rate-limit headers recorded from every response including a `304`, and no throw on any status: every failure is a value the poller turns
 into an `access` state. `poller.service.ts` is a `setTimeout` chain in the watchdog's shape, armed only while a registered project resolves to `github` and
-`BM_GITHUB_TOKEN` is set; each tick makes two conditional requests per connected repo (issues, then every comment in the repo — the second is made now and read
-by nothing until phase 3), paginates the first sync to the end, upserts by issue number against an inclusive `since`, drops pull requests, and sleeps a
-rate-limited repo until its reset. The eight labels in `labels.ts` are created on a repo's first successful sync if any is missing — the module's one write to
-GitHub. `map-issue.ts` is the pure issue → `BacklogItem` mapping (spec §5.3). `GET /api/trackers` is read-only and carries the platform's `hasToken`/`login`,
-its rate limit, and one row per registered project — **never the token**, which is read per call from the environment and leaves this process in no payload,
-log line or URL.
+`BM_GITHUB_TOKEN` is set; each tick makes two conditional requests per connected repo (issues, then every comment in the repo, each paginated to the end and
+each with its OWN high-water mark — sharing one mark was a task-46 defect that hid every claim older than the newest issue — the second had no reader at all in
+phase 2 and is what the claim protocol maps from since task-46), paginates the first sync to the end, upserts by issue number against an inclusive `since`,
+drops pull requests, and sleeps a rate-limited repo until its reset. The eight labels in `labels.ts` are created on a repo's first successful sync if any is
+missing — the module's one write to GitHub. `map-issue.ts` is the pure issue → `BacklogItem` mapping (spec §5.3). `GET /api/trackers` is read-only and carries
+the platform's `hasToken`/`login`, its rate limit, and one row per registered project — **never the token**, which is read per call from the environment and
+leaves this process in no payload, log line or URL.
 
 ### `registry/`
 

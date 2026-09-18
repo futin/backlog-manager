@@ -14,3 +14,4 @@ paths: ["server/src/agents/**"]
 - Before changing files here, read docs/subsystems/invariants.md#armed-idle-off
 - Before changing files here, read docs/subsystems/invariants.md#grace-any-attempt-starts-the-clock-only-a-success-counts
 - Before changing files here, read docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists
+- Before changing files here, read docs/subsystems/invariants.md#isitemid-accepts-three-shapes

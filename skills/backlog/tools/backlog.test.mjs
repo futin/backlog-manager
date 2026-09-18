@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles } from './backlog.mjs'
 
@@ -3202,12 +3202,24 @@ const CLI_SOURCES = {
 const codeLines = (file) =>
   fs.readFileSync(file, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('//'))
 
+// `= await main(` is accepted for backlog.mjs ALONE (task-46). The invariant is about `process.exit()` truncating a pipe, which asynchrony has nothing to do
+// with; what it actually requires is that nothing be left holding the event loop open when main returns. API mode keeps that — every `fetch` is awaited to
+// completion and each one sends `connection: close`, so no pooled socket outlives the call — and the API-mode cases assert it behaviourally, by expecting each
+// child process to EXIT rather than hang. The other two CLIs hold no asynchronous work at all and stay on the synchronous form, so a stray `await` appearing
+// in either of them still goes red here.
+const ENTRY_SHAPES = {
+  'backlog.mjs': ['process.exitCode = main(', 'process.exitCode = await main('],
+  'orchestrate.mjs': ['process.exitCode = main('],
+  'retro.mjs': ['process.exitCode = main('],
+}
+
 test('all three skill CLIs end through process.exitCode, never process.exit', () => {
   for (const [name, file] of Object.entries(CLI_SOURCES)) {
     const lines = codeLines(file)
+    const accepted = ENTRY_SHAPES[name]
     assert.ok(
-      lines.some((line) => line.includes('process.exitCode = main(')),
-      `${name} no longer sets process.exitCode from main() in its entry guard`,
+      lines.some((line) => accepted.some((shape) => line.includes(shape))),
+      `${name} no longer sets process.exitCode from main() in its entry guard (accepted: ${accepted.join(' or ')})`,
     )
     const offenders = lines.filter((line) => line.includes('process.exit('))
     assert.deepEqual(
@@ -3517,4 +3529,708 @@ test('connect appears in the top-level usage block', () => {
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /^ {2}connect {5}/m)
+})
+
+// --- task-46: backlog.mjs in API mode ----------------------------------------
+//
+// A project whose committed marker says `github` has NO ITEM FILES (spec §6.5): every command routes through the backlog-manager API on this machine, which
+// holds the credential and does the writing. These cases spawn the REAL tool against a fake API on an ephemeral port, exactly as every other CLI case here
+// spawns it against a real store — the tool is the subject, and stubbing its transport would test the stub.
+//
+// Two properties are asserted over and over and are the reason for the shape of this harness:
+//
+//   * **What goes on the wire.** The CLI cannot import the server's request types (a plugin skill's `tools/` is a standalone copy of what was pushed, with no
+//     path back into the repo), so the agreement between the two sides is enforced mechanically instead: these cases assert the exact bodies, and
+//     `shared/types.ts` declares the shapes the routes validate.
+//   * **The child EXITS.** `main` is async in this mode, and the "all three CLIs exit through process.exitCode" invariant requires that nothing hold the event
+//     loop open. Every case below is a `spawnSync` that has to return — a hanging socket would time the suite out rather than pass quietly.
+
+import http from 'node:http'
+
+/** The fake API: records every request and answers from a per-route table. */
+function fakeApi(routes) {
+  const requests = []
+  const server = http.createServer((req, res) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8')
+      const url = new URL(req.url, 'http://127.0.0.1')
+      let body = null
+      try {
+        body = raw === '' ? null : JSON.parse(raw)
+      } catch {
+        body = raw
+      }
+      requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body })
+
+      const answer = routes[url.pathname]
+      const resolved = typeof answer === 'function' ? answer(body) : answer
+      if (resolved === undefined) {
+        res.writeHead(404, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: `no fake route for ${url.pathname}` }))
+        return
+      }
+      const status = resolved.status ?? 200
+      const payload = resolved.body
+      // text/plain for the body route, which answers Markdown rather than JSON — the same content type the real one uses.
+      const type = typeof payload === 'string' ? 'text/plain; charset=utf-8' : 'application/json'
+      res.writeHead(status, { 'content-type': type })
+      res.end(typeof payload === 'string' ? payload : JSON.stringify(payload ?? null))
+    })
+  })
+  return { server, requests }
+}
+
+/**
+ * Stand a fake API up, run one command against it, tear it down.
+ *
+ * `async`, which makes the cases below the only asynchronous ones in this file — `listen` is resolved by the event loop and there is no synchronous way to
+ * learn the ephemeral port it chose. The SPAWN inside is still `spawnSync`, exactly as every other CLI case here, so what each case asserts on is a completed
+ * child process rather than a stream.
+ *
+ * `127.0.0.1`, never the wildcard, for the reason `test/helpers/app.ts` gives at length on the jest side: a bare `listen(0)` binds `::` and the kernel picks a
+ * port against that address alone, so another process holding the same number on IPv4 loopback answers instead.
+ */
+/**
+ * The same spawn every other CLI case here makes, ASYNCHRONOUSLY — and the difference is a deadlock, not a preference.
+ *
+ * The fake API runs in THIS process. `spawnSync` blocks this process's event loop until the child exits, so a child that connects to the fake would wait for
+ * an accept that cannot happen until it has already exited: the first version of these cases sat for five minutes and then reported exit `5`, which reads
+ * exactly like a stack that is not running. Every case that stands a server up therefore awaits its child instead.
+ */
+function runNode(cwd, env, ...args) {
+  return new Promise((resolve) => {
+    const child = spawn('node', [SCRIPT, ...args], { cwd, env })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (c) => (stdout += c))
+    child.stderr.on('data', (c) => (stderr += c))
+    child.on('close', (status) => resolve({ status, stdout, stderr }))
+  })
+}
+
+async function withApi(routes, fn) {
+  const { server, requests } = fakeApi(routes)
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    return { out: await fn(port), requests }
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+}
+
+/** A tracker fixture: a git repo whose `backlog/` holds the marker and nothing else. */
+function trackerFixture(repo = 'futin/x') {
+  const { dir, backlog } = backlogFixture()
+  fs.mkdirSync(backlog, { recursive: true })
+  fs.writeFileSync(path.join(backlog, 'source.json'), JSON.stringify({ kind: 'github', repo }, null, 2) + '\n')
+  return { dir, backlog }
+}
+
+const apiEnv = (port, extra = {}) => ({ ...process.env, BM_API_PORT: String(port), ...extra })
+
+/** One issue as `/api/items` returns it, with only what a case is about spelled out. */
+function apiItem(over = {}) {
+  return {
+    id: '#31',
+    title: 'the board lies',
+    created: '2026-09-01',
+    started: '',
+    updated: '2026-09-02T10:00:00Z',
+    lastCommit: '',
+    phase: '',
+    groomElapsed: 0,
+    executeElapsed: 0,
+    groomTokens: 0,
+    executeTokens: 0,
+    kind: '',
+    tags: [],
+    section: 'bugs',
+    status: 'open',
+    project: 'gamma',
+    projectPath: '',
+    groomed: true,
+    path: 'gh:futin/x#31',
+    source: 'github',
+    url: 'https://github.com/futin/x/issues/31',
+    assignee: null,
+    untyped: false,
+    ...over,
+  }
+}
+
+test('API mode: nothing listening is exit 5, names the port and both start commands, and prints nothing to stdout', async () => {
+  const { dir } = trackerFixture()
+  // Port 1 is privileged and nothing listens there; the connection is refused rather than hanging.
+  const out = await runNode(dir, apiEnv(1), 'board')
+
+  assert.equal(out.status, 5)
+  assert.match(out.stderr, /127\.0\.0\.1:1/)
+  assert.match(out.stderr, /pnpm run dev/)
+  assert.match(out.stderr, /pnpm run docker:up/)
+  assert.equal(out.stdout, '')
+})
+
+test('API mode: a marker naming a kind this tool cannot write to is exit 1, and makes no request', async () => {
+  const { dir, backlog } = trackerFixture()
+  fs.writeFileSync(path.join(backlog, 'source.json'), JSON.stringify({ kind: 'gitlab', repo: 'a/b' }))
+
+  const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'board'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /gitlab/)
+  assert.deepEqual(requests, [])
+})
+
+// The load-bearing negative, and the same one `resolveSource` carries on the server: a marker this tool cannot read must NEVER fall back to files. Falling
+// back would write item files into a project whose items live on GitHub, on one machine, where nothing would ever report them.
+test('API mode: a github marker with a malformed repo is exit 1, not a fallback to files', async () => {
+  const { dir, backlog } = trackerFixture()
+  fs.writeFileSync(path.join(backlog, 'source.json'), JSON.stringify({ kind: 'github', repo: 'not-a-repo' }))
+
+  const out = run(dir, 'new', 'bugs', 'a title')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /repo/)
+  assert.deepEqual(fs.readdirSync(backlog), ['source.json'])
+})
+
+test('API mode: init registers the project, creates no directories, and says it is already connected', async () => {
+  const { dir, backlog } = trackerFixture()
+  const registry = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-reg-')), 'registry.json')
+
+  const out = await runNode(dir, { ...process.env, BM_REGISTRY_FILE: registry }, 'init')
+
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /already connected: .* → github futin\/x/)
+  assert.deepEqual(fs.readdirSync(backlog), ['source.json'])
+  assert.ok(JSON.parse(fs.readFileSync(registry, 'utf8')).projects.some((p) => p.path === dir))
+})
+
+test('API mode: new posts create and prints the id, the url and the urn', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Symptom\n\nit breaks\n')
+
+  const { out, requests } = await withApi(
+    { '/api/items/create': { status: 201, body: { id: '#77', urn: 'gh:futin/x#77', url: 'https://github.com/futin/x/issues/77', number: 77 } } },
+    async (port) => await runNode(dir, apiEnv(port), 'new', 'bugs', 'a title', '--body', bodyFile),
+  )
+
+  assert.equal(out.status, 0)
+  assert.deepEqual(out.stdout.trim().split('\n'), ['#77', 'https://github.com/futin/x/issues/77', 'gh:futin/x#77'])
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].method, 'POST')
+  assert.equal(requests[0].path, '/api/items/create')
+  assert.deepEqual(requests[0].body, { project: dir, section: 'bugs', title: 'a title', body: '## Symptom\n\nit breaks\n' })
+})
+
+// `--body` is REQUIRED here and REFUSED in files mode, and the two contracts are opposites on purpose: a files `new` prints what to write and the skill writes
+// the file, so a `--body` flag there would make this command a second writer of item files.
+test('API mode: new without --body is a usage error and makes no request', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'new', 'bugs', 'a title'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /--body <file>/)
+  assert.deepEqual(requests, [])
+})
+
+test('files mode: new --body is refused and writes nothing', async () => {
+  const { dir, backlog } = backlogFixture()
+  run(dir, 'init')
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, 'x\n')
+
+  const out = run(dir, 'new', 'bugs', 'a title', '--body', bodyFile)
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog.mjs new/)
+  assert.deepEqual(fs.readdirSync(path.join(backlog, 'bugs', 'open')), [])
+})
+
+test('API mode: new --from sends the cited id in the tracker spelling', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, 'x\n')
+
+  const { requests } = await withApi({ '/api/items/create': { status: 201, body: { id: '#77', urn: 'gh:futin/x#77', url: 'u', number: 77 } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'new', 'tasks', 't', '--body', bodyFile, '--from', '12'),
+  )
+
+  assert.equal(requests[0].body.from, '#12')
+})
+
+// Three spellings, one issue. A person types `31`, a skill's prose says `#31`, and the board posts the URN — and all three have to mean the same item or a
+// skill written against one of them breaks against another.
+test('API mode: show accepts a number, a #number and this project-s urn identically', async () => {
+  const { dir } = trackerFixture()
+  const routes = {
+    '/api/items': { body: { items: [apiItem({ projectPath: dir, started: '2026-09-18T10:00:00Z', phase: 'groom', groomElapsed: 120, groomTokens: 4000 })], errors: [] } },
+    '/api/items/body': { body: '## Symptom\n\nthe cached issue body\n' },
+    '/api/items/claim': { body: null },
+  }
+
+  const outputs = []
+  for (const id of ['31', '#31', 'gh:futin/x#31']) {
+    const { out } = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'show', id))
+    outputs.push(out)
+  }
+
+  for (const out of outputs) assert.equal(out.status, 0)
+  assert.equal(outputs[0].stdout, outputs[1].stdout)
+  assert.equal(outputs[1].stdout, outputs[2].stdout)
+
+  const printed = outputs[0].stdout
+  assert.match(printed, /^gh:futin\/x#31\n/)
+  assert.match(printed, /started: 2026-09-18T10:00:00Z/)
+  assert.match(printed, /phase: groom/)
+  assert.match(printed, /groom-elapsed: 120/)
+  assert.match(printed, /groom-tokens: 4000/)
+  // The body, byte for byte, after the closing `---` — spec §6.5: there is no file for the skill to read.
+  assert.ok(printed.endsWith('## Symptom\n\nthe cached issue body\n'))
+})
+
+test('API mode: show refuses another repo-s urn and a file-shaped id, each with its own sentence', async () => {
+  const { dir } = trackerFixture()
+  const routes = { '/api/items': { body: { items: [], errors: [] } } }
+
+  const { out: other } = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'show', 'gh:other/y#31'))
+  assert.equal(other.status, 1)
+  assert.match(other.stderr, /other\/y/)
+
+  const { out: fileId } = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'show', 'task-31'))
+  assert.equal(fileId.status, 1)
+  assert.match(fileId.stderr, /file id/)
+})
+
+test('API mode: show --json carries the urn, the body, updatedAt and the claim', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi(
+    {
+      '/api/items': { body: { items: [apiItem({ projectPath: dir })], errors: [] } },
+      '/api/items/body': { body: '# body\n' },
+      '/api/items/claim': { body: { commentId: 100, record: { v: 1, session: 'A', phase: 'groom', at: '2026-09-18T10:00:00Z', heartbeat: '2026-09-18T10:05:00Z', counters: { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } } },
+    },
+    async (port) => await runNode(dir, apiEnv(port), 'show', '31', '--json'),
+  )
+
+  assert.equal(out.status, 0)
+  const parsed = JSON.parse(out.stdout)
+  assert.equal(parsed.urn, 'gh:futin/x#31')
+  assert.equal(parsed.body, '# body\n')
+  assert.equal(parsed.updatedAt, '2026-09-02T10:00:00Z')
+  assert.equal(parsed.claim.commentId, 100)
+})
+
+test('API mode: board reads /api/items once and prints only this project-s open rows', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(
+    {
+      '/api/items': {
+        body: {
+          items: [
+            apiItem({ projectPath: dir, started: '2026-09-18T10:00:00Z' }),
+            apiItem({ id: '#32', title: 'somebody else-s', projectPath: '/abs/elsewhere' }),
+            apiItem({ id: '#33', title: 'already done', projectPath: dir, status: 'done' }),
+          ],
+          errors: [],
+        },
+      },
+    },
+    async (port) => await runNode(dir, apiEnv(port), 'board'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /the board lies/)
+  assert.doesNotMatch(out.stdout, /somebody else-s/)
+  assert.doesNotMatch(out.stdout, /already done/)
+  // The in-progress marker, drawn from `started` exactly as it is for a files row.
+  assert.match(out.stdout, /»\s*the board lies/)
+  assert.equal(requests.filter((r) => r.path === '/api/items').length, 1)
+})
+
+test('API mode: board --section filters', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi(
+    { '/api/items': { body: { items: [apiItem({ projectPath: dir }), apiItem({ id: '#40', title: 'an idea', section: 'ideas', projectPath: dir })], errors: [] } } },
+    async (port) => await runNode(dir, apiEnv(port), 'board', '--section', 'ideas'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /an idea/)
+  assert.doesNotMatch(out.stdout, /the board lies/)
+})
+
+test('API mode: move posts state, carrying --outcome-s bytes', async () => {
+  const { dir } = trackerFixture()
+  const outcomeFile = path.join(dir, 'outcome.md')
+  fs.writeFileSync(outcomeFile, '## Outcome\n\nit worked\n')
+
+  const { out, requests } = await withApi({ '/api/items/state': { body: { id: '#31', status: 'done', url: 'https://github.com/futin/x/issues/31' } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'move', '31', 'done', '--outcome', outcomeFile),
+  )
+
+  assert.equal(out.status, 0)
+  assert.equal(out.stdout.trim(), 'https://github.com/futin/x/issues/31')
+  assert.deepEqual(requests[0].body, { project: dir, id: '#31', status: 'done', outcome: '## Outcome\n\nit worked\n' })
+})
+
+test('API mode: move without --outcome sends no outcome key at all', async () => {
+  const { dir } = trackerFixture()
+  const { requests } = await withApi({ '/api/items/state': { body: { id: '#31', status: 'out-of-scope', url: 'u' } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'move', '31', 'out-of-scope'),
+  )
+
+  assert.deepEqual(requests[0].body, { project: dir, id: '#31', status: 'out-of-scope' })
+})
+
+test('files mode: move --outcome is refused and the item does not move', async () => {
+  const { dir, backlog } = backlogFixture()
+  run(dir, 'init')
+  const file = path.join(backlog, 'bugs', 'open', 'bug-1-x.md')
+  fs.writeFileSync(file, '---\nid: bug-1\ntitle: x\ncreated: 2026-09-01\n---\n\nbody\n')
+  const outcomeFile = path.join(dir, 'o.md')
+  fs.writeFileSync(outcomeFile, 'x\n')
+
+  const out = run(dir, 'move', 'bug-1', 'done', '--outcome', outcomeFile)
+  assert.equal(out.status, 1)
+  assert.ok(fs.existsSync(file))
+})
+
+test('API mode: start posts claim with the session identity and prints the urn, the comment id and the heartbeat hint', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(
+    { '/api/items/claim': { status: 201, body: { commentId: 100, record: { v: 1, session: 'sess-abc', phase: 'groom', at: '2026-09-18T10:00:00Z', heartbeat: '2026-09-18T10:00:00Z', counters: { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } } } },
+    async (port) =>
+      await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-abc' }), 'start', '31', '--as', 'groom'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.deepEqual(requests[0].body, { project: dir, id: '#31', phase: 'groom', session: 'sess-abc' })
+  assert.match(out.stdout, /^gh:futin\/x#31\n/)
+  assert.match(out.stdout, /claim 100/)
+  assert.match(out.stdout, /heartbeat #31 between long steps/)
+})
+
+test('API mode: start without --as is a usage error and makes no request', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'start', '31'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /--as/)
+  assert.deepEqual(requests, [])
+})
+
+// Without a session id the identity is `<user>@<host>` — stable across the two PROCESSES `start` and `stop` run in, and honest about who it names.
+test('API mode: start falls back to user@host when there is no session id', async () => {
+  const { dir } = trackerFixture()
+  const env = apiEnv(0)
+  delete env.CLAUDE_CODE_SESSION_ID
+  const { requests } = await withApi({ '/api/items/claim': { status: 201, body: { commentId: 1, record: {} } } }, async (port) =>
+    await runNode(dir, { ...env, BM_API_PORT: String(port) }, 'start', '31', '--as', 'groom'),
+  )
+
+  assert.match(requests[0].body.session, /^[^@]+@.+$/)
+})
+
+test('API mode: start reports a lost race with the holder-s session and the age of its heartbeat', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi(
+    {
+      '/api/items/claim': {
+        status: 409,
+        body: { error: '#31 is already in progress (session A)', holder: { session: 'A', heartbeat: '2026-09-18T10:00:00Z', ageMs: 4 * 60 * 1000, commentId: 100 } },
+      },
+    },
+    async (port) => await runNode(dir, apiEnv(port), 'start', '31', '--as', 'groom'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /session A/)
+  assert.match(out.stderr, /heartbeat 4m ago/)
+})
+
+// The billing semantics `stopItem` already has, reproduced against a claim comment instead of frontmatter: the seeded total plus this session's seconds, into
+// the bucket the claim's own `phase` names.
+test('API mode: stop bills the elapsed seconds on top of the claim-s seeded counters', async () => {
+  const { dir } = trackerFixture()
+  const at = new Date(Date.now() - 90_000).toISOString()
+  const { out, requests } = await withApi(
+    {
+      '/api/items/claim': {
+        body: { commentId: 100, record: { v: 1, session: 'sess-abc', phase: 'groom', at, heartbeat: new Date().toISOString(), counters: { groomElapsed: 10, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } },
+      },
+      '/api/items/release': { status: 201, body: { commentId: 100, record: {} } },
+    },
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-abc' }), 'stop', '31'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.equal(out.stdout.trim(), 'gh:futin/x#31')
+  const release = requests.find((r) => r.path === '/api/items/release')
+  assert.equal(release.body.commentId, 100)
+  assert.equal(release.body.reason, 'stopped')
+  // 10 seeded + 90 this session, with a second of tolerance for the clock between the two lines above.
+  assert.ok(Math.abs(release.body.counters.groomElapsed - 100) <= 1, `billed ${release.body.counters.groomElapsed}`)
+})
+
+// `--abandon` sends NO counters key, which is not the same as sending zeros: zeros would OVERWRITE the seeded totals and erase every earlier session's work.
+test('API mode: stop --abandon releases with no counters at all', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(
+    {
+      '/api/items/claim': {
+        body: { commentId: 100, record: { v: 1, session: 'sess-abc', phase: 'groom', at: new Date(Date.now() - 90_000).toISOString(), heartbeat: new Date().toISOString(), counters: { groomElapsed: 10, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } },
+      },
+      '/api/items/release': { status: 201, body: { commentId: 100, record: {} } },
+    },
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-abc' }), 'stop', '31', '--abandon'),
+  )
+
+  assert.equal(out.status, 0)
+  const release = requests.find((r) => r.path === '/api/items/release')
+  assert.equal(release.body.reason, 'abandoned')
+  assert.ok(!('counters' in release.body), 'counters must be absent, never zeroed')
+})
+
+test('API mode: stop on an item with no live claim is exit 1 and releases nothing', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi({ '/api/items/claim': { body: null } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'stop', '31'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /not in progress/)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+test('API mode: heartbeat posts the claim-s comment id', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(
+    {
+      '/api/items/claim': { body: { commentId: 100, record: { v: 1, session: 'A', phase: 'groom', at: '2026-09-18T10:00:00Z', heartbeat: '2026-09-18T10:05:00Z', counters: {} } } },
+      '/api/items/heartbeat': { status: 201, body: { commentId: 100, record: {} } },
+    },
+    async (port) => await runNode(dir, apiEnv(port), 'heartbeat', '31'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.deepEqual(requests.find((r) => r.path === '/api/items/heartbeat').body, { project: dir, id: '#31', commentId: 100 })
+})
+
+test('API mode: comment posts the file-s bytes', async () => {
+  const { dir } = trackerFixture()
+  const file = path.join(dir, 'c.md')
+  fs.writeFileSync(file, '## Outcome\n\nit failed\n')
+
+  const { out, requests } = await withApi({ '/api/items/comment': { status: 201, body: { commentId: 101, url: 'https://github.com/futin/x/issues/31#issuecomment-101' } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'comment', '31', '--body', file),
+  )
+
+  assert.equal(out.status, 0)
+  assert.deepEqual(requests[0].body, { project: dir, id: '#31', body: '## Outcome\n\nit failed\n' })
+})
+
+test('API mode: body sends the caller-s ifUpdatedAt, and a 409 says to read it again', async () => {
+  const { dir } = trackerFixture()
+  const file = path.join(dir, 'b.md')
+  fs.writeFileSync(file, '# new body\n')
+
+  const ok = await withApi({ '/api/items/body': { status: 201, body: { id: '#31', updatedAt: '2026-09-18T11:00:00Z' } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'body', '31', '--body', file, '--if-updated-at', '2026-09-18T10:00:00Z'),
+  )
+  assert.equal(ok.out.status, 0)
+  assert.deepEqual(ok.requests[0].body, { project: dir, id: '#31', body: '# new body\n', ifUpdatedAt: '2026-09-18T10:00:00Z' })
+
+  const stale = await withApi({ '/api/items/body': { status: 409, body: { error: 'changed', updatedAt: '2026-09-18T11:30:00Z' } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'body', '31', '--body', file, '--if-updated-at', '2026-09-18T10:00:00Z'),
+  )
+  assert.equal(stale.out.status, 1)
+  assert.match(stale.out.stderr, /show it again/)
+  assert.match(stale.out.stderr, /2026-09-18T11:30:00Z/)
+})
+
+test('files mode: the three tracker-only verbs are each refused with their own reason', async () => {
+  const { dir } = backlogFixture()
+  run(dir, 'init')
+  const file = path.join(dir, 'x.md')
+  fs.writeFileSync(file, 'x\n')
+
+  const heartbeat = run(dir, 'heartbeat', 'bug-1')
+  assert.equal(heartbeat.status, 1)
+  assert.match(heartbeat.stderr, /files projects have no heartbeat/)
+
+  const comment = run(dir, 'comment', 'bug-1', '--body', file)
+  assert.equal(comment.status, 1)
+  assert.match(comment.stderr, /files projects have no comment timeline/)
+
+  const body = run(dir, 'body', 'bug-1', '--body', file, '--if-updated-at', 'x')
+  assert.equal(body.status, 1)
+  assert.match(body.stderr, /files projects have no body route/)
+})
+
+// Every request the CLI makes is the shape `SameOriginPostGuard` allows: `application/json`, and NO `Origin` at all — the guard permits an absent origin
+// precisely because a non-browser caller cannot forge its way past a check only a browser enforces, and this is that caller.
+test('API mode: every request is application/json with no origin header', async () => {
+  const { dir } = trackerFixture()
+  const file = path.join(dir, 'b.md')
+  fs.writeFileSync(file, 'x\n')
+
+  const { requests } = await withApi(
+    {
+      '/api/items/create': { status: 201, body: { id: '#77', urn: 'gh:futin/x#77', url: 'u', number: 77 } },
+      '/api/items/claim': { status: 201, body: { commentId: 1, record: {} } },
+    },
+    async (port) => {
+      await runNode(dir, apiEnv(port), 'new', 'bugs', 't', '--body', file)
+      return await runNode(dir, apiEnv(port), 'start', '31', '--as', 'groom')
+    },
+  )
+
+  assert.ok(requests.length >= 2)
+  for (const req of requests) {
+    assert.equal(req.headers['content-type'], 'application/json')
+    assert.equal(req.headers.origin, undefined)
+  }
+})
+
+// The other half of "files mode runs today's code byte for byte": a files project must make NO http request at all, on any verb. A fake API that records
+// nothing is the only way to state that as a property rather than as an absence of evidence.
+test('files mode makes no HTTP request on any verb', async () => {
+  const { dir, backlog } = backlogFixture()
+  const { requests } = await withApi({}, async (port) => {
+    const env = apiEnv(port)
+    spawnSync('node', [SCRIPT, 'init'], { encoding: 'utf8', cwd: dir, env })
+    spawnSync('node', [SCRIPT, 'new', 'bugs', 'a title'], { encoding: 'utf8', cwd: dir, env })
+    fs.writeFileSync(path.join(backlog, 'bugs', 'open', 'bug-1-a-title.md'), '---\nid: bug-1\ntitle: a title\ncreated: 2026-09-01\n---\n\nbody\n')
+    spawnSync('node', [SCRIPT, 'board'], { encoding: 'utf8', cwd: dir, env })
+    spawnSync('node', [SCRIPT, 'show', 'bug-1'], { encoding: 'utf8', cwd: dir, env })
+    spawnSync('node', [SCRIPT, 'start', 'bug-1', '--as', 'groom'], { encoding: 'utf8', cwd: dir, env })
+    spawnSync('node', [SCRIPT, 'stop', 'bug-1'], { encoding: 'utf8', cwd: dir, env })
+    return spawnSync('node', [SCRIPT, 'move', 'bug-1', 'done'], { encoding: 'utf8', cwd: dir, env })
+  })
+
+  assert.deepEqual(requests, [])
+})
+
+// `--kind` exists only in API mode, and only because a tracker has nowhere else to put a refactor's flavour: a files capture adds a `kind:` line to the
+// frontmatter `new` printed, and on a tracker there is no file to add it to. An unknown value is refused by the SERVER rather than dropped here — GitHub
+// creates an unknown label silently on first use, so a dropped one would become a mystery grey label instead of a complaint.
+test('API mode: new --kind rides along as the label field', async () => {
+  const { dir } = trackerFixture()
+  const file = path.join(dir, 'b.md')
+  fs.writeFileSync(file, 'x\n')
+
+  const { requests } = await withApi({ '/api/items/create': { status: 201, body: { id: '#77', urn: 'gh:futin/x#77', url: 'u', number: 77 } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'new', 'refactors', 't', '--body', file, '--kind', 'debt'),
+  )
+
+  assert.equal(requests[0].body.kind, 'debt')
+})
+
+test('files mode: new --kind is refused, the same way --body is', async () => {
+  const { dir, backlog } = backlogFixture()
+  run(dir, 'init')
+
+  const out = run(dir, 'new', 'refactors', 't', '--kind', 'debt')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog.mjs new/)
+  assert.deepEqual(fs.readdirSync(path.join(backlog, 'refactors', 'open')), [])
+})
+
+// --- task-46: the four skills' tracker prose ---------------------------------
+//
+// One section per skill, titled identically so a reader who has found it in one file knows what to look for in the others. Asserted here rather than left to
+// review for the same reason every other prose case in this file exists: the skills are the only place a session learns what to do, and a section that
+// silently stops being true is a session doing the wrong thing with no error anywhere.
+
+const CAPTURE_SKILL_MD = fileURLToPath(new URL('../../backlog-capture/SKILL.md', import.meta.url))
+const BACKLOG_SKILL_MD = fileURLToPath(new URL('./../SKILL.md', import.meta.url))
+
+const TRACKER_SECTION = '## In a tracker project'
+
+test('all four skills carry an identically titled tracker section', () => {
+  for (const [name, file] of Object.entries({
+    'backlog': BACKLOG_SKILL_MD,
+    'backlog-capture': CAPTURE_SKILL_MD,
+    'backlog-groom': GROOM_SKILL_MD,
+    'backlog-execute': EXECUTE_SKILL_MD,
+  })) {
+    assert.ok(fs.readFileSync(file, 'utf8').includes(TRACKER_SECTION), `${name}/SKILL.md has no "${TRACKER_SECTION}" section`)
+  }
+})
+
+// Exit 5 is the one failure mode that is entirely new and entirely outside the tool: no amount of retrying fixes it, and the fix is the same every time. It is
+// documented where the tool's exit codes are documented, which is `backlog`'s own SKILL.md.
+test('backlog/SKILL.md documents exit 5 and both ways to start the stack', () => {
+  const text = fs.readFileSync(BACKLOG_SKILL_MD, 'utf8')
+  assert.match(text, /exit `5`/)
+  assert.match(text, /pnpm run dev/)
+  assert.match(text, /pnpm run docker:up/)
+})
+
+// The pair that has to stay in step, and the reason this case is in THIS file rather than only in groom's: the line is printed for a files project and must
+// NOT be printed for a tracker one, so the skill has to carry both halves. Asserting only the verbatim line (above) would pass with the tracker exception
+// silently dropped, and a session would send somebody looking for a file to `git add` that does not exist.
+test('backlog-groom says the on-disk-only line is not printed for a tracker project', () => {
+  const text = flatQuoted(GROOM_SKILL_MD)
+  assert.ok(text.includes(ON_DISK_LINE), 'the verbatim files-project line is still required')
+  assert.ok(
+    /`Groomed on disk only` is NOT printed for a tracker project/.test(text),
+    'backlog-groom/SKILL.md no longer says the on-disk-only line is skipped for a tracker project',
+  )
+})
+
+// Groom is the ONLY skill that patches a body (§6.4), and the `--if-updated-at` check is what stops two machines overwriting each other. Both halves asserted:
+// the command, and what a refusal means — a session told only the command would retry it with the same stale stamp forever.
+test('backlog-groom documents the body patch and what a refusal means', () => {
+  const text = flat(GROOM_SKILL_MD)
+  assert.match(text, /--if-updated-at/)
+  assert.match(text, /re-read and re-apply/i)
+})
+
+// Execute's two Outcome paths, both of which change in a tracker project and neither of which may quietly become the other: the archive path moves the item,
+// the failure path does not.
+test('backlog-execute documents both tracker Outcome paths', () => {
+  const text = flat(EXECUTE_SKILL_MD)
+  assert.match(text, /move <id> done --outcome/)
+  assert.match(text, /comment <id> --body/)
+  assert.match(text, /nothing moves/)
+})
+
+// The heartbeat, in the two skills that hold a claim for long enough to lose one. `backlog` documents the command; these two have to tell a session to USE it.
+test('groom and execute both ask for a heartbeat between long steps', () => {
+  for (const [name, file] of Object.entries({ 'backlog-groom': GROOM_SKILL_MD, 'backlog-execute': EXECUTE_SKILL_MD })) {
+    assert.match(flat(file), /heartbeat between long steps/i, `${name}/SKILL.md no longer asks for a heartbeat between long steps`)
+  }
+})
+
+// `--keep-started` is accepted and INERT in API mode: a claim's `at` is permanent, so there is nothing for it to preserve. Asserted rather than assumed
+// (the review's gap) — "inert by construction" is a claim about the code, and the flag reaching a branch that behaved differently would be silent.
+test('API mode: stop --keep-started is identical to a plain stop', async () => {
+  const { dir } = trackerFixture()
+  const at = new Date(Date.now() - 90_000).toISOString()
+  const routes = {
+    '/api/items/claim': {
+      body: { commentId: 100, record: { v: 1, session: 'sess-abc', phase: 'groom', at, heartbeat: new Date().toISOString(), counters: { groomElapsed: 10, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } },
+    },
+    '/api/items/release': { status: 201, body: { commentId: 100, record: {} } },
+  }
+  const env = { CLAUDE_CODE_SESSION_ID: 'sess-abc' }
+
+  const plain = await withApi(routes, async (port) => await runNode(dir, apiEnv(port, env), 'stop', '31'))
+  const kept = await withApi(routes, async (port) => await runNode(dir, apiEnv(port, env), 'stop', '31', '--keep-started'))
+
+  assert.equal(plain.out.status, 0)
+  assert.equal(kept.out.status, 0)
+  assert.equal(plain.out.stdout, kept.out.stdout)
+
+  const bodyOf = (r) => r.requests.find((q) => q.path === '/api/items/release').body
+  const a = bodyOf(plain)
+  const b = bodyOf(kept)
+  assert.equal(a.reason, b.reason)
+  assert.equal(a.commentId, b.commentId)
+  // The one number that could differ is the billed total, and it is computed from a clock — so compare it with the same tolerance the plain-stop case uses.
+  assert.ok(Math.abs(a.counters.groomElapsed - b.counters.groomElapsed) <= 1)
 })
