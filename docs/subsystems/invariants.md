@@ -304,6 +304,33 @@ it holds. The base tree is wherever `<base>` happens to be right now. On a defau
 below has to name the right one: the `symbolic-ref` precondition and the dirty-path overlap probe both follow the merge into the **base** tree, because what can
 refuse a merge is the state of the tree being written to. A dirty main tree cannot block a merge that is not happening there.
 
+**And so does everything that follows the merge — every cleanup command belongs in the tree that merge happened in** (bug-38). Two of them kept the pre-base
+spelling, where `$PWD` was correct only because the base was always `main`: `git branch -d backlog/<id>`, and the `git diff --name-only HEAD^1 HEAD` that
+§9's runner-fix pickup reads. Both are HEAD-relative — `branch -d` has no `--merged-into` and tests reachability from the HEAD of the repository it runs in, so
+the invoking tree _is_ the parameter — and the project root's HEAD is `main` while the merge commit is on `<base>`. Measured on run-20260918-081422: `error:
+the branch 'backlog/task-45' is not fully merged`, one line after `Merge made by the 'ort' strategy`, for a branch `git branch --merged feature/tracker-backed`
+listed.
+
+The leftover branch was the small half. The large half was the sentence attached to it, which told the driver a refusal proved the merge had not happened —
+wrong in the direction that stops a healthy run, on every item of every `--base` run, since a driver that believes the merge failed has every reason to
+re-merge or park an item already in the base. So the reading is now stated against the tree: a refusal **from the base tree** is real evidence of a missing
+merge, a refusal from anywhere else is evidence only of a misaimed command, and `git branch --merged <base> | grep backlog/<id>` settles which before either is
+believed.
+
+**The line between the two kinds of command is whether it DEPENDS on the HEAD of the tree it runs in — never whether it names it.** `branch -d` is the
+counterexample that decides the wording, and it is the very command this bug is about: it contains no `HEAD` anywhere and is entirely HEAD-relative, because
+with no `--merged-into` the only thing it can measure reachability from is the invoking tree's HEAD. `branch --merged`, `branch --contains`, a bare `diff` and
+a `status` are the same shape. A criterion of "names HEAD" would license every one of them at the project root, which is bug-38 reinstated. The commands that
+genuinely may stay there are HEAD-independent by construction, and the list is short: `show-ref --verify refs/heads/…` (a ref lookup by full name), every
+`worktree` verb (repo-wide administration), and a `diff`/`log` given an explicit `<base>...backlog/<id>` range — the range being part of what makes it safe,
+not incidental to it.
+
+So `orchestrate.test.mjs` guards that list as a **closed allowlist** rather than hunting the bad shape: a text guard cannot decide HEAD-dependence, which is a
+fact about git's semantics and not about the string, but it can fail closed. Every `git -C "$PWD"` line in SKILL.md must match one of the four permitted
+shapes, each recorded there with the reason it is HEAD-independent, and anything else goes red until whoever added it works out which side of the line it
+falls on. That is the honest generality available here, and it is the one that catches the command nobody has written yet — the first version of the guard
+looked for `$PWD` lines mentioning `HEAD`, which the reverted `branch -d` passed.
+
 Both halves of the base's own validity are checked twice, in the same order, by `resolveBase` (`agents.service.ts`) on the way in and `assertUsableBase`
 (`orchestrate.mjs`) at `init`. Neither copy is redundant: the endpoint's exists to refuse a bad request **before** it spawns a headless session, and the tool's
 exists because a terminal is not the endpoint. The order is deliberate, and the honest reason is a downstream one: `git check-ref-format --branch` runs first
@@ -524,8 +551,9 @@ fix that was going to fall outside the cap now lands inside it. The gate itself 
 
 **Ordering alone would buy nothing.** Every skill body and every `orchestrate.mjs` invocation in a run resolves through `$CLAUDE_PLUGIN_ROOT` — the installed
 plugin copy — while the merge lands in this repo's `main`, so a merged fix does not reach the run that merged it. SKILL.md §9's "After a runner-fix item lands"
-is the within-run half: print `git diff --name-only HEAD^1 HEAD`, and if it names `skills/backlog-orchestrate/SKILL.md`, follow the repo's copy for the rest of
-the run — plus the repo's `orchestrate.mjs` if that moved too. **Prose and tool move together or not at all**: following freshly merged prose while still
+is the within-run half: print `git diff --name-only HEAD^1 HEAD` **in the base tree** (bug-38 — `HEAD` there has to mean the merge commit, and on a `--base` run
+the project root's is `main`), and if it names `skills/backlog-orchestrate/SKILL.md`, follow the repo's copy for the rest of the run — plus the repo's
+`orchestrate.mjs` if that moved too. **Prose and tool move together or not at all**: following freshly merged prose while still
 invoking the installed tool is the one genuinely dangerous combination, because the new body may name a flag the old tool refuses.
 
 The switch is session state and nothing on disk carries it, so a crashed run resumed by the board or the watchdog is handed the installed copy again. Both
