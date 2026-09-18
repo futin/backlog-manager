@@ -1,22 +1,50 @@
 # The API
 
-Nest, one process, every route under `/api`. It owns four things: reading the registry, scanning each registered project's `backlog/` store, reading the
-orchestrator's run state, and — behind a switch that is off by default — asking another local process to start a Claude Code session. It writes no item file and
+Nest, one process, every route under `/api`. It owns five things: reading the registry, listing each registered project's items through whichever
+source owns them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, and —
+behind a switch that is off by default — asking another local process to start a Claude Code session. It writes no item file and
 no run file; the only bytes it owns are two files under `~/.backlog-manager/settings/`.
 
 ## Modules
 
 ### `items/`
 
-`GET /api/items` — the whole index, every registered project scanned fresh on each request. `GET /api/projects` — one row per registered project, with open-item
-counts and a `missing` flag for a project whose `backlog/` disappeared. `GET /api/items/body?path=` — one item's Markdown body, resolved through an allowlist
-built from the registry, so a path outside every registered project's `backlog/` 404s. `GET /api/items/uncommitted?project=` — which of one project's item files
-differ from `main`, so the Orchestrate sheet can flag the rows whose bytes on disk are not the bytes a run will read: `{ paths, known }`, `known: false` for
-every git failure alike, 404 for an unregistered project, and nothing cached.
+`GET /api/items` — the whole index, every registered project scanned fresh on each request; every row carries a `source` naming the adapter that produced it.
+`GET /api/projects` — one row per registered project, with open-item counts, a `missing` flag for a project whose `backlog/` disappeared, and that project's
+`source`. `GET /api/items/body?path=` — one item's Markdown body, resolved through an allowlist built from the registry, so a path outside every registered
+project's `backlog/` 404s. `GET /api/items/uncommitted?project=` — which of one project's item files differ from `main`, so the Orchestrate sheet can flag the
+rows whose bytes on disk are not the bytes a run will read: `{ paths, known }`, `known: false` for every git failure alike — and for a tracker project, where
+the question has no meaning — 404 for an unregistered project, and nothing cached.
+
+A project's source is resolved per request from its own committed `backlog/source.json` (`sources/resolve.util.ts`), never cached and never stored — the same
+rule the registry read follows, for the same reason. No marker means `files`, the implicit source, which never has to be registered for that to work; a
+`{"kind":"github","repo":"owner/name"}` marker resolves to the GitHub adapter (task-45). A marker that is present and cannot be honoured — malformed, no string `kind`, or a kind with no adapter here — resolves `unsupported`:
+the project contributes **no items** and exactly one error (prefixed with the marker's path, like every scan error), and its `/api/projects` row reads
+`source: 'unsupported'` with zero counts and `missing: false`. It never reads as `files`; a tracker project whose marker this build cannot read would otherwise
+render a stale clone's files as ghosts. A project with no store at all still reads `missing: true` and `source: null`. `ItemsService` dispatches over the
+registered adapters and refuses two claiming one kind at boot.
 
 Two git-backed reads live here and they cache differently on purpose. The last commit touching an item file (`git-dates.util.ts`) is memoised per project
 against the mtimes of `index` and `logs/HEAD` — the files git rewrites whenever the answer can change. The uncommitted read (`uncommitted.util.ts`) is memoised
 **nowhere**: a working-tree edit, the exact event it reports, moves neither of those files, so the same key would answer "clean" forever after its first hit.
+
+Two adapters are registered (`sources/files.source.ts`, `sources/github.source.ts`). `GET /api/items/body` dispatches on the ref's SHAPE, in `ItemsService` and
+nowhere else: a `gh:<owner>/<repo>#<n>` URN goes to the GitHub adapter, anything else is a filesystem path and goes to files. The GitHub adapter answers from
+the poller's cache and makes no network call of its own; a URN naming a repo no registered project is connected to answers `null`, so the route 404s. Each
+adapter also answers `summary(project, marker)` — the four connection fields (`repo`, `polledAt`, `access`, `detail`) on `ProjectSummary`, four `null`s from
+files. `GET /api/items/uncommitted` answers `known: false` for a tracker project: the question has no meaning where there are no item files.
+
+### `tracker/`
+
+The second outbound-calling module, and the only other one. `github.client.ts` is a thin client over `fetch` with no Nest decorators — one constant host
+(`api.github.com`), rate-limit headers recorded from every response including a `304`, and no throw on any status: every failure is a value the poller turns
+into an `access` state. `poller.service.ts` is a `setTimeout` chain in the watchdog's shape, armed only while a registered project resolves to `github` and
+`BM_GITHUB_TOKEN` is set; each tick makes two conditional requests per connected repo (issues, then every comment in the repo — the second is made now and read
+by nothing until phase 3), paginates the first sync to the end, upserts by issue number against an inclusive `since`, drops pull requests, and sleeps a
+rate-limited repo until its reset. The eight labels in `labels.ts` are created on a repo's first successful sync if any is missing — the module's one write to
+GitHub. `map-issue.ts` is the pure issue → `BacklogItem` mapping (spec §5.3). `GET /api/trackers` is read-only and carries the platform's `hasToken`/`login`,
+its rate limit, and one row per registered project — **never the token**, which is read per call from the environment and leaves this process in no payload,
+log line or URL.
 
 ### `registry/`
 
@@ -77,10 +105,13 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
 ## Interfaces
 
 - **The registry file** — read per request, never written, never cached. Its only writer is `skills/backlog/tools/backlog.mjs`.
-- **Each project's store** — read-only, always. Every write goes through the skills.
+- **Each project's store** — read-only, always. Every write goes through the skills. Its `backlog/source.json`, when present, names the tracker that owns its
+  items ([spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md)).
 - **The run-state directory** — read fresh per request. Its only writer is `skills/backlog-orchestrate/tools/orchestrate.mjs`; the server re-derives the
   directory path with its own copy of the same function rather than importing the `.mjs` tool.
 - **`../claude-agents-dashboard`** — reached only from `agents/`, at an env-only URL, and never by the browser: every call goes board → this API → dashboard.
+- **`api.github.com`** — reached only from `tracker/`, with a token read per call from `BM_GITHUB_TOKEN`, and never by the browser: every call goes board → this
+  API → GitHub, and the token reaches no payload.
 - **The client** — same-origin `fetch` against these routes, plus the built bundle when `static.ts` finds one.
 
 ## Invariants

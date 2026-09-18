@@ -3,6 +3,7 @@ import { useId, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
+import { hasTracker, trackerLine } from '../../lib/tracker';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useReverify } from '../../hooks/useReverify';
@@ -401,7 +402,16 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      construction. `liveRank(...) < 2` and `leavesBoard` are consequently two
      readings of one fact now, off one payload. */
   const hasLive = matched.some((i) => liveRank(i, runStageFor(i)) < 2);
-  const now = useNow(hasLive);
+  /* A registered tracker project is the board's second reason to hold a clock
+     (task-45). The band prints a POLL AGE, which goes stale with no event in
+     this tab exactly the way an in-progress card's elapsed does — and it goes
+     stale faster: the server polls every fifteen seconds, so a minute-long
+     period would show one number for four cycles. Hence one clock, running
+     faster while a tracker is registered, rather than a second interval beside
+     the first: every reading on this board is aged against one instant, which
+     is the rule `now` exists to keep. */
+  const tracked = hasTracker(projects);
+  const now = useNow(hasLive || tracked, tracked ? 5_000 : 60_000);
 
   /* Task 5: the Board/Archive split. Everything the toolbar matched, minus the
      open refactors, ideas and bugs nobody has touched inside the window — those
@@ -450,6 +460,16 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
     projectValue === ALL
       ? `${visible.length} ${countWord} across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
       : `${visible.length} ${countWord}`;
+
+  /* One line per CONNECTED project — the poll age, or the access reason in
+     its place when the connection is not `ok` (spec §5.5). The band is where
+     the run chip lives, so it is already this page's status line, and a
+     tracker's freshness is exactly that kind of fact: not about any one card,
+     and wrong to repeat on forty of them.
+     Derived by `lib/tracker.ts` and merely rendered here, the same discipline
+     every other board derivation follows. `null` for every files project, so
+     a board with no tracker prints exactly what it printed before. */
+  const trackerLines = registered.map((p) => trackerLine(p, now)).filter((line): line is string => line !== null);
 
   const missing = registered.filter((p) => p.missing);
   const warnings = [...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`), ...(index?.errors ?? [])];
@@ -524,6 +544,14 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
    * `runClaimBlock`'s own comment for why per-item is not available here at
    * all.
    */
+  /* The tracker line for one item's project, or null when its project is not
+     a tracker. Looked up by `projectPath`, the stable key — two checkouts of
+     one repo share a name but never a path. */
+  const trackerLineFor = (item: BacklogItem): string | null => {
+    const project = registered.find((p) => p.path === item.projectPath);
+    return project === undefined ? null : trackerLine(project, now);
+  };
+
   const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
 
   /*
@@ -597,7 +625,19 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
           19/500 title over the 13 px count line, then right-aligned the run
           chip, the 36 px search field, the three filter chips and — last, and
           the page's ONE ink chip — Orchestrate. */}
-      <Band title="Board" sub={countLine}>
+      <Band
+        title="Board"
+        sub={
+          <>
+            {countLine}
+            {trackerLines.map((line) => (
+              <span className="board-band-tracker" key={line} data-testid="tracker-line">
+                {line}
+              </span>
+            ))}
+          </>
+        }
+      >
         {/* Left of the controls (spec §3.2). Everything the Board still says
             about runs, in one control that opens Runs; absent entirely when
             the payload carries no run and no starting entry. */}
@@ -811,6 +851,12 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
           onDispatch={() => openLaunchSheet(open)}
           runBlock={runBlockFor(open)}
           reverify={reverifyAgents}
+          /* The same line the band prints, for the project THIS item belongs
+             to: the modal shows a body that came out of the poller's cache, so
+             it says how old that cache is right beside it (spec §5.5). Derived
+             here rather than in the modal because this view owns the clock and
+             the project list, exactly as it does for `runBlock` and `now`. */
+          trackerLine={trackerLineFor(open)}
         />
       )}
       {dispatching !== null && (

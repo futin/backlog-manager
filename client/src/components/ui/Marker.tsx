@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type MarkerTone = 'groomed' | 'kind' | 'done' | 'stale';
+export type MarkerTone = 'groomed' | 'kind' | 'done' | 'stale' | 'untyped';
 
 /**
  * Marker — the word on a card's marker row (.claude/DESIGN.md §8.3).

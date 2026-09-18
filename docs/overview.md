@@ -21,7 +21,7 @@ touch an item file, and each file that holds state has exactly one writer.
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes                                 |
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
 
-`.claude/rules/` sits beside that table rather than in it: four path-scoped pointer files that a session loads automatically when it reads a file under their
+`.claude/rules/` sits beside that table rather than in it: six path-scoped pointer files that a session loads automatically when it reads a file under their
 `paths:` glob, each one line per anchor into `subsystems/invariants.md` and no prose of its own. They are guarded by `test/claude-rules.test.ts` rather than by
 `/docs-sync`, because what can rot in them is a dead anchor or a glob that matches nothing — both mechanical checks.
 
@@ -50,15 +50,20 @@ guarantee is untouched by it.
 
 Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route under `/api`:
 
-- **`items/`** — walks each registered project's store, parses frontmatter, derives what the board needs, and serves item bodies through a registry-built
-  allowlist so a file outside every registered `backlog/` cannot be read. Two git-backed reads live here: the last commit touching an item file (memoised
-  against the files git rewrites) and which items differ from `main` (memoised nowhere — the edit it reports moves neither of those files).
+- **`items/`** — resolves which source owns each registered project's items (its committed `backlog/source.json`, read per request; absent means the files on
+  disk), lists them through that source's adapter — `files` or, since task-45, `github` — parses frontmatter, derives what the board needs, and serves item
+  bodies through a registry-built allowlist so a file outside every registered `backlog/` cannot be read; a `gh:<owner>/<repo>#<n>` URN goes to the tracker
+  adapter instead, gated on the registry the same way. Two git-backed reads live here: the last commit touching an
+  item file (memoised against the files git rewrites) and which items differ from `main` (memoised nowhere — the edit it reports moves neither of those files).
 - **`orchestrator/`** — a read-only view of the run-state directory, current run and archived runs alike, plus two pieces of in-memory bookkeeping that are lost
   on restart on purpose: what the watchdog has done, and which projects this process has just asked to start a run.
-- **`agents/`** — the one module that makes an outbound call, to the local claude-agents-dashboard, and the only one that can start a session. Off unless
+- **`agents/`** — one of the two modules that make an outbound call — to the local claude-agents-dashboard — and the only one that can start a session. Off unless
   `BM_AGENTS` says otherwise; every POST here is additionally guarded by content-type and `Origin`, because loopback is no boundary against a page in this
   machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
   while some run file says `running`.
+- **`tracker/`** — the other outbound-calling module: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set, the
+  in-memory issue cache the `github` adapter answers from (the one cache in this server whose age is rendered, as `polledAt`), the eight-label bootstrap, and a
+  read-only `trackers` route for Settings. The token is read per call from the environment and reaches no payload.
 - **`registry/`** — read-only view of the registry file.
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins
   the inline theme script by hash; and every route, read or write, is gated by a `Host` allowlist, which is what a page that rebinds DNS onto loopback cannot

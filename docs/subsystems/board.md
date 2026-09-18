@@ -47,7 +47,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | rail wordmark, card foot, column header, run chip, Runs rows, modal facts       |
-| `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale`, `children`                                                    | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
+| `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`                                            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
 | `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
 | `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
 | `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal` — the only modal in the app                                         |
@@ -193,18 +193,21 @@ everything in this browser's `localStorage`, Shared is what the API reads off th
 | Page       | Column 1              | Column 2      |
 | ---------- | --------------------- | ------------- |
 | **Local**  | Display, Board        | Orchestrator, Dispatch |
-| **Shared** | Orchestrator watchdog | Claude Agents |
+| **Shared** | Orchestrator watchdog | Claude Agents, Trackers |
 
 Each card is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether changing this
 affects anybody but the person changing it. Both pages draw the same two hand-placed columns, so a card does not move to the other side of the page when its
 neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card
-against the agents report.
+against two shorter reports stacked in one column (task-45 added `Trackers` under `Claude Agents`; both report on the host and neither sets anything, which is
+what makes them one column rather than two halves of the page).
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
 model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
 from. That card is what the old `Claude Agents` card's per-device half became: that card mixed backends, and a page that promises a scope cannot carry one that
 does. What stayed on Shared is genuinely the host's — the dispatch status lines and the conditional `Setting it up` block — on a status row with no control in
-its right slot at all.
+its right slot at all. `Trackers · this machine` is the other Shared report and is read-only by design, not by phase: a project is connected by committing
+`backlog/source.json`, so what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with the repo
+read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is.
 
 The watchdog card is the one place Settings writes to the server — four knobs that live in `settings/watchdog.json` beside the registry rather than in this
 browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it is the one write, it is also the one card
@@ -216,6 +219,19 @@ failed read replaces the whole group and a failed write must not.
 `useSettings`, releasing `.wrap` and `.wrap.wide` through one CSS block. Every section renders in `wrap wide` — Settings included since the split, which took
 the shell's narrow-Settings exception away.
 
+### A connected tracker
+
+Three readings and no new surface (task-45, [spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md) §5.5), all derived in `lib/tracker.ts` and
+merely rendered by the components:
+
+- **The band** prints one line per connected project — `futin/x · polled 12 s ago`, with the access reason in place of the age when the connection is not `ok`.
+  The band already carries the run chip, so it is the board's status line; a freshness fact about a whole project must not be repeated on forty cards.
+- **The card** gains three things and loses one: an `untyped` marker (amber, like `stale` — both mark something a person must do before the board can be
+  trusted), the assignee's login on the foot line (NOT on the live strip: phase 2 has no claim protocol, and drawing it there would claim someone is working
+  the item), a link-out to the issue that stops its click from opening the modal behind it — and **no dispatch control at all**, hidden the environment-level
+  way because a spawned session would run the file-writing skills against a project with no files.
+- **The item modal** prints the same line under the title, because the body it shows came out of the poller's cache rather than from GitHub on open.
+
 ## Interfaces
 
 - `lib/agents.ts` — same-origin fetches against `/api`.
@@ -224,6 +240,9 @@ the shell's narrow-Settings exception away.
   window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop.
+- `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker: a tracker's items move on the server's
+  poll clock, which this tab has no event for, and the band renders the poll age as a live reading. No tracker registered means no interval at all.
+- `hooks/useTrackers.ts` — mount and window focus only, for the Shared Settings Trackers card; the board is the surface that polls.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.
 
 ## Invariants

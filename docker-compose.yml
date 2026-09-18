@@ -93,6 +93,20 @@ services:
       # from inside this container" when those differ, and bug-25 is the
       # record of what a single key silently outranking the other does.
       BM_AGENTS_URL: '${BM_AGENTS_DOCKER_URL:-http://host.docker.internal:4173}'
+      # The GitHub credential the tracker poller reads (task-45). Passed
+      # through exactly the way BM_AGENTS is and for exactly bug-25's reason —
+      # an interpolation with a default, NEVER a literal. A literal here would
+      # be a token committed to this repository, which is the one mistake in
+      # this file that cannot be undone by editing it: it would have to be
+      # revoked. `:-` so an empty BM_GITHUB_TOKEN= reads as absent, which the
+      # server renders as `no-token` on the Trackers card rather than sending
+      # an empty Authorization header and getting a 401 it would have to
+      # explain.
+      #
+      # An absent token is a supported state, not a broken install: a machine
+      # with no connected project never needs one, and the poller is disarmed
+      # without it.
+      BM_GITHUB_TOKEN: '${BM_GITHUB_TOKEN:-}'
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:

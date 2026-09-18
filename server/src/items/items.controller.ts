@@ -15,13 +15,17 @@ import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
 export class ItemsController {
   constructor(private readonly items: ItemsService) {}
 
+  // Asynchronous since task-43: the item-source seam is async throughout,
+  // because a tracker adapter reads a cache a poller fills. Paths, status
+  // codes and content types are unchanged — Nest awaits a returned promise
+  // and serialises the value exactly as before.
   @Get('projects')
-  projects(): ProjectSummary[] {
+  async projects(): Promise<ProjectSummary[]> {
     return this.items.projects();
   }
 
   @Get('items')
-  index(): ItemsIndex {
+  async index(): Promise<ItemsIndex> {
     return this.items.index();
   }
 
@@ -68,8 +72,8 @@ export class ItemsController {
    * and non-.md alike — the caller has no business learning which.
    */
   @Get('items/body')
-  body(@Query('path') path: string | undefined, @Res() res: Response): void {
-    const body = path ? this.items.body(path) : null;
+  async body(@Query('path') path: string | undefined, @Res() res: Response): Promise<void> {
+    const body = path ? await this.items.body(path) : null;
     if (body === null) {
       res.status(404).send('not found');
       return;

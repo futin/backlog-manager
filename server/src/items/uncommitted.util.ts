@@ -68,7 +68,10 @@ export interface UncommittedItems {
    *  to `BacklogItem.path` without either side calling `realpath`. */
   paths: string[];
   /** False whenever this read could not be made — no git, not a repo, the
-   *  project is not the repo toplevel, no `main` ref, a timeout. The client
+   *  project is not the repo toplevel, no `main` ref, a timeout — and, since
+   *  task-45, whenever it could not be ASKED: a tracker project has no item
+   *  files, so `ItemsService.uncommitted` answers this shape without reaching
+   *  this module at all. The client
    *  renders NOTHING on `known: false`: an absent answer must never read as
    *  "nothing is uncommitted", since this feeds a render that asserts a fact
    *  about someone's repo. */

@@ -3,6 +3,7 @@ import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
+import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useSettings } from '../../hooks/useSettings';
@@ -181,13 +182,16 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
 }
 
 /**
- * The Shared page: the watchdog's file beside the registry, and the host
- * environment `Claude Agents` reports on.
+ * The Shared page: the watchdog's file beside the registry, the host
+ * environment `Claude Agents` reports on, and — since task-45 — what this
+ * machine can currently see of each project's tracker.
  *
- * Two cards rather than four, and the hand-balanced columns hold up for a
- * different reason here than on Local: this is the watchdog's long card
- * against the agents report, one tall column each, rather than Local's two
- * short cards over two taller ones.
+ * Three cards, and the hand-balanced columns hold up for a different reason
+ * here than on Local: this is the watchdog's long card against two shorter
+ * reports stacked in one column, rather than Local's two short cards over two
+ * taller ones. Both of the right column's cards report on the HOST and neither
+ * sets anything, which is what makes them one column rather than two halves of
+ * the page.
  */
 function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   return (
@@ -198,6 +202,12 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
 
       <div className="set-col">
         <AgentsGroup />
+        {/* Beside Claude Agents (spec §5.6), under it in the same column: both
+            report on the HOST — one on the dispatch environment, one on the
+            tracker connection — and both are read-only reports rather than
+            controls, so they read as one column of "what this machine can
+            currently reach". */}
+        <TrackersGroup />
       </div>
     </div>
   );

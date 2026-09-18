@@ -307,7 +307,12 @@ describe('SettingsView', () => {
       global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
 
       renderView('shared');
-      expect(screen.getByText(/checking…/)).toBeInTheDocument();
+      // `getAllBy`, not `getBy`: the Trackers card beside this one (task-45)
+      // says `checking…` in the same frame and for the same reason — its own
+      // fetch has not answered either. What this case is about is the SETUP
+      // PANEL below the status line, which must not appear while the answer is
+      // still outstanding.
+      expect(screen.getAllByText(/checking…/).length).toBeGreaterThan(0);
       expect(screen.queryByText(/BM_AGENTS=on/)).not.toBeInTheDocument();
     });
 
@@ -570,11 +575,16 @@ describe('SettingsView', () => {
       `this device`, and the day a card on this page says anything else it is a
       card on the wrong page.
     */
-    it("renders the Shared page's two cards, each with its own scope", async () => {
+    it("renders the Shared page's three cards, each with its own scope", async () => {
       renderView('shared');
       await screen.findByText(/connected/);
-      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Claude Agents']);
-      expect(groupScopes()).toEqual(['this server', 'this machine']);
+      // `Trackers` joined the pair in task-45: a third host-backed report, in
+      // the same column as `Claude Agents` because both report and neither
+      // sets. An exact list rather than a `toContain` for the reason the
+      // comment above gives — a build that lost one card outright would pass
+      // the looser check.
+      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Claude Agents', 'Trackers']);
+      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.
