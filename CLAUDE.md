@@ -156,7 +156,10 @@ any of these — most encode a failure that already happened.
   `polledAt`: the rendered age means "since we last successfully checked", and a conditional request that came back `304` is a successful check (settled
   2026-09-18 in spec §12.2's favour, against task-45's own authoritative case, which is recorded as having been overturned). The comments request is made every
   tick and is read by `TrackerPollerService.comments()`, which is what the claim protocol maps an item's `started`/`phase` and counters
-  from. Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eight labels
+  from. **Issues and comments have SEPARATE high-water marks and each paginates to the end** — sharing one mark asked for comments `since` the newest
+  ISSUE's stamp, which hid every claim older than that from a fresh process, and `readClaim` therefore falls back to one fresh read on a cache miss
+  rather than reporting "unclaimed".
+ Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eight labels
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
   `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. Why:
   [invariants.md](docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value)

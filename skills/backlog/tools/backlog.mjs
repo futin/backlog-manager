@@ -625,6 +625,14 @@ function apiBase() {
 // and the second one has a fix that is the same every time — start the stack. Named here so both the message and the code have one home.
 const API_DOWN_CODE = 5
 
+// How long a claim stays live without a heartbeat, mirroring the server's `CLAIM_STALE_MS` (`shared/types.ts`), which is itself a named alias of
+// `RUN_STALE_MS`. The CLI genuinely cannot import it — a plugin skill's `tools/` is a standalone copy of what was pushed, with no path back into the repo —
+// so this is the second copy, and it is NAMED for the reason the server's is: the invariant says the window exists as an alias precisely so phase 4 can give
+// a skill claim a longer one, and an unnamed literal buried in `stop` is the copy that would silently disagree when it moves. Only `stop` reads it, to decide
+// whether another session's claim is still somebody's property or merely litter; the authority on that question is the server, which re-decides it on every
+// `claim`.
+const CLAIM_STALE_MS = 15 * 60 * 1000
+
 function apiDownMessage() {
   return `the backlog-manager API is not running on ${apiBase().replace('http://', '')} — start it with \`pnpm run dev\` or \`pnpm run docker:up\`; a tracker project needs the stack up for every command`
 }
@@ -2436,7 +2444,7 @@ export async function main(argv) {
 
         const session = sessionIdentity()
         const ageMs = Math.max(0, Date.now() - Date.parse(held.record.heartbeat))
-        if (held.record.session !== session && ageMs < 15 * 60 * 1000) {
+        if (held.record.session !== session && ageMs < CLAIM_STALE_MS) {
           console.error(`${wanted} is held by session ${held.record.session} (heartbeat ${roughAge(ageMs)} ago) — not this one`)
           return 1
         }

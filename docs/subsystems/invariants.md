@@ -2328,6 +2328,18 @@ hour while the poller was in fact confirming the state every fifteen seconds. Th
 the failure mode that outweighs the other reading's one merit — that "how old are these items" is also a true thing somebody might want. It is still available
 (an item's own `updated` is on every row) and it is not what the band's line claims.
 
+**Issues and comments each have their own high-water mark, and each read paginates to the end.** They are two streams with independent clocks, and treating
+them as one was a defect task-46's own review caught before it merged: `syncRepo` reads issues first, `absorbIssues` advances the mark to the newest issue's
+`updated_at`, and the comments request then sent THAT as its `since` — asking for "every comment at or after the most recently touched issue's timestamp". A
+claim on an issue that anything else has outlived was therefore invisible to a fresh process, permanently, because no later response ever mentions an unedited
+comment again. Nothing read the cache before task-46, so the gap had been harmless and silent; the moment the board's `started`/`phase` and `backlog.mjs stop`
+started reading it, it meant a held item drawn as free and a claim the CLI could not give back. Pagination is the same rule one step on: the issues loop always
+followed `Link` and the comments read did not, so a claim past the first page was lost the same way.
+
+That is also why `readClaim` does not trust a cache MISS. A miss means "this process has not seen it", never "nobody holds it" — a server that started after
+the claim, or a second machine's server, has every right to one — so it falls back to a single fresh per-issue read. The cache stays the fast path and the
+common one; the fallback is what makes the answer safe to act on.
+
 **The comments request is made on every tick, and since task-46 it has a reader.** One conditional request covers every comment in the repo, including edits,
 which is what makes per-item claim watching cheap. Phase 2 made the call with nothing reading it, deliberately, so that the polling loop's shape, its budget and
 its tests would not move in the phase that also introduced the protocol they feed — and that bet paid: task-46 added `TrackerPollerService.comments()` over the

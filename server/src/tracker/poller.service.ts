@@ -73,9 +73,28 @@ interface RepoState {
    *  below, which is what the claim protocol maps an item's `started`/`phase`
    *  and counters from. */
   comments: Map<number, GithubComment>;
-  /** The newest `updated_at` seen, sent as the next poll's `since`. `null`
-   *  before the first sync, which is what makes that sync a full one. */
+  /** The newest issue `updated_at` seen, sent as the next ISSUES poll's
+   *  `since`. `null` before the first sync, which is what makes that sync a
+   *  full one. */
   hwm: string | null;
+  /**
+   * The same thing for COMMENTS, and a separate field rather than a reuse of
+   * `hwm` — which is the bug task-46's review caught (Critical).
+   *
+   * `syncRepo` reads issues first, and `absorbIssues` moves `hwm` to the newest
+   * issue's `updated_at` BEFORE the comments request is made. Sending that as
+   * the comments `since` asks for "every comment at or after the single most
+   * recently touched issue's timestamp", which on a fresh process silently
+   * excludes every claim comment older than that — and no later response ever
+   * mentions an unedited comment again, so the gap never closes. Two readers
+   * added by task-46 rest on this cache (`claimsByIssue` for the board's
+   * `started`/`phase`, and `readClaim` for `backlog.mjs stop`), so the item
+   * looked FREE after any restart while a session held it.
+   *
+   * The two streams have independent clocks and now have independent marks:
+   * this one moves only from what the comments responses themselves return.
+   */
+  commentsHwm: string | null;
   issuesEtag: string | null;
   commentsEtag: string | null;
   polledAt: string | null;
@@ -406,6 +425,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
         issues: new Map(),
         comments: new Map(),
         hwm: null,
+        commentsHwm: null,
         issuesEtag: null,
         commentsEtag: null,
         polledAt: null,
@@ -474,19 +494,23 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // budget and its tests into the phase that also introduced the claim
     // protocol they feed. Since task-46 `comments()` reads this cache, and the
     // loop itself did not have to change.
-    const comments = await this.client.comments(repo, { token, since: state.hwm, etag: state.commentsEtag });
+    // `commentsHwm`, never `hwm` — see that field for the incident. And
+    // PAGINATED to the end, exactly as the issues loop above is: a repo with
+    // more than a hundred comments newer than the mark would otherwise land
+    // only its first page, and the claim the CLI needs is as likely to be on
+    // the second as on the first.
+    const comments = await this.client.comments(repo, { token, since: state.commentsHwm, etag: state.commentsEtag });
     if (this.handleFailure(state, comments)) return;
     if (comments.status === 200) {
       state.commentsEtag = comments.etag;
-      // `Array.isArray` rather than a bare `?? []`, here and in
-      // `absorbIssues`: a 200 whose body is not the array this endpoint
-      // documents (a proxy's error page, an API change) would otherwise throw
-      // inside a `for…of` — and this code runs from a timer chain, where a
-      // throw is an unhandled rejection that kills the poll loop rather than
-      // one bad tick. Every other failure in this file is a value the board
-      // renders; this one must be too.
-      if (Array.isArray(comments.data)) {
-        for (const comment of comments.data) state.comments.set(comment.id, comment);
+      let page = comments;
+      for (;;) {
+        this.absorbComments(state, page.data ?? []);
+        if (page.next === null) break;
+        const nextPage = await this.client.page<GithubComment[]>(page.next, { token });
+        if (this.handleFailure(state, nextPage)) return;
+        if (nextPage.status !== 200) break;
+        page = nextPage;
       }
     }
 
@@ -510,6 +534,27 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       state.issues.set(issue.number, issue);
       if (typeof issue.updated_at === 'string' && (state.hwm === null || issue.updated_at > state.hwm)) {
         state.hwm = issue.updated_at;
+      }
+    }
+  }
+
+  /**
+   * Upsert by comment id and move the COMMENTS high-water mark — `absorbIssues`
+   * one stream over, and separate for the reason `commentsHwm` gives.
+   *
+   * `Array.isArray` rather than a bare `?? []`, here as there: a 200 whose body
+   * is not the array this endpoint documents (a proxy's error page, an API
+   * change) would otherwise throw inside a `for…of`, and this code runs from a
+   * timer chain where a throw is an unhandled rejection that kills the poll
+   * loop rather than one bad tick. Every other failure in this file is a value
+   * the board renders; this one must be too.
+   */
+  private absorbComments(state: RepoState, comments: GithubComment[]): void {
+    if (!Array.isArray(comments)) return;
+    for (const comment of comments) {
+      state.comments.set(comment.id, comment);
+      if (typeof comment.updated_at === 'string' && (state.commentsHwm === null || comment.updated_at > state.commentsHwm)) {
+        state.commentsHwm = comment.updated_at;
       }
     }
   }

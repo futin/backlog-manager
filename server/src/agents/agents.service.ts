@@ -1636,7 +1636,6 @@ export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'boa
   return `${prefix} ${basename(projectPath)}`.slice(0, 60);
 }
 
-/** Never throws — used only to build messages and to compare paths. */
 /**
  * A ceiling we do not recognise is a dashboard newer than this client. Read as
  * null, which `modesUpTo` turns into "plan only" — the safe reading, since we

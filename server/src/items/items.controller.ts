@@ -72,10 +72,14 @@ export class ItemsController {
    *
    * A GET, and therefore in THIS controller rather than beside the seven
    * writes: it starts nothing, reads no caller-supplied path (`project` has to
-   * match a registry entry exactly), makes no network call at all — the answer
-   * comes out of the poller's cache — and discloses strictly less than
+   * match a registry entry exactly), and discloses strictly less than
    * `/api/items` already does to any same-origin reader. That is the same
    * reasoning `uncommitted` above carries for being unguarded.
+   *
+   * It answers from the poller's cache, and makes ONE fresh read when the cache
+   * has no claim for that issue — see `ItemWriter.readClaim` for why a miss
+   * cannot be reported as "unclaimed". So it is not free, but it is bounded: at
+   * most one request, and none at all in the common case.
    *
    * It exists because `backlog.mjs start` and `backlog.mjs stop` are two
    * PROCESSES: `claim` answers the comment id that identifies the claim, and

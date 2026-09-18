@@ -576,6 +576,35 @@ describe('release', () => {
     expect(gh.issues.get(31)?.assignees).toEqual([{ login: 'futin' }]);
   });
 
+  /**
+   * The 404 the item's Test cases name by hand: "`removeLabel`'s 404 answers
+   * `status: 404` (the poller/writer treats it as success — assert THAT in the
+   * writer suite, not here)". `test/tracker-client-write.test.ts` pins the
+   * client half; this is the writer half, and it was missing until the review
+   * caught it.
+   *
+   * The issue here carries NO `in-progress` label, which is an ordinary state:
+   * two sessions releasing the same dead claim, or a person who removed it by
+   * hand. Today the release succeeds only because `github.source.ts` ignores the
+   * result — so this case is what stops a plausible-looking
+   * `if (removed.status !== 200) return refusal` from being added there, which
+   * would break every release of an already-clean claim with nothing going red.
+   */
+  it('succeeds when in-progress is already gone, on a 404 from the label removal', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }] });
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+
+    const res = await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'A', reason: 'stopped' }).expect(201);
+    expect(res.body.record.released).toMatchObject({ reason: 'stopped', by: 'A' });
+    expect(claimIn(100)?.released?.reason).toBe('stopped');
+
+    // The attempt WAS made and GitHub WAS the one to say no — a release that
+    // skipped the call entirely would pass an outcome-only assertion too.
+    const removals = gh.matching('/labels/in-progress', 'DELETE');
+    expect(removals).toHaveLength(1);
+  });
+
   it('keeps the seeded counters when the caller sends none', async () => {
     gh.issue();
     gh.claim(record({ session: 'A', counters: { groomElapsed: 9, executeElapsed: 8, groomTokens: 7, executeTokens: 6 } }), 31, 100);

@@ -334,6 +334,16 @@ export class GithubSource implements ItemSource, ItemWriter {
     return this.serialise(issueUrn(repo, number), async () => {
       const found = await this.issueNow(repo, number, token);
       if (!found.ok) return found;
+      /* This is the one precondition in this file read from the CACHE rather
+         than fresh (`issueNow` prefers it), so it can be up to one poll interval
+         behind: a claim can slip onto an issue closed seconds ago, or be refused
+         on one reopened seconds ago. Left that way on purpose — the alternative
+         is a guaranteed extra request on every `start` to narrow a window the
+         protocol's own writes do not depend on. Nothing downstream trusts this:
+         the claim comment lands either way, `release` does not care about state,
+         and a person who closed an issue out from under a session sees the claim
+         comment on it. Make it fresh only if a real sequence is found that this
+         gets wrong. */
       if (found.value.state === 'closed') {
         return { ok: false as const, refusal: { refused: 'conflict' as const, error: `#${number} is done — nothing to start` } };
       }
@@ -352,6 +362,18 @@ export class GithubSource implements ItemSource, ItemWriter {
       await sleep(this.settleMs);
 
       const after = await this.allClaims(repo, number, token);
+      /* The posted comment is deliberately NOT deleted on this path. A failure
+         here is a rate limit or a transport error, not a lost race, and the two
+         want opposite things: a loser knows it lost and cleans up after itself,
+         while this call does not know whether it won. Deleting would throw away
+         a claim that may be the only one, and on a second machine mid-protocol
+         that is the claim somebody is about to rely on.
+
+         The cost is an issue that reads as claimed by a session whose `start`
+         reported failure, until something contests it — which the protocol
+         handles on its own, because the heartbeat never moves and the next
+         claimant retires it as stale. Self-healing in fifteen minutes beats a
+         delete that can be wrong immediately. */
       if (!after.ok) return after;
 
       // The union, keyed by comment id, with our own claim included
@@ -452,10 +474,24 @@ export class GithubSource implements ItemSource, ItemWriter {
         released: { at: new Date(now).toISOString(), reason: req.reason, by: req.session }
       };
     }, async (repo, number, token) => {
-      // The label comes off after the comment is edited, and a 404 from it is a
-      // success: the caller's contract is "the label is not there", and it is
-      // not. Two sessions releasing the same dead claim, or a person who
-      // removed the label by hand, both land on that 404.
+      /* The label comes off after the comment is edited, and the RESULT IS
+         DELIBERATELY NOT CHECKED — which is a decision rather than an oversight,
+         so it is worth the three lines.
+
+         A 404 means the label was not on the issue, and that is a SUCCESS for
+         this caller: the contract is "`in-progress` is not there", and it is not
+         there. Two sessions releasing the same dead claim, and a person who
+         removed the label by hand, both land on it. Nor would any OTHER status
+         justify failing: by the time this runs the claim comment is already
+         edited and the release has happened, so refusing here would report a
+         release that did occur as one that did not — and the caller's retry
+         would then hit `claim … is already released`, wedging the item shut.
+
+         `test/tracker-write.test.ts` pins the 404 half against an issue with no
+         `in-progress` label, because "the result is ignored" is exactly the
+         shape a green suite cannot protect: adding a plausible-looking
+         `if (removed.status !== 200) return refusal` here would break every
+         release of an already-clean claim with nothing going red. */
       await this.client.removeLabel(repo, number, 'in-progress', { token });
       // The assignee is deliberately left alone. It records who last worked the
       // issue, which stays true after they stop, and clearing it would throw
@@ -540,30 +576,51 @@ export class GithubSource implements ItemSource, ItemWriter {
   }
 
   /**
-   * The newest claim on one item, from the CACHE — the eighth route's whole
-   * implementation, and the only read on `ItemWriter`.
+   * The newest claim on one item — the eighth route's whole implementation, and
+   * the only read on `ItemWriter`.
    *
-   * No network call, deliberately: it is a GET on the board's own read path,
-   * and a claim this server posted is in the cache before the POST that made it
-   * returned. `stop` therefore learns its own `start`'s comment id for free,
-   * which is the reason this exists at all — the two are separate processes.
+   * **Cache first, then one fresh read on a miss.** The cache is the fast path
+   * and the common one: a claim this server posted is in it before the POST
+   * that made it returned, so `stop` learns its own `start`'s comment id
+   * without a request. The FALLBACK is what makes the answer trustworthy, and
+   * it exists because of a Critical this branch's review caught — a cache miss
+   * here is not "nobody holds it", it is "this process has not seen it", and
+   * those are opposite answers to the one question `stop` and `heartbeat` ask.
    *
-   * `null` for an item nobody has ever claimed, which the CLI reads as "not in
-   * progress". An issue this build has never seen is `null` too rather than a
-   * refusal: the honest answer to "who holds it" for an issue that is not in
-   * the cache is "nobody we know of", and the caller's next step (a `release`
-   * or a `heartbeat`) refuses on its own terms.
+   * A miss is an ordinary state, not an exotic one: this process may have
+   * started after the claim was posted, the poller is armed only once something
+   * reads the board, and a second machine's server has never seen the first
+   * machine's comments at all. Answering `null` there orphans the claim — the
+   * CLI prints "not in progress", the counters only it can compute are lost,
+   * `in-progress` and the assignee stay set, and the board draws a held item as
+   * free. `issueNow` already handles exactly this shape for ISSUES, one line
+   * over, and `allClaims` already paginates and absorbs what it reads.
+   *
+   * A genuinely unclaimed item costs one request per `stop` on a cold cache and
+   * none afterwards, which is the right way round: the expensive case is the
+   * one where being wrong is free, and the cheap case is the one where being
+   * wrong loses a session's work.
    */
   async readClaim(_project: RegistryProject, marker: SourceMarker, id: string): Promise<WriteOutcome<ClaimResult | null>> {
-    const repo = marker.repo;
-    if (!isRepo(repo)) {
-      return { ok: false, refusal: { refused: 'upstream', error: `backlog/source.json names no valid "repo" (expected "owner/name")`, status: 0 } };
-    }
+    const ready = this.ready(marker);
+    if (!ready.ok) return ready;
+    const { repo, token } = ready.value;
+
     const number = issueNumberFor(id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${id} does not name an issue in ${repo}` } };
 
-    const newest = newestClaim(claimsFor(number, this.poller.comments(repo)));
-    return { ok: true, value: newest === null ? null : { commentId: newest.commentId, record: newest.record } };
+    const cached = newestClaim(claimsFor(number, this.poller.comments(repo)));
+    if (cached !== null) return { ok: true, value: { commentId: cached.commentId, record: cached.record } };
+
+    // The fallback. Serialised on this item's chain like every other call that
+    // touches it, so a `stop` cannot read the comments while the `claim` that
+    // is about to post one is mid-flight.
+    return this.serialise(issueUrn(repo, number), async () => {
+      const fresh = await this.allClaims(repo, number, token);
+      if (!fresh.ok) return fresh;
+      const newest = newestClaim(fresh.value);
+      return { ok: true as const, value: newest === null ? null : { commentId: newest.commentId, record: newest.record } };
+    });
   }
 
   /* ---------------------------------------------------------------------

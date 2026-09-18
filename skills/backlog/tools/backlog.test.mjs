@@ -4205,3 +4205,32 @@ test('groom and execute both ask for a heartbeat between long steps', () => {
     assert.match(flat(file), /heartbeat between long steps/i, `${name}/SKILL.md no longer asks for a heartbeat between long steps`)
   }
 })
+
+// `--keep-started` is accepted and INERT in API mode: a claim's `at` is permanent, so there is nothing for it to preserve. Asserted rather than assumed
+// (the review's gap) — "inert by construction" is a claim about the code, and the flag reaching a branch that behaved differently would be silent.
+test('API mode: stop --keep-started is identical to a plain stop', async () => {
+  const { dir } = trackerFixture()
+  const at = new Date(Date.now() - 90_000).toISOString()
+  const routes = {
+    '/api/items/claim': {
+      body: { commentId: 100, record: { v: 1, session: 'sess-abc', phase: 'groom', at, heartbeat: new Date().toISOString(), counters: { groomElapsed: 10, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } },
+    },
+    '/api/items/release': { status: 201, body: { commentId: 100, record: {} } },
+  }
+  const env = { CLAUDE_CODE_SESSION_ID: 'sess-abc' }
+
+  const plain = await withApi(routes, async (port) => await runNode(dir, apiEnv(port, env), 'stop', '31'))
+  const kept = await withApi(routes, async (port) => await runNode(dir, apiEnv(port, env), 'stop', '31', '--keep-started'))
+
+  assert.equal(plain.out.status, 0)
+  assert.equal(kept.out.status, 0)
+  assert.equal(plain.out.stdout, kept.out.stdout)
+
+  const bodyOf = (r) => r.requests.find((q) => q.path === '/api/items/release').body
+  const a = bodyOf(plain)
+  const b = bodyOf(kept)
+  assert.equal(a.reason, b.reason)
+  assert.equal(a.commentId, b.commentId)
+  // The one number that could differ is the billed total, and it is computed from a clock — so compare it with the same tolerance the plain-stop case uses.
+  assert.ok(Math.abs(a.counters.groomElapsed - b.counters.groomElapsed) <= 1)
+})

@@ -447,7 +447,7 @@ pnpm test: both runners passed.
 $ pnpm run build
 ✓ built in 1.23s   (nest build + vite build, exit 0)
 
-$ git diff --quiet main...HEAD -- skills/backlog-orchestrate && echo "no diff"
+$ git diff --quiet feature/tracker...HEAD -- skills/backlog-orchestrate && echo "no diff"
 no diff
 
 $ grep -rn "phase 3" server/src client/src shared docs/subsystems skills CLAUDE.md README.md .claude
@@ -518,6 +518,78 @@ naming: the SOURCE guard stays green when it is reverted (it accepts both shapes
 8. **No `--runner-fix` flag on the CLI.** The `create` route accepts `runnerFix`, but the marker only matters to an orchestrator run and a tracker project
    cannot be orchestrated until phase 4 — and `backlog-groom`'s tracker path patches a BODY, where a files groom writes frontmatter. Phase 4's problem, with
    the route already waiting for it.
+
+### Fix loop 1 — 2026-09-18, after review `task-46-1.md` (verdict: fix)
+
+Two findings, both real, both fixed. The review's five Minors are fixed too; none needed a judgement call.
+
+```
+$ pnpm run typecheck
+(clean, no output)
+
+$ pnpm test
+Test Suites: 124 passed, 124 total
+Tests:       2016 passed, 2016 total
+# tests 620
+# pass 620
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.11s   (exit 0)
+
+$ git diff --quiet feature/tracker...HEAD -- skills/backlog-orchestrate && echo "no diff"
+no diff
+```
+
+Contract sweep: 5 sites updated (CLAUDE.md, docs/subsystems/{invariants,api}.md, server/src/items/sources/source.ts,
+server/src/items/items.controller.ts)
+Red proof: 4 tests went red with the change reverted
+
+**Critical — the comment cache could not contain a claim made before the process started.** The reviewer was right about the mechanism and about
+its reach. `syncRepo` reads issues first, `absorbIssues` advances `hwm` to the newest issue's `updated_at`, and the comments request then sent THAT
+as its `since` — so a claim on an issue anything else had outlived was invisible to a fresh process, permanently, because no later response ever
+mentions an unedited comment again. Both of this branch's new readers rest on that cache, so after any restart the board drew a held item as free
+and `backlog.mjs stop` printed `not in progress` and exited 1, orphaning the claim with its counters lost.
+
+Fixed at the source AND at the reader, because they cover different states:
+
+- `RepoState.commentsHwm` is a separate mark, moved only by `absorbComments` from what the comments responses themselves return, and the comments
+  read now follows `Link` to the end exactly as the issues loop always did. This is what fixes the BOARD, whose mapper reads the cache and has no
+  fallback to fall back to.
+- `readClaim` falls back to one fresh per-issue read on a cache miss (`allClaims`, which already paginates and absorbs). This is what fixes a
+  server nobody has opened the board on, whose poller has never been armed at all — a state no amount of correct polling reaches, and the exact
+  state a first `backlog.mjs stop` after a restart is in.
+
+`test/tracker-cold-cache.test.ts` is new and drives the scenario rather than the reordering: #5 claimed at 10:00, #9 edited at 10:05, a fresh app
+whose poller is held down across `init()` so each case controls its own sweeps. Eight cases — the board's reading and the route's after one sweep,
+the first sweep sending no `since` at all, the second sending the newest COMMENT's stamp, a claim on page 2 behind `pageSize = 1`, the route
+answering with NO sweep anywhere, `null` for a genuinely unclaimed item, and no request at all when the cache already holds it.
+
+The fake had to become faithful first, and that is the part worth carrying forward: `test/helpers/github.ts` ignored `since` and never paginated,
+so a caller sending a wrong `since` or reading one page looked identical to a correct one. It now filters by `since`, sorts ascending, and sends a
+`Link` header past `pageSize`. That is why the bug reached review — no test COULD have caught it.
+
+**Important — the release path's "a `removeLabel` 404 is a success" was specified and unasserted.** Now pinned by `succeeds when in-progress is
+already gone, on a 404 from the label removal`, which seeds an issue with no `in-progress` label and asserts both the 201 and that the DELETE was
+actually attempted (an outcome-only assertion would pass a release that skipped the call). The discard in `github.source.ts` is now explained
+rather than silent: no status justifies failing there, because by that point the claim comment is already edited and the release HAS happened —
+refusing would report a release that occurred as one that did not, and the caller's retry would hit `claim … is already released` and wedge the
+item shut.
+
+**Minors, all five:** the orphaned `samePath` docblock left behind in `agents.service.ts` is gone; `backlog.mjs` names its `CLAIM_STALE_MS` mirror
+instead of an inline `15 * 60 * 1000`, with a note pointing at the server constant it copies; the claim path's two unexplained choices (not
+deleting the posted comment when the SECOND listing fails, and reading "is it closed" from the cache) now carry the reasoning for each; and the CLI
+suite gained `stop --keep-started is identical to a plain stop`, which was inert by construction and therefore unasserted.
+
+**One correction to this Outcome itself:** the verification block above originally pasted the orchestrate-diff check as `main...HEAD`. The run's
+base is `feature/tracker`; the claim was true against both, but the transcript named the wrong ref and has been corrected in place.
+
+**Carried into phase 4's item** (the reviewer endorsed deviation 8 and asked for this): the `create` route accepts `runnerFix` and no CLI flag
+sends it, because the marker only matters to an orchestrator run and a tracker project cannot have one until phase 4. Phase 4 should add the flag
+or drop the field rather than leave the route caller-less indefinitely.
 
 ### Still to be done by a person with a token
 

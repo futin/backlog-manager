@@ -74,6 +74,10 @@ export class FakeGithub {
 
   /** Comment ids this fake will omit from the NEXT per-issue list only. */
   hideFromFirstList = new Set<number>();
+
+  /** Rows per page. GitHub's own maximum is 100; a case that wants to prove a
+   *  caller follows `Link` lowers this to 1. */
+  pageSize = 100;
   private listCount = 0;
 
   private nextIssue = 77;
@@ -131,21 +135,52 @@ export class FakeGithub {
     const method = init?.method ?? 'GET';
     const body = init?.body === undefined ? undefined : (JSON.parse(String(init.body)) as Record<string, unknown>);
     this.calls.push({ method, url, body });
-    const { status, payload } = this.route(method, url, body);
-    return new Response(payload === undefined ? null : JSON.stringify(payload), { status });
+    const { status, payload, next } = this.route(method, url, body);
+    return new Response(payload === undefined ? null : JSON.stringify(payload), {
+      status,
+      // `Link` is how this API paginates, and the client reads `rel="next"` off
+      // it — so a fake that never sends one can never exercise a caller's page
+      // loop. Task-46's review caught a poller that dropped every comment past
+      // the first page precisely because nothing here ever asked for a second.
+      headers: next === undefined ? undefined : { link: `<${next}>; rel="next"` }
+    });
   }) as unknown as typeof fetch;
 
-  private route(method: string, url: string, body: Record<string, unknown> | undefined): { status: number; payload?: unknown } {
+  /**
+   * `since` and one page of rows, the way GitHub answers a list.
+   *
+   * Both halves are faithfulness this fake lacked until task-46's fix pass, and
+   * both were load-bearing: it returned every row whatever `since` asked for and
+   * never paginated, so a caller sending a WRONG `since` — or reading only the
+   * first page — looked identical to a correct one. `pageSize` is large enough
+   * that no existing case pages, and a case that wants to prove a page loop
+   * lowers it.
+   */
+  private page<T extends { updated_at: string }>(rows: T[], url: string): { status: number; payload: unknown; next?: string } {
+    const since = new URL(url).searchParams.get('since');
+    const cursor = Number(new URL(url).searchParams.get('bm_page') ?? '0');
+    // Ascending by `updated_at`, which is what `sort=updated&direction=asc`
+    // asks for and what makes a high-water mark meaningful at all.
+    const matching = rows
+      .filter((r) => since === null || r.updated_at >= since)
+      .sort((a, b) => (a.updated_at < b.updated_at ? -1 : a.updated_at > b.updated_at ? 1 : 0));
+    const slice = matching.slice(cursor, cursor + this.pageSize);
+    const more = cursor + this.pageSize < matching.length;
+    const nextUrl = `${url.split('?')[0]}?bm_page=${cursor + this.pageSize}${since === null ? '' : `&since=${encodeURIComponent(since)}`}`;
+    return { status: 200, payload: slice, next: more ? nextUrl : undefined };
+  }
+
+  private route(method: string, url: string, body: Record<string, unknown> | undefined): { status: number; payload?: unknown; next?: string } {
     const path = url.replace('https://api.github.com', '').split('?')[0];
 
     if (path === '/user') return { status: 200, payload: { login: 'futin' } };
     if (path === `/repos/${FAKE_REPO}/labels`) return { status: 200, payload: TRACKER_LABELS.map((l) => ({ name: l.name })) };
 
     // The repository-wide comment read the poller makes.
-    if (path === `/repos/${FAKE_REPO}/issues/comments`) return { status: 200, payload: [...this.comments.values()] };
+    if (path === `/repos/${FAKE_REPO}/issues/comments`) return this.page([...this.comments.values()], url);
 
     if (path === `/repos/${FAKE_REPO}/issues`) {
-      if (method === 'GET') return { status: 200, payload: [...this.issues.values()] };
+      if (method === 'GET') return this.page([...this.issues.values()], url);
       const created = this.issue({
         number: this.nextIssue++,
         title: String(body?.title ?? ''),
@@ -159,10 +194,13 @@ export class FakeGithub {
     if (issueComments !== null) {
       const number = Number(issueComments[1]);
       if (method === 'GET') {
-        this.listCount++;
-        const hide = this.listCount === 1 ? this.hideFromFirstList : new Set<number>();
+        // `bm_page` only on a follow-up page: the settle window's "first list"
+        // is the first REQUEST for this issue, not each page of it.
+        const paging = url.includes('bm_page=');
+        if (!paging) this.listCount++;
+        const hide = this.listCount === 1 && !paging ? this.hideFromFirstList : new Set<number>();
         const rows = [...this.comments.values()].filter((c) => c.issue_url.endsWith(`/issues/${number}`) && !hide.has(c.id));
-        return { status: 200, payload: rows };
+        return this.page(rows, url);
       }
       const id = this.nextComment++;
       this.comments.set(id, {

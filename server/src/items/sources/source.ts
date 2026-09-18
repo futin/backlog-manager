@@ -226,9 +226,15 @@ export interface ItemWriter {
    * never give it back. The spec's §6.2 names seven write routes and does not
    * name this one; the deviation is recorded in the task item's Outcome.
    *
-   * Answered from the CACHE, with no network call, because it is a GET on the
-   * board's own read path: a claim this server absorbed when it posted it is
-   * already there, and a claim from another machine arrives within one poll.
+   * Answered from the CACHE when it is there, and from ONE fresh read when it
+   * is not. The cache is the fast path — a claim this server posted is in it
+   * before the POST that made it returned — but a miss is not "nobody holds
+   * it", it is "this process has not seen it", and those are opposite answers
+   * to the question `stop` asks. A process that started after the claim was
+   * posted, or a second machine's server, has every right to a miss; answering
+   * `null` there orphans the claim and loses the counters only the CLI can
+   * compute. (Task-46's review caught exactly that, one layer down in the
+   * poller's own comment cache.)
    */
   readClaim(project: RegistryProject, marker: SourceMarker, id: string): Promise<WriteOutcome<ClaimResult | null>>;
 }
