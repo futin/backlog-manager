@@ -522,14 +522,16 @@ that gate can — and because what it prevents is not a crash but a _silent succ
 that one, and every stage of the run reports success over a branch carrying code with no lifecycle move on it. (`references/rationale.md`, §4, lists everything
 the probe catches that the gate cannot.)
 
-Then keep the new directory out of everybody's `git status`, idempotently:
+Then keep the new directory — and anything this run itself puts in a worktree — out of everybody's `git status`, idempotently:
 
 ```bash
 EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
-grep -qxF '.worktrees/' "$EXCLUDE" 2>/dev/null || printf '.worktrees/\n' >> "$EXCLUDE"
+for PATTERN in '.worktrees/' 'node_modules'; do
+  grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
+done
 ```
 
-Run that from the project root (the path `git rev-parse` prints is relative to cwd). Three details, all load-bearing, all explained in `references/rationale.md`
+Run that from the project root (the path `git rev-parse` prints is relative to cwd). Four details, all load-bearing, all explained in `references/rationale.md`
 (§4):
 
 - **`--git-common-dir`, and the check before the append** — `info/exclude` is one shared file for the repo and every worktree of it, so a blind append grows
@@ -537,6 +539,13 @@ Run that from the project root (the path `git rev-parse` prints is relative to c
 - **`grep -qxF`** — whole line, fixed string. Anything looser either misses an existing entry or matches an unrelated one and skips a needed append.
 - **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it is an uncommitted change in the user's repo at best, and a stray commit riding a
   merge into the base at worst.
+- **The list is the runner's own scaffolding, and it is a list because there will be more of it.** Whatever this run writes into a worktree to make verification
+  possible — the `node_modules` link a fresh checkout needs before the project's own test command can resolve anything, a package-manager shim, a scratch config
+  — is excluded here, locally, before the first dispatch, and is **never committed**. The item's work is the only thing §6 is allowed to pick up, and §6 stages
+  with `add -A` precisely because that work is not enumerable in advance; the exclude is what keeps the runner's own files out of that net. `node_modules` is
+  listed **bare**, no trailing slash: a worktree gets a *symlink* to the main tree's directory, git stores a symlink as a blob (mode `120000`), and a
+  directory-only pattern cannot match one — which is exactly how bug-37 put a root-level `node_modules` blob on an item branch, ignored by nothing and reported
+  by no `git status`. This exclude is the guard that holds even in a repo whose own `.gitignore` has that same gap.
 
 Now write any pre-flight answer into the worktree's copy of the item file (see above), and record the worktree on the run:
 
@@ -764,7 +773,10 @@ Conventional-commit subject, derived from the item's own title, in the type that
 task). The body names the item id and names the orchestrator as the committer, so `git log` never implies a human read this diff before it existed — a reviewer,
 and the user reading history next month, both need to know which commits arrived unattended.
 
-`add -A` is safe _here specifically_: the worktree is a fresh checkout that nothing else has written to. Never run it in the main tree.
+`add -A` is safe _here specifically_: the worktree holds this item's work and nothing else. Never run it in the main tree. "Nothing else" is a claim §4 has to
+keep true, not a property of a fresh checkout — this run may itself have written scaffolding into the tree to make verification possible, and §4's `info/exclude`
+list is what keeps that scaffolding out of this `add -A`. A run that adds a new piece of scaffolding adds it to that list in the same edit; bug-37 is what the
+missed half costs.
 
 ## 7. Review
 

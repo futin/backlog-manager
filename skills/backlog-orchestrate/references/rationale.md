@@ -203,6 +203,19 @@ the one the gate defaults to.
   append that was actually needed.
 - **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it would be an uncommitted change in the user's repo at best, and a stray commit
   riding a merge into the base at worst. `info/exclude` is local, untracked, and reversible by deleting a line.
+- **The list covers the runner's own scaffolding, not just `.worktrees/` (bug-37).** A per-item worktree is a fresh checkout with no `node_modules` of its own,
+  so on a machine where the project's test command cannot resolve its dependencies without one, the runner links the main tree's directory in — and then §6's
+  `git add -A` picks that link up, because `.gitignore`'s own `node_modules/` pattern is directory-only and git stores a symlink as a blob with mode `120000`.
+  The result rode onto `backlog/task-45` in run `run-20260918-081422`: a root-level `node_modules` blob whose target (`../../node_modules`) resolves only inside
+  the worktree that created it, and which `git status` never once reported, because an untracked path that looks ignored is quiet in exactly the check a run
+  makes before committing. Merging such a blob into a tree that already has a real `node_modules/` directory there makes git refuse to clobber it — a run-level
+  failure, not a code defect — and if it does land, every clone gets a dangling root symlink and a broken `pnpm install`.
+
+  The repo's own `.gitignore` was widened to a bare `node_modules` (`test/gitignore-node-modules.test.ts` pins it), but that fixes one repo. The exclude list is
+  the general guard: it is local, it is written before the first dispatch, and it holds in any project whose `.gitignore` has the same gap. So the rule is
+  stated as a rule — whatever the run writes into a worktree to make verification possible is excluded here and never committed — and the entry is bare, with no
+  trailing slash, for the same reason the `.gitignore` one now is. The next such file will not be called `node_modules`; it goes in this same list, in the same
+  edit that introduces it.
 
 ---
 

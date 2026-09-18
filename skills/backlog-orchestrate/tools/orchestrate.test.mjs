@@ -5411,3 +5411,84 @@ test('step 10 removes a run-created base worktree without failing the run', () =
   const flat = text.replace(/\s*\n\s*/g, ' ');
   assert.ok(/does not fail the run/.test(flat), 'a failed base-worktree removal is no longer explicitly non-fatal');
 });
+
+// --- bug-37: the runner's own scaffolding is excluded, never committed -------
+// A per-item worktree has no `node_modules` of its own, so on this machine the
+// runner links one in before the verify step can resolve anything. `.gitignore`
+// carried `node_modules/` — directory-only — and git stores a symlink as a blob
+// with mode 120000, so the link was neither ignored nor reported by
+// `git status`, and §6's `git add -A` committed it onto `backlog/task-45` as a
+// root-level path resolving outside every clone but the one that made it.
+//
+// `.gitignore` is fixed separately (test/gitignore-node-modules.test.ts). This
+// half is the one that generalises: §4 already writes a local exclude for
+// `.worktrees/`, and anything else the runner puts in a tree to make
+// verification possible belongs in that same file — so a run is safe in a repo
+// whose own `.gitignore` has the identical gap, and safe for the next such file,
+// which will not be called `node_modules` either.
+//
+// The block is EXECUTED rather than read for a pattern: what it has to do is
+// leave two whole lines in `info/exclude` and leave them once, and only running
+// it proves the shell it is written in actually does that.
+
+/** §4's `info/exclude` block, taken off SKILL.md as the only fenced block that names the file. */
+function excludeBlock() {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const blocks = [...text.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]).filter((b) => b.includes('info/exclude'));
+  assert.equal(blocks.length, 1, `SKILL.md has ${blocks.length} fenced blocks writing info/exclude, expected exactly 1`);
+  return blocks[0];
+}
+
+/** Runs it the way §4 does — from the project root, in a repo that has never seen it. */
+function runExcludeBlock(times) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-exclude-'));
+  const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git('init', '-q', '-b', 'main', '.');
+  const block = excludeBlock();
+  for (let i = 0; i < times; i += 1) {
+    const out = spawnSync('sh', ['-c', block], { cwd: dir, encoding: 'utf8' });
+    assert.equal(out.status, 0, `the exclude block failed: ${out.stderr}`);
+  }
+  const lines = fs.readFileSync(path.join(dir, '.git', 'info', 'exclude'), 'utf8').split('\n');
+  fs.rmSync(dir, { recursive: true, force: true });
+  return lines;
+}
+
+test("§4's exclude block covers the runner's node_modules link, not just .worktrees/", () => {
+  const lines = runExcludeBlock(1);
+  assert.ok(
+    lines.includes('.worktrees/'),
+    'the exclude block no longer keeps .worktrees/ out of git status'
+  );
+  assert.ok(
+    lines.includes('node_modules'),
+    "the exclude block no longer covers the runner's node_modules link, so a repo whose .gitignore has bug-37's gap commits it again"
+  );
+  // Bare, for the same reason `.gitignore` is: a trailing slash would match the
+  // directory a normal checkout has and miss the symlink a worktree gets, which
+  // is the entire defect.
+  assert.ok(!lines.includes('node_modules/'), 'the exclude entry has a trailing slash again, which cannot match a symlink');
+});
+
+test('§4 states the rule as a rule, not as one file name', () => {
+  // Naming `node_modules` alone would be fixed the day the runner needs a pnpm
+  // shim or a scratch config instead, and nothing in the file would say what to
+  // do with it.
+  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s*\n\s*/g, ' ');
+  assert.ok(
+    text.includes('writes into a worktree to make verification possible'),
+    '§4 no longer states the general rule about the runner\'s own scaffolding'
+  );
+  assert.ok(text.includes('never committed'), '§4 no longer says the scaffolding is excluded locally rather than committed');
+});
+
+test('the exclude block stays idempotent once it covers two patterns', () => {
+  // The existing rule (`grep -qxF`, whole line, fixed string) applied to one
+  // pattern. `info/exclude` is shared by the repo and every worktree of it and
+  // is the user's file, so a second pattern that appends blindly grows a
+  // duplicate per run rather than per repo.
+  const lines = runExcludeBlock(3);
+  for (const pattern of ['.worktrees/', 'node_modules']) {
+    assert.equal(lines.filter((l) => l === pattern).length, 1, `${pattern} was appended more than once`);
+  }
+});
