@@ -148,9 +148,30 @@ function escapeLiteral(text: string): string {
   return text.replace(/[.+^${}()|[\]\\*?]/g, '\\$&');
 }
 
-/** Every tracked file, repo-relative — the universe case 3 matches globs against. */
+/**
+ * Every file git would carry, repo-relative — the universe case 3 matches globs
+ * against.
+ *
+ * Tracked files PLUS untracked-but-not-ignored ones (`--others
+ * --exclude-standard`), which is the honest universe for a repo mid-change:
+ * this case asks "does this glob name anything that exists", and a rule added
+ * in the same commit as the directory it scopes is the ordinary way a rule
+ * arrives (task-45 added `.claude/rules/tracker.md` beside
+ * `server/src/tracker/`). Tracked-only made that a red suite until the commit
+ * landed — a false negative on the one workflow this guard is most likely to
+ * meet, with no matching gain: a typo'd or renamed glob still matches nothing
+ * under either universe, and `--exclude-standard` keeps `node_modules` and
+ * every other ignored path out.
+ */
 function trackedFiles(): string[] {
-  return execFileSync('git', ['ls-files'], { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+  const args = [['ls-files'], ['ls-files', '--others', '--exclude-standard']];
+  const seen = new Set<string>();
+  for (const argv of args) {
+    for (const line of execFileSync('git', argv, { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n')) {
+      if (line !== '') seen.add(line);
+    }
+  }
+  return [...seen];
 }
 
 describe('.claude/rules', () => {

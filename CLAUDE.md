@@ -29,16 +29,19 @@ inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` 
 One line per seam. The mechanism lives in the subsystem docs linked below; the reasoning behind the rules in the next section lives in
 [docs/subsystems/invariants.md](docs/subsystems/invariants.md). The doc map is [docs/overview.md](docs/overview.md).
 
-- `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`), `agents/` (the one outbound-calling module,
-  plus the run watchdog), `orchestrator/` (a read-only view of the run-state directory, plus the in-memory watchdog and starting-run records and the two files
-  the server does write), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is
-  gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
+- `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, and the item-source adapters), `agents/` (the
+  dashboard calls, plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap and the read-only
+  `trackers` route) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
+  in-memory watchdog and starting-run records and the two files the server does write), `registry/`, `static.ts` (serves `client/dist` only when built),
+  `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
 
   Watchdog — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
-  surface draws has one home in `components/ui/`. → [docs/subsystems/board.md](docs/subsystems/board.md)
+  surface draws has one home in `components/ui/`. A connected tracker adds three readings and no new surface: the band's poll-age line, the card's
+  `untyped`/assignee/link-out, and the item modal's age beside the cached body — all derived in `lib/tracker.ts`, plus the read-only `Trackers` card on Shared
+  Settings. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
   cite its subsection in a header comment. Not a `.claude/rules/` file — those pin to `invariants.md` anchors only.
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate` and the run/watchdog predicates both sides must agree on), `theme.css`
@@ -50,7 +53,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   board, not by typing the trigger into a terminal.** → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge.
-- `.claude/rules/` — five path-scoped pointer files, injected into a session the moment it reads a file under their `paths:` glob. Each is one line per anchor
+- `.claude/rules/` — six path-scoped pointer files, injected into a session the moment it reads a file under their `paths:` glob. Each is one line per anchor
   into `docs/subsystems/invariants.md` and nothing else; the reasoning has one home and this is not it.
 - `backlog/` — this repo's own backlog, self-registered like any project.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](docs/workflows/publishing.md)), `test-all.mjs`
@@ -109,9 +112,32 @@ any of these — most encode a failure that already happened.
   `unsupported`; `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES` and **throws at boot** if two claim one kind. Absent means `files`;
   an explicit `{"kind":"files"}` is honoured, and `files` never has to be registered. An unsupported marker contributes **no items** and one
   `ItemsIndex.errors` entry (prefixed with the marker's path), with `source: 'unsupported'`, zero counts and `missing: false` — `missing` still means no
-  `backlog/` at all, whose `source` is `null`. `SourceKind` is the closed list of adapters this build ships (`'files'` today) and widens only with the adapter;
+  `backlog/` at all, whose `source` is `null`. `SourceKind` is the closed list of adapters this build ships (`'files' | 'github'` since task-45) and widens only with the adapter;
   `BacklogItem.source` is required so the compiler is the fixture checklist. Why:
   [invariants.md](docs/subsystems/invariants.md#a-projects-source-is-a-committed-marker-resolved-per-request-and-an-unsupported-one-never-falls-back-to-files)
+- **The GitHub token never leaves the server, and the poller is armed only while something is connected.** `BM_GITHUB_TOKEN` is read by `githubToken()`
+  (`server/src/tracker/token.util.ts`) per call and cached nowhere; no route returns it and the browser never talks to `api.github.com` — the credential's
+  sibling of "the browser never talks to the dashboard", stated separately because one is about an origin and the other about a secret. `docker-compose.yml`
+  passes it through as an interpolation with a default, never a literal (bug-25's rule, higher stakes), pinned by `test/compose-env.test.ts`. Outbound calls go
+  to one constant host and `repo` is validated before it is interpolated. `TrackerPollerService` is a `setTimeout` chain in the watchdog's shape, armed only
+  while a registered project resolves to `github` AND a token is present, disarmed on the tick that finds either missing; `arm()` is called from the bootstrap
+  hook and from `GithubSource.list`. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
+- **The tracker cache is the one cache in this server whose age is a rendered value.** In memory, per repo, lost on restart, rebuilt by the first sync; it
+  exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal and on the Trackers card is what
+  keeps it honest. Every other read stays per request — the registry's and `resolveSource`'s rules are untouched. A `304` leaves the cache AND `polledAt`
+  unchanged (the task-45 item's authoritative case; spec §12.2 disagrees and is recorded as disagreeing). The comments request is made every tick and read by
+  nothing until phase 3. Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eight labels
+  live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
+  `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value)
+- **A tracker project has no item files, and that shows up in four places.** `deriveAction` answers `null` for any item whose `source` is not `files`, as its
+  FIRST line — so the dispatch control is HIDDEN (the environment-level way) and the server refuses a hand-made POST from the same implementation;
+  `GET /api/items/uncommitted` answers `known: false`, and `uncommitted` stays a sibling endpoint nothing derived reads; `ItemsService.body` dispatches on the
+  REF'S SHAPE — a `gh:<owner>/<repo>#<n>` URN to the tracker adapter, anything else to files — in one place, and the adapter gates on the registry exactly as
+  the files allowlist does; and `untyped` is a rendered badge that NOTHING derived reads (no type label → `ideas` with the badge and no error; two → the first
+  alphabetically AND one `errors` entry). A closed issue keeps its `type:*` label so the original type is recoverable. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-four-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,
   refactors and out-of-scope derive `null`, not `false` — grooming is not a state they have, and for the first two the state they wait in is _promoted_.
 - **Board-versus-Archive is derived from `updated ?? lastCommit ?? created` and the run payload, never stored.** `isStale`/`leavesBoard`
@@ -241,7 +267,8 @@ any of these — most encode a failure that already happened.
 - **Dispatch derives the action; it never accepts one.** `deriveAction` (`shared/agent.ts`) is the single implementation for the board's label and the server's
   validation; dispatch re-scans the file and 409s on disagreement. The prompt is the only client field taken outright; unknown `model`/`effort` drop rather than
   reject; the controller rebuilds the body field by field and checks `action` with `isAgentAction`, never a hand-written comparison chain. `AgentAction` has
-  three members: `capture` is derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a `done/` item still derives `null`; capture
+  three members and TWO checks run ahead of all of them, in this order: an item whose `source` is not `files` derives `null` outright (task-45 — a tracker
+  project's dispatch is hidden, not disabled), then `capture` is derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a `done/` item still derives `null`; capture
   spawns `backlog-capture` for a **new** item citing `from: <id>`, and `moveItem` still refuses every move out of `out-of-scope/`. Why:
   [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
 - **The orchestrate spawn prompt is composed server-side.** `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal `/backlog-orchestrate`; the request body

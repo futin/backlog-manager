@@ -200,7 +200,11 @@ describe('BoardView: the run chip', () => {
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
       counts: { bugs: 1, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
-      source: 'files'
+      source: 'files',
+      repo: null,
+      polledAt: null,
+      access: null,
+      detail: null
     },
     {
       name: 'beta',
@@ -208,7 +212,11 @@ describe('BoardView: the run chip', () => {
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
       counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
-      source: 'files'
+      source: 'files',
+      repo: null,
+      polledAt: null,
+      access: null,
+      detail: null
     }
   ];
 
@@ -241,7 +249,10 @@ describe('BoardView: the run chip', () => {
     projectPath: '/abs/alpha',
     groomed: false,
     path: '/abs/alpha/backlog/bugs/open/bug-1-a-bug.md',
-    source: 'files'
+    source: 'files',
+    url: null,
+    assignee: null,
+    untyped: false
   };
 
   const realFetch = global.fetch;

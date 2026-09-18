@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readAgentsConfig } from '../server/src/agents/config.util';
+import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 
 /**
  * bug-25: `docker-compose.yml` sat for months with `BM_AGENTS: 'on'` as a
@@ -71,5 +72,39 @@ describe('docker-compose BM_AGENTS', () => {
     // Matched against the whole file rather than this one assignment, because
     // the mistake is just as wrong anywhere else in it.
     expect(COMPOSE).not.toMatch(/\$\{BM_AGENTS_URL[:}]/);
+  });
+});
+
+/**
+ * The same shape for the GitHub credential (task-45). Extended in THIS file
+ * rather than a second one on purpose: the rule is "how compose passes an
+ * environment value through", it already has a home, and a `compose-token.test.ts`
+ * beside it would be a second place to remember when the next variable lands.
+ *
+ * The stake is higher than BM_AGENTS': a literal here is not a wrong default,
+ * it is a credential committed to a public repository, and the fix for that is
+ * revoking the token rather than editing the line.
+ */
+describe('docker-compose BM_GITHUB_TOKEN', () => {
+  it('passes the host value through with an empty default', () => {
+    expect(assignments('BM_GITHUB_TOKEN')).toEqual(['${BM_GITHUB_TOKEN:-}']);
+  });
+
+  it('holds no literal token', () => {
+    // Every assignment of the key must BE an interpolation — the check is
+    // "starts with ${", not a guess at what a token looks like. GitHub has
+    // shipped several token prefixes (ghp_, gho_, github_pat_, and the classic
+    // 40-hex form) and a pattern list would be the thing that goes stale; a
+    // value that is not an interpolation is wrong whatever it looks like.
+    for (const value of assignments('BM_GITHUB_TOKEN')) {
+      expect(value.startsWith('${')).toBe(true);
+    }
+  });
+
+  it('spells the variable the way the server reads it', () => {
+    // The server's own constant, not a string copied into this test: a rename
+    // that missed compose would otherwise pass here and fail only on a machine
+    // with a token set.
+    expect(assignments(GITHUB_TOKEN_ENV)).toEqual(['${BM_GITHUB_TOKEN:-}']);
   });
 });

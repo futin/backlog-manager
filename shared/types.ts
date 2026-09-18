@@ -48,19 +48,21 @@ export type ItemStatus = 'open' | 'done' | 'terminal';
 
 /**
  * Which adapter produced an item — the closed list of item sources THIS BUILD
- * ships, deliberately narrow: `'files'` alone in phase 1 of the tracker-backed
- * design (docs/superpowers/specs/2026-09-17-tracker-backed-backlog-design.md
- * §4.2, task-43).
+ * ships, deliberately narrow: `'files'` and, since phase 2 of the
+ * tracker-backed design registered the GitHub adapter
+ * (docs/superpowers/specs/2026-09-17-tracker-backed-backlog-design.md §4.2 and
+ * §5, task-43 then task-45), `'github'`.
  *
  * Closed and narrow because a kind named here without an adapter behind it
  * would be a lie the resolver could not keep: `resolveSource` answers
  * `unsupported` for a marker kind no registered adapter serves, and a type
- * that already admitted `'github'` would let a caller write the field a
- * server could never produce. Phase 2 widens this to `'files' | 'github'` in
- * the same commit that registers the GitHub adapter — the union grows with
- * each adapter, never ahead of one.
+ * that admitted a kind this build does not ship would let a caller write a
+ * field the server could never produce. The union grows with each adapter,
+ * never ahead of one — `'github'` arrived in the same commit that appended
+ * `GithubSource` to `ITEM_SOURCES`, and the next kind (GitLab, Jira — spec
+ * §10) waits for its own adapter the same way.
  */
-export type SourceKind = 'files';
+export type SourceKind = 'files' | 'github';
 
 export interface BacklogItem {
   id: string;
@@ -214,14 +216,65 @@ export interface BacklogItem {
   /**
    * Which adapter produced this row — beside `path` because the two answer
    * one question together: where this row came from, and how to ask for its
-   * body. `'files'` for every row this build can produce (see `SourceKind`).
+   * body. `'files'` for a row off the store on disk, `'github'` for one the
+   * tracker poller's cache produced (see `SourceKind`), and the two answer
+   * `path` differently: a filesystem path against a URN.
    *
    * Required rather than optional, so the shape stays total: every fixture
    * literal in `test/` has to name its source and the compiler is the
-   * checklist, the same reason `SectionCounts` spells out every section. The
-   * client ignores the field until a second kind exists to draw with it.
+   * checklist, the same reason `SectionCounts` spells out every section.
+   *
+   * Two readers on the client since task-45, and they are the two worth
+   * knowing about: `deriveAction` (`shared/agent.ts`) answers `null` for any
+   * row that is not `'files'`, which is what hides the dispatch control on a
+   * tracker project, and `lib/tracker.ts` reads `ProjectSummary.source` (not
+   * this one) to decide which projects get a poll-age line. Nothing else
+   * branches on it — the board draws a tracker row exactly as it draws a file
+   * row.
    */
   source: SourceKind;
+  /**
+   * Where a person can open this item in the source's own UI — an issue's
+   * `html_url` for a tracker row, `null` for a files row, which has no URL to
+   * give (its `path` is a path on one machine's disk and means nothing on
+   * another's). The client draws a link-out control exactly when this is set
+   * (spec §5.5), which is why it is `null` rather than `''`: the question is
+   * "is there somewhere to go", and an empty string is a value that has to be
+   * checked for emptiness at every site instead of once at the type.
+   *
+   * Required, like `source` and for the same reason task-43 gave: the
+   * compiler is the checklist for the fixture literals in `test/`.
+   */
+  url: string | null;
+  /**
+   * The login of the person the tracker says owns this item — the FIRST
+   * assignee where a tracker allows several, because the board draws one name
+   * and picking the first is an answer a reader can predict, while joining
+   * them is a string nobody can scan at card width. `null` for a files item
+   * (a file has no assignee) and for an unassigned issue; the two are
+   * deliberately the same value, since neither has anyone to name.
+   *
+   * Not a claim. Phase 2 has no claim protocol at all — `started`/`phase` stay
+   * `''` for a tracker row — so a surface that draws this must not draw it as
+   * if someone were working the item (spec §5.5: the login renders only where
+   * it does not imply a claim). Phase 3 is what gives the in-progress bar a
+   * claim to stand on.
+   */
+  assignee: string | null;
+  /**
+   * A tracker issue carrying no `type:*` label: there is nothing on it saying
+   * which section it belongs to, so the mapping puts it in `ideas` and sets
+   * this, and the client draws a badge saying so (spec §5.3).
+   *
+   * **A rendered badge, and nothing derived reads it.** Not `deriveGroomed`,
+   * not `isStale`, not `lastTouched`, not the orchestrator gate. An untyped
+   * issue IS an idea to every predicate until someone labels it — that is the
+   * whole point of choosing `ideas` as the fallback rather than inventing a
+   * sixth section — and a predicate that branched on this would make the badge
+   * a second, invisible status. `false` for every files item, which cannot be
+   * untyped: its section is the directory it lives in.
+   */
+  untyped: boolean;
 }
 
 export interface ItemsIndex {
@@ -231,11 +284,14 @@ export interface ItemsIndex {
    * prefixed with the absolute path of the file that caused it — same
    * semantics as `backlog.mjs board` exiting 1 with a partial board.
    *
-   * Two kinds of entry since task-43, both path-prefixed and deliberately not
-   * distinguished by shape: a malformed ITEM file skipped during a scan, and
-   * a project whose `backlog/source.json` could not be honoured, which
-   * contributes this one message and no items at all. A reader that needs to
-   * tell them apart has the path.
+   * Three kinds of entry, all subject-prefixed and deliberately not
+   * distinguished by shape: a malformed ITEM file skipped during a scan
+   * (path-prefixed), a project whose `backlog/source.json` could not be
+   * honoured (prefixed with the marker's path), which contributes this one
+   * message and no items at all, and — since task-45 — a tracker issue this
+   * build cannot map unambiguously, prefixed with its URN (`gh:owner/repo#31`)
+   * rather than a path, because that is the handle that issue HAS. A reader
+   * that needs to tell them apart has the prefix.
    */
   errors: string[];
 }
@@ -272,6 +328,113 @@ export interface ProjectSummary {
    * (spec §3.2).
    */
   source: SourceKind | 'unsupported' | null;
+  /**
+   * The four fields below are the tracker connection's live state (spec §5.4),
+   * and all four are `null` for a files project, a project with no store and an
+   * unsupported marker alike.
+   *
+   * `null` rather than optional, and decided once for all four: `source: null`
+   * set that precedent in task-43 and the reason is the same — the shape stays
+   * TOTAL, so every fixture literal in `test/` names every field and the
+   * compiler is the checklist rather than a reviewer. An optional field is a
+   * field a new call site can silently forget.
+   *
+   * `owner/name` of the connected repo, read off the project's marker.
+   */
+  repo: string | null;
+  /**
+   * When the poller last successfully read this repo, ISO, or `null` before
+   * the first successful sync. The board renders its AGE (`polled 12 s ago`),
+   * which is what keeps the one cache in this server honest: the items are at
+   * most one poll interval old and the number says exactly how old.
+   */
+  polledAt: string | null;
+  /**
+   * Whether this app can currently read the connected repo, and if not, why —
+   * `no-token` (nothing in `BM_GITHUB_TOKEN`), `forbidden` (the token cannot
+   * see this repo), `not-found` (no such repo, or the token cannot see that it
+   * exists — GitHub answers 404 for both and so does this), `rate-limited`,
+   * or `error` for anything else. `null` for a non-tracker project, which has
+   * no connection to have a state.
+   *
+   * A tracker project with no token is `access: 'no-token'` and **`missing:
+   * false`** — `missing` keeps its one meaning, no `backlog/` directory at
+   * all, and a connected project with an unreadable credential still has its
+   * store (the marker) exactly where it belongs.
+   */
+  access: 'ok' | 'no-token' | 'forbidden' | 'not-found' | 'rate-limited' | 'error' | null;
+  /**
+   * The human half of `access`: the rate limit's reset time, or the error
+   * text. `null` when there is nothing to add — including when `access` is
+   * `ok`.
+   *
+   * Note the asymmetry with `unsupported`, whose reason deliberately lives in
+   * `ItemsIndex.errors` and NOT here. That reason is a per-read parse failure
+   * of a file, which is what `errors` is for and where every other one of them
+   * already travels; this is a LIVE CONNECTION STATE that moves on every tick
+   * and belongs to the project rather than to any one read. Putting it here
+   * therefore does not make `errors` a second home for anything, and putting
+   * `unsupported`'s reason here would make this a second home for `errors`.
+   */
+  detail: string | null;
+}
+
+/**
+ * `GET /api/trackers` — everything the Shared Settings page's Trackers card
+ * draws (task-45, spec §5.6), and deliberately nothing else. Read-only: no
+ * surface POSTs to a tracker route in this phase, and there is no connections
+ * file — a project is connected by committing `backlog/source.json`, which is
+ * `backlog.mjs connect`'s job and nobody else's.
+ *
+ * **The token is not in this payload and never will be.** It is process-only
+ * (spec §11): `hasToken` says whether one is configured and `login` says who
+ * it authenticates as, which is what an operator needs in order to know
+ * whether the right credential is loaded. `test/tracker-items.test.ts`'s
+ * `never puts the token in a payload` asserts the value appears in no response
+ * of any route this module serves — `/api/items`, `/api/projects` and
+ * `/api/trackers` alike.
+ */
+export interface TrackersPayload {
+  platforms: TrackerPlatform[];
+  projects: TrackerProjectRow[];
+}
+
+/** One row per platform this build can talk to — `github` alone today, the
+ *  same list `SourceKind` grows with. */
+export interface TrackerPlatform {
+  kind: SourceKind;
+  /** Whether `BM_GITHUB_TOKEN` holds anything. Never the value. */
+  hasToken: boolean;
+  /** Who the token authenticates as, or `null` before the first poll — the
+   *  login is read once per process inside a sweep that already holds the
+   *  credential, never per card render. */
+  login: string | null;
+  /** The hourly rate limit as the last response reported it; every field is
+   *  `null` until this process has made a request. */
+  limit: number | null;
+  remaining: number | null;
+  /** Unix seconds, as GitHub sends it — the client formats it. */
+  reset: number | null;
+}
+
+/** One row per registered project: where its items come from, and — for a
+ *  files project whose `origin` is on GitHub — the exact command that would
+ *  connect it. */
+export interface TrackerProjectRow {
+  name: string;
+  path: string;
+  source: SourceKind | 'unsupported' | null;
+  repo: string | null;
+  polledAt: string | null;
+  access: ProjectSummary['access'];
+  detail: string | null;
+  /**
+   * The copyable `backlog.mjs connect github <owner>/<name>` line, or `null`
+   * when there is nothing to suggest — a project that is already connected, or
+   * one whose `origin` is not on GitHub. The repo is read off `origin` per
+   * request, the way `uncommitted` reads git per request, and joins no memo.
+   */
+  connect: string | null;
 }
 
 /**

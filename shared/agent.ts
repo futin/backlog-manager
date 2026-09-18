@@ -96,6 +96,27 @@ export function isQuestionMode(value: unknown): value is QuestionMode {
  * task fallback), so the branch had to be widened.
  */
 export function deriveAction(item: BacklogItem): AgentAction | null {
+  // A tracker item has no next step this build can take, and the check is
+  // FIRST for the same reason the section check below is: every line after it
+  // would otherwise answer, and `capture` in particular would answer for a
+  // closed issue. Dispatch spawns a session that runs the file-writing skills
+  // (`backlog-groom`, `backlog-execute`) against a project with NO item files,
+  // so every one of the three actions is wrong here rather than merely
+  // premature — the session would find nothing to read and write into a store
+  // that does not exist.
+  //
+  // Answered here rather than as a fourth disabled state in `DispatchButton`
+  // because that is the distinction CLAUDE.md pins: an environment-level block
+  // HIDES the control and a per-item one disables it, and "this project's
+  // items do not live in files" is a fact about the project, not about the
+  // item. A card in a tracker project therefore draws no dispatch chip at all
+  // (task-45, spec §5.5).
+  //
+  // One implementation, both sides: this is the module the server validates
+  // dispatch with, so the same line that hides the control also refuses a
+  // hand-made POST. Phase 3 lifts this — the claim protocol is what gives a
+  // tracker item a next step — and lifting it is this one branch.
+  if (item.source !== 'files') return null;
   if (item.section === 'out-of-scope') return 'capture';
   if (item.status !== 'open') return null;
   if (item.section === 'ideas') return 'groom';

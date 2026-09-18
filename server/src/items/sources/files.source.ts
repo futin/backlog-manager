@@ -4,7 +4,7 @@ import { Injectable } from '@nestjs/common';
 import { buildAllowlist, resolveAllowed } from '../allow.util';
 import { parseFrontmatter } from '../parse.util';
 import { scanProject } from '../scan.util';
-import type { ItemSource } from './source';
+import type { ItemSource, SourceSummary } from './source';
 import type { SourceMarker } from './resolve.util';
 import type { BacklogItem, Registry, RegistryProject } from '../../../../shared/types';
 
@@ -27,6 +27,17 @@ export class FilesSource implements ItemSource {
    *  and nothing in a marker could move them. */
   async list(project: RegistryProject, _marker: SourceMarker | null): Promise<{ items: BacklogItem[]; errors: string[] }> {
     return scanProject(project);
+  }
+
+  /**
+   * Four nulls, and they are the true answer rather than a stub (task-45): a
+   * store on disk has no repo, no poll, no access state that could be down and
+   * nothing to detail. The fields exist on every summary — including this one —
+   * so `ProjectSummary` stays a total shape; see its doc comment for why that
+   * was chosen over four optional keys.
+   */
+  async summary(_project: RegistryProject, _marker: SourceMarker | null): Promise<SourceSummary> {
+    return { repo: null, polledAt: null, access: null, detail: null };
   }
 
   /**

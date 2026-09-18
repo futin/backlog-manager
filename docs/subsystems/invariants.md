@@ -912,7 +912,10 @@ there too.
 The controller rebuilds the dispatch body field by field — a new field reaches the service only when added there too — and checks `action` with `isAgentAction`,
 never a hand-written comparison chain: that chain is a second copy of the vocabulary, and it is the copy that goes stale. **`AgentAction` has three members**,
 and the third is why the two archives no longer share a branch: `deriveAction` returns `capture` for an out-of-scope item, checked by SECTION and BEFORE the
-`status !== 'open'` line that would otherwise swallow a `terminal` item. A `done/` item still derives `null` — history genuinely has no next step, where a
+`status !== 'open'` line that would otherwise swallow a `terminal` item. Since task-45 one check runs ahead of even that: an item whose `source` is not `files`
+derives `null`, because a dispatched session runs the file-writing skills and a tracker project has no files for them to write — see
+[a tracker project has no item files](#a-tracker-project-has-no-item-files-and-that-shows-up-in-four-places) for why that answer lives here rather than in
+`DispatchButton`. A `done/` item still derives `null` — history genuinely has no next step, where a
 rejection does. Capture spawns `backlog-capture` for a **new** item citing `from: <id>`; the original stays rejected and `moveItem` still refuses every move out
 of `out-of-scope/`. Archive's Out of scope column is the only surface that renders the control.
 
@@ -1804,9 +1807,10 @@ it recomputes instead. It exists because the call costs 84–396ms per project a
 Every registered project's items used to be, by definition, the files under its `backlog/`. Phase 1 of the tracker-backed design (task-43,
 [spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md) §3–§4) makes that a question the server asks rather than an assumption it holds:
 `resolveSource` (`server/src/items/sources/resolve.util.ts`) reads the project's own `backlog/source.json` and answers `missing`, `files`, `tracker` or
-`unsupported`, and `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES`. Today exactly one adapter is registered — `FilesSource`, a
-wrapper around the same `scanProject` — so every project on every machine resolves to `files` and the payloads are what they always were plus one `source`
-field each. That is the point: the seam is the change, and a payload diff of exactly those fields is what proves it.
+`unsupported`, and `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES`. Phase 1 registered exactly one adapter — `FilesSource`, a wrapper around the same
+`scanProject` — so every project on every machine resolved to `files` and the payloads were what they always were plus one `source` field each. That was the
+point: the seam was the change, and a payload diff of exactly those fields is what proved it. Phase 2 (task-45) registered `GithubSource` beside it by appending
+two lines to `items.module.ts`, and `items.service.ts`'s listing control flow did not change — the claim, tested.
 
 **The marker is per project and committed**, not a per-machine setting, because source is a property of the PROJECT and not of the laptop reading it (spec
 §2.3). A per-machine setting would have to be set again on every clone, and the first machine that had not heard of the tracker would render the repo's stale
@@ -1832,8 +1836,9 @@ must not be a way to opt out of it, and `files` never has to be registered for t
 answer nothing, and a board that renders one source's items while another's never appear is wrong without ever saying so; a provider that throws turns that
 into a stack trace at startup.
 
-`SourceKind` is the closed list of adapters THIS BUILD ships — `'files'` alone today — and widens in the same commit that registers the next adapter. A kind
-named in the type with no adapter behind it would be a lie the resolver could not keep. `BacklogItem.source` is required rather than optional for the same
+`SourceKind` is the closed list of adapters THIS BUILD ships — `'files'` alone in phase 1, `'files' | 'github'` since task-45 registered the second one — and it
+widens in the same commit that registers the next adapter, never ahead of one. A kind named in the type with no adapter behind it would be a lie the resolver
+could not keep. `BacklogItem.source` is required rather than optional for the same
 reason `SectionCounts` spells out every section: the shape stays total, so every fixture literal in `test/` has to name its source and the compiler is the
 checklist.
 
@@ -2237,6 +2242,107 @@ hash from `client/index.html` and is the proof the step was taken.
 stylesheet, so a rendered assertion on the released measure would pass whether or not the CSS rule existed — and the failure mode is a segmented control that
 toggles cleanly and changes nothing on screen. `client/index.html` is never loaded by any suite at all, so React's own stamp would keep every case green while
 the pre-paint half was missing. Neither is a detail a reader would think to check by hand, which is exactly why they are checked mechanically.
+
+
+## The GitHub token never leaves the server, and the poller is armed only while something is connected
+
+Phase 2 of the tracker-backed design (task-45, [spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md) §5) gave this server a credential and a
+second outbound-calling module. Both facts change what the rest of the app may assume, and neither is covered by a rule that already existed.
+
+**The token is process-only.** `BM_GITHUB_TOKEN` is read by `githubToken()` (`server/src/tracker/token.util.ts`) and nowhere else, per call and never cached —
+the same posture `isAllowedHost` takes with `BM_ALLOWED_HOSTS`, and for the same reason: a value read once at boot cannot be changed by a test or fixed by an
+operator without a restart, and the poller's own "armed only while a token is present" rule is a question asked on every tick rather than once. No route returns
+it, no payload carries it, and the browser never talks to `api.github.com` at all — every call is board → this API → GitHub.
+
+That is deliberately the same SHAPE as "the browser never talks to the dashboard", stated separately rather than assumed to be covered by it. The dashboard rule
+is about an ORIGIN the browser must not reach; this one is about a SECRET that must not reach the browser. Neither implies the other, and this app now has both.
+`GET /api/trackers` is what the Trackers card reads, and it carries `hasToken` and a `login` — whether a credential is loaded, and whose — because those are
+what an operator needs in order to know the right one is in place. `test/tracker-items.test.ts` asserts the value appears in no response of any route this
+module serves.
+
+**`docker-compose.yml` passes it through as an interpolation with a default, never a literal** — bug-25's rule, applied to a variable where the stake is higher.
+A literal `BM_AGENTS: 'on'` was a wrong default; a literal token would be a credential committed to a repository, and the fix for that is revoking it rather
+than editing the line. Pinned by `test/compose-env.test.ts`, which also asserts the key compose uses is the constant the server reads
+(`GITHUB_TOKEN_ENV`), so a rename that missed one half fails here rather than on a machine with a token set.
+
+**Outbound calls go to one constant host.** `API` in `server/src/tracker/github.client.ts` is the only host any request in this app can reach, nothing in a
+request shape names a host, and `repo` is validated (`isRepo`, `owner/name` over GitHub's own character set) before it is interpolated into a path. A repo
+string arrives from a marker file someone committed, which is not a trusted input just because it is not a request body.
+
+**Armed, idle, off — the watchdog's shape, for the watchdog's reasons.** `TrackerPollerService` is a `setTimeout` chain, never a `setInterval`: the next tick is
+scheduled after the current tick's awaits complete, so two ticks can never overlap by construction, and a tick waiting on a slow `api.github.com` can never be
+re-entered by its own successor with two syncs racing for one repo's cache. It arms only while at least one registered project resolves to `github` AND a token
+is present, and disarms on the tick that finds either half missing. A standing interval against a registry where nobody has connected anything is exactly the
+cost the watchdog's own rule exists to refuse — and this loop would make HTTP requests rather than directory reads. `arm()` is called from the bootstrap hook
+and from `GithubSource.list`, which is reached precisely when a project resolved to `github`: the cheapest honest signal that something is connected, and the
+reason a repo connected after boot is polled from the first board read that touches it.
+
+## The tracker cache is the one cache in this server whose age is a rendered value
+
+`TrackerPollerService` holds every connected repo's issues in memory, per repo, lost on restart and rebuilt by the first sync (task-45, spec §5.1). Every other
+read in this server is per request and uncached — the registry, each project's source marker, the run files, `uncommitted` — and those rules are untouched: this
+poller re-reads all of them on every tick. What it keeps is the one thing behind a network call with an hourly budget.
+
+The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
+board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the board's band prints its
+age (`futin/x · polled 12 s ago`), the item modal prints it beside the body it drew from that same cache, and the Trackers card prints it per project. A cache
+whose staleness is on screen is a different object from one that is not.
+
+**A `304` leaves the cache and `polledAt` exactly as they were.** Every tick sends `If-None-Match`, and an unchanged repo answers `304` at no cost against the
+budget. The task item's authoritative test case says the age does not move on one; spec §12.2 says it does. The item won, being the work order, and the
+consequence is stated here so the next phase settles it rather than rediscovering it: the rendered age currently means "how old are these items", not "how long
+since we last checked", and those differ on a repo nobody is editing.
+
+**The comments request is made on every tick and read by nothing.** One conditional request covers every comment in the repo, including edits, which is what
+makes phase 3's per-item claim watching cheap. Making the call now means the polling loop's shape, its budget and its tests do not move in the phase that also
+introduces the protocol they feed. `test/tracker-poll.test.ts` asserts the call explicitly, precisely because a call with no reader is what a later edit deletes
+as dead.
+
+**Rate limits are a state, not an exception.** Nothing in `github.client.ts` throws on an HTTP status: every response — including a transport failure, which
+surfaces as `status: 0` — comes back as a value the poller turns into `access` and `detail`, because every one of them is something the board renders rather
+than something a request handler should make a 500 out of. A `403`/`429` with `remaining: 0` or a `Retry-After` puts that repo to sleep until the reset and
+records the reset TIME (not a duration, which goes stale the moment it is drawn); a secondary limit backs off sixty seconds. While asleep the repo gets no
+request at all, not even a conditional one: a `304` is free against the budget but a `403` is not, and asking again before the reset is how an app earns a
+secondary limit on top of the one it has.
+
+**The label set has one home and one cross-file guard.** `server/src/tracker/labels.ts` lists the eight labels spec §5.2 names, and the poller creates whichever
+are missing on the first successful sync of a repo — idempotently, case-insensitively (GitHub label names preserve case but collide without it), treating a 422
+as success because another machine's poller winning the race still leaves the label there. This is phase 2's ONE write to GitHub, and it is a bootstrap rather
+than a lifecycle write: the issue→item mapping cannot work without the set. `skills/backlog/tools/backlog.mjs`'s `connect` writes issue forms that pre-apply the
+four `type:*` labels and CANNOT import that module — a skill's `tools/` is a standalone copy of what was pushed — so the agreement is enforced the other way
+round: `test/tracker-labels.test.ts` reads the skill's source as text and asserts the two lists match. A comment asking two files to stay in step is what drifts.
+
+## A tracker project has no item files, and that shows up in four places
+
+An issue is not a file, and four separate surfaces would each have got that wrong on their own (task-45, spec §5.3/§5.5).
+
+**Dispatch is hidden, not disabled.** `deriveAction` (`shared/agent.ts`) answers `null` for any item whose `source` is not `files`, as its FIRST line — ahead of
+the out-of-scope check, which would otherwise answer `capture` for a closed issue. A dispatched session runs the file-writing skills against a project with no
+files, so all three actions are wrong here rather than merely premature. It is answered there rather than as a fourth disabled state in `DispatchButton` because
+that is the distinction CLAUDE.md already pins: an environment-level block hides the control, a per-item one disables it, and "this project's items do not live
+in files" is a fact about the project. One implementation covers both sides — it is the module the server validates dispatch with — so the same line that hides
+the chip refuses a hand-made POST. Phase 3 lifts exactly this branch.
+
+**`GET /api/items/uncommitted` answers `known: false`.** "Which item files differ from `main`" is not a question with a wrong answer for a tracker project; it is
+a question with no meaning, and `known: false` is the shape this endpoint already has for that. The Orchestrate sheet's existing `known` gate keeps the chip
+off, so nothing on the client changed. What did not change either: `uncommitted` stays a sibling endpoint rather than a `BacklogItem` field, and nothing derived
+reads it.
+
+**The body route dispatches on the ref's SHAPE, in one place.** `ItemsService.body` sends a `gh:<owner>/<repo>#<n>` URN to the GitHub adapter and anything else
+to files — the seam's one home for that decision, exactly where phase 1's comment said it would arrive. The shape test is the ref's and never the caller's:
+nothing in the request says which source to ask, so a caller cannot route its own filesystem path to an adapter by asserting a kind, which is the same rule
+"dispatch derives the action, it never accepts one" states for the agents routes. The adapter then gates on the REGISTRY, exactly as the files allowlist does: a
+URN naming a repo no registered project is connected to answers `null` and the route 404s, rather than a repo merely sitting in the cache being readable.
+
+**`untyped` is a rendered badge and nothing derived reads it.** An issue with no `type:*` label lands in `ideas` with `untyped: true` and no error — a blank
+issue filed through the web UI is an ordinary state. Two type labels IS an error: the issue claims to be two things, so the item is produced from the first
+label alphabetically AND an entry naming the issue joins `ItemsIndex.errors`, the same tolerant contract a malformed item file gets. `deriveGroomed`, `isStale`,
+`lastTouched` and the orchestrator gate never see `untyped`: an untyped issue is an idea to every predicate until somebody labels it, which is the whole reason
+`ideas` is the fallback rather than a sixth section.
+
+A closed issue's section can change while its labels never do: `completed` (or no reason at all, which GitHub sent before 2022) is `done` with its section
+intact, and any other reason is `terminal` in `out-of-scope`. The `type:*` label stays on the issue, so the original type is recoverable — which the file store
+cannot do, since a rejected item moves into a flat directory that forgets it.
 
 <!-- docs-sync:
   sources:

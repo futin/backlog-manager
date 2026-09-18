@@ -383,6 +383,18 @@ code, kbd, samp, pre { font-family: inherit }
   margin-left: auto; flex: none;
   font-size: 12px; font-weight: 400; color: var(--ink3); white-space: nowrap;
 }
+/* task-45, the two tracker readings on the foot line. The assignee sits with
+   the project (left half) because it is a fact about who, not about when; it
+   ellipsises like the project name beside it, since a long login must not push
+   the id and date off the row. The link-out is 12 px of ink3 that takes the
+   accent on hover — the one control on this line, and the only place the card
+   admits a pointer that is not the card itself. */
+.board-card-assignee {
+  font-size: 12px; font-weight: 400; color: var(--ink3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.board-card-link { flex: none; font-size: 12px; line-height: 1; color: var(--ink3); text-decoration: none }
+.board-card-link:hover { color: var(--ink) }
 /* The marker row (DESIGN.md §8.3), drawn whenever a marker applies OR dispatch
    is available — ItemCard decides which, through `dispatchAvailable`. The words
    are `Marker`'s (a `ui/` primitive); this rule only lays them out and pushes
@@ -415,13 +427,16 @@ code, kbd, samp, pre { font-family: inherit }
 .pill-proj-6 { color: var(--proj-6); border-color: var(--proj-6) }
 .pill-proj-7 { color: var(--proj-7); border-color: var(--proj-7) }
 .pill-proj-8 { color: var(--proj-8); border-color: var(--proj-8) }
-/* The four foot markers — groomed, done, kind, stale — were four rules here
-   until task-37. They are `Marker`'s tones now (`components/ui/Marker.tsx`,
-   DESIGN.md §8.3), declared once in the ui primitives block at the end of this
-   file, because the Archive card draws the same words and two surfaces must
-   not be free to disagree about what `stale` looks like. The tokens did not
-   move with them: groomed is still `--green`, kind and done `--ink3`, stale
-   `--mustard`.
+/* The foot markers — groomed, done, kind, stale, and `untyped` since task-45 —
+   were four rules here until task-37. They are `Marker`'s tones now
+   (`components/ui/Marker.tsx`, DESIGN.md §8.3), declared once in the ui
+   primitives block at the end of this file, because the Archive card draws the
+   same words and two surfaces must not be free to disagree about what `stale`
+   looks like. That is also why this comment names the set rather than counting
+   it: the list grows there, and a number here would be the thing that goes
+   stale. The tokens did not move with them: groomed is still `--green`, kind
+   and done `--ink3`, stale and `untyped` both `--amber` (the tone this design gives
+   anything a person still has to act on).
 
 /* Task 11: the orchestrator's own per-stage chip — the one marker whose source
    is a run payload rather than an item file, and the reason it is shaped as an
@@ -2474,6 +2489,18 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-marker-kind { color: var(--ink3) }
 .ui-marker-done { color: var(--ink3) }
 .ui-marker-stale { color: var(--amber) }
+/* task-45: an untyped tracker issue. Same ink as `stale` deliberately — both
+   mark an item a person still has to act on for the board to be right about
+   it — and no rule of its own beyond the colour, because a marker is a weight
+   and an ink and nothing else (§8.3). */
+.ui-marker-untyped { color: var(--amber) }
+
+/* task-45's two tracker readings outside the card: the board band's poll-age
+   clause, and the same line under the item modal's title. Both are 12/400
+   --ink3, the sub-line ink this design already uses for anything that is
+   context rather than content (§8.1). */
+.board-band-tracker { margin-left: 10px; color: var(--ink3) }
+.item-body-tracker { margin: -4px 0 12px; font-size: 12px; font-weight: 400; color: var(--ink3) }
 
 /* ProgressRow — §7's progress row: name + value, a 10 px bar, a caption under.
    The track is flat --steel with no hatch and the fill carries it (§2). */

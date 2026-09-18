@@ -51,7 +51,11 @@ describe('BoardView: card live strips', () => {
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
       counts: { bugs: 0, ideas: 0, tasks: 1, refactors: 0, 'out-of-scope': 0 },
-      source: 'files'
+      source: 'files',
+      repo: null,
+      polledAt: null,
+      access: null,
+      detail: null
     },
     {
       name: 'beta',
@@ -59,7 +63,11 @@ describe('BoardView: card live strips', () => {
       createdAt: '2026-08-26T00:00:00.000Z',
       missing: false,
       counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
-      source: 'files'
+      source: 'files',
+      repo: null,
+      polledAt: null,
+      access: null,
+      detail: null
     }
   ];
 
@@ -94,6 +102,9 @@ describe('BoardView: card live strips', () => {
       groomed: true,
       path: '/abs/alpha/backlog/tasks/open/task-14-wire-the-heartbeat.md',
       source: 'files',
+      url: null,
+      assignee: null,
+      untyped: false,
       ...over
     };
     return base;

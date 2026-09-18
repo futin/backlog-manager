@@ -29,7 +29,10 @@ const ITEM: BacklogItem = {
   projectPath: '/abs/alpha',
   groomed: true,
   path: '/abs/alpha/backlog/tasks/open/task-12.md',
-  source: 'files'
+  source: 'files',
+  url: null,
+  assignee: null,
+  untyped: false
 };
 
 const PLAN: AgentPlan = {

@@ -292,9 +292,17 @@ export function ItemCard({
   const markers = [
     item.section === 'refactors' && REFACTOR_KINDS.includes(item.kind) ? { tone: 'kind' as const, word: item.kind } : null,
     item.section === 'bugs' && item.groomed ? { tone: 'groomed' as const, word: 'groomed' } : null,
+    /* task-45: a tracker issue with no `type:*` label. It leads the two
+       history markers and follows `kind`/`groomed` for the same reason the
+       order already has: this says what the item IS (or rather, what nobody
+       has said it is), and the two below say where it has got to. It is a
+       RENDERED BADGE and nothing more — `untyped` reaches no predicate on
+       this board, which is the rule shared/types.ts states and this is the
+       one place that reads the field at all. */
+    item.untyped ? { tone: 'untyped' as const, word: 'untyped' } : null,
     item.status === 'done' ? { tone: 'done' as const, word: 'done' } : null,
     stale ? { tone: 'stale' as const, word: 'stale' } : null
-  ].filter((m): m is { tone: 'kind' | 'groomed' | 'done' | 'stale'; word: string } => m !== null);
+  ].filter((m): m is { tone: 'kind' | 'groomed' | 'done' | 'stale' | 'untyped'; word: string } => m !== null);
 
   /* Asked through `dispatchAvailable` rather than by re-deriving the action and
      the gate here: the row has to reserve its space exactly when the control
@@ -357,6 +365,14 @@ export function ItemCard({
             <Dot hue={hues.hueFor(item.project)} />
             <span className="board-card-proj-name">{item.project}</span>
           </span>
+          {/* The tracker's assignee (task-45), beside the project and NOT on
+              the live strip: phase 2 has no claim protocol, so an assignee is
+              someone's name against an issue and not a statement that anyone
+              is working it. Drawing it where the in-progress bar goes would
+              make it exactly that claim — spec §5.5 says the login renders
+              only where it does not imply one, and phase 3 is what gives the
+              bar something to stand on. `null` for every files item. */}
+          {item.assignee !== null && <span className="board-card-assignee">@{item.assignee}</span>}
           {/* Pushed right and `flex: none` (CSS). The date is short (`aug 20`,
               not `2026-08-20`) because this line is nowrap-with-ellipsis at the
               real column width, and the stored form left no room for the id
@@ -366,6 +382,47 @@ export function ItemCard({
             {item.id}
             {created === '' ? '' : ` · ${created}`}
           </span>
+          {/* The link out to the issue, drawn exactly when the item has a URL
+              — every tracker row, no files row (task-45). `rel="noreferrer"`
+              with `target="_blank"` for the usual reason, and an aria-label
+              because the glyph is the only content.
+
+              BOTH halves of `DispatchButton`'s guard, not just the click one,
+              and that component's own comment carries the full reasoning —
+              this is the second control to sit inside the card and it meets
+              the same two hazards:
+
+              `stopPropagation` on click, because the whole card is a
+              role="button" that opens the modal and without it one click opens
+              the issue AND the modal.
+
+              On keydown, bounded to the two keys the card's own handler acts
+              on and no further. The card's `onKeyDown` bubbles from ANY
+              descendant and unconditionally calls `preventDefault()` +
+              `onOpen()`. Left unstopped, Enter on this link would have that
+              handler run first — and `preventDefault()` there cancels the
+              ANCHOR'S OWN activation, which the browser runs as the default
+              action of that keydown — so the modal would open and GitHub would
+              never be reached, with no other keyboard path to the issue.
+              Stopping every key instead was a real bug when `DispatchButton`
+              tried it: React delegates keydown at the root, so a synthetic
+              stopPropagation also stops the native event and Escape stopped
+              reaching the dialog stack. */}
+          {item.url !== null && (
+            <a
+              className="board-card-link"
+              href={item.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`open ${item.id} in the tracker`}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+              }}
+            >
+              ↗
+            </a>
+          )}
         </div>
         {(markers.length > 0 || dispatchable) && (
           <div className="board-card-markers" data-testid="marker-row">

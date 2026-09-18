@@ -234,7 +234,8 @@ export function ItemModal({
   agents,
   onDispatch,
   runBlock,
-  reverify
+  reverify,
+  trackerLine
 }: {
   item: BacklogItem;
   hues: ProjectHues;
@@ -259,6 +260,21 @@ export function ItemModal({
    *  stayed unrecoverably disabled while the tab could clear itself would be
    *  the same contradiction on two surfaces. */
   reverify?: () => Promise<AgentsStatus>;
+  /**
+   * `futin/x · polled 12 s ago` for an item whose project is a connected
+   * tracker, or null/undefined for every files item (task-45, spec §5.5).
+   *
+   * Drawn beside the body because of what the body IS here: an issue body out
+   * of the poller's in-memory cache, at most one poll interval old. There is
+   * no per-open fetch to GitHub — that is the whole reason the cache exists —
+   * so the honest thing is to say how old the cached copy is rather than to
+   * imply it was just read.
+   *
+   * Handed in already derived, like `runBlock` beside it and for the same
+   * reason: the line needs the clock and the project list, and this modal owns
+   * neither.
+   */
+  trackerLine?: string | null;
 }) {
   const [body, setBody] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -371,6 +387,9 @@ export function ItemModal({
   return (
     <Modal label={item.title} facts={facts} onClose={onClose}>
       <h2 className="item-body-title">{item.title}</h2>
+      {/* Between the title and the body, so it reads as a statement about what
+          follows rather than as one more fact in the left column. */}
+      {trackerLine && <p className="item-body-tracker">{trackerLine}</p>}
       <div className="item-body">
         {failed ? (
           <div className="drawer-empty">item file unavailable</div>
