@@ -5492,3 +5492,117 @@ test('the exclude block stays idempotent once it covers two patterns', () => {
     assert.equal(lines.filter((l) => l === pattern).length, 1, `${pattern} was appended more than once`);
   }
 });
+
+// --- bug-38: every post-merge command runs in the tree the merge happened in -
+// `git branch -d` has no `--merged-into`: it tests reachability from the HEAD
+// of the repository the command runs in, so the invoking tree *is* the
+// parameter. Before run-scoped bases that was invisible, because the project
+// root and the tree holding the base were the same directory. On a `--base`
+// run they are not, and the project root's HEAD is `main` while the merge
+// commit sits on `<base>` — so the safe delete correctly refuses a branch that
+// is genuinely merged. Measured on run-20260918-081422 (task-45, base
+// feature/tracker-backed): `error: the branch 'backlog/task-45' is not fully
+// merged` one line after `Merge made by the 'ort' strategy`.
+//
+// The leftover branch is the small half. The large half is that §9 told the
+// driver to read that refusal as proof the merge did not happen — which is
+// wrong in the direction that stops a healthy run, on every item of every
+// `--base` run.
+//
+// These guards are over the SKILL's text rather than over behaviour because
+// the SKILL body *is* the runner: no code executes these commands, a headless
+// driver does, and the only way a wrong `-C` can be caught before it reaches
+// a run is by reading the file.
+
+test('no branch delete in SKILL.md runs in the project root', () => {
+  // `$PWD` is the project root, which on a `--base` run is not the tree
+  // holding the base. `worktree remove` is deliberately exempt — worktree
+  // administration is repo-wide and correct from the root — so this is
+  // scoped to the delete verb alone.
+  //
+  // Command lines only, matched by the line *starting* with `git`: the four
+  // other places this file says `branch -d` are prose — the branch-mode path
+  // saying it deliberately runs none, and the paragraph explaining how to
+  // read a refusal — and a guard that caught those would forbid the file
+  // from discussing its own rule.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const deletes = text.split('\n').filter((l) => /^git\b.*\bbranch -[dD]\b/.test(l.trim()));
+  assert.equal(deletes.length, 1, `expected exactly 1 branch-delete command, found ${deletes.length}`);
+  for (const line of deletes) {
+    assert.ok(
+      !line.includes('$PWD'),
+      `a branch delete is pointed at the project root, which is not the base tree on a --base run: ${line.trim()}`,
+    );
+    assert.ok(
+      line.includes('<base tree>'),
+      `a branch delete does not name the base tree it must run in: ${line.trim()}`,
+    );
+  }
+});
+
+test("the runner-fix pickup diffs the merge commit, which is the base tree's HEAD", () => {
+  // Same shape, one command further on. §9's "After a runner-fix item lands"
+  // prints what the merge brought in so the run can follow its own fix for
+  // the rest of the queue. Run in the project root on a `--base` run it
+  // reads `main`'s HEAD, which the merge never touched: either `fatal:
+  // ambiguous argument 'HEAD^1'` on a root with no merge in its history, or
+  // — worse — the file list of some unrelated earlier merge, silently. A
+  // merged runner fix then goes unnoticed for the remainder of the run.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const diffs = text.split('\n').filter((l) => l.includes('HEAD^1 HEAD'));
+  assert.equal(diffs.length, 1, `expected exactly 1 post-merge diff line, found ${diffs.length}`);
+  assert.ok(
+    !diffs[0].includes('$PWD'),
+    `the runner-fix diff reads the project root's HEAD, not the merge: ${diffs[0].trim()}`,
+  );
+  assert.ok(
+    diffs[0].includes('<base tree>'),
+    `the runner-fix diff does not name the base tree the merge happened in: ${diffs[0].trim()}`,
+  );
+});
+
+test('SKILL.md reads a branch -d refusal against the tree it was run in', () => {
+  // The sentence that turned a stale command into a wrong instruction. A
+  // refusal is only evidence of a missing merge when the delete ran in the
+  // base tree; from anywhere else it is evidence the command was pointed at
+  // the wrong tree. `git branch --merged <base>` is what settles which, and
+  // is named here so a driver has something cheap to run before believing
+  // either reading.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  for (const [rule, needle] of [
+    ['the refusal is stated against the base tree', 'a refusal from the base tree'],
+    ['the wrong-tree reading is stated too', 'pointed at the wrong tree'],
+    ['the check that settles it is named', 'git branch --merged <base>'],
+    [
+      'the general rule is stated for the next command someone adds',
+      'every cleanup command that follows a merge belongs in the tree that merge happened in',
+    ],
+  ]) {
+    assert.ok(text.includes(needle), `SKILL.md §9 lost the rule: ${rule} (${needle})`);
+  }
+  assert.ok(
+    !text.includes('so a refusal here is real information'),
+    'SKILL.md still carries the unqualified "a refusal here is real information" reading',
+  );
+});
+
+test('no git command in SKILL.md reads HEAD out of the project root', () => {
+  // The general shape, for the command nobody has written yet. Both halves
+  // of bug-38 were one command reading `HEAD` — implicitly for `branch -d`,
+  // explicitly for `HEAD^1 HEAD` — from `$PWD`, which is the project root
+  // and therefore `main` on a `--base` run.
+  //
+  // The complement of this guard is what makes it safe to state rather than
+  // just narrow: every OTHER `git -C "$PWD"` line in this file is
+  // HEAD-independent by construction — `show-ref --verify refs/heads/…` and
+  // the `worktree` verbs are repo-wide, and `diff`/`log` there are always
+  // given an explicit `<base>...backlog/<id>` range. So "names HEAD" is
+  // exactly the line between the commands that may run in the project root
+  // and the ones that must follow the merge into the base tree.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const offenders = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^git\b/.test(l) && l.includes('"$PWD"') && /\bHEAD\b/.test(l));
+  assert.deepEqual(offenders, [], `a git command reads HEAD from the project root:\n${offenders.join('\n')}`);
+});

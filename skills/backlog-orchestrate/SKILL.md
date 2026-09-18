@@ -1183,7 +1183,7 @@ rule out that the user has uncommitted work in the tree it is writing to, so the
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
-git -C "$PWD" branch -d backlog/<id>
+git -C "<base tree>" branch -d backlog/<id>
 ```
 
 Plain `remove`, never `--force`. **`remove=0` is the ordinary case and needs nothing further** — including for a worktree holding only an ignored `dist/` that
@@ -1226,8 +1226,25 @@ that _is_ a human's problem.
 - **Never as a substitute for the first attempt.** `git worktree remove` always runs first: dropping the registration stays git's job, and this command only
   ever finishes what git already committed to.
 
-Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a branch that is actually merged, so a refusal here is real information — the merge
-you think happened did not, and that _is_ worth stopping to understand before the next item builds on a base you may have misread.
+Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a branch that is actually merged, so a refusal carries information — but **only about
+the tree the delete ran in**. `branch -d` has no `--merged-into`; it tests reachability from the HEAD of the repository the command runs in, so the invoking
+tree _is_ the parameter. That is why the `-C` above names the base tree rather than `$PWD`: the merge commit is on `<base>`, and on a `--base` run the project
+root is sitting on `main`, from which `backlog/<id>` is genuinely unreachable. Run it there and git refuses a branch that merged perfectly — measured, one line
+after `Merge made by the 'ort' strategy`.
+
+So there are two readings, and they take opposite responses:
+
+- **a refusal from the base tree** means the merge you think happened did not, and that _is_ worth stopping to understand before the next item builds on a base
+  you may have misread;
+- a refusal from anywhere else means only that the command was **pointed at the wrong tree**, and says nothing at all about the merge.
+
+`git branch --merged <base> | grep backlog/<id>` settles which one it is — if it prints the branch, the merge is real and the delete was misaimed. It costs one
+command, so run it before believing either reading rather than after acting on the wrong one.
+
+The general rule this is one instance of: **every cleanup command that follows a merge belongs in the tree that merge happened in**. The merge itself, the
+`symbolic-ref` precondition and the dirty-path probe were all re-pointed at `<base tree>` when run-scoped bases landed; this delete kept the pre-base spelling,
+where `$PWD` was correct only because the base was always `main`. Anything added to this block later inherits the same rule. Worktree administration is the one
+exception, and it is not really one — `git worktree remove` and `worktree list` are repo-wide, so they are correct from the project root and stay there.
 
 Then the next item starts from the updated `<base>`, so later items build on earlier ones. On a `--base` run that is the whole point: item by item, a phased
 feature accumulates on its own branch and `main` is never written until a human decides it should be.
@@ -1238,10 +1255,12 @@ A merged fix does **not** reach this run on its own. Every skill body and every 
 _installed plugin copy_ — while the merge just landed in this repo's base branch. Hoisting the item to the front of the queue (§1) buys ordering and nothing else
 unless the run is told, once, to follow the repo's copy for the rest of the run.
 
-So after every merge, print what it brought in:
+So after every merge, print what it brought in — in the base tree, for the reason the cleanup rule above gives: `HEAD` here has to mean the merge commit, and on
+a `--base` run the project root's `HEAD` is `main`, which the merge never touched. Asked there this prints some unrelated earlier merge's file list, or nothing
+at all, and either way a merged runner fix goes unnoticed for the rest of the run.
 
 ```bash
-git -C "$PWD" diff --name-only HEAD^1 HEAD
+git -C "<base tree>" diff --name-only HEAD^1 HEAD
 ```
 
 - If those paths include **`skills/backlog-orchestrate/SKILL.md`**, re-read that file from this repo's working tree and follow it for the remainder of the run.
