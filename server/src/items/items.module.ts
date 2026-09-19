@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { ItemsController } from './items.controller';
+import { ItemsWriteController } from './items-write.controller';
 import { ItemsService } from './items.service';
 import { FilesSource } from './sources/files.source';
 import { GithubSource } from './sources/github.source';
@@ -10,7 +11,13 @@ import { TrackerModule } from '../tracker/tracker.module';
 
 @Module({
   imports: [RegistryModule, TrackerModule],
-  controllers: [ItemsController],
+  // Two controllers, split by verb rather than by resource: the reads are open
+  // (`ItemsController`, no guard — every GET in this app is) and the writes are
+  // guarded as a set (`ItemsWriteController`, one `@UseGuards` on the class).
+  // One controller carrying both would make "is this route guarded" a
+  // per-method question, which is exactly the shape the agents module's own
+  // guarded/unguarded split already avoids.
+  controllers: [ItemsController, ItemsWriteController],
   providers: [
     ItemsService,
     FilesSource,
@@ -27,6 +34,10 @@ import { TrackerModule } from '../tracker/tracker.module';
       useFactory: (files: FilesSource, github: GithubSource) => [files, github],
       inject: [FilesSource, GithubSource]
     }
-  ]
+  ],
+  // Exported for `AgentsModule` (task-46): `AgentsService.findItem` is now a
+  // delegate to `ItemsService.find`, and `orchestrate` asks
+  // `isTrackerProject`. One direction only — nothing here imports agents.
+  exports: [ItemsService]
 })
 export class ItemsModule {}

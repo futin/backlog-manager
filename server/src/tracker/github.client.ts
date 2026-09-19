@@ -107,14 +107,19 @@ export class GithubClient {
 
   /**
    * One page of the repo's issue comments — every comment in the repo, not one
-   * issue's, which is what makes watching claims cheap in phase 3: one request
-   * covers every issue, and an EDIT moves `updated_at` too, so a claim comment
-   * that is rewritten in place still comes back.
+   * issue's, which is what makes watching claims cheap on the board's read path
+   * (task-46): one request covers every issue, and an EDIT moves `updated_at`
+   * too, so a claim comment that is rewritten in place still comes back.
    *
-   * Nothing reads the result in phase 2. The call is made anyway, deliberately
-   * (spec §5.1) — the alternative is a phase-3 change to the polling loop's
-   * shape, its rate-limit budget and its tests all at once, at the point where
-   * the protocol it feeds is also new.
+   * Nothing read the result in phase 2. The call was made anyway, deliberately
+   * (spec §5.1) — the alternative would have been changing the polling loop's
+   * shape, its rate-limit budget and its tests all at once, in the phase that
+   * also introduced the protocol they feed. That bet paid: task-46 added
+   * `TrackerPollerService.comments()` over this cache and moved nothing here.
+   *
+   * The PROTOCOL does not read this. It reads `issueComments` below, per issue
+   * and fresh, because a claim posted a second ago has to be visible to the
+   * session deciding who won and no cache can promise that.
    */
   async comments(repo: string, opts: { token: string; since?: string | null; etag?: string | null }): Promise<GithubResponse<GithubComment[]>> {
     const query = `per_page=100&sort=updated&direction=asc${opts.since ? `&since=${encodeURIComponent(opts.since)}` : ''}`;
@@ -141,6 +146,131 @@ export class GithubClient {
    *  underneath it. */
   async page<T>(url: string, opts: { token: string }): Promise<GithubResponse<T>> {
     return this.request<T>('GET', url, opts);
+  }
+
+  /* ---------------------------------------------------------------------
+   * The write half (task-46, spec §6.2).
+   *
+   * Nine methods, each one request, each keeping this file's three rules: the
+   * one constant host, the rate headers recorded from every response, and
+   * nothing thrown on a status. That last rule is what the writer seam above
+   * this file depends on — every refusal it reports (`not-found`, `conflict`,
+   * `rate-limited`) is a status this client handed back as a value.
+   *
+   * `repo` is checked by `isRepo` before it is interpolated, in EVERY one of
+   * them. The reads above are called only from the poller and the adapter,
+   * both of which validate first; these are called from a request handler with
+   * a `project` a caller named, so the check moves into the one place it can
+   * never be forgotten. A repo that fails it answers `status: 0` and makes no
+   * request at all — a value, exactly like a transport failure, rather than a
+   * throw that would be the one exception to rule 3.
+   * ------------------------------------------------------------------- */
+
+  /** A new issue. 201 with the created issue; the `labels` array is what
+   *  carries the section (`type:*`), a refactor's `kind:*` and `runner-fix`. */
+  async createIssue(repo: string, fields: { title: string; body: string; labels: string[] }, opts: { token: string }): Promise<GithubResponse<GithubIssue>> {
+    const bad = refuseRepo<GithubIssue>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<GithubIssue>('POST', `${API}/repos/${repo}/issues`, { ...opts, body: fields });
+  }
+
+  /**
+   * A partial update of one issue. Every field this app ever patches, in one
+   * method rather than five: `state`/`state_reason` close it, `body` is
+   * groom's rewrite, `assignees` is the claim protocol's, `labels` is a
+   * wholesale replacement nothing currently uses (the label verbs below are
+   * the additive ones). A caller sends only the keys it means.
+   */
+  async updateIssue(
+    repo: string,
+    number: number,
+    patch: { state?: string; state_reason?: string | null; body?: string; assignees?: string[]; labels?: string[] },
+    opts: { token: string }
+  ): Promise<GithubResponse<GithubIssue>> {
+    const bad = refuseRepo<GithubIssue>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<GithubIssue>('PATCH', `${API}/repos/${repo}/issues/${number}`, { ...opts, body: patch });
+  }
+
+  /** One issue, fresh off the network rather than out of the poller's cache —
+   *  the `body` route's whole reason for existing. Optimistic concurrency needs
+   *  the issue's `updated_at` AS IT IS NOW, and the cache is up to one poll
+   *  interval old, so a cached read would compare against a stamp that may
+   *  already have moved. */
+  async issue(repo: string, number: number, opts: { token: string }): Promise<GithubResponse<GithubIssue>> {
+    const bad = refuseRepo<GithubIssue>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<GithubIssue>('GET', `${API}/repos/${repo}/issues/${number}`, opts);
+  }
+
+  /** One page of ONE issue's comments — the claim protocol's read. Paginated
+   *  the way `issues` is: this returns a page and its `next` link, and the
+   *  caller follows the cursor with `page()`. A per-issue read rather than the
+   *  repository-wide one the poller makes, because the protocol has to see the
+   *  comments posted in the last second, which no cache can promise. */
+  async issueComments(repo: string, number: number, opts: { token: string }): Promise<GithubResponse<GithubComment[]>> {
+    const bad = refuseRepo<GithubComment[]>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<GithubComment[]>('GET', `${API}/repos/${repo}/issues/${number}/comments?per_page=100`, opts);
+  }
+
+  /** A new comment on an issue. 201 with the created comment — whose `id` is
+   *  the claim protocol's ordering key, which is why the response body matters
+   *  here and not only the status. */
+  async createComment(repo: string, number: number, body: string, opts: { token: string }): Promise<GithubResponse<GithubComment>> {
+    const bad = refuseRepo<GithubComment>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<GithubComment>('POST', `${API}/repos/${repo}/issues/${number}/comments`, { ...opts, body: { body } });
+  }
+
+  /** Rewrite one comment in place. The comment endpoint is repo-scoped and
+   *  takes a COMMENT id, not an issue number — `/issues/comments/{id}`, which
+   *  reads like a typo and is not. Editing rather than re-posting is what keeps
+   *  one claim comment per session per issue, so an issue's timeline stays
+   *  readable by a person. */
+  async updateComment(repo: string, commentId: number, body: string, opts: { token: string }): Promise<GithubResponse<GithubComment>> {
+    const bad = refuseRepo<GithubComment>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<GithubComment>('PATCH', `${API}/repos/${repo}/issues/comments/${commentId}`, { ...opts, body: { body } });
+  }
+
+  /** Remove one comment. 204, no body. The ONE thing the protocol ever deletes,
+   *  and only ever a comment this same call chain posted seconds earlier — a
+   *  claim that LOST the race. A claim that merely went stale is released, never
+   *  deleted (spec §6.3 step 5). */
+  async deleteComment(repo: string, commentId: number, opts: { token: string }): Promise<GithubResponse<unknown>> {
+    const bad = refuseRepo<unknown>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<unknown>('DELETE', `${API}/repos/${repo}/issues/comments/${commentId}`, opts);
+  }
+
+  /** Add labels to an issue, leaving the ones already there alone — additive,
+   *  unlike `updateIssue`'s `labels`, which replaces. The protocol wants the
+   *  additive one: it sets `in-progress` on an issue whose `type:*` and `kind:*`
+   *  labels are structure it must not touch. */
+  async addLabels(repo: string, number: number, names: string[], opts: { token: string }): Promise<GithubResponse<unknown>> {
+    const bad = refuseRepo<unknown>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<unknown>('POST', `${API}/repos/${repo}/issues/${number}/labels`, { ...opts, body: { labels: names } });
+  }
+
+  /**
+   * Remove one label from an issue.
+   *
+   * A 404 here means the label was not on the issue, which is a SUCCESS for
+   * every caller this has — each one's contract is "the label is not there",
+   * and it is not there. The status is handed back honestly (404) rather than
+   * rewritten to 200; the judgement belongs to the writer, which is where it is
+   * made and tested. Two sessions releasing the same claim, or a release of a
+   * claim whose `in-progress` a person already removed by hand, both land here.
+   *
+   * The name is URL-encoded: label names legitimately contain `:` and spaces,
+   * and this one goes in a path segment.
+   */
+  async removeLabel(repo: string, number: number, name: string, opts: { token: string }): Promise<GithubResponse<unknown>> {
+    const bad = refuseRepo<unknown>(repo, this.rate);
+    if (bad !== null) return bad;
+    return this.request<unknown>('DELETE', `${API}/repos/${repo}/issues/${number}/labels/${encodeURIComponent(name)}`, opts);
   }
 
   private async request<T>(
@@ -233,6 +363,30 @@ export class GithubClient {
   }
 }
 
+/**
+ * The write methods' repo guard: `null` when the repo is fine, and otherwise
+ * the response a caller gets INSTEAD of a request being made.
+ *
+ * `status: 0` rather than a throw, because rule 3 at the top of this file has
+ * no exceptions: every outcome a caller has to branch on is a value, and a
+ * transport failure already uses this exact shape. The message names the field
+ * so a writer's `upstream` refusal reads as something an operator can fix (a
+ * typo in a committed `backlog/source.json`) rather than as a network blip.
+ */
+function refuseRepo<T>(repo: string, rate: RateLimit): GithubResponse<T> | null {
+  if (isRepo(repo)) return null;
+  return {
+    status: 0,
+    data: null,
+    etag: null,
+    next: null,
+    retryAfter: null,
+    secondary: false,
+    error: `not an owner/name repository: ${JSON.stringify(repo)}`,
+    rate
+  };
+}
+
 /** A header as a finite number, or `null` — an absent, empty or non-numeric
  *  header all read the same, because all three mean "this response did not say". */
 function numberHeader(value: string | null): number | null {
@@ -277,12 +431,24 @@ export interface GithubIssue {
   pull_request?: unknown;
 }
 
-/** The comment fields phase 3 will read. Cached and otherwise untouched in
- *  phase 2 — see `comments()` above for why the call is made now. */
+/**
+ * The comment fields the claim protocol reads (task-46). Written by the poller
+ * since phase 2 — see `comments()` above for why the call was made a phase
+ * before anything read it.
+ *
+ * `id` carries more weight than the rest and is worth naming: it is the
+ * protocol's ORDERING key. GitHub assigns comment ids monotonically, so the
+ * lowest live claim's id is the one posted first, and that is what lets two
+ * machines pick the same winner with no lock between them (see
+ * `server/src/tracker/claim.ts`).
+ */
 export interface GithubComment {
   id: number;
   issue_url: string;
   body: string | null;
+  /** Where a person opens this comment. Carried so a refusal can point at the
+   *  claim that won, and so `comment`'s 201 can answer with a URL. */
+  html_url: string;
   user?: { login: string } | null;
   created_at: string;
   updated_at: string;

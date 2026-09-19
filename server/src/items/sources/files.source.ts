@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { Injectable } from '@nestjs/common';
 
 import { buildAllowlist, resolveAllowed } from '../allow.util';
@@ -68,5 +68,46 @@ export class FilesSource implements ItemSource {
     } catch {
       return text;
     }
+  }
+
+  /**
+   * One item by its absolute path (task-46) — `AgentsService.findItem`'s body,
+   * moved here unchanged down to the realpath compare.
+   *
+   * It belongs on this adapter and nowhere else: "resolve a ref against the
+   * allowlist, then scan every registered project for the file it names" is a
+   * statement about ITEM FILES, and `agents/` holding a private copy of it was
+   * the reason the dispatch routes could not see a tracker item at all. Now the
+   * ref's shape picks an adapter (`ItemsService.find`) and each one answers for
+   * its own source.
+   *
+   * No `writer` on this class, deliberately — see `ItemSource.writer`: item
+   * files are the skills' to write, and the absence of the field is what makes
+   * a write route answer "this project's items are files" in ONE place.
+   */
+  async find(ref: string, registry: Registry): Promise<BacklogItem | null> {
+    const real = resolveAllowed(ref, buildAllowlist(registry));
+    if (real === null || !real.endsWith('.md')) return null;
+    for (const project of registry.projects) {
+      for (const candidate of scanProject(project).items) {
+        // Both sides through realpath: resolveAllowed already resolved
+        // symlinks, scanProject did not, and on macOS the temp roots the test
+        // fixtures live under are themselves symlinks (/var → /private/var).
+        // A plain string compare would find nothing there.
+        if (samePath(candidate.path, real)) return candidate;
+      }
+    }
+    return null;
+  }
+}
+
+/** Two paths naming one file, symlinks resolved on both sides. `false` rather
+ *  than a throw for a path that does not exist, which is the ordinary case when
+ *  an item was archived between two requests. */
+function samePath(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return false;
   }
 }

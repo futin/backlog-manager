@@ -366,12 +366,13 @@ export function ItemCard({
             <span className="board-card-proj-name">{item.project}</span>
           </span>
           {/* The tracker's assignee (task-45), beside the project and NOT on
-              the live strip: phase 2 has no claim protocol, so an assignee is
-              someone's name against an issue and not a statement that anyone
-              is working it. Drawing it where the in-progress bar goes would
-              make it exactly that claim — spec §5.5 says the login renders
-              only where it does not imply one, and phase 3 is what gives the
-              bar something to stand on. `null` for every files item. */}
+              the live strip: an assignee is someone's name against an issue
+              and not a statement that anyone is working it right now. Drawing
+              it where the in-progress bar goes would make it exactly that
+              claim — spec §5.5 says the login renders only where it does not
+              imply one. Since task-46 the bar HAS something to stand on for a
+              tracker item, and it is the live claim (`started`/`phase`, filled
+              by the mapper), not this. `null` for every files item. */}
           {item.assignee !== null && <span className="board-card-assignee">@{item.assignee}</span>}
           {/* Pushed right and `flex: none` (CSS). The date is short (`aug 20`,
               not `2026-08-20`) because this line is nowrap-with-ellipsis at the

@@ -52,6 +52,32 @@ it isn't hiding anything.
 `--json` carries the same thing as `started`, the UTC timestamp the work began (`""` when
 nobody has started it; a bare `YYYY-MM-DD` on items picked up before it stamped a time).
 
+## In a tracker project
+
+A project whose `backlog/source.json` says `github` has **no item files**: its items are GitHub issues, and every command above routes through the
+backlog-manager API running on this machine, which holds the credential. Nothing about how you invoke them changes — `board`, `board --section bugs` and
+`board --json` print the same thing off the same tool. What changes is what has to be true for them to work, and the vocabulary for naming an item.
+
+**The stack must be running.** There is no offline mode and deliberately no queue: a write parked on one laptop would be a second source of truth for an item
+nobody else can see. A refused connection is **exit `5`**, naming the port and both ways to start the stack (`pnpm run dev`, `pnpm run docker:up`). Treat it
+exactly like exit `2` — a precondition to fix, not a backlog to report.
+
+**An item is `#31`.** `31`, `#31` and the full URN `gh:<owner>/<repo>#31` all name the same issue, so use whichever the context hands you; a file-shaped id
+(`task-31`) is refused with its own message, because in a tracker project there is no such thing. A URN naming a different repository is refused too.
+
+The commands and flags that exist only here, one line each:
+
+- `show <id>` prints the item's URN, a frontmatter-shaped block, `---`, and then **the body** — there is no file for a skill to read afterwards, so this is
+  the whole of what an item says. `show <id> --json` adds `updatedAt` and the current claim, which `groom` and `stop` both need.
+- `new <section> "<title>" --body <file>` — `--body` is REQUIRED here (and refused in a files project): with no file to write, the body travels with the
+  request. Prints three lines: the id, the url, the URN.
+- `move <id> done|out-of-scope [--outcome <file>]` — the outcome file becomes the issue's closing comment.
+- `start <id> --as groom|execute` takes the item by posting a claim comment; `--as` is required, because the claim records which phase is running.
+- `heartbeat <id>` says this session is still alive. **A claim reads stale after 15 minutes without one**, at which point the next session to contest the item
+  retires it — so heartbeat between long steps.
+- `comment <id> --body <file>` appends a comment without moving anything.
+- `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the issue moved since you read it. Only `backlog-groom` uses it.
+
 ## Print it as returned
 
 Show the command's own output as-is. Don't re-summarise it, re-sort it, drop rows, or

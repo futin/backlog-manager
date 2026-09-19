@@ -3,7 +3,7 @@ import type { Response } from 'express';
 
 import { ItemsService } from './items.service';
 import type { UncommittedItems } from './uncommitted.util';
-import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
+import type { ClaimResult, ItemsIndex, ProjectSummary } from '../../../shared/types';
 
 /**
  * Everything lives under /api on purpose: dev-mode Vite proxies exactly one
@@ -64,6 +64,40 @@ export class ItemsController {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
     return this.items.uncommitted(trimmed);
+  }
+
+  /**
+   * Who holds one item, or `null` — the eighth item route (task-46) and the
+   * only READ among the claim protocol's.
+   *
+   * A GET, and therefore in THIS controller rather than beside the seven
+   * writes: it starts nothing, reads no caller-supplied path (`project` has to
+   * match a registry entry exactly), and discloses strictly less than
+   * `/api/items` already does to any same-origin reader. That is the same
+   * reasoning `uncommitted` above carries for being unguarded.
+   *
+   * It answers from the poller's cache, and makes ONE fresh read when the cache
+   * has no claim for that issue — see `ItemWriter.readClaim` for why a miss
+   * cannot be reported as "unclaimed". So it is not free, but it is bounded: at
+   * most one request, and none at all in the common case.
+   *
+   * It exists because `backlog.mjs start` and `backlog.mjs stop` are two
+   * PROCESSES: `claim` answers the comment id that identifies the claim, and
+   * the `stop` that has to `release` it — minutes later, from a different
+   * invocation — has no other way to rediscover it. Without this the CLI could
+   * take an item and never give it back.
+   *
+   * 400 for a blank parameter and 404 for an unregistered or non-tracker
+   * project, kept apart for the reason `uncommitted` gives: a malformed request
+   * is the caller's bug, and a 404 is the registry's answer.
+   */
+  @Get('items/claim')
+  async claim(@Query('project') project: string | undefined, @Query('id') id: string | undefined): Promise<ClaimResult | null> {
+    const trimmedProject = typeof project === 'string' ? project.trim() : '';
+    const trimmedId = typeof id === 'string' ? id.trim() : '';
+    if (trimmedProject === '') throw new HttpException({ error: 'project is required' }, 400);
+    if (trimmedId === '') throw new HttpException({ error: 'id is required' }, 400);
+    return this.items.readClaim(trimmedProject, trimmedId);
   }
 
   /**

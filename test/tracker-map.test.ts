@@ -1,6 +1,8 @@
 import { issueUrn, mapIssue, parseUrn } from '../server/src/tracker/map-issue';
 import type { GithubIssue } from '../server/src/tracker/github.client';
-import type { BacklogItem, RegistryProject } from '../shared/types';
+import type { ParsedClaim } from '../server/src/tracker/claim';
+import { CLAIM_STALE_MS } from '../shared/types';
+import type { BacklogItem, ClaimRecord, RegistryProject } from '../shared/types';
 
 /**
  * The issue → `BacklogItem` mapping table, spec §5.3, one case per row
@@ -68,12 +70,28 @@ const BASE: BacklogItem = {
   untyped: false
 };
 
-function map(over: Partial<GithubIssue> = {}): ReturnType<typeof mapIssue> {
-  return mapIssue(issue(over), REPO, project);
+/** A claim, with only the fields a case cares about spelled out. */
+function claim(over: Partial<ClaimRecord> = {}, commentId = 100): ParsedClaim {
+  return {
+    commentId,
+    record: {
+      v: 1,
+      session: 'A',
+      phase: 'groom',
+      at: '2026-09-18T10:00:00Z',
+      heartbeat: new Date().toISOString(),
+      counters: { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 },
+      ...over
+    }
+  };
+}
+
+function map(over: Partial<GithubIssue> = {}, claims: ParsedClaim[] = []): ReturnType<typeof mapIssue> {
+  return mapIssue(issue(over), REPO, project, claims);
 }
 
 describe('issue → BacklogItem', () => {
-  it('maps a type:bug issue whole, including the fields phase 3 will fill', () => {
+  it('maps a type:bug issue whole, with the claim fields empty when nobody has claimed it', () => {
     const mapped = map();
     expect(mapped?.item).toEqual(BASE);
     expect(mapped?.errors).toEqual([]);
@@ -131,7 +149,7 @@ describe('issue → BacklogItem', () => {
 
   it('maps a not_planned close to terminal and out-of-scope, leaving the type label on the issue', () => {
     const source = issue({ state: 'closed', state_reason: 'not_planned' });
-    const mapped = mapIssue(source, REPO, project);
+    const mapped = mapIssue(source, REPO, project, []);
     expect(mapped?.item.status).toBe('terminal');
     expect(mapped?.item.section).toBe('out-of-scope');
     // The recoverability claim, asserted on the SOURCE rather than on the
@@ -193,13 +211,66 @@ describe('issue → BacklogItem', () => {
   });
 
   it('drops a pull request entirely', () => {
-    expect(mapIssue(issue({ pull_request: { url: 'https://api.github.com/…' } }), REPO, project)).toBeNull();
+    expect(mapIssue(issue({ pull_request: { url: 'https://api.github.com/…' } }), REPO, project, [])).toBeNull();
   });
 
   it('accepts labels sent as bare strings as well as objects', () => {
     // Both shapes appear in the wild and neither is wrong; a mapper that threw
     // on the string form would fail a whole repo over a shape nobody controls.
-    expect(mapIssue(issue({ labels: ['type:task'] }), REPO, project)?.item.section).toBe('tasks');
+    expect(mapIssue(issue({ labels: ['type:task'] }), REPO, project, [])?.item.section).toBe('tasks');
+  });
+});
+
+/**
+ * The claim half of the mapping (task-46). Phase 2 asserted `started`, `phase`
+ * and the four counters as empty precisely so this phase would have a red case
+ * the day it filled them; these are that case, inverted.
+ */
+describe('the claim fields', () => {
+  const COUNTERS = { groomElapsed: 5, executeElapsed: 30, groomTokens: 10, executeTokens: 4000 };
+
+  it('fills started, phase and the four counters from a live unreleased claim', () => {
+    const mapped = map({}, [claim({ at: '2026-09-18T10:00:00Z', phase: 'execute', counters: COUNTERS })]);
+    expect(mapped?.item).toEqual({
+      ...BASE,
+      started: '2026-09-18T10:00:00Z',
+      phase: 'execute',
+      groomElapsed: 5,
+      executeElapsed: 30,
+      groomTokens: 10,
+      executeTokens: 4000
+    });
+  });
+
+  /* Released clears the HOLD and keeps the TOTALS — the two questions the
+     newest claim answers, and the reason they are read separately. Counters
+     that vanished on release would make an item's accumulated cost disappear
+     the moment the work finished. */
+  it('clears started and phase on release but keeps the counters', () => {
+    const released = claim({ phase: 'execute', counters: COUNTERS, released: { at: '2026-09-18T11:00:00Z', reason: 'stopped', by: 'A' } });
+    expect(map({}, [released])?.item).toEqual({ ...BASE, groomElapsed: 5, executeElapsed: 30, groomTokens: 10, executeTokens: 4000 });
+  });
+
+  /* "ANY stamp, fresh or stale" — the same rule `progressBlock` applies to a
+     files item. What retires a stale claim is the PROTOCOL, at the moment
+     another session contests the issue; a mapper that expired them on its own
+     would show an item as free while `claim` still had to fight for it. */
+  it('still reads started for a stale but unreleased claim', () => {
+    const stale = claim({ heartbeat: new Date(Date.now() - CLAIM_STALE_MS * 4).toISOString() });
+    expect(map({}, [stale])?.item.started).toBe('2026-09-18T10:00:00Z');
+  });
+
+  /* The newest is the HIGHEST comment id, not the last one in the array. */
+  it('reads the newest claim by comment id, whatever order they arrive in', () => {
+    const older = claim({ phase: 'groom', at: '2026-09-18T09:00:00Z' }, 40);
+    const newer = claim({ phase: 'execute', at: '2026-09-18T10:00:00Z' }, 99);
+    expect(map({}, [newer, older])?.item.phase).toBe('execute');
+  });
+
+  /* `in-progress` is CONSUMED since task-46: the claim renders it as the
+     in-progress bar, and leaving it in `tags` would draw it twice. */
+  it('consumes the in-progress label', () => {
+    expect(map({ labels: [{ name: 'type:bug' }, { name: 'in-progress' }] })?.item.tags).toEqual([]);
   });
 });
 

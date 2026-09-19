@@ -7,7 +7,7 @@
  * by construction and every item lands in `ideas`. The other four are the
  * fields the file store keeps in frontmatter and a tracker has nowhere else to
  * put — a refactor's `kind:`, the orchestrator's `runner-fix:` marker, and the
- * `in-progress` flag phase 3's claim protocol sets.
+ * `in-progress` flag the claim protocol sets (task-46).
  *
  * Created by the POLLER, the first time a repo syncs successfully and any is
  * missing, which is why `connect` needs no server and no network (spec §5.7):
@@ -54,6 +54,25 @@ export const TRACKER_LABELS: readonly TrackerLabel[] = [
   { name: 'runner-fix', color: 'b60205', description: 'Executing this repairs machinery the orchestrator run itself depends on' },
   { name: 'in-progress', color: 'ededed', description: 'A session holds this item (set by the claim protocol)' }
 ];
+
+/**
+ * A refactor's two flavours, DERIVED from the list above rather than written
+ * out again (task-46) — `['chore', 'debt']`.
+ *
+ * The write route validates `kind` against this, so "which kinds exist" has one
+ * home: the labels a connected repo carries. A hand-written copy in the
+ * controller would be the copy that goes stale the day a third flavour is
+ * added, and it would let a caller ask for a `kind:` label no repo has — which
+ * GitHub creates silently on first use, so the mistake would show up as a
+ * mystery grey label rather than as a refusal.
+ *
+ * The client's own `REFACTOR_KINDS` (`client/src/components/board/ItemCard.tsx`)
+ * is a third statement of the same two words and is deliberately left alone:
+ * it decides which kinds get a BADGE, over a `kind` string the API passes
+ * through verbatim from either source, and coupling a render decision to the
+ * tracker's label list would make a files project's badges depend on GitHub.
+ */
+export const KIND_NAMES: readonly string[] = TRACKER_LABELS.filter((l) => l.name.startsWith('kind:')).map((l) => l.name.slice('kind:'.length));
 
 /** The eight names alone — what the bootstrap compares the repo's existing
  *  labels against. Case-insensitive on purpose: GitHub label names are

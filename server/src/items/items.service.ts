@@ -2,10 +2,11 @@ import { HttpException, Inject, Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
 import { resolveSource } from './sources/resolve.util';
+import type { SourceMarker } from './sources/resolve.util';
 import { parseUrn } from '../tracker/map-issue';
-import { ITEM_SOURCES, type ItemSource, type SourceSummary } from './sources/source';
+import { ITEM_SOURCES, type ItemSource, type ItemWriter, type SourceSummary } from './sources/source';
 import { uncommittedItemPaths, type UncommittedItems } from './uncommitted.util';
-import type { ItemsIndex, ProjectSummary, SectionCounts } from '../../../shared/types';
+import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts } from '../../../shared/types';
 
 /**
  * All reads walk the registry and the stores per request, like guide-manager's
@@ -224,8 +225,136 @@ export class ItemsService {
    * action, it never accepts one" states for the agents routes.
    */
   async body(requestPath: string): Promise<string | null> {
-    const adapter = this.sources.get(parseUrn(requestPath) === null ? 'files' : 'github');
+    const adapter = this.adapterForRef(requestPath);
     if (adapter === undefined) return null;
     return adapter.body(requestPath, this.registry.load());
   }
+
+  /**
+   * One item by the ref that names it (task-46) — the same dispatch `body`
+   * above makes, over the same one decision, for the agents routes' lookup.
+   *
+   * This is the ONE home for "which adapter owns this ref", and it is why
+   * `AgentsService.findItem` is now a one-line delegate: that method used to
+   * hold a second copy of the files adapter's allowlist-and-scan, which meant
+   * `plan` and `dispatch` could only ever see a file. Nothing in `agents/`
+   * knows what a URN is any more.
+   */
+  async find(ref: string): Promise<BacklogItem | null> {
+    const adapter = this.adapterForRef(ref);
+    if (adapter === undefined) return null;
+    return adapter.find(ref, this.registry.load());
+  }
+
+  /**
+   * Does this project's items come from a tracker (task-46)?
+   *
+   * One question, asked by one caller: `AgentsService.orchestrate`, which
+   * refuses a tracker project outright until phase 4. It is a separate method
+   * from `writerFor` below because it is a different question — "can an
+   * orchestrator run drain this" rather than "may these routes write to it" —
+   * and folding them would make the orchestrate refusal accidentally depend on
+   * whether an adapter happens to ship a writer.
+   *
+   * Registry compare and `resolveSource` per request, the same two reads every
+   * other method here makes, cached nowhere.
+   */
+  isTrackerProject(projectPath: string): boolean {
+    const entry = this.registry.load().projects.find((p) => p.path === projectPath);
+    if (entry === undefined) return false;
+    return resolveSource(entry.path, this.known).kind === 'tracker';
+  }
+
+  /**
+   * How, if at all, one registered project's items may be WRITTEN through this
+   * API (task-46, spec §6.2) — the one gate the seven write routes share.
+   *
+   * Four answers rather than a boolean, because the routes owe four different
+   * HTTP statuses and the difference between them is the whole of what a caller
+   * can act on: a path nobody registered (404), a project whose items are files
+   * and are the skills' to write (400), a marker this build cannot honour (400,
+   * carrying `resolveSource`'s own reason), and an adapter that can write (the
+   * call).
+   *
+   * Registry-gated by a RAW STRING COMPARE against the registry's own `path`,
+   * deliberately not `samePath`'s realpath compare — the identical rule
+   * `uncommitted` above and `dispatchGate` follow, and load-bearing for the
+   * identical reason: realpath-ing an unregistered path before comparing it
+   * would itself be a filesystem touch on a path this server was never given.
+   *
+   * `resolveSource` per request, never cached, exactly as `index()` and
+   * `projects()` do it — connecting a project takes effect on the next request,
+   * not on the next restart.
+   */
+  writerFor(projectPath: string): WriterLookup {
+    const entry = this.registry.load().projects.find((p) => p.path === projectPath);
+    if (entry === undefined) return { kind: 'unregistered' };
+
+    const resolved = resolveSource(entry.path, this.known);
+    if (resolved.kind === 'unsupported') return { kind: 'unsupported', reason: resolved.reason };
+    // `missing` reads as `files` here, and that is the right answer rather than
+    // a fifth case: a project with no `backlog/` at all is a project whose
+    // items would be files if it had any, and the sentence a caller needs —
+    // "this project's items are files; the skills write them directly" — is the
+    // same one. A tracker project always has a `backlog/` (the marker lives in
+    // it), so `missing` can never be a tracker.
+    if (resolved.kind === 'missing' || resolved.kind === 'files') return { kind: 'files' };
+
+    const adapter = this.adapterFor(resolved);
+    // No adapter, or an adapter that does not write: both are "this build
+    // cannot write to that", and the marker's own reason is the honest thing to
+    // say. Unreachable for `files` (which is answered above) and for `github`
+    // (which writes), so this covers only a kind registered without a writer —
+    // the shape a future read-only adapter would have.
+    if (adapter?.writer === undefined) {
+      return { kind: 'unsupported', reason: `${entry.path}: source kind "${resolved.marker.kind}" cannot be written to by this build` };
+    }
+    return { kind: 'writer', writer: adapter.writer, project: entry, marker: resolved.marker };
+  }
+
+  /**
+   * Who holds one item right now, or `null` — `GET /api/items/claim`'s whole
+   * implementation (task-46).
+   *
+   * Gated through `writerFor`, not through a second lookup of its own: the
+   * question "may this caller be told who holds this item" has exactly the same
+   * answer as "may this caller write to it", and the claim is the writer's to
+   * describe. A files project and an unregistered path both answer 404 here —
+   * neither has a claim, and the two failures are not worth telling apart to a
+   * caller that is asking about a tracker item.
+   */
+  async readClaim(projectPath: string, id: string): Promise<ClaimResult | null> {
+    const lookup = this.writerFor(projectPath);
+    if (lookup.kind !== 'writer') throw new HttpException({ error: 'not found' }, 404);
+    const outcome = await lookup.writer.readClaim(lookup.project, lookup.marker, id);
+    if (!outcome.ok) throw new HttpException({ error: outcome.refusal.error }, outcome.refusal.refused === 'not-found' ? 404 : 502);
+    return outcome.value;
+  }
+
+  /**
+   * Which adapter owns a ref, by the ref's SHAPE and nothing else — a
+   * `gh:<owner>/<repo>#<n>` URN is the tracker's, anything else is a
+   * filesystem path and is the files adapter's.
+   *
+   * The shape test is the ref's, never the caller's: nothing in a request says
+   * which source to ask, so a caller cannot route its own path to an adapter by
+   * asserting a kind. That is the same rule "dispatch derives the action, it
+   * never accepts one" states for the agents routes, and it is stated once here
+   * rather than in each of the two methods that dispatch.
+   */
+  private adapterForRef(ref: string): ItemSource | undefined {
+    return this.sources.get(parseUrn(ref) === null ? 'files' : 'github');
+  }
 }
+
+/**
+ * `writerFor`'s four answers. A discriminated union rather than
+ * `ItemWriter | null`, because the three failures are three different HTTP
+ * statuses with three different sentences and collapsing them would make every
+ * route guess which one happened.
+ */
+export type WriterLookup =
+  | { kind: 'unregistered' }
+  | { kind: 'files' }
+  | { kind: 'unsupported'; reason: string }
+  | { kind: 'writer'; writer: ItemWriter; project: RegistryProject; marker: SourceMarker };

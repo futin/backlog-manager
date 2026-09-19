@@ -96,6 +96,33 @@ Capture only ever creates. It never moves, converts, or reclassifies an existing
 
 4. Print the id and the path back so the user has something to cite.
 
+## In a tracker project
+
+A project whose `backlog/source.json` says `github` has no item files at all: the four steps above collapse into one call, because there is no path to write
+to. Everything that decides WHAT to file — the section table, the two refusals, the `--from` rule and the verbatim headings — is unchanged; only the writing
+moves.
+
+1. **`init` still runs first, unconditionally.** On a connected project it creates nothing and prints `already connected: <root> → github <owner>/<repo>`, and
+   it still REGISTERS the project, which is the one thing a fresh clone needs before the board can serve it.
+
+2. **Compose the whole body into a temp file** — the section's headings from the table below, verbatim, with `unknown` where you don't know — and pass it:
+
+   ```bash
+   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new <section> "<title>" --body /tmp/item.md
+   ```
+
+   `--body` is required here and refused in a files project, and the asymmetry is the point: with a file there is a path for you to write and a second writer
+   would be a second source of truth; without one, the body has to travel with the request.
+
+3. **Print the two lines it answers** — `#<n>` and the issue URL — so the user has something to cite and somewhere to click. There is no path to report.
+
+Three things that move from frontmatter onto the issue, and none of them needs a decision from you: `tags:` become labels, `kind:` becomes `kind:chore` /
+`kind:debt` (pass it as `--kind <value>`; any other value is refused rather than silently dropped), and `--from #<n>` becomes a `_From #<n>._` line the server
+prepends to the body. There is no `status:` to avoid writing, because there is no frontmatter to write it in.
+
+**Issues filed in the web UI carry no `type:*` label**, so they land in Ideas with an `untyped` badge until somebody labels them. That is an ordinary state, not
+an error, and capture is not the skill that fixes it.
+
 ### Worked example
 
 ```bash

@@ -31,6 +31,12 @@ class DuplicateFilesSource implements ItemSource {
   async summary(): Promise<SourceSummary> {
     return { repo: null, polledAt: null, access: null, detail: null };
   }
+  /* task-46: the seam grew `find`, so a stub adapter has to answer it too.
+     Deliberately not a spy — this suite is about the module refusing two
+     adapters of one kind at BOOT, which happens before anything is called. */
+  async find(): Promise<null> {
+    return null;
+  }
 }
 
 describe('ItemsService construction', () => {

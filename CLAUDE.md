@@ -29,7 +29,9 @@ inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` 
 One line per seam. The mechanism lives in the subsystem docs linked below; the reasoning behind the rules in the next section lives in
 [docs/subsystems/invariants.md](docs/subsystems/invariants.md). The doc map is [docs/overview.md](docs/overview.md).
 
-- `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, and the item-source adapters), `agents/` (the
+- `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
+  adapters, and — since task-46 — the seven guarded write routes in `items-write.controller.ts`, which are the ONLY writes this server makes to anybody's
+  items), `agents/` (the
   dashboard calls, plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap and the read-only
   `trackers` route) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
   in-memory watchdog and starting-run records and the two files the server does write), `registry/`, `static.ts` (serves `client/dist` only when built),
@@ -104,7 +106,32 @@ any of these — most encode a failure that already happened.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
-  the skills, which remain the only writers.
+  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the seven routes
+  below — never a file, on any path.
+- **The seven `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
+  `@UseGuards(SameOriginPostGuard)` (`items-write.controller.ts`, one decorator on the class) and each is a thin pass-through to an `ItemWriter` method:
+  `ItemsService.writerFor` gates the `project` against the registry by a RAW string compare, resolves the marker per request, and answers `unregistered` (404)
+  / `files` (400, `this project's items are files — the skills write them directly`) / `unsupported` (400, carrying `resolveSource`'s own reason) / the call.
+  None of those four makes a network request. `FilesSource` has no `writer` at all, and that absence IS the rule. The adapter answers a VALUE for every
+  failure (`WriteRefusal`), and the controller is the only layer mapping one to a status: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited`
+  429 · anything else 502. `GithubSource` keeps a `Map<urn, Promise>` so two local sessions never race on one item, and every response is absorbed into the
+  poller's cache — but a write never moves `polledAt`, because nothing was polled. The token stays in the process; no response carries it. An eighth route,
+  `GET /api/items/claim`, is a READ (unguarded like every other GET) and exists because `start` and `stop` are two processes. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-seven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
+- **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.** `server/src/tracker/claim.ts` is the one implementation of
+  what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`); `GithubSource.claim` is the one implementation of taking one. The sequence
+  is list · post · settle (`settleMs`, 1 s) · list · UNION, and the union is what decides — never the second list alone, because GitHub's comment listing is
+  eventually consistent. A LOSER deletes its own comment; a claim that merely went STALE is released (`released: { reason: 'stale' }`), never deleted, because
+  it is the permanent record of work somebody did and carries the counters to prove it. `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second
+  number. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the newest prior claim and are BILLED by the CLI on
+  release — `--abandon` sends no `counters` key at all, which is not the same as zeros. The mapper reads `started`/`phase` from an UNRELEASED claim without
+  consulting its heartbeat ("any stamp, fresh or stale") and the counters from the newest claim regardless of release. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
+- **`backlog.mjs` in a tracker project needs the stack up, and says so with exit `5`.** The marker decides the mode — absent or `{"kind":"files"}` runs today's
+  synchronous code byte for byte and makes no HTTP request on any verb; `{"kind":"github"}` with a valid repo routes every command through
+  `http://127.0.0.1:${BM_API_PORT ?? 4322}`; anything else is exit `1` naming the marker, NEVER a fallback to files. There is no offline queue on purpose: a
+  parked write would be a second source of truth on one laptop. Ids are `31` / `#31` / this project's own URN; a file-shaped id and another repo's URN are each
+  refused with their own sentence. Why: [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
 - **Every server route lives under `/api`**; the Vite proxy has exactly one entry, asserted by `test/vite-proxy.test.ts`.
 - **Item bodies are served through a registry-built allowlist** (`allow.util.ts`); a file outside every registered `backlog/` 404s.
 - **A project's source is a committed marker, resolved per request, and an `unsupported` one never falls back to `files`.** `resolveSource`
@@ -125,19 +152,27 @@ any of these — most encode a failure that already happened.
   [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **The tracker cache is the one cache in this server whose age is a rendered value.** In memory, per repo, lost on restart, rebuilt by the first sync; it
   exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal and on the Trackers card is what
-  keeps it honest. Every other read stays per request — the registry's and `resolveSource`'s rules are untouched. A `304` leaves the cache AND `polledAt`
-  unchanged (the task-45 item's authoritative case; spec §12.2 disagrees and is recorded as disagreeing). The comments request is made every tick and read by
-  nothing until phase 3. Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eight labels
+  keeps it honest. Every other read stays per request — the registry's and `resolveSource`'s rules are untouched. A `304` leaves the cache unchanged and MOVES
+  `polledAt`: the rendered age means "since we last successfully checked", and a conditional request that came back `304` is a successful check (settled
+  2026-09-18 in spec §12.2's favour, against task-45's own authoritative case, which is recorded as having been overturned). The comments request is made every
+  tick and is read by `TrackerPollerService.comments()`, which is what the claim protocol maps an item's `started`/`phase` and counters
+  from. **Issues and comments have SEPARATE high-water marks and each paginates to the end** — sharing one mark asked for comments `since` the newest
+  ISSUE's stamp, which hid every claim older than that from a fresh process, and `readClaim` therefore falls back to one fresh read on a cache miss
+  rather than reporting "unclaimed".
+ Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eight labels
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
   `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. Why:
   [invariants.md](docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value)
-- **A tracker project has no item files, and that shows up in four places.** `deriveAction` answers `null` for any item whose `source` is not `files`, as its
-  FIRST line — so the dispatch control is HIDDEN (the environment-level way) and the server refuses a hand-made POST from the same implementation;
-  `GET /api/items/uncommitted` answers `known: false`, and `uncommitted` stays a sibling endpoint nothing derived reads; `ItemsService.body` dispatches on the
-  REF'S SHAPE — a `gh:<owner>/<repo>#<n>` URN to the tracker adapter, anything else to files — in one place, and the adapter gates on the registry exactly as
+- **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.** `GET /api/items/uncommitted` answers
+  `known: false`, and `uncommitted` stays a sibling endpoint nothing derived reads; `ItemsService.body` AND `ItemsService.find` dispatch on the REF'S SHAPE — a
+  `gh:<owner>/<repo>#<n>` URN to the tracker adapter, anything else to files — in ONE place each side calls, and the adapter gates on the registry exactly as
   the files allowlist does; and `untyped` is a rendered badge that NOTHING derived reads (no type label → `ideas` with the badge and no error; two → the first
-  alphabetically AND one `errors` entry). A closed issue keeps its `type:*` label so the original type is recoverable. Why:
-  [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-four-places)
+  alphabetically AND one `errors` entry). A closed issue keeps its `type:*` label so the original type is recoverable. **Dispatch is derived like any other
+  item's since task-46** (the lift): `deriveAction` asks nothing about `source`, and the per-item block that stops a claimed tracker item is the LIVE CLAIM,
+  read by `progressBlock` off the `started` the mapper fills — no tracker-specific branch anywhere. What did not lift is the ORCHESTRATOR: `projectIsFiles`
+  (`client/src/lib/tracker.ts`) hides the toolbar control and `AgentsService.orchestrate` 400s a tracker project with `orchestrating a tracker project arrives
+  in phase 4`, and those are two statements of one rule that used to ride on `deriveAction`'s removed first line. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,
   refactors and out-of-scope derive `null`, not `false` — grooming is not a state they have, and for the first two the state they wait in is _promoted_.
 - **Board-versus-Archive is derived from `updated ?? lastCommit ?? created` and the run payload, never stored.** `isStale`/`leavesBoard`
@@ -225,7 +260,10 @@ any of these — most encode a failure that already happened.
 - **All three skill CLIs end with `process.exitCode = main(...)`, never `process.exit(main(...))`.** Writing to a pipe is asynchronous, so `process.exit()`
   drops everything past 65,536 bytes of a `--json` payload while a `> file.json` redirect stays fine — which is why the shipped instance passed every hand
   check. Safe only because none of the three holds the event loop open (synchronous `fs`, `spawnSync` children, and `watch`'s `Atomics.wait` sleep); whoever
-  adds a timer, server or async child closes the handle rather than restoring `process.exit()`. Each tool carries its own note on why _its_ file is safe;
+  adds a timer, server or async child closes the handle rather than restoring `process.exit()`. **`backlog.mjs` alone may also end
+  `process.exitCode = await main(...)`** (task-46): the rule is about `process.exit()` truncating a pipe, which asynchrony has nothing to do with, and API
+  mode's every `fetch` is awaited to completion with `connection: close`, so no pooled socket outlives the call. The other two hold no asynchronous work and
+  stay on the synchronous form, which the guard enforces per file. Each tool carries its own note on why _its_ file is safe;
   `retro.mjs`'s is the long-form copy. `backlog.test.mjs`'s source guard reads all three sources and is the only one of the three cases that covers an entry
   point nobody has written yet. Why: [invariants.md](docs/subsystems/invariants.md#all-three-skill-clis-exit-through-processexitcode-never-processexit)
 - **Editing `skills/` changes nothing until it is committed, pushed, and `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD, never the
@@ -275,10 +313,17 @@ any of these — most encode a failure that already happened.
 - **Dispatch derives the action; it never accepts one.** `deriveAction` (`shared/agent.ts`) is the single implementation for the board's label and the server's
   validation; dispatch re-scans the file and 409s on disagreement. The prompt is the only client field taken outright; unknown `model`/`effort` drop rather than
   reject; the controller rebuilds the body field by field and checks `action` with `isAgentAction`, never a hand-written comparison chain. `AgentAction` has
-  three members and TWO checks run ahead of all of them, in this order: an item whose `source` is not `files` derives `null` outright (task-45 — a tracker
-  project's dispatch is hidden, not disabled), then `capture` is derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a `done/` item still derives `null`; capture
-  spawns `backlog-capture` for a **new** item citing `from: <id>`, and `moveItem` still refuses every move out of `out-of-scope/`. Why:
+  three members and ONE check runs ahead of all of them: `capture` is derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a
+  `done/` item still derives `null`; capture spawns `backlog-capture` for a **new** item citing `from: <id>`, and `moveItem` still refuses every move out of
+  `out-of-scope/`. **Nothing here asks what an item's `source` is** — task-45's `source !== 'files' → null` first line was removed by task-46's dispatch lift,
+  and re-adding it would hide the control for every tracker item again. `findItem` is a one-line delegate to `ItemsService.find`, so a `gh:<owner>/<repo>#<n>`
+  URN resolves to exactly the `BacklogItem` the board drew its button from. Why:
   [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
+- **`isItemId` accepts three shapes, and `#` is the one metacharacter among them.** `[a-z]+-\d+` (a files id), `#\d+` and the URN
+  `gh:<owner>/<repo>#\d+` — still no whitespace, no newline, no quote, no `;`, no `$`. `#` is safe because nothing this predicate guards reaches a shell: the
+  dispatch prompt is prose handed over JSON, and the ONE composition that concatenates caller text — the orchestrate prompt — refuses a tracker project
+  outright before `resolveIds` runs. Lift that refusal and this paragraph is the thing to re-check first. Why:
+  [invariants.md](docs/subsystems/invariants.md#isitemid-accepts-three-shapes)
 - **The orchestrate spawn prompt is composed server-side.** `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal `/backlog-orchestrate`; the request body
   has no `prompt` field, so a caller-supplied one is never read. What a caller can influence is enumerated by the composition in `orchestrate()` and nowhere
   else, in this order: `ids` first (each proven by `isItemId` and a per-project scan; 400 for a malformed list, 409 for a disagreeing one; absent means the whole

@@ -101,6 +101,29 @@ describe('deriveAction', () => {
     // `moveItem` refuses.
     expect(deriveAction(fakeItem({ id: 'oos-1', section: 'out-of-scope', status: 'terminal', groomed: null }))).toBe('capture');
   });
+
+  /**
+   * A tracker item derives exactly what a files item derives (task-46, the
+   * dispatch lift). Task-45 opened this function with `source !== 'files' →
+   * null`; phase 3 removed that line, because the skills detect a tracker
+   * project from its committed marker and write through the API, and the claim
+   * protocol gives a tracker item a `started` for `progressBlock` to read.
+   *
+   * Four rows rather than one, because the removed line sat AHEAD of every
+   * branch below it — so each branch has to be shown reaching a tracker item,
+   * not just the first one.
+   */
+  it('derives for a tracker item exactly as it does for a files one', () => {
+    const issue = (over: Partial<BacklogItem> = {}): BacklogItem => fakeItem({ id: '#31', source: 'github', path: 'gh:futin/x#31', url: 'https://github.com/futin/x/issues/31', ...over });
+
+    expect(deriveAction(issue({ section: 'ideas', groomed: null }))).toBe('groom');
+    expect(deriveAction(issue({ groomed: true }))).toBe('execute');
+    // A `not_planned` close maps to out-of-scope/terminal — revivable, exactly
+    // like `oos-1` above.
+    expect(deriveAction(issue({ section: 'out-of-scope', status: 'terminal', groomed: null }))).toBe('capture');
+    // A `completed` close is history and has no next step.
+    expect(deriveAction(issue({ status: 'done', groomed: true }))).toBeNull();
+  });
 });
 
 describe('the action vocabulary', () => {
@@ -497,6 +520,29 @@ describe('isItemId', () => {
     expect(isItemId('task-1;ls')).toBe(false);
     expect(isItemId('task-1\n')).toBe(false);
     expect(isItemId('task-1 --resume')).toBe(false);
+  });
+
+  /* The two tracker spellings (task-46). `#` is the ONE metacharacter these
+     add, and the predicate's own comment records why it is safe here: nothing
+     this guards reaches a shell, and the one composition that concatenates
+     caller text — the orchestrate prompt — refuses a tracker project outright
+     before `resolveIds` runs. */
+  it('accepts a bare issue number and a full URN', () => {
+    expect(isItemId('#31')).toBe(true);
+    expect(isItemId('gh:futin/x#31')).toBe(true);
+    expect(isItemId('gh:my-org/my.repo_2#7')).toBe(true);
+  });
+
+  it('rejects a half-written issue number or URN', () => {
+    expect(isItemId('#')).toBe(false);
+    expect(isItemId('# 31')).toBe(false);
+    expect(isItemId('#31a')).toBe(false);
+    // No slash: `gh:futin#31` names no repository.
+    expect(isItemId('gh:futin#31')).toBe(false);
+    expect(isItemId('gh:futin/x')).toBe(false);
+    expect(isItemId('gh:futin/x#')).toBe(false);
+    // A path that merely starts with the prefix is still not a URN.
+    expect(isItemId('gh:../../etc/passwd#1')).toBe(false);
   });
 
   /* Anchored, so a valid id embedded in a longer string is not "a valid id".

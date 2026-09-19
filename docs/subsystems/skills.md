@@ -28,7 +28,7 @@ from and merges land in. Told to leave branches instead, it stops at a reviewed 
 
 - `skills/backlog/tools/backlog.mjs` — the CLI every skill calls, and the registry's only writer. Since task-45 it also carries `connect github [owner/repo]`,
   which writes a project's committed `backlog/source.json` marker (and, by default, four GitHub issue forms) and touches the registry not at all — the marker is
-  the project's, not the machine's.
+  the project's, not the machine's. Since task-46 it has **two modes**, chosen by that marker and nothing else (see below).
 - `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer.
 - `skills/backlog-retro/tools/retro.mjs` — `backlog-retro`'s own CLI, and the only writer of `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`). It is the one of
   the three that writes nothing anybody else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by
@@ -41,6 +41,33 @@ helper is shared by all three, and the two pairs are different pairs — `backlo
 `retro.mjs` has no discriminator at all — it needs no git root, because its subject is every project at once — and `backlog.mjs` has neither path helper,
 because the run-state directory is none of its business. Each copy is pinned by its own tool's suite.
 
+#### `backlog.mjs`'s two modes (task-46, spec §6.5)
+
+No marker, or `{"kind":"files"}`, is **files mode** — today's synchronous code, byte for byte, making no HTTP request on any verb. `{"kind":"github"}` with a
+valid repo is **API mode**: the project has no item files, so every command routes through `http://127.0.0.1:${BM_API_PORT ?? 4322}`, where the server holds
+`BM_GITHUB_TOKEN` and does the writing. Anything else is exit `1` naming the marker — never a fallback to files, which would write item files into a project
+whose items live on GitHub.
+
+The stack has to be running: there is no offline queue, because a write parked on one laptop would be a second source of truth invisible to every other machine.
+A refused connection is **exit `5`**, a new code, naming the port and both ways to start the stack.
+
+What each verb does differently, and the three that exist only here:
+
+| Verb             | API mode                                                                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`           | registers and prints `already connected: <root> → github <repo>`; creates no directories; exit `0`                                                 |
+| `new`            | `--body <file>` REQUIRED (and refused in files mode); `--kind`, `--from` ride along; prints the id, the url and the URN                            |
+| `show`           | prints the URN, a frontmatter-shaped block, `---`, and **the body** — there is no file to read afterwards. `--json` adds `updatedAt` and the claim |
+| `board`          | `GET /api/items`, filtered to this project's open rows, printed by the same code path                                                              |
+| `move`           | `state`; `--outcome <file>` becomes the closing comment (refused in files mode)                                                                    |
+| `start` / `stop` | the claim protocol. `--as` REQUIRED on `start`; `stop` rediscovers the claim, bills the counters and releases                                      |
+| `heartbeat`      | new — says this session still holds the item. Files mode: exit `1`                                                                                 |
+| `comment`        | new — appends a comment. Files mode: exit `1`                                                                                                      |
+| `body`           | new — groom's body patch, behind `--if-updated-at`. Files mode: exit `1`                                                                           |
+
+Ids are `31`, `#31` or this project's own URN, all meaning one issue; a file-shaped id and another repo's URN are each refused with their own sentence. Session
+identity is `CLAUDE_CODE_SESSION_ID`, falling back to `<user>@<host>` — stable across the two processes `start` and `stop` run in.
+
 What all three _do_ share is how they end: `process.exitCode = main(...)`, never `process.exit(main(...))`. Writing to a pipe is asynchronous, so
 `process.exit()` tears the process down before stdout drains and a `--json` payload is silently cut at exactly 65,536 bytes — while a `> file.json` redirect,
 synchronous on POSIX, stays perfectly fine, which is why the shipped instance (a 442,757-byte `retro.mjs sweep --json` that arrived through `| jq` as 65,536
@@ -48,6 +75,11 @@ bytes and a parse error) survived every hand check. Setting the code instead let
 holds the event loop open: all reads are synchronous `fs`, every child is `spawnSync`, and `orchestrate.mjs watch` sleeps by blocking on `Atomics.wait` rather
 than on a timer. Whoever adds a timer, a server or an async child closes its handle — restoring `process.exit()` would restore the truncation. One rule, three
 files, three comments; `retro.mjs`'s is the long-form copy the other two point at, and `backlog.test.mjs`'s source guard reads all three.
+
+`backlog.mjs` alone ends `process.exitCode = await main(...)` since task-46, and the rule is untouched by the `await`: it is `process.exit()` that truncates a
+pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. API mode awaits every `fetch` to completion and sends
+`connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for this file and still requires the synchronous one of
+the other two, which hold no asynchronous work at all.
 
 ### `references/`
 

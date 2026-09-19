@@ -205,7 +205,7 @@ describe('syncing', () => {
     p.disarm();
   });
 
-  it('leaves the cache and polledAt untouched on a 304', async () => {
+  it('leaves the cache untouched and moves polledAt on a 304', async () => {
     const { poller: p } = poller(registryOf(githubProject()), [
       ['/issues?', (n): Canned => (n === 1 ? { status: 200, body: [issue(1, '2026-09-01T00:00:00Z')], headers: { etag: 'W/"abc"' } } : { status: 304 })],
       ['/labels', LABELS_PRESENT]
@@ -214,13 +214,26 @@ describe('syncing', () => {
     const after = p.summary('futin/x');
     expect(after.polledAt).not.toBeNull();
 
+    // Two milliseconds, so the two stamps cannot land in the same one: the
+    // assertion below is STRICTLY newer, which is what tells "the 304 branch
+    // stamped it" apart from "the 304 branch left it alone", and an equality
+    // that happened to hold because both ticks ran inside one millisecond would
+    // report the second as the first.
+    await new Promise((resolve) => setTimeout(resolve, 2));
+
     await p.tick();
-    // The task item's authoritative test case: a 304 leaves BOTH the cache and
-    // `polledAt` as they were. (Spec §12.2 says a 304 moves `polledAt`; the
-    // item won, and the disagreement is recorded in its Outcome.)
+    // The cache is untouched — nothing changed, so there is nothing to absorb —
+    // and `polledAt` MOVES, because the age the board renders means "since we
+    // last successfully checked" and a 304 is a successful check. Task-45
+    // shipped the opposite reading against spec §12.2 and recorded the
+    // disagreement; task-46 settled it in the spec's favour.
     expect(p.issues('futin/x')).toHaveLength(1);
-    expect(p.summary('futin/x').polledAt).toBe(after.polledAt);
     expect(p.summary('futin/x').access).toBe('ok');
+    const moved = p.summary('futin/x').polledAt;
+    expect(moved).not.toBeNull();
+    // Strictly newer, not merely different: a stamp that moved BACKWARDS would
+    // satisfy an inequality and would be a clock bug rather than a poll.
+    expect(Date.parse(moved as string)).toBeGreaterThan(Date.parse(after.polledAt as string));
     p.disarm();
   });
 

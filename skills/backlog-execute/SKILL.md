@@ -72,6 +72,27 @@ loses nothing: the item is still there, still open, and whoever committed it can
 If that path resolves under `ideas/`, `refactors/` or `out-of-scope/`, stop — wrong skill for this id (see Hard limits below). If it's already under a `done/`
 directory, there's nothing left to execute — say so instead of proceeding.
 
+## In a tracker project
+
+A project whose `backlog/source.json` says `github` has no item files. The refusal gate, the dispatch, the verification and both pre-review checks are
+unchanged — they are about the WORK, and the work is the same. What changes is where the item's text comes from and where the Outcome goes.
+
+**`show <id>` prints the body.** In a files project it prints the path and the frontmatter only, and you open the file; here there is no file, so `show` is the
+whole item — read the plan or the fix there. `show <id> --json` if you also need the claim or the stamp.
+
+**`## Outcome` goes into a temp file and becomes a comment**, on both paths and in the same words either way:
+
+- **Archiving** — write the Outcome to a temp file, `stop <id> --keep-started`, then
+  `move <id> done --outcome /tmp/outcome.md`. The closing comment carries it.
+- **Verification failed** — the same text, through `comment <id> --body /tmp/outcome.md`, and **nothing moves**. Same rule as a files project: no proof, no
+  archive.
+
+**Heartbeat between long steps.** A claim reads stale after 15 minutes without one, and the next session to contest the item retires it. An execute session that
+spends twenty minutes in a build has a claim somebody else is entitled to take.
+
+There is no `git status` to read for the contract sweep's scoping sentence in a tracker project's own store — the item is an issue — but the sweep itself is
+over the REPOSITORY's text and is entirely unchanged: the code you edited is still in files, and so is every site that might now lie about it.
+
 ## The refusal gate
 
 This is the load-bearing rule of the whole system: **refuse any item whose plan isn't real yet, and name the groom command to run instead.** Without it,
@@ -235,9 +256,11 @@ whatever time was spent and drops `started` along with it, because there's nothi
   work and `backlog-groom` now marks it in progress the same way this skill does — and `start` never had any notion of a refactor to refuse. The tool will
   happily stamp either one for you, and the refusal gate below inspects only a task's `## Plan` and a bug's `## Fix`, so a refactor that got past this check
   would find no rule to fail. The id has to be checked here, before `start` is ever reached.
-- **Writes only under the repo root `show` resolved.** Every write this skill makes — the `start`/`stop` markers, the `## Outcome` append, the `move` to `done/`
-  — lands inside the one tree `backlog.mjs` resolved from this session's own cwd. Another checkout of the same repository is another tree: writing into it from
-  here produces changes on nobody's branch, attributable to no commit, in a working copy this session was never given.
+- **Writes only under the repo root `show` resolved** — and, in a tracker project, only to the issue that root's marker names. Every write this skill makes —
+  the `start`/`stop` markers, the `## Outcome` append, the `move` to `done/` — lands inside the one tree `backlog.mjs` resolved from this session's own cwd.
+  Another checkout of the same repository is another tree: writing into it from here produces changes on nobody's branch, attributable to no commit, in a
+  working copy this session was never given. The tracker half is the same rule over a different address space: the API refuses an id naming another
+  repository, so an item id copied from somewhere else fails rather than writing into somebody else's backlog.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a hard limit, not a suggestion: no proof, no archive.
 - **Never escalates to the user while an `[orchestrator-run` marker holds.** Covered above, and a hard limit for the same reason the one above it is: an
   unattended run has nobody to answer, and a session that stops to negotiate keeps the whole queue waiting on a decision the run was going to make by itself.
