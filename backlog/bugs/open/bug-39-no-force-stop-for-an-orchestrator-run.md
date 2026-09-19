@@ -1,3 +1,9 @@
+---
+id: bug-39
+title: No force stop for an orchestrator run
+created: 2026-09-19
+tags: watchdog, orchestrator
+---
 
 ## Symptom
 
