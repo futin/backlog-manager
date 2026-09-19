@@ -30,6 +30,15 @@ long as that marker does:
   no better one: `orchestrate.mjs` refuses every command but `init` from inside a linked worktree, so this session _cannot_ park or stage itself. Parking is the
   orchestrator's decision, made from outside, on the evidence this session leaves behind.
 - **Unchanged: never commits, never pushes.** The marker adds a prohibition and removes none.
+- **In a TRACKER project the marker carries a fifth rule, and an `outcome <path>` clause to go with it.** It reads
+  `[orchestrator-run <runId> item <n> of <m> branch backlog/<n> outcome <absolute path>: …]`.
+  - **Never run `start`, `stop`, `heartbeat`, `move` or `comment` on the item.** The driver holds the issue's claim for the whole item — it claimed before this
+    worktree existed and it releases when the item reaches its terminal stage — and it is the driver that closes the issue. A session that ran any of those
+    five would be contesting a claim its own run already holds, or closing an issue the run has not finished with.
+  - **Write the whole `## Outcome` to the path the marker names** — the same text, in the same shape, the archiving and failure sections below both describe,
+    contract-sweep and red-proof lines included. Write it **whether verification passed or failed**: the run reads that file to decide what happened, and an
+    empty one reads as "the session died".
+  - `show <n>` is still how to read the item, and the id is the bare issue number the marker gives.
 
 No marker means a human started this session and the user is the channel, as always. Everything below applies either way **except where it names the user as
 that channel** — under the marker, every one of those exits reports to the run instead, through the final message and `## Outcome`. The two that say so outright
@@ -86,6 +95,10 @@ whole item — read the plan or the fix there. `show <id> --json` if you also ne
   `move <id> done --outcome /tmp/outcome.md`. The closing comment carries it.
 - **Verification failed** — the same text, through `comment <id> --body /tmp/outcome.md`, and **nothing moves**. Same rule as a files project: no proof, no
   archive.
+
+**None of that applies under an `[orchestrator-run` marker.** There, the Outcome goes to the path the marker names and nothing else happens: no `stop`, no
+`move`, no `comment`. The run holds the claim and closes the issue itself — see the marker's own fifth rule above, which is the authority for a tracker item
+inside a run.
 
 **Heartbeat between long steps.** A claim reads stale after 15 minutes without one, and the next session to contest the item retires it. An execute session that
 spends twenty minutes in a build has a claim somebody else is entitled to take.

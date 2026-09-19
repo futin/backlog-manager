@@ -135,6 +135,25 @@ describe('issue → BacklogItem', () => {
     expect(mapped?.item.tags).toEqual([]);
   });
 
+  /* task-47: the marker reached `BacklogItem` when the consumer arrived —
+     `orchestrate.mjs`'s tracker gate has no file to read a frontmatter key
+     off. `true` or ABSENT and never `false`, which is what keeps every files
+     fixture and every unmarked issue's payload byte-identical to what it was.
+     `'runnerFix' in item` is the assertion rather than a `toBeUndefined`,
+     because the two readings differ for a key present with an `undefined`
+     value and only one of them is the rule. */
+  it('puts runnerFix on the item when the label is there, and no key at all when it is not', () => {
+    const marked = map({ labels: [{ name: 'type:task' }, { name: 'runner-fix' }] });
+    expect(marked?.item.runnerFix).toBe(true);
+
+    const plain = map();
+    expect('runnerFix' in (plain?.item ?? {})).toBe(false);
+    // The whole payload, so the absence is asserted against the shape rather
+    // than against one key: `BASE` is this suite's declared expectation for an
+    // ordinary issue, and it carries no `runnerFix`.
+    expect(plain?.item).toEqual(BASE);
+  });
+
   it('maps an open issue to open', () => {
     expect(map({ state: 'open' })?.item.status).toBe('open');
   });

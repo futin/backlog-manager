@@ -169,9 +169,10 @@ any of these — most encode a failure that already happened.
   the files allowlist does; and `untyped` is a rendered badge that NOTHING derived reads (no type label → `ideas` with the badge and no error; two → the first
   alphabetically AND one `errors` entry). A closed issue keeps its `type:*` label so the original type is recoverable. **Dispatch is derived like any other
   item's since task-46** (the lift): `deriveAction` asks nothing about `source`, and the per-item block that stops a claimed tracker item is the LIVE CLAIM,
-  read by `progressBlock` off the `started` the mapper fills — no tracker-specific branch anywhere. What did not lift is the ORCHESTRATOR: `projectIsFiles`
-  (`client/src/lib/tracker.ts`) hides the toolbar control and `AgentsService.orchestrate` 400s a tracker project with `orchestrating a tracker project arrives
-  in phase 4`, and those are two statements of one rule that used to ride on `deriveAction`'s removed first line. Why:
+  read by `progressBlock` off the `started` the mapper fills — no tracker-specific branch anywhere. **The ORCHESTRATOR lifted one phase later (task-47, phase
+  4a)**: `projectIsFiles` is deleted and `AgentsService.orchestrate`'s `arrives in phase 4` 400 is gone, and what replaced them is `resolveIds` learning the
+  vocabulary — `resolveTrackerIds` proves an id against `ItemsService` where the files path proves it against a directory scan, accepts `#31`, the URN and a
+  bare `31`, and **emits bare digits alone**, so no `#` reaches the prompt. Why:
   [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,
   refactors and out-of-scope derive `null`, not `false` — grooming is not a state they have, and for the first two the state they wait in is _promoted_.
@@ -202,10 +203,24 @@ any of these — most encode a failure that already happened.
   an unattributable count writes no key, never `0`. `updated:` is stamped by every `start` and every `stop`, never by `move`. Written only by `start`/`stop`,
   which round-trip unknown keys and the body byte-for-byte; "in progress" is decided in the client. Why:
   [invariants.md](docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status)
-- **`backlog-orchestrate` is the only skill that commits or merges.** Inside a per-item worktree, on `backlog/<id>` alone; merged into the run's **base branch**
-  (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base is verified to have it actually checked out. No other skill
-  touches git history at all. Why:
+- **`backlog-orchestrate` is the only skill that commits or merges — and, for a TRACKER project only, the only one that pushes.** Inside a per-item worktree,
+  on `backlog/<id>` alone; merged into the run's **base branch** (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base
+  is verified to have it actually checked out. No other skill touches git history at all. The push half is task-47's and is exactly three commands, none of
+  them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree, `push origin <base>` after each merge and
+  before `stage <n> merged`, and `push -u origin backlog/<n>` from the item worktree under branch mode. **A rejected or classifier-denied push PARKS, never
+  degrades** — the merge has already landed, so `branched` would be false — which is the one exception to the classifier-denial rule. Why:
   [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-commits-or-merges)
+- **On a tracker project the DRIVER owns each item's claim, and the execute session never touches the issue** (task-47). The run claims at
+  `stage <n> preflight` — before the worktree exists — with `phase: 'execute'` and a `ClaimRun` naming the run; it publishes the queue item as `ClaimState`
+  through `heartbeat` from every command that changes one (`stage`, `usage`, `verify`, `assume`, `watch`'s tick); and it releases at a terminal stage
+  (`merged`, `branched`, `failed`, `skipped`, `parked`, `ungroomed` — never `needs-answers`), billing `executeElapsed`/`executeTokens` on top of the counters
+  it reads first. **A failed heartbeat or release is one stderr line and never fails the command** — `run.json` is the journal of record and the claim is a
+  published copy — while a failed CLOSE is exit `9` with nothing written, because it is the only record anywhere that the item is done. A 409 naming ANOTHER
+  run skips the item (exit `0`, `claimed elsewhere`); a resumed driver re-claims its own run's items and the SERVER makes that a takeover, by `run.runId`.
+  The dispatched `backlog-execute` session runs none of `start`/`stop`/`heartbeat`/`move`/`comment`: it writes its `## Outcome` to the path the
+  `[orchestrator-run … outcome <path>]` marker names, and `orchestrate.mjs snapshot <n>` turns that plus the issue body into the one file the reviewer and
+  `verify` read. Inside a run a tracker item's id is its **bare issue number**. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item)
 - **The merge happens in whichever tree holds the base, and the run removes only the tree it made.** git refuses one branch in two trees and `--force` is not
   the way round it, so the merge site is resolved per merge (`git worktree list --porcelain`) into three exhaustive outcomes: a tree holds it → merge there; none
   does → create `.worktrees/_base-<sanitised ref>`, merge, remove at the end of the run; none does and `worktree add` refuses → park. Outcome 3 is detected by
@@ -257,15 +272,17 @@ any of these — most encode a failure that already happened.
   `--ids` is hoisted too, a hand order included. SKILL.md §9: after a merged runner fix, follow the repo's SKILL.md **and** `orchestrate.mjs` — both or neither.
   Inert for the _next_ run until push + `pnpm run plugin:sync`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-runner-fix-item-is-hoisted-to-the-front-of-the-queue-and-the-marker-is-read-at-base)
-- **All three skill CLIs end with `process.exitCode = main(...)`, never `process.exit(main(...))`.** Writing to a pipe is asynchronous, so `process.exit()`
+- **Every skill CLI ends with `process.exitCode = main(...)`, never `process.exit(main(...))`.** Writing to a pipe is asynchronous, so `process.exit()`
   drops everything past 65,536 bytes of a `--json` payload while a `> file.json` redirect stays fine — which is why the shipped instance passed every hand
-  check. Safe only because none of the three holds the event loop open (synchronous `fs`, `spawnSync` children, and `watch`'s `Atomics.wait` sleep); whoever
-  adds a timer, server or async child closes the handle rather than restoring `process.exit()`. **`backlog.mjs` alone may also end
-  `process.exitCode = await main(...)`** (task-46): the rule is about `process.exit()` truncating a pipe, which asynchrony has nothing to do with, and API
-  mode's every `fetch` is awaited to completion with `connection: close`, so no pooled socket outlives the call. The other two hold no asynchronous work and
-  stay on the synchronous form, which the guard enforces per file. Each tool carries its own note on why _its_ file is safe;
-  `retro.mjs`'s is the long-form copy. `backlog.test.mjs`'s source guard reads all three sources and is the only one of the three cases that covers an entry
-  point nobody has written yet. Why: [invariants.md](docs/subsystems/invariants.md#all-three-skill-clis-exit-through-processexitcode-never-processexit)
+  check. Safe only because none of them holds the event loop open (synchronous `fs`, `spawnSync` children, and `watch`'s `Atomics.wait` sleep); whoever
+  adds a timer, server or async child closes the handle rather than restoring `process.exit()`. **`backlog.mjs` and `api-call.mjs` may also end
+  `process.exitCode = await main(...)`** (task-46, task-47): the rule is about `process.exit()` truncating a pipe, which asynchrony has nothing to do with, and
+  each one's every `fetch` is awaited to completion with `connection: close`, so no pooled socket outlives the call. `orchestrate.mjs` and `retro.mjs` hold no
+  asynchronous work and stay on the synchronous form, which the guard enforces per file — and `orchestrate.mjs` can, precisely because `api-call.mjs` is a
+  CHILD it `spawnSync`s rather than a `fetch` it awaits. Each tool carries its own note on why _its_ file is safe;
+  `retro.mjs`'s is the long-form copy. `backlog.test.mjs`'s `CLI_SOURCES` is where the list of files lives — never a count in prose — and it is the only one of
+  the cases that covers an entry point nobody has written yet. Why:
+  [invariants.md](docs/subsystems/invariants.md#every-skill-cli-exits-through-processexitcode-never-processexit)
 - **Editing `skills/` changes nothing until it is committed, pushed, and `pnpm run plugin:sync` runs.** An install is a copy of the pushed HEAD, never the
   working tree; the sync refuses dirty/unpushed/behind states. New skills load on the next Claude Code restart. Why:
   [invariants.md](docs/subsystems/invariants.md#editing-skills-changes-nothing-until-commit--push--pluginsync)
@@ -321,8 +338,10 @@ any of these — most encode a failure that already happened.
   [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
 - **`isItemId` accepts three shapes, and `#` is the one metacharacter among them.** `[a-z]+-\d+` (a files id), `#\d+` and the URN
   `gh:<owner>/<repo>#\d+` — still no whitespace, no newline, no quote, no `;`, no `$`. `#` is safe because nothing this predicate guards reaches a shell: the
-  dispatch prompt is prose handed over JSON, and the ONE composition that concatenates caller text — the orchestrate prompt — refuses a tracker project
-  outright before `resolveIds` runs. Lift that refusal and this paragraph is the thing to re-check first. Why:
+  dispatch prompt is prose handed over JSON, and the ONE composition that concatenates caller text — the orchestrate prompt — **never carries a `#` because
+  `resolveTrackerIds` normalises every accepted id to bare digits before composing** (task-47). That normalisation replaced task-46's "refuse a tracker project
+  outright" guarantee, and it is the more fragile of the two — a closed door became one `replace` — so anything that weakens or routes around it is the thing
+  to re-check first. Why:
   [invariants.md](docs/subsystems/invariants.md#isitemid-accepts-three-shapes)
 - **The orchestrate spawn prompt is composed server-side.** `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal `/backlog-orchestrate`; the request body
   has no `prompt` field, so a caller-supplied one is never read. What a caller can influence is enumerated by the composition in `orchestrate()` and nowhere

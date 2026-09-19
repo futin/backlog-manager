@@ -44,10 +44,10 @@ Seven POST routes under `/api/items/`, in `items-write.controller.ts`, each a th
 | ----------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | `create`    | `project, section, title, body, kind?, runnerFix?, from?` | labels from the section (`type:*`), `kind:*` and `runner-fix`; `from` prepends `_From #n._`; `out-of-scope` creates untyped and closes `not_planned` | 201 `{ id, urn, url, number }`                 |
 | `state`     | `project, id, status, outcome?`                           | posts `outcome` as a comment FIRST, then closes `completed`/`not_planned`. Labels and claims untouched                                               | 200 `{ id, status, url }`                      |
-| `claim`     | `project, id, phase, session`                             | the claim protocol (§6.3)                                                                                                                            | 200 `{ commentId, record }` / 409 `{ holder }` |
+| `claim`     | `project, id, phase, session, run?`                       | the claim protocol (§6.3); `run` is a `ClaimRun` validated field by field, and a live claim carrying the SAME `run.runId` is taken over, not contested | 200 `{ commentId, record }` / 409 `{ holder }` |
 | `release`   | `project, id, commentId, session, reason, counters?`      | edits `released` into the claim, writes `counters` verbatim, removes `in-progress`                                                                   | 200 `{ commentId, record }`                    |
-| `heartbeat` | `project, id, commentId, state?`                          | re-stamps `heartbeat`; carries phase 4's opaque `state`                                                                                              | 200 `{ commentId, record }`                    |
-| `body`      | `project, id, body, ifUpdatedAt`                          | one fresh `GET`, then `PATCH` only if the stamp matches                                                                                              | 200 `{ id, updatedAt }` / 409 `{ updatedAt }`  |
+| `heartbeat` | `project, id, commentId, state?`                          | re-stamps `heartbeat`; carries the opaque `ClaimState` (task-47's, read by nothing in this build)                                                    | 200 `{ commentId, record }`                    |
+| `body`      | `project, id, body, ifUpdatedAt, runnerFix?`              | one fresh `GET`, then `PATCH` only if the stamp matches; `runnerFix` adds/removes the `runner-fix` label AFTER the patch, and ABSENT leaves it alone | 200 `{ id, updatedAt }` / 409 `{ updatedAt }`  |
 | `comment`   | `project, id, body`                                       | appends a comment                                                                                                                                    | 201 `{ commentId, url }`                       |
 
 Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `agents/` — these create and close issues with a credential the browser never sees, which is
@@ -88,7 +88,9 @@ The one module that calls anything outbound, and every POST in it is guarded by 
 - `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt.
 - `POST /api/agents/dispatch` — spawns the session in that dashboard.
 - `POST /api/agents/orchestrate` — spawns a headless `/backlog-orchestrate` run for one project. The prompt is composed server-side, so a caller can influence
-  which items, which modes and which base branch, and nothing else.
+  which items, which modes and which base branch, and nothing else. A TRACKER project is accepted since task-47: `resolveIds` proves its ids against
+  `ItemsService` rather than against a directory scan, accepts `#31` / the URN / a bare `31`, and **emits bare digits alone**, so the prompt never carries a
+  `#`.
 - `POST /api/agents/resume` — re-spawns a run that crashed or was paused.
 - `POST /api/agents/pause` — writes the pause request a live run reads back at its dispatch gates.
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it

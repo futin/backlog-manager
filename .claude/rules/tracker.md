@@ -8,3 +8,4 @@ paths: ["server/src/tracker/**"]
 - Before changing files here, read docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value
 - Before changing files here, read docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places
 - Before changing files here, read docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins
+- Before changing files here, read docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item

@@ -91,12 +91,14 @@ export function issueNumberFor(id: string, repo: string): number | null {
  *
  * - `runnerFix` — the `runner-fix` label, which means what the file store's
  *   `runner-fix:` frontmatter key means (CLAUDE.md: presence hoists an item to
- *   the front of an orchestrator run's queue). It rides here rather than on
- *   `BacklogItem` because nothing on the READ side renders it and phase 2 has
- *   no dispatch against a tracker project at all — adding a field to the
- *   payload for a consumer that does not exist yet is how a field ends up with
- *   two meanings by the time one does. The label is still CONSUMED here, so it
- *   never shows up as a tag.
+ *   the front of an orchestrator run's queue). It rode here and ONLY here
+ *   until task-47, when the consumer arrived: `orchestrate.mjs`'s gate builds
+ *   a tracker queue out of `GET /api/items` and has no file to read the
+ *   marker off, so the item now carries `runnerFix: true` as well. This field
+ *   stays — it is a `boolean` where the item's is `true | absent`, and it is
+ *   what `list`'s own error/count bookkeeping reads — but the two are set from
+ *   the same `names.includes('runner-fix')` one line apart, so they cannot
+ *   disagree. The label is still CONSUMED here, so it never shows up as a tag.
  * - `errors` — the per-issue complaints that belong in `ItemsIndex.errors`,
  *   collected rather than thrown for the reason `scanProject` gives: one bad
  *   row must not blind the board to the other nine.
@@ -223,7 +225,16 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // The FIRST assignee, and `null` for none — see BacklogItem.assignee for
     // why one name rather than a joined list, and why this is not a claim.
     assignee: issue.assignees?.[0]?.login ?? null,
-    untyped
+    untyped,
+    // Spread rather than assigned, so an unmarked issue carries NO KEY at all
+    // (task-47). `BacklogItem.runnerFix` is `true | absent` and never `false`
+    // — see its own declaration for why — and `runnerFix: undefined` would
+    // still put the key on the object, which `'runnerFix' in item` sees and
+    // `JSON.stringify` does not. One of those two readings would be wrong
+    // wherever the payload is compared as a whole, and the mapper is the one
+    // writer of this field, so the absence is arranged here rather than
+    // cleaned up later.
+    ...(runnerFix ? { runnerFix: true as const } : {})
   };
 
   return { item, runnerFix, errors };

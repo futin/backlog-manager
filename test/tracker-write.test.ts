@@ -14,7 +14,7 @@ import { FakeGithub } from './helpers/github';
 import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
 import { CLAIM_STALE_MS } from '../shared/types';
-import type { ClaimRecord, ItemsIndex } from '../shared/types';
+import type { ClaimRecord, ClaimRun, ItemsIndex } from '../shared/types';
 
 /**
  * The seven write routes and the claim protocol, end to end (task-46,
@@ -702,5 +702,173 @@ describe('the token', () => {
     const claimed = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A' }).expect(201);
     expect(JSON.stringify(created.body)).not.toContain(TOKEN);
     expect(JSON.stringify(claimed.body)).not.toContain(TOKEN);
+  });
+});
+
+/* =========================================================================
+ * task-47 — `claim.run`, the same-run takeover, and `body.runnerFix`
+ *
+ * The takeover is the one place the SERVER branches on a field a caller sent,
+ * and the whole reason `ClaimRun` is a declared shape rather than the opaque
+ * blob task-46 reserved. What it solves is a resumed driver losing every one
+ * of its own items to a session that no longer exists: the crashed session's
+ * claims are still LIVE (it was heartbeating minutes ago) and still hold the
+ * lowest comment ids, so under the plain protocol the resume waits fifteen
+ * minutes per item for them to go stale.
+ *
+ * Three cases draw the line, and they only make sense together: the same run
+ * takes over (C-3), a DIFFERENT run does not (C-4), and a hand claim with no
+ * `run` at all is never same-run with anything (C-5).
+ * ========================================================================= */
+
+const RUN: ClaimRun = {
+  runId: 'run-20260919-120000',
+  startedAt: '2026-09-19T12:00:00.000Z',
+  mergeMode: 'merge',
+  questionMode: 'park',
+  maxItems: null,
+  base: 'main'
+};
+
+describe('claim.run', () => {
+  it('writes the run into the claim comment verbatim, with all six keys', async () => {
+    gh.issue();
+    await sync();
+    const res = await post('claim', { project: trackerPath, id: '#31', phase: 'execute', session: 'A', run: RUN }).expect(201);
+
+    // The COMMENT is the claim, so the assertion is against what landed on
+    // GitHub rather than against the response alone — a reader on another
+    // machine has only the comment.
+    expect(claimIn(res.body.commentId)?.run).toEqual(RUN);
+  });
+
+  /* Field by field, and each refusal names the field. The caller is a CLI
+     composing this object out of a run file: "something in `run` is wrong"
+     sends it re-reading six fields, and one name sends it to the line. */
+  it('400s a malformed run and names the field', async () => {
+    gh.issue();
+    await sync();
+    const bad = await post('claim', { project: trackerPath, id: '#31', phase: 'execute', session: 'A', run: { runId: 5 } }).expect(400);
+    expect(bad.body.error).toContain('run.runId');
+
+    const worse = await post('claim', {
+      project: trackerPath,
+      id: '#31',
+      phase: 'execute',
+      session: 'A',
+      run: { ...RUN, mergeMode: 'yolo' }
+    }).expect(400);
+    expect(worse.body.error).toContain('run.mergeMode');
+
+    // Nothing was posted on either: a 400 is answered before the adapter is
+    // reached at all.
+    expect(gh.matching('/issues/31/comments', 'POST')).toEqual([]);
+  });
+
+  it('takes over its own run-s live claim, releasing it as resumed and carrying its counters forward', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', run: RUN, counters: { groomElapsed: 0, executeElapsed: 90, groomTokens: 0, executeTokens: 4200 } }), 31, 100);
+    await sync();
+
+    const res = await post('claim', { project: trackerPath, id: '#31', phase: 'execute', session: 'B', run: RUN }).expect(201);
+
+    // B won despite holding the HIGHER comment id, which is the takeover: A
+    // was dropped from the live set before `winner` ran.
+    expect(res.body.commentId).toBe(101);
+    // A is RELEASED, never deleted — it is the permanent record of the work
+    // that session did, and it carries the counters to prove it.
+    expect(gh.comments.has(100)).toBe(true);
+    expect(claimIn(100)?.released).toEqual(expect.objectContaining({ reason: 'resumed', by: 'B' }));
+    // Seeded from the newest prior claim as always, so the totals survive the
+    // takeover.
+    expect(res.body.record.counters).toEqual({ groomElapsed: 0, executeElapsed: 90, groomTokens: 0, executeTokens: 4200 });
+  });
+
+  it('is refused by a live claim from a DIFFERENT run, and leaves it untouched', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', run: RUN }), 31, 100);
+    await sync();
+
+    const res = await post('claim', {
+      project: trackerPath,
+      id: '#31',
+      phase: 'execute',
+      session: 'B',
+      run: { ...RUN, runId: 'run-20260919-999999' }
+    }).expect(409);
+
+    expect(res.body.holder.session).toBe('A');
+    expect(claimIn(100)?.released).toBeUndefined();
+    // The loser deletes its OWN comment, which is the one thing this protocol
+    // ever deletes.
+    expect(gh.comments.has(101)).toBe(false);
+  });
+
+  it('is refused by a live HAND claim, which carries no run and is never same-run with anything', async () => {
+    gh.issue();
+    // No `run` key: `backlog.mjs start` at a terminal. A run has no standing
+    // to evict somebody working the item by hand.
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+
+    const res = await post('claim', { project: trackerPath, id: '#31', phase: 'execute', session: 'B', run: RUN }).expect(409);
+    expect(res.body.holder.session).toBe('A');
+    expect(claimIn(100)?.released).toBeUndefined();
+  });
+
+  /* The negative that keeps every phase-3 caller safe: `backlog.mjs start`
+     sends no `run` key, and must behave exactly as it did before this field
+     existed. */
+  it('writes no run key at all when the caller sent none', async () => {
+    gh.issue();
+    await sync();
+    const res = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A' }).expect(201);
+    expect('run' in (claimIn(res.body.commentId) ?? {})).toBe(false);
+  });
+});
+
+describe('body.runnerFix', () => {
+  it('adds the label with the patch, and adding it twice is still one label', async () => {
+    const issue = gh.issue();
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, runnerFix: true }).expect(201);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('runner-fix');
+
+    await post('body', { project: trackerPath, id: '#31', body: 'v2', ifUpdatedAt: gh.issues.get(31)!.updated_at, runnerFix: true }).expect(201);
+    expect(gh.issues.get(31)?.labels.filter((l) => l.name === 'runner-fix')).toHaveLength(1);
+  });
+
+  /* The DELETE is attempted and its 404 swallowed, the same reasoning
+     `release` documents for `in-progress`: the contract is "the label is not
+     there", and it is not there. Asserted on the CALL rather than only on the
+     outcome — an outcome-only assertion passes just as well for a route that
+     skipped the request entirely. */
+  it('removes the label when asked, and a 404 from the removal is a success', async () => {
+    const issue = gh.issue();
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, runnerFix: false }).expect(201);
+
+    expect(gh.matching('/issues/31/labels/runner-fix', 'DELETE')).toHaveLength(1);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('runner-fix');
+  });
+
+  /* Three states, and the third is the important one: a body patch that said
+     nothing about the marker must leave it exactly as it is, or every re-groom
+     silently clears a decision somebody made deliberately. */
+  it('leaves the label alone when the key is absent', async () => {
+    const issue = gh.issue({ labels: [{ name: 'type:task' }, { name: 'runner-fix' }] });
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at }).expect(201);
+
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('runner-fix');
+    expect(gh.matching('/issues/31/labels/runner-fix', 'DELETE')).toEqual([]);
+    expect(gh.matching('/issues/31/labels', 'POST')).toEqual([]);
+  });
+
+  it('400s a runnerFix that is not a boolean, and patches nothing', async () => {
+    const issue = gh.issue();
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, runnerFix: 'yes' }).expect(400);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
   });
 });

@@ -249,12 +249,17 @@ export class ItemsService {
   /**
    * Does this project's items come from a tracker (task-46)?
    *
-   * One question, asked by one caller: `AgentsService.orchestrate`, which
-   * refuses a tracker project outright until phase 4. It is a separate method
-   * from `writerFor` below because it is a different question — "can an
-   * orchestrator run drain this" rather than "may these routes write to it" —
-   * and folding them would make the orchestrate refusal accidentally depend on
-   * whether an adapter happens to ship a writer.
+   * One question, asked by one caller: `AgentsService.resolveIds`, which since
+   * task-47 uses it to decide which VOCABULARY an `ids` list is in — a tracker
+   * project's ids are issue numbers, proved against `ItemsService` and
+   * normalised to bare digits, where a files project's are `<prefix>-<n>`
+   * proved against a directory scan. Until then the caller was
+   * `orchestrate()`'s own refusal, which phase 4a removed.
+   *
+   * It is a separate method from `writerFor` below because it is a different
+   * question — "which vocabulary do this project's ids use" rather than "may
+   * these routes write to it" — and folding them would make the id check
+   * accidentally depend on whether an adapter happens to ship a writer.
    *
    * Registry compare and `resolveSource` per request, the same two reads every
    * other method here makes, cached nowhere.

@@ -1901,7 +1901,7 @@ tracker projects only (backlog/source.json names github):
   body        replace an item's body (groom's only write)`
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
-       backlog.mjs new <section> <title> --body <file> [--from <id>] [--kind chore|debt]   (tracker projects)
+       backlog.mjs new <section> <title> --body <file> [--from <id>] [--kind chore|debt] [--runner-fix]   (tracker projects)
 
 sections: bugs, ideas, tasks, refactors, out-of-scope`
 
@@ -1937,7 +1937,7 @@ const CONNECT_USAGE = `usage: backlog.mjs connect github [owner/repo] [--no-form
 // heartbeat, no timeline to comment on, and a files body is edited by whoever is holding the file.
 const HEARTBEAT_USAGE = `usage: backlog.mjs heartbeat <id>`
 const COMMENT_USAGE = `usage: backlog.mjs comment <id> --body <file>`
-const BODY_USAGE = `usage: backlog.mjs body <id> --body <file> --if-updated-at <iso>`
+const BODY_USAGE = `usage: backlog.mjs body <id> --body <file> --if-updated-at <iso> [--runner-fix | --no-runner-fix]`
 
 // `async` since task-46: a tracker project routes every command through the local API, and `fetch` is asynchronous. `files` mode makes no call at all, so a
 // project with no marker runs exactly the synchronous code it always did — the `await`s below are never reached.
@@ -2004,6 +2004,8 @@ export async function main(argv) {
     let from
     let bodyFile
     let kind
+    // Valueless, so it consumes no argv slot — unlike the three above, which all take the `argv[i + 1]` step.
+    let runnerFix = false
     for (let i = 3; i < argv.length; i++) {
       if (argv[i] === '--from') {
         from = argv[i + 1]
@@ -2014,6 +2016,8 @@ export async function main(argv) {
       } else if (argv[i] === '--kind') {
         kind = argv[i + 1]
         i++
+      } else if (argv[i] === '--runner-fix') {
+        runnerFix = true
       }
     }
 
@@ -2043,6 +2047,11 @@ export async function main(argv) {
            there is no file for the caller to add the line to. An unknown value is REFUSED by the server rather than dropped — GitHub creates an unknown label
            silently on first use, so a dropped one would surface as a mystery grey label instead of a complaint. */
         if (kind) payload.kind = kind
+        /* The `runner-fix` marker (task-47), which a files capture writes as a frontmatter line and a tracker carries as a label. It needs a flag for the
+           same reason `--kind` does — there is no file for the caller to add the line to — and the key is SENT ONLY WHEN SET: the route reads it with a
+           strict `=== true`, so an absent key and `false` mean the same thing there, and sending `false` on every unmarked capture would put a field in
+           every request body for a fact the absence already states. */
+        if (runnerFix) payload.runnerFix = true
         const created = await apiPost('create', payload)
         console.log(created.id)
         console.log(created.url)
@@ -2058,6 +2067,15 @@ export async function main(argv) {
 
     if (bodyFile || kind) {
       console.error(NEW_USAGE)
+      return 1
+    }
+
+    /* Its own sentence rather than the usage block the two flags above take, because the mistake is a different one. `--body` and `--kind` in files mode are
+       a caller using the tracker CALL SHAPE — the usage text is the right answer, since it shows both shapes side by side. `--runner-fix` in files mode is a
+       caller who knows exactly what they want and is asking the wrong writer for it: the marker is a frontmatter line, and `backlog-capture` (not this tool)
+       is what composes a files item's frontmatter. Saying so is more use than reprinting two call shapes neither of which mentions frontmatter. */
+    if (runnerFix) {
+      console.error('--runner-fix is a tracker flag: in a files project the marker is a `runner-fix: true` frontmatter line, written into the item file')
       return 1
     }
 
@@ -2509,6 +2527,11 @@ export async function main(argv) {
 
     let bodyFile
     let ifUpdatedAt
+    // Two valueless flags naming one tri-state field (task-47). Tracked as two booleans rather than one `runnerFix` variable so that "neither was passed"
+    // and "both were passed" stay distinguishable — the first sends no key at all and the second is a usage error, and a single variable could express
+    // neither.
+    let wantRunnerFix = false
+    let wantNoRunnerFix = false
     for (let i = 2; i < argv.length; i++) {
       if (argv[i] === '--body') {
         bodyFile = argv[i + 1]
@@ -2516,6 +2539,10 @@ export async function main(argv) {
       } else if (argv[i] === '--if-updated-at') {
         ifUpdatedAt = argv[i + 1]
         i++
+      } else if (argv[i] === '--runner-fix') {
+        wantRunnerFix = true
+      } else if (argv[i] === '--no-runner-fix') {
+        wantNoRunnerFix = true
       }
     }
     if ((cmd === 'comment' || cmd === 'body') && !bodyFile) {
@@ -2524,6 +2551,13 @@ export async function main(argv) {
     }
     if (cmd === 'body' && !ifUpdatedAt) {
       console.error(usage)
+      return 1
+    }
+    /* Both flags together is a usage error rather than a last-one-wins, and it is refused HERE — before `requireStore`, before the mode is even resolved, so
+       no request is made on any path. The two flags are opposite instructions about one label; picking one of them for the caller would silently add or
+       remove a marker that decides whether an item hoists to the front of a run's queue. */
+    if (wantRunnerFix && wantNoRunnerFix) {
+      console.error('--runner-fix and --no-runner-fix are opposites: pass one or neither')
       return 1
     }
 
@@ -2566,7 +2600,13 @@ export async function main(argv) {
       /* Groom's write, and the ONE route that rewrites a body (§6.4). A 409 means somebody edited the issue between the `show --json` this caller read and
          this call — re-read and re-apply is the only safe answer, and the message says so rather than offering a force. */
       try {
-        const patched = await apiPost('body', { project, id: wanted, body, ifUpdatedAt })
+        const payload = { project, id: wanted, body, ifUpdatedAt }
+        /* Sent only when a flag said so, so a groom with no opinion leaves the label exactly as it is (task-47). That is the third state
+           `ItemBodyRequest.runnerFix` declares, and it is the common one: most body patches are re-grooms and plan rewrites that have nothing to say about
+           whether the item repairs the runner. */
+        if (wantRunnerFix) payload.runnerFix = true
+        else if (wantNoRunnerFix) payload.runnerFix = false
+        const patched = await apiPost('body', payload)
         console.log(patched.updatedAt)
       } catch (e) {
         if (e instanceof BacklogError && e.status === 409) {

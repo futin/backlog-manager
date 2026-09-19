@@ -3,8 +3,10 @@ import { Body, Controller, HttpException, Post, UseGuards } from '@nestjs/common
 import { ItemsService, type WriterLookup } from './items.service';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import { KIND_NAMES } from '../tracker/labels';
+import { isMergeMode, isQuestionMode } from '../../../shared/agent';
+import { MERGE_MODES, QUESTION_MODES } from '../../../shared/types';
 import type { CreatedItem, WriteOutcome, WriteRefusal } from './sources/source';
-import type { ClaimCounters, ClaimResult, Section } from '../../../shared/types';
+import type { ClaimCounters, ClaimResult, ClaimRun, Section } from '../../../shared/types';
 
 /**
  * items-write.controller.ts — the seven write routes of a tracker project
@@ -132,9 +134,10 @@ export class ItemsWriteController {
       throw new HttpException({ error: 'phase must be groom or execute' }, 400);
     }
     const session = required(raw.session, 'session');
+    const run = claimRunOf(raw.run);
 
     const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.claim(w.project, w.marker, { project, id, phase, session }));
+    return this.answer(await w.writer.claim(w.project, w.marker, { project, id, phase, session, run }));
   }
 
   /** Give it back, billing the counters the CALLER computed — the CLI is the
@@ -153,7 +156,7 @@ export class ItemsWriteController {
     return this.answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters }));
   }
 
-  /** Say the session is still alive; carry phase 4's opaque `state` when given. */
+  /** Say the session is still alive; carry the driver's opaque `state` when given. */
   @Post('heartbeat')
   async heartbeat(@Body() body: Record<string, unknown> | undefined): Promise<ClaimResult> {
     const raw = body ?? {};
@@ -164,8 +167,10 @@ export class ItemsWriteController {
     const w = this.writable(this.items.writerFor(project));
     // `state` is the ONE field on these seven routes taken outright, and it is
     // safe for the reason the dispatch route's `prompt` is not: nothing reads
-    // it. It is phase 4's opaque blob, round-tripped into a comment this app
-    // wrote and back out again, and no predicate in this build branches on it.
+    // it. It is the `ClaimState` task-47's driver publishes, round-tripped into
+    // a comment this app wrote and back out again, and no predicate in this
+    // build branches on it — `run`, one route over, is the opposite case and is
+    // validated field by field for exactly that reason.
     return this.answer(await w.writer.heartbeat(w.project, w.marker, { project, id, commentId, state: raw.state }));
   }
 
@@ -178,9 +183,18 @@ export class ItemsWriteController {
     const id = required(raw.id, 'id');
     const itemBody = typeof raw.body === 'string' ? raw.body : '';
     const ifUpdatedAt = required(raw.ifUpdatedAt, 'ifUpdatedAt');
+    // Three states, and `undefined` is one of them — see `ItemBodyRequest.
+    // runnerFix`. A non-boolean is a 400 rather than a coerced value for the
+    // reason `kind` is: a caller that sent `'yes'` meant something, and
+    // dropping it would leave the marker silently unset on an item a groom
+    // just decided repairs the runner.
+    if (raw.runnerFix !== undefined && typeof raw.runnerFix !== 'boolean') {
+      throw new HttpException({ error: 'runnerFix must be a boolean' }, 400);
+    }
+    const runnerFix = raw.runnerFix as boolean | undefined;
 
     const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt }));
+    return this.answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix }));
   }
 
   /** Append a comment. Execute's failure path: the Outcome is recorded and the
@@ -292,6 +306,60 @@ function commentIdOf(value: unknown): number {
  * only record of them, and a clamp would quietly bank a wrong total where a 400
  * sends the caller back to fix the arithmetic.
  */
+/**
+ * `ItemClaimRequest.run`, or `undefined` when the caller sent none (task-47).
+ *
+ * Validated field by field, and it is the only nested object on these seven
+ * routes that is — `heartbeat`'s `state` is taken outright one route over, and
+ * the difference between them is the whole rule: **the server BRANCHES on this
+ * one.** `runId` decides whether a contesting claim is a takeover or a race
+ * (`GithubSource.claim`), so a value of the wrong type here does not merely
+ * travel through and come back out again — it silently matches no run,
+ * contests its own run's claim, and the resumed driver loses the item it
+ * already held. `state` has no such reading and is round-tripped verbatim.
+ *
+ * Each refusal NAMES the field, `run.mergeMode` rather than `run`, because the
+ * caller is a CLI composing this object out of a run file: "something in `run`
+ * is wrong" sends it re-reading six fields, and one name sends it to the line.
+ *
+ * `mergeMode` and `questionMode` are checked against the two guards that
+ * already exist rather than against literals — the same "one copy of the
+ * vocabulary" rule `MERGE_MODES` exists for, and the same two guards
+ * `AgentsService` runs on the orchestrate route.
+ */
+function claimRunOf(value: unknown): ClaimRun | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new HttpException({ error: 'run must be an object' }, 400);
+  }
+  const raw = value as Record<string, unknown>;
+  for (const key of ['runId', 'startedAt', 'base'] as const) {
+    if (typeof raw[key] !== 'string' || (raw[key] as string).trim() === '') {
+      throw new HttpException({ error: `run.${key} must be a non-empty string` }, 400);
+    }
+  }
+  if (!isMergeMode(raw.mergeMode)) {
+    throw new HttpException({ error: `run.mergeMode must be one of ${MERGE_MODES.join(', ')}` }, 400);
+  }
+  if (!isQuestionMode(raw.questionMode)) {
+    throw new HttpException({ error: `run.questionMode must be one of ${QUESTION_MODES.join(', ')}` }, 400);
+  }
+  // `null` is a VALUE here (an uncapped run), not an absent field — the same
+  // distinction `OrchestratorRun.maxItems` carries — so it is accepted
+  // explicitly rather than falling through the integer check.
+  if (raw.maxItems !== null && (typeof raw.maxItems !== 'number' || !Number.isInteger(raw.maxItems) || raw.maxItems < 0)) {
+    throw new HttpException({ error: 'run.maxItems must be a non-negative integer or null' }, 400);
+  }
+  return {
+    runId: (raw.runId as string).trim(),
+    startedAt: (raw.startedAt as string).trim(),
+    mergeMode: raw.mergeMode,
+    questionMode: raw.questionMode,
+    maxItems: raw.maxItems as number | null,
+    base: (raw.base as string).trim()
+  };
+}
+
 function countersOf(value: unknown): ClaimCounters | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'object' || Array.isArray(value)) {

@@ -3194,6 +3194,13 @@ const CLI_SOURCES = {
   'backlog.mjs': fileURLToPath(new URL('./backlog.mjs', import.meta.url)),
   'orchestrate.mjs': fileURLToPath(new URL('../../backlog-orchestrate/tools/orchestrate.mjs', import.meta.url)),
   'retro.mjs': fileURLToPath(new URL('../../backlog-retro/tools/retro.mjs', import.meta.url)),
+  // task-47's fourth entry point, and the reason this list is not named after
+  // the three skills: `api-call.mjs` is a CHILD of orchestrate.mjs, spawned
+  // per request so the asynchrony of `fetch` never reaches the parent's own
+  // synchronous `main`. It is still a process whose stdout is a pipe the
+  // parent reads, so the truncation this guard exists for applies to it
+  // exactly as it does to the three above.
+  'api-call.mjs': fileURLToPath(new URL('../../backlog-orchestrate/tools/api-call.mjs', import.meta.url)),
 }
 
 // Comment lines are stripped before matching because retro.mjs's own note
@@ -3207,13 +3214,18 @@ const codeLines = (file) =>
 // completion and each one sends `connection: close`, so no pooled socket outlives the call — and the API-mode cases assert it behaviourally, by expecting each
 // child process to EXIT rather than hang. The other two CLIs hold no asynchronous work at all and stay on the synchronous form, so a stray `await` appearing
 // in either of them still goes red here.
+//
+// `api-call.mjs` takes the awaited shape too (task-47), and its safety argument is its own rather than a copy of backlog.mjs's: it makes exactly ONE `fetch`,
+// awaits it to completion, sends `connection: close`, and holds no timer, server or child of its own. A-1 asserts it behaviourally from the other side — the
+// child is expected to EXIT with a code, not to hang.
 const ENTRY_SHAPES = {
   'backlog.mjs': ['process.exitCode = main(', 'process.exitCode = await main('],
   'orchestrate.mjs': ['process.exitCode = main('],
   'retro.mjs': ['process.exitCode = main('],
+  'api-call.mjs': ['process.exitCode = await main('],
 }
 
-test('all three skill CLIs end through process.exitCode, never process.exit', () => {
+test('every skill CLI ends through process.exitCode, never process.exit', () => {
   for (const [name, file] of Object.entries(CLI_SOURCES)) {
     const lines = codeLines(file)
     const accepted = ENTRY_SHAPES[name]
@@ -4233,4 +4245,127 @@ test('API mode: stop --keep-started is identical to a plain stop', async () => {
   assert.equal(a.commentId, b.commentId)
   // The one number that could differ is the billed total, and it is computed from a clock — so compare it with the same tolerance the plain-stop case uses.
   assert.ok(Math.abs(a.counters.groomElapsed - b.counters.groomElapsed) <= 1)
+})
+
+// --- task-47: --runner-fix, the tracker spelling of a frontmatter marker -----
+//
+// A files capture writes `runner-fix: true` into the item's own frontmatter; a
+// tracker item carries a `runner-fix` LABEL and has no file to write a line
+// into. So the judgement travels as a flag — on `new` for a promotion, and on
+// the one `body` call a groom makes.
+//
+// `create`'s `runnerFix` field has existed since task-46 with no caller at
+// all, which is the carried item that Outcome names. These cases are the
+// caller.
+
+test('API mode: new --runner-fix sends runnerFix, and the key is absent without it', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Goal\n\nrepair the runner\n')
+  const routes = { '/api/items/create': { status: 201, body: { id: '#77', urn: 'gh:futin/x#77', url: 'u', number: 77 } } }
+
+  const marked = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'new', 'tasks', 't', '--body', bodyFile, '--runner-fix'))
+  assert.equal(marked.out.status, 0, marked.out.stderr)
+  assert.equal(marked.requests[0].body.runnerFix, true)
+
+  // Absent rather than `false`: the route reads it with a strict `=== true`,
+  // so sending `false` on every unmarked capture would put a field in every
+  // request body for a fact the absence already states.
+  const plain = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'new', 'tasks', 't', '--body', bodyFile))
+  assert.equal(plain.out.status, 0, plain.out.stderr)
+  assert.equal('runnerFix' in plain.requests[0].body, false)
+})
+
+/* Its own sentence rather than the usage block `--body` and `--kind` take, and
+   the difference is which mistake was made: those two are a caller using the
+   tracker CALL SHAPE, where showing both shapes side by side is the answer,
+   while this is a caller who knows what they want and is asking the wrong
+   writer for it. */
+test('files mode: new --runner-fix is refused by name, and makes no request', async () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'new', 'tasks', 'a title', '--runner-fix'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /frontmatter line/)
+  assert.deepEqual(requests, [])
+})
+
+test('API mode: body --no-runner-fix sends false, and the two flags together are a usage error', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Plan\n\nreal work\n')
+  const routes = { '/api/items/body': { status: 201, body: { id: '#7', updatedAt: '2026-09-19T10:00:00Z' } } }
+
+  const off = await withApi(routes, async (port) =>
+    await runNode(dir, apiEnv(port), 'body', '7', '--body', bodyFile, '--if-updated-at', '2026-09-19T09:00:00Z', '--no-runner-fix'),
+  )
+  assert.equal(off.out.status, 0, off.out.stderr)
+  assert.equal(off.requests[0].body.runnerFix, false)
+
+  // Opposite instructions about one label. Picking one for the caller would
+  // silently add or remove the marker that decides whether an item hoists to
+  // the front of a run's queue — so it is refused, before the store is even
+  // resolved, with nothing sent.
+  const both = await withApi(routes, async (port) =>
+    await runNode(dir, apiEnv(port), 'body', '7', '--body', bodyFile, '--if-updated-at', 'x', '--runner-fix', '--no-runner-fix'),
+  )
+  assert.equal(both.out.status, 1)
+  assert.match(both.out.stderr, /opposites/)
+  assert.deepEqual(both.requests, [])
+})
+
+/* The third state, and the one a re-groom depends on: a body patch that says
+   nothing about the marker must leave it exactly as it is. */
+test('API mode: body with neither flag sends no runnerFix key at all', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Plan\n\nreal work\n')
+
+  const { out, requests } = await withApi(
+    { '/api/items/body': { status: 201, body: { id: '#7', updatedAt: '2026-09-19T10:00:00Z' } } },
+    async (port) => await runNode(dir, apiEnv(port), 'body', '7', '--body', bodyFile, '--if-updated-at', 'x'),
+  )
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal('runnerFix' in requests[0].body, false)
+})
+
+// --- task-47: the prose halves of the phase-4a seams -------------------------
+//
+// Read as text and never imported, for the reason the `Groomed on disk only`
+// pair above gives: each of these is one rule that two files have to agree on,
+// and a suite reading only one half cannot catch them drifting apart.
+
+test('backlog-execute names the outcome path and forbids the five item writes under an orchestrator run', () => {
+  const text = flat(EXECUTE_SKILL_MD)
+  // The clause the orchestrator's own dispatch line writes, so the two files
+  // agree on one spelling of the marker.
+  assert.match(text, /outcome <absolute path>/)
+  for (const verb of ['`start`', '`stop`', '`heartbeat`', '`move`', '`comment`']) {
+    assert.ok(text.includes(verb), `backlog-execute no longer names ${verb} among the writes a tracker run forbids`)
+  }
+  assert.match(text, /Never run `start`, `stop`, `heartbeat`, `move` or `comment` on the item/)
+})
+
+test('the orchestrator dispatch line and backlog-execute agree on the outcome clause', () => {
+  // One seam, two files: the driver writes `outcome <dir>/outcomes/<n>.md`
+  // into the prompt, and the session reads the path back out of it.
+  const orch = flat(fileURLToPath(new URL('../../backlog-orchestrate/SKILL.md', import.meta.url)))
+  assert.match(orch, /outcome <dir>\/outcomes\/<n>\.md/)
+  assert.match(flat(EXECUTE_SKILL_MD), /\[orchestrator-run <runId> item <n> of <m> branch backlog\/<n> outcome <absolute path>/)
+})
+
+test('the reviewer is told a tracker item file is a snapshot under the run-state directory', () => {
+  const text = flat(fileURLToPath(new URL('../../../agents/backlog-reviewer.md', import.meta.url)))
+  assert.match(text, /SNAPSHOT under the run-state directory/)
+  assert.match(text, /<dir>\/items\/<n>\.md/)
+})
+
+test('backlog-groom names --runner-fix as the tracker spelling of the marker', () => {
+  const text = flat(GROOM_SKILL_MD)
+  assert.match(text, /--runner-fix/)
+  assert.match(text, /--no-runner-fix/)
+  // The third state, stated where a groomer will read it.
+  assert.match(text, /Passing neither leaves the label exactly as it is/)
 })

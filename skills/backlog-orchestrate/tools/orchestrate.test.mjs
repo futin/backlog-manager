@@ -4055,7 +4055,14 @@ const NOTE_PLACEHOLDERS = new Map([
   ['<what happened, your words>', "the driver's summary of a dead session"],
   ['<verdict summary, your words>', "the driver's summary of a review verdict"],
   ['<the failing command names>', 'command names, never their output'],
-  ['<why, your words>', "the driver's reason for skipping an item"]
+  ['<why, your words>', "the driver's reason for skipping an item"],
+  // task-47, and spelled the same way as the three above it for the same
+  // reason. An API refusal's sentence is composed by the SERVER out of what
+  // GitHub said — prose this run did not compose, carrying whatever
+  // punctuation GitHub felt like — so it is exactly the text this rule exists
+  // to keep off a command line. The copy of record is the tool's own stderr in
+  // the run's log; the detail is a summary in the driver's voice.
+  ['<what the API refused, your words>', "the driver's summary of an API refusal"]
 ]);
 
 // Values can wrap across lines in prose (`--detail\n"<what happened…>"`), so
@@ -5649,4 +5656,747 @@ test('every project-root git command in SKILL.md is on the HEAD-independent allo
       'if it does not, add its shape to the allowlist in this test with the reason.\n' +
       offenders.join('\n'),
   );
+});
+
+// --- task-47: a tracker project's queue, claim and close ---------------------
+//
+// A project whose committed `backlog/source.json` says `github` has no item
+// files: the queue comes from `GET /api/items`, and the claim that stops a
+// second machine working an issue is a comment the API writes. Every case
+// below spawns the REAL tool against a fake API on an ephemeral port, exactly
+// as the cases above spawn it against a real store — the tool is the subject,
+// and stubbing its transport would test the stub.
+//
+// Two shapes of the harness are load-bearing and neither is a preference:
+//
+//   * **The fake API runs in THIS process, so the tool must be spawned
+//     ASYNCHRONOUSLY.** `spawnSync` blocks this process's event loop until the
+//     child exits, and a child that connects to the fake would wait for an
+//     accept that cannot happen until it has already exited — a five-minute
+//     hang reported as exit `5`, which reads exactly like a stack that is not
+//     running. `backlog.test.mjs`'s API-mode suite records the same deadlock.
+//   * **`127.0.0.1`, never the wildcard**, for the reason `test/helpers/app.ts`
+//     gives on the jest side: a bare `listen(0)` binds `::` and the kernel
+//     picks a port against that address alone, so another process holding the
+//     same number on IPv4 loopback answers instead.
+
+import http from 'node:http';
+
+const API_CALL_SCRIPT = fileURLToPath(new URL('./api-call.mjs', import.meta.url));
+
+/** The fake API: records every request and answers from a per-route table. */
+function fakeApi(routes) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      const url = new URL(req.url, 'http://127.0.0.1');
+      let body = null;
+      try {
+        body = raw === '' ? null : JSON.parse(raw);
+      } catch {
+        body = raw;
+      }
+      requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body });
+
+      const answer = routes[url.pathname];
+      const resolved = typeof answer === 'function' ? answer(body, url, req.method) : answer;
+      if (resolved === undefined) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: `no fake route for ${url.pathname}` }));
+        return;
+      }
+      const payload = resolved.body;
+      // text/plain for the body route, which answers Markdown rather than
+      // JSON — the same content type the real one uses.
+      const type = typeof payload === 'string' ? 'text/plain; charset=utf-8' : 'application/json';
+      res.writeHead(resolved.status ?? 200, { 'content-type': type });
+      res.end(typeof payload === 'string' ? payload : JSON.stringify(payload ?? null));
+    });
+  });
+  return { server, requests };
+}
+
+async function withApi(routes, fn) {
+  const { server, requests } = fakeApi(routes);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    return { out: await fn(port), requests };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+/** `runAsync` plus a `BM_API_PORT` and the control home every `run()` pins. */
+function runApi(cwd, home, port, ...args) {
+  return new Promise((resolve) => {
+    const proc = spawn('node', [SCRIPT, ...args], {
+      cwd,
+      env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control`, BM_API_PORT: String(port), CLAUDE_CODE_SESSION_ID: 'sess-test' },
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => (stdout += d));
+    proc.stderr.on('data', (d) => (stderr += d));
+    proc.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+/** A port nothing is listening on — a closed one, for the two cases that are
+ *  about the API being absent. Opened and immediately closed so the number is
+ *  real and free rather than guessed. */
+async function closedPort() {
+  const server = http.createServer(() => {});
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+/** `orchFixture` plus a committed tracker marker. */
+function trackerFixture(t, marker = { kind: 'github', repo: 'futin/x' }) {
+  const fixture = orchFixture(t);
+  fs.mkdirSync(path.join(fixture.project, 'backlog'), { recursive: true });
+  fs.writeFileSync(path.join(fixture.project, 'backlog', 'source.json'), `${JSON.stringify(marker, null, 2)}\n`);
+  return fixture;
+}
+
+const GROOMED_TASK_BODY = '## Goal\n\nSomething.\n\n## Plan\n\nDo the real work, described in enough detail to count as groomed.\n\n## Done when\n';
+const GROOMED_BUG_BODY = '## Symptom\n\nx\n\n## Cause\n\na real diagnosed cause\n\n## Fix\n\nthe real fix\n';
+const UNGROOMED_TASK_BODY = '## Goal\n\nSomething.\n\n## Plan\n\n## Done when\n';
+
+/** One issue as `GET /api/items` returns it. Only the fields the gate reads
+ *  are spelled out; a `BacklogItem` carries more, and none of the rest reaches
+ *  `trackerCandidates`. */
+function apiItem(projectPath, number, over = {}) {
+  return {
+    id: `#${number}`,
+    title: `issue ${number}`,
+    section: 'tasks',
+    status: 'open',
+    projectPath,
+    path: `gh:futin/x#${number}`,
+    source: 'github',
+    ...over,
+  };
+}
+
+/** The two read routes a tracker gate makes, as a route table. `bodies` is
+ *  keyed by issue number. */
+function gateRoutes(items, bodies) {
+  return {
+    '/api/items': { body: { items, errors: [] } },
+    '/api/items/body': (_body, url) => {
+      const number = String(url.searchParams.get('path') ?? '').replace(/^.*#/, '');
+      return { body: bodies[number] ?? '' };
+    },
+  };
+}
+
+// --- O-1: a files run never touches the API ---------------------------------
+
+test('a files run makes no API request at any stage, with the port closed', async (t) => {
+  // The whole point of the marker check: `projectSource` answers `files` for a
+  // project with no `source.json`, and not one command may then spawn the
+  // helper. Pinned by making the API UNREACHABLE rather than by counting
+  // requests — a count can only see the calls a test happens to drive, while a
+  // closed port fails every one of them.
+  const { home, project } = orchFixture(t);
+  const port = await closedPort();
+  seedReadyTask(project, 'task-1', 'a task');
+
+  const init = await runApi(project, home, port, 'init', '--project', project);
+  assert.equal(init.status, 0, init.stderr);
+
+  for (const args of [
+    ['stage', 'task-1', 'preflight'],
+    ['stage', 'task-1', 'dispatched', '--session', 's1'],
+    ['stage', 'task-1', 'inspecting'],
+    ['stage', 'task-1', 'merged'],
+  ]) {
+    const out = await runApi(project, home, port, ...args);
+    assert.equal(out.status, 0, `${args.join(' ')}: ${out.stderr}`);
+  }
+
+  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(run.queue[0].stage, 'merged');
+  // No claim was ever taken, which is the other half of "no request was made".
+  assert.equal(run.queue[0].claim, undefined);
+});
+
+// --- O-2: projectSource, through `plan` -------------------------------------
+
+test('an unsupported source marker refuses the plan by name, and never falls back to files', async (t) => {
+  const { home, project } = trackerFixture(t, { kind: 'jira', repo: 'futin/x' });
+  const port = await closedPort();
+  seedReadyTask(project, 'task-1', 'a task');
+
+  const out = await runApi(project, home, port, 'plan', '--project', project, '--json');
+
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /source\.json/);
+  assert.match(out.stderr, /jira/);
+  // The load-bearing negative: the item on disk is NOT reported.
+  assert.doesNotMatch(out.stdout, /task-1/);
+});
+
+test('an explicit files marker runs the files walk, with the port closed', async (t) => {
+  const { home, project } = trackerFixture(t, { kind: 'files' });
+  const port = await closedPort();
+  seedReadyTask(project, 'task-1', 'a task');
+
+  const out = await runApi(project, home, port, 'plan', '--project', project, '--json');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((row) => row.id),
+    ['task-1'],
+  );
+});
+
+test('a github marker with no usable repo is refused, never treated as files', async (t) => {
+  const { home, project } = trackerFixture(t, { kind: 'github', repo: 'not a repo' });
+  const port = await closedPort();
+
+  const out = await runApi(project, home, port, 'plan', '--project', project, '--json');
+
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /valid "repo"/);
+});
+
+// --- A-1: the helper's own exit codes ---------------------------------------
+
+test('api-call.mjs exits 5 with both start commands named when nothing is listening', async () => {
+  const port = await closedPort();
+  const out = await new Promise((resolve) => {
+    const proc = spawn('node', [API_CALL_SCRIPT, 'GET', '/api/items'], { env: { ...process.env, BM_API_PORT: String(port) } });
+    let stderr = '';
+    proc.stderr.on('data', (d) => (stderr += d));
+    proc.on('close', (status) => resolve({ status, stderr }));
+  });
+
+  assert.equal(out.status, 5);
+  assert.match(out.stderr, /pnpm run dev/);
+  assert.match(out.stderr, /pnpm run docker:up/);
+});
+
+test('api-call.mjs exits 3 for a non-2xx and still writes the body to stdout', async () => {
+  const { out } = await withApi({ '/api/items/claim': { status: 409, body: { error: 'held', holder: { session: 'B' } } } }, (port) =>
+    new Promise((resolve) => {
+      const proc = spawn('node', [API_CALL_SCRIPT, 'POST', '/api/items/claim', '{}'], { env: { ...process.env, BM_API_PORT: String(port) } });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => (stdout += d));
+      proc.stderr.on('data', (d) => (stderr += d));
+      proc.on('close', (status) => resolve({ status, stdout, stderr }));
+    }),
+  );
+
+  assert.equal(out.status, 3);
+  assert.deepEqual(JSON.parse(out.stdout), { error: 'held', holder: { session: 'B' } });
+  assert.match(out.stderr, /409/);
+});
+
+// --- G-1 / G-2: the tracker gate --------------------------------------------
+
+test('plan on a tracker project orders bugs then tasks, hoists the runner fix, and never mentions "not committed"', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [
+    apiItem(project, 1),
+    apiItem(project, 2),
+    apiItem(project, 3, { section: 'bugs' }),
+    apiItem(project, 5, { runnerFix: true }),
+    // Two rows that must not reach the queue at all: another project's item,
+    // and a closed one.
+    apiItem('/somewhere/else', 9),
+    apiItem(project, 10, { status: 'done' }),
+  ];
+  const bodies = { 1: GROOMED_TASK_BODY, 2: UNGROOMED_TASK_BODY, 3: GROOMED_BUG_BODY, 5: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ['5', '3', '1', '2'],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.gate),
+    ['ready', 'ready', 'ready', 'ungroomed'],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.hoisted),
+    [true, false, false, false],
+  );
+  // There is no `<base>` read for a tracker project, so the skip that exists
+  // for one has nothing to skip.
+  assert.doesNotMatch(out.stdout, /not committed/);
+});
+
+test('--ids on a tracker project takes bare numbers only, and names the shape it wants', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const routes = gateRoutes([apiItem(project, 3, { section: 'bugs' })], { 3: GROOMED_BUG_BODY });
+
+  const hashed = await withApi(routes, (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '#3', '--json'));
+  assert.equal(hashed.out.status, 1);
+  assert.match(hashed.out.stderr, /tracker items are named by issue number inside a run — got #3/);
+
+  const absent = await withApi(routes, (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '99', '--json'));
+  assert.equal(absent.out.status, 1);
+  assert.match(absent.out.stderr, /unknown item id: 99/);
+});
+
+// --- G-3 / G-4: init's pull, and the API being down -------------------------
+
+test('init refuses when the base cannot fast-forward onto origin, and writes nothing', async (t) => {
+  const { home, project } = trackerFixture(t);
+  // A real diverged remote: a bare repo with one commit the project does not
+  // have, and a project with one commit of its own.
+  const remote = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-remote-')));
+  t.after(() => fs.rmSync(remote, { recursive: true, force: true }));
+  spawnSync('git', ['init', '-q', '--bare', '-b', 'main', remote], { encoding: 'utf8' });
+
+  const seed = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-seed-')));
+  t.after(() => fs.rmSync(seed, { recursive: true, force: true }));
+  spawnSync('git', ['clone', '-q', remote, seed], { encoding: 'utf8' });
+  fs.writeFileSync(path.join(seed, 'theirs.txt'), 'theirs\n');
+  commitEverything(seed, 'theirs');
+  spawnSync('git', ['-C', seed, 'push', '-q', 'origin', 'main'], { encoding: 'utf8' });
+
+  fs.writeFileSync(path.join(project, 'mine.txt'), 'mine\n');
+  commitEverything(project, 'mine');
+  spawnSync('git', ['-C', project, 'remote', 'add', 'origin', remote], { encoding: 'utf8' });
+
+  const { out } = await withApi(gateRoutes([], {}), (port) => runApi(project, home, port, 'init', '--project', project));
+
+  assert.equal(out.status, 1, out.stdout);
+  assert.match(out.stderr, /cannot fast-forward/);
+  assert.equal(fs.existsSync(runFile(home, project)), false);
+});
+
+test('init and stage exit 8 with nothing written when the API is down', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const port = await closedPort();
+
+  const init = await runApi(project, home, port, 'init', '--project', project);
+  assert.equal(init.status, 8);
+  assert.match(init.stderr, /pnpm run dev/);
+  assert.equal(fs.existsSync(runFile(home, project)), false);
+
+  // Now with a run file on disk, so `stage` reaches its own request.
+  const seeded = await withApi(gateRoutes([apiItem(project, 3, { section: 'bugs' })], { 3: GROOMED_BUG_BODY }), (p) =>
+    runApi(project, home, p, 'init', '--project', project),
+  );
+  assert.equal(seeded.out.status, 0, seeded.out.stderr);
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
+
+  const staged = await runApi(project, home, port, 'stage', '3', 'preflight');
+  assert.equal(staged.status, 8);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before);
+});
+
+// --- P-1 … P-12: the claim as this machine's state --------------------------
+//
+// The driver owns a tracker item's claim for the whole item: it takes the
+// issue at `stage <n> preflight`, publishes the queue item onto that claim
+// from every command that changes it, and releases at the terminal stage. The
+// dispatched session never touches the issue at all.
+//
+// Two asymmetries these cases exist to pin, because both are decisions that
+// look like oversights from the code alone:
+//
+//   * **A failed heartbeat is never a failure of the command** (P-4). The run
+//     file is the journal of record on this machine and the claim's `state` is
+//     a published copy of it; failing a `stage` call over a copy would cost
+//     this machine an item mid-flight for a write nothing local depends on.
+//   * **A failed CLOSE is fatal** (P-8). That one is not a copy — it is the
+//     only record anywhere that the item is done — so the stage is not written
+//     and no release is sent, and the SKILL parks the item.
+
+/** A tracker run whose queue holds one bug, `3`, claimed at `preflight`.
+ *  Returns the route table (so a case can rewrite one answer) alongside it. */
+function claimRoutes(project, over = {}) {
+  let nextComment = 500;
+  return {
+    ...gateRoutes([apiItem(project, 3, { section: 'bugs' })], { 3: GROOMED_BUG_BODY }),
+    '/api/items/claim': (body, _url, method) =>
+      method === 'GET'
+        ? { body: { commentId: 500, record: { v: 1, counters: { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 } } } }
+        : { status: 201, body: { commentId: (nextComment += 1), record: { v: 1, session: body?.session, run: body?.run } } },
+    '/api/items/heartbeat': { status: 201, body: { commentId: 500, record: { v: 1 } } },
+    '/api/items/release': { status: 201, body: { commentId: 500, record: { v: 1 } } },
+    '/api/items/state': { status: 201, body: { id: '#3', status: 'done', url: 'https://example.invalid/3' } },
+    ...over,
+  };
+}
+
+const posts = (requests, route) => requests.filter((r) => r.method === 'POST' && r.path === `/api/items/${route}`);
+
+test('stage preflight claims the issue for this run and records the comment id', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    const out = await runApi(project, home, port, 'stage', '3', 'preflight');
+    assert.equal(out.status, 0, out.stderr);
+  });
+
+  const claims = posts(requests, 'claim');
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].body.phase, 'execute');
+  assert.equal(claims[0].body.id, '#3');
+  assert.equal(claims[0].body.session, 'sess-test');
+
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(claims[0].body.run.runId, written.runId);
+  assert.deepEqual(Object.keys(claims[0].body.run).sort(), ['base', 'maxItems', 'mergeMode', 'questionMode', 'runId', 'startedAt']);
+  assert.deepEqual(written.queue[0].claim, { commentId: 501 });
+});
+
+test('a claim held by another run skips the item and says whose it is, exit 0', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const held = {
+    '/api/items/claim': (_body, _url, method) =>
+      method === 'GET'
+        ? { body: null }
+        : { status: 409, body: { error: '#3 is already in progress', holder: { session: 'other-machine', heartbeat: '…', ageMs: 42_000, commentId: 7 } } },
+  };
+
+  const { requests } = await withApi(claimRoutes(project, held), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    const out = await runApi(project, home, port, 'stage', '3', 'preflight');
+    // A refusal is information about the world, not a failure of this call.
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /"stage":"skipped"/);
+  });
+
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.queue[0].stage, 'skipped');
+  assert.match(written.queue[0].note, /^claimed elsewhere \(session other-machine, heartbeat 42s ago\)/);
+  assert.equal(written.queue[0].claim, undefined);
+  // No release for a claim this run never held.
+  assert.equal(posts(requests, 'release').length, 0);
+});
+
+test('every stage after preflight publishes the queue item onto the claim', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'dispatched', '--session', 's1')).status, 0);
+  });
+
+  const beats = posts(requests, 'heartbeat');
+  assert.equal(beats.length, 2, 'one for preflight, one for dispatched');
+  assert.equal(beats[1].body.commentId, 501);
+  assert.equal(beats[1].body.state.stage, 'dispatched');
+  assert.equal(beats[1].body.state.sessionId, 's1');
+});
+
+test('a heartbeat the API refuses is one stderr line and never fails the stage', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const broken = { '/api/items/heartbeat': { status: 500, body: { error: 'boom' } } };
+
+  const { out } = await withApi(claimRoutes(project, broken), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    return runApi(project, home, port, 'stage', '3', 'dispatched', '--session', 's1');
+  });
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stderr, /heartbeat for 3 was refused/);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stage, 'dispatched');
+});
+
+test('usage publishes the new entry onto the claim', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    const out = await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3.jsonl'));
+    assert.equal(out.status, 0, out.stderr);
+  });
+
+  const beats = posts(requests, 'heartbeat');
+  const last = beats[beats.length - 1];
+  assert.equal(last.body.state.usage.length, 1);
+  assert.equal(last.body.state.usage[0].kind, 'execute');
+  assert.equal(last.body.state.usage[0].outputTokens, 52893);
+});
+
+test('stage merged in a tracker project requires --outcome, and writes nothing without it', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests, out } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    return runApi(project, home, port, 'stage', '3', 'merged');
+  });
+
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /--outcome/);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stage, 'preflight');
+  assert.equal(posts(requests, 'state').length, 0);
+  assert.equal(posts(requests, 'release').length, 0);
+});
+
+test('--outcome is refused for a files project, where the item file already carries the Outcome', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'a task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  const out = run(project, home, 'stage', 'task-1', 'merged', '--outcome', '/tmp/whatever.md');
+
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /--outcome is only for/);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stage, 'pending');
+});
+
+test('stage merged reads the counters, closes the issue, then releases — in that order', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const outcomeText = '## Outcome\n\n2026-09-19. It worked.\n';
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3.jsonl'))).status, 0);
+
+    const file = path.join(project, 'outcome.md');
+    fs.writeFileSync(file, outcomeText);
+    const out = await runApi(project, home, port, 'stage', '3', 'merged', '--outcome', file);
+    assert.equal(out.status, 0, out.stderr);
+  });
+
+  // The three requests this path makes, in order and with nothing between.
+  const tail = requests.filter((r) => ['/api/items/claim', '/api/items/state', '/api/items/release'].includes(r.path)).slice(-3);
+  assert.deepEqual(
+    tail.map((r) => `${r.method} ${r.path}`),
+    ['GET /api/items/claim', 'POST /api/items/state', 'POST /api/items/release'],
+  );
+  assert.equal(tail[1].body.status, 'done');
+  assert.equal(tail[1].body.outcome, outcomeText);
+  assert.equal(tail[2].body.reason, 'merged');
+  // Read counters (1/2/3/4) plus this run's bill: 812345 ms floors to 812 s,
+  // and 208 + 52893 + 204362 tokens are billed while the 15,155,855 CACHE
+  // READS are not — the same set `backlog.mjs stop` bills for a files item.
+  assert.deepEqual(tail[2].body.counters, { groomElapsed: 1, executeElapsed: 2 + 812, groomTokens: 3, executeTokens: 4 + 257_463 });
+});
+
+test('a refused close exits 9, writes no stage and sends no release', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const broken = { '/api/items/state': { status: 502, body: { error: 'github said no' } } };
+
+  const { requests, out } = await withApi(claimRoutes(project, broken), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    const file = path.join(project, 'outcome.md');
+    fs.writeFileSync(file, 'x\n');
+    return runApi(project, home, port, 'stage', '3', 'merged', '--outcome', file);
+  });
+
+  assert.equal(out.status, 9);
+  assert.match(out.stderr, /github said no/);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stage, 'preflight');
+  assert.equal(posts(requests, 'release').length, 0);
+});
+
+test('stage branched releases the claim and never closes the issue', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project, '--merge-mode', 'branch')).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    const out = await runApi(project, home, port, 'stage', '3', 'branched', '--branch', 'backlog/3');
+    assert.equal(out.status, 0, out.stderr);
+  });
+
+  const released = posts(requests, 'release');
+  assert.equal(released.length, 1);
+  assert.equal(released[0].body.reason, 'branched');
+  // The issue stays open under branch mode: nothing has landed on the base.
+  assert.equal(posts(requests, 'state').length, 0);
+});
+
+test('usage entries with no numbers at all bill nothing, and the read counters go back unchanged', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE_NO_NUMBERS, '3.jsonl'))).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'failed')).status, 0);
+  });
+
+  const released = posts(requests, 'release');
+  assert.equal(released.length, 1);
+  // Not zeros: "nothing was recorded" is not "it cost zero", and zeros would
+  // erase every earlier session's work on the item.
+  assert.deepEqual(released[0].body.counters, { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 });
+});
+
+test('a resumed driver re-claims its own run-s in-flight items under the same runId', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'dispatched', '--session', 's1')).status, 0);
+    const out = await runApi(project, home, port, 'claim');
+    assert.equal(out.status, 0, out.stderr);
+  });
+
+  const claims = posts(requests, 'claim');
+  assert.equal(claims.length, 2, 'the preflight claim, and the resume re-claim');
+  assert.equal(claims[1].body.run.runId, claims[0].body.run.runId, 'the same run takes its own item back');
+
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(written.queue[0].claim, { commentId: 502 }, 'the new comment id replaces the old one');
+  assert.equal(written.queue[0].stage, 'dispatched');
+});
+
+test('a resumed driver skips an item another run now holds, and leaves its worktree alone', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const worktree = path.join(project, '.worktrees', '3');
+  fs.mkdirSync(worktree, { recursive: true });
+  let calls = 0;
+
+  // The FIRST claim wins (the preflight), the second is refused — the shape a
+  // resume meets when another machine picked the item up meanwhile.
+  const contested = {
+    '/api/items/claim': (body, _url, method) => {
+      if (method === 'GET') return { body: null };
+      calls += 1;
+      return calls === 1
+        ? { status: 201, body: { commentId: 501, record: { v: 1, session: body?.session, run: body?.run } } }
+        : { status: 409, body: { error: 'held', holder: { session: 'other-machine', heartbeat: '…', ageMs: 30_000, commentId: 9 } } };
+    },
+  };
+
+  await withApi(claimRoutes(project, contested), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'dispatched', '--session', 's1', '--worktree', worktree)).status, 0);
+    const out = await runApi(project, home, port, 'claim');
+    assert.equal(out.status, 0, out.stderr);
+  });
+
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(written.queue[0].stage, 'skipped');
+  assert.match(written.queue[0].note, /claimed elsewhere/);
+  assert.match(written.queue[0].note, /worktree .* left in place/);
+  // The run lost the item, not the work: nothing on disk is removed.
+  assert.equal(fs.existsSync(worktree), true);
+});
+
+// --- I-1 … I-3: the snapshot, and the sidecars ------------------------------
+
+test('snapshot writes the issue body and the session-s Outcome to one file', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { out } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    const dir = path.join(home, encodeURIComponent(project));
+    fs.mkdirSync(path.join(dir, 'outcomes'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'outcomes', '3.md'), 'Contract sweep: none found\nRed proof: 1 test went red\n');
+    return runApi(project, home, port, 'snapshot', '3');
+  });
+
+  assert.equal(out.status, 0, out.stderr);
+  const written = fs.readFileSync(path.join(home, encodeURIComponent(project), 'items', '3.md'), 'utf8');
+  assert.match(written, /## Cause/);
+  assert.match(written, /## Outcome\n\nContract sweep: none found/);
+});
+
+test('snapshot is refused for a files project', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'a task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  const out = run(project, home, 'snapshot', 'task-1');
+
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /snapshot is for a tracker project/);
+});
+
+test('verify reads a tracker item-s Done when out of the snapshot, not out of any backlog file', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const marker = path.join(project, 'verify-ran.txt');
+  const body = `## Symptom\n\nx\n\n## Cause\n\nreal\n\n## Fix\n\nreal\n\n## Done when\n\n\`\`\`\nnode -e "require('fs').writeFileSync('${marker}','ran')"\n\`\`\`\n`;
+
+  const { out } = await withApi({ ...claimRoutes(project), '/api/items/body': { body } }, async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'snapshot', '3')).status, 0);
+    return runApi(project, home, port, 'verify', '3', '--cwd', project, '--json');
+  });
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'ran');
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((row) => row.ok),
+    [true],
+  );
+});
+
+test('a tracker run-s outcomes/ and items/ are archived beside its run file by the next init', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const dir = path.join(home, encodeURIComponent(project));
+
+  await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    fs.mkdirSync(path.join(dir, 'outcomes'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'outcomes', '3.md'), 'outcome\n');
+    assert.equal((await runApi(project, home, port, 'snapshot', '3')).status, 0);
+    assert.equal((await runApi(project, home, port, 'finish', '--status', 'done')).status, 0);
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+  });
+
+  // The mover is a denylist of two (`run.json`, `runs/`), so a new sidecar
+  // directory needs no change to it at all — which is exactly what this
+  // asserts.
+  const stems = fs.readdirSync(runsDir(home, project)).filter((name) => !name.endsWith('.json'));
+  assert.equal(stems.length, 1);
+  assert.equal(fs.readFileSync(path.join(runsDir(home, project), stems[0], 'outcomes', '3.md'), 'utf8'), 'outcome\n');
+  assert.ok(fs.existsSync(path.join(runsDir(home, project), stems[0], 'items', '3.md')));
+  assert.equal(fs.existsSync(path.join(dir, 'outcomes')), false);
+});
+
+// --- W-1 / W-2: the push-and-pull prose (task-47) ---------------------------
+
+test('SKILL.md carries the tracker push and pull, and leaves the files merge line alone', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  for (const [rule, needle] of [
+    ['the per-item pull', 'pull --ff-only origin <base>'],
+    ['the push after a merge', 'push origin <base>'],
+    ['the branch-mode push', 'push -u origin backlog/<n>'],
+    ['the merge commit names the issue', 'Fixes #<n>'],
+    ['the close rides the stage', 'stage <n> merged --outcome'],
+  ]) {
+    assert.ok(text.includes(needle), `SKILL.md lost the tracker rule: ${rule} (${needle})`);
+  }
+  // The files path is untouched, which is the other half of the claim: a
+  // tracker-shaped edit that also rewrote the ordinary merge would pass every
+  // assertion above.
+  assert.ok(text.includes('git -C "<base tree>" merge --no-ff --no-edit backlog/<id>'), 'the files merge line changed');
+  assert.ok(!/files[^\n]*\bgit push\b/i.test(text), 'a files-path push appeared in SKILL.md');
+});
+
+test('SKILL.md says a classifier-denied PUSH parks, in the push paragraph itself', () => {
+  // The one place the classifier-denial rule does NOT apply, and it has to be
+  // stated beside the push rather than somewhere in the file: a denied MERGE
+  // degrades the run to branch mode because nothing landed, while a denied
+  // PUSH follows a merge that HAS landed, so `branched` would be a falsehood
+  // written into the run file and into the summary a person reads afterwards.
+  const flat = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s*\n\s*/g, ' ');
+  const at = flat.indexOf('push origin <base>');
+  assert.ok(at !== -1, 'the push command is gone');
+  const paragraph = flat.slice(at, at + 1600);
+  assert.match(paragraph, /denied by the auto-mode classifier/i);
+  assert.match(paragraph, /park/i);
+  assert.match(paragraph, /branch mode|branched/i);
 });

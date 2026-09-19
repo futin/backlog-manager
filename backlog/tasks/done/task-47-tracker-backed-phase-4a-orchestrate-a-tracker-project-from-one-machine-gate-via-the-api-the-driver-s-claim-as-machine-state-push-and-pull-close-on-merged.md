@@ -4,6 +4,10 @@ title: Tracker-backed phase 4a: orchestrate a tracker project from one machine -
 created: 2026-09-19
 from: idea-12
 tags: architecture, multi-machine, tracker, github, orchestrator, claim, git
+updated: 2026-09-19T17:55:06Z
+started: 2026-09-19T14:38:08Z
+execute-elapsed: 11818
+execute-tokens: 617869
 ---
 
 ## Goal
@@ -354,3 +358,184 @@ the merge commit. Then check the second machine case by hand: a claim from anoth
 
 What happened to each Decision; every deviation, numbered, for task-48 to read; the shipped `ClaimState` shape verbatim, which 4b builds runs from;
 and the known trades (a stale claim while the API is down; the dangling claim after a close whose release failed).
+
+## Outcome
+
+2026-09-19. Phase 4a landed whole: a tracker project can be orchestrated from this machine. The queue comes from `GET /api/items`, the driver claims each
+issue before its worktree exists and publishes the queue item onto that claim, the run pushes, and `stage <n> merged --outcome <file>` closes the issue with
+the session's Outcome as the closing comment. 35 files changed, 1 added (`skills/backlog-orchestrate/tools/api-call.mjs`).
+
+```
+$ pnpm run typecheck
+(clean, no output)
+
+$ pnpm test
+Test Suites: 124 passed, 124 total
+Tests:       2031 passed, 2031 total
+# tests 657
+# pass 657
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run build
+✓ built in 1.08s   (nest build + vite build, exit 0)
+
+$ git diff main -- skills/backlog-orchestrate/tools/orchestrate.mjs | grep '^-' | grep -v '^---' | grep -v '^-\s*//' | grep -v '^-$'
+-const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop]';
+-function itemDoneWhenCommands(cwd, itemId) {
+-  const found = findItemFilePath(cwd, itemId);
+-  if (!found) return [];
+-  const { body } = readItemForGate(found.path);
+-function resolveVerifyCommands(cwd, itemId) {
+-  for (const cmd of [...base, ...itemDoneWhenCommands(cwd, itemId)]) {
+-  findQueueItem(readRun(dir), itemId);
+-  const commands = resolveVerifyCommands(cwd, itemId);
+```
+
+That is the whole of what this branch removed from `orchestrate.mjs` outside comments, and **none of it is a files-mode behaviour change**: a usage STRING that
+grew a flag, two signatures that gained a defaulted parameter (`snapshotPath = null` takes the byte-identical branch every files caller already took), and one
+`readRun` hoisted into a named local so `cmdVerify` can ask the project's source. The queue's hoist-and-cap tail moved verbatim into `orderGatedQueue`, shared
+with the tracker path. O-1 is the standing proof of the whole claim — `init` plus a four-stage sequence on a files fixture with `BM_API_PORT` pointed at a
+CLOSED port, exit `0` at every step — and it is a closed port rather than a request count on purpose: a count only sees the calls a test happens to drive.
+
+Contract sweep: 14 sites updated (CLAUDE.md, docs/subsystems/{invariants,api,board,skills}.md, docs/overview.md,
+docs/superpowers/specs/2026-09-17-tracker-backed-backlog-design.md, .claude/rules/{orchestrator,tracker,items}.md,
+server/src/{agents/agents.service,items/items.service,items/items-write.controller,items/sources/source,items/sources/github.source}.ts, shared/{types,agent}.ts,
+client/src/lib/tracker.ts, skills/backlog-orchestrate/SKILL.md, skills/backlog/tools/backlog.test.mjs)
+Red proof: 26 tests went red with the change reverted
+
+The two sweep findings worth naming, because both were statements of a rule this branch inverted and both sat in files the diff would not otherwise have
+touched:
+
+- **`skills/backlog-orchestrate/SKILL.md`'s Hard limits said "never pushes at all."** Now split: never force-pushes and never rewrites history (unchanged),
+  never pushes a FILES project (unchanged), and a tracker project is the one exception, named as exactly three commands.
+- **`shared/types.ts` said `run` and `state` "are carried opaque here."** Half of that became false the moment the server began branching on `run.runId`. The
+  asymmetry is now stated as the rule rather than left as an inconsistency: a field a decision depends on cannot stay an opaque blob, and `state` — which
+  nothing in this build reads — still is one.
+
+One deliberate non-edit: `docs/superpowers/specs/2026-09-19-tracker-phase3-write-back-verification.md` names `projectIsFiles` and the phase-4 refusal and was
+left exactly as it is. It is the record of a live verification performed on 2026-09-18, and what it says was true then; rewriting it would falsify a transcript
+to keep a name current.
+
+The red proof reverted twenty-six production changes one at a time and ran the pinning case each time, restoring from a file copy (never `git stash` — the
+stack is shared with every other worktree of this repo). All twenty-six went red: the mapper's `runnerFix`, `queueItemIs`'s tracker clause, the same-run
+takeover, `patchBody`'s label move, `claimRunOf`'s field validation, `resolveTrackerIds`, the board's Orchestrate gate, `backlog.mjs`'s `--runner-fix` on
+`new` and its both-flags refusal, the tracker branch in `buildGatedQueue`, the `preflight` claim, the state heartbeat, the heartbeat's best-effort posture,
+`--outcome` required for `merged`, `--outcome` refused in files mode, the counters-before-close ordering, the close being fatal, the terminal release, the
+null-skip in the billing arithmetic, `snapshot`'s files refusal, `verify` reading the snapshot, `init`'s pull, exit `8`, the no-fallback-to-files refusal, and
+`api-call.mjs`'s exit `5`. Two are worth naming because the first revert I tried was too coarse: `claimRunOf` had to be reverted one FIELD at a time (an early
+`return raw as ClaimRun` made the file fail to compile, which is not a red test), and the billing arithmetic had to be reverted at the `Number.isFinite`
+guards rather than at the read-failure branch, or the case would have gone red for the wrong reason.
+
+### The seven design calls, and what happened to each
+
+All seven shipped as settled on 2026-09-19. Nothing was renegotiated.
+
+1. **Split 4a/4b** — as specified. task-48 is planned only after this merges, which is why §7.3 landed nothing here.
+2. **The driver owns the claim** — as specified. It claims at `stage <n> preflight`, releases at a terminal stage, and `backlog-execute`'s SKILL.md grew a
+   fifth marker rule forbidding `start`/`stop`/`heartbeat`/`move`/`comment` on a tracker item inside a run.
+3. **`orchestrate.mjs` stays synchronous** — as specified, and the mechanism is worth stating: `api-call.mjs` is a CHILD process run with `spawnSync` and
+   reaped before the parent's call returns, so the parent's "nothing holds the event loop open" guarantee stays true by construction rather than by argument.
+4. **A run pushes, tracker projects only; push then close; a rejected or denied push parks** — as specified.
+5. **`runner-fix` becomes a label the gate reads; `BacklogItem.runnerFix` is set by the tracker mapper only** — as specified, and it is `true | absent`, never
+   `false`, so every files payload is byte-identical.
+6. **Inside a run a tracker item's id is its bare issue number** — as specified, and the server normalises to it too (see deviation 3).
+7. **A resumed driver takes over a claim carrying its own `runId`** — as specified, in `GithubSource.claim`'s existing serialised block.
+
+### The seven Decisions the plan took, and what happened to each
+
+1. **`phase: 'execute'`** — as specified. A run is execution and the counters it bills are the execute pair.
+2. **`run` is a first-class `ClaimRecord.run`, with `base` joining §7.1's list** — as specified, and `run` was TYPED rather than left `unknown`. That was not
+   in the plan and follows from the decision: the server reads `run.runId` to decide a takeover, and a field a decision depends on cannot stay opaque.
+3. **Close at `stage merged`, not at the merge** — as specified.
+4. **The outcome file lives in the run-state directory** — as specified. §6's `git add -A` is the reason, and it is stated in both SKILL.mds.
+5. **The reviewer gets a snapshot file** — as specified. `agents/backlog-reviewer.md` gained the sentence; `itemDoneWhenCommands` reads the same file.
+6. **A failed state heartbeat never fails a command** — as specified, and extended to the release for the same reason. The CLOSE is the one exception and it
+   is exit `9`.
+7. **Attention stays in `run.json`** — as specified. Comment-borne attention is task-48's.
+
+### Nine deviations this branch took, for task-48 to read
+
+1. **`apiCall` answers `status: null` for every non-2xx, rather than the real status.** The helper prints the status to stderr for a person and hands the BODY
+   to stdout, and every branch in `orchestrate.mjs` that cares reads the body's own `error` or `holder`. A parsed-out copy of the number would have been a
+   second decoding of a fact the body already carries. **A 409 is told from every other refusal by the presence of `holder`, never by parsing a sentence** —
+   that is the discriminator 4b should use too if it grows one.
+2. **`init`'s pull runs in the tree that HOLDS `<base>`, not "the main tree"** (spec §7.5's wording). Those are the same directory only while the base is
+   `main`; on a `--base` run a `pull` typed in the project root fast-forwards the wrong branch. It is skipped outright when no tree holds the base and when the
+   project has no `origin` — two absences rather than two tolerances, and each is a state where there is genuinely nothing to pull.
+3. **The SERVER normalises tracker ids to bare digits, which the plan did not ask for in so many words.** `resolveTrackerIds` accepts `#31`, the URN and `31`
+   and emits only the last. This is what replaced task-46's "refuse a tracker project outright" as the guarantee behind CLAUDE.md's `#`-never-reaches-a-shell
+   paragraph, and it is the more fragile of the two — a closed door became one `replace`. Anything in 4b that composes a prompt should re-read that paragraph.
+4. **A resumed driver does NOT start a contested item over** (spec §7.6 says a takeover "starts the item over"). The item goes to `skipped` and its worktree
+   and branch are left in place and named in the note. The run lost the item, not the work, and deleting a session's output on the strength of somebody else's
+   claim is not a call an unattended run gets to make.
+5. **`needs-answers` does not release the claim.** The plan's terminal list omits it and that is deliberate: the run is waiting on an answer and will come back
+   to the item, which is the same split `RUN_HELD_STAGES` already makes on the client side. 4b's reconciliation should expect a live claim on a
+   `needs-answers` item.
+6. **A failed counters READ sends no `counters` key at all, rather than zeros.** `claimCountersFor` answers `undefined` and `trackerRelease` omits the field,
+   so the route leaves the claim's totals alone. Zeros would have erased every earlier session's work on the item to record the absence of ours — the same
+   distinction `--abandon` already relies on. A SUCCESSFUL read answering `null` is a different thing and is zeros: nobody has ever claimed the item.
+7. **`body.runnerFix` answers the PATCH's `updated_at`, not the label write's.** A label change does move `updated_at` on GitHub, so the stamp this route
+   returns is stale by one write. Left knowingly: it is the stamp of the write the route is about, the CLI prints it and nothing re-uses it, and the next groom
+   re-reads through `show --json` rather than remembering a number. Re-reading here would be a third request for a value nobody holds on to.
+8. **`cmdClaim` prints a fourth key, `reclaimed`, for a tracker project only.** A files run's output line is byte-identical to what it was. 4b reads run state
+   from claims rather than from this line, so the key is for a person watching a resume.
+9. **`snapshot` is tracker-only and exits `1` in files mode**, rather than being a silent no-op. A driver calling it against a files project has misread which
+   loop it is in, and the item file it should be pointing the reviewer at already exists.
+
+### The shipped `ClaimState`, verbatim — what 4b builds runs from
+
+```ts
+export interface ClaimState {
+  stage?: RunStage;
+  stageAt?: Partial<Record<RunStage, string>>;
+  worktree?: string | null;
+  branch?: string | null;
+  sessionId?: string | null;
+  fixLoops?: number;
+  verification?: RunVerification[];
+  usage?: RunSessionUsage[];
+  assumptions?: { question: string; answer: string }[];
+  note?: string | null;
+}
+
+export interface ClaimRun {
+  runId: string;
+  startedAt: string;
+  mergeMode: MergeMode;
+  questionMode: QuestionMode;
+  maxItems: number | null;
+  base: string;
+}
+```
+
+Every field of `ClaimState` is optional, and that is a contract rather than laziness: the object is composed by a tool reading a run file that may predate any
+of them, so a reader across a version gap must degrade to "says less" rather than to a crash. The fields are RESTATED rather than `Pick`ed off `RunQueueItem`
+— a `Pick` would make this shape move whenever the queue item moves, silently, across a boundary that is a published comment on somebody's issue and therefore
+has mixed-version readers by construction. `ClaimRun.mergeMode` is the EFFECTIVE mode, so a reader learns whether the item will be merged rather than what was
+hoped for before a classifier said no.
+
+### The known trades
+
+- **A claim can go stale while the API is down.** Every heartbeat is best-effort, so fifteen minutes of a stopped stack lets the next contestant retire this
+  run's claim as stale. That is the protocol working as designed; the alternative — failing every command that cannot publish — trades a rare lost item for a
+  common stalled run. `run.json` is unaffected and the run continues.
+- **A dangling live claim after a close whose release failed.** `stage merged` closes the issue and then releases; if the release is refused, the issue is done
+  and the claim stays live until it goes stale. One stderr line, no retry, because refusing there would report a finished item as unfinished.
+- **A `runner-fix` label write and the `updatedAt` it does not report** — deviation 7 above.
+- **`GET /api/items` is read whole for one project's queue.** `ItemsService` offers no narrower call, so building a tracker queue costs a cache read per
+  tracker project and a directory scan per files project. On a route that then spawns a headless session, that was not worth a new method.
+
+### Still to be done by a person with a token
+
+The live run in **Done when** was not performed, exactly as task-45's and task-46's Outcomes each recorded for their own — an unattended run cannot authorise
+writes to a real repository, and the second half of the check needs two machines. The hermetic suites stand in: `test/tracker-write.test.ts` drives `claim.run`
+and all three takeover cases against an in-memory GitHub behind a real `GithubClient`, and `orchestrate.test.mjs` spawns the real CLI against a fake API on
+loopback for the whole claim/close/release sequence.
+
+What a person must still do, after merge, push and `pnpm run plugin:sync`, on `futin/test-claude-issues`: two groomed issues, one Orchestrate from the board,
+then check that each issue carries ONE claim comment whose JSON has both `run` and `state`, that it is closed after the push with `Fixes #n` in the merge
+commit, and that the closing comment is the session's Outcome. Then the second-machine case by hand: post a claim carrying a different `runId` and confirm the
+item goes to `skipped` with `claimed elsewhere` and its worktree left in place.

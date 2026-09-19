@@ -541,24 +541,13 @@ export class AgentsService {
       throw new HttpException({ error: gate.reason }, 409);
     }
 
-    /* A tracker project cannot be orchestrated yet (task-46, spec §7 — phase 4).
-       400, here with the environment gates rather than down with `resolveIds`,
-       because it answers the same question they do: may this project be
-       orchestrated AT ALL. Everything past the locks answers "what should the
-       run contain", and this is not that.
-
-       It needs its own gate now, and that is a consequence of the dispatch lift
-       rather than a feature. Until task-46 this case was covered for free by
-       `deriveAction` answering `null` for every tracker item: no item had a next
-       step, so no id could ever be runnable. With the lift every tracker item
-       has one, and without this line `resolveIds` — which scans FILES — would
-       find none of them and 409 each id as "not an open bug or task in this
-       project", which is both wrong and unactionable. The client's half of the
-       same rule is `projectIsFiles` (`client/src/lib/tracker.ts`), which hides
-       the toolbar control; this is the half that refuses a hand-made POST. */
-    if (this.items.isTrackerProject(req.project)) {
-      throw new HttpException({ error: 'orchestrating a tracker project arrives in phase 4' }, 400);
-    }
+    /* task-46's `orchestrating a tracker project arrives in phase 4` refusal
+       stood here, and task-47 is phase 4a: it is gone, and so is the client's
+       half of it (`projectIsFiles`). What replaced it is not a looser gate but
+       a different one, and it lives in `resolveIds` below — which now proves
+       an id against `ItemsService` for a tracker project where it scans files
+       for a files one, and normalises every accepted id to BARE DIGITS before
+       the prompt is composed. Nothing named `#` reaches the prompt. */
 
     // The lock. orchestrate.mjs's own `init` already refuses to start a
     // second run for a project that has a fresh run.json (its on-disk lock,
@@ -670,7 +659,7 @@ export class AgentsService {
     // start at all, and case 8 of the design's server-validation table
     // (task-4-brief.md) pins the lock winning over it, same as it wins over
     // an ids problem.
-    const ids = this.resolveIds(req.project, req.ids);
+    const ids = await this.resolveIds(req.project, req.ids);
     const mergeMode = this.resolveMergeMode(req.mergeMode);
     // Beside resolveMergeMode, after the lock, for the identical reason the
     // comment directly above gives: a malformed `questionMode` is a problem
@@ -1224,7 +1213,7 @@ export class AgentsService {
    * not what an id disagreement means, and nothing here needs to be told
    * apart from the others by a machine.
    */
-  private resolveIds(project: string, ids: unknown): string[] | undefined {
+  private async resolveIds(project: string, ids: unknown): Promise<string[] | undefined> {
     if (ids === undefined || ids === null) return undefined;
     if (!Array.isArray(ids)) {
       throw new HttpException({ error: 'ids must be an array of item ids' }, 400);
@@ -1237,6 +1226,33 @@ export class AgentsService {
       // exists to prevent one layer down.
       throw new HttpException({ error: 'ids must name at least one item — omit ids entirely to run the whole queue' }, 400);
     }
+    /* task-47. A TRACKER project's ids take a different proof and a different
+       spelling, and both differences are here rather than spread over the
+       method:
+
+         * **Shape.** `#31`, this project's own URN and a BARE `31` are all
+           accepted. The first two are `isItemId`'s already; bare digits get
+           their own check, because `isItemId` deliberately does not admit them
+           — `31` on its own is not an item id anywhere else in this app, and
+           widening that predicate to accept one would make every caller of it
+           accept a number.
+         * **Membership.** Proved against `ItemsService`, never `scanProject`:
+           a tracker project has no item files, and the files scan would find
+           nothing and 409 every id.
+         * **Spelling.** Every accepted id is NORMALISED TO BARE DIGITS before
+           it reaches the composition. That is what keeps CLAUDE.md's `#`
+           paragraph true: the orchestrate prompt is the one composition that
+           concatenates caller text, `orchestrate.mjs` reads its argv as
+           tokens, and SKILL.md substitutes those tokens into fenced shell
+           commands where `#` opens a comment. The refusal that used to stop a
+           `#` reaching the prompt is gone; this normalisation is what stands
+           in its place, and it is stronger — nothing is refused for carrying a
+           `#`, it simply never survives to the prompt.
+
+       A files project takes neither branch and is byte-identical to what it
+       was, which O-L3 pins by reusing the existing composition cases. */
+    if (this.items.isTrackerProject(project)) return this.resolveTrackerIds(project, ids);
+
     for (const id of ids) {
       if (!isItemId(id)) {
         // Echoed back truncated and JSON-quoted: a client bug is far easier
@@ -1305,6 +1321,82 @@ export class AgentsService {
       // tool: a second copy of "hoist the runner fix" here would have to
       // re-read every item's frontmatter at `<base>` to know which one that
       // is, and the two copies would drift the first time either rule moved.
+      if (!seen.includes(id)) seen.push(id);
+    }
+    return seen;
+  }
+
+  /**
+   * `resolveIds` for a TRACKER project (task-47) — the same two-check
+   * arrangement (shape, then membership) over a different vocabulary, and one
+   * step the files path does not have: normalisation.
+   *
+   * The three accepted spellings all mean the same issue and all become the
+   * same bare number. `#31` is what a person types and what the board draws;
+   * `gh:owner/repo#31` is what `BacklogItem.path` carries, which is what the
+   * sheet has to hand; `31` is what a run's queue calls it. Accepting all
+   * three and emitting one is the whole job — refusing two of them would push
+   * the translation onto the board, where a second copy of it would drift.
+   *
+   * 400 vs 409 follows exactly the split the files path makes: 400 for a shape
+   * that is not an id at all, 409 for a well-formed id the project disagrees
+   * with. The 409 sentence is the files one, word for word, because it is the
+   * same fact and the caller does the same thing about it.
+   *
+   * Membership comes from `ItemsService.index()` filtered to this project's
+   * registry path — a raw string compare, the deliberately-not-realpath rule
+   * every membership check in this app follows. It is one read of every
+   * registered project rather than a per-project call because the service
+   * offers no narrower one; the cost is a cache read per tracker project and
+   * a directory scan per files project, on a route that then spawns a headless
+   * session.
+   */
+  private async resolveTrackerIds(project: string, ids: unknown[]): Promise<string[]> {
+    const wanted: string[] = [];
+    for (const id of ids) {
+      // Bare digits FIRST, and checked here rather than inside `isItemId`: see
+      // `resolveIds`' own comment for why that predicate must not learn them.
+      const bare = typeof id === 'string' && /^\d+$/.test(id) ? id : null;
+      if (bare !== null) {
+        wanted.push(bare);
+        continue;
+      }
+      if (!isItemId(id)) {
+        const shown = JSON.stringify(typeof id === 'string' ? id.slice(0, 40) : id);
+        throw new HttpException({ error: `ids must all be item ids like #31 — ${shown} is not one` }, 400);
+      }
+      // `#31` and `gh:owner/repo#31` both end in the number, and `isItemId`
+      // has already proved the whole string against an anchored shape — so
+      // taking the digits after the last `#` is reading a value that has been
+      // proved, never parsing an unproved one.
+      const at = (id as string).lastIndexOf('#');
+      const digits = at === -1 ? '' : (id as string).slice(at + 1);
+      if (!/^\d+$/.test(digits)) {
+        // A files-shaped id (`task-3`) in a tracker project — `isItemId`
+        // accepts it and this project has nothing it could name. Its own
+        // sentence rather than the 409 below, because the caller has the wrong
+        // vocabulary rather than the wrong item.
+        throw new HttpException({ error: `${String(id)} is a file id — a tracker project's items are named #<n>` }, 400);
+      }
+      wanted.push(digits);
+    }
+
+    const index = await this.items.index();
+    const runnable = new Set(
+      index.items
+        .filter((it) => it.projectPath === project && it.status === 'open' && (it.section === 'bugs' || it.section === 'tasks'))
+        .map((it) => String(it.id).replace(/^#/, ''))
+    );
+
+    const seen: string[] = [];
+    for (const id of wanted) {
+      if (!runnable.has(id)) {
+        throw new HttpException({ error: `${id} is not an open bug or task in this project` }, 409);
+      }
+      // De-duplicated, first-seen order kept — the files path's rule and its
+      // reasoning verbatim, and it matters more here: three spellings of one
+      // issue collapse to one number, so a selection naming `#31` and
+      // `gh:owner/repo#31` arrives as a duplicate that no caller can see.
       if (!seen.includes(id)) seen.push(id);
     }
     return seen;

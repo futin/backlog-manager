@@ -1,8 +1,8 @@
 # The skills
 
 Six skills under `skills/`, one agent under `agents/`, and three CLIs beneath the skills — two of which do all the writing to items, the registry and the run
-file, and a third that only reads them. This is the plugin's skill root — never duplicated under `.claude/skills/`, which would load the same skills twice and
-drift.
+file, and a third that only reads them — plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's
+skill root — never duplicated under `.claude/skills/`, which would load the same skills twice and drift.
 
 ## Mechanism
 
@@ -24,20 +24,26 @@ from and merges land in. Told to leave branches instead, it stops at a reviewed 
 
 `backlog-execute` never commits and never pushes; `backlog-groom` lands on disk only, so an item has to be committed before an orchestrator run can read it.
 
-### The three CLIs
+### The CLIs
 
 - `skills/backlog/tools/backlog.mjs` — the CLI every skill calls, and the registry's only writer. Since task-45 it also carries `connect github [owner/repo]`,
   which writes a project's committed `backlog/source.json` marker (and, by default, four GitHub issue forms) and touches the registry not at all — the marker is
   the project's, not the machine's. Since task-46 it has **two modes**, chosen by that marker and nothing else (see below).
-- `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer.
+- `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer. Since task-47 it has two modes of its
+  own, chosen by the same committed marker `backlog.mjs` reads (see below).
+- `skills/backlog-orchestrate/tools/api-call.mjs` — one HTTP request and nothing else, run by `orchestrate.mjs` with `spawnSync` (task-47). It exists so the
+  parent can stay synchronous: `fetch` is asynchronous and `orchestrate.mjs`'s entry guard rests on nothing holding the event loop open, so the asynchrony is
+  exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
+  `8` (the stack is down) and `9` (a refusal this command cannot absorb).
 - `skills/backlog-retro/tools/retro.mjs` — `backlog-retro`'s own CLI, and the only writer of `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`). It is the one of
   the three that writes nothing anybody else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by
   recorded lease id, a run's driver transcript (`$BM_CLAUDE_PROJECTS`), and its `record` command writes a sweep, the session's labels and the report beside
   them, once, refusing to overwrite.
 
-None may import another: one skill's `tools/` directory is not on another's path once installed, so a helper two of them need exists twice, on purpose. No
-helper is shared by all three, and the two pairs are different pairs — `backlog.mjs` and `orchestrate.mjs` each carry the linked-worktree discriminator (the
-`commondir` entry in a `gitdir:` target, never "`.git` is a file"), while `orchestrate.mjs` and `retro.mjs` each carry `orchHome()` and `projectDir()`.
+No skill's tools may import another skill's: one skill's `tools/` directory is not on another's path once installed, so a helper two of them need exists
+twice, on purpose. No helper is shared by all of them, and the two pairs are different pairs — `backlog.mjs` and `orchestrate.mjs` each carry the
+linked-worktree discriminator (the `commondir` entry in a `gitdir:` target, never "`.git` is a file"), while `orchestrate.mjs` and `retro.mjs` each carry
+`orchHome()` and `projectDir()`.
 `retro.mjs` has no discriminator at all — it needs no git root, because its subject is every project at once — and `backlog.mjs` has neither path helper,
 because the run-state directory is none of its business. Each copy is pinned by its own tool's suite.
 
@@ -68,18 +74,35 @@ What each verb does differently, and the three that exist only here:
 Ids are `31`, `#31` or this project's own URN, all meaning one issue; a file-shaped id and another repo's URN are each refused with their own sentence. Session
 identity is `CLAUDE_CODE_SESSION_ID`, falling back to `<user>@<host>` — stable across the two processes `start` and `stop` run in.
 
-What all three _do_ share is how they end: `process.exitCode = main(...)`, never `process.exit(main(...))`. Writing to a pipe is asynchronous, so
+What every one of them _does_ share is how it ends: `process.exitCode = main(...)`, never `process.exit(main(...))`. Writing to a pipe is asynchronous, so
 `process.exit()` tears the process down before stdout drains and a `--json` payload is silently cut at exactly 65,536 bytes — while a `> file.json` redirect,
 synchronous on POSIX, stays perfectly fine, which is why the shipped instance (a 442,757-byte `retro.mjs sweep --json` that arrived through `| jq` as 65,536
 bytes and a parse error) survived every hand check. Setting the code instead lets node flush and exit on its own. That is only safe because none of the three
 holds the event loop open: all reads are synchronous `fs`, every child is `spawnSync`, and `orchestrate.mjs watch` sleeps by blocking on `Atomics.wait` rather
-than on a timer. Whoever adds a timer, a server or an async child closes its handle — restoring `process.exit()` would restore the truncation. One rule, three
-files, three comments; `retro.mjs`'s is the long-form copy the other two point at, and `backlog.test.mjs`'s source guard reads all three.
+than on a timer. Whoever adds a timer, a server or an async child closes its handle — restoring `process.exit()` would restore the truncation. One rule, one
+comment per file; `retro.mjs`'s is the long-form copy the others point at, and `backlog.test.mjs`'s source guard reads every one of them.
 
-`backlog.mjs` alone ends `process.exitCode = await main(...)` since task-46, and the rule is untouched by the `await`: it is `process.exit()` that truncates a
-pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. API mode awaits every `fetch` to completion and sends
-`connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for this file and still requires the synchronous one of
-the other two, which hold no asynchronous work at all.
+`backlog.mjs` (task-46) and `api-call.mjs` (task-47) end `process.exitCode = await main(...)`, and the rule is untouched by the `await`: it is
+`process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. Each awaits every
+`fetch` to completion and sends `connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for those two files and
+still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s `CLI_SOURCES` is where
+the list of files lives, never a count in prose.
+
+#### `orchestrate.mjs`'s two modes (task-47, spec §7)
+
+The same marker decides, read per call and cached nowhere. **Files mode is byte for byte what it always was** — no command spawns `api-call.mjs` at all, which
+the suite pins by driving a whole stage sequence with `BM_API_PORT` pointed at a closed port. **`github` mode** changes four things and nothing else:
+
+| Where                | Tracker behaviour                                                                                                                                      |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the queue            | candidates from `GET /api/items` filtered to this project; bodies from `GET /api/items/body`; the UNCHANGED `gateItem` verdicts. No `<base>` read, so no "not committed on `<base>`" skip. `hoisted` reads the `runner-fix` LABEL |
+| ids                  | the BARE issue number (`31`). `--ids` accepts nothing else, naming the shape it wants                                                                 |
+| `init`               | `git pull --ff-only origin <base>` in the tree holding the base, BEFORE the queue is built. A failure refuses the init, nothing written                |
+| the claim            | `stage <n> preflight` claims; every field-changing command heartbeats the state; a terminal stage releases with this run's bill; `stage <n> merged --outcome <file>` closes the issue |
+
+Two commands exist only here: `snapshot <n>` (the issue body plus the session's Outcome, as one file the reviewer and `verify` read) and `stage`'s `--outcome`
+flag, which is required for `merged` in a tracker project and refused in a files one. `docs/subsystems/invariants.md`'s
+"the driver owns a tracker item's claim for the whole item" carries the reasoning.
 
 ### `references/`
 
