@@ -23,6 +23,7 @@ import {
   runClaimBlock,
   EFFORTS,
   MODELS,
+  DEFAULT_MODEL,
   PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
@@ -469,7 +470,7 @@ export class AgentsService {
       // `--effort`. Validated here rather than trusted because the sheet is
       // not the only possible caller; the dashboard would drop a bad value
       // too, but that is its check, not ours.
-      model: pickFrom(req.model, MODELS),
+      model: pickFrom(req.model, MODELS) ?? DEFAULT_MODEL,
       effort: pickFrom(req.effort, EFFORTS),
       // Strictly `=== true`, matching the dashboard's own parse rule for this
       // field: anything else means off.
@@ -740,7 +741,7 @@ export class AgentsService {
       // The ceiling still clamps this down on a stricter dashboard, so this
       // can never widen what a host permits.
       permissionMode: clampMode(req.permissionMode === undefined || req.permissionMode === '' ? 'auto' : req.permissionMode, status.spawnMaxPermission),
-      model: pickFrom(req.model, MODELS),
+      model: pickFrom(req.model, MODELS) ?? DEFAULT_MODEL,
       effort: pickFrom(req.effort, EFFORTS)
       // No `remoteControl`. That flag is what gives a spawned session's
       // AskUserQuestion a channel to a human's phone when it hits a

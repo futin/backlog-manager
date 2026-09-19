@@ -11,6 +11,7 @@ import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, RunStage } from '../shared/types';
+import { DEFAULT_MODEL } from '../shared/agent';
 
 // Same cast every suite reading this fixture makes: it is plain JSON, so TS
 // widens its string fields to `string` rather than the literal unions
@@ -377,16 +378,18 @@ describe('POST /api/agents/dispatch', () => {
      actually leave — rather than on the parsed object, because
      `{ model: undefined }` parses to a missing key too and would hide a
      regression that started sending `"model": null`. */
-  it('sends no model or effort key at all when the sheet left both on default', async () => {
+  it('sends the default model and no effort key when the sheet left both on default', async () => {
     const sent = stubDashboard();
     await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(201);
     const raw = String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body);
-    expect(raw).not.toContain('model');
+    expect(JSON.parse(raw).model).toBe(DEFAULT_MODEL);
     expect(raw).not.toContain('effort');
   });
 
   /* Fail soft, matching the dashboard's own rule for these two fields: a name
-     this build has never heard of costs the flag, not the launch. */
+     this build has never heard of costs the flag, not the launch — and the
+     model then falls to DEFAULT_MODEL rather than to whatever the host CLI
+     defaults to. */
   it('drops an unrecognised model or effort instead of refusing the launch', async () => {
     const sent = stubDashboard();
     await post({
@@ -396,7 +399,7 @@ describe('POST /api/agents/dispatch', () => {
       effort: 'ludicrous'
     }).expect(201);
     const body = JSON.parse(String(sent.find((s) => s.url.endsWith('/api/spawn'))?.init?.body));
-    expect(body.model).toBeUndefined();
+    expect(body.model).toBe(DEFAULT_MODEL);
     expect(body.effort).toBeUndefined();
   });
 

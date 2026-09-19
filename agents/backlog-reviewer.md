@@ -6,6 +6,7 @@ description: >
   backlog/<id>, handing it the worktree, the branch, the item file and a report path. It writes the full report to that path and returns only a verdict plus the
   Critical/Important findings, one line each. Read-only by design: it never fixes, stages or commits anything it finds.
 tools: Read, Grep, Glob, Bash
+model: opus
 ---
 
 <!--

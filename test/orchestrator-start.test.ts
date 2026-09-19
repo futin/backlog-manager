@@ -12,6 +12,7 @@ import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { OrchestratorRun } from '../shared/types';
+import { DEFAULT_MODEL } from '../shared/agent';
 
 // Same translation orchestrator-runs.test.ts (Task 8) already does: the
 // fixture is plain JSON, so TS would otherwise widen its string fields to
@@ -539,10 +540,13 @@ describe('POST /api/agents/orchestrate', () => {
       // floor: an absent field is "no preference", not "a request nobody
       // recognises" — see the permission-mode block below, which pins both
       // halves of that distinction.
-      permissionMode: 'acceptEdits'
-      // model/effort are absent entirely, not merely falsy: JSON.stringify
-      // drops an undefined value outright, which is what proves the flag
-      // never reaches the dashboard's argv at all.
+      permissionMode: 'acceptEdits',
+      // The unrecognised `claude-x` is dropped and the model falls to
+      // DEFAULT_MODEL, not to the host CLI's own default. effort is absent
+      // entirely, not merely falsy: JSON.stringify drops an undefined value
+      // outright, which is what proves the flag never reaches the
+      // dashboard's argv at all.
+      model: DEFAULT_MODEL
     });
   });
 

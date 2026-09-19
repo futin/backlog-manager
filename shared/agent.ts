@@ -172,6 +172,13 @@ export const PERMISSION_LADDER: readonly PermissionMode[] = ['plan', 'acceptEdit
  */
 export const MODELS: readonly string[] = ['opus', 'sonnet', 'haiku', 'fable'];
 
+/**
+ * The model a spawn gets when the caller names none. A bare `claude -p` takes the host CLI's own default, which was Sonnet on this machine — so "no
+ * choice" silently meant a cheaper model than the one the board's runs are meant to use. Applied by `AgentsService` at both spawn sites; the skill's dispatch
+ * lines and the reviewer agent carry the same value literally, since neither can import from here; test/default-model.test.ts holds them to it.
+ */
+export const DEFAULT_MODEL = 'opus';
+
 /** Mirrors the dashboard's EFFORTS. Lowest to highest, for the reader's sake
  *  only — see MODELS on why neither list is clamped against. */
 export const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
