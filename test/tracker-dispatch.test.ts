@@ -16,15 +16,18 @@ import { item, makeProject, makeRegistry } from './helpers/store';
 import type { ClaimRecord } from '../shared/types';
 
 /**
- * The dispatch lift (task-46, Step 8): `plan` and `dispatch` reach a tracker
- * item, and `orchestrate` refuses a tracker project.
+ * The dispatch lift (task-46, Step 8) and the orchestrate lift (task-47, phase
+ * 4a): `plan`, `dispatch` AND `orchestrate` all reach a tracker project.
  *
- * Task-45 made both of those one line — `deriveAction` answered `null` for
- * every tracker item, so there was no dispatch AND no orchestrate. Phase 3
- * split them: a tracker item has exactly the next steps a files item has, and
- * a tracker PROJECT still cannot be orchestrated until phase 4. This suite
- * drives both halves through the real routes, with a files project in the same
- * registry so every case can show the two answering differently.
+ * Task-45 made all three one line — `deriveAction` answered `null` for every
+ * tracker item, so there was no dispatch and no orchestrate. Phase 3 split
+ * them: a tracker item gained the next steps a files item has, and a tracker
+ * PROJECT kept a refusal of its own. Phase 4a removed that refusal too, and
+ * what replaced it is `resolveIds` learning the tracker vocabulary — three
+ * accepted spellings, one emitted, none of them carrying a `#` into the
+ * prompt. This suite drives all of it through the real routes, with a files
+ * project in the same registry so every case can show the two answering
+ * identically where they should.
  *
  * Two fakes, and they are deliberately separate: `GithubClient` gets the
  * in-memory GitHub (`helpers/github.ts`), and the global `fetch` gets the
@@ -233,24 +236,47 @@ describe('dispatch', () => {
 });
 
 describe('orchestrate', () => {
-  /* Phase 4's refusal, and the reason it needs a gate of its own: until the
-     lift this case was covered for free by `deriveAction` answering `null` for
-     every tracker item, so no id could ever be runnable. With the lift,
-     `resolveIds` — which scans FILES — would find none of them and 409 each id
-     as "not an open bug or task in this project", which is both wrong and
-     unactionable. */
-  it('refuses a tracker project with a 400 naming phase 4, before any id check and with no spawn', async () => {
-    const res = await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: trackerPath }).expect(400);
-    expect(res.body.error).toContain('phase 4');
-    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  /* task-47 (phase 4a) removed task-46's `orchestrating a tracker project
+     arrives in phase 4` refusal, and these are what stand in its place. The
+     three cases below are O-L1 to O-L3 of the item's Test cases.
+
+     The interesting property is the LAST assertion of the first case: no `#`
+     anywhere in the composed prompt. `resolveTrackerIds` accepts all three
+     spellings a caller can hold — `#31`, the URN, and the bare number — and
+     emits one, because `orchestrate.mjs` reads its argv as tokens and
+     SKILL.md substitutes those tokens into fenced shell commands where `#`
+     opens a comment. That normalisation is the reason CLAUDE.md's `isItemId`
+     paragraph can still say a `#` never reaches a shell, now that the refusal
+     which used to guarantee it is gone. */
+  const promptOf = (): string => {
+    const call = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url).endsWith('/api/spawn'));
+    return JSON.parse(String((call?.[1] as RequestInit | undefined)?.body ?? '{}')).prompt as string;
+  };
+
+  it('starts a run for a tracker project, naming every id by bare number and no # anywhere', async () => {
+    // #31 is the default issue (a `type:bug`); two more, one a task, so the
+    // three accepted spellings each have a real open item behind them.
+    gh.issue({ number: 32, labels: [{ name: 'type:task' }] });
+    gh.issue({ number: 33, labels: [{ name: 'type:task' }] });
+    await app.get(TrackerPollerService).tick();
+
+    await request(app.getHttpServer())
+      .post('/api/agents/orchestrate')
+      .send({ project: trackerPath, ids: ['#31', `gh:${FAKE_REPO}#32`, '33'] })
+      .expect(201);
+
+    const prompt = promptOf();
+    expect(prompt).toContain('/backlog-orchestrate 31 32 33');
+    expect(prompt).not.toContain('#');
   });
 
-  /* Before the ID check, asserted by handing it ids that are nonsense for this
-     project: the answer must still be the tracker refusal, not a complaint
-     about `task-3`. */
-  it('answers the tracker refusal even when the ids are also wrong', async () => {
-    const res = await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: trackerPath, ids: ['task-3'] }).expect(400);
-    expect(res.body.error).toContain('phase 4');
+  /* The two refusals, split the way the files path splits them: 409 when the
+     request is well-formed and the PROJECT disagrees with it, 400 when it is
+     not an id this project could ever name. */
+  it('409s an id that is not an open bug or task, and 400s a malformed one', async () => {
+    await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: trackerPath, ids: ['#99'] }).expect(409);
+    await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: trackerPath, ids: ['#31; rm'] }).expect(400);
+    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
   });
 
   it('still starts a run for a files project', async () => {

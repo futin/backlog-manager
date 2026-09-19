@@ -69,6 +69,19 @@ record it exists to make.
 
 **Plan the fix** is `body`, above, and nothing else.
 
+**The runner-fix marker is a flag on that one `body` call, and on `new` for a promotion.** Where a files groom adds `runner-fix: true` to the item's own
+frontmatter (see both verdicts below for exactly when that judgement applies — it has not changed), a tracker item carries a `runner-fix` label instead, and
+there is no file to write a line into:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt> --runner-fix
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new tasks "<title>" --body /tmp/task.md --from #<n> --runner-fix
+```
+
+`--no-runner-fix` removes it, for the groom that decides an item no longer repairs the runner. **Passing neither leaves the label exactly as it is** — which
+is what makes a re-groom safe: a body patch that said nothing about the marker would otherwise clear a decision somebody made deliberately. Passing both
+is a usage error, exit `1`, with nothing sent.
+
 **"Already in progress" reads differently here.** The refusal names the holder's session and how long ago its heartbeat was:
 
 - **Stale past 15 minutes** — the protocol retires it for you the moment you claim. The takeover is `start <id> --as groom` alone; do **not** `stop --abandon`

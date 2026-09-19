@@ -308,6 +308,10 @@ tracker project, and that the stack must be running.
 
 ## 7. The orchestrator on a tracker project — phase 4
 
+> **Landed in task-47 (phase 4a), 2026-09-19 — one machine orchestrating.** Phase 4 was split on the user's call: 4a is a run draining a tracker project
+> from one machine, and task-48 (4b) is making that run visible from others. The annotations below record what each subsection actually became; the original
+> text above and beneath them is never rewritten. §7.3 is 4b's whole subject and landed nothing here.
+
 ### 7.1 The claim comment is the item's machine state
 
 One comment per session per item, edited in place: the claim posted at `stage <id> preflight` gains a `state` object holding what `RunQueueItem` holds today —
@@ -321,11 +325,35 @@ and the pushed branch's merge commit closes it whenever a human merges it, throu
 `run.json` is still written, locally, unchanged in shape: the journal of the machine that ran, what the watchdog and retro's transcript lookup read. It is no
 longer what another machine sees.
 
+> **§7.1 — landed, with four deviations.**
+>
+> 1. **`run` is a first-class field (`ClaimRecord.run`), not nested inside `state`** as the prose above puts it. Task-46 had already reserved `run` beside
+>    `state`, and the same-run takeover needs `runId` somewhere the SERVER can read without parsing an opaque blob — a field a decision depends on cannot stay
+>    opaque. `state` is still carried opaque, and the asymmetry is the rule: nothing in 4a reads a field of `state`.
+> 2. **`base` joins the `run` list.** 4b cannot say where a run's work landed without it: the merge commits are on the base branch and in no file this app
+>    keeps. `mergeMode` is the EFFECTIVE one, so a reader learns whether the item will be merged rather than what was hoped for before a classifier said no.
+> 3. **The driver's claim uses `phase: 'execute'`.** `ClaimRecord.phase` has two values and the counters it bills are the execute pair. A run is execution.
+> 4. **Close happens at `stage <n> merged`, not at the merge.** The tool cannot see a push, so the SKILL calls that stage only after the push succeeds and the
+>    close is tied to the stage. `stage <n> merged --outcome <file>` is required in a tracker project and refused in a files one.
+>
+> Two more shapes worth recording because 4b reads them: the state is published by every command that CHANGES an item (`stage`, `usage`, `verify`, `assume`,
+> and `watch`'s tick), and **a failed heartbeat or release is one stderr line and never fails the command** — `run.json` stays the journal of record on the
+> machine that ran, and the claim is a published copy of it. A failed CLOSE is the exception: exit `9`, nothing written.
+
 ### 7.2 The gate
 
 `init` and `plan` read a tracker project's candidates from `GET /api/items` — groomed derived server-side, `runner-fix` read as a label, hoisting unchanged. There
 is no `<base>` read, so the `not committed on main` skip has nothing to skip: the item is not in git. `backlog-groom`'s `Groomed on disk only` line is printed
 for files projects only. A `claim` refusal at `preflight` skips the item with the reason `claimed elsewhere` — a reason inside `skipped`, not a new stage.
+
+> **§7.2 — landed as written, plus one refusal the prose does not name.** Candidates come from `GET /api/items` filtered to the project, bodies from
+> `GET /api/items/body`, and the verdicts come from the UNCHANGED `gateItem`. There is no `<base>` read, so the `not committed on main` skip has nothing to
+> skip; `runner-fix` is read as a label through the new optional `BacklogItem.runnerFix`, set by the tracker mapper alone. A `claim` refusal at `preflight`
+> puts the item at `skipped` with the reason `claimed elsewhere (session <s>, heartbeat <age> ago)` — a note inside `skipped`, not a new stage — and exits `0`.
+>
+> **The refusal: inside a run a tracker item is its BARE issue number (`31`), and `--ids` accepts nothing else.** `#31`, a URN and a files id are each exit `1`
+> naming the shape wanted. `#` opens a comment in every shell SKILL.md's fenced blocks use, and the id is substituted into dozens of them. The server's
+> `resolveIds` therefore normalises all three spellings to bare digits before composing the spawn prompt.
 
 ### 7.3 Runs are derived from claims
 
@@ -339,10 +367,16 @@ ride in every claim redundantly. `finish` edits the run's last-touched claim wit
 so instead of drawing controls that would do nothing. A run whose queue never claimed an item has no comment and is invisible cross-machine; the local journal
 has it.
 
+> **§7.3 — landed nothing. This is task-48's whole subject.** 4a keeps attention entries in `run.json` and the Runs page reading the local run-state
+> directory, exactly as before. What 4a DID settle is the shape 4b builds from: `ClaimRun` and `ClaimState` (`shared/types.ts`), both exported and both read
+> by nothing in this build.
+
 ### 7.4 One executor per item
 
 "One run per project" is what a local file could enforce. Two machines draining one project now take disjoint items: each `preflight` claims, and the loser
 skips. `init`'s exit `4` and the server's `RUN_IN_PROGRESS_CODE` stay as they are — they still guard *this machine* against two of its own runs.
+
+> **§7.4 — landed as written.** Each `preflight` claims and the loser skips; `init`'s exit `4` and the server's `RUN_IN_PROGRESS_CODE` are untouched.
 
 ### 7.5 Push and pull
 
@@ -353,11 +387,31 @@ re-pulls and re-pushes.
 Under branch mode, `branched` also does `git push -u origin backlog/<n>` — a branch left on one machine is invisible to every other, and the claim comment
 records the branch name. This is not the rejected lease design: nothing locks through git and nothing syncs server-side; a session pushes what it merged.
 
+> **§7.5 — landed, with two deviations.**
+>
+> 1. **The pull runs in the tree that HOLDS `<base>`, not "the main tree".** Those are the same directory only while the base is `main`; on a `--base` run they
+>    are not, and a `pull` typed in the wrong one fast-forwards the wrong branch. It is skipped outright when no tree holds the base (there is nothing checked
+>    out to fast-forward) and when the project has no `origin` (there is nothing to pull from). `init`'s pull is a refusal (exit `1`, nothing written); the
+>    per-item one parks the run.
+> 2. **A classifier-denied PUSH parks, and never degrades to branch mode.** The prose above does not cover it, and the existing rule points the wrong way: a
+>    denied MERGE degrades the run because nothing landed, while a denied PUSH follows a merge that HAS landed, so `branched` would be a falsehood written
+>    into the run file and into the summary a person reads afterwards. This is stated in SKILL.md beside the push, and pinned by a prose case.
+
 ### 7.6 Recovery
 
 A resumed driver re-`claim`s each in-flight item before touching it and skips any another live claim now holds — today's driver lease, relocated to the issue.
 A takeover from another machine starts the item over: the dead machine's worktree and branch are unreachable, and its claim is `released: stale` by the winner.
 `reconcile` reads claims for a tracker project where it reads `run.json` for a files one.
+
+> **§7.6 — landed by half, deliberately.** A resumed driver re-claims each in-flight item at `orchestrate.mjs claim`, and the SERVER makes that succeed
+> against its own run's live claim: a live claim carrying the same `run.runId` is dropped from the live set before the lowest-id rule runs, and then released
+> `resumed` rather than deleted, with its counters carried forward. A claim a DIFFERENT run holds moves the item to `skipped`.
+>
+> **The deviation is what happens to the work.** The prose above says a takeover "starts the item over"; 4a does not remove or restart anything — the item's
+> worktree and branch are left in place and named in the note. The run did not lose them, it lost the item, and deleting a session's work on the strength of
+> somebody else's claim is not a call an unattended run gets to make.
+>
+> **`reconcile` still reads `run.json` for a tracker project.** Reading claims is 4b's, alongside §7.3.
 
 ## 8. Import — phase 5
 

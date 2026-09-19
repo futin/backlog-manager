@@ -262,8 +262,22 @@ branch (`main` for a run that asked for nothing else) and `<base tree>` is which
 [the merge happens in whichever tree holds the base](#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made) for why that
 tree has to be found rather than created. It is refused — parked, not forced — unless that tree is first verified to be on `refs/heads/<base>`; a run never
 checks out a branch in a tree it does not own, either. No branch other than the run's base is ever a merge target, and no tree other than the one holding it is
-ever committed to. Force-push, history rewrite, and push
-of any kind stay off the table entirely — publishing to a remote is the user's call, not this skill's, merge commits or otherwise.
+ever committed to. Force-push and history rewrite stay off the table entirely.
+
+**Push is no longer off the table, and the narrowing is exactly one sentence wide (task-47).** For a TRACKER project — and only for one — this skill is also
+the only skill that pushes: `git -C "<base tree>" pull --ff-only origin <base>` before each item's worktree, `git -C "<base tree>" push origin <base>` after
+each merge, and `git push -u origin backlog/<n>` from the item worktree under branch mode. For a files project nothing changed and publishing remains the
+user's call, merge commits or otherwise.
+
+The reason a tracker project is different is not a change of taste: it is that the project is SHARED by definition. Its items are issues every machine reads,
+so a merge that stayed on one laptop would be a run reporting `merged` for work nobody else can see — the same second-source-of-truth failure the whole
+tracker-backed direction exists to remove. That is also why the push sits between the merge and `stage <n> merged`: the tool cannot see a push, so the close
+is tied to the stage, and the driver calls it only once the push has succeeded.
+
+**A rejected push parks and never degrades**, and it is the one place the classifier-denial rule does not apply. A denied MERGE degrades the run to branch mode
+because nothing landed; a denied or rejected PUSH follows a merge that HAS landed, so staging the item `branched` would write a falsehood into the run file and
+into the summary a person reads afterwards. See
+[a classifier denial degrades the run](#a-classifier-denial-degrades-the-run-every-other-merge-failure-parks) for the rule this is the exception to.
 
 ## The merge happens in whichever tree holds the base, and the run removes only the tree it made
 
@@ -1988,7 +2002,7 @@ Board card renders it; it reaches no persisted setting and no run file. A chip o
 committed this yet" is not news — the sheet is the one place where not knowing costs a run slot. Step 2 of the sheet carries no chip either, and that is a
 decision rather than an omission: the flag is a step 1 fact about membership, and step 1 is where the control that acts on it lives.
 
-## All three skill CLIs exit through `process.exitCode`, never `process.exit()`
+## Every skill CLI exits through `process.exitCode`, never `process.exit()`
 
 `process.exit()` in an entry guard is not a neutral way of spelling "return this code". Writing to a **pipe** is asynchronous on POSIX, so `process.exit()`
 tears the process down before stdout has drained and everything past the 64KB pipe buffer is dropped — silently, with a zero exit status and no error anywhere.
@@ -2010,6 +2024,11 @@ What `process.exit()` bought was a forced teardown even if something _were_ hold
   `spawnSync`, reaped before the call returns, and `watch`'s polling sleep is `sleepSync`: an `Atomics.wait` on a throwaway `SharedArrayBuffer`, which _blocks
   the thread_ rather than scheduling a timer. There is no `setTimeout`, no `setInterval`, no `async`/`await`, no server and no stdin read in the file, so
   `watch` and `verify` — the two commands ref-3 flagged — leave no live handle when `main` returns. Neither tool needs an explicit drain.
+- **`api-call.mjs` (task-47) is the fourth file the guard reads, and the reason `orchestrate.mjs` can still say the above.** A tracker project needs `fetch`,
+  which is asynchronous, so the asynchrony is exiled into a CHILD process that `orchestrate.mjs` runs with `spawnSync` and reaps before its own call returns.
+  The parent stays synchronous by construction rather than by argument. The child itself takes the awaited entry shape, on its own safety argument: exactly one
+  `fetch`, awaited to completion, `connection: close`, no timer, no server and no child of its own. The title of this section says "every" rather than "all
+  three" for that reason — the rule was never about a count, and `backlog.test.mjs`'s `CLI_SOURCES` is where the list lives.
 
 So the trade is real but narrow: a future edit that opens a timer, a server or an async child would hang instead of being killed. **The rule for whoever makes
 that edit is to close the handle — not to bring `process.exit()` back**, which would restore the truncation along with it.
@@ -2373,11 +2392,17 @@ came out rather than being loosened: the skills detect a tracker project from it
 the claim protocol gives a tracker item a `started` for `progressBlock` to read, and `ItemsService.find` resolves a URN to the same `BacklogItem` a filesystem
 path resolves to, so `plan` and `dispatch` re-derive the action from exactly the object the board drew its button from.
 
-What did NOT lift with it is the ORCHESTRATOR, and the split is worth stating because the two used to be one line. A tracker project cannot be orchestrated
-until phase 4, so that refusal now needs a gate of its own on each side: `projectIsFiles` (`client/src/lib/tracker.ts`) hides the toolbar control — hidden, not
-disabled, because there is nothing a reader can do to make it appear — and `AgentsService.orchestrate` answers 400 `orchestrating a tracker project arrives in
-phase 4` BEFORE `resolveIds`. That ordering is load-bearing: `resolveIds` scans files, so without the gate it would find none of a tracker project's ids and
-409 each one as "not an open bug or task in this project", which is both wrong and unactionable.
+The ORCHESTRATOR followed one phase later, and the two-phase shape is worth keeping on the record. Task-46 could not lift it with dispatch, so it gave the
+refusal a gate of its own on each side: `projectIsFiles` (`client/src/lib/tracker.ts`) hid the toolbar control, and `AgentsService.orchestrate` answered 400
+`orchestrating a tracker project arrives in phase 4` before `resolveIds` — necessary then because `resolveIds` scanned FILES and would otherwise have found
+none of a tracker project's ids and 409ed each one as "not an open bug or task in this project", which is both wrong and unactionable.
+
+**Task-47 (phase 4a) removed both, and what replaced them is `resolveIds` learning the vocabulary rather than a looser gate.** `projectIsFiles` is deleted (it
+had exactly one job and its own doc comment said so), the 400 is gone, and `AgentsService.resolveTrackerIds` now proves a tracker project's ids against
+`ItemsService` where the files path proves them against a directory scan. It accepts all three spellings a caller can hold — `#31`, this project's own URN, and
+the bare `31` — and **emits exactly one: bare digits, before the prompt is composed.** See "the orchestrate spawn prompt is composed server-side" and
+"`isItemId` accepts three shapes" for why that normalisation is the load-bearing half: the prompt is the one composition that concatenates caller text,
+`orchestrate.mjs` reads its argv as tokens, and SKILL.md substitutes those tokens into fenced shell commands where `#` opens a comment.
 
 **`GET /api/items/uncommitted` answers `known: false`.** "Which item files differ from `main`" is not a question with a wrong answer for a tracker project; it is
 a question with no meaning, and `known: false` is the shape this endpoint already has for that. The Orchestrate sheet's existing `known` gate keeps the chip
@@ -2492,9 +2517,76 @@ nonsense cases the cap exists for — a 500-character blob, a `task-` followed b
 
 `#` is the one shell metacharacter these shapes add, and it is worth saying plainly why that is safe HERE rather than trusting that it happens to be: nothing
 this predicate guards reaches a shell. The dispatch prompt is prose handed to a spawned session over JSON, and the orchestrate prompt — the ONE composition in
-this build that concatenates caller-supplied text — refuses a tracker project outright before `resolveIds` is ever called. If that refusal is ever lifted, this
-paragraph is the first thing to re-check: `orchestrate.mjs` reads its argv as tokens, and a `#` in one would need proving safe against THAT reader, not
-against this one.
+this build that concatenates caller-supplied text — **never carries a `#`, because every accepted id is normalised to bare digits before it is composed**
+(`AgentsService.resolveTrackerIds`, task-47).
+
+**That normalisation replaced a refusal, and the swap is the thing to understand here.** Task-46's guarantee was that a tracker project could not be
+orchestrated at all, so no `#`-bearing id could reach the prompt; task-47 (phase 4a) lifted the refusal and put the normalisation in its place. The
+normalisation is the stronger of the two — nothing is refused for carrying a `#`, it simply never survives to the prompt — but it is also the more fragile,
+because it is one `replace` rather than a closed door. `orchestrate.mjs` reads its argv as tokens and SKILL.md substitutes those tokens into fenced shell
+commands, so anything that weakens or routes around the normalisation needs proving safe against THAT reader, not against this predicate.
+
+## The driver owns a tracker item's claim for the whole item
+
+Task-47, spec §7.1. On a tracker project the orchestrator's driver claims an item's issue at `stage <n> preflight` — **before the worktree exists** — and
+releases it at the item's terminal stage. The dispatched `backlog-execute` session never runs `start`, `stop`, `heartbeat`, `move` or `comment` on the item at
+all, which is the exact opposite of the files arrangement, where execute stamps the item file itself.
+
+**The reason is the worktree.** A files item's marker is a line in a file the execute session has in its own tree. A tracker item's marker is a comment on an
+issue, and the session that would post it lives in a directory with no `run.json`, no run id, and no way to say which run it belongs to — so a claim it posted
+would be indistinguishable from a hand `backlog.mjs start`, and the resumed-driver takeover below could never recognise it. The driver has all three facts.
+
+### What rides on the claim, and what reads it
+
+`ClaimRecord.run` is a `ClaimRun`: `runId`, `startedAt`, `mergeMode` (the EFFECTIVE one — a reader wants to know whether this item will be merged, not what was
+hoped for before a classifier said no), `questionMode`, `maxItems`, `base`. It is on EVERY claim of the run, redundantly, because a run's items are claims on
+different issues and this object is the only thing that groups them: §7.3's cross-machine assembly starts from whichever claim it happens to have.
+
+`ClaimRecord.state` is a `ClaimState` — the `RunQueueItem` fields §7.1 names, written through `heartbeat` by every command that changes one (`stage`, `usage`,
+`verify`, `assume`, and `watch`'s tick). It is declared in `shared/types.ts` and typed nowhere else: the fields are restated rather than `Pick`ed off
+`RunQueueItem`, because this shape crosses a boundary with mixed-version readers by construction and what crosses it has to be a decision rather than a
+consequence of whatever the queue item grew this week. **Nothing in 4a reads a field of it.** Its first reader is task-48.
+
+`run` is TYPED where `state` stays `unknown`, and the asymmetry is the rule rather than an inconsistency: the server BRANCHES on `run.runId`, and a field a
+decision depends on cannot stay an opaque blob. `state` is round-tripped verbatim and no predicate in this build touches it.
+
+### The three failure postures, which are deliberately not the same
+
+- **A failed heartbeat is one stderr line and never fails the command.** `run.json` is the journal of record on this machine; the claim's `state` is a
+  published copy. Failing a `stage` call over a copy would cost this machine an item mid-flight for a write nothing local depends on.
+- **A failed release is one stderr line too.** By then the item has reached its terminal stage and, on the `merged` path, the issue is already closed; refusing
+  would report a finished item as unfinished. A dangling live claim goes stale within `CLAIM_STALE_MS`, which is the protocol's own repair.
+- **A failed CLOSE is exit `9`, with the stage NOT written and no release sent.** That one is not a copy — it is the only record anywhere that the item is done
+  — and an item staged `merged` whose issue is still open is an issue nobody ever closes, because the run has moved on and no later command looks back.
+
+**The known trade:** an API down for fifteen minutes lets a claim go stale, and the next contestant retires it. That is the protocol working as designed, and
+the alternative (failing every command that cannot publish) trades a rare lost item for a common stalled run.
+
+### Same-run takeover, and the three things it is not
+
+A resumed driver re-claims each in-flight item at `claim`, and the claim it is contesting is ITS OWN RUN'S — posted by the session that crashed, still live
+because it was heartbeating minutes ago, still holding the lowest comment id. Under the plain protocol the resume loses every item to a process that no longer
+exists, once per item, for fifteen minutes each.
+
+So `GithubSource.claim` drops from the live set every live claim whose `record.run?.runId` equals the request's, and the lowest-id rule then decides among the
+rest — which is the question that actually matters: has another RUN taken this item? A dropped claim is then `released: { reason: 'resumed' }`, never deleted,
+and its counters are carried forward by the ordinary seed. Three things this is not:
+
+- it never drops the caller's own comment, which carries the same `runId` and would otherwise take itself out of the race;
+- it never matches a claim with **no `run`** — a hand `backlog.mjs start` is somebody working the item at a terminal, and a run has no standing to evict them;
+- it never deletes. The only thing this protocol ever deletes is a loser's own comment, seconds after posting it.
+
+### Ids, and the outcome file
+
+**Inside a run a tracker item is its bare issue number** (`31`), where the board and a person both say `#31`. `#` opens a comment in every shell SKILL.md's
+fenced blocks use, and the id is substituted into dozens of them. `queueItemIs` (`shared/agent.ts`) is the one place the two spellings are reconciled, gated on
+`item.source === 'github'` rather than on how the id is spelled — the question is which STORE the queue entry belongs to.
+
+**The session's `## Outcome` goes to `<dir>/outcomes/<n>.md`**, an absolute path the dispatch marker names, created empty by the driver. Under the run-state
+directory and never in the worktree, because §6 stages the worktree with `add -A` and an Outcome written there would be committed into the project's history.
+`orchestrate.mjs snapshot <n>` then writes `<dir>/items/<n>.md` — the issue body, `## Outcome`, that file — which is what the reviewer is handed where a files
+run hands the item file, and what `verify` reads `## Done when` out of. Both directories ride the existing archive mover with no change to it: it is a denylist
+of two (`run.json`, `runs/`), which is exactly the property that makes a new sidecar directory free.
 
 ## `backlog.mjs` in a tracker project needs the stack up
 

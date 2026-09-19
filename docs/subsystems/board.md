@@ -239,10 +239,13 @@ skills against a project with no files; phase 3 made that false — the skills w
 and a tracker card gets the same chip on the same rules. The per-item block that stops a CLAIMED item is the ordinary one: `progressBlock` reads the `started`
 the mapper fills from a live claim, with no tracker-specific branch anywhere, and disables the control with its usual sentence.
 
-What is still hidden is the toolbar's **Orchestrate** control, which `projectIsFiles` (`lib/tracker.ts`) keeps off a tracker project until phase 4 — hidden
-rather than disabled, because there is nothing a reader could do to make it appear. It is a fifth condition beside the four `showOrchestrate` already had, and
-it needs to be one only BECAUSE of the lift: the two rules rode on `deriveAction`'s removed first line and are now stated once each, here and in
-`AgentsService.orchestrate`.
+**The toolbar's Orchestrate control is drawn for a tracker project too, since task-47 (phase 4a).** Task-46 kept it off with a fifth condition,
+`projectIsFiles` (`lib/tracker.ts`), because a tracker project could not then be orchestrated at all; phase 4a made it orchestratable, so that predicate is
+DELETED — it had exactly one job and its own doc comment said so — and `showOrchestrate` is back to the four conditions it had before phase 3. The server's
+matching refusal went at the same time; the two were always one rule stated twice.
+
+The sheet needed no change to follow: its `uncommitted` column already renders nothing when the endpoint answers `known: false`, which is what
+`GET /api/items/uncommitted` answers for a project whose items are issues.
 
 ## Interfaces
 

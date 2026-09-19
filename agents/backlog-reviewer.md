@@ -63,6 +63,11 @@ Five fields, always, in the prompt that spawned you:
   beyond `main` — other items, possibly weeks of them — and you would review a change set this item's author never wrote.
 - **`item file path`** — absolute path of the item's markdown file _inside that worktree_. Expect it under `backlog/<section>/done/`, not `open/`: execute
   archives the item inside the session, so the move is part of the diff you are reviewing.
+
+  **In a tracker project this is a SNAPSHOT under the run-state directory, not a file under `backlog/`** — `<dir>/items/<n>.md`, written by
+  `orchestrate.mjs snapshot`. The item is a GitHub issue there and the repository holds no copy of it, so the run writes the issue's body plus the session's
+  `## Outcome` to one file and hands you that. Read it exactly as you would the real thing; what changes is only that **no lifecycle move is in the diff**, so
+  its absence is not a finding.
 - **`report path`** — absolute path to write your full report to. It is inside the run's state directory under `~/.backlog-manager/orchestrator/`, deliberately
   outside the repo, so your report never becomes part of the diff it describes and never rides the merge into the base.
 

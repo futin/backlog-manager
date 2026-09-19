@@ -186,19 +186,19 @@ describe('dispatch on a tracker project', () => {
     expect(button).toHaveAttribute('aria-disabled', 'true');
   });
 
-  /* The orchestrator half, which did NOT lift. Hidden rather than disabled:
-     there is nothing a reader could do to make it appear before phase 4, so a
-     disabled button with a reason would invite waiting for something that is
-     not coming. Both directions in one case, because a change that hid the
-     control for everybody would pass either half alone. */
-  it('hides the Orchestrate control for a tracker project and keeps it for a files one', async () => {
+  /* The orchestrator half, which did NOT lift in task-46 and DID in task-47
+     (phase 4a): `projectIsFiles` is gone, and the control is now drawn for a
+     tracker project on exactly the four conditions it is drawn for a files
+     one. Both directions in one case, because a change that drew the control
+     for nobody would pass either half alone. */
+  it('draws the Orchestrate control for a tracker project as well as a files one', async () => {
     await renderBoard([item({}), issueItem()]);
 
     await userEvent.selectOptions(screen.getByLabelText('Project'), FILES_PATH);
     expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText('Project'), TRACKER_PATH);
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Orchestrate' })).toBeInTheDocument());
   });
 });
 

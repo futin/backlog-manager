@@ -109,12 +109,13 @@ export function deriveAction(item: BacklogItem): AgentAction | null {
   // the next steps a files item has, derived from exactly the same three facts
   // below.
   //
-  // What did NOT come back with the lift is the orchestrator: a tracker project
-  // cannot be orchestrated until phase 4, and that refusal has its own gate
-  // (`projectIsFiles` on the client, a check in `AgentsService.orchestrate` on
-  // the server) rather than riding on this function. The two were one line
-  // while `deriveAction` answered `null` for every tracker item; they are two
-  // rules and they are now stated twice, once each.
+  // The orchestrator followed one phase later (task-47, phase 4a) and this
+  // function is untouched by that too: `projectIsFiles` and
+  // `AgentsService.orchestrate`'s own refusal are both gone, and what replaced
+  // them is `resolveIds` learning the tracker vocabulary. So the historical
+  // note worth keeping is only this — a rule about a PROJECT never belonged on
+  // a function that is handed an ITEM, which is why task-46 stated it twice
+  // rather than restoring the line that had done both jobs at once.
   if (item.section === 'out-of-scope') return 'capture';
   if (item.status !== 'open') return null;
   if (item.section === 'ideas') return 'groom';
@@ -466,10 +467,46 @@ function runEntryAt(item: BacklogItem, runs: OrchestratorRunsPayload['runs'], st
     // the display name: two checkouts of one repo share a name and never a
     // path, and only the path is what the run itself reports.
     if (!run.fresh || run.project !== item.projectPath) continue;
-    const found = run.queue.find((q) => q.id === item.id && stages.includes(q.stage));
+    const found = run.queue.find((q) => queueItemIs(q.id, item) && stages.includes(q.stage));
     if (found !== undefined) return found;
   }
   return null;
+}
+
+/**
+ * Does this run-queue entry name this item?
+ *
+ * One function, and it exists because a tracker run's queue does NOT hold the
+ * item's id (task-47). Inside a run a tracker item is its BARE issue number —
+ * `31`, never `#31` — because the id travels through `orchestrate.mjs`'s argv
+ * and into SKILL.md's fenced shell commands, where `#` opens a comment and
+ * swallows the rest of the line. `BacklogItem.id` for the same issue is `#31`,
+ * because that is what a person types and what the board draws. The two
+ * spellings are both right for their own side, and this is the one place they
+ * are reconciled.
+ *
+ * Identity first, and it is not a shortcut for the tracker case either: `#31`
+ * === `#31` holds whatever the source is, so a caller that already has the
+ * board's spelling in a queue never depends on the second clause.
+ *
+ * `source === 'github'` gates the second clause rather than "does the id start
+ * with `#`", and that gate is the whole safety of this function. A files store
+ * can never mint `#31` — `backlog.mjs`'s ids are `<prefix>-<n>` — but the
+ * question being asked is which STORE the queue entry belongs to, and letting
+ * a bare `31` match any item whose id happens to be `#31` would be a match
+ * made on a coincidence of spelling rather than on the item's actual source.
+ * That is the same reasoning `runEntryAt`'s project-path compare already
+ * follows one line up: ids are only meaningful inside one store.
+ *
+ * Deliberately NOT the reverse translation (`item.id` → a queue id). Nothing
+ * needs it: every caller holds a queue entry and an item and is asking whether
+ * they are the same thing, and a function that MADE a queue id would be a
+ * second place deciding what a tracker item is called inside a run — which is
+ * `orchestrate.mjs`'s decision, made where the queue is built.
+ */
+export function queueItemIs(queueId: string, item: BacklogItem): boolean {
+  if (queueId === item.id) return true;
+  return item.source === 'github' && `#${queueId}` === item.id;
 }
 
 /**
@@ -594,13 +631,20 @@ const ITEM_ID_MAX = 200;
  * `#` is a shell metacharacter (a comment introducer), so it is worth saying
  * plainly why admitting it is safe HERE rather than trusting that it happens to
  * be: nothing this predicate guards reaches a shell. The dispatch prompt is
- * prose handed to a spawned session over JSON (`composePrompt`), and the
+ * prose handed to a spawned session over JSON (`composePrompt`); and the
  * orchestrate prompt — the one composition that concatenates caller text at all
- * — refuses a tracker project outright before `resolveIds` is ever called
- * (`AgentsService.orchestrate`, task-46 Step 8), so a `#`-bearing id cannot be
- * appended to it. If that refusal is ever lifted, this paragraph is the thing
- * to re-check first: `orchestrate.mjs` reads its argv as tokens, and a `#` in
- * one would need proving safe against THAT reader, not against this one.
+ * — **never carries a `#` because every accepted id is normalised to bare
+ * digits before it is composed** (`AgentsService.resolveTrackerIds`, task-47).
+ *
+ * That normalisation REPLACED the refusal this paragraph used to rest on. Until
+ * phase 4a the guarantee was that a tracker project could not be orchestrated
+ * at all, so no `#`-bearing id could reach the prompt; phase 4a lifted the
+ * refusal and put the normalisation in its place, which is the stronger of the
+ * two — nothing is refused for carrying a `#`, it simply never survives to the
+ * prompt. `orchestrate.mjs` reads its argv as tokens and SKILL.md substitutes
+ * those tokens into fenced shell commands, so anything that weakened the
+ * normalisation would need proving safe against THAT reader, not against this
+ * one.
  *
  * Takes `unknown` for the same reason `pickFrom` does: the server is
  * narrowing a body it cannot trust, so the type guard is the point rather

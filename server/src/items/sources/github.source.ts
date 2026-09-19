@@ -354,6 +354,13 @@ export class GithubSource implements ItemSource, ItemWriter {
 
       const at = new Date().toISOString();
       const record: ClaimRecord = { v: 1, session: req.session, phase: req.phase, at, heartbeat: at, counters: { ...seed } };
+      // `run` only when the caller sent one, never `run: undefined`: this
+      // record is `JSON.stringify`d into a comment body, so an undefined key
+      // would vanish there anyway — but it would be PRESENT on the object the
+      // response carries, and `'run' in record` is how a reader tells a skill
+      // claim from a run's. Keeping the two spellings identical means the
+      // comment and the response say the same thing.
+      if (req.run !== undefined) record.run = req.run;
       const posted = await this.client.createComment(repo, number, renderClaim(record), { token });
       if (posted.status !== 201 || posted.data === null) return { ok: false as const, refusal: refusalFor(posted) };
       const mine = posted.data;
@@ -385,7 +392,39 @@ export class GithubSource implements ItemSource, ItemWriter {
 
       const now = Date.now();
       const all = [...union.values()];
-      const held = winner(liveClaims(all, now));
+      const live = liveClaims(all, now);
+
+      /* **Same-run takeover** (task-47). A resumed driver re-claims every
+         in-flight item before it touches one, and the claim it is contesting
+         is ITS OWN RUN'S — posted by the session that crashed, still live
+         because it was heartbeating minutes ago, and holding the lowest id.
+         Under the plain protocol the resumed session loses to a session that
+         no longer exists, and the item is unreachable until the claim goes
+         stale fifteen minutes later — once per item, on every resume.
+
+         So a live claim carrying THIS REQUEST'S `runId` is not a contestant:
+         it is this run's previous session, which is gone by definition (only
+         one driver holds a run's lease at a time — `orchestrate.mjs`'s exit
+         `7`, the layer above this one). Dropping it from the live set lets the
+         lowest-id rule decide among everything else, which is exactly the
+         question that matters: has another RUN taken the item meanwhile?
+
+         Three things this deliberately does not do:
+
+           * It never drops OUR OWN comment (`mine.id`), which carries the same
+             `runId` and would otherwise take itself out of the race.
+           * It never matches a claim with no `run` — a hand `backlog.mjs
+             start` is somebody working the item at a terminal, and a run has
+             no standing to evict them.
+           * It never DELETES. The dropped claim is released below, with the
+             counters it accumulated intact, because it is the permanent record
+             of work that session actually did. */
+      const sameRun =
+        req.run === undefined
+          ? []
+          : live.filter((c) => c.commentId !== mine.id && typeof c.record.run?.runId === 'string' && c.record.run.runId === req.run?.runId);
+      const sameRunIds = new Set(sameRun.map((c) => c.commentId));
+      const held = winner(live.filter((c) => !sameRunIds.has(c.commentId)));
 
       if (held === null || held.commentId !== mine.id) {
         // Lost. Our comment is deleted — the ONE thing this protocol ever
@@ -434,6 +473,28 @@ export class GithubSource implements ItemSource, ItemWriter {
         if (isLive(other.record, now)) continue;
         const retired: ClaimRecord = { ...other.record, released: { at: new Date().toISOString(), reason: 'stale', by: req.session } };
         const edited = await this.client.updateComment(repo, other.commentId, renderClaim(retired), { token });
+        if (edited.status === 200 && edited.data !== null) this.poller.absorbComment(repo, edited.data);
+      }
+
+      /* The same-run claims this call stepped over (task-47), released rather
+         than left live — a run that has taken the item back must not leave a
+         second live claim of its own on the issue, or the NEXT contestant
+         reads two live holders and `winner` hands the item to a session that
+         is not driving it.
+
+         `reason: 'resumed'`, distinct from `'stale'` directly above, and the
+         distinction is the record rather than the mechanism: a stale claim is
+         one nobody came back for, and this one is one whose own run came back.
+         Both keep their counters, and neither is ever deleted.
+
+         A failed edit is swallowed for the same reason the stale loop's is —
+         by this point the claim is WON and reporting a failure would report a
+         claim that happened as one that did not. The leftover then goes stale
+         on its own within `CLAIM_STALE_MS`, which is the protocol's own repair
+         for exactly this shape. */
+      for (const other of sameRun) {
+        const resumed: ClaimRecord = { ...other.record, released: { at: new Date().toISOString(), reason: 'resumed', by: req.session } };
+        const edited = await this.client.updateComment(repo, other.commentId, renderClaim(resumed), { token });
         if (edited.status === 200 && edited.data !== null) this.poller.absorbComment(repo, edited.data);
       }
 
@@ -507,7 +568,7 @@ export class GithubSource implements ItemSource, ItemWriter {
       if (existing.released !== undefined) {
         return { refused: 'conflict', error: `claim ${req.commentId} on #${number} is released — nothing to heartbeat` };
       }
-      // `state` is phase 4's and is written verbatim when given, left exactly
+      // `state` is the driver's and is written verbatim when given, left exactly
       // as it was when not — an old build heartbeating a record a newer one
       // wrote must not erase it.
       return req.state === undefined
@@ -552,6 +613,39 @@ export class GithubSource implements ItemSource, ItemWriter {
       const patched = await this.client.updateIssue(repo, number, { body: req.body }, { token });
       if (patched.status !== 200 || patched.data === null) return { ok: false as const, refusal: refusalFor(patched) };
       this.poller.absorbIssue(repo, patched.data);
+
+      /* The `runner-fix` marker, moved by the same call (task-47) — after the
+         body patch, never before it, so a failed patch leaves the label
+         exactly as it was. The reverse order would relabel an issue whose
+         text never changed.
+
+         AFTER the concurrency check too, and that is the real reason this
+         rides `body` at all: the marker is a groom's judgement about the plan
+         it just wrote, and a caller that lost the `ifUpdatedAt` race has not
+         written that plan. Its opinion about the label is as stale as its
+         body was.
+
+         Neither result is checked, and each for its own reason. A 404 from
+         `removeLabel` means the label was not there, which IS this caller's
+         contract ("`runner-fix` is not on the issue") — the same reasoning
+         `release` spells out at length for `in-progress`. `addLabels` is
+         idempotent on GitHub's side, so calling it on an issue that already
+         carries the label is a 200 and not an error to absorb. And for both:
+         the body is already patched, so failing here would report a patch
+         that happened as one that did not, and the caller's retry would hit
+         the `ifUpdatedAt` check against the stamp it no longer holds.
+
+         The `updatedAt` answered below is therefore the PATCH's stamp, not the
+         label change's, and a label write does move `updated_at` on GitHub.
+         Left that way knowingly: it is the stamp of the write this route is
+         about, the CLI prints it and nothing re-uses it, and the next groom
+         re-reads the issue through `show --json` rather than remembering a
+         number from a previous session. Re-reading the issue here to report a
+         fresher stamp would be a third request for a value nobody holds on
+         to. */
+      if (req.runnerFix === true) await this.client.addLabels(repo, number, ['runner-fix'], { token });
+      else if (req.runnerFix === false) await this.client.removeLabel(repo, number, 'runner-fix', { token });
+
       return { ok: true as const, value: { id: `#${number}`, updatedAt: patched.data.updated_at } };
     });
   }

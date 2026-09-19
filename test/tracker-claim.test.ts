@@ -46,14 +46,15 @@ describe('renderClaim / parseClaim', () => {
     expect(parseClaim(comment({ body: renderClaim(r) }))).toEqual(r);
   });
 
-  /* `released`, `run` and `state` together, because the last two are phase 4's
-     and are carried opaque — a reader of this version has to hand them back
-     byte-identical or a mixed-version pair of machines loses phase 4's state on
-     the first heartbeat an old build writes. */
-  it('round-trips a released record carrying phase 4-s opaque fields', () => {
+  /* `released`, `run` and `state` together. `run` became a declared shape in
+     task-47 (the server branches on its `runId`); `state` is still carried
+     opaque, and the round-trip is what a mixed-version pair of machines rests
+     on — a reader of this version has to hand `state` back byte-identical or
+     an old build writing one heartbeat erases a newer build's item state. */
+  it('round-trips a released record carrying a run and phase 4-s opaque state', () => {
     const r = record({
       released: { at: '2026-09-18T12:01:00.000Z', reason: 'stopped', by: 'A' },
-      run: { runId: 'run-1', stage: 'merging' },
+      run: { runId: 'run-1', startedAt: '2026-09-18T11:00:00Z', mergeMode: 'merge', questionMode: 'park', maxItems: null, base: 'main' },
       state: ['anything', 7, null]
     });
     expect(parseClaim(comment({ body: renderClaim(r) }))).toEqual(r);

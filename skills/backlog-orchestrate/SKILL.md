@@ -77,6 +77,8 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `5`  | `verify` only: nothing resolvable to verify with                                                                                                                                                                                                                                   |
 | `6`  | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; go to §10, _Pausing_                                                                                                                                         |
 | `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ |
+| `8`  | **tracker projects only** — the backlog-manager API is not running. **Nothing is written.** Start the stack (`pnpm run dev` or `pnpm run docker:up`) and retry the same command; a files project can never see this code                                              |
+| `9`  | **tracker projects only** — an API refusal this command could not absorb (no token, a 502 from GitHub, a 400 naming a field). **Nothing is written.** Not a call to fix and retry: park the item with the server's own sentence in the detail                         |
 
 `6` and `7` are the two codes whose reaction is neither a fix nor a retry, which is exactly why neither is a `1`. A `1` means "this call was wrong". A `6` means
 "this call was right and the run is being asked to stop": never retry it, never work around it, go to §10. A `7` means "this call was right and this session is
@@ -87,6 +89,24 @@ resume opens with.
 
 That `3` carries two meanings for `watch` deliberately: "no run yet" and "still running, call me again" are the same shape of retry from here. And unlike
 `backlog.mjs`, this tool has no exit `2` — running it outside a git repository is a `1` whose message says `no .git found`.
+
+## In a tracker project
+
+A project whose committed `backlog/source.json` says `github` has **no item files**: its items are GitHub issues, and the run reads and writes them through the
+backlog-manager API on this machine. **Every step of this file is otherwise unchanged** — the gate, the questions hunt, the worktree, the dispatch, the review,
+the verification and the merge are all the same work, and the paragraphs that describe them are the ones to follow.
+
+What differs is gathered here, and each item names the section it belongs to. A files project takes none of it.
+
+- **Ids are bare issue numbers inside a run: `31`, never `#31`.** Every `<id>` placeholder below is that number, in every command and in the dispatch prompt.
+  `#` opens a comment in a shell, and a `#31` substituted into one of these fenced blocks would swallow the rest of the line.
+- **The stack must be up.** Exit `8` from any command means it is not; start it and retry the same call. There is no offline mode on purpose.
+- **The driver holds the item's claim, not the execute session** (§3, §9). The run claims the issue at `stage <n> preflight`, before the worktree exists, and
+  releases it at the item's terminal stage. The dispatched session never runs `start`, `stop`, `move` or `heartbeat` on the item — its SKILL.md says so.
+- **A claim refusal naming another run is a skip, not a failure** (§3). Another machine is draining the same project and got there first.
+- **The session's `## Outcome` goes to a file, and the file becomes the closing comment** (§4, §5, §9).
+- **The reviewer and `verify` read a snapshot** (§5, §7) — `orchestrate.mjs snapshot <n>`, which writes the issue's body plus that Outcome to one file.
+- **The run pushes** (§9). Pull before each item's worktree, push after each merge, close the issue only once the push succeeded.
 
 ## 1. Preview the queue — `plan` first, always
 
@@ -345,6 +365,16 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 **Exit `6`** — the board asked this run to pause. Do not pre-flight the item, do not create anything: go straight to §10, _Pausing_. Nothing was written, the
 item is still `pending`, and a resumed run picks it up from here as if this turn had never happened.
 
+**In a tracker project that same call is where the run takes the issue** — it posts the claim comment that stops a second machine working this item, before a
+worktree exists and before anything is spent on it. Three outcomes, and the tool prints which:
+
+- **`{"id":"<n>","stage":"preflight"}`** — the run holds it. Carry on.
+- **`{"id":"<n>","stage":"skipped","note":"claimed elsewhere …"}`**, exit `0` — another run holds it. **This is information, not a failure**: another machine is
+  draining the same project and reached this item first. Do not retry, do not create a worktree, do not park. Move to the next item.
+- **exit `9`** — the claim was refused for some other reason (no token, a 502 from GitHub). Nothing was written and the run cannot know whether it holds the
+  item, so it must not proceed: `attention <n> --kind parked --detail "the claim for this item was refused — <what the API refused, your
+  words>"`, `stage <n> parked`, and continue with the next item.
+
 ### Hunt for open questions
 
 Read the item file in the **main tree** (read-only — no worktree exists yet) and look for what would stop a headless session cold: a `TBD`, an unresolved
@@ -428,6 +458,28 @@ archives it. Amending inside the worktree instead means the answer rides the bra
 makes. So: hunt and ask here, write in step 4.
 
 ## 4. The loop — worktree, dispatch, watch
+
+### Pull the base first — tracker projects only
+
+```bash
+git -C "<base tree>" pull --ff-only origin <base>
+```
+
+**Before every item's worktree, not once per run.** A tracker project is shared by definition, and another machine draining the same queue pushes its merges to
+the same base; an item cut from a stale base is verified against a commit nobody else's base matches, and its own push is rejected at the end of the pipeline
+after the whole item has been spent. `<base tree>` is §9's own resolution — the tree that has `<base>` checked out, which on an ordinary `main` run is the
+project root and on a `--base` run is not.
+
+A non-zero exit **parks the run**, because what cannot fast-forward is the branch every remaining item would be cut from:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <n> --kind parked --detail "<base> cannot fast-forward onto origin — another machine pushed something this tree cannot take; resolve it by hand, then resume"
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <n> parked
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
+```
+
+`init` ran the same pull once, before it built the queue, so on the ordinary path this never fires for the first item. It is here because a run lasts hours and
+the other machine does not stop pushing while it does.
 
 ### Create the worktree
 
@@ -521,6 +573,10 @@ its own `.git`-ancestor walk resolves to the worktree and not to the main tree (
 that gate can — and because what it prevents is not a crash but a _silent success_: a session with no item file in its tree finds the main tree's copy, works
 that one, and every stage of the run reports success over a branch carrying code with no lifecycle move on it. (`references/rationale.md`, §4, lists everything
 the probe catches that the gate cannot.)
+
+**Skip this probe entirely in a tracker project.** It asks whether a committed file reached the worktree, and there is no such file — the item is an issue. The
+failure it guards against cannot happen either: a session with no item file in its tree cannot wander off and find the main tree's copy, because no tree has
+one.
 
 Then keep the new directory — and anything this run itself puts in a worktree — out of everybody's `git status`, idempotently:
 
@@ -629,6 +685,21 @@ leaving the problem for this run to find — three message round-trips with the 
 - **Merge mode is deliberately left out.** Nothing the session may do differs between `merge` and `branch` — it never merges either way — and a marker naming
   facts the session cannot act on trains it to skim the ones it must.
 
+**In a tracker project the marker gains one clause, and it is not optional**: `outcome <dir>/outcomes/<n>.md`, an absolute path, immediately before the closing
+`.]`. Create the file empty first — `mkdir -p "<dir>/outcomes" && : > "<dir>/outcomes/<n>.md"` — so the session has somewhere to write and §5 can tell "wrote
+nothing" from "was never given a path".
+
+```
+[orchestrator-run <runId> item <n> of <m> branch backlog/<n> outcome <dir>/outcomes/<n>.md: you are dispatched by …]
+```
+
+That clause is the session's only way to report: a tracker item has no file to append `## Outcome` to, and the session must not write the issue itself — the
+driver holds the claim and the driver closes the issue. `backlog-execute`'s own tracker bullet reads that path out of this marker, so the two files agree on
+one spelling and a test pins it.
+
+The path goes under the run-state directory, never in the worktree. §6 stages the worktree with `add -A`, so an Outcome written there would be committed into
+the project's history — an execute session's report landing as a file on the item's branch, in a repository whose items are issues.
+
 **Prose this run did not compose — reviewer findings, execute's `## Outcome`, a captured error — never rides a shell command line; it goes in a file and the
 command names the file.** This is the general form of the constraint above it, and it is stated separately because the two have different reach: "no
 apostrophes" governs the fixed marker text _this run writes itself_, and can be obeyed by choosing different words, while the words in a fix-loop or retry
@@ -726,6 +797,23 @@ the board shows and exactly what the run strip exists to compensate for.
   record is the most useful thing you have.
 - **Neither** (no `## Outcome` at all, item still open, session gone) → the session died: a crash, a usage cap, a dropped connection.
 
+**In a tracker project there is no item file to look at, and the evidence is `<dir>/outcomes/<n>.md` instead.** The three readings map one for one, and the
+middle two take exactly the branches above:
+
+- **Non-empty, carrying real verification output** → succeeded on its own terms. Continue to Commit.
+- **Non-empty, describing a failure** → execute's own failure path. Same branch as the second reading above.
+- **Empty or absent** → the session died. An empty outcome file is the same evidence an unmoved item file is, and takes the same branch.
+
+Then, in a tracker project only, write the snapshot the reviewer and `verify` both read:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" snapshot <n>
+```
+
+It writes `<dir>/items/<n>.md` — the issue's body, then `## Outcome`, then that outcome file — which is byte for byte what a files run's item file looks like at
+this point in the loop. **Run it again after every fix loop**: the Outcome grows with each one, and a reviewer handed the first loop's snapshot would be reading
+a report that no longer describes the branch.
+
 For both failure shapes, ask the user — best-effort, exactly like pre-flight — which of three they want: **retry**, **skip**, or **stop the run**. Retry resumes
 that item's own session so its context is not paid for twice. **Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first, with the Write tool**,
 and only then launch. §4's rule about prose in a command position covers this text: it quotes execute's failure `## Outcome`, which carries command output
@@ -791,7 +879,8 @@ Dispatch the plugin's own reviewer, `backlog-manager:backlog-reviewer`, with the
 - `base` — this run's base branch (`main` unless `--base` said otherwise). The reviewer takes every diff against it, so handing `main` to a `--base` run would
   have it review that branch's whole divergence instead of this item's work — a much larger diff that still looks legitimate. Both halves of this pair are
   pinned by a test; change neither alone.
-- `item file path` — the item's absolute path _inside the worktree_
+- `item file path` — the item's absolute path _inside the worktree_. **In a tracker project, `<dir>/items/<n>.md`** — the snapshot §5 just wrote, which is the
+  issue's body with the session's `## Outcome` appended. The field is the same field and the reviewer reads it the same way; only the path moves.
 - `report path` — `<dir>/reviews/<id>-1.md` (`-2` on the second loop)
 
 That agent writes its full report to the report path and returns only `verdict: approve` or `verdict: fix` plus its Critical/Important findings, one line each.
@@ -981,6 +1070,17 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
+**In a tracker project, one command comes first** — the branch is pushed before the worktree that holds it is removed:
+
+```bash
+git -C "$PWD/.worktrees/<n>" push -u origin backlog/<n>
+```
+
+A branch left on one machine is invisible to every other, and the whole point of a tracker project is that the work is not on one machine. The issue stays
+**open**: nothing has landed on the base, and the pushed branch's own merge commit closes it whenever a person merges it, through the `Fixes #<n>` below. A
+failed push **parks** the item exactly as a failed merge does — `attention <n> --kind parked` naming git's message, then `stage <n> parked` — and the worktree
+and branch stay where they are.
+
 No `stage <id> merging` — nothing is merging. No base tree to resolve, no `symbolic-ref` precondition and no dirty-path probe: all three exist to protect a
 write to the tree holding the base, and there is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy of this item's work anywhere. `remove` stays plain and never `--force`; if
 it does not exit `0`, the item stays `branched` and is never re-staged — read git's message and record the leftover exactly as the merge path's own removal
@@ -1101,6 +1201,15 @@ git -C "<base tree>" merge --no-ff --no-edit backlog/<id>
 session that has no terminal to open one in. The explicit `-C` is what makes this land in the base tree — the version of this command before run-scoped bases
 had none and relied on the main tree being the cwd, which is true only while the base is `main`.
 
+**In a tracker project the merge carries `Fixes #<n>`, and `--no-edit` gives way to two `-m` flags:**
+
+```bash
+git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>: <title>" -m "Fixes #<n>"
+```
+
+Free provenance: `git log` then names the issue every merge came from, and GitHub's own close-on-push is idempotent with the close the tool performs below, so
+the two cannot disagree. `--no-edit` is dropped because `-m` already supplies the message — no editor can open either way.
+
 **Three different failures, and they take different commands. Do not conflate them: only the first one degrades the run, and the other two park the item exactly
 as they always have.**
 
@@ -1185,6 +1294,28 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 git -C "<base tree>" branch -d backlog/<id>
 ```
+
+**In a tracker project the push comes between the merge and the stage, and the order is not negotiable:**
+
+```bash
+git -C "<base tree>" push origin <base>
+```
+
+- **It succeeds** → `stage <n> merged --outcome "<dir>/outcomes/<n>.md"` in place of the plain `stage` above. That flag is **required** here (a plain
+  `stage <n> merged` exits `1` and writes nothing) and refused in a files project: it is what closes the issue, with the session's Outcome as the closing
+  comment. If the close is refused the command exits `9` having written nothing — park the item with `attention <n> --kind parked --detail "merged and pushed; the
+  issue was not closed — <what the API refused, your words> — close it by hand"`, then `stage <n> parked`, and carry on. The merge is real and pushed; only the bookkeeping is
+  outstanding.
+- **It is rejected** (non-fast-forward) → another machine merged into the base meanwhile. `attention <n> --kind parked --detail "merge landed locally but the
+  push was rejected — another machine pushed to <base>"`, then `stage <n> parked`. The merge stays local and `--resume` pulls and pushes again. **Do not**
+  `push --force` and do not reset.
+- **It is denied by the auto-mode classifier** → **park it too.** This is the one place the classifier-denial rule below does _not_ apply: a denied MERGE
+  degrades the run to branch mode, because nothing landed and "branched" is then a true description. A denied PUSH is the opposite — the merge has already
+  landed in the base tree, so staging the item `branched` would write a falsehood into the run file and into the summary a person reads afterwards. Park, with
+  the classifier's message quoted, and leave the merge where it is.
+
+The close is tied to the STAGE rather than to the merge because the tool cannot see the push: it has no way to know whether the commit it is recording ever left
+this machine, so the driver calls `stage merged` only once the push has succeeded, and the tool closes the issue as part of that call.
 
 Plain `remove`, never `--force`. **`remove=0` is the ordinary case and needs nothing further** — including for a worktree holding only an ignored `dist/` that
 step 8's build wrote, which removes cleanly and takes the build output with it (measured; `references/rationale.md`, §9).
@@ -1402,8 +1533,11 @@ Two rules stay here, because a reader who stops at this line still has to know t
 - **The merge site is derived, never assumed: merge in whichever tree has `<base>` checked out, and remove only a base worktree this run created.** git
   refuses one branch in two trees and `--force` is not the way round it (§9). A tree the person made is theirs — the same sentence as "this run's authority
   stops at worktrees it created itself", not a second rule beside it.
-- **Never force-pushes, never rewrites the base's history, never pushes at all.** Merge commits only; undoing one is `git revert -m 1`, never `git reset --hard`
-  (step 9). Publishing anything is the user's call.
+- **Never force-pushes and never rewrites the base's history.** Merge commits only; undoing one is `git revert -m 1`, never `git reset --hard` (step 9).
+- **Never pushes a files project.** Publishing that is the user's call. **A tracker project is the one exception, and it is exactly three commands** —
+  `pull --ff-only origin <base>` before each item's worktree, `push origin <base>` after each merge, `push -u origin backlog/<n>` under branch mode — because
+  its items are issues every machine reads, so a merge that stayed on one laptop would be a run reporting `merged` for work nobody else can see. A rejected or
+  classifier-denied push **parks**, never degrades: the merge has already landed, so `branched` would be a falsehood.
 - **Never writes the registry.** `~/.backlog-manager/registry.json` keeps its single writer (`backlog.mjs` `init`/`new`), untouched by anything here.
 - **Item bodies: pre-flight answers only.** Nothing else in the item lifecycle belongs to this skill — `start`, `## Outcome`, and the archive move all belong to
   `backlog-execute`, inside the session, and the plan belongs to `backlog-groom`. The single exception is the dead-marker `backlog.mjs stop` in the resume and

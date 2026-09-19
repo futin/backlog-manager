@@ -188,7 +188,7 @@ export interface ItemWriter {
    *  verbatim and this layer computes none of it. */
   release(project: RegistryProject, marker: SourceMarker, req: ItemReleaseRequest): Promise<WriteOutcome<ClaimResult>>;
 
-  /** Say the session is still alive, and carry phase 4's opaque `state` when
+  /** Say the session is still alive, and carry the driver's opaque `state` when
    *  one is given. */
   heartbeat(project: RegistryProject, marker: SourceMarker, req: ItemHeartbeatRequest): Promise<WriteOutcome<ClaimResult>>;
 

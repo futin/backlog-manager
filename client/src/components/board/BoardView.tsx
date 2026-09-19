@@ -3,7 +3,7 @@ import { useId, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
-import { hasTracker, projectIsFiles, trackerLine } from '../../lib/tracker';
+import { hasTracker, trackerLine } from '../../lib/tracker';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useReverify } from '../../hooks/useReverify';
@@ -512,22 +512,12 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      question, and the starting placeholder is one of the two rows that can
      be telling that story. */
   const orchestrateBusy = freshRuns.some((run) => run.project === projectValue) || starting.some((s) => s.project === projectValue);
-  /* Condition 5 (task-46): a tracker project cannot be orchestrated until
-     phase 4, so the control is HIDDEN rather than disabled — the distinction
-     CLAUDE.md pins, and this is a fact about the project rather than about any
-     one item, which is exactly what the hidden posture is for. There is nothing
-     a reader could do to make it appear, so a disabled button with a reason
-     would be an invitation to wait for something that is not coming.
-
-     It needs a condition of its own only BECAUSE of the dispatch lift. Until
-     task-46 `deriveAction` answered `null` for every tracker item, which kept
-     this control off a tracker project as a side effect; the lift gave tracker
-     items a next step, and the two rules came apart. `projectIsFiles`
-     (`lib/tracker.ts`) is the one implementation of the second one, and the
-     server refuses the same POST with the same reason. */
+  /* task-46's fifth condition — `projectIsFiles`, which hid this control for a
+     tracker project — is GONE (task-47, phase 4a). A tracker project is
+     orchestratable now, and the server's matching refusal went with it. Four
+     conditions again, exactly as before phase 3. */
   const orchestrateProject = registered.find((p) => p.path === projectValue);
-  const showOrchestrate =
-    orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateBusy && projectIsFiles(orchestrateProject);
+  const showOrchestrate = orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateBusy;
   const orchestrateBlockedReason = orchestrateGate?.control === 'disabled' ? orchestrateGate.reason : null;
   // The registry's own display name, for the button's title and the sheet's
   // header — falls back to the raw path only in the unreachable case where

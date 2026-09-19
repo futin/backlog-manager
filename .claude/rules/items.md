@@ -11,3 +11,4 @@ paths: ["server/src/items/**"]
 - Before changing files here, read docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value
 - Before changing files here, read docs/subsystems/invariants.md#the-seven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item
 - Before changing files here, read docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins
+- Before changing files here, read docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item

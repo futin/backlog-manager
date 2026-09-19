@@ -15,6 +15,7 @@ import {
   modesUpTo,
   pickFrom,
   projectDispatchGate,
+  queueItemIs,
   resumeGate,
   runClaimBlock,
   runHoldsItem
@@ -839,5 +840,53 @@ describe('runHoldsItem', () => {
      while `runClaimBlock` became three-argument is the assertion. */
   it('takes no starting parameter — a placeholder naming no items cannot say a run holds one', () => {
     expect(runHoldsItem.length).toBe(2);
+  });
+});
+
+/* =========================================================================
+ * task-47 — `queueItemIs`, the one place a run's queue id meets an item's id
+ *
+ * Inside a run a tracker item is its BARE issue number (`31`), because the id
+ * travels through `orchestrate.mjs`'s argv and into SKILL.md's fenced shell
+ * commands, where `#` opens a comment and swallows the rest of the line.
+ * `BacklogItem.id` for the same issue is `#31`, because that is what a person
+ * types and what the board draws. Both spellings are right for their own side,
+ * and this function is where they are reconciled.
+ * ========================================================================= */
+
+describe('queueItemIs', () => {
+  it('matches a bare queue number against a tracker item-s hashed id', () => {
+    expect(queueItemIs('31', fakeItem({ id: '#31', source: 'github' }))).toBe(true);
+  });
+
+  /* The gate that makes this safe, and the reason it is `source` rather than
+     "does the id start with a `#`": the question is which STORE the queue
+     entry belongs to. A files store cannot mint `#31` today, but matching on
+     the coincidence of spelling rather than on the item's actual source is how
+     that stops being true quietly. */
+  it('never matches a bare number against a files item, whatever its id looks like', () => {
+    expect(queueItemIs('31', fakeItem({ id: '#31', source: 'files' }))).toBe(false);
+  });
+
+  it('matches identically-spelled ids for either source', () => {
+    expect(queueItemIs('task-3', fakeItem({ id: 'task-3', source: 'files' }))).toBe(true);
+    // Identity holds first, so a caller that already has the board's spelling
+    // never depends on the tracker clause at all.
+    expect(queueItemIs('#31', fakeItem({ id: '#31', source: 'github' }))).toBe(true);
+  });
+});
+
+/* The consequence on the surface that matters: a run whose queue holds `31`
+   blocks dispatch on the item the board draws as `#31`. Before task-47 the two
+   never matched, so a tracker item a run was actively working rendered as
+   free — and the project check is asserted in the same case, because a block
+   that ignored the path would pass the first half alone. */
+describe('runClaimBlock over a tracker item', () => {
+  it('blocks #31 for a fresh run holding queue id 31, and only in that item-s own project', () => {
+    const item = fakeItem({ id: '#31', source: 'github' });
+    const run = { ...runWith('dispatched'), queue: [{ ...runFixture.queue[0], id: '31', stage: 'dispatched' as RunStage }] };
+
+    expect(runClaimBlock(item, [run], [])).toBe('an orchestrator run is working this item (dispatched)');
+    expect(runClaimBlock(item, [{ ...run, project: '/abs/elsewhere' }], [])).toBeNull();
   });
 });

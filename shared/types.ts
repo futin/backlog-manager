@@ -275,6 +275,28 @@ export interface BacklogItem {
    * untyped: its section is the directory it lives in.
    */
   untyped: boolean;
+  /**
+   * The `runner-fix` marker, for a TRACKER item only (task-47): the issue
+   * carries the `runner-fix` label, which means what a files item's
+   * `runner-fix: true` frontmatter line means — executing this item repairs
+   * machinery the rest of the queue depends on, so the orchestrator's gate
+   * hoists it to the front.
+   *
+   * **Optional, `true` or absent, and never `false`.** Absence is the negative,
+   * for the same reason `ItemCreateRequest.runnerFix` is read with a strict
+   * `=== true`: the mapper is the only writer, so every files item and every
+   * unmarked issue carries no key at all and their payloads stay byte-identical
+   * to what they were before this field existed. A `false` would put a new key
+   * on every row in every fixture in `test/`, for a value that says nothing the
+   * absence does not.
+   *
+   * Required nowhere and derived from nothing. The files half of the same fact
+   * is read by `orchestrate.mjs`'s own `parseItemForGate` straight off the item
+   * file, which never becomes a `BacklogItem` at all — so this field exists
+   * because a tracker item has no file for the gate to read, not because the
+   * gate wanted a field.
+   */
+  runnerFix?: true;
 }
 
 export interface ItemsIndex {
@@ -963,6 +985,24 @@ export interface RunQueueItem {
    * and a default at the seam would erase it before the view could ask.
    */
   usage?: RunSessionUsage[];
+  /**
+   * The claim comment this run holds the item's issue with, on a TRACKER
+   * project only (task-47). Present once `stage <n> preflight` has WON the
+   * claim, and absent everywhere else — every files run, and every tracker
+   * item the run has not reached or lost.
+   *
+   * Just the comment id, and deliberately nothing else. The claim's own
+   * contents live on GitHub, where every machine can read them; what this
+   * machine needs locally is the one number that says WHICH comment to edit
+   * next — `heartbeat` and `release` both take it, and neither can rediscover
+   * it without a request. Storing a copy of the record beside it would be a
+   * second source of truth for a thing the protocol says is authoritative
+   * exactly once, in the comment.
+   *
+   * Optional for the reason `usage` above is: every run file already on disk
+   * predates it, and both archive endpoints serve those verbatim.
+   */
+  claim?: { commentId: number };
 }
 
 /**
@@ -1510,10 +1550,11 @@ export interface ClaimCounters {
  * comments, and both compute the same winner — the LOWEST live comment id —
  * without a lock, a lease server, or a clock they have to agree on.
  *
- * `run` and `state` are phase 4's (§7.1) and are carried opaque here. They are
- * declared NOW, as `unknown`, so the phase-4 shape does not force `v: 2`: a
- * reader of this version round-trips them untouched, which is what makes a
- * mixed-version pair of machines safe rather than merely lucky.
+ * `run` and `state` are phase 4's (§7.1). Task-46 declared both as `unknown` so
+ * the phase-4 shape would not force `v: 2`, and task-47 typed `run` when the
+ * server began branching on its `runId` — see each field below for why exactly
+ * one of the two moved. `state` is still round-tripped untouched, which is what
+ * makes a mixed-version pair of machines safe rather than merely lucky.
  */
 export interface ClaimRecord {
   /** The protocol version. `1` is the only value this build writes or accepts;
@@ -1544,11 +1585,105 @@ export interface ClaimRecord {
    *  holder: a dead claim may be retired by whoever next contests the issue,
    *  with `reason: 'stale'`. */
   released?: { at: string; reason: string; by: string };
-  /** Phase 4's (§7.1). Opaque here — read by nothing, written by nothing, and
-   *  round-tripped verbatim by `heartbeat`'s `state` field and by every edit
-   *  this build makes. */
-  run?: unknown;
+  /**
+   * Which orchestrator run holds this claim (task-47, spec §7.1).
+   *
+   * Typed now, where task-46 reserved it as `unknown`, because the server
+   * READS one field of it: `runId` is what makes a resumed driver's re-claim a
+   * TAKEOVER of its own earlier claim rather than a contest with it (see
+   * `GithubSource.claim`). A field the server branches on cannot stay an
+   * opaque blob — parsing one at the moment a decision depends on it is how a
+   * mis-shaped value becomes a wrong winner.
+   *
+   * Absent for a claim a SKILL made (`backlog.mjs start`), which is not a run
+   * and has no run to name. That absence is load-bearing: a hand claim is
+   * never same-run with anything, so it is never taken over and always has to
+   * be contested or waited out.
+   */
+  run?: ClaimRun;
+  /**
+   * The item's machine state, published for other machines to read (§7.1) —
+   * `ClaimState`, carried opaque HERE and typed at its one writer.
+   *
+   * Still `unknown` on this side, deliberately, where `run` above became
+   * typed. Nothing in this build's server reads a field of it: it is written
+   * by `orchestrate.mjs` through `heartbeat` and round-tripped verbatim, and
+   * its first reader is task-48's cross-machine run assembly. Typing it here
+   * would claim a contract the server does not yet uphold, and an old build
+   * half-reading a newer one's state is the failure `parseClaim`'s `v` check
+   * already refuses at the record level.
+   */
   state?: unknown;
+}
+
+/**
+ * Which run a claim belongs to (task-47, spec §7.1) — the six facts about an
+ * orchestrator run that ride in EVERY one of its claims, redundantly.
+ *
+ * Redundant on purpose. A run's items are claims on different issues, and the
+ * only thing that groups them is this object; a reader that had to find "the
+ * first claim of the run" to learn the run's mode would be a reader that
+ * cannot start from any item it happens to have. §7.3's cross-machine
+ * assembly (task-48) groups by `runId` and reads the rest off whichever claim
+ * it saw — which works only while every claim carries all of it.
+ *
+ * `base` is this plan's addition to §7.1's list, and it is not decoration:
+ * "where did this run's work land" has no other answer once the run file is on
+ * a machine you are not sitting at. The merge commits are on the base branch
+ * and in no file this app keeps.
+ */
+export interface ClaimRun {
+  /** `run-YYYYMMDD-HHMMSS`, minted by `orchestrate.mjs init` — the grouping key. */
+  runId: string;
+  /** The run's `startedAt`, ISO 8601. */
+  startedAt: string;
+  /** What the run is actually doing, i.e. `mergeModeEffective` rather than what
+   *  `init` was asked for: a reader on another machine wants to know whether
+   *  this item will be merged, not what was hoped for before a classifier said
+   *  no. */
+  mergeMode: MergeMode;
+  questionMode: QuestionMode;
+  /** The run's `--max`, `null` for an uncapped run — the same value
+   *  `OrchestratorRun.maxItems` carries, and `null` for the same reason. */
+  maxItems: number | null;
+  /** The ref every item of this run is cut from and merged into. */
+  base: string;
+}
+
+/**
+ * What `orchestrate.mjs` publishes about ONE item through the `heartbeat`
+ * route's `state` field (spec §7.1) — exactly the `RunQueueItem` fields a
+ * reader needs to draw the item, and nothing else.
+ *
+ * Exported for task-48, which is its first and only reader: nothing in 4a's
+ * server or client looks at a single field of this. It is declared here rather
+ * than inside the tool because the tool cannot export a type at all (a plugin
+ * skill's `tools/` is plain `.mjs`), and a shape whose whole purpose is to be
+ * read by a second program needs one written-down home.
+ *
+ * The fields are `RunQueueItem`'s, restated rather than `Pick`ed. A `Pick`
+ * would look tidier and would be wrong in the one way that matters: it would
+ * make this shape MOVE whenever `RunQueueItem` moves, silently, across a
+ * boundary that is a published comment on somebody's issue and therefore has
+ * mixed-version readers by construction. What another machine reads has to be
+ * a decision, not a consequence.
+ *
+ * Every field is optional for the same reason: this object is composed by a
+ * tool reading a run file that may predate any of them, and a reader on the
+ * other side of a version gap must degrade to "says less" rather than to a
+ * crash.
+ */
+export interface ClaimState {
+  stage?: RunStage;
+  stageAt?: Partial<Record<RunStage, string>>;
+  worktree?: string | null;
+  branch?: string | null;
+  sessionId?: string | null;
+  fixLoops?: number;
+  verification?: RunVerification[];
+  usage?: RunSessionUsage[];
+  assumptions?: { question: string; answer: string }[];
+  note?: string | null;
 }
 
 /**
@@ -1626,6 +1761,17 @@ export interface ItemClaimRequest extends ItemWriteRequest {
   id: string;
   phase: 'groom' | 'execute';
   session: string;
+  /**
+   * The orchestrator run taking the claim (task-47), written verbatim into
+   * `ClaimRecord.run`. Absent for a skill claim — `backlog.mjs start` sends no
+   * `run` key at all, and that is what makes a hand claim un-takeoverable.
+   *
+   * Validated field by field by the route rather than taken as a blob: it is
+   * the one field on these seven routes the SERVER branches on (same-run
+   * takeover), so a malformed one is a 400 naming the field rather than a
+   * value that silently fails to match any `runId` and contests its own run.
+   */
+  run?: ClaimRun;
 }
 
 /** `POST /api/items/release`. `counters` are the CLI's totals, written
@@ -1639,8 +1785,9 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
   counters?: ClaimCounters;
 }
 
-/** `POST /api/items/heartbeat`. `state` is phase 4's opaque blob, round-tripped
- *  into the record when given. */
+/** `POST /api/items/heartbeat`. `state` is the `ClaimState` task-47's driver
+ *  publishes, carried opaque here and round-tripped into the record when
+ *  given — nothing in this build reads a field of it. */
 export interface ItemHeartbeatRequest extends ItemWriteRequest {
   id: string;
   commentId: number;
@@ -1657,6 +1804,25 @@ export interface ItemBodyRequest extends ItemWriteRequest {
   id: string;
   body: string;
   ifUpdatedAt: string;
+  /**
+   * The `runner-fix` label, moved by the same call that rewrote the body
+   * (task-47) — `true` adds it, `false` removes it, ABSENT leaves it exactly
+   * as it is.
+   *
+   * Three states rather than two, and the third is the important one: a groom
+   * that has an opinion says so, and every other body patch — a re-groom, a
+   * plan rewrite, `import`'s second pass — must not silently clear a marker
+   * somebody set deliberately. The files half of this is a frontmatter line
+   * that survives every edit that does not name it, which is the behaviour
+   * `undefined` reproduces here.
+   *
+   * It rides `body` rather than getting a route of its own because the
+   * judgement is the groom's and the groom makes exactly one write: a
+   * separate call would be a second request that can fail on its own, leaving
+   * a body that says "this repairs the runner" on an issue that is not
+   * labelled as one.
+   */
+  runnerFix?: boolean;
 }
 
 /** `POST /api/items/comment` — appends a comment and nothing else. Execute's

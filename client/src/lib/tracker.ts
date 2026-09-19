@@ -89,31 +89,16 @@ export function trackerLine(project: ProjectSummary, now: number): string | null
   return age === null ? `${repo} · connecting…` : `${repo} · polled ${age} ago`;
 }
 
-/**
- * Can an orchestrator run drain this project's queue at all (task-46)?
+/* `projectIsFiles` lived here from task-46 until task-47 and is gone.
  *
- * `false` for a tracker project, which cannot be orchestrated until phase 4,
- * and `true` for everything else — a files project, and also a project whose
- * marker this build cannot honour or which has no `backlog/` yet, because
- * neither of those has items for the control to be wrong about and the honest
- * refusal for both already comes from the server.
- *
- * It exists as its own predicate because of the dispatch lift, and that is
- * worth knowing before anyone folds it back in. Until task-46 the toolbar's
- * Orchestrate control was kept off a tracker project for free, by
- * `deriveAction` answering `null` for every tracker item — one line doing two
- * jobs. The lift gave tracker items a next step, so the two jobs came apart:
- * a tracker item IS dispatchable, and its project is NOT orchestratable. This
- * is the second rule, stated once, read by the toolbar control; the server's
- * half is `AgentsService.orchestrate`'s own check.
- *
- * Takes the whole summary rather than the `source` string so the call site
- * reads as a question about a PROJECT, and so a second source that also cannot
- * be orchestrated is one edit here.
+ * It answered "can an orchestrator run drain this project at all", and for one
+ * phase the answer for a tracker project was no. Phase 4a made it yes, so the
+ * predicate had exactly one job and that job is over — its own doc comment
+ * said as much, which is why this is a deletion rather than a function that
+ * now returns `true`. The server's matching refusal
+ * (`orchestrating a tracker project arrives in phase 4`) went at the same
+ * time; the two were always one rule stated twice.
  */
-export function projectIsFiles(project: Pick<ProjectSummary, 'source'> | undefined): boolean {
-  return project?.source !== 'github';
-}
 
 /** Whether any registered project's items come from a tracker — the board's
  *  "should I keep re-reading the payload" question (a tracker's items move on

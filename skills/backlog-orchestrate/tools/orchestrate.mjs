@@ -58,6 +58,148 @@ export class OrchestrateError extends Error {
   }
 }
 
+// --- the API, for a tracker project (task-47) ------------------------------
+//
+// A project whose committed `backlog/source.json` says `github` has NO ITEM
+// FILES: its queue comes from `GET /api/items`, and its claim — the thing that
+// stops two machines working one issue — is a comment the API writes. Both go
+// through the local backlog-manager server, which holds the credential; this
+// tool never talks to GitHub and never holds a token.
+//
+// **Every one of these calls is a CHILD PROCESS.** `fetch` is asynchronous and
+// `main` below is not, deliberately — see `api-call.mjs`'s own header for the
+// whole argument, and CLAUDE.md's "all three skill CLIs exit through
+// process.exitCode" invariant for what it protects. `spawnSync` reaps the
+// child before this function returns, so nothing asynchronous ever exists in
+// THIS process.
+//
+// **In files mode nothing below is ever reached.** Not one command in this
+// tool spawns the helper for a project with no marker or a `files` one; test
+// case O-1 pins that by running the whole stage sequence with `BM_API_PORT`
+// pointed at a closed port and expecting exit `0` at every step.
+
+// The stack is not running. A code of its own rather than a `1`, for the
+// reason `backlog.mjs`'s own exit `5` has one: "the store said no" and "there
+// is no store reachable at all" are different things to a caller, and the
+// second has the same fix every time. `5` was already taken here (`verify`:
+// nothing to verify with) and so was `3` (`watch`: budget elapsed), and
+// SKILL.md branches on both — so this tool's number is `8`, not the helper's.
+const EXIT_API_DOWN = 8;
+
+// An API refusal the command cannot absorb — a 500 on the route that closes an
+// issue, a 400 naming a field this tool composed wrong. Distinct from `1`,
+// which means "this call was wrong": a `9` means the call was right and the
+// other side would not do it, and the reaction is a park rather than a fix.
+// Commands that CAN absorb a refusal do — a `claim` 409 naming another run is
+// exit `0` and a skipped item, because a refusal is information.
+const EXIT_API_REFUSED = 9;
+
+const API_CALL = fileURLToPath(new URL('./api-call.mjs', import.meta.url));
+
+// The helper's own private exit codes, named here because this is the only
+// place that reads them. They are deliberately NOT this tool's: `api-call.mjs`
+// answers `3`/`5` and knows nothing about `watch`'s budget or `verify`'s
+// nothing-to-prove, and this function is the one-way mapping between the two
+// vocabularies.
+const HELPER_EXIT_NON_2XX = 3;
+const HELPER_EXIT_NO_API = 5;
+
+// One request. `{ ok, status, data }` for a 2xx and for an ordinary refusal
+// alike — a 409's body is what the caller needs in order to skip an item
+// rather than fail — and a throw only for the stack being down, which no
+// command can proceed past.
+//
+// `status` is `null` for a non-2xx, and that is honest rather than lazy: the
+// helper prints the status to stderr for a human and hands the BODY to stdout,
+// and every branch in this file that cares reads the body's own `error` or
+// `holder`. A caller that genuinely needs the number can read it off `stderr`.
+// Carrying a parsed-out copy would be a second decoding of the same fact.
+//
+// The body goes to the child on STDIN, never on argv: a `state` heartbeat
+// carries a whole queue item — verification tails, usage entries, assumptions
+// — and argv has a length ceiling (`E2BIG`) that a long item would cross
+// silently at the worst moment.
+function apiCall(method, requestPath, body) {
+  const res = spawnSync(process.execPath, [API_CALL, method, requestPath, body === undefined ? undefined : '-'].filter((a) => a !== undefined), {
+    encoding: 'utf8',
+    input: body === undefined ? undefined : JSON.stringify(body),
+    maxBuffer: GIT_BLOB_MAX_BUFFER
+  });
+
+  if (res.status === HELPER_EXIT_NO_API) {
+    throw new OrchestrateError((res.stderr || '').trim() || 'the backlog-manager API is not running', EXIT_API_DOWN);
+  }
+  // A child that could not be spawned at all, or died on a signal. Neither is
+  // an API answer, and treating it as one would let a broken node install read
+  // as an empty queue.
+  if (res.status !== 0 && res.status !== HELPER_EXIT_NON_2XX) {
+    throw new OrchestrateError(`api-call.mjs ${method} ${requestPath} failed to run (${res.error ? res.error.message : `exit ${res.status}`})`, EXIT_API_REFUSED);
+  }
+
+  let data = null;
+  try {
+    data = JSON.parse(res.stdout);
+  } catch {
+    // The helper always writes one JSON line, so this is a child that died
+    // before it could. Left `null`; the caller reports what it was doing.
+    data = null;
+  }
+  return { ok: res.status === 0, status: res.status === 0 ? 200 : null, data, stderr: (res.stderr || '').trim() };
+}
+
+// The sentence a refusal becomes. The server composes every one of them (it is
+// the only side that knows what GitHub said), so this copies the sentence
+// rather than inventing a second wording for one fact — the same posture
+// `backlog.mjs`'s `apiPost` takes.
+function apiErrorText(res, fallback) {
+  if (res.data !== null && typeof res.data === 'object' && typeof res.data.error === 'string') return res.data.error;
+  return res.stderr || fallback;
+}
+
+// Which mode a project is in, read from its committed marker and nothing else
+// — this tool's copy of `backlog.mjs`'s `sourceMode`, which is itself a copy of
+// the server's `resolveSource`. Restated rather than imported for the reason
+// this file's header gives: a plugin skill's `tools/` is installed as a
+// standalone copy of what was pushed, and one skill's tools may never import
+// another's.
+//
+// Three answers, and the load-bearing one is the third. Absent or
+// `{"kind":"files"}` is `files` — the implicit case is every project on this
+// machine today. `{"kind":"github"}` with a usable repo is `github`. Anything
+// else is a REFUSAL, never a fallback to files: falling back would make this
+// tool build a queue by scanning `backlog/` in a project whose items live on
+// GitHub, dispatch sessions for files that are not there, and report every one
+// of them as ungroomed.
+//
+// Read per call and cached nowhere, the same posture the server takes toward
+// the same file.
+function projectSource(projectRoot) {
+  const marker = path.join(projectRoot, 'backlog', 'source.json');
+  if (!fs.existsSync(marker)) return 'files';
+
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  } catch (e) {
+    throw new OrchestrateError(`${marker}: cannot be read as JSON (${e.message})`, 1);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new OrchestrateError(`${marker}: expected an object with a string "kind"`, 1);
+  }
+  if (parsed.kind === 'files') return 'files';
+  if (parsed.kind === 'github') {
+    // GitHub's own character set for an owner and a name, the same class the
+    // server's `isRepo` and `backlog.mjs`'s `isValidRepo` enforce. A `github`
+    // marker with no usable repo is a refusal rather than a files fallback,
+    // for the reason above.
+    if (typeof parsed.repo !== 'string' || !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(parsed.repo)) {
+      throw new OrchestrateError(`${marker}: names kind "github" with no valid "repo" (expected "owner/name")`, 1);
+    }
+    return 'github';
+  }
+  throw new OrchestrateError(`${marker} names source kind ${JSON.stringify(String(parsed.kind))}, which this tool cannot orchestrate`, 1);
+}
+
 // --- freshness ------------------------------------------------------------
 // Fifteen minutes, exactly mirroring shared/types.ts's own RUN_STALE_MS.
 // That file is TypeScript and this file is a plugin skill tool that must
@@ -716,6 +858,46 @@ function cmdClaim(argv) {
   const run = readRun(dir);
 
   const at = takeOverRun(dir, run);
+
+  /* task-47, and only for a tracker project: taking the RUN over is not the
+     same as taking its ITEMS over. Each in-flight item's issue carries a claim
+     posted by the session that just died — still live, still holding the
+     lowest comment id — and under the plain protocol this session would lose
+     every one of them to a process that no longer exists, once per item, for
+     fifteen minutes each.
+
+     So each is re-claimed here, at the one command a `--resume` session opens
+     with. The SERVER makes that succeed: a live claim carrying this same
+     `runId` is a takeover rather than a contest (`GithubSource.claim`), which
+     is why `run` rides every claim and not only the first.
+
+     A claim now held by a DIFFERENT run is the one case that is not
+     recoverable, and it is not an error either — another machine picked the
+     item up while this one was down. The item goes to `skipped`, and its
+     worktree and branch are LEFT IN PLACE and named in the note: the run did
+     not lose them, it lost the item, and whatever that session built is still
+     on disk for a person to look at. Removing them here would be this run
+     deleting work on the strength of somebody else's claim. */
+  const reclaimed = [];
+  if (projectSource(run.project) === 'github') {
+    for (const item of run.queue) {
+      if (item.claim === undefined || CLAIM_RELEASE_STAGES.has(item.stage)) continue;
+      const taken = trackerClaim(run, item);
+      if (taken.won) {
+        item.claim = { commentId: taken.commentId };
+        reclaimed.push({ id: item.id, stage: item.stage });
+        continue;
+      }
+      const where = item.worktree === null ? '' : ` — worktree ${item.worktree} left in place`;
+      applyQueueItemFields(item, { stage: 'skipped', note: `${taken.note}${where}` });
+      reclaimed.push({ id: item.id, stage: 'skipped', note: item.note });
+    }
+    run.updatedAt = nowISO();
+    writeRunAtomic(dir, run);
+    console.log(JSON.stringify({ runId: run.runId, driver: run.driver, updatedAt: run.updatedAt, reclaimed }));
+    return 0;
+  }
+
   console.log(JSON.stringify({ runId: run.runId, driver: run.driver, updatedAt: at }));
   return 0;
 }
@@ -1209,6 +1391,12 @@ function blobReaderAt(projectRoot, base) {
 // only for an --ids entry that names nothing this store has, which is a
 // usage error regardless of which caller asked.
 function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DEFAULT } = {}) {
+  // task-47. Read per call, never recorded in run.json and never passed down
+  // from a caller: a project's source is a COMMITTED marker, so re-deriving it
+  // is one `existsSync` and cannot go stale, while a copy on the run would
+  // have to be kept true across a `connect` that happened mid-run.
+  if (projectSource(projectRoot) === 'github') return orderGatedQueue(trackerCandidates(projectRoot, { ids }), maxItems);
+
   const backlogDir = path.join(projectRoot, 'backlog');
   const bugs = listOpenItems(backlogDir, 'bugs').sort((a, b) => a.num - b.num);
   const tasks = listOpenItems(backlogDir, 'tasks').sort((a, b) => a.num - b.num);
@@ -1296,37 +1484,504 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
   // that was going to fall outside the cap now lands inside it.
   const gated = ordered.map((entry) => ({ id: entry.id, ...gateEntry(entry) }));
 
-  // A stable partition, not a sort: every item keeps its relative position
-  // inside its own half, so the hoisted items stay bugs-before-tasks and
-  // oldest-first among themselves (or, under --ids, in the order the caller
-  // gave) and everything else keeps the order it already had. The partition
-  // OUTRANKS the bugs-then-tasks rule rather than sorting inside it — a
-  // marked task hoists ahead of an unmarked bug, because "repairs the thing
-  // about to execute the rest of this queue" is a property of the item, not
-  // of its section.
-  //
-  // This applies to `--ids` too, narrowing SKILL.md §1's old "in the order
-  // given" promise on purpose: OrchestrateSheet sends `ids` for any strict
-  // subset of its checkbox list, so that list is a *selection*, not an
-  // ordering — nobody chose the order it arrives in, and exempting `--ids`
-  // would defeat the hoist on the one surface CLAUDE.md tells you to start
-  // runs from.
-  //
-  // The gate itself is untouched: membership and verdicts are decided
-  // exactly as before, this only reorders. An ungroomed marked item
-  // therefore hoists too and appears first in the preview labelled
-  // `ungroomed` — "the thing that would fix your runner is not groomed" is
-  // information, and the top of the list is where it will be read.
+  // The hoist partition and the cap are `orderGatedQueue`'s, shared with the
+  // tracker path below — see that function for the rules, which are the
+  // queue's rather than either source's.
+  return orderGatedQueue(gated, maxItems);
+}
+
+// The hoist partition and the `--max` count, over an already-gated list —
+// shared by the files walk above and the tracker read below (task-47).
+//
+// It is one function rather than two identical tails because these are the
+// queue's ORDERING rules, and they are the same rules whatever the items came
+// out of: a run capped at two items works two items, and a runner fix goes
+// first, on GitHub exactly as on disk. The two sources differ in where an
+// item's text and marker are READ from, and that is all they differ in — which
+// is the whole shape of this phase.
+//
+// A stable partition, not a sort: every item keeps its relative position
+// inside its own half, so the hoisted items stay bugs-before-tasks and
+// oldest-first among themselves (or, under `--ids`, in the order the caller
+// gave) and everything else keeps the order it already had. The partition
+// OUTRANKS the bugs-then-tasks rule rather than sorting inside it — a marked
+// task hoists ahead of an unmarked bug, because "repairs the thing about to
+// execute the rest of this queue" is a property of the item, not of its
+// section.
+//
+// This applies to `--ids` too, narrowing SKILL.md §1's old "in the order
+// given" promise on purpose: OrchestrateSheet sends `ids` for any strict
+// subset of its checkbox list, so that list is a *selection*, not an ordering
+// — nobody chose the order it arrives in, and exempting `--ids` would defeat
+// the hoist on the one surface CLAUDE.md tells you to start runs from.
+//
+// The gate itself is untouched: membership and verdicts are decided before
+// this function is reached, and this only reorders. An ungroomed marked item
+// therefore hoists too and appears first in the preview labelled `ungroomed` —
+// "the thing that would fix your runner is not groomed" is information, and
+// the top of the list is where it will be read.
+function orderGatedQueue(gated, maxItems) {
   const hoistedOrder = [...gated.filter((item) => item.hoisted), ...gated.filter((item) => !item.hoisted)];
 
   // `readyCount` is read BEFORE it is possibly incremented for the item
-  // currently being examined — see the long comment above gateEntry.
+  // currently being examined — see the long comment above `gateEntry`.
   let readyCount = 0;
   return hoistedOrder.map(({ id, title, gate, reasons, questions, hoisted }) => {
     const beyondMax = maxItems !== null && readyCount >= maxItems;
     if (gate === 'ready') readyCount++;
     return { id, title, gate, reasons, questions, beyondMax, hoisted };
   });
+}
+
+// A tracker project's candidates, gated (task-47) — the queue builder's other
+// half, and deliberately the ONLY thing about the queue that differs.
+//
+// Four differences from the files walk above, and each one is the absence of
+// something rather than a new rule:
+//
+//   * The candidates come from `GET /api/items` rather than from a directory
+//     walk. Filtered to THIS project by the registry path, raw string compare
+//     — the same not-realpath rule every membership check in this app follows.
+//   * **There is no `<base>` read and no "not committed on `<base>`" reason.**
+//     An issue is not in git; there is no blob for the worktree to be missing,
+//     so the skip that exists for one cannot fire. This is also why the tracker
+//     path takes no `base` parameter at all.
+//   * Each candidate's body comes from `GET /api/items/body`, and goes through
+//     the UNCHANGED `gateItem`. A bug still needs Cause and Fix, a task still
+//     needs a Plan; the gate never learns where the bytes came from.
+//   * `hoisted` reads `item.runnerFix`, the label, where the files walk reads
+//     a frontmatter key.
+//
+// Ordering is bugs then tasks, oldest ISSUE NUMBER first — the same rule the
+// files walk applies to its own `<prefix>-<n>` numbers, and for the same
+// reason: the oldest open thing has been waiting longest.
+function trackerCandidates(projectRoot, { ids }) {
+  const index = apiCall('GET', '/api/items');
+  if (!index.ok) throw new OrchestrateError(apiErrorText(index, 'GET /api/items was refused'), EXIT_API_REFUSED);
+  const all = index.data !== null && Array.isArray(index.data.items) ? index.data.items : [];
+
+  const mine = all.filter((item) => item.projectPath === projectRoot && item.status === 'open' && (item.section === 'bugs' || item.section === 'tasks'));
+  // The bare issue number is the id INSIDE a run, and `#31` is the id
+  // everywhere else. `#` opens a comment in every shell SKILL.md's fenced
+  // blocks use, and this id is substituted into dozens of them — so the `#`
+  // comes off once, here, at the one place a run's queue is built.
+  // `shared/agent.ts`'s `queueItemIs` is the reader-side half of the same
+  // decision.
+  const byId = new Map(mine.map((item) => [String(item.id).replace(/^#/, ''), item]));
+
+  const ordered = [];
+  if (ids !== undefined) {
+    for (const id of ids) {
+      /* A tracker run names items by bare number and nothing else. `#31`, a
+         URN and a files id are each refused rather than normalised, and the
+         refusal names the shape: a caller typing `#31` at a terminal has the
+         board's spelling in mind and needs to be told the run's, and a caller
+         passing `task-3` is carrying a habit across from a files project.
+         Normalising them silently would leave `--ids '#31'` working here and
+         failing in every later `stage`/`verify` call that takes the same
+         string. */
+      if (!/^\d+$/.test(id)) {
+        throw new OrchestrateError(`tracker items are named by issue number inside a run — got ${id}`, 1);
+      }
+      const found = byId.get(id);
+      if (!found) throw new OrchestrateError(`unknown item id: ${id}`, 1);
+      ordered.push(found);
+    }
+  } else {
+    const num = (item) => Number(String(item.id).replace(/^#/, ''));
+    const bugs = mine.filter((item) => item.section === 'bugs').sort((a, b) => num(a) - num(b));
+    const tasks = mine.filter((item) => item.section === 'tasks').sort((a, b) => num(a) - num(b));
+    ordered.push(...bugs, ...tasks);
+  }
+
+  return ordered.map((item) => {
+    const id = String(item.id).replace(/^#/, '');
+    const body = apiCall('GET', `/api/items/body?path=${encodeURIComponent(item.path)}`);
+    if (!body.ok) throw new OrchestrateError(apiErrorText(body, `GET /api/items/body was refused for ${item.path}`), EXIT_API_REFUSED);
+    // The route answers `text/plain`, and `api-call.mjs` carries a non-JSON
+    // body through as a string for exactly this read.
+    const text = typeof body.data === 'string' ? body.data : '';
+    return { id, title: item.title, hoisted: item.runnerFix === true, ...gateItem(item.section, text, projectRoot) };
+  });
+}
+
+// --- the claim, as this machine's state on a tracker item (task-47) ------
+//
+// Everything in this section runs in TRACKER MODE ONLY. A files run reaches
+// none of it, and O-1 pins that by driving a whole stage sequence with the API
+// port closed.
+//
+// ## Who owns the claim
+//
+// **The driver does, for the whole item.** It claims at `stage <n> preflight`
+// — before the worktree exists — and releases at the terminal stage. The
+// dispatched `backlog-execute` session never runs `start`, `stop`, `move` or
+// `heartbeat` on a tracker item (its SKILL.md says so, and W-3 pins the
+// sentence), which is the opposite of the files arrangement where execute
+// stamps the item file itself.
+//
+// The reason is the worktree. A files item's marker is a line in a file the
+// execute session has in its own tree; a tracker item's marker is a comment on
+// an issue, and the session that would post it lives in a directory with no
+// `run.json`, no run id and no way to say which run it belongs to. The driver
+// has all three. So the driver claims, and the session does the work.
+//
+// ## What the claim carries
+//
+// `run` — six fields identifying the run, on every claim, redundantly (see
+// `ClaimRun` in shared/types.ts for why redundantly). `state` — the queue
+// item, published so another machine can draw it. Neither is read by anything
+// in this build: `run.runId` is read by the SERVER, to decide a same-run
+// takeover, and `state` is read by task-48 and by nothing before it.
+//
+// ## Why a failed heartbeat is never a failure
+//
+// `run.json` is the journal of record on this machine. The claim's `state` is
+// a published COPY of it, and a copy that failed to publish costs a reader on
+// another machine one stale reading — where failing the command would cost
+// this machine an item mid-flight, over a write nothing local depends on. The
+// known trade is that a claim can go stale, and be retired by the next
+// contestant, if the API is down for fifteen minutes; that is the protocol
+// working as designed rather than a hole in it.
+
+// The stages at which the driver has finished with the item and gives the
+// issue back. `needs-answers` is deliberately NOT here: the run is waiting on
+// an answer and will come back to the item, so it keeps the claim — the same
+// split `RUN_HELD_STAGES` makes on the client side, where a `needs-answers`
+// item is still held.
+const CLAIM_RELEASE_STAGES = new Set(['merged', 'branched', 'failed', 'skipped', 'parked', 'ungroomed']);
+
+// The registry path a write route gates on. `resolveProjectRoot` already
+// refuses a linked worktree (exit 1), so the root this tool resolved IS the
+// tree the registry holds — which is what makes a raw string compare on the
+// server side correct without a realpath here.
+function claimProjectOf(run) {
+  return run.project;
+}
+
+// A queue id (`31`) as the id the routes take (`#31`). The one place the two
+// spellings meet inside this tool — see `trackerCandidates` for why the queue
+// holds the bare number at all.
+function claimItemId(itemId) {
+  return `#${itemId}`;
+}
+
+// The six run facts every claim carries. `mergeModeEffective` rather than
+// `mergeMode`: a reader on another machine wants to know whether this item
+// will be merged, not what was hoped for before a classifier said no.
+function claimRunOf(run) {
+  return {
+    runId: run.runId,
+    startedAt: run.startedAt,
+    mergeMode: run.mergeModeEffective ?? run.mergeMode ?? 'merge',
+    questionMode: run.questionMode ?? 'park',
+    maxItems: run.maxItems ?? null,
+    base: run.base ?? BASE_REF_DEFAULT
+  };
+}
+
+// The queue item, as `ClaimState` (shared/types.ts). Field by field rather
+// than a spread of the item, and deliberately: the item is this machine's
+// record and this is a PUBLISHED shape with mixed-version readers by
+// construction, so what crosses that boundary has to be a decision rather than
+// a consequence of whatever `RunQueueItem` grew this week.
+function claimStateOf(item) {
+  return {
+    stage: item.stage,
+    stageAt: item.stageAt,
+    worktree: item.worktree,
+    branch: item.branch,
+    sessionId: item.sessionId,
+    fixLoops: item.fixLoops,
+    verification: item.verification,
+    usage: item.usage,
+    assumptions: item.assumptions,
+    note: item.note
+  };
+}
+
+/**
+ * Publish this item's state onto its claim. Best-effort, always.
+ *
+ * Called by every command that changes an item's fields — `stage`, `usage`,
+ * `verify`, `assume`, and `watch`'s tick — AFTER the run file is written, so
+ * what it publishes is what this machine actually recorded rather than what it
+ * was about to.
+ *
+ * A failure is one stderr line and never a failure of the command. See this
+ * section's header for why; the short version is that `run.json` is the
+ * journal of record and this is a copy of it.
+ *
+ * No claim on the item means nothing to heartbeat — an item the run reached
+ * before `preflight`, or one whose claim was lost — and that is silence rather
+ * than a complaint: there is no failure to report.
+ */
+function trackerHeartbeat(run, item) {
+  if (item.claim === undefined) return;
+  try {
+    const res = apiCall('POST', '/api/items/heartbeat', {
+      project: claimProjectOf(run),
+      id: claimItemId(item.id),
+      commentId: item.claim.commentId,
+      state: claimStateOf(item)
+    });
+    if (!res.ok) console.error(`heartbeat for ${item.id} was refused: ${apiErrorText(res, 'the API refused it')}`);
+  } catch (e) {
+    console.error(`heartbeat for ${item.id} could not be sent: ${e.message}`);
+  }
+}
+
+/**
+ * This run's bill for one item, added to what the claim already carries.
+ *
+ * The counters are the ITEM's running totals across every session that has
+ * ever worked it, so they are READ first and added to — never recomputed.
+ * `GET /api/items/claim` answers the newest claim, released or not, which is
+ * where those totals live.
+ *
+ * What this run spent is the sum over its own `usage` entries: seconds of
+ * wall-clock, and the three token kinds that are actually BILLED. Cache READS
+ * are excluded, exactly as `backlog.mjs stop` excludes them for a files item —
+ * they routinely run an order of magnitude above everything else and including
+ * them would make the counter a measure of context size rather than of work.
+ *
+ * A `null` field contributes nothing, and if EVERY field of every entry is
+ * `null` the read counters are sent back unchanged. That is the same
+ * distinction `usage` itself keeps: "nothing was recorded" is not "it cost
+ * zero", and writing zeros over a total somebody else accumulated would erase
+ * their work to record the absence of ours.
+ */
+function claimCountersFor(run, item) {
+  const held = apiCall('GET', `/api/items/claim?project=${encodeURIComponent(claimProjectOf(run))}&id=${encodeURIComponent(claimItemId(item.id))}`);
+  /* A FAILED read sends no `counters` key at all, which is not the same as
+     four zeros — the route treats an absent key as "nothing to bill" and
+     leaves the claim's totals alone, where zeros would overwrite every earlier
+     session's work on the item. The same distinction `--abandon` relies on in
+     `backlog.mjs stop`. A SUCCESSFUL read answering `null` is a different
+     thing and is zeros: nobody has ever claimed this item, so there is nothing
+     to carry forward. */
+  if (!held.ok) {
+    console.error(`could not read ${claimItemId(item.id)}'s counters — releasing without billing rather than overwriting them with zeros`);
+    return undefined;
+  }
+  const base =
+    held.data !== null && held.data.record && held.data.record.counters
+      ? held.data.record.counters
+      : { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 };
+
+  let ms = 0;
+  let tokens = 0;
+  for (const entry of item.usage ?? []) {
+    if (Number.isFinite(entry.durationMs)) ms += entry.durationMs;
+    for (const key of ['inputTokens', 'outputTokens', 'cacheCreationTokens']) {
+      if (Number.isFinite(entry[key])) tokens += entry[key];
+    }
+  }
+
+  return {
+    groomElapsed: base.groomElapsed ?? 0,
+    // A run is EXECUTION, which is why the claim's `phase` is `'execute'` and
+    // why the bill lands in this pair. `ClaimRecord.phase` has two values and
+    // a driver is never grooming.
+    executeElapsed: (base.executeElapsed ?? 0) + Math.floor(ms / 1000),
+    groomTokens: base.groomTokens ?? 0,
+    executeTokens: (base.executeTokens ?? 0) + tokens
+  };
+}
+
+/**
+ * Give the issue back, billing this run's spend — the terminal half of the
+ * claim's life.
+ *
+ * Best-effort like the heartbeat, and for a sharper version of the same
+ * reason: by the time this runs the item has REACHED its terminal stage, and
+ * on the `merged` path the issue is already closed. Failing the command would
+ * report a finished item as unfinished. A dangling live claim goes stale on
+ * its own within `CLAIM_STALE_MS`, which is the protocol's own repair.
+ */
+function trackerRelease(run, item, reason, counters = undefined) {
+  if (item.claim === undefined) return;
+  try {
+    // Read here unless the caller already read them. `stage <n> merged` reads
+    // them BEFORE it closes the issue, so the three requests that path makes
+    // arrive in the order `GET claim`, `state`, `release` — the counters are
+    // the item's running totals and are read while the claim is plainly still
+    // the newest thing on the issue, rather than after a close has put a
+    // comment on it.
+    const billed = counters === undefined ? claimCountersFor(run, item) : counters;
+    const payload = {
+      project: claimProjectOf(run),
+      id: claimItemId(item.id),
+      commentId: item.claim.commentId,
+      session: sessionIdentity() ?? run.runId,
+      reason
+    };
+    // Omitted rather than sent as zeros when the read failed — see
+    // `claimCountersFor`.
+    if (billed !== undefined) payload.counters = billed;
+    const res = apiCall('POST', '/api/items/release', payload);
+    if (!res.ok) console.error(`release of ${item.id} was refused: ${apiErrorText(res, 'the API refused it')}`);
+  } catch (e) {
+    console.error(`release of ${item.id} could not be sent: ${e.message}`);
+  }
+}
+
+/**
+ * Take the issue for this run, at `preflight` or on a resume.
+ *
+ * Three outcomes, and the middle one is the whole point of the phase:
+ *
+ *   * **Won** — `{ won: true, commentId }`. The caller stores it on the queue
+ *     item and carries on.
+ *   * **Held by another run** — `{ won: false, note }`. A refusal here is
+ *     INFORMATION, not a failure: another machine is working this item, and
+ *     the right answer is to skip it and move to the next one. Exit `0`.
+ *   * **Anything else** — a throw with exit `9`. A 503 with no token, a 502
+ *     from GitHub: the run cannot know whether it holds the item, and
+ *     proceeding on that would be two sessions on one issue.
+ *
+ * The 409 is told from the rest by its `holder`, which only the claim route's
+ * conflict answer carries — never by parsing the sentence.
+ *
+ * A resumed driver's re-claim succeeds against its OWN run's live claim
+ * because the SERVER treats a matching `run.runId` as a takeover rather than a
+ * contest (`GithubSource.claim`). That is why `run` is sent on every claim and
+ * not only the first.
+ */
+function trackerClaim(run, item) {
+  const res = apiCall('POST', '/api/items/claim', {
+    project: claimProjectOf(run),
+    id: claimItemId(item.id),
+    phase: 'execute',
+    session: sessionIdentity() ?? run.runId,
+    run: claimRunOf(run)
+  });
+  if (res.ok) return { won: true, commentId: res.data.commentId };
+
+  const holder = res.data !== null && typeof res.data === 'object' ? res.data.holder : undefined;
+  if (holder !== undefined && holder !== null) {
+    const age = Number.isFinite(holder.ageMs) ? `${Math.round(holder.ageMs / 1000)}s` : 'unknown';
+    return { won: false, note: `claimed elsewhere (session ${holder.session}, heartbeat ${age} ago)` };
+  }
+  throw new OrchestrateError(`claiming ${claimItemId(item.id)} was refused: ${apiErrorText(res, 'the API refused it')}`, EXIT_API_REFUSED);
+}
+
+/**
+ * Close the issue with the Outcome as its closing comment — `stage <n> merged`
+ * and nothing else calls this.
+ *
+ * Comment first, then close, which is task-46's `state` route doing it in one
+ * call: the issue's timeline then reads in the order the work happened.
+ *
+ * A failure THROWS with exit `9` and the caller writes nothing. That is the
+ * one place in this section where a refusal is fatal, and the asymmetry with
+ * the heartbeat and the release is deliberate: those two publish a copy of
+ * something already true locally, while this one is the only record anywhere
+ * that the item is done. An item staged `merged` whose issue is still open
+ * would be an issue nobody ever closes, because the run has moved on and no
+ * later command looks back.
+ */
+function trackerClose(run, item, outcome) {
+  const res = apiCall('POST', '/api/items/state', {
+    project: claimProjectOf(run),
+    id: claimItemId(item.id),
+    status: 'done',
+    outcome
+  });
+  if (!res.ok) {
+    throw new OrchestrateError(
+      `${claimItemId(item.id)} was merged and pushed, but closing the issue was refused: ${apiErrorText(res, 'the API refused it')}. Nothing was written.`,
+      EXIT_API_REFUSED
+    );
+  }
+}
+
+// The two sidecar directories a TRACKER run writes (task-47), and the reason
+// they are directories under `<dir>` rather than files in the worktree:
+//
+//   * `outcomes/<n>.md` — created empty by the driver before dispatch, written
+//     by the execute session, read by `snapshot` and by `stage merged`. It is
+//     NOT in the worktree because the driver's own `git add -A` (§6) would
+//     commit it into the project's history — an execute session's report
+//     landing as a file on the item's branch, in a repo whose items are
+//     issues.
+//   * `items/<n>.md` — the snapshot the reviewer is handed where a files run
+//     hands the item file. Under `<dir>` for the same reason, and so that the
+//     existing archive mover carries both away with the run: `archiveSidecars`
+//     is a DENYLIST of two (`run.json`, `runs/`), so a new sidecar directory
+//     needs no change to it at all.
+function outcomeFilePath(dir, itemId) {
+  return path.join(dir, 'outcomes', `${itemId}.md`);
+}
+
+function snapshotFilePath(dir, itemId) {
+  return path.join(dir, 'items', `${itemId}.md`);
+}
+
+const SNAPSHOT_USAGE = 'usage: orchestrate.mjs snapshot <itemId>';
+
+/**
+ * Write the item, as one file, for the things that expect an item file
+ * (task-47) — the reviewer, and `verify`'s `## Done when` read.
+ *
+ * `<dir>/items/<n>.md` is the issue's body, then `## Outcome`, then whatever
+ * the execute session wrote to `<dir>/outcomes/<n>.md`. That is exactly what a
+ * files run's item file looks like at this point in the loop: the item's text
+ * with the session's Outcome appended.
+ *
+ * **Why a file at all, when the API could answer the same question.** The
+ * reviewer's input contract is "here is the item file path", and it is an
+ * agent with `Read` — handing it a URN would mean a new code path, a running
+ * stack, and a contract that differs by project source. `itemDoneWhenCommands`
+ * is the same story one layer down. A snapshot keeps both contracts byte-identical
+ * and costs one write.
+ *
+ * Re-run after each fix loop, deliberately: the Outcome grows with every loop,
+ * and a reviewer reading the first loop's snapshot would be reviewing a report
+ * that no longer describes the branch.
+ *
+ * Exit `1` in files mode. Not a silent no-op: a driver calling this against a
+ * files project has misread which loop it is in, and the item file it should
+ * be pointing the reviewer at already exists.
+ */
+function cmdSnapshot(argv) {
+  const itemId = argv[0];
+  if (!itemId) throw new OrchestrateError(SNAPSHOT_USAGE, 1);
+
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  const item = findQueueItem(run, itemId);
+  if (projectSource(run.project) !== 'github') {
+    throw new OrchestrateError('snapshot is for a tracker project — a files item already has a file, in the worktree the session wrote it in', 1);
+  }
+
+  const body = apiCall('GET', `/api/items/body?path=${encodeURIComponent(`gh:${trackerRepoOf(run)}#${itemId}`)}`);
+  if (!body.ok) throw new OrchestrateError(apiErrorText(body, `GET /api/items/body was refused for ${claimItemId(itemId)}`), EXIT_API_REFUSED);
+  const text = typeof body.data === 'string' ? body.data : '';
+
+  // A missing outcome file is an EMPTY Outcome, not a refusal. §5's inspect
+  // step has already decided what an empty one means (the session left
+  // nothing, which is the same evidence as an unmoved item file in a files
+  // run) and taken its own branch on it; this command's job is to record what
+  // is there.
+  const outcomePath = outcomeFilePath(dir, itemId);
+  const outcome = fs.existsSync(outcomePath) ? fs.readFileSync(outcomePath, 'utf8') : '';
+
+  const target = snapshotFilePath(dir, itemId);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, `${text.replace(/\s*$/, '')}\n\n## Outcome\n\n${outcome.replace(/^\s*/, '')}`);
+  console.log(JSON.stringify({ id: itemId, snapshot: target, title: item.title }));
+  return 0;
+}
+
+// The repo a tracker project is connected to, read from the same committed
+// marker `projectSource` reads — needed because a body is fetched by URN and
+// a URN names the repository. Read per call and cached nowhere, like every
+// other reader of this file.
+function trackerRepoOf(run) {
+  const marker = path.join(run.project, 'backlog', 'source.json');
+  const parsed = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  return parsed.repo;
 }
 
 // --- shared queue-item lookup + field application ---------------------
@@ -1541,6 +2196,82 @@ function isUnbornHead(projectRoot, base) {
   return head.status === 0 && head.stdout.trim() === `refs/heads/${base}`;
 }
 
+// The working tree that has `<branch>` checked out, or `null` (task-47).
+//
+// The same `worktree list --porcelain` scan SKILL.md §9 spells out, in the
+// tool because `init` needs the answer too — and it needs it for the same
+// reason §9 does: "the main tree" and "the tree holding `main`" are not
+// synonyms, and on a `--base feature/x` run they are different directories.
+// A command aimed at the wrong one silently acts on the wrong branch.
+//
+// Repo-wide and HEAD-independent, so it is correct from the project root:
+// `worktree list` reports the repository's trees whichever of them it is
+// typed in.
+//
+// `null` covers the two states §9 enumerates as outcomes 2 and 3 — no tree
+// holds the base, and a tree holds it but is mid-rebase and reports
+// `detached`. Neither is distinguishable here and neither needs to be: both
+// mean "there is nothing checked out on this branch to fast-forward".
+function treeHoldingBranch(projectRoot, branch) {
+  const listed = spawnSync('git', ['-C', projectRoot, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  if (listed.status !== 0) return null;
+  let current = null;
+  for (const line of listed.stdout.split('\n')) {
+    if (line.startsWith('worktree ')) current = line.slice('worktree '.length);
+    else if (line === `branch refs/heads/${branch}` && current !== null) return current;
+  }
+  return null;
+}
+
+/**
+ * `init`'s pull, for a TRACKER project only (task-47, spec §7.5).
+ *
+ * A tracker project is shared by definition — that is the whole point of the
+ * phase — so the machine starting a run may be behind a base another machine
+ * pushed. Every item this run merges lands on that base and is then pushed
+ * back, and a push from a tree that never caught up is rejected at the end of
+ * the first item, after the whole pipeline has been spent on it. Pulling at
+ * `init` moves that failure to the one moment when nothing has been built yet
+ * and nothing has been written.
+ *
+ * **A failure refuses the init**: exit `1`, nothing written, git's own stderr
+ * quoted. Not a warning, because the thing that cannot fast-forward is the
+ * branch every item of this run is about to be cut from — a run that started
+ * anyway would produce worktrees from a commit that is not what anybody else's
+ * `main` means.
+ *
+ * `plan` never calls this. `plan` writes nothing, and git state counts as
+ * state: a preview that quietly moved a branch would be the one command in
+ * this tool whose "writes nothing at all" promise was false.
+ *
+ * Two skips, and each is an absence rather than a tolerance:
+ *
+ *   * **No `origin`.** There is nothing to pull from — a repo with a tracker
+ *     marker and no remote is odd but not this command's business to refuse.
+ *   * **No tree holds `<base>`.** Nothing is checked out on it, so there is no
+ *     fast-forward to attempt. §9 creates a base worktree from the local ref
+ *     when it needs one, and SKILL.md §8's per-item pull runs in whatever tree
+ *     that resolution settled on — which is where the miss is caught.
+ *
+ * `origin <base>` explicitly rather than a bare `pull`: a bare one needs
+ * upstream tracking configured, which a fresh clone of somebody else's branch
+ * does not necessarily have, and would otherwise fail with a message about
+ * tracking information that has nothing to do with what went wrong.
+ */
+function pullBaseAtInit(projectRoot, base) {
+  if (spawnSync('git', ['-C', projectRoot, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).status !== 0) return;
+  const tree = treeHoldingBranch(projectRoot, base);
+  if (tree === null) return;
+
+  const pulled = spawnSync('git', ['-C', tree, 'pull', '--ff-only', 'origin', base], { encoding: 'utf8' });
+  if (pulled.status === 0) return;
+  throw new OrchestrateError(
+    `git pull --ff-only origin ${base} failed in ${tree} — another machine has pushed something this tree cannot fast-forward onto. ` +
+      `Nothing was written. git said: ${(pulled.stderr || pulled.stdout || '').trim()}`,
+    1
+  );
+}
+
 // --- commands ----------------------------------------------------------
 // Each cmdXxx function is the CLI's own contract for one command: parse
 // this command's flags, validate everything that can be validated before
@@ -1691,6 +2422,14 @@ function cmdInit(argv) {
   // means a bad call can never destroy or hide state that already existed;
   // the failure is confined to "nothing written," the same guarantee every
   // other error path in this file already gives.
+  // task-47, and BEFORE the queue is built rather than after: a queue built
+  // from `GET /api/items` is already current, but the WORKTREES this run will
+  // cut come from the local base, and every later item merges into it. Still
+  // inside the "nothing written" block — the pull moves git state, which is
+  // the project's, and writes nothing of this tool's. A files project never
+  // reaches this call, which is why the source is asked first.
+  if (projectSource(project) === 'github') pullBaseAtInit(project, base);
+
   const stamp = nowISO();
   // buildGatedQueue is the exact function `plan` (below) calls to preview a
   // run — see its own comment for the ordering/gate/max rules, kept in one
@@ -1939,7 +2678,8 @@ function cmdPlan(argv) {
   return 0;
 }
 
-const STAGE_USAGE = 'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop]';
+const STAGE_USAGE =
+  'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop] [--outcome <file>]';
 
 function cmdStage(argv) {
   const itemId = argv[0];
@@ -1949,8 +2689,13 @@ function cmdStage(argv) {
   let branch;
   let note;
   let permissionMode;
+  // task-47: the Outcome text that becomes the issue's closing comment.
+  // Required by `stage <n> merged` in a tracker project and refused in a files
+  // one — a files item's Outcome is already in the item file the branch
+  // carries, and there is no timeline to post it to.
+  let outcomeFile;
   // The one valueless flag on this command: it consumes no argv slot, so it
-  // never does the `argv[++i]` step the four above all take.
+  // never does the `argv[++i]` step the five above all take.
   let fixLoop = false;
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--session') session = argv[++i];
@@ -1958,6 +2703,7 @@ function cmdStage(argv) {
     else if (argv[i] === '--branch') branch = argv[++i];
     else if (argv[i] === '--permission-mode') permissionMode = argv[++i];
     else if (argv[i] === '--note') note = argv[++i];
+    else if (argv[i] === '--outcome') outcomeFile = argv[++i];
     else if (argv[i] === '--fix-loop') fixLoop = true;
   }
 
@@ -2031,10 +2777,79 @@ function cmdStage(argv) {
     );
   }
 
+  /* --- task-47: the claim, in tracker mode only -------------------------
+     Everything from here to `applyQueueItemFields` is skipped outright for a
+     files project — `projectSource` is asked once, off the committed marker,
+     and O-1 pins that a files run makes no request on any stage. */
+  const tracker = projectSource(run.project) === 'github';
+
+  // `--outcome` belongs to exactly one (mode, stage) pair, and both halves of
+  // that are refused here — before the queue item is touched, so a refusal
+  // leaves run.json byte-identical like every other exit 1 in this function.
+  if (outcomeFile !== undefined && !(tracker && stage === 'merged')) {
+    throw new OrchestrateError('--outcome is only for `stage <id> merged` in a tracker project — a files item carries its Outcome in the item file', 1);
+  }
+  if (tracker && stage === 'merged' && outcomeFile === undefined) {
+    throw new OrchestrateError(
+      'a tracker item is closed by `stage <id> merged --outcome <file>` — the file becomes the issue-s closing comment, and there is no item file carrying it',
+      1
+    );
+  }
+
+  /* **`preflight` is where a tracker run takes the issue**, before the
+     worktree exists and before anything is spent on the item. On a TRANSITION
+     only, exactly like the pause gate above and for the same reason: a
+     re-stamp of a stage the item already occupies must not post a second
+     claim comment on an issue this run already holds. */
+  if (tracker && stage === 'preflight' && item.stage !== stage) {
+    const claimed = trackerClaim(run, item);
+    if (!claimed.won) {
+      /* Another run holds it. The item is SKIPPED and the loop moves on, exit
+         `0` — a refusal here is information about the world, not a failure of
+         this call. This is the one place a `stage` command writes a stage
+         other than the one it was given, and it says so in the note. */
+      applyQueueItemFields(item, { stage: 'skipped', note: claimed.note });
+      run.updatedAt = nowISO();
+      writeRunAtomic(dir, run);
+      console.log(JSON.stringify({ id: itemId, stage: 'skipped', note: claimed.note }));
+      return 0;
+    }
+    item.claim = { commentId: claimed.commentId };
+  }
+
+  /* **`merged` closes the issue, and it happens BEFORE the stage is written.**
+     The order is the design (Decision 3 of the item's plan): the tool cannot
+     see the push, so SKILL.md calls this only after the push succeeded, and
+     the close is tied to the stage rather than to the merge. A failure throws
+     exit `9` with nothing written — see `trackerClose` for why this one
+     refusal is fatal where the heartbeat's and the release's are not. */
+  let mergedCounters;
+  if (tracker && stage === 'merged') {
+    let outcome;
+    try {
+      outcome = fs.readFileSync(outcomeFile, 'utf8');
+    } catch (e) {
+      throw new OrchestrateError(`--outcome ${outcomeFile}: could not be read (${e.message})`, 1);
+    }
+    // Read before the close, so this path's three requests go out as
+    // `GET claim`, `state`, `release` — see `trackerRelease` for why.
+    mergedCounters = claimCountersFor(run, item);
+    trackerClose(run, item, outcome);
+  }
+
   applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop });
 
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+
+  /* The claim's two ends, after the run file is written so that what is
+     published is what this machine actually recorded. A terminal stage
+     releases — with this run's bill — and every other stage publishes the
+     item's state. Both are best-effort; neither can fail this command. */
+  if (tracker) {
+    if (CLAIM_RELEASE_STAGES.has(stage)) trackerRelease(run, item, stage, mergedCounters);
+    else trackerHeartbeat(run, item);
+  }
   // The new count is echoed back only when this call actually incremented it,
   // so the caller enforcing the two-loop ceiling reads it straight off the
   // command that spent the loop rather than making a second `status --json`
@@ -2279,6 +3094,9 @@ function cmdAssume(argv) {
 
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  // task-47, as in `stage` and `usage`: the item's fields changed, so the
+  // published copy follows. Best-effort; a files project never reaches it.
+  if (projectSource(run.project) === 'github') trackerHeartbeat(run, item);
   console.log(JSON.stringify({ id: itemId, assumptions: item.assumptions.length }));
   return 0;
 }
@@ -2807,6 +3625,9 @@ function cmdUsage(argv) {
 
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  // task-47: a command that changed the item's fields publishes them. After
+  // the write, best-effort, and a no-op for a files project.
+  if (projectSource(run.project) === 'github') trackerHeartbeat(run, item);
   console.log(JSON.stringify({ id: itemId, usage: entry }));
   return 0;
 }
@@ -2885,6 +3706,18 @@ function cmdWatch(argv) {
     run.updatedAt = nowISO();
     writeRunAtomic(dir, run);
 
+    /* task-47: the tick that keeps the RUN alive keeps the CLAIM alive too.
+       This is the one heartbeat that matters most — a dispatched session can
+       run for an hour with nothing else calling a command, and a claim with no
+       heartbeat is retired by the next contestant after fifteen minutes. Every
+       other caller in this file publishes state because the item changed; this
+       one publishes it because time passed.
+
+       Still best-effort, and still after the local write. A tick that cannot
+       reach the API prints one line and keeps watching the child, which is
+       what it is actually for. */
+    if (projectSource(run.project) === 'github') trackerHeartbeat(run, findQueueItem(run, itemId));
+
     if (!pidAlive(pid)) return 0;
 
     elapsed += intervalMs;
@@ -2937,10 +3770,29 @@ function packageJsonVerifyCommands(cwd) {
 // when` section at all, both resolve to "nothing extra" rather than an
 // error — mirroring findUnresolvedCommands' own tolerant style in the gate
 // section above.
-function itemDoneWhenCommands(cwd, itemId) {
-  const found = findItemFilePath(cwd, itemId);
-  if (!found) return [];
-  const { body } = readItemForGate(found.path);
+// `snapshotPath` (task-47) is where a TRACKER item's text is: there is no item
+// file in the worktree to find, so the `## Done when` block is read from the
+// snapshot `snapshot <n>` wrote under the run-state directory. `null` — every
+// files call — keeps the search exactly as it was.
+//
+// A missing snapshot resolves to "nothing extra" rather than an error, the
+// same tolerance a missing item file already gets: the caller's own exit `5`
+// ("nothing resolvable to verify with") is the right answer for an item that
+// has no proof commands anywhere, and it says so far better than a throw here
+// would.
+function itemDoneWhenCommands(cwd, itemId, snapshotPath = null) {
+  let body;
+  if (snapshotPath !== null) {
+    if (!fs.existsSync(snapshotPath)) return [];
+    // The WHOLE file is the body. A snapshot has no frontmatter fence — an
+    // issue has no frontmatter to snapshot — so running it through
+    // `parseItemForGate` would answer `body: ''` for every well-formed one.
+    body = fs.readFileSync(snapshotPath, 'utf8');
+  } else {
+    const found = findItemFilePath(cwd, itemId);
+    if (!found) return [];
+    ({ body } = readItemForGate(found.path));
+  }
   const doneWhen = extractSection(body, 'Done when');
   if (doneWhen === undefined) return [];
   return extractDoneWhenCommands(doneWhen);
@@ -2953,7 +3805,7 @@ function itemDoneWhenCommands(cwd, itemId) {
 // command (`pnpm test` is the obvious one), and running the identical
 // command twice would only double the wall-clock cost of every verify call
 // for zero extra proof.
-function resolveVerifyCommands(cwd, itemId) {
+function resolveVerifyCommands(cwd, itemId, snapshotPath = null) {
   let base;
   const verifyJsonPath = path.join(cwd, 'backlog', 'verify.json');
   try {
@@ -2990,7 +3842,7 @@ function resolveVerifyCommands(cwd, itemId) {
 
   const seen = new Set();
   const all = [];
-  for (const cmd of [...base, ...itemDoneWhenCommands(cwd, itemId)]) {
+  for (const cmd of [...base, ...itemDoneWhenCommands(cwd, itemId, snapshotPath)]) {
     if (seen.has(cmd)) continue;
     seen.add(cmd);
     all.push(cmd);
@@ -3078,9 +3930,15 @@ function cmdVerify(argv) {
   // before a single command is spawned, exactly like every other command in
   // this file — but nothing is held across the suite. See the re-read below
   // for why that distinction is not pedantry.
-  findQueueItem(readRun(dir), itemId);
+  const checked = readRun(dir);
+  findQueueItem(checked, itemId);
 
-  const commands = resolveVerifyCommands(cwd, itemId);
+  // task-47: in a tracker project the item's `## Done when` block is in the
+  // snapshot `snapshot <n>` wrote, not in any file under the worktree's
+  // `backlog/` — there is none. Everything else about verify is unchanged:
+  // the commands still run in `--cwd`, the rows still land on the queue item.
+  const snapshotPath = projectSource(checked.project) === 'github' ? snapshotFilePath(dir, itemId) : null;
+  const commands = resolveVerifyCommands(cwd, itemId, snapshotPath);
   if (commands.length === 0) {
     // Exit 5: nothing this tool could find to prove the item works — no
     // backlog/verify.json, no package.json test/typecheck/build script, and
@@ -3115,6 +3973,11 @@ function cmdVerify(argv) {
   item.verification = item.verification.concat(rows);
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  // task-47, as in `stage`, `usage` and `assume`. The verification rows are
+  // the one part of a queue item another machine most wants to see — they are
+  // the evidence behind a merge — so publishing them is the point rather than
+  // completeness for its own sake.
+  if (projectSource(run.project) === 'github') trackerHeartbeat(run, item);
 
   if (json) {
     console.log(JSON.stringify(rows));
@@ -3428,6 +4291,7 @@ commands:
   denials      list the permission denials a session's transcript recorded
   usage        record what one dispatched session cost, from its transcript
   verify       run the project's proof commands and record them
+  snapshot     write a tracker item + its Outcome to one file (tracker projects only)
   reconcile    read-only crash-recovery report
   abort        tear down worktrees/branches and end the run`;
 
@@ -3481,6 +4345,21 @@ commands:
 //      this call and retry" but STOP — another session is driving this run, so
 //      write nothing more and exit (references/recovery.md). `unpause` is the
 //      one writing command exempt from it; see cmdUnpause for why.
+//   8  the backlog-manager API is not running (task-47), on a TRACKER project
+//      only — a files project makes no request on any path and can never see
+//      this. Nothing is written. Its own number rather than a `1` for the
+//      reason backlog.mjs's own exit `5` has one: "the store said no" and
+//      "there is no store reachable at all" are different things, and the
+//      second has the same fix every time (`pnpm run dev`, `pnpm run
+//      docker:up`). It is `8` rather than `5` only because `5` and `3` were
+//      already taken here and SKILL.md branches on both.
+//   9  an API refusal this command could not absorb (task-47) — a 503 with no
+//      token, a 502 from GitHub, a 400 naming a field this tool composed.
+//      Nothing is written. Distinct from `1`, which means "this call was
+//      wrong": a `9` means the call was right and the other side would not do
+//      it, so the reaction is a park rather than a fix. Refusals a command CAN
+//      absorb never reach it — a `claim` 409 naming another run is exit `0`
+//      and a `skipped` item, because a refusal is information.
 export function main(argv) {
   const [cmd, ...rest] = argv;
   try {
@@ -3499,6 +4378,7 @@ export function main(argv) {
     if (cmd === 'denials') return cmdDenials(rest);
     if (cmd === 'usage') return cmdUsage(rest);
     if (cmd === 'verify') return cmdVerify(rest);
+    if (cmd === 'snapshot') return cmdSnapshot(rest);
     if (cmd === 'reconcile') return cmdReconcile(rest);
     if (cmd === 'abort') return cmdAbort();
     console.error(`unknown command: ${cmd ?? '(none)'}\n\n${USAGE}`);
