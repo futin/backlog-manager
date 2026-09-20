@@ -306,6 +306,31 @@ Ids: inside a project `31`, `#31` and — since the type is a label, not part of
 (`shared/agent.ts`) accepts `#\d+` and the URN beside the file forms until phase 6. The four skills' prose gains one paragraph each: how to name an item in a
 tracker project, and that the stack must be running.
 
+### 6.6 Plan and spec documents stay in the repo, and the issue links them
+
+Item-level plans are not what this section is about: §6.4's body rules already carry them, because `## Plan` **is** the plan artifact and `backlog-groom`
+produces no standalone file for a promoted item. This is about the other kind — a multi-phase design spec and the `superpowers:writing-plans` output beside it,
+the pair under `docs/superpowers/` that this very document is a member of.
+
+Those stay committed files in the repo. An issue that needs one carries a link and never the text. The link is pinned to a commit SHA
+(`https://github.com/<owner>/<repo>/blob/<sha>/docs/superpowers/plans/<file>.md`) rather than to `blob/main`, because `main` moves and the issue must keep
+pointing at the document that was approved when it was written.
+
+Three shapes were weighed and lost:
+
+- **As an issue attachment.** GitHub has no REST endpoint for issue attachments at all — `github.com/user-attachments` is a browser-only upload against session
+  cookie auth — so a headless skill cannot produce one. Jira's `POST /rest/api/3/issue/{key}/attachments` can, which is worse rather than better: the planning
+  path would work on one tracker and silently not on the other, and §4.1's seam would have to carry a capability only some adapters have.
+- **As the issue body, or split across comments.** GitHub caps a body and each comment at 65,536 characters. Three of this repo's own plans are already over
+  that cap (89 KB, 114 KB, 121 KB), so the shape does not merely strain, it fails — and splitting one document across comments costs it its diff.
+- **Mirrored into a gist or a tracker wiki.** That buys a reader with no repo access, at the price of a second home for one document, which is the failure
+  every single-writer rule in `CLAUDE.md` exists to prevent. Deferred (§15) until a reader who cannot clone the repo actually exists.
+
+What the repo buys beyond avoiding those: the orchestrator has the tree checked out at `<base>` in every worktree, so a plan is read from disk with no request
+and no spend against the hourly rate limit §5.1's cache exists to protect; the reviewer reads it the same way; and the document is versioned, so a plan revised
+mid-phase leaves a diff instead of silently replacing itself. `runner-fix:` being read at `<base>` is the same rule already in force for a different piece of
+run-relevant text.
+
 ## 7. The orchestrator on a tracker project — phase 4
 
 > **Landed in task-47 (phase 4a), 2026-09-19 — one machine orchestrating.** Phase 4 was split on the user's call: 4a is a run draining a tracker project
@@ -532,6 +557,9 @@ against the code as it is by then. Each phase is one orchestrator run.
 9. **The claim comment and the state comment are one comment.** The 2026-09-15 direction had two; one is fewer notifications and one record per session per
    item. Cost: an item worked three times has three comments, each a complete record.
 10. **Promote to the phase-1 task now; later phases as due.** Cost: the board shows one task for a six-phase direction; the spec is the map.
+11. **Plan and spec documents stay on disk in the repo; the issue links them, pinned to a commit SHA** (§6.6). Taken 2026-09-20, ahead of phase 5, and
+    deliberately provisional — first version, revisit on evidence. The case it does not serve is a reader whose access stops at the tracker. Cost: a dead link
+    for that reader, and no plan text visible to anyone who cannot clone the repo.
 
 ## 15. Deferred, on purpose
 

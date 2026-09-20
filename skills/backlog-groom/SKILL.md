@@ -249,6 +249,12 @@ exactly one such place, step 1's headings.
    `## Done when` — filled in for real. `## Plan` is the one heading `backlog-execute` gates on, but a task that's actually executable needs all four answered,
    not just that one.
 
+   On a project whose backlog lives in a tracker rather than in files, this body becomes the issue's body, rendered outside the repo — so cite a repo document
+   by a commit-pinned permalink (`https://github.com/<owner>/<repo>/blob/<sha>/<path>`), never by a relative path and never by pasting the document in. A
+   relative path is dead the moment it leaves the tree, a `blob/main` link drifts off whatever was approved when the plan was written, and a tracker caps a
+   body's length (GitHub: 65,536 characters), so a long design document pasted in is a body that fails to save. The plan a promote produces still goes in
+   `## Plan` as prose either way — the permalink is how that prose cites a standalone spec, not a replacement for it.
+
    `## Test cases` and `## Done when` are read by a headless `backlog-execute` session — under the orchestrator that session has no interactive browser pane and
    nobody watching the screen, so every check must be one it can run itself. When the change is user-visible in the browser (client code, anything rendered) and
    the project's `.mcp.json` configures a browser MCP server — this repo's is Playwright — write the browser check as an executable test case that begins with
