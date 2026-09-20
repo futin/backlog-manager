@@ -3,6 +3,9 @@ id: bug-35
 title: Watchdog retries a permanently-refused resume forever
 created: 2026-09-16
 tags: watchdog, orchestrator
+updated: 2026-09-20T12:28:53Z
+groom-elapsed: 175
+groom-tokens: 52535
 ---
 
 ## Symptom
@@ -57,20 +60,103 @@ nothing reads it; `entry` has no notion of "this is the Nth time in a row".
 The refusal in this instance is the dashboard's, not this app's: the message comes from `claude-agents-dashboard`'s spawn endpoint, surfaced here by
 `resumeErrorMessage`. That matters for the fix — the sentence is another repo's string, so a fix must not classify refusals by matching on its text.
 
+
+Confirmed against the current source while grooming: `entry.attempts += 1` is line 521 of `watchdog.service.ts`, inside the `try` and after the awaited
+`resume()`; the `catch` (525-534) writes `lastError` and pushes `failed` with the literal `(not counted)`; `visit()`'s only stand-down is
+`watchdogStoodDown({ enabled, exhausted })` at 384, whose `exhausted` is `watchdogExhausted(entry.attempts, …)` at 383. One further detail the filing did not
+name and the fix depends on: `entry.lastSpawnAt` is stamped at 518, *before* the call, so a refusal re-arms grace exactly as a success does. That is why the
+failures arrive one per `graceMs` forever rather than once per tick — the loop is stable, not a thundering one, which is precisely what let it run for 5h20m
+without anything else noticing.
+
 ## Fix
 
-unknown
+**Shape 1 — a consecutive-failure ceiling — measured against the cap that already exists.** Shape 3 (classify the refusal) is rejected for now: the taxonomy
+would have to come from the status `AgentsService.resume()` throws, and those statuses do not carry the distinction. `409` covers both a terminal refusal
+(`projectDispatchGate` disabled, the dashboard's own "remote answers are off") and a wholly benign one (bug-19's resume lock, "a resume was already started
+12s ago"), while the dashboard's spawn failures arrive with the upstream's own status. Classifying by text is ruled out by the Cause above. Shape 2 (backoff)
+is rejected because it fixes only the ring-buffer half and never tells anybody. Shape 1 makes the sweeper's existing exit reachable by refusals, and the
+existing coupling then does the telling: standing down is exactly what makes the board render its hand-Resume control.
 
-Three shapes were considered while filing; the choice is grooming's, not this file's.
+**No second number.** The ceiling is `WatchdogConfig.maxAttempts`, the "Give up after N" the user already sets — an alias, not a new setting, for the reason
+`CLAIM_STALE_MS` is an alias of `RUN_STALE_MS`. Nothing is added to `WatchdogConfig`, `watchdog-config.util.ts`, the Settings card or the config route, and
+raising "Give up after" re-enters a stood-down run through the same path it already re-enters an exhausted one.
 
-1. **Consecutive-failure ceiling.** Add `consecutiveFailures` to `WatchdogEntry`, reset on any success, and stand the sweeper down at a bound (its own setting, or
-   reuse `maxAttempts`). Smallest change; has to enter through `watchdogStoodDown` so the board's Resume control appears at the same moment, which means a new
-   input to a predicate two suites pin from one table (`test/watchdog-coupling.test.tsx`, `test/watchdog-sweep.test.ts`).
-2. **Exponential backoff on `lastSpawnAt`.** Keeps trying forever — right if the refusal really is transient — but only widens the interval, so it fixes the ring
-   buffer and not the "nobody was told" half.
-3. **Classify the refusal.** Terminal (remote answers off, `BM_AGENTS` off, project not visible) stands down on the first occurrence; transient (network, 5xx)
-   backs off. Best behaviour, most coupling: the taxonomy has to come from a status code or an error code, never from matching the dashboard's prose.
+### The change
 
-Whichever lands, two things are worth deciding with it: whether a stood-down-on-failure run reports a different `kind` than `exhausted` (the strip currently says
-"exhausted after N attempts", which would be a lie at `attempts: 0`), and whether repeated identical failures should collapse in the event log rather than
-consuming one ring slot each.
+1. **`server/src/orchestrator/watchdog-state.service.ts`** — add `consecutiveFailures: number` to `WatchdogEntry`, initialised `0` in `upsert`, beside
+   `attempts` and with its own comment explaining that the two count different things: `attempts` is sessions this sweeper started, `consecutiveFailures` is
+   refusals in a row since the last one it started. Both are in-memory and lost on restart, unchanged.
+
+   In `annotate()`, fill two new `RunWatchdog` fields from the same single read of the entry and the config that already fills `exhausted`:
+   `failures: entry?.consecutiveFailures ?? 0` and `failing: watchdogFailing(failures, config.maxAttempts)`. Same rule as `exhausted`: derived at annotate
+   time, never stored, so a `POST /api/agents/watchdog/config` between two reads can never publish `failing: true` beside numbers that contradict it.
+
+2. **`shared/agent.ts`** — add `watchdogFailing(consecutiveFailures: number, maxAttempts: number): boolean`, `>=`, the one-line sibling of
+   `watchdogExhausted` and written the same way and for the same reason (a person reading the board must be able to check the sentence against the two numbers
+   printed beside it).
+
+   Widen the stand-down predicate to `watchdogStoodDown(w: { enabled: boolean; exhausted: boolean; failing: boolean })` — **a required third property, no
+   default**, the rule `runClaimBlock` follows for `starting` (bug-21). A default would let a future caller silently opt out of the new stand-down and put the
+   board back to offering Resume while the sweeper still spawns, which is the one thing this predicate exists to prevent. `RunControls` passes
+   `run.watchdog` whole and needs no edit; `watchdog.service.ts`'s object literal is the one call site the compiler will fail, which is the intent.
+
+3. **`shared/types.ts`** — add `failures: number` and `failing: boolean` to `RunWatchdog`, both required (the compiler is the fixture checklist here, the same
+   way it is for `BacklogItem.source`). Add `'stalled'` to `WatchdogEventKind`.
+
+   `stalled`, not a reuse of `exhausted`: the strip and the Activity list both render `exhausted after ${attempts} attempts`, and at `attempts: 0` — the
+   observed case — that sentence is false. This answers the first of the two questions the filing left open: a stood-down-on-failure run reports its own kind.
+
+4. **`server/src/agents/watchdog.service.ts`**
+   - `spawn()`: on success, `entry.consecutiveFailures = 0` beside the existing `attempts += 1` / `lastError = null`. In the `catch`, `entry.consecutiveFailures += 1`,
+     and change the pushed detail so it stops claiming nothing was counted when something now is:
+     `resume failed: ${entry.lastError} (${entry.consecutiveFailures}/${maxAttempts} in a row; no session started, so the attempt cap is untouched)`.
+   - `visit()`: `const failing = watchdogFailing(entry.consecutiveFailures, config.maxAttempts);` beside the existing `enabled`/`exhausted`, passed into the
+     one `watchdogStoodDown` call. Inside the stand-down branch the existing `off` → `exhausted` ladder gains a third rung, ranked last: `off` first (an
+     operator who just flipped the toggle is owed the fact they can act on), then `exhausted`, then `stalled`, each logged once per condition behind its own
+     `…Logged` flag — `entry.stalledLogged`, initialised `false` in `upsert` and cleared alongside `entry.exhaustedLogged = false` on the line past the branch,
+     so a raised cap lets a run say it again rather than stalling in silence. The line: `` `resume refused ${entry.consecutiveFailures}× in a row — resume by hand (last: ${entry.lastError})` ``.
+   - `visit()` step 1 (`run.fresh`, the `recovered` branch) and `noteBoardResume()`: both set `entry.consecutiveFailures = 0`. Recovery and a hand resume that
+     actually spawned are the two events that prove the refusal has cleared, and a person clicking the control this stand-down exists to reveal must not have
+     to click it twice.
+
+5. **`client/src/lib/run-watchdog.ts`** — `watchdogClause` gains one clause, between `!w.enabled` and the `lastError` fallback (which it subsumes, so ordering
+   matters): `` if (w.failing) return `watchdog: resume refused ${w.failures}× — resume by hand`; ``. Add `stalled` to `WATCHDOG_KIND_GLYPH` and to
+   `WATCHDOG_KIND_TONE` (tone `warn`, the same tone `exhausted` and `disabled` carry — a state needing a person, not a failure of this run).
+
+**The ring buffer needs nothing of its own**, which answers the filing's second open question: with a ceiling of `maxAttempts` a run can push at most that many
+`failed` lines plus one `stalled`, so the 17-line flood is gone as a consequence of the fix rather than as a second mechanism. Collapsing duplicate events is
+therefore NOT part of this bug; if it is ever wanted it is a separate item about the log, not about the watchdog.
+
+**Known and accepted: bug-19's resume lock counts.** A sweeper tick that lands inside the 15-minute window of a board resume is refused, and that refusal
+increments the counter like any other. It is not worth a new error code to exclude: a successful board resume resets the counter through `noteBoardResume`
+before the sweeper can see the lock, and a resume that recovers the run resets it again through `recovered`. What remains is a run that a person resumed, that
+did not recover, and that the sweeper then stands down on early — which is the correct outcome anyway.
+
+### Test cases
+
+- `test/helpers/watchdog-coupling.ts` — `CouplingRow` gains `consecutiveFailures`, `rowWatchdog` fills `failures` and
+  `failing: watchdogFailing(row.consecutiveFailures, row.maxAttempts)`, and every existing row gains `consecutiveFailures: 0` so its hand-checked `standsDown`
+  verdict is unchanged. Three rows added, each with `standsDown` written out by hand, never derived: enabled with `attempts: 0, consecutiveFailures: 2, maxAttempts: 3`
+  → `false`; enabled with `attempts: 0, consecutiveFailures: 3, maxAttempts: 3` → `true` (**the bug's own state**, and the row whose absence let it ship);
+  enabled with `attempts: 0, consecutiveFailures: 3, maxAttempts: 4` → `false`, the raised-cap re-entry.
+- `test/watchdog-sweep.test.ts` — a sweep case driving the real failure: `AgentsService.resume` stubbed to reject with an `HttpException` every time, a
+  crashed run, `maxAttempts: 3`, and grace advanced between ticks. Assert after the third tick that `consecutiveFailures` is `3`, `attempts` is still `0`,
+  exactly one `stalled` event exists, and that the fourth and fifth ticks add no further `failed` event and make no further `resume` call (today's code makes
+  one per tick forever — that call count is the red proof, and it must be taken from the stub, not from the log). Then a sixth tick with the stub resolving
+  and `maxAttempts` raised to `4`: one `spawned` event, `attempts: 1`, `consecutiveFailures: 0`.
+- `test/watchdog-sweep.test.ts` — reset coverage: a run that goes fresh after two failures clears `consecutiveFailures` (via the `recovered` branch), and
+  `noteBoardResume` clears it too.
+- `test/watchdog-coupling.test.tsx` — unchanged in structure; it re-runs the widened table through both `watchdogStoodDown` and `RunControls`, so the three new
+  rows assert the client's half (a Resume control renders for the stalled state) for free. Its "exactly one client reader" source guard must stay green.
+- `test/run-watchdog.test.ts` — the `Record<WatchdogEventKind, true>` literal forces `stalled` into the glyph and tone maps; add `watchdogClause` cases for
+  `failing: true` (the new sentence), and for `failing: true` with `exhausted: true` (exhausted still wins, the existing order).
+- `test/agents-shared.test.ts` — a `watchdogFailing` table mirroring the `watchdogExhausted` one, `>=` included.
+
+No browser check is written for this fix, deliberately, and this line is the reason rather than an omission: the state it would have to show is server memory
+that only real refused spawns can produce — `consecutiveFailures` cannot be written from the outside, and a hand-built `run.json` would violate the run file's
+single-writer rule while still not reaching `WatchdogStateService`. The two rendered readings (`RunControls`'s Resume, `watchdogClause`'s sentence) are pinned
+in jsdom by the suites above, which is where every other watchdog rendering in this repo is pinned.
+
+No `runner-fix:` marker, also deliberately: the code is under `server/src/agents/`, but the marker exists so the *rest of a run* is not executed by the version
+being repaired, and a server change cannot take effect inside a run that is already going — the process holding the broken watchdog is not restarted by a merge.
+Hoisting this item would buy nothing.
