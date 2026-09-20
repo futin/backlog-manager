@@ -4,8 +4,10 @@ import { useAgents } from '../../hooks/useAgents';
 import { elapsedSince } from '../../lib/item-age';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
+import { useProjectSources } from '../../hooks/useProjectSources';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
+import { remoteAsArchive, remoteAsLive, runInvisibleElsewhere } from '../../lib/remote-run';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
 import { RUN_STATUS_GLYPH, runDotTone, runStatusChip } from '../../lib/run-stage';
 import { useRunsMode } from '../../hooks/useRunsMode';
@@ -25,7 +27,7 @@ import { StageBars } from './StageBars';
 import { WatchdogMonitor } from './WatchdogMonitor';
 import type { RunRange } from '../../lib/run-range';
 import { resumeGate } from '../../../../shared/agent';
-import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RunStage, StartingRun } from '../../../../shared/types';
+import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RemoteRun, RunStage, StartingRun } from '../../../../shared/types';
 
 /**
  * Runs — the board's third surface: history of every backlog-orchestrate run
@@ -204,6 +206,13 @@ interface MergedRun {
    * disagree for exactly the run this list used to freeze.
    */
   isLive: boolean;
+  /**
+   * Another machine's run (task-48), assembled from a tracker repo's claim
+   * comments. Such a row has no archive record — `run` and `live` are both
+   * built from the one `remote` entry — and it is read-only: the sheet draws
+   * no controls for it and fetches no file, because there is none here.
+   */
+  remote: boolean;
 }
 
 type LiveRun = OrchestratorRunsPayload['runs'][number];
@@ -251,7 +260,7 @@ function runKey(project: string, runId: string): string {
  * endpoint's own per-project descending order) is a safer failure than
  * rendering the same run twice in one list.
  */
-function mergeRuns(archiveRuns: readonly OrchestratorArchiveRun[], liveRuns: readonly LiveRun[]): MergedRun[] {
+function mergeRuns(archiveRuns: readonly OrchestratorArchiveRun[], liveRuns: readonly LiveRun[], remoteRuns: readonly RemoteRun[]): MergedRun[] {
   // bug-29: EVERY live entry, not `liveRuns.filter((r) => r.fresh)`. The
   // freshness question moved down one line, onto `isLive` alone — see both
   // fields' own doc comments for the split and why it is the whole fix.
@@ -263,7 +272,20 @@ function mergeRuns(archiveRuns: readonly OrchestratorArchiveRun[], liveRuns: rea
     if (seen.has(key)) continue;
     seen.add(key);
     const live = liveByKey.get(key) ?? null;
-    merged.push({ run, live, isLive: live?.fresh === true });
+    merged.push({ run, live, isLive: live?.fresh === true, remote: false });
+  }
+  // task-48: other machines' runs, appended after the archive's. The archive
+  // can never hold one — the server drops a derived run whose runId any local
+  // run file carries — so the `seen` check is the same defensive dedupe as
+  // above rather than a merge. `live` is the remote entry itself, which is
+  // what keeps `splitLive` unchanged: a remote `running` run is a Live row and
+  // a finished one is a History row, by the same rule a local run follows.
+  for (const remote of remoteRuns) {
+    const key = runKey(remote.project, remote.runId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const live = remoteAsLive(remote);
+    merged.push({ run: remoteAsArchive(remote), live, isLive: live.fresh, remote: true });
   }
   return merged;
 }
@@ -521,6 +543,7 @@ function LiveRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: numb
             would be an animation asserting something false. */}
         {tone === undefined ? <Dot size={10} /> : <Dot size={10} tone={tone} breathe={row.isLive} />}
         <span className="runs-row-project">{projectLabel(run.project)}</span>
+        {row.remote && <RemoteTag runId={run.runId} />}
         {attention > 0 && (
           <span className="runs-row-attn" data-testid={`runs-row-attn-${run.runId}`}>
             <span aria-hidden="true">⚠ </span>
@@ -659,6 +682,7 @@ function HistoryRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: n
           {status.label}
         </span>
         <span className="runs-row-project">{projectLabel(run.project)}</span>
+        {row.remote && <RemoteTag runId={run.runId} />}
         <CountPair completed={completed} total={total} />
         {/* The row's right-hand reading: wall time, and what the run cost.
             Either half can be known without the other — a run with a corrupt
@@ -673,6 +697,22 @@ function HistoryRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: n
         )}
       </span>
     </button>
+  );
+}
+
+/**
+ * The `remote` tag on a row (task-48) — `ui/Pill`'s neutral tone, .claude/
+ * DESIGN.md §1's status micro-label as §8 applies it: a pill states a fact and
+ * is never clickable, and "another machine ran this" is a fact, not a state
+ * anyone is waiting on, so it takes the tone that carries no urgency.
+ */
+function RemoteTag({ runId }: { runId: string }): JSX.Element {
+  return (
+    <span data-testid={`runs-row-remote-${runId}`}>
+      <Pill tone="neutral" title="Driven from another machine — seen through its claim comments">
+        remote
+      </Pill>
+    </span>
   );
 }
 
@@ -712,7 +752,10 @@ export default function RunsView() {
   // second expression agreeing with the first — the shape `watchdogStoodDown`
   // and `isStale` are each one function to avoid, and the one this repo has
   // already been bitten by twice.
-  const { runs: liveRuns, starting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  const { runs: liveRuns, starting, remote: remoteRuns, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  // task-48: which projects are tracker-backed, for the one line a local run
+  // that has not claimed an issue yet carries in its detail sheet.
+  const projectSources = useProjectSources();
   // task-17: the environment half of the resume gate. Read here rather than
   // inside `RunControls` so that component stays free of a data source —
   // `resumeGate` (shared/agent.ts) is the single implementation, and a
@@ -819,7 +862,7 @@ export default function RunsView() {
   // rather than let each derivation call Date.now() for itself.
   const now = Date.now();
 
-  const merged = mergeRuns(archiveRuns, liveRuns);
+  const merged = mergeRuns(archiveRuns, liveRuns, remoteRuns);
 
   // Every project seen anywhere in the (unfiltered) merged list — computed
   // off `merged`, not off `inScope`/`filtered` below, so narrowing EITHER
@@ -1303,6 +1346,11 @@ export default function RunsView() {
                     <RunDetail
                       summary={selectedRow.run}
                       live={selectedRow.live}
+                      remote={selectedRow.remote}
+                      invisibleElsewhere={runInvisibleElsewhere(
+                        pickAuthority([selectedRow.live], selectedRow.run),
+                        projectSources.get(selectedRow.run.project)
+                      )}
                       gate={resumeGate(agents, selectedRow.run.project)}
                       resuming={resuming.has(selectedRow.run.project)}
                       onChanged={(kind) => {

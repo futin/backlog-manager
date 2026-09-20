@@ -91,7 +91,7 @@ the list of files lives, never a count in prose.
 #### `orchestrate.mjs`'s two modes (task-47, spec §7)
 
 The same marker decides, read per call and cached nowhere. **Files mode is byte for byte what it always was** — no command spawns `api-call.mjs` at all, which
-the suite pins by driving a whole stage sequence with `BM_API_PORT` pointed at a closed port. **`github` mode** changes four things and nothing else:
+the suite pins by driving a whole stage sequence with `BM_API_PORT` pointed at a closed port. **`github` mode** changes these things and nothing else:
 
 | Where                | Tracker behaviour                                                                                                                                      |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -99,6 +99,8 @@ the suite pins by driving a whole stage sequence with `BM_API_PORT` pointed at a
 | ids                  | the BARE issue number (`31`). `--ids` accepts nothing else, naming the shape it wants                                                                 |
 | `init`               | `git pull --ff-only origin <base>` in the tree holding the base, BEFORE the queue is built. A failure refuses the init, nothing written                |
 | the claim            | `stage <n> preflight` claims; every field-changing command heartbeats the state; a terminal stage releases with this run's bill; `stage <n> merged --outcome <file>` closes the issue |
+| publishing (task-48) | `finish` stamps `finished` on the last-touched claimed item; `attention` posts a `bm:attention` comment with an `@mention`; `heartbeat` heartbeats every held claim — all best-effort, one stderr line on failure |
+| `reconcile`          | each row gains `claim` (`this-run`/`other`/`released`/`none`/`unknown`, from `GET /api/items/claim`); `other` makes the suggestion `skip` |
 
 Two commands exist only here: `snapshot <n>` (the issue body plus the session's Outcome, as one file the reviewer and `verify` read) and `stage`'s `--outcome`
 flag, which is required for `merged` in a tracker project and refused in a files one. `docs/subsystems/invariants.md`'s

@@ -4,9 +4,9 @@ import { ItemsService, type WriterLookup } from './items.service';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import { KIND_NAMES } from '../tracker/labels';
 import { isMergeMode, isQuestionMode } from '../../../shared/agent';
-import { MERGE_MODES, QUESTION_MODES } from '../../../shared/types';
+import { CLAIM_FINISHED_STATUSES, MERGE_MODES, QUESTION_MODES } from '../../../shared/types';
 import type { CreatedItem, WriteOutcome, WriteRefusal } from './sources/source';
-import type { ClaimCounters, ClaimResult, ClaimRun, Section } from '../../../shared/types';
+import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, Section } from '../../../shared/types';
 
 /**
  * items-write.controller.ts — the seven write routes of a tracker project
@@ -156,22 +156,27 @@ export class ItemsWriteController {
     return this.answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters }));
   }
 
-  /** Say the session is still alive; carry the driver's opaque `state` when given. */
+  /** Say the session is still alive; carry the driver's opaque `state` when
+   *  given, and `finish`'s `finished` stamp — the one field this route also
+   *  accepts on a RELEASED claim (see `GithubSource.heartbeat`). */
   @Post('heartbeat')
   async heartbeat(@Body() body: Record<string, unknown> | undefined): Promise<ClaimResult> {
     const raw = body ?? {};
     const project = required(raw.project, 'project');
     const id = required(raw.id, 'id');
     const commentId = commentIdOf(raw.commentId);
+    const finished = claimFinishedOf(raw.finished);
 
     const w = this.writable(this.items.writerFor(project));
     // `state` is the ONE field on these seven routes taken outright, and it is
-    // safe for the reason the dispatch route's `prompt` is not: nothing reads
-    // it. It is the `ClaimState` task-47's driver publishes, round-tripped into
-    // a comment this app wrote and back out again, and no predicate in this
-    // build branches on it — `run`, one route over, is the opposite case and is
-    // validated field by field for exactly that reason.
-    return this.answer(await w.writer.heartbeat(w.project, w.marker, { project, id, commentId, state: raw.state }));
+    // safe for the reason the dispatch route's `prompt` is not: no predicate
+    // branches on it. It is the `ClaimState` task-47's driver publishes,
+    // round-tripped into a comment this app wrote and back out again; its one
+    // reader (task-48's remote-run assembly) only DRAWS it, and reads it
+    // tolerantly. `run`, one route over, is the opposite case and is validated
+    // field by field for exactly that reason — and so is `finished`, which a
+    // derived run's status is decided from.
+    return this.answer(await w.writer.heartbeat(w.project, w.marker, { project, id, commentId, state: raw.state, finished }));
   }
 
   /** Groom's route — the ONE route that rewrites an item's body (§6.4), behind
@@ -358,6 +363,32 @@ function claimRunOf(value: unknown): ClaimRun | undefined {
     maxItems: raw.maxItems as number | null,
     base: (raw.base as string).trim()
   };
+}
+
+/**
+ * `ItemHeartbeatRequest.finished`, or `undefined` when the caller sent none
+ * (task-48).
+ *
+ * Validated field by field, the `run` rule rather than the `state` one, because
+ * something decides on it: a derived remote run's `status` IS this value. A
+ * `status` outside the four, or an `at` that does not parse, would otherwise be
+ * banked into a comment where it reads as a run that finished with no known
+ * outcome at no known time. The refusal happens before the adapter is reached,
+ * so nothing is edited.
+ */
+function claimFinishedOf(value: unknown): ClaimFinished | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new HttpException({ error: 'finished must be an object' }, 400);
+  }
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.at !== 'string' || Number.isNaN(Date.parse(raw.at))) {
+    throw new HttpException({ error: 'finished.at must be an ISO 8601 timestamp' }, 400);
+  }
+  if (!CLAIM_FINISHED_STATUSES.includes(raw.status as ClaimFinishedStatus)) {
+    throw new HttpException({ error: `finished.status must be one of ${CLAIM_FINISHED_STATUSES.join(', ')}` }, 400);
+  }
+  return { at: raw.at, status: raw.status as ClaimFinishedStatus };
 }
 
 function countersOf(value: unknown): ClaimCounters | undefined {

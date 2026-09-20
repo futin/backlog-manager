@@ -687,6 +687,65 @@ describe('heartbeat', () => {
   });
 });
 
+/* `finished` (task-48): `orchestrate.mjs finish` stamps the run's outcome on its
+ * last-touched claim through this same route, and that claim is normally
+ * released already — so the one exception to "a released claim refuses a
+ * heartbeat" is pinned from both sides. */
+describe('heartbeat.finished', () => {
+  const FINISHED = { at: '2026-09-19T12:00:00.000Z', status: 'done' };
+
+  it('H-1: stamps finished on a released claim and moves nothing else', async () => {
+    gh.issue();
+    const released = { at: '2026-09-19T11:59:00.000Z', reason: 'merged', by: 'A' };
+    const seeded = record({ session: 'A', heartbeat: '2026-09-19T11:58:00.000Z', state: { stage: 'merged' }, released });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, finished: FINISHED }).expect(201);
+    const after = claimIn(100)!;
+    expect(after.finished).toEqual(FINISHED);
+    expect(after.heartbeat).toBe(seeded.heartbeat);
+    expect(after.state).toEqual({ stage: 'merged' });
+    expect(after.released).toEqual(released);
+  });
+
+  it('H-2: a released claim with no finished is still the existing 409', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', released: { at: new Date().toISOString(), reason: 'stopped', by: 'A' } }), 31, 100);
+    await sync();
+
+    const res = await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100 }).expect(409);
+    expect(res.body.error).toBe('claim 100 on #31 is released — nothing to heartbeat');
+  });
+
+  it('H-3: finished on a live claim sets it and moves the heartbeat', async () => {
+    gh.issue();
+    const seeded = record({ session: 'A', heartbeat: new Date(Date.now() - 60_000).toISOString() });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, finished: { ...FINISHED, status: 'paused' } }).expect(201);
+    const after = claimIn(100)!;
+    expect(after.finished).toEqual({ ...FINISHED, status: 'paused' });
+    expect(Date.parse(after.heartbeat)).toBeGreaterThan(Date.parse(seeded.heartbeat));
+    expect(after.released).toBeUndefined();
+  });
+
+  it.each([
+    ['a status outside the four', { at: FINISHED.at, status: 'bogus' }],
+    ['an at that does not parse', { at: 'yesterday', status: 'done' }],
+    ['a non-object', 'done']
+  ])('H-4: refuses %s with a 400 and edits nothing', async (_label, finished) => {
+    gh.issue();
+    gh.claim(record({ session: 'A', released: { at: new Date().toISOString(), reason: 'merged', by: 'A' } }), 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, finished }).expect(400);
+    expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
+    expect(claimIn(100)?.finished).toBeUndefined();
+  });
+});
+
 /* =========================================================================
  * The credential
  * ========================================================================= */

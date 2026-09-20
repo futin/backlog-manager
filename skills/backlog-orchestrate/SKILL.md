@@ -410,6 +410,11 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 flag and validate it, then ignore its content. Both lines: the `attention` entry is what the run drawer surfaces to the user, the `stage` is what stops this
 item being treated as still in flight. Then continue with the next item; a `needs-answers` item is not a failed run.
 
+**In a tracker project every `attention` call also becomes a comment on the item's issue** — a `<!-- bm:attention kind=… run=… -->` line, then an `@mention`
+of the token's user and your `--detail`, so the notification reaches a phone rather than only the board's strip. Best-effort: a comment the API refuses is one
+stderr line and the command still exits `0`, because the entry is already in the run file. It does mean `--detail` is now **published text on somebody's
+issue**, which is one more reason it is always your own words and never a quote from a report or a log.
+
 **Not answered, `questionMode: decide`** → decide each question yourself, then record what you decided:
 
 1. Answer every question, using the item, the repo's `CLAUDE.md` and the code as it actually is. Prefer the smallest answer that lets the plan proceed.
@@ -1447,7 +1452,9 @@ the run** — the items merged, the base holds their work, and a leftover direct
 loud in the summary so whoever tidies it knows which one it is. A base worktree the run did **not** create is never touched here, however convenient it looks:
 it is someone's working tree, and this run's authority stops at worktrees it created itself.
 
-`--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits `1`. Then summarise for the user from `status --json`: what merged or branched,
+`--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits `1`. In a tracker project `finish` also stamps that status on the run's
+last-touched claim (`finished: { at, status }`), which is how another machine's Runs page tells a finished run from a crashed one; like every publish to the
+issue it is best-effort, one stderr line on failure and exit `0`. Then summarise for the user from `status --json`: what merged or branched,
 what parked and why, what was skipped as `ungroomed` or `needs-answers` and therefore wants a groom pass before the next run. A clean item — no fix loops, no
 retries, green first try — should have produced no ping at all along the way; the summary is where it finally gets mentioned.
 
@@ -1480,6 +1487,9 @@ freshness threshold on their own, and a run whose heartbeat goes stale reads to 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
 ```
+
+In a tracker project `heartbeat` also heartbeats every claim the run still holds — `needs-answers` items included — so a long review cannot let the in-flight
+item's claim go stale and read to another machine as a crashed run it may contest. Nothing extra to run; the same one line does both.
 
 ### Pausing
 
@@ -1514,8 +1524,8 @@ immediately, write nothing more, and exit. `references/recovery.md` has the mech
 
 Two rules stay here, because a reader who stops at this line still has to know them:
 
-- **`--resume` starts from what is on disk, not from what the run file hoped.** `orchestrate.mjs reconcile` is read-only and prints one of four suggestions per
-  item; deciding what to do with each is this skill's job, not the tool's.
+- **`--resume` starts from what is on disk, not from what the run file hoped.** `orchestrate.mjs reconcile` is read-only and prints one of five suggestions per
+  item (`skip` only in a tracker project, for an item another run's live claim now holds); deciding what to do with each is this skill's job, not the tool's.
 - **A resumed run takes its base from the run file, and re-resolves the base tree before its next merge.** The base itself is fixed — `status --json` carries
   it, and it is never re-derived from a flag the person resuming happened to type — but *which tree holds it* is a fact about right now, and the interruption is
   exactly the gap in which someone checks the base out somewhere else, removes the worktree that had it, or leaves a rebase half-finished in it. Walk §9's

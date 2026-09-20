@@ -370,6 +370,20 @@ has it.
 > **§7.3 — landed nothing. This is task-48's whole subject.** 4a keeps attention entries in `run.json` and the Runs page reading the local run-state
 > directory, exactly as before. What 4a DID settle is the shape 4b builds from: `ClaimRun` and `ClaimState` (`shared/types.ts`), both exported and both read
 > by nothing in this build.
+>
+> **§7.3 — landed in task-48 (phase 4b), 2026-09-19, with two deviations.** The server assembles each run another machine drove from the poller's cached
+> claim comments (`deriveRemoteRuns`, `server/src/orchestrator/remote-runs.util.ts`) and serves it in `OrchestratorRunsPayload.remote` — a separate array,
+> never a member of `runs`, so this machine's `RUN_IN_PROGRESS_CODE` lock, `runClaimBlock` and watchdog stay local-only and two machines draining one project
+> never block each other (§7.4). A derived run whose `runId` any local run file carries is dropped, never merged: the local journal wins whole. A remote row is
+> read-only — the Runs page draws `Remote run: its controls are on the machine that ran it.` where the controls would be — and attention entries become
+> `<!-- bm:attention kind=… run=… -->` comments with an `@mention`, parsed by a strict line-1 regex that a source-reading guard holds together with the CLI.
+>
+> 1. **Status does not fall back to "the last-touched claim's recorded outcome".** It is the newest `finished` stamp's status when no OTHER claim in the group
+>    heartbeated after it, and otherwise `running`, fresh or not by the newest heartbeat. The prose's rule would report a crashed run — every heartbeat stale,
+>    never finished — as finished; this one keeps it `running && !fresh`, which the Runs page already draws as crashed. The stamped claim's own heartbeat is
+>    excluded because `finish` on an unreleased claim moves it to the server's clock, just after the CLI's `at`.
+> 2. **`finished` rides the existing `heartbeat` route, accepted on a released claim**, where it sets `finished` and nothing else — by the time a run finishes
+>    its last item's terminal stage has normally released that claim. An eighth write route would have changed the "seven routes" rule for one field.
 
 ### 7.4 One executor per item
 
@@ -412,6 +426,10 @@ A takeover from another machine starts the item over: the dead machine's worktre
 > somebody else's claim is not a call an unattended run gets to make.
 >
 > **`reconcile` still reads `run.json` for a tracker project.** Reading claims is 4b's, alongside §7.3.
+>
+> **`reconcile` reads claims — landed in task-48 (4b).** In a tracker project each row gains `claim` (`this-run` / `other` / `released` / `none` /
+> `unknown`, read from `GET /api/items/claim`), and `other` — another run's LIVE claim — turns the suggestion into `skip`. It still reads `run.json` as well:
+> the claim says who holds the item, the journal says what this machine left on disk, and a resume needs both. A files run's output is byte-identical.
 
 ## 8. Import — phase 5
 

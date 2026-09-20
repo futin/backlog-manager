@@ -98,12 +98,17 @@ function hasResumed(runs: OrchestratorRunsPayload['runs'], project: string): boo
 export function useOrchestratorRuns(): {
   runs: OrchestratorRunsPayload['runs'];
   starting: OrchestratorRunsPayload['starting'];
+  remote: OrchestratorRunsPayload['remote'];
   refresh: () => void;
   noteResume: (project: string) => void;
   resuming: ReadonlySet<string>;
 } {
   const [runs, setRuns] = useState<OrchestratorRunsPayload['runs']>([]);
   const [starting, setStarting] = useState<OrchestratorRunsPayload['starting']>([]);
+  // Other machines' runs on a tracker project (task-48). Their own state,
+  // never folded into `runs`: every reader of `runs` here and on the board
+  // assumes one run file per project on THIS machine.
+  const [remote, setRemote] = useState<OrchestratorRunsPayload['remote']>([]);
   /**
    * project → the moment its resume mark expires (task-17).
    *
@@ -165,6 +170,8 @@ export function useOrchestratorRuns(): {
         // board's own `.find()` would throw on undefined and take the whole
         // board down over a field that only ever adds a card.
         setStarting(payload.starting ?? []);
+        // Same fallback, same reason, for task-48's array.
+        setRemote(payload.remote ?? []);
         // task-17: drop marks this payload has answered or that have simply
         // run out. Purely housekeeping — `resuming` below re-applies both
         // rules on every render, so an unpruned map never lies, it only
@@ -240,7 +247,11 @@ export function useOrchestratorRuns(): {
     [...resumeMarks].filter(([project, expiresAt]) => Date.now() < expiresAt && !hasResumed(runs, project)).map(([project]) => project)
   );
 
-  const anyLive = runs.some((run) => run.fresh || run.status === 'running') || starting.length > 0 || resuming.size > 0;
+  // task-48 ORs a remote `running` run in too: this machine cannot see it
+  // progress any other way than by asking again, and a run another machine is
+  // draining is live in exactly the sense this poll exists for.
+  const anyLive =
+    runs.some((run) => run.fresh || run.status === 'running') || remote.some((run) => run.status === 'running') || starting.length > 0 || resuming.size > 0;
 
   /**
    * The point of this hook: an interval that exists only while it has
@@ -299,5 +310,5 @@ export function useOrchestratorRuns(): {
     [refresh]
   );
 
-  return { runs, starting, refresh, noteResume, resuming };
+  return { runs, starting, remote, refresh, noteResume, resuming };
 }

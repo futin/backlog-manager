@@ -2363,7 +2363,8 @@ common one; the fallback is what makes the answer safe to act on.
 which is what makes per-item claim watching cheap. Phase 2 made the call with nothing reading it, deliberately, so that the polling loop's shape, its budget and
 its tests would not move in the phase that also introduced the protocol they feed — and that bet paid: task-46 added `TrackerPollerService.comments()` over the
 same cache and changed nothing about the loop. `test/tracker-poll.test.ts` asserted the call explicitly while it had no reader, precisely because a call with no
-reader is what a later edit deletes as dead.
+reader is what a later edit deletes as dead. Task-48 gave `comments()` its second reader, `RemoteRunsService`, which derives other machines' runs from the same
+cached comments on every `GET /api/orchestrator/runs` and keeps no cache of its own — this stays the one cache.
 
 **Rate limits are a state, not an exception.** Nothing in `github.client.ts` throws on an HTTP status: every response — including a transport failure, which
 surfaces as `status: 0` — comes back as a value the poller turns into `access` and `detail`, because every one of them is something the board renders rather
@@ -2460,6 +2461,11 @@ issues in that cache do not have the freshness a moved stamp would claim for the
 **The token never leaves the process.** It is read per call inside the adapter, and no response shape here carries it; a project with no token gets a 503
 naming the ENVIRONMENT VARIABLE, which is the thing an operator can act on.
 
+**`heartbeat` accepts one field on a RELEASED claim (task-48).** A request carrying `finished: { at, status }` is taken on a released claim too, and there it
+sets `finished` and nothing else — no heartbeat, no state, never an un-release. `orchestrate.mjs finish` stamps the run's outcome on its last-touched claim, and
+that claim's terminal stage has normally released it already. `finished` is validated field by field like `run` (a derived run's status IS that value), where
+`state` is still taken outright. It rides the heartbeat route rather than an eighth write route so the count below stays seven.
+
 **There is an eighth route, and it is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
 every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
 `backlog.mjs stop` are two PROCESSES: `claim` answers the comment id that identifies the claim, and the `stop` that must release it has no other way to
@@ -2545,7 +2551,8 @@ different issues and this object is the only thing that groups them: §7.3's cro
 `ClaimRecord.state` is a `ClaimState` — the `RunQueueItem` fields §7.1 names, written through `heartbeat` by every command that changes one (`stage`, `usage`,
 `verify`, `assume`, and `watch`'s tick). It is declared in `shared/types.ts` and typed nowhere else: the fields are restated rather than `Pick`ed off
 `RunQueueItem`, because this shape crosses a boundary with mixed-version readers by construction and what crosses it has to be a decision rather than a
-consequence of whatever the queue item grew this week. **Nothing in 4a reads a field of it.** Its first reader is task-48.
+consequence of whatever the queue item grew this week. Its one reader is task-48's remote-run assembly, `readClaimState`, which keeps each field only when it
+has the right shape and drops the rest — a claim from a newer build, or a hand-edited one, makes a drawn remote run say less rather than making the read throw.
 
 `run` is TYPED where `state` stays `unknown`, and the asymmetry is the rule rather than an inconsistency: the server BRANCHES on `run.runId`, and a field a
 decision depends on cannot stay an opaque blob. `state` is round-tripped verbatim and no predicate in this build touches it.
@@ -2587,6 +2594,53 @@ directory and never in the worktree, because §6 stages the worktree with `add -
 `orchestrate.mjs snapshot <n>` then writes `<dir>/items/<n>.md` — the issue body, `## Outcome`, that file — which is what the reviewer is handed where a files
 run hands the item file, and what `verify` reads `## Done when` out of. Both directories ride the existing archive mover with no change to it: it is a denylist
 of two (`run.json`, `runs/`), which is exactly the property that makes a new sidecar directory free.
+
+### What the rest of the run publishes (task-48)
+
+Three more commands publish to the issue, each after the run file is written and each best-effort with the heartbeat's posture — one stderr line, exit `0`:
+
+- **`finish` stamps `finished: { at, status }` on the run's LAST-TOUCHED claimed item** (the one whose newest `stageAt` is latest), through the `heartbeat`
+  route. That route accepts `finished` on a RELEASED claim — the one exception to "a released claim refuses a heartbeat" — and there it sets `finished` and
+  moves nothing else, because by then the item's terminal stage has normally released the claim and release is permanent. It is how another machine tells a
+  finished run from a crashed one. `at` is the run file's own `updatedAt`, so the stamp and the journal name one instant.
+- **`attention` posts a comment** — `<!-- bm:attention kind=<kind> run=<runId> -->` on line 1, then `@<login> <detail>` — so a phone notification replaces the
+  strip badge. The login comes from `GET /api/trackers`; without one the mention is omitted, never guessed. The marker's CLI literal and the server's
+  `ATTENTION_LINE` cannot import each other and agree through a source-reading guard (`test/remote-runs.test.ts`, G-1). **Known risk:** GitHub may not notify
+  a user of their own `@mention`, and the token is the user's own; the fix for that is a GitHub App identity (spec §15), not a workaround here.
+- **`heartbeat` heartbeats every claim the run still holds** — `claim` set and the stage not in `CLAIM_RELEASE_STAGES`, so `needs-answers` is included. Before
+  this it stamped only `run.json`, and a review longer than fifteen minutes let the in-flight claim go stale and read as crashed on another machine.
+
+And one command READS the issue: **`reconcile` adds a `claim` column** in a tracker project — `this-run` / `other` / `released` / `none` / `unknown` — and
+`other` (another run's LIVE claim) turns the suggestion into `skip`. A files run's report has no `claim` key at all.
+
+## Remote runs ride beside `runs`, never in it
+
+Task-48, spec §7.3. `GET /api/orchestrator/runs` carries a third top-level array, `remote`: runs on a tracker project that ANOTHER machine drove, assembled by
+`RemoteRunsService` from the poller's cached claim comments — never from a file, and with no cache or network request of its own. The derivation is pure
+(`deriveRemoteRuns`, `server/src/orchestrator/remote-runs.util.ts`): group the repo's claims by `run.runId`, one queue item per issue from its newest claim,
+the run facts off any member, `finished` off whichever claim `finish` stamped.
+
+**It is never a member of `runs`, for a stronger reason than `starting`'s.** `runs` means "this machine's run files, one per project", and three things lean on
+exactly that: the `RUN_IN_PROGRESS_CODE` lock, which would 409 a local Orchestrate because another machine is draining the same project — spec §7.4 says two
+machines must NOT block each other, and the claims already keep them disjoint; `runClaimBlock`; and the watchdog, which must never try to resume a run whose
+driver is on another machine. So `OrchestratorService.runs()` fills `remote: []` and `OrchestratorController.runs()` overwrites it — the service's direct
+callers in `AgentsService` never see a remote run.
+
+**The same `runId` locally and remotely: the local one wins, whole.** A derived run is dropped when any run file on this machine — a project's `run.json` or an
+archived `runs/*.json` (read by NAME, through `archivedRunFiles`) — carries its id. Nothing merges field by field: overlaying claim state onto the local journal
+would make "which one is right" a per-field question.
+
+**`project` is this machine's registry path for the repo**, never anything a claim says; a claim carries no path, and another machine's would mean nothing here.
+
+**Status is not the spec's "else the last-touched claim's outcome".** It is the newest `finished` stamp's status when no OTHER claim in the group heartbeated
+after it; otherwise `running`, `fresh` by the newest heartbeat. The spec's rule would report a crashed run as finished, and "a crashed run renders as crashed,
+never as nothing" holds for a remote run too. The stamped claim's own heartbeat is excluded because `finish` on an unreleased (`needs-answers`) claim moves it to
+the server's clock, milliseconds after `finished.at`; a resume never needs it, since a re-claim is a takeover that posts a NEW comment. A released claim whose
+`reason` is a stage reads as that stage — the driver releases at a terminal stage without a final state heartbeat, so `state.stage` is the one before.
+
+**A remote run is read-only, and says so.** Pause, resume, abort and the watchdog are all local mechanisms on the machine holding the run file, so the Runs
+detail sheet draws `Remote run: its controls are on the machine that ran it.` in the controls' slot and never fetches `archive/run`. A queue holds only what
+the run has CLAIMED, and the sheet says that too; a LOCAL run of a tracker project that has claimed nothing says it is not visible from other machines.
 
 ## `backlog.mjs` in a tracker project needs the stack up
 

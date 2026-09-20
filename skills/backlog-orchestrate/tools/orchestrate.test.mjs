@@ -3607,12 +3607,12 @@ test("the body's recovery stub points at references/recovery.md", () => {
   assert.ok(fs.existsSync(path.join(REFERENCES, 'recovery.md')), 'references/recovery.md is gone');
 });
 
-test('references/recovery.md keeps all four reconcile verdicts', () => {
-  // `reconcile` prints exactly one of four suggestions per item. A recovery
-  // doc missing one strands a run on the case it dropped, with no other file
-  // saying what that word means.
+test('references/recovery.md keeps all five reconcile verdicts', () => {
+  // `reconcile` prints exactly one of five suggestions per item (`skip` since
+  // task-48, tracker projects only). A recovery doc missing one strands a run
+  // on the case it dropped, with no other file saying what that word means.
   const text = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8');
-  for (const verdict of ['resume-session', 'redispatch-after-stop', 'inspect', 'park']) {
+  for (const verdict of ['resume-session', 'redispatch-after-stop', 'inspect', 'park', 'skip']) {
     assert.ok(text.includes(verdict), `recovery.md no longer explains the "${verdict}" verdict`);
   }
 });
@@ -5807,6 +5807,8 @@ test('a files run makes no API request at any stage, with the port closed', asyn
   const { home, project } = orchFixture(t);
   const port = await closedPort();
   seedReadyTask(project, 'task-1', 'a task');
+  // A second item left `pending`, so `reconcile` has a row to report.
+  seedReadyTask(project, 'task-2', 'another task');
 
   const init = await runApi(project, home, port, 'init', '--project', project);
   assert.equal(init.status, 0, init.stderr);
@@ -5816,13 +5818,28 @@ test('a files run makes no API request at any stage, with the port closed', asyn
     ['stage', 'task-1', 'dispatched', '--session', 's1'],
     ['stage', 'task-1', 'inspecting'],
     ['stage', 'task-1', 'merged'],
+    // task-48's four: each publishes to the issue in a tracker run, and none
+    // may so much as try in a files one.
+    ['attention', 'task-2', '--kind', 'parked', '--detail', 'x'],
+    ['heartbeat'],
   ]) {
     const out = await runApi(project, home, port, ...args);
     assert.equal(out.status, 0, `${args.join(' ')}: ${out.stderr}`);
   }
 
+  const reconcile = await runApi(project, home, port, 'reconcile', '--json');
+  assert.equal(reconcile.status, 0, reconcile.stderr);
+  const rows = JSON.parse(reconcile.stdout);
+  assert.deepEqual(rows.map((r) => r.id), ['task-2']);
+  assert.equal('claim' in rows[0], false, 'a files run reports no claim column at all');
+
+  const finish = await runApi(project, home, port, 'finish', '--status', 'done');
+  assert.equal(finish.status, 0, finish.stderr);
+  assert.equal(finish.stderr, '');
+
   const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
   assert.equal(run.queue[0].stage, 'merged');
+  assert.equal(run.status, 'done');
   // No claim was ever taken, which is the other half of "no request was made".
   assert.equal(run.queue[0].claim, undefined);
 });
@@ -6399,4 +6416,141 @@ test('SKILL.md says a classifier-denied PUSH parks, in the push paragraph itself
   assert.match(paragraph, /denied by the auto-mode classifier/i);
   assert.match(paragraph, /park/i);
   assert.match(paragraph, /branch mode|branched/i);
+});
+
+// --- C-1 … C-5: task-48, what the rest of the run publishes -----------------
+//
+// Phase 4b makes a run VISIBLE from other machines, and the only thing another
+// machine can read is the issue. So three more commands publish there —
+// `finish` stamps the outcome on the last-touched claim, `attention` posts a
+// comment, and `heartbeat` keeps every held claim alive — and `reconcile`
+// reads who holds each item before it suggests anything. Every publish is
+// best-effort for the reason P-4 gives: `run.json` is the journal of record.
+
+/** A tracker run whose queue is rewritten to `items` after `init` — each
+ *  `{ id, stage, at, claim }` — so a case states exactly the stages and claims
+ *  it is about without driving a merge to get there. */
+async function seededTrackerRun(t, items) {
+  const fixture = trackerFixture(t);
+  const { home, project } = fixture;
+  const gate = gateRoutes(
+    items.map((i) => apiItem(project, Number(i.id), { section: 'bugs' })),
+    Object.fromEntries(items.map((i) => [i.id, GROOMED_BUG_BODY])),
+  );
+  const { out } = await withApi(gate, (port) => runApi(project, home, port, 'init', '--project', project));
+  assert.equal(out.status, 0, out.stderr);
+  const file = runFile(home, project);
+  const run = JSON.parse(fs.readFileSync(file, 'utf8'));
+  run.queue = run.queue.map((q) => {
+    const want = items.find((i) => i.id === q.id);
+    // `pending` pinned before every case's stamps: `init` stamped it with the
+    // real clock, which would otherwise be every item's newest arrival.
+    const next = { ...q, stage: want.stage, stageAt: { pending: '2026-09-19T09:00:00.000Z', [want.stage]: want.at ?? '2026-09-19T10:00:00.000Z' } };
+    if (want.claim !== undefined) next.claim = { commentId: want.claim };
+    return next;
+  });
+  fs.writeFileSync(file, `${JSON.stringify(run, null, 2)}\n`);
+  return { ...fixture, runId: run.runId };
+}
+
+const TRACKERS = (login) => ({ body: { platforms: [{ kind: 'github', hasToken: true, login }], projects: [] } });
+
+test('C-1: finish stamps finished on the last-touched claimed item, and only that one', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '3', stage: 'merged', at: '2026-09-19T10:00:00.000Z', claim: 503 },
+    { id: '5', stage: 'skipped', at: '2026-09-19T10:05:00.000Z', claim: 505 },
+  ]);
+
+  const { out, requests } = await withApi({ '/api/items/heartbeat': { status: 201, body: { commentId: 505, record: { v: 1 } } } }, (port) =>
+    runApi(project, home, port, 'finish', '--status', 'done'),
+  );
+
+  assert.equal(out.status, 0, out.stderr);
+  const beats = posts(requests, 'heartbeat');
+  assert.equal(beats.length, 1);
+  assert.equal(beats[0].body.commentId, 505);
+  assert.equal(beats[0].body.id, '#5');
+  assert.equal(beats[0].body.finished.status, 'done');
+  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(beats[0].body.finished.at, run.updatedAt, 'the stamp and the journal name one instant');
+});
+
+test('C-2: finish with the API down exits 0, says so once, and the run file still reads done', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [{ id: '3', stage: 'merged', claim: 503 }]);
+  const port = await closedPort();
+
+  const out = await runApi(project, home, port, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.stderr.trim().split('\n').length, 1, out.stderr);
+  assert.match(out.stderr, /finished stamp on 3 could not be sent/);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'done');
+});
+
+test('C-3: attention posts one marker comment mentioning the token-s user, and still records the entry', async (t) => {
+  const { home, project, runId } = await seededTrackerRun(t, [{ id: '5', stage: 'parked', claim: 505 }]);
+  const routes = (login) => ({
+    '/api/trackers': TRACKERS(login),
+    '/api/items/comment': { status: 201, body: { commentId: 900, url: 'https://example.invalid/5#c900' } },
+  });
+
+  const withLogin = await withApi(routes('futin'), (port) => runApi(project, home, port, 'attention', '5', '--kind', 'parked', '--detail', 'x'));
+  assert.equal(withLogin.out.status, 0, withLogin.out.stderr);
+  const comments = posts(withLogin.requests, 'comment');
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0].body.id, '#5');
+  const lines = comments[0].body.body.split('\n');
+  assert.equal(lines[0], `<!-- bm:attention kind=parked run=${runId} -->`);
+  assert.match(comments[0].body.body, /@futin x/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).attention, [{ id: '5', kind: 'parked', detail: 'x' }]);
+
+  const noLogin = await withApi(routes(null), (port) => runApi(project, home, port, 'attention', '5', '--kind', 'parked', '--detail', 'y'));
+  assert.equal(noLogin.out.status, 0, noLogin.out.stderr);
+  const bare = posts(noLogin.requests, 'comment');
+  assert.equal(bare.length, 1);
+  assert.doesNotMatch(bare[0].body.body, /@/);
+});
+
+test('C-4: heartbeat keeps every claim the run still holds alive, and none it released', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '3', stage: 'reviewing', claim: 503 },
+    { id: '5', stage: 'needs-answers', claim: 505 },
+    { id: '7', stage: 'merged', claim: 507 },
+  ]);
+
+  const { out, requests } = await withApi({ '/api/items/heartbeat': { status: 201, body: { commentId: 0, record: { v: 1 } } } }, (port) =>
+    runApi(project, home, port, 'heartbeat'),
+  );
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    posts(requests, 'heartbeat').map((r) => r.body.commentId).sort(),
+    [503, 505],
+  );
+});
+
+test('C-5: reconcile reads who holds each item, and another run-s live claim means skip', async (t) => {
+  const { home, project, runId } = await seededTrackerRun(t, [
+    { id: '3', stage: 'reviewing', claim: 503 },
+    { id: '5', stage: 'reviewing', claim: 505 },
+  ]);
+  const fresh = new Date().toISOString();
+  const stale = new Date(Date.now() - 20 * 60_000).toISOString();
+  const claimRoute = (_body, url) =>
+    url.searchParams.get('id') === '#5'
+      ? { body: { commentId: 9, record: { v: 1, session: 'B', heartbeat: fresh, run: { runId: 'run-20260101-000000' } } } }
+      : { body: { commentId: 503, record: { v: 1, session: 'sess-test', heartbeat: stale, run: { runId } } } };
+
+  const { out } = await withApi({ '/api/items/claim': claimRoute }, (port) => runApi(project, home, port, 'reconcile', '--json'));
+  assert.equal(out.status, 0, out.stderr);
+  const rows = Object.fromEntries(JSON.parse(out.stdout).map((r) => [r.id, r]));
+  assert.equal(rows['5'].claim, 'other');
+  assert.equal(rows['5'].suggestion, 'skip');
+  assert.equal(rows['3'].claim, 'this-run');
+  // Unchanged from before task-48: no worktree and no branch is `park`.
+  assert.equal(rows['3'].suggestion, 'park');
+
+  const down = await runApi(project, home, await closedPort(), 'reconcile', '--json');
+  assert.equal(down.status, 0, down.stderr);
+  assert.deepEqual(JSON.parse(down.stdout).map((r) => r.claim), ['unknown', 'unknown']);
 });

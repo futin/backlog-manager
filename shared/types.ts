@@ -1241,7 +1241,52 @@ export interface OrchestratorRunsPayload {
    * which today is exactly one component (`RunChip`, which counts it).
    */
   starting: StartingRun[];
+  /**
+   * Runs on a TRACKER project that another machine drove (task-48, spec
+   * §7.3) — assembled from the tracker cache's claim comments, never from a
+   * file. See `RemoteRun` for one entry.
+   *
+   * **A separate top-level array, never members of `runs`**, the precedent
+   * `starting` set one field up, and for a stronger reason than that one's.
+   * `runs` means "this machine's run files, one per project", and three
+   * things lean on exactly that: the `RUN_IN_PROGRESS_CODE` lock, which would
+   * 409 a local Orchestrate because another machine is draining the same
+   * project (spec §7.4 says two machines must NOT block each other — the
+   * claims keep them disjoint); `runClaimBlock`; and the watchdog, which must
+   * never try to resume a run whose driver is on another machine. Keeping
+   * remote runs out of `runs` leaves all three local-only with no change.
+   *
+   * Required rather than optional so the compiler finds every fixture that
+   * builds a payload. `OrchestratorService.runs()` fills `[]` — the service is
+   * the run-state directory's reader and knows nothing about claims — and the
+   * controller overwrites it, so a direct caller of the service (the agents
+   * lock, `resume()`) sees none.
+   */
+  remote: RemoteRun[];
 }
+
+/**
+ * A run derived from the claim comments one tracker repository carries
+ * (task-48), for a run whose `run.json` is on some OTHER machine.
+ *
+ * An `OrchestratorRun` so every reader that draws a run can draw this one, plus
+ * three facts the claims answer: `fresh` (the newest heartbeat in the group
+ * against `RUN_STALE_MS`, as `runs` computes it from a file's `updatedAt`),
+ * `remote: true` (the discriminator — a literal, so a narrowing reads it) and
+ * `repo` (`owner/name`, the one thing a claim names that this machine's
+ * `project` path does not).
+ *
+ * `project` is THIS machine's registry path for the repo, never anything the
+ * claim said: a claim carries no path, and another machine's would mean
+ * nothing here. `driver` is `null` and `mergeModeNote` is `null` — neither is
+ * published — and `mergeMode` equals `mergeModeEffective`, because a claim
+ * publishes only the effective mode (`ClaimRun.mergeMode`).
+ *
+ * The queue holds only the items the run has CLAIMED. An item the run has not
+ * reached yet has no comment and cannot be seen from here, which the Runs page
+ * says rather than hiding.
+ */
+export type RemoteRun = OrchestratorRun & { fresh: boolean; remote: true; repo: string };
 
 /**
  * One "the board asked for a run and this server spawned it, but
@@ -1605,16 +1650,52 @@ export interface ClaimRecord {
    * The item's machine state, published for other machines to read (§7.1) —
    * `ClaimState`, carried opaque HERE and typed at its one writer.
    *
-   * Still `unknown` on this side, deliberately, where `run` above became
-   * typed. Nothing in this build's server reads a field of it: it is written
-   * by `orchestrate.mjs` through `heartbeat` and round-tripped verbatim, and
-   * its first reader is task-48's cross-machine run assembly. Typing it here
-   * would claim a contract the server does not yet uphold, and an old build
-   * half-reading a newer one's state is the failure `parseClaim`'s `v` check
-   * already refuses at the record level.
+   * Still `unknown` on the wire, deliberately, where `run` above became
+   * typed. It is written by `orchestrate.mjs` through `heartbeat` and
+   * round-tripped verbatim, and it has exactly one reader: task-48's
+   * cross-machine run assembly (`server/src/orchestrator/remote-runs.util.ts`),
+   * which reads it TOLERANTLY through `readClaimState` — keeping each field
+   * only when it has the right shape and dropping the rest — rather than
+   * trusting a type. Nothing the server decides branches on it (a remote run
+   * is drawn from it, never acted on), so a claim from a newer build that
+   * carries more, or a hand-edited one that carries nonsense, makes the drawn
+   * run say less rather than making the read throw.
    */
   state?: unknown;
+  /**
+   * How the RUN ended, stamped by `orchestrate.mjs finish` on the run's
+   * last-touched claim (task-48, spec §7.3) — the one fact another machine
+   * needs to tell a finished run from a crashed one, since a run file it
+   * cannot see is the only other place that fact lives.
+   *
+   * Written through the `heartbeat` route rather than an eighth one, and
+   * accepted on a RELEASED claim, where it moves nothing else: by the time a
+   * run finishes, its last item's terminal stage has normally released that
+   * claim already. It is a fact about the run riding on one of its items'
+   * comments, not a fact about the item, so it never un-releases anything.
+   *
+   * Absent on every claim but that one, and on every claim a run that never
+   * finished left behind — which is how a derived run reads as crashed rather
+   * than done (see `deriveRemoteRuns`).
+   */
+  finished?: ClaimFinished;
 }
+
+/**
+ * `ClaimRecord.finished` — the run's closing status and when it was reached.
+ * `status` is `finish --status`'s vocabulary, i.e. every `OrchestratorRun`
+ * status but `running`, which is the one a finished run cannot have.
+ */
+export interface ClaimFinished {
+  at: string;
+  status: ClaimFinishedStatus;
+}
+
+export type ClaimFinishedStatus = 'done' | 'aborted' | 'failed' | 'paused';
+
+/** The four `ClaimFinished.status` values — the route validates against this
+ *  list, never a hand-written comparison chain. */
+export const CLAIM_FINISHED_STATUSES: readonly ClaimFinishedStatus[] = ['done', 'aborted', 'failed', 'paused'];
 
 /**
  * Which run a claim belongs to (task-47, spec §7.1) — the six facts about an
@@ -1655,8 +1736,10 @@ export interface ClaimRun {
  * route's `state` field (spec §7.1) — exactly the `RunQueueItem` fields a
  * reader needs to draw the item, and nothing else.
  *
- * Exported for task-48, which is its first and only reader: nothing in 4a's
- * server or client looks at a single field of this. It is declared here rather
+ * Its one reader is task-48's cross-machine run assembly
+ * (`readClaimState` in `server/src/orchestrator/remote-runs.util.ts`), which
+ * reads it tolerantly — field by field, dropping any that is mis-shaped — and
+ * only ever to DRAW a remote run, never to decide anything. It is declared here rather
  * than inside the tool because the tool cannot export a type at all (a plugin
  * skill's `tools/` is plain `.mjs`), and a shape whose whole purpose is to be
  * read by a second program needs one written-down home.
@@ -1787,11 +1870,15 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
 
 /** `POST /api/items/heartbeat`. `state` is the `ClaimState` task-47's driver
  *  publishes, carried opaque here and round-tripped into the record when
- *  given — nothing in this build reads a field of it. */
+ *  given — its only reader is the remote-run assembly, which reads it
+ *  tolerantly. `finished` (task-48) is `finish`'s stamp, validated field by
+ *  field by the route and accepted on a released claim too — see
+ *  `ClaimRecord.finished`. */
 export interface ItemHeartbeatRequest extends ItemWriteRequest {
   id: string;
   commentId: number;
   state?: unknown;
+  finished?: ClaimFinished;
 }
 
 /**

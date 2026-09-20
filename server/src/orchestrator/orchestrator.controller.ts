@@ -1,6 +1,7 @@
 import { Controller, Get, HttpException, Query } from '@nestjs/common';
 
 import { OrchestratorService } from './orchestrator.service';
+import { RemoteRunsService } from './remote-runs.service';
 import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 import type { OrchestratorArchivePayload, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
@@ -16,7 +17,8 @@ export class OrchestratorController {
   constructor(
     private readonly orchestrator: OrchestratorService,
     private readonly watchdogState: WatchdogStateService,
-    private readonly starting: StartingRunsService
+    private readonly starting: StartingRunsService,
+    private readonly remoteRuns: RemoteRunsService
   ) {}
 
   @Get('runs')
@@ -50,6 +52,14 @@ export class OrchestratorController {
     // makes AgentsService's own direct `runs()` calls (the RUN_IN_PROGRESS
     // lock, `resume()`) safe without a sweep of their own.
     this.starting.sweep(payload.runs);
+    // Other machines' runs (task-48), set HERE and never inside `runs()`: the
+    // service is the run-state directory's reader and fills `remote: []`, so
+    // its direct callers — the RUN_IN_PROGRESS lock and `resume()` — never see
+    // another machine's run. That is what keeps two machines draining one
+    // tracker project from blocking each other (spec §7.4). Set after the two
+    // calls above on purpose too: the watchdog and the starting sweep read
+    // `runs` alone, and a remote run has nothing for either of them to do.
+    payload.remote = this.remoteRuns.list();
     return payload;
   }
 

@@ -16,3 +16,4 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
 - Before changing files here, read docs/subsystems/invariants.md#a-pause-request-is-a-file-the-server-writes-and-the-tool-reads
 - Before changing files here, read docs/subsystems/invariants.md#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made
 - Before changing files here, read docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item
+- Before changing files here, read docs/subsystems/invariants.md#remote-runs-ride-beside-runs-never-in-it

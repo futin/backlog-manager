@@ -2,14 +2,18 @@ import { Module } from '@nestjs/common';
 
 import { OrchestratorController } from './orchestrator.controller';
 import { OrchestratorService } from './orchestrator.service';
+import { RemoteRunsService } from './remote-runs.service';
 import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
+import { RegistryModule } from '../registry/registry.module';
+import { TrackerModule } from '../tracker/tracker.module';
 
 /**
- * No RegistryModule import, unlike ItemsModule/AgentsModule — see
- * OrchestratorService's own class comment for why: a run's project identity
- * is self-contained in its run.json, so this module has nothing to
- * cross-reference against the registry.
+ * `OrchestratorService` still reads no registry — see its own class comment
+ * for why: a run's project identity is self-contained in its run.json. The
+ * `RegistryModule` import below is `RemoteRunsService`'s (task-48), which maps
+ * a tracker repo's claims onto THIS machine's registry path for that repo,
+ * because a claim carries no path at all.
  *
  * `WatchdogStateService` is provided and exported alongside
  * `OrchestratorService`, for the same reason and the same shape as that
@@ -30,8 +34,12 @@ import { WatchdogStateService } from './watchdog-state.service';
  * `AgentsModule` already imports this one.
  */
 @Module({
+  // `TrackerModule` for the poller's cached comments, which `RemoteRunsService`
+  // derives other machines' runs from (task-48). No cycle: `TrackerModule`
+  // imports only `RegistryModule`.
+  imports: [RegistryModule, TrackerModule],
   controllers: [OrchestratorController],
-  providers: [OrchestratorService, StartingRunsService, WatchdogStateService],
+  providers: [OrchestratorService, RemoteRunsService, StartingRunsService, WatchdogStateService],
   exports: [OrchestratorService, StartingRunsService, WatchdogStateService]
 })
 export class OrchestratorModule {}

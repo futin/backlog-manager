@@ -199,7 +199,7 @@ describe('the agents client', () => {
 // a mystery in the hook suite.
 describe('the orchestrator calls', () => {
   it('reads runs from the same-origin API', async () => {
-    const body: OrchestratorRunsPayload = { runs: [{ ...fixture, fresh: true, pastRuns: 0, pauseRequested: false }], starting: [] };
+    const body: OrchestratorRunsPayload = { runs: [{ ...fixture, fresh: true, pastRuns: 0, pauseRequested: false }], starting: [], remote: [] };
     const calls = stub({ ok: true, body });
     await expect(fetchOrchestratorRuns()).resolves.toEqual(body);
     expect(calls[0].url).toBe('/api/orchestrator/runs');

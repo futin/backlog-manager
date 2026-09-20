@@ -178,6 +178,8 @@ function rowsFromLive(queue: readonly RunQueueItem[]): DetailRow[] {
 export function RunDetail({
   summary,
   live,
+  remote = false,
+  invisibleElsewhere = false,
   gate,
   resuming,
   onChanged
@@ -192,6 +194,16 @@ export function RunDetail({
    *  states what it READS: `pastRuns` rides the same entry and is none of
    *  this sheet's business. */
   live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean; watchdog?: RunWatchdog }) | null;
+  /** task-48: another machine's run, drawn from its claim comments
+   *  (`MergedRun.remote`). Read-only: no `RunControls` — pause, resume, abort
+   *  and the watchdog are all local mechanisms on the machine that holds the
+   *  run file — and no file fetch, because there is no file here. */
+  remote?: boolean;
+  /** task-48: a LOCAL run of a tracker project that has claimed no issue yet,
+   *  and so has posted nothing another machine could find it by
+   *  (`runInvisibleElsewhere`, lib/remote-run.ts). Decided by the caller, which
+   *  holds the project's source; this sheet only says it. */
+  invisibleElsewhere?: boolean;
   /** task-17: the resume gate, from the same `resumeGate` call every host of
    *  `RunControls` has made — one host today (this sheet's head), and the
    *  prop stays so the component never reaches for a data source itself. */
@@ -224,6 +236,10 @@ export function RunDetail({
     // while still re-arming correctly the moment a run's liveness actually
     // flips (it goes stale, or finishes) with the same runId still selected.
     if (live !== null) return;
+    // task-48: a remote row always carries its entry as `live`, so the line
+    // above already returns for one; this states the rule rather than leaning
+    // on that — there is no run file on this machine to ask for.
+    if (remote) return;
 
     // The stale-response guard the brief calls for: the selection can move
     // on to a different run before this fetch resolves (a person clicking
@@ -246,7 +262,7 @@ export function RunDetail({
     return () => {
       cancelled = true;
     };
-  }, [summary.project, summary.runId, live !== null]);
+  }, [summary.project, summary.runId, live !== null, remote]);
 
   // One clock reading for this render, matching RunDrawer.tsx's own rule
   // (restated there in full): every derivation below that needs "now"
@@ -540,20 +556,30 @@ export function RunDetail({
              the sweeper stood down would move every reading under it while
              someone was reading them. */
           <span className="run-detail-controls">
-            <RunControls
-              run={
-                live ?? {
-                  status: source.status,
-                  project: summary.project,
-                  queue: source.queue,
-                  fresh: false,
-                  pauseRequested: false
+            {/* task-48: a remote run gets the SENTENCE in the controls' slot,
+                never the controls. Every one of them would act on this
+                machine's run-state directory, which holds nothing for this
+                run, so a Pause here would write a request no driver reads. */}
+            {remote ? (
+              <span className="run-detail-remote" data-testid="run-detail-remote">
+                Remote run: its controls are on the machine that ran it.
+              </span>
+            ) : (
+              <RunControls
+                run={
+                  live ?? {
+                    status: source.status,
+                    project: summary.project,
+                    queue: source.queue,
+                    fresh: false,
+                    pauseRequested: false
+                  }
                 }
-              }
-              gate={gate}
-              resuming={resuming}
-              onChanged={onChanged}
-            />
+                gate={gate}
+                resuming={resuming}
+                onChanged={onChanged}
+              />
+            )}
           </span>
         }
       />
@@ -730,6 +756,15 @@ export function RunDetail({
             The `decide` note is the other half: a run that answered its own
           questions did something a reader has to know before trusting the
           `assumed` lists further down. */}
+      {invisibleElsewhere && (
+        // task-48: the one run the claim comments cannot show anyone else —
+        // said here rather than left for someone on another machine to wonder
+        // why their Runs page is empty.
+        <div className="run-detail-mode-note" data-testid="run-detail-invisible">
+          Not visible from other machines: this run has not claimed an issue yet.
+        </div>
+      )}
+
       {(modeNote !== null || questionNote !== null) && (
         <div className="run-detail-mode-note" data-testid="run-detail-mode-note">
           {[modeNote, questionNote].filter((part) => part !== null).join(' · ')}
@@ -966,6 +1001,13 @@ export function RunDetail({
           );
         })}
       </div>
+      {remote && (
+        // task-48: the queue above is only what the run has CLAIMED — an item
+        // it has not reached has no comment, so nothing here can list it.
+        <div className="run-detail-sub" data-testid="run-detail-remote-queue">
+          Items this run has not claimed yet are not visible from here.
+        </div>
+      )}
 
       {/* The run-level "machine time by stage" rollup (Task 6) — the same
           `StageBars` widget Task 7's wide toolbar tile reuses, here fed

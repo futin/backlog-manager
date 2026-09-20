@@ -149,6 +149,9 @@ const RUN_ID_RE = /^run-\d{8}-\d{6}(-\d+)?$/;
  * `leavesBoard` are one: two expressions that merely agree today are two
  * chances to disagree later.
  */
+/** The run id at the front of an archived run file's name — see `localRunIds`. */
+const ARCHIVED_RUN_ID = /^(run-\d{8}-\d{6})(?:-\d+)?\.json$/;
+
 function archivedRunFiles(runsDir: string): string[] {
   try {
     return readdirSync(runsDir).filter((name) => name.endsWith('.json'));
@@ -319,7 +322,7 @@ export class OrchestratorService {
       // is the exact shape a first-ever run takes. `[]` as the real runs,
       // because there genuinely are none — which also means rule 1 cannot
       // match and only the RUN_STALE_MS rule can retire an entry here.
-      return { runs: [], starting: this.starting.list([]) };
+      return { runs: [], starting: this.starting.list([]), remote: [] };
     }
 
     const runs: OrchestratorRunsPayload['runs'] = [];
@@ -378,7 +381,46 @@ export class OrchestratorService {
     // list would leave every placeholder alive until its RUN_STALE_MS
     // expiry, i.e. a card claiming a run is still starting for fifteen
     // minutes after it started.
-    return { runs, starting: this.starting.list(runs) };
+    return { runs, starting: this.starting.list(runs), remote: [] };
+  }
+
+  /**
+   * Every run id this machine holds a run file for — each project's current
+   * `run.json` and every archived `runs/*.json` — the set a derived remote run
+   * is dropped against (task-48): a run this machine can read its own journal
+   * of is never also drawn from its claims.
+   *
+   * The archived half is read off the FILE NAMES `archivedRunFiles` lists,
+   * never by opening them: this runs on every `GET /api/orchestrator/runs`,
+   * which polls, and an archive grows without bound. A name is `<stem>.json`
+   * where `archiveStem` makes the stem the run id, or the run id plus `-<n>`
+   * when that name was taken, so the id is the leading `RUN_ID_RE`-shaped part.
+   */
+  localRunIds(): Set<string> {
+    const ids = new Set<string>();
+    const root = orchHome();
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      return ids;
+    }
+    for (const name of entries) {
+      const dir = join(root, name);
+      try {
+        const parsed: unknown = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+        const runId = (parsed as { runId?: unknown } | null)?.runId;
+        if (typeof runId === 'string') ids.add(runId);
+      } catch {
+        // No current run, or an unreadable one — `runs()` already warns about
+        // the latter, once per request; a second warning here would be noise.
+      }
+      for (const file of archivedRunFiles(join(dir, 'runs'))) {
+        const id = ARCHIVED_RUN_ID.exec(file);
+        if (id !== null) ids.add(id[1]);
+      }
+    }
+    return ids;
   }
 
   /**

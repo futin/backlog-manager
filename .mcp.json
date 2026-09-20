@@ -2,7 +2,10 @@
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["@playwright/mcp@latest", "--headless", "--isolated"]
+      "args": ["@playwright/mcp@latest", "--headless", "--isolated", "--browser", "chromium"],
+      "env": {
+        "LD_LIBRARY_PATH": "${HOME}/.local/playwright-libs/root/usr/lib/x86_64-linux-gnu"
+      }
     }
   }
 }

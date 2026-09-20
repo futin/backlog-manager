@@ -15,3 +15,4 @@ paths: ["client/src/**"]
 - Before changing files here, read docs/subsystems/invariants.md#settings-is-two-pages-the-page-is-the-scope
 - Before changing files here, read docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it
 - Before changing files here, read docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places
+- Before changing files here, read docs/subsystems/invariants.md#remote-runs-ride-beside-runs-never-in-it

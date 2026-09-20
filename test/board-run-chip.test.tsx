@@ -273,7 +273,7 @@ describe('BoardView: the run chip', () => {
       const payload: unknown = url.includes('/api/agents/status')
         ? AGENTS_STATUS
         : url.includes('/api/orchestrator/runs')
-          ? ({ runs, starting: startingRuns } satisfies OrchestratorRunsPayload)
+          ? ({ runs, starting: startingRuns, remote: [] } satisfies OrchestratorRunsPayload)
           : url.includes('/api/projects')
             ? PROJECTS
             : { items: [ITEM], errors: [] };

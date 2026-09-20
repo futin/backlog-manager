@@ -2932,12 +2932,68 @@ function cmdHeartbeat() {
   assertDriver(run);
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  // task-48, tracker only: every claim the run still HOLDS is heartbeated too.
+  // Before this, `heartbeat` stamped only `run.json`, so a review or a merge
+  // longer than fifteen minutes let the in-flight item's claim go stale — and
+  // another machine then read the run as crashed, and was entitled to contest
+  // and retire the claim. "Still holds" is `claim` set and the stage not one
+  // that released it, so a `needs-answers` item is included: the run keeps
+  // that claim (see `CLAIM_RELEASE_STAGES`). Best-effort per item, through
+  // `trackerHeartbeat`; a files run makes no request.
+  if (projectSource(run.project) === 'github') {
+    for (const item of run.queue) {
+      if (item.claim !== undefined && !CLAIM_RELEASE_STAGES.has(item.stage)) trackerHeartbeat(run, item);
+    }
+  }
   console.log(run.updatedAt);
   return 0;
 }
 
 const ATTENTION_USAGE = 'usage: orchestrate.mjs attention <itemId> --kind <needs-answers|parked|fix-exhausted> --detail <text> [--questions-json <file>]';
 const ATTENTION_KINDS = ['needs-answers', 'parked', 'fix-exhausted'];
+
+// Line 1 of an attention COMMENT on a tracker item's issue (task-48). The
+// server parses it with `ATTENTION_LINE` (`server/src/orchestrator/
+// remote-runs.util.ts`) to put the entry on the run another machine sees, and
+// this file cannot import that — a plugin skill's `tools/` stands alone — so
+// the two agree through a source-reading guard (`test/remote-runs.test.ts`,
+// G-1) that substitutes into THIS declaration. Keep it one arrow function
+// returning one template literal, or the guard cannot find it.
+const ATTENTION_MARKER = (kind, runId) => `<!-- bm:attention kind=${kind} run=${runId} -->`;
+
+// Who the token authenticates as, for the `@mention` that makes a phone buzz,
+// or `null` when the API cannot say (no poll yet, no token, API down). Read off
+// `GET /api/trackers` rather than asked of GitHub: the token never leaves the
+// server, and the server already knows the answer.
+function trackerLogin() {
+  try {
+    const res = apiCall('GET', '/api/trackers');
+    if (!res.ok || res.data === null || !Array.isArray(res.data.platforms)) return null;
+    const github = res.data.platforms.find((p) => p && p.kind === 'github');
+    return github && typeof github.login === 'string' && /^[A-Za-z0-9-]+$/.test(github.login) ? github.login : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Post one attention entry as a comment on the item's issue (task-48).
+ * Best-effort, exactly like `trackerHeartbeat`: `run.json` already holds the
+ * entry, and it is the journal of record, so a failure is one stderr line and
+ * never a failure of the command. The comment is what turns the board's strip
+ * badge into a phone notification, through the `@mention` — omitted, rather
+ * than guessed, when no login is known.
+ */
+function trackerAttention(run, itemId, kind, detail) {
+  try {
+    const login = trackerLogin();
+    const body = `${ATTENTION_MARKER(kind, run.runId)}\n\n${login === null ? '' : `@${login} `}${detail}\n`;
+    const res = apiCall('POST', '/api/items/comment', { project: claimProjectOf(run), id: claimItemId(itemId), body });
+    if (!res.ok) console.error(`attention comment on ${claimItemId(itemId)} was refused: ${apiErrorText(res, 'the API refused it')}`);
+  } catch (e) {
+    console.error(`attention comment on ${claimItemId(itemId)} could not be sent: ${e.message}`);
+  }
+}
 
 function cmdAttention(argv) {
   const itemId = argv[0];
@@ -2993,6 +3049,9 @@ function cmdAttention(argv) {
 
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  // AFTER the write, as every tracker publish in this file is: the comment is
+  // a copy of an entry this machine has already recorded.
+  if (projectSource(run.project) === 'github') trackerAttention(run, itemId, kind, detail);
   console.log(JSON.stringify({ id: itemId, kind }));
   return 0;
 }
@@ -3124,8 +3183,59 @@ function cmdFinish(argv) {
   run.status = status;
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  // task-48, tracker only: another machine can only tell a finished run from
+  // a crashed one if the outcome is on a claim, so it is stamped on the run's
+  // last-touched claimed item. Best-effort like every publish here.
+  if (projectSource(run.project) === 'github') trackerFinish(run, status);
   console.log(JSON.stringify({ status }));
   return 0;
+}
+
+// The queue item carrying `claim` whose newest `stageAt` stamp is latest —
+// "the item this run touched last", read off the one per-item clock the run
+// file keeps. `null` for a run that never claimed anything.
+function lastTouchedClaimedItem(run) {
+  let best = null;
+  let bestAt = -Infinity;
+  for (const item of run.queue) {
+    if (item.claim === undefined) continue;
+    let latest = -Infinity;
+    for (const stamp of Object.values(item.stageAt ?? {})) {
+      const t = Date.parse(stamp);
+      if (!Number.isNaN(t) && t > latest) latest = t;
+    }
+    if (best === null || latest > bestAt) {
+      best = item;
+      bestAt = latest;
+    }
+  }
+  return best;
+}
+
+/**
+ * Stamp `finished: { at, status }` on the run's last-touched claim (task-48,
+ * spec §7.3) through the heartbeat route, which accepts that one field on a
+ * RELEASED claim too — by now that item's terminal stage has normally
+ * released it. `at` is the run file's own `updatedAt`, so the stamp and the
+ * journal name the same instant.
+ *
+ * A run with no claimed item stamps nothing and says nothing: there is no
+ * comment another machine could have found it by, which the Runs page states.
+ */
+function trackerFinish(run, status) {
+  const item = lastTouchedClaimedItem(run);
+  if (item === null) return;
+  try {
+    const res = apiCall('POST', '/api/items/heartbeat', {
+      project: claimProjectOf(run),
+      id: claimItemId(item.id),
+      commentId: item.claim.commentId,
+      finished: { at: run.updatedAt, status }
+    });
+    if (!res.ok) console.error(`finished stamp on ${item.id} was refused: ${apiErrorText(res, 'the API refused it')}`);
+  } catch (e) {
+    console.error(`finished stamp on ${item.id} could not be sent: ${e.message}`);
+  }
 }
 
 // The one exit a `paused` run has, and a `--resume` session's FIRST write
@@ -4037,11 +4147,56 @@ const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'branched', 'failed', 'skip
 //      real work, or it finished and stopped cleanly but the orchestrator
 //      itself died before committing/reviewing/merging. Reconcile cannot
 //      tell those two apart from the outside, so a human looks (`inspect`).
-function suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId }) {
+function suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId, claim }) {
+  // task-48: another run's LIVE claim outranks everything the worktree says —
+  // whatever is on disk here, the item is somebody else's now, and the one
+  // thing this run must not do is resume or re-dispatch it. `references/
+  // recovery.md` maps `skip` to `stage <n> skipped --note "claimed elsewhere …"`.
+  if (claim === 'other') return 'skip';
   if (!worktreeExists && !itemBranchExists) return 'park';
   if (!worktreeExists) return 'inspect';
   if (marker) return sessionId ? 'resume-session' : 'redispatch-after-stop';
   return 'inspect';
+}
+
+/**
+ * Who holds a tracker item's issue, as `reconcile` reports it (task-48) — read
+ * from `GET /api/items/claim`, which answers the NEWEST claim, released or not.
+ *
+ *   * `this-run` — unreleased and carrying this run's `runId`, stale or not: a
+ *     crashed driver's own claim, which a resume takes over.
+ *   * `other`    — LIVE and carrying another `runId`, or none at all (a hand
+ *     `start`). The one value that changes the suggestion.
+ *   * `released` — the newest claim was given back.
+ *   * `none`     — nobody has ever claimed it.
+ *   * `unknown`  — the API could not say. One stderr line; the other columns
+ *     are computed exactly as before, because a reconcile that failed outright
+ *     over a published copy would hide the local evidence it exists to show.
+ *
+ * A STALE claim from another run reads as `released`-like freedom in the
+ * protocol (it can be retired by the next contestant), so it is not `other`:
+ * a resume will win that item, and the suggestion should not stop it.
+ */
+function reconcileClaimOf(run, item) {
+  let res;
+  try {
+    res = apiCall('GET', `/api/items/claim?project=${encodeURIComponent(claimProjectOf(run))}&id=${encodeURIComponent(claimItemId(item.id))}`);
+  } catch (e) {
+    console.error(`could not read the claim on ${claimItemId(item.id)}: ${e.message}`);
+    return 'unknown';
+  }
+  if (!res.ok) {
+    console.error(`could not read the claim on ${claimItemId(item.id)}: ${apiErrorText(res, 'the API refused it')}`);
+    return 'unknown';
+  }
+  const record = res.data !== null && typeof res.data === 'object' ? res.data.record : null;
+  if (record === null || record === undefined) return 'none';
+  if (record.released !== undefined) return 'released';
+  const runId = record.run && typeof record.run === 'object' ? record.run.runId : undefined;
+  if (runId === run.runId) return 'this-run';
+  const beat = Date.parse(record.heartbeat);
+  const live = !Number.isNaN(beat) && Date.now() - beat < RUN_STALE_MS;
+  return live ? 'other' : 'released';
 }
 
 function cmdReconcile(argv) {
@@ -4051,6 +4206,7 @@ function cmdReconcile(argv) {
   const dir = projectDir(orchHome(), projectRoot);
   const run = readRun(dir); // never written back — see this function's own header comment
 
+  const tracker = projectSource(run.project) === 'github';
   const report = run.queue
     .filter((item) => !RECONCILE_TERMINAL_STAGES.has(item.stage))
     .map((item) => {
@@ -4067,7 +4223,7 @@ function cmdReconcile(argv) {
           marker = itemHasPhaseMarker(found.path);
         }
       }
-      return {
+      const row = {
         id: item.id,
         stage: item.stage,
         worktreeExists,
@@ -4075,9 +4231,14 @@ function cmdReconcile(argv) {
         itemFileLocation,
         started,
         marker,
-        sessionId: item.sessionId,
-        suggestion: suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId: item.sessionId })
+        sessionId: item.sessionId
       };
+      // Only a tracker run carries the key at all, so a files run's report is
+      // byte-identical to what it was.
+      const claim = tracker ? reconcileClaimOf(run, item) : undefined;
+      if (claim !== undefined) row.claim = claim;
+      row.suggestion = suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sessionId: item.sessionId, claim });
+      return row;
     });
 
   if (json) {
@@ -4086,7 +4247,7 @@ function cmdReconcile(argv) {
     for (const row of report) {
       console.log(
         `${row.id}  stage=${row.stage}  worktree=${row.worktreeExists}  branch=${row.branchExists}  ` +
-          `marker=${row.marker}  session=${row.sessionId ?? '(none)'}  -> ${row.suggestion}`
+          `marker=${row.marker}  ${row.claim === undefined ? '' : `claim=${row.claim}  `}session=${row.sessionId ?? '(none)'}  -> ${row.suggestion}`
       );
     }
   }

@@ -46,7 +46,7 @@ Seven POST routes under `/api/items/`, in `items-write.controller.ts`, each a th
 | `state`     | `project, id, status, outcome?`                           | posts `outcome` as a comment FIRST, then closes `completed`/`not_planned`. Labels and claims untouched                                               | 200 `{ id, status, url }`                      |
 | `claim`     | `project, id, phase, session, run?`                       | the claim protocol (§6.3); `run` is a `ClaimRun` validated field by field, and a live claim carrying the SAME `run.runId` is taken over, not contested | 200 `{ commentId, record }` / 409 `{ holder }` |
 | `release`   | `project, id, commentId, session, reason, counters?`      | edits `released` into the claim, writes `counters` verbatim, removes `in-progress`                                                                   | 200 `{ commentId, record }`                    |
-| `heartbeat` | `project, id, commentId, state?`                          | re-stamps `heartbeat`; carries the opaque `ClaimState` (task-47's, read by nothing in this build)                                                    | 200 `{ commentId, record }`                    |
+| `heartbeat` | `project, id, commentId, state?, finished?`               | re-stamps `heartbeat`; carries the opaque `ClaimState` (read tolerantly by the remote-run assembly). `finished` (task-48) is also accepted on a RELEASED claim, where it sets `finished` alone | 200 `{ commentId, record }`                    |
 | `body`      | `project, id, body, ifUpdatedAt, runnerFix?`              | one fresh `GET`, then `PATCH` only if the stamp matches; `runnerFix` adds/removes the `runner-fix` label AFTER the patch, and ABSENT leaves it alone | 200 `{ id, updatedAt }` / 409 `{ updatedAt }`  |
 | `comment`   | `project, id, body`                                       | appends a comment                                                                                                                                    | 201 `{ commentId, url }`                       |
 
@@ -112,13 +112,16 @@ The run watchdog lives here too (`watchdog.service.ts`), armed only while some `
 A read-only view of the orchestrator's run-state directory:
 
 - `GET /api/orchestrator/runs` — every project's current `run.json`, re-read fresh on every request, which is what lets the board watch a run's heartbeat live;
-  plus the runs this server has itself just asked for and whose run file does not exist yet.
+  plus the runs this server has itself just asked for and whose run file does not exist yet (`starting`); plus, in a separate `remote` array (task-48), the
+  runs other machines drove on a tracker project, derived from the poller's cached claim comments by `remote-runs.service.ts` — never members of `runs`, so
+  this machine's lock and watchdog never see them, and dropped whenever a local run file carries the same `runId`.
 - `GET /api/orchestrator/archive` — every run a project has ever produced, current and archived alike.
 - `GET /api/orchestrator/archive/run` — one run file verbatim, gated by an id pattern and an allowlist built the same way item bodies are.
 
 `orchestrate.mjs` is that directory's only writer; this module never writes it and never caches it. Beside those endpoints sit three pieces of state this module
 owns: `watchdog-state.service.ts` (in memory — what the watchdog did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs only),
-`starting-runs.service.ts` (in memory — a spawn this server itself requested, surfaced as the payload's separate `starting` array so a board-started run is
+`remote-runs.service.ts` with its pure half `remote-runs.util.ts` (no state at all — other machines' runs, re-derived per request from the poller's cached
+claim comments into the payload's separate `remote` array), `starting-runs.service.ts` (in memory — a spawn this server itself requested, surfaced as the payload's separate `starting` array so a board-started run is
 visible before `init` writes a run file), and two files it genuinely writes: `watchdog-config.util.ts`, the first file the server ever wrote, and
 `pause-control.util.ts`, the second — the pause request `orchestrate.mjs` reads back at its two dispatch gates, the one file in this system travelling server →
 tool.

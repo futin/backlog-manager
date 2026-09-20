@@ -163,6 +163,8 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   and cannot be selected: there is no run file for the detail sheet to show. A crashed run — `running`, heartbeat stale — is a two-line row carrying all three
   of its readings together (`no heartbeat for <age>`; `last reported <id> at <stage>` or `all items at rest`; the `watchdogClause` sentence), and it is always a
   Live row, never a History one: which sheet a row belongs to is `splitLive`'s call on `running`/`paused` presence, with freshness deliberately excluded.
+  A **remote** run (task-48 — another machine's run on a tracker project, from the payload's `remote` array) follows the same rule and carries a neutral
+  `remote` pill beside the project, in either sheet.
 - **The History sheet** holds one row per finished run under day kickers, newest first: the dot and the status word from `runStatusChip`, the project, the
   two-tone count, wall time and the cost beside it when usage exists, behind a counted `load more` in pages of 25 — a render decision over a corpus the client
   already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
@@ -173,6 +175,10 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
   its count, so the section earns the screen only when it has something in it. Selection is one run across both sheets: the first live run is selected on
   arrival, and with nothing live the newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
+  For a remote run the sheet is read-only: `Remote run: its controls are on the machine that ran it.` stands where `RunControls` would, nothing fetches
+  `archive/run`, and a line under the items says the ones the run has not claimed yet are not visible from here. A LOCAL run of a tracker project that has
+  claimed nothing yet says `Not visible from other machines: this run has not claimed an issue yet.` — `lib/remote-run.ts` holds all three derivations, and
+  `hooks/useProjectSources.ts` reads the project sources once on mount.
 
 
 Cost rides all three surfaces — the History row's foot line, the detail head's `$ · N turns · N sessions`, and each item's own line under its track — absent
@@ -251,13 +257,15 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 
 - `lib/agents.ts` — same-origin fetches against `/api`.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
-- `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, or any `starting` entry is present, plus a grace
-  window after a Resume click.
+- `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
+  `starting` entry is present, plus a grace window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker: a tracker's items move on the server's
   poll clock, which this tab has no event for, and the band renders the poll age as a live reading. No tracker registered means no interval at all.
 - `hooks/useTrackers.ts` — mount and window focus only, for the Shared Settings Trackers card; the board is the surface that polls.
+- `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
+  explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.
 
 ## Invariants

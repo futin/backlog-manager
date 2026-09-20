@@ -34,7 +34,7 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   items), `agents/` (the
   dashboard calls, plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap and the read-only
   `trackers` route) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
-  in-memory watchdog and starting-run records and the two files the server does write), `registry/`, `static.ts` (serves `client/dist` only when built),
+  in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, and the two files the server does write), `registry/`, `static.ts` (serves `client/dist` only when built),
   `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
@@ -78,6 +78,13 @@ any of these — most encode a failure that already happened.
   under `$BM_ORCH_HOME` or `~/.backlog-manager/orchestrator/`. The server re-derives that path with its own copy of the same function, reads it fresh on every
   request, never writes or caches it — `GET /api/orchestrator/archive` and `GET /api/orchestrator/archive/run` included. Why:
   [invariants.md](docs/subsystems/invariants.md#the-orchestrators-run-file-has-exactly-one-writer-one-reader--the-same-relationship-the-registry-has)
+- **Remote runs ride beside `runs`, never in it** (task-48). `OrchestratorRunsPayload.remote` is other machines' runs on a tracker project, derived by
+  `RemoteRunsService` from the poller's cached claim comments — never from a file, no cache or request of its own. `OrchestratorService.runs()` fills `[]` and
+  the controller overwrites it, so the `RUN_IN_PROGRESS_CODE` lock, `runClaimBlock` and the watchdog stay local-only and two machines never block each other.
+  A derived run whose `runId` any local run file carries (current or archived, by name through `archivedRunFiles`) is DROPPED, never merged; `project` is this
+  machine's registry path; status is the newest `finished` stamp unless ANOTHER claim heartbeated after it, else `running` — a crashed remote run stays
+  crashed. A remote row is read-only: no `RunControls`, no `archive/run` fetch. Why:
+  [invariants.md](docs/subsystems/invariants.md#remote-runs-ride-beside-runs-never-in-it)
 - **`~/.backlog-manager/retro/` has exactly one writer, `retro.mjs record`, and `backlog-retro` never writes under the run-state directory** — the same
   relationship `registry.json` and `run.json` each have with their writer, stated for the third directory under `~/.backlog-manager` a tool owns. A record is
   evidence, so `record` refuses to overwrite one (exit `2`): the fix for a wrong record is the next sweep, never an edit. `sweep` reads four homes and writes
@@ -114,7 +121,8 @@ any of these — most encode a failure that already happened.
   / `files` (400, `this project's items are files — the skills write them directly`) / `unsupported` (400, carrying `resolveSource`'s own reason) / the call.
   None of those four makes a network request. `FilesSource` has no `writer` at all, and that absence IS the rule. The adapter answers a VALUE for every
   failure (`WriteRefusal`), and the controller is the only layer mapping one to a status: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited`
-  429 · anything else 502. `GithubSource` keeps a `Map<urn, Promise>` so two local sessions never race on one item, and every response is absorbed into the
+  429 · anything else 502. `heartbeat` also takes `finished: { at, status }` (task-48), validated field by field and accepted on a RELEASED claim, where it
+  sets `finished` and nothing else — `finish` stamps a claim its terminal stage already released. `GithubSource` keeps a `Map<urn, Promise>` so two local sessions never race on one item, and every response is absorbed into the
   poller's cache — but a write never moves `polledAt`, because nothing was polled. The token stays in the process; no response carries it. An eighth route,
   `GET /api/items/claim`, is a READ (unguarded like every other GET) and exists because `start` and `stop` are two processes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-seven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
@@ -156,7 +164,7 @@ any of these — most encode a failure that already happened.
   `polledAt`: the rendered age means "since we last successfully checked", and a conditional request that came back `304` is a successful check (settled
   2026-09-18 in spec §12.2's favour, against task-45's own authoritative case, which is recorded as having been overturned). The comments request is made every
   tick and is read by `TrackerPollerService.comments()`, which is what the claim protocol maps an item's `started`/`phase` and counters
-  from. **Issues and comments have SEPARATE high-water marks and each paginates to the end** — sharing one mark asked for comments `since` the newest
+  from — and, since task-48, what `RemoteRunsService` derives other machines' runs from, with no cache of its own. **Issues and comments have SEPARATE high-water marks and each paginates to the end** — sharing one mark asked for comments `since` the newest
   ISSUE's stamp, which hid every claim older than that from a fresh process, and `readClaim` therefore falls back to one fresh read on a cache miss
   rather than reporting "unclaimed".
  Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eight labels
@@ -219,7 +227,10 @@ any of these — most encode a failure that already happened.
   run skips the item (exit `0`, `claimed elsewhere`); a resumed driver re-claims its own run's items and the SERVER makes that a takeover, by `run.runId`.
   The dispatched `backlog-execute` session runs none of `start`/`stop`/`heartbeat`/`move`/`comment`: it writes its `## Outcome` to the path the
   `[orchestrator-run … outcome <path>]` marker names, and `orchestrate.mjs snapshot <n>` turns that plus the issue body into the one file the reviewer and
-  `verify` read. Inside a run a tracker item's id is its **bare issue number**. Why:
+  `verify` read. Inside a run a tracker item's id is its **bare issue number**. Task-48 added three publishes, all best-effort: `finish` stamps
+  `finished` on the last-touched claimed item, `attention` posts a `<!-- bm:attention kind=… run=… -->` comment with an `@mention` (its marker and the
+  server's `ATTENTION_LINE` agree through a source-reading guard, never an import), and `heartbeat` heartbeats every claim the run still holds. `reconcile`
+  reads each item's claim and suggests `skip` for another run's live one; a files run's output is byte-identical. Why:
   [invariants.md](docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item)
 - **The merge happens in whichever tree holds the base, and the run removes only the tree it made.** git refuses one branch in two trees and `--force` is not
   the way round it, so the merge site is resolved per merge (`git worktree list --porcelain`) into three exhaustive outcomes: a tree holds it → merge there; none
@@ -401,7 +412,8 @@ any of these — most encode a failure that already happened.
   on the board's own runs reads, a boot-time scan, a successful `orchestrate`/`resume` spawn (wired in `AgentsController`, never `AgentsService`) and every
   `POST /api/agents/watchdog/config` save, which calls `arm()` and then an unawaited `tick()`. A run started by typing the trigger with the board never opened
   is never watched. Why: [invariants.md](docs/subsystems/invariants.md#armed-idle-off)
-- **`useOrchestratorRuns` polls while any run is `running`, fresh or not.** Why:
+- **`useOrchestratorRuns` polls while any run is `running`, fresh or not** — and, since task-48, while any REMOTE run is `running`, which is the only way this
+  machine sees another's progress. Why:
   [invariants.md](docs/subsystems/invariants.md#a-crashed-run-renders-as-crashed-never-as-nothing)
 - **Any spawn attempt starts the grace clock; only a success counts against the cap.** `exhausted` is decided before grace. A board resume is a spawn attempt
   too (`WatchdogService.noteBoardResume`, called from the controller BEFORE `arm()`): grace yes, cap no. Why:

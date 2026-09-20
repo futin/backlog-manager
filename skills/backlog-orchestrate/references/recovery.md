@@ -84,12 +84,25 @@ live child exists. The flat paths below are the same paths the crashed session w
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" reconcile
 ```
 
-Read-only — it never writes the run file; deciding what to do is this skill's job. For every item still in the pipeline it prints what it found and one of four
-suggestions:
+Read-only — it never writes the run file; deciding what to do is this skill's job. For every item still in the pipeline it prints what it found and one of five
+suggestions (`skip` only ever appears in a tracker project):
 
 ```
 task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2…  -> resume-session
 ```
+
+In a **tracker project** each row also carries `claim`, read from the item's issue: `this-run` (the newest claim is unreleased and this run's, stale or not —
+a resume takes it over), `other` (a LIVE claim from another run or a hand `start`), `released`, `none` (never claimed), or `unknown` (the API could not say; one
+stderr line, and every other column is computed as usual). A stale claim from another run reads `released`: the protocol lets the next contestant retire it, so
+it does not stop a resume. A files project's rows have no `claim` key at all.
+
+- **`skip`** — `claim=other`: another machine or session holds the item now, whatever this tree still has on disk. Do not resume or re-dispatch it:
+
+  ```bash
+  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> skipped --note "claimed elsewhere — found by reconcile; worktree <path> left in place"
+  ```
+
+  Leave its worktree and branch where they are, the same rule the resumed driver's own re-claim follows: this run lost the item, not the work.
 
 - **`resume-session`** — worktree present, the item file still carries an in-progress `phase:` marker, and a session id is known. Resume that session in place
   with **step 5's retry line unchanged** — every flag it carries, `--verbose` among them, since a `claude -p --output-format stream-json` without it exits in

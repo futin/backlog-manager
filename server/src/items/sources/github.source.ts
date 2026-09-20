@@ -560,13 +560,29 @@ export class GithubSource implements ItemSource, ItemWriter {
     });
   }
 
-  /** Say the session is still alive. Refuses a released claim — a heartbeat on
-   *  one would be a session insisting it holds something it gave back, which is
-   *  a bug in the caller rather than a state to tolerate. */
+  /**
+   * Say the session is still alive. Refuses a released claim — a heartbeat on
+   * one would be a session insisting it holds something it gave back, which is
+   * a bug in the caller rather than a state to tolerate.
+   *
+   * With ONE exception (task-48): a request carrying `finished` is accepted on
+   * a released claim, and there it sets `finished` and nothing else. `finish`
+   * stamps the run's LAST-TOUCHED claim, and by then that item's terminal stage
+   * has normally released it — so refusing would make the stamp impossible on
+   * exactly the claim it belongs on. It is a fact about the run riding on the
+   * comment, not a claim to be alive: `heartbeat` and `state` stay where the
+   * release left them (a moved heartbeat would read as the item being worked
+   * again) and `released` is never touched, because release is permanent.
+   */
   async heartbeat(_project: RegistryProject, marker: SourceMarker, req: ItemHeartbeatRequest): Promise<WriteOutcome<ClaimResult>> {
     return this.editClaim(marker, req.id, req.commentId, (existing, now, number) => {
       if (existing.released !== undefined) {
+        if (req.finished !== undefined) return { ...existing, finished: req.finished };
         return { refused: 'conflict', error: `claim ${req.commentId} on #${number} is released — nothing to heartbeat` };
+      }
+      if (req.finished !== undefined) {
+        const beat = { ...existing, heartbeat: new Date(now).toISOString(), finished: req.finished };
+        return req.state === undefined ? beat : { ...beat, state: req.state };
       }
       // `state` is the driver's and is written verbatim when given, left exactly
       // as it was when not — an old build heartbeating a record a newer one

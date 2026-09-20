@@ -576,7 +576,7 @@ describe('the board wiring', () => {
       const payload = url.includes('/api/agents/status')
         ? AGENTS
         : url.includes('/api/orchestrator/runs')
-          ? ({ runs: RUNS, starting: [] } satisfies OrchestratorRunsPayload)
+          ? ({ runs: RUNS, starting: [], remote: [] } satisfies OrchestratorRunsPayload)
           : url.includes('/api/agents/plan')
             ? {
                 action: 'execute',

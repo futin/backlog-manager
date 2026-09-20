@@ -5,9 +5,12 @@ created: 2026-09-19
 from: idea-12
 tags: architecture, multi-machine, tracker, github, orchestrator, runs
 runner-fix: true
-updated: 2026-09-19T18:52:13Z
+updated: 2026-09-20T06:42:00Z
 groom-elapsed: 275
 groom-tokens: 86036
+started: 2026-09-19T20:36:31Z
+execute-elapsed: 36329
+execute-tokens: 805253
 ---
 
 ## Goal
@@ -272,3 +275,89 @@ All three are green, and every test case above exists and fails with its product
 **Still to be done by a person with a token (not gating the merge, as for task-45/46/47):** on `futin/test-claude-issues`, orchestrate two groomed issues
 from machine A. On machine B, open Runs and confirm the run appears with the `remote` tag, as running and then done. Force one item to park and confirm the
 attention comment lands on the issue. Record whether the `@mention` produced a phone notification (Decision 8's known risk).
+
+## Outcome
+
+Executed 2026-09-19/20, on `main` in the main tree (a hand session; the orchestrator run that had been queued for this item crashed at `preflight` before
+creating a worktree, and was aborted so the watchdog could not resume it alongside this session).
+
+Phase 4b landed as planned: the server derives other machines' runs from the tracker cache's claim comments and serves them in a new
+`OrchestratorRunsPayload.remote`; `finish` stamps the run's outcome on its last-touched claim through the existing heartbeat route; `attention` posts a marker
+comment with an `@mention`; `heartbeat` keeps every held claim alive; `reconcile` reads each item's claim and suggests `skip` for another run's live one; and
+the Runs page draws a remote run as a read-only, tagged row.
+
+### Deviations from the plan, and why
+
+1. **The status rule excludes the finished claim's OWN heartbeat.** Decision 5 says `status = F.status` when "no claim in the group has a `heartbeat` later
+   than `F.at`". `finish` stamps through the heartbeat route, and on an UNRELEASED claim (a `needs-answers` item keeps its claim) that request also moves the
+   heartbeat — to the server's clock, milliseconds after the `at` the CLI chose. The plan's rule as written reads every such run as resumed the instant it
+   finished. The claim carrying `F` is therefore excluded from that comparison; nothing is lost, because a resume re-claims through a takeover that posts a NEW
+   comment. Pinned by the second R-3 case.
+2. **A released claim's `reason` is read as the item's stage.** The plan's step 2 says `stage` is `state.stage`. The driver releases at a terminal stage
+   WITHOUT a final state heartbeat (`stage <n> merged` → `release … merged`), so `state.stage` is the stage BEFORE the terminal one and every finished item
+   would have rendered as `merging`/`reviewing`. When a release reason is a `RunStage` it is the stage; any other reason (`resumed`, `stale`) falls through to
+   `state`. Pinned by R-3.
+3. **`reconcile`'s `claim` column answers `released` for a STALE claim held by another run.** Decision 10's list has no value for that state: it is unreleased,
+   but the protocol lets the next contestant retire it, so reporting `other` would stop a resume that is entitled to take the item. `other` is reserved for a
+   LIVE claim, which is what changes the suggestion.
+4. **The Runs page reads `/api/projects` itself.** Step 6 says the project's `source` "comes from the projects payload the page already has" — `RunsView` has
+   no such payload (it reads the archive, the runs poll and `useAgents`). Added `hooks/useProjectSources.ts`: one `fetch` on mount, failing soft to an empty
+   map, which reads as "do not know" and draws no line. Plain `fetch` rather than a `lib/agents` helper so the suites that mock that module are untouched.
+5. **`OrchestratorService.localRunIds()` reads archived ids from FILE NAMES**, never by opening them (`archiveStem` makes a name `<runId>.json` or
+   `<runId>-<n>.json`). This endpoint polls and an archive grows without bound.
+
+### Test cases
+
+Every case in the plan exists: R-1…R-12 plus `readClaimState`/`parseAttention` and the G-1 source guard in `test/remote-runs.test.ts` (18 cases); S-1…S-4 in
+the new `test/remote-runs-routes.test.ts`; H-1…H-4 in `test/tracker-write.test.ts`; O-1 (extended with `attention`/`heartbeat`/`reconcile`/`finish` against a
+closed port) and C-1…C-5 in `orchestrate.test.mjs`; U-1…U-3 in `test/runs-view.test.tsx` and U-4 in `test/orchestrator-hook.test.tsx`.
+`test/watchdog-coupling.test.tsx`'s reader set is unchanged.
+
+### Verification
+
+```
+$ pnpm test
+Test Suites: 3 failed, 124 passed, 127 total
+Tests:       5 failed, 2064 passed, 2069 total
+ℹ pass 661
+ℹ fail 1
+```
+
+**All six failures reproduce on an untouched HEAD checkout** (`git worktree add --detach /tmp/bm-head… HEAD`, same `node_modules`), and none of them touches
+code this branch changed:
+
+- `board-live-cards.test.tsx` ("gives a needs-answers card its own strip…") and `dispatch-button.test.tsx`'s two "board wiring" cases — fixture items created
+  `2026-08-20` against the 30-day stale window. They expired when the date rolled to 2026-09-20 during this session: the item leaves the Board, so the card
+  the case looks for is not rendered. A date-bomb in the fixtures, worth its own bug.
+- `supertest-bind.test.ts`'s two "platform behaviour this helper exists for" probes — `listen EADDRINUSE` on a wildcard bind under this kernel.
+- `orchestrate.test.mjs`'s "a submodule working tree resolves to itself" — the `commondir` discriminator case.
+
+```
+$ pnpm run typecheck   # tsc --noEmit: no diagnostics from this branch
+$ npx tsc -p tsconfig.build.json --outDir /tmp/bm-dist-check   # exit 0
+$ npx vite build                                               # ✓ built in 3.75s
+```
+
+`pnpm run build` itself cannot run on this machine: `dist/` is owned by `root` (written by an earlier Docker build), so `nest build` fails with
+`EACCES: permission denied, rmdir '…/dist/server'` before compiling anything. `tsc --noEmit` reports the same `TS5033` for its build-info file. Both halves of
+the build were therefore run explicitly — the server compiled to a temp `--outDir`, the client normally — and both pass. Fixing the ownership needs `sudo` and
+is not this item's work.
+
+**The browser check in Test cases was NOT run.** A Vite dev server was started on 5177 and answered `200`, but the Playwright MCP browser is not installed on
+this machine (`Chromium distribution 'chrome' is not found at /opt/google/chrome/chrome`), and installing one is a machine-wide change this session did not
+make unasked. The dev server was killed by its recorded pid afterwards and 5177 is free. The "still to be done by a person with a token" live check on
+`futin/test-claude-issues` is also still outstanding, as it is for task-45/46/47.
+
+Contract sweep: 12 sites updated (CLAUDE.md — the run-file, write-routes, tracker-cache, driver-claim, poll and layout entries plus a new remote-runs entry;
+docs/subsystems/invariants.md — a new `Remote runs ride beside runs, never in it` section, a new `What the rest of the run publishes` subsection, and the
+`ClaimState`-has-no-reader sentence corrected; docs/subsystems/api.md, board.md, skills.md; .claude/rules/orchestrator.md and board.md; SKILL.md's attention,
+finish and heartbeat paragraphs plus its "one of four suggestions" line; references/recovery.md's verdict list; `orchestrate.test.mjs`'s "all four reconcile
+verdicts" guard, now five; the spec's §7.3 and §7.6 annotations; and `ClaimState`'s own doc comment in shared/types.ts). Nothing was left standing on purpose.
+
+Red proof: 35 tests went red with the change reverted — one mutation per production change, each applied to a file copy and restored afterwards (never
+`git stash`). Not proved, with reasons: **S-3** (a fresh remote run does not 409 a local Orchestrate) and **S-4** (`remote: []` and zero outbound requests with
+no tracker project) pin structural guarantees — remote runs never enter `runs`, and the derivation reads a cache rather than the network — so there is no line
+whose reversion makes them fail; S-3 asserts its own precondition (`[['running', true]]`) first so it cannot pass vacuously. **H-2** pins the pre-existing 409
+wording, which this change deliberately leaves alone.
+
+Follow-ups for a person, not filed by this session: the fixture date-bomb above, and `dist/` being root-owned.

@@ -120,7 +120,7 @@ const AGENTS_STATUS: AgentsStatus = {
   projectPaths: [FILES_PATH, TRACKER_PATH]
 };
 
-const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [] };
+const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [] };
 
 let bodyCalls: string[];
 

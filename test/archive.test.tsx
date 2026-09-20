@@ -143,7 +143,7 @@ function stubItems(
     const payload: unknown = url.includes('/api/agents/status')
       ? AGENTS_STATUS
       : url.includes('/api/orchestrator/runs')
-        ? ({ runs, starting } satisfies OrchestratorRunsPayload)
+        ? ({ runs, starting, remote: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects')
           ? PROJECTS
           : index;

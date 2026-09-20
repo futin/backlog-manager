@@ -156,7 +156,7 @@ describe('toolbar Orchestrate button', () => {
       const payload: unknown = url.includes('/api/agents/status')
         ? AGENTS
         : url.includes('/api/orchestrator/runs')
-          ? ({ runs, starting: [] } satisfies OrchestratorRunsPayload)
+          ? ({ runs, starting: [], remote: [] } satisfies OrchestratorRunsPayload)
           : url.includes('/api/agents/merge-check')
             ? { covered: true, source: null }
             : // task-32: the sheet fires this on mount, unconditionally (unlike

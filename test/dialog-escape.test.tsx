@@ -110,7 +110,7 @@ function stubFetch(items: BacklogItem[]): void {
     const payload: unknown = url.includes('/api/agents/status')
       ? READY
       : url.includes('/api/orchestrator/runs')
-        ? ({ runs: [], starting: [] } satisfies OrchestratorRunsPayload)
+        ? ({ runs: [], starting: [], remote: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/agents/plan')
           ? {
               action: 'execute',

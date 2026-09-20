@@ -23,7 +23,7 @@ const fixture = rawFixture as OrchestratorRun;
  * parameter nobody would vary.
  */
 function payload(fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false }], starting: [] };
+  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false }], starting: [], remote: [] };
 }
 
 /**
@@ -35,12 +35,18 @@ function payload(fresh: boolean): OrchestratorRunsPayload {
  * lib/run-watchdog.ts) — the poll must still be running for it.
  */
 function payloadWith(status: OrchestratorRun['status'], fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false }], starting: [] };
+  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false }], starting: [], remote: [] };
 }
 
 /** Same shape as test/agents-client.test.ts's own `stub`: every call answers
  *  the same body, for the cases that only care about CALL COUNT in one
  *  unchanging world. */
+/** task-48: one `remote` entry — another machine's run, as the server derives
+ *  it from claim comments. */
+function remoteEntry(status: OrchestratorRun['status']): OrchestratorRunsPayload['remote'][number] {
+  return { ...fixture, runId: 'run-20260919-110000', status, fresh: status === 'running', remote: true, repo: 'futin/x' };
+}
+
 function stubFetch(body: OrchestratorRunsPayload): jest.Mock {
   const fn = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response));
   global.fetch = fn as unknown as typeof fetch;
@@ -461,7 +467,8 @@ describe('useOrchestratorRuns', () => {
   it('polls while a starting entry is present with no runs at all', async () => {
     const fetchMock = stubFetch({
       runs: [],
-      starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }]
+      starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }],
+      remote: []
     });
     renderHook(() => useOrchestratorRuns());
     await flush();
@@ -473,8 +480,32 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('does not poll when both runs and starting are empty', async () => {
-    const fetchMock = stubFetch({ runs: [], starting: [] });
+  // task-48: another machine's run can only be watched by asking again, so a
+  // `running` remote entry keeps the poll going on its own — and a finished
+  // one does not, or every Runs page with a tracker history would poll forever.
+  it('U-4: polls while only a remote run is running', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('running')] });
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.remote.map((r) => r.runId)).toEqual(['run-20260919-110000']);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('U-4: does not poll for a remote run that has finished', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('done')] });
+    renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('does not poll when runs, starting and remote are all empty', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [] });
     renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -491,7 +522,7 @@ describe('useOrchestratorRuns', () => {
     // notices the real run landing, and the interval has to stand back down
     // once that run is over rather than outliving both shapes.
     const fetchMock = stubFetchSequence([
-      { runs: [], starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }] },
+      { runs: [], starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }], remote: [] },
       payloadWith('done', false)
     ]);
     renderHook(() => useOrchestratorRuns());
@@ -508,7 +539,7 @@ describe('useOrchestratorRuns', () => {
   it('surfaces the starting array to its caller', async () => {
     const entry = { project: '/abs/alpha', requestedAt: new Date().toISOString() };
     const { result } = renderHook(() => useOrchestratorRuns());
-    stubFetch({ runs: [], starting: [entry] });
+    stubFetch({ runs: [], starting: [entry], remote: [] });
     result.current.refresh();
     await flush();
 

@@ -133,7 +133,7 @@ describe('GET /api/orchestrator/runs', () => {
 
   it('returns an empty list when the state dir does not exist yet', async () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
-    expect(res.body).toEqual({ runs: [], starting: [] });
+    expect(res.body).toEqual({ runs: [], starting: [], remote: [] });
   });
 
   it('reports a fresh running fixture with its queue passed through intact', async () => {
@@ -367,7 +367,10 @@ describe('GET /api/orchestrator/runs', () => {
 
     expect(app.get(OrchestratorService).runs()).toEqual({
       runs: [],
-      starting: [{ project: '/abs/first-ever', requestedAt: expect.any(String) }]
+      starting: [{ project: '/abs/first-ever', requestedAt: expect.any(String) }],
+      // The service's own `remote` is always empty — the controller fills it
+      // (task-48), so the agents lock that calls this directly never sees one.
+      remote: []
     });
   });
 

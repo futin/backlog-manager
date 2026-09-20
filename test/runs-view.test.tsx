@@ -432,12 +432,13 @@ const RUN_B = run({
 async function renderRunsView(
   archiveRuns: OrchestratorArchiveRun[],
   liveRuns: OrchestratorRunsPayload['runs'] = [],
-  starting: OrchestratorRunsPayload['starting'] = []
+  starting: OrchestratorRunsPayload['starting'] = [],
+  remote: OrchestratorRunsPayload['remote'] = []
 ): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
-  mockRuns.mockResolvedValue({ runs: liveRuns, starting } satisfies OrchestratorRunsPayload);
+  mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote } satisfies OrchestratorRunsPayload);
   const result = render(<RunsView />);
-  if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0) {
+  if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0 && remote.length === 0) {
     await screen.findByText('no runs yet');
   } else {
     await screen.findByTestId('runs-list');
@@ -1012,7 +1013,7 @@ describe('RunsView', () => {
       };
 
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
-      mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [] } satisfies OrchestratorRunsPayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [], remote: [] } satisfies OrchestratorRunsPayload);
 
       render(<RunsView />);
       // Flushes the mount-time fetches (both hooks') and whatever effects
@@ -1046,7 +1047,7 @@ describe('RunsView', () => {
         pastRuns: 0,
         pauseRequested: false
       };
-      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [] } satisfies OrchestratorRunsPayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [], remote: [] } satisfies OrchestratorRunsPayload);
 
       await act(async () => {
         await jest.advanceTimersByTimeAsync(5_000);
@@ -1743,7 +1744,7 @@ describe('RunsView history paging (task-16)', () => {
     // Not `renderRunsView`: that helper waits on `runs-list`, which is
     // exactly what this page does not render.
     mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
-    mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [] } satisfies OrchestratorRunsPayload);
+    mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [], remote: [] } satisfies OrchestratorRunsPayload);
     render(<RunsView />);
 
     // `watchdog-phase`, not `watchdog-state`: the page renders a
@@ -1928,7 +1929,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
             pauseRequested: false
           }
         ],
-        starting: []
+        starting: [],
+        remote: []
       });
 
       mockArchive.mockResolvedValue({ runs: [archiveEntry] } satisfies OrchestratorArchivePayload);
@@ -2571,5 +2573,89 @@ describe('Runs · one home per derivation (task-38)', () => {
     // And the owner itself is still one module, so "one owner" is a fact
     // about the tree rather than a sentence in a doc.
     expect(sources('client/src').filter((f) => /export function useDialogEscape\s*\(/.test(f.text))).toHaveLength(1);
+  });
+});
+
+/* task-48: a run another machine drove, assembled by the server from a tracker
+ * repo's claim comments and delivered in the payload's `remote` array. The page
+ * draws it with the same rows and sheet as a local run, tagged, read-only, and
+ * without ever asking for a file this machine does not have. */
+describe('RunsView · a remote run (task-48)', () => {
+  function remoteRun(status: OrchestratorRunsPayload['remote'][number]['status'], fresh: boolean): OrchestratorRunsPayload['remote'][number] {
+    const at = new Date(Date.now() - 60_000).toISOString();
+    return {
+      runId: 'run-20260919-110000',
+      project: '/abs/gamma',
+      status,
+      startedAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+      updatedAt: at,
+      maxItems: null,
+      base: 'main',
+      mergeMode: 'merge',
+      mergeModeEffective: 'merge',
+      mergeModeNote: null,
+      questionMode: 'park',
+      driver: null,
+      queue: [{ ...liveQueueItem('3', status === 'running' ? 'reviewing' : 'merged'), claim: { commentId: 501 } }],
+      attention: [],
+      fresh,
+      remote: true,
+      repo: 'futin/x'
+    };
+  }
+
+  it('U-1: a running remote run is a tagged Live row whose sheet has no controls and fetches no file', async () => {
+    const remote = remoteRun('running', true);
+    await renderRunsView([], [], [], [remote]);
+
+    expect(isLiveRow(remote.runId)).toBe(true);
+    expect(screen.getByTestId(`runs-row-remote-${remote.runId}`)).toHaveTextContent('remote');
+
+    await userEvent.click(screen.getByTestId(`runs-row-${remote.runId}`));
+    expect(await screen.findByTestId('run-detail-remote')).toHaveTextContent('Remote run: its controls are on the machine that ran it.');
+    expect(screen.getByTestId('run-detail-remote-queue')).toHaveTextContent('Items this run has not claimed yet are not visible from here.');
+    expect(document.querySelector('[data-testid^="run-controls-"]')).toBeNull();
+    expect(mockFetchArchivedRun).not.toHaveBeenCalled();
+  });
+
+  it('U-2: a finished remote run is a tagged History row', async () => {
+    const remote = remoteRun('done', false);
+    const { container } = await renderRunsView([], [], [], [remote]);
+
+    expect(isLiveRow(remote.runId)).toBe(false);
+    expect(historyRowIds(container)).toEqual([`runs-row-${remote.runId}`]);
+    expect(screen.getByTestId(`runs-row-remote-${remote.runId}`)).toBeInTheDocument();
+  });
+
+  describe('U-3: a local run that has claimed nothing', () => {
+    const realFetch = global.fetch;
+    afterEach(() => {
+      global.fetch = realFetch;
+    });
+
+    function stubProjects(source: 'github' | 'files'): void {
+      global.fetch = jest.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve([{ name: 'alpha', path: RUN_LIVE.project, source }]) } as Response)
+      ) as jest.Mock;
+    }
+
+    it('says it is not visible from other machines on a tracker project', async () => {
+      stubProjects('github');
+      await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+      await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+      expect(await screen.findByTestId('run-detail-invisible')).toHaveTextContent('Not visible from other machines: this run has not claimed an issue yet.');
+      // A local run keeps its controls; the tag is for remote runs only.
+      expect(screen.queryByTestId('run-detail-remote')).toBeNull();
+      expect(screen.queryByTestId(`runs-row-remote-${LIVE_RUNS[0].runId}`)).toBeNull();
+    });
+
+    it('says nothing of the kind on a files project', async () => {
+      stubProjects('files');
+      await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+      await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+      await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+      await act(async () => {});
+      expect(screen.queryByTestId('run-detail-invisible')).toBeNull();
+    });
   });
 });
