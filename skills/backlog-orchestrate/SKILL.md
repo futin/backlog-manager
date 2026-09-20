@@ -79,12 +79,15 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ |
 | `8`  | **tracker projects only** — the backlog-manager API is not running. **Nothing is written.** Start the stack (`pnpm run dev` or `pnpm run docker:up`) and retry the same command; a files project can never see this code                                              |
 | `9`  | **tracker projects only** — an API refusal this command could not absorb (no token, a 502 from GitHub, a 400 naming a field). **Nothing is written.** Not a call to fix and retry: park the item with the server's own sentence in the detail                         |
+| `10` | a **stop** was requested for this run: `stage` refuses **every** transition with it, and `watch` returns it after signalling the child. **Nothing is written** by the `stage` refusal; go to §10, _Stopping_                                                   |
 
-`6` and `7` are the two codes whose reaction is neither a fix nor a retry, which is exactly why neither is a `1`. A `1` means "this call was wrong". A `6` means
+`6`, `7` and `10` are the codes whose reaction is neither a fix nor a retry, which is exactly why none of them is a `1`. A `1` means "this call was wrong". A `6` means
 "this call was right and the run is being asked to stop": never retry it, never work around it, go to §10. A `7` means "this call was right and this session is
 no longer the one driving this run": another `--resume` session claimed it, and two sessions past that point both stage-write one `run.json` and both end in a
 merge into the base. Stop — do not retry, do not re-claim, do not finish the run. (That prohibition is about a session refused mid-run. It does not touch `--abort`,
-which opens by taking the run over on purpose: see `references/recovery.md`.) `references/recovery.md` has the whole of the lease, including the `claim` a
+which opens by taking the run over on purpose: see `references/recovery.md`.) A `10` means "a person ended this run": it is `6`'s sibling and not `6` itself,
+because a pause stops at the next item boundary and a stop stops **now**, abandoning whatever item is in flight. Never retry it, never work around it — go to
+§10, _Stopping_, which is `--abort` and not `finish`. `references/recovery.md` has the whole of the lease, including the `claim` a
 resume opens with.
 
 That `3` carries two meanings for `watch` deliberately: "no run yet" and "still running, call me again" are the same shape of retry from here. And unlike
@@ -637,6 +640,16 @@ nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/b
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
+**Then record that pid on the run** (bug-39):
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --pid "$(cat '<dir>/logs/<id>.pid')"
+```
+
+A re-stamp of the stage the item already occupies, exactly like the `--session` line further down, so the pause gate lets it through. It is the same number
+`watch --pid` reads, put somewhere an `--abort` arriving **after** this driver is gone can still find it: nothing scans `logs/`, so without this the run file
+holds no address for the child at all and a force stop cannot reach an orphaned executor. Run it on the retry line in §5 too.
+
 Both lines in **one** Bash invocation — each invocation gets its own shell, so `$!` is only readable in the call that backgrounded the child; that is why the
 pid goes straight into a file. `exec` matters too: it makes the pid you recorded the `claude` process itself rather than a wrapper shell around it, and `watch`
 polls exactly that pid. `nohup` and the redirects are what let the session outlive the single tool call that started it. stdout is the stream-json transcript
@@ -777,6 +790,8 @@ that file itself, and why `status --json` is where the session id is read back f
   gets cut off.
 - **exit `1`** — a problem with this call: a missing `.jsonl` after the first interval, or one that cannot be read at all. The session may still be running; do
   not assume it died. Inspect the worktree and the `.err` file before deciding anything.
+- **exit `10`** — a stop was requested for this run (bug-39). `watch` has already signalled the child by the pid you gave it, so the session is ending. Do
+  **not** call `watch` again and do not stage anything: every `stage` transition now refuses with the same `10`. Go straight to §10, _Stopping_.
 
 ## 5. Inspect what the session left behind
 
@@ -1512,6 +1527,32 @@ at the project root.
 
 Then end the turn. Do not ping, do not ask whether to continue, do not wait: the board's own control is what asked for this pause, so the person who asked is
 already looking at the surface that will restart it.
+
+### Stopping
+
+You are here because a command exited `10`. A person asked for this run to **end**, from the board's Stop control. Nothing was written by the call that
+refused.
+
+**Do not finish the queue, and do not retry anything.** This is the one difference from _Pausing_ above and it is the whole difference: a pause stops at the
+next item boundary and leaves the item in flight to complete, a stop abandons it. Every `stage` transition now refuses with `10`, so there is no path forward
+even if you tried.
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
+```
+
+Read `references/recovery.md`'s abort section first, as always — abort's order of operations is its entire safety property, and it is unchanged here. Three
+things are worth knowing before you run it:
+
+- **It will not be refused on the lease.** `abort` takes the run over on the strength of the stop request itself, even from a driver the run file still reads
+  as alive. That is what a stop is for: the run file's freshness measures the FILE, never the process.
+- **It signals the children.** Any item still in flight whose pid this run recorded (§4) is sent `SIGTERM` first, and only a live process whose command line
+  names `claude` — never a pattern, never a pid the run did not record itself.
+- **A worktree carrying an in-progress marker is still left in place**, with an `attention` entry naming it. A stop may abandon an item; it may not destroy
+  uncommitted work.
+
+Then summarise as _Finishing_ does — what merged or branched, what was abandoned mid-flight and where its worktree is — and end the turn. Do not ping and do
+not ask whether to continue: the person who stopped the run is already looking at the surface they stopped it from.
 
 ### `--resume` and `--abort`
 

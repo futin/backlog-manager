@@ -355,6 +355,35 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     // dead (CLAUDE.md's "one freshness number").
     const entry = this.state.upsert(run.runId, run.project);
 
+    // 1b. bug-39 — a person asked for this run to END, and nothing resumes a
+    //     stopped run.
+    //
+    //     Placed AFTER the `fresh` branch and BEFORE the stand-down branch,
+    //     and both halves of that position are load-bearing. After `fresh`,
+    //     because a stopped run that is still heartbeating is a run whose
+    //     driver has not noticed yet — it will, within one `watch` tick — and
+    //     the `recovered` line that branch may write is still the honest
+    //     reading of what this sweeper saw. Before the stand-down branch,
+    //     because this is a stronger refusal than either of those two: `off`
+    //     and `exhausted` both mean "not right now, and a person may hand-
+    //     resume", while a stop means "not at all, by that person's own
+    //     request", and reporting the weaker reason for it would invite
+    //     exactly the click it is here to prevent.
+    //
+    //     `run.stopRequested` is READ, never re-derived. The field is one
+    //     boolean the server computed once (`OrchestratorService.runs()`),
+    //     and `RunControls` reads the same one to suppress every Resume it
+    //     draws — see that field's own comment for why this deliberately is
+    //     not a third input to `watchdogStoodDown`, which the board renders
+    //     a Resume on the TRUE of.
+    if (run.stopRequested) {
+      if (!entry.stoppedLogged) {
+        entry.stoppedLogged = true;
+        this.push(run, 'stopped', 'a stop was requested — not resuming');
+      }
+      return;
+    }
+
     // 2 & 3. The two stand-down states: the watchdog is off (the user's
     //    Settings toggle, or either env switch), or the cap is spent.
     //    Watching continues in both and the crashed run is still reported;
@@ -534,7 +563,7 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     }
   }
 
-  private push(run: OrchestratorRunsPayload['runs'][number], kind: 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled', detail: string): void {
+  private push(run: OrchestratorRunsPayload['runs'][number], kind: 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled' | 'stopped', detail: string): void {
     this.state.push({ project: run.project, runId: run.runId, kind, detail });
   }
 }

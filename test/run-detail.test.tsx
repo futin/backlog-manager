@@ -12,7 +12,7 @@ import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueu
 /** What `RunDetail`'s `live` prop takes since task-17: the run plus the two
  *  annotations the runs endpoint adds, which are exactly what the
  *  `RunControls` in its head decides from. */
-type LiveRun = OrchestratorRun & { fresh: boolean; pauseRequested: boolean };
+type LiveRun = OrchestratorRun & { fresh: boolean; pauseRequested: boolean; stopRequested: boolean };
 
 /** task-17 gave `RunDetail` three more required props for those controls.
  *  Every pre-existing case here is about durations, stage tracks or the tail
@@ -62,6 +62,7 @@ function archiveItem(
     sessionId: null,
     worktree: null,
     branch: over.branch ?? null,
+    pid: null,
     permissionMode: null,
     fixLoops: over.fixLoops ?? 0,
     stageAt: over.stageAt ?? {},
@@ -92,6 +93,7 @@ function liveItem(
     sessionId: null,
     worktree: null,
     branch: null,
+    pid: null,
     permissionMode: null,
     fixLoops: over.fixLoops ?? 0,
     stageAt: over.stageAt ?? {},
@@ -157,6 +159,7 @@ function primaryFull(overTails: { a1?: string; a2?: string } = {}): LiveRun {
   return {
     fresh: true,
     pauseRequested: false,
+    stopRequested: false,
     runId: RUN_ID,
     project: PROJECT,
     status: 'done',
@@ -350,6 +353,7 @@ describe('RunDetail', () => {
     const runningLive: LiveRun = {
       fresh: true,
       pauseRequested: false,
+      stopRequested: false,
       runId: RUN_ID,
       project: PROJECT,
       status: 'running',
@@ -375,6 +379,7 @@ describe('RunDetail', () => {
     const freshFetched: LiveRun = {
       fresh: true,
       pauseRequested: false,
+      stopRequested: false,
       runId: RUN_ID,
       project: PROJECT,
       status: 'done',
@@ -597,6 +602,7 @@ describe('RunDetail', () => {
     const fixingLive: LiveRun = {
       fresh: true,
       pauseRequested: false,
+      stopRequested: false,
       runId: RUN_ID,
       project: PROJECT,
       status: 'running',

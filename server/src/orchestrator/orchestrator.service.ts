@@ -6,7 +6,7 @@ import { Injectable } from '@nestjs/common';
 import { isMergeMode } from '../../../shared/agent';
 import { RUN_STALE_MS } from '../../../shared/types';
 import type { OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
-import { pauseRequestEffective, readPauseRequest } from './pause-control.util';
+import { pauseRequestEffective, readPauseRequest, stopRequestEffective } from './pause-control.util';
 import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 
@@ -366,8 +366,16 @@ export class OrchestratorService {
       // exists until it next reaches a dispatch gate. Same posture as `fresh`
       // above: computed once here so every client isn't re-implementing the
       // predicate against its own clock and its own copy of the rules.
-      const pauseRequested = pauseRequestEffective(readPauseRequest(run.project), run);
-      runs.push({ ...run, fresh, pastRuns, pauseRequested, ...(watchdog ? { watchdog } : {}) });
+      //
+      // bug-39: ONE control-file read, two verdicts. Two reads would be two
+      // answers to one question with a window between them, and the two
+      // predicates are disjoint over the same bytes — so a single read is
+      // also the only way `pauseRequested` and `stopRequested` can never
+      // both be true for one file.
+      const control = readPauseRequest(run.project);
+      const pauseRequested = pauseRequestEffective(control, run);
+      const stopRequested = stopRequestEffective(control, run);
+      runs.push({ ...run, fresh, pastRuns, pauseRequested, stopRequested, ...(watchdog ? { watchdog } : {}) });
     }
 
     // `list`, the pure half — this method stays a pure read (see the class

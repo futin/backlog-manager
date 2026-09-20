@@ -554,6 +554,30 @@ export interface PauseResult {
 }
 
 /**
+ * 200 body of `POST /api/agents/stop` (bug-39) — three fields, because
+ * recording the fact and ending the run are TWO outcomes and only the first
+ * one is guaranteed.
+ *
+ * `stopRequested` is the guaranteed half, re-derived from what landed on
+ * disk exactly as `PauseResult.pauseRequested` is. Once it is `true` the
+ * watchdog is already standing down and `abort` will already take the lease,
+ * whatever happened to the other two fields.
+ *
+ * `abortSession` is the id of the `/backlog-orchestrate --abort` session the
+ * route spawned, or `null` when it spawned none. `abortRefused` carries the
+ * refusal's own sentence when that happened, and `null` otherwise — the two
+ * are never both non-null, and a `cancel` answers `null` for both because it
+ * spawns nothing. A gate refusal is deliberately NOT an error status here:
+ * the request is on disk, so the honest answer is a 200 that says what did
+ * and did not happen, plus the one command a person can run instead.
+ */
+export interface StopResult {
+  stopRequested: boolean;
+  abortSession: string | null;
+  abortRefused: string | null;
+}
+
+/**
  * The app's ONE machine-readable 409 discriminator — a `code` field alongside
  * a 409's human-readable `error` string. It means exactly one thing:
  *
@@ -894,6 +918,33 @@ export interface RunQueueItem {
    * point where a session would exist to record.
    */
   sessionId: string | null;
+  /**
+   * The dispatched child's process id, or `null` for every item that never
+   * had one recorded (bug-39).
+   *
+   * **Mandatory in the TYPE and absent from every run file written before
+   * bug-39, and those two facts do not contradict each other.** Required is
+   * what makes the compiler the fixture checklist — the same argument
+   * `BacklogItem.source` carries — so a constructor that could record a pid
+   * and does not goes red rather than quietly writing `undefined`. At RUN
+   * TIME, absent and `null` mean the identical thing ("no pid was ever
+   * recorded") and the one reader treats them identically: `cmdAbort` guards
+   * with `Number.isInteger` before it goes anywhere near a signal, so an old
+   * run file reads as "nothing to kill" rather than stranding anything. Do
+   * not add a sanitiser for it the way `base` has one: `base` is
+   * substituted into commands and must have a value, this one is asked
+   * `is there a pid?` and absence is a perfectly good answer.
+   *
+   * It exists because `abort` is the run-ending command and, until this, the
+   * only thing it could end was the run FILE: a driver killed by hand leaves
+   * an orphaned `claude -p` executor that nothing anywhere holds an address
+   * for, since `run.driver` is `{ sessionId, at }` and a session id is not a
+   * process. A stop that cannot reach that child is a force stop in name
+   * only. Read by `cmdAbort` alone, and only behind three guards (the item is
+   * non-terminal, `pidAlive`, and `ps` naming a `claude` process) — see that
+   * function for why a bare `kill` on a recorded pid is not good enough.
+   */
+  pid: number | null;
   /** Absolute path of this item's git worktree, or `null` for the same reasons as `sessionId`. */
   worktree: string | null;
   /** The item's working branch name, or `null` for the same reasons as `sessionId`. */
@@ -1222,8 +1273,21 @@ export interface OrchestratorRunsPayload {
    * would be a second answer to a question whose inputs (the file, the run's
    * `startedAt`/`unpausedAt`) both move underneath it. Same posture as
    * "Groomed is derived" and the watchdog's `exhausted`.
+   *
+   * `stopRequested` (bug-39) is its sibling in every one of those respects —
+   * mandatory, derived per request, stored nowhere — and is read from the
+   * SAME control-file read in the same loop, which is what makes the two
+   * mutually exclusive rather than merely usually so.
+   *
+   * **Both sides read this ONE field; neither re-derives it, and it is
+   * deliberately NOT a third input to `watchdogStoodDown`.** That predicate
+   * answers "will the sweeper spawn a resume", and the board renders its hand
+   * Resume on the same answer being TRUE — so folding a stop into it would
+   * make the board offer a Resume on precisely the runs a person just
+   * stopped. A stop must suppress BOTH sides, which one boolean read verbatim
+   * by two readers does and two agreeing expressions do not.
    */
-  runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog }>;
+  runs: Array<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; stopRequested: boolean; watchdog?: RunWatchdog }>;
   /**
    * Projects this server has spawned an orchestrator session for that have
    * not yet produced a run file — the starting-run placeholder (task-14).
@@ -1417,7 +1481,16 @@ export type WatchdogPhase = 'off' | 'idle' | 'armed';
  * situation where the sweeper is doing everything BUT the one thing anyone
  * actually wants from it, and that is worth surfacing on its own.
  */
-export type WatchdogEventKind = 'armed' | 'idle' | 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled';
+/**
+ * `'stopped'` (bug-39) is the eighth and is unlike the other seven in what it
+ * reports: every other kind is something the sweeper did or found out about
+ * ITSELF, while this one records that it declined to act because a PERSON
+ * asked for this run to end. It is logged once per condition behind its own
+ * per-entry flag, the same shape `'disabled'` and `'exhausted'` use and for
+ * the identical reason — the event log is a ring buffer and cannot answer
+ * "did I already say this".
+ */
+export type WatchdogEventKind = 'armed' | 'idle' | 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled' | 'stopped';
 
 /**
  * One line of the watchdog's own history — entirely separate from a run

@@ -358,6 +358,41 @@ export function readPauseRequest(project) {
 // Every malformed input answers `false`: a request this function cannot
 // understand is not one a run should stop for.
 export function pauseRequestEffective(control, run) {
+  if (!controlRequestTimely(control, run)) return false;
+  // bug-39's one added clause, and what makes the two predicates DISJOINT
+  // rather than nested: a stop is not a stronger pause, it is a different
+  // request with a different gate. A `stop` file must never make
+  // `stage <id> preflight` exit `6`, because the run would then take the
+  // cooperative path (`finish --status paused`) for a request whose whole
+  // point is that the cooperative path is not reaching it.
+  return control.kind !== 'stop';
+}
+
+// Is this request an effective STOP for this run (bug-39)? The same two
+// clauses `pauseRequestEffective` applies, plus `kind === 'stop'` — which an
+// ABSENT `kind` can never satisfy, so every control file written before this
+// key existed goes on meaning exactly the pause it has always meant.
+//
+// Byte-equivalent to the server's own `stopRequestEffective`
+// (`server/src/orchestrator/pause-control.util.ts`), duplicated rather than
+// imported for the boundary reason `pauseRequestEffective` above already
+// gives: a skill's `tools/` may never import from the server.
+//
+// Read at three places, and they are three different kinds of reader: the
+// `stage` gate (refuse every transition), `cmdWatch`'s per-tick body (kill
+// the child and exit `10`) and `cmdAbort`'s `takeOverRun` argument (take the
+// lease from a driver that may still hold it). Nothing stores the verdict —
+// same rule, same reason as the pause: the inputs all move underneath it.
+export function stopRequestEffective(control, run) {
+  if (!controlRequestTimely(control, run)) return false;
+  return control.kind === 'stop';
+}
+
+// The two clauses both predicates share. Private on purpose: what makes a
+// request EFFECTIVE is one of the two exported answers, never this half of
+// it — a caller that reached for this alone would be acting on a request
+// without knowing which of the two things it asked for.
+function controlRequestTimely(control, run) {
   if (control === null || control === undefined || typeof control !== 'object') return false;
   if (typeof control.runId !== 'string' || typeof control.requestedAt !== 'string') return false;
   if (control.runId !== run.runId) return false;
@@ -722,6 +757,15 @@ function writeRunAtomic(dir, run) {
 // retry", it is STOP — write nothing more and exit.
 const EXIT_FOREIGN_DRIVER = 7;
 
+// bug-39. Exit code for "a stop was requested for this run" — `6`'s sibling,
+// and its own number for the reason `6` and `7` each have one: the reaction
+// is neither a fix nor a retry. A `6` says "stop at the next item boundary,
+// then `finish --status paused`"; a `10` says "stop NOW and go to `--abort`",
+// which is a different command and a different ending. Collapsing the two
+// would make a run that was told to end finish its item first, which is
+// precisely the request a stop is not.
+const EXIT_STOP_REQUESTED = 10;
+
 // This session's identity, or `null` when there is none.
 //
 // `CLAUDE_CODE_SESSION_ID` is the same variable `backlog.mjs` reads for token
@@ -823,13 +867,42 @@ const CLAIM_USAGE = 'usage: orchestrate.mjs claim';
 // live one that another session is actively heartbeating is refused and says
 // whose it is — pause it first (a pause is server-side and needs no lease),
 // then abort the paused run.
-function takeOverRun(dir, run) {
+//
+// bug-39 added the THIRD PARAMETER, `force`, and it is required with no
+// default — the rule `runClaimBlock` follows for `starting` (bug-21) and for
+// the identical reason: a default would let a future caller silently opt out
+// of the lease check by forgetting an argument, which is the one mistake this
+// parameter exists to make impossible.
+//
+// `force` is passed as `stopRequestEffective(readPauseRequest(run.project), run)`
+// by `cmdAbort` and as a literal `false` by `cmdClaim`, and that split IS the
+// design. What the refusal below actually measures is the freshness of the run
+// FILE, never the liveness of the driver PROCESS — nothing anywhere records a
+// pid for the driver, so no reader can ask whether it still exists — and a
+// session killed one second ago therefore leaves a lease that reads live for
+// fifteen minutes. A recorded control-file request is the evidence this tool
+// has no other way to get: a human act that passed the server's origin guard,
+// naming this run, made after it started. It is deliberately not a flag: a
+// flag is available to every automated caller, including a confused `--resume`
+// session, and would reduce the lease to a suggestion.
+//
+// A stop does NOT open `claim` the same way. A resume taking a live run over
+// on the strength of a stop would be the resume fighting the stop, which is
+// the one pairing this feature must never produce.
+//
+// This is also what un-strands the hand-run terminal. The refusal's condition
+// is `driver.sessionId !== me`, and an unidentified caller has `me === null`,
+// so a person typing the command was refused where `assertDriver` — same file,
+// same lease — deliberately warns and proceeds. With a stop on file, `me ===
+// null` no longer refuses.
+function takeOverRun(dir, run, force) {
   const me = sessionIdentity();
   const driver = runDriver(run);
-  if (driver !== null && driver.sessionId !== me && run.status === 'running' && isFresh(run.updatedAt)) {
+  if (!force && driver !== null && driver.sessionId !== me && run.status === 'running' && isFresh(run.updatedAt)) {
     throw new OrchestrateError(
       `run ${run.runId} is alive (last heartbeat ${run.updatedAt}) and driven by session ${driver.sessionId} — ` +
-        'nothing to take over. Stop immediately: write nothing, and exit.',
+        'nothing to take over. Stop immediately: write nothing, and exit. If that session is gone and this run has ' +
+        'to end, request a stop from the board first, then re-run `--abort`.',
       EXIT_FOREIGN_DRIVER
     );
   }
@@ -857,7 +930,10 @@ function cmdClaim(argv) {
   const dir = projectDir(orchHome(), resolveProjectRoot());
   const run = readRun(dir);
 
-  const at = takeOverRun(dir, run);
+  // `false`, never a stop's verdict: a resume must never be able to take a
+  // live run over. See `takeOverRun`'s own comment for why only `abort` gets
+  // the escape hatch.
+  const at = takeOverRun(dir, run, false);
 
   /* task-47, and only for a tracker project: taking the RUN over is not the
      same as taking its ITEMS over. Each in-flight item's issue carries a claim
@@ -976,6 +1052,13 @@ function makeQueueItem(id, title, stamp) {
     title,
     stage: 'pending',
     sessionId: null,
+    // bug-39. Null until `stage <id> dispatched --pid <p>` records the child
+    // this run actually started. It sits beside `sessionId` because it
+    // answers the same question about the same process from the other side:
+    // `sessionId` is what the dashboard and the transcript call it, `pid` is
+    // what this machine's kernel calls it, and only the second one can be
+    // signalled.
+    pid: null,
     worktree: null,
     branch: null,
     fixLoops: 0,
@@ -2135,7 +2218,7 @@ function findQueueItem(run, itemId) {
   return item;
 }
 
-function applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop = false } = {}) {
+function applyQueueItemFields(item, { stage, session, pid, worktree, branch, note, permissionMode, fixLoop = false } = {}) {
   if (stage !== undefined) {
     item.stage = stage;
     // First-arrival only — see shared/types.ts's own RunQueueItem.stageAt
@@ -2167,6 +2250,13 @@ function applyQueueItemFields(item, { stage, session, worktree, branch, note, pe
     item.fixLoops = Number.isInteger(item.fixLoops) ? item.fixLoops + 1 : 1;
   }
   if (session !== undefined) item.sessionId = session;
+  // bug-39, and `undefined`-guarded exactly like every field around it: a
+  // `stage` call that does not pass `--pid` must leave whatever is already
+  // recorded alone. Every later stage of the same item re-stages it without
+  // the flag, and clearing the pid at `inspecting` would take the address of
+  // the child away from an abort at precisely the point the child is most
+  // likely to still be running.
+  if (pid !== undefined) item.pid = pid;
   if (worktree !== undefined) item.worktree = worktree;
   if (branch !== undefined) item.branch = branch;
   if (permissionMode !== undefined) item.permissionMode = permissionMode;
@@ -2810,12 +2900,18 @@ function cmdPlan(argv) {
 }
 
 const STAGE_USAGE =
-  'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop] [--outcome <file>]';
+  'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--pid P] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop] [--outcome <file>]';
 
 function cmdStage(argv) {
   const itemId = argv[0];
   const stage = argv[1];
   let session;
+  // bug-39: the dispatched child's process id, written through the same
+  // `applyQueueItemFields` path `--session` uses. §4's dispatch already
+  // records this number into `logs/<id>.pid` for `watch --pid`; this is that
+  // same number put somewhere an abort arriving AFTER the driver is gone can
+  // still read it, which `logs/` alone is not (nothing scans it).
+  let pidArg;
   let worktree;
   let branch;
   let note;
@@ -2830,6 +2926,7 @@ function cmdStage(argv) {
   let fixLoop = false;
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--session') session = argv[++i];
+    else if (argv[i] === '--pid') pidArg = argv[++i];
     else if (argv[i] === '--worktree') worktree = argv[++i];
     else if (argv[i] === '--branch') branch = argv[++i];
     else if (argv[i] === '--permission-mode') permissionMode = argv[++i];
@@ -2846,6 +2943,18 @@ function cmdStage(argv) {
   // exists at all, so it is refused the same way regardless of run state.
   if (!RUN_STAGES.includes(stage)) {
     throw new OrchestrateError(`unknown stage: ${stage} (expected one of ${RUN_STAGES.join(', ')})`, 1);
+  }
+  // Validated here, beside the stage name and before the run is read, for the
+  // same reason: a malformed `--pid` is a problem with this call. Refused
+  // rather than dropped, because the one thing worse than no recorded pid is
+  // a WRONG one — `cmdAbort` signals what it finds here, and a number that
+  // came from a typo names somebody else's process.
+  let pid;
+  if (pidArg !== undefined) {
+    pid = Number(pidArg);
+    if (!Number.isInteger(pid) || pid <= 0) {
+      throw new OrchestrateError(`--pid must be a positive integer: ${pidArg}`, 1);
+    }
   }
 
   const dir = projectDir(orchHome(), resolveProjectRoot());
@@ -2901,7 +3010,31 @@ function cmdStage(argv) {
   // Placed after `findQueueItem` (the gate needs the item's current stage)
   // and before `applyQueueItemFields`, so a refusal leaves run.json
   // byte-identical like every other refusal in this function.
-  if ((stage === 'preflight' || stage === 'dispatched') && item.stage !== stage && pauseRequestEffective(readPauseRequest(run.project), run)) {
+  //
+  // bug-39 reads the control file ONCE here and asks it two disjoint
+  // questions, in the order of how wide each refusal is.
+  const control = readPauseRequest(run.project);
+
+  // The STOP gate, and it is deliberately wider than the pause gate below in
+  // both dimensions: every stage, and every call rather than only a
+  // transition. A stop is allowed to abandon a half-finished worktree —
+  // that is the whole difference between it and a pause — and `abort`'s
+  // existing marker-preservation rule is what keeps that safe: an item whose
+  // worktree still carries an in-progress `phase:` marker is LEFT IN PLACE
+  // with an `attention` entry naming it, rather than force-removed.
+  //
+  // It is not restricted to a transition either, because a re-stamp's own
+  // justification does not apply: the pause gate exempts re-stamps so that a
+  // live `claude -p` child always has its session id recorded, and under a
+  // stop that child is about to be killed by `watch` (or is already gone).
+  if (stopRequestEffective(control, run)) {
+    throw new OrchestrateError(
+      `a stop was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. End the run with \`--abort\` (SKILL.md §10, "Stopping").`,
+      EXIT_STOP_REQUESTED
+    );
+  }
+
+  if ((stage === 'preflight' || stage === 'dispatched') && item.stage !== stage && pauseRequestEffective(control, run)) {
     throw new OrchestrateError(
       `a pause was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. Finish the run with \`finish --status paused\` (SKILL.md §10, "Pausing").`,
       6
@@ -2968,7 +3101,7 @@ function cmdStage(argv) {
     trackerClose(run, item, outcome);
   }
 
-  applyQueueItemFields(item, { stage, session, worktree, branch, note, permissionMode, fixLoop });
+  applyQueueItemFields(item, { stage, session, pid, worktree, branch, note, permissionMode, fixLoop });
 
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
@@ -3479,6 +3612,14 @@ function cmdStatus(argv) {
     if (pauseRequestEffective(control, run)) {
       console.log(`pause requested at ${control.requestedAt}`);
     }
+    // bug-39, on the same terms as the pause line above — only when
+    // EFFECTIVE, and absent from `--json` for the same reason: that branch is
+    // a verbatim print of the run file, and a control request is not part of
+    // the run. The two lines can never both print: the predicates are
+    // disjoint over one file.
+    if (stopRequestEffective(control, run)) {
+      console.log(`stop requested at ${control.requestedAt}`);
+    }
     console.log(`queue: ${queueSummaryLine(run)}`);
     console.log(`attention: ${run.attention.length}`);
   }
@@ -3941,6 +4082,40 @@ function cmdWatch(argv) {
     // matters, not just that it is convenient).
     const run = readRun(dir);
     assertDriver(run);
+
+    /* bug-39: the tick that keeps the run alive is also the tick that learns
+       a person ended it — within one `--interval-ms` rather than at the next
+       item boundary, which a session forty minutes into a build never
+       reaches.
+
+       **This is the one place in the system that holds a live child's pid**,
+       which is why the kill belongs here and nowhere else. It is the pid this
+       very command was GIVEN (`--pid`), recorded by the dispatch that started
+       the child — never a pattern. A `pkill -f`-shaped teardown matches every
+       process on the machine and a headless run has no way to know which of
+       them belong to the person at the keyboard.
+
+       Before the heartbeat write, deliberately: a run being stopped should
+       not have its `updatedAt` pushed forward by the very tick that noticed,
+       because that freshness is read by `takeOverRun` and would extend the
+       window in which an abort from anywhere else is refused.
+
+       `SIGTERM`, not `SIGKILL`: the child is a `claude -p` process that owns
+       a transcript it is still appending to, and `usage`/`denials` read that
+       file afterwards. A refusal to signal (the child raced away, or the pid
+       is no longer ours) is swallowed — the exit code is what the caller acts
+       on, and a stop that could not reach the child still has to reach
+       `--abort`. */
+    if (stopRequestEffective(readPauseRequest(run.project), run)) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        /* already gone, or not ours any more — the exit code below is what the caller acts on */
+      }
+      console.error(`a stop was requested for this run — signalled pid ${pid} and stopped watching ${itemId}. End the run with \`--abort\` (SKILL.md §10, "Stopping").`);
+      return EXIT_STOP_REQUESTED;
+    }
+
     if (newlyFoundSessionId !== null) {
       applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId });
     }
@@ -4463,11 +4638,63 @@ function cmdAbort() {
   // real write rather than an in-memory pass: `cmdFinish` below re-reads the
   // file and runs `assertDriver` on what it finds, so a takeover that never
   // landed on disk would refuse this run's own ending.
-  takeOverRun(dir, run);
+  // bug-39: the one caller that may take the lease from a driver the run file
+  // still believes in. Read here rather than inside `takeOverRun` so the
+  // control file has exactly one reader per command and the parameter states,
+  // at the call site, which commands are allowed the escape hatch.
+  takeOverRun(dir, run, stopRequestEffective(readPauseRequest(run.project), run));
 
   const removedIds = [];
   const preservedIds = [];
   const keptBranchIds = [];
+  const signalledIds = [];
+
+  /* bug-39: end the CHILDREN before the teardown touches their worktrees.
+     Until this, `abort` ended the run FILE and nothing else — a driver killed
+     by hand leaves an orphaned `claude -p` executor that nothing anywhere
+     held an address for, and a "force stop" that leaves the process it was
+     supposed to stop still writing into a worktree this loop is about to
+     remove is a force stop in name only.
+
+     Three guards before any signal, and each closes a different way of
+     killing the wrong thing:
+
+       - the item is NON-TERMINAL, by `RECONCILE_TERMINAL_STAGES` — the set
+         this file already means by "this item is finished with", reused
+         rather than joined by a second list. A merged item's child exited
+         long ago and its recorded pid has had every chance to be reused
+         since.
+       - `pidAlive(pid)`. Cheap, and it is also the zombie check — see that
+         function for why a `Z` state reads as dead.
+       - `ps -o args= -p <pid>` names a `claude` process. This is the guard
+         against the pid-reuse TOCTOU `pidAlive`'s own comment documents:
+         between the dispatch and this abort the OS may have handed the number
+         to something else entirely, and the one thing this tool must never do
+         is signal a process it did not start. A `ps` that fails, or that
+         names something else, is a decision NOT to signal — the bias is the
+         opposite of `pidAlive`'s, deliberately, because the cost of not
+         killing is a stray process a person can find and the cost of killing
+         wrongly is somebody else's work.
+
+     `SIGTERM` for `watch`'s reason: the child owns a transcript that
+     `usage`/`denials` still read. Best-effort per item — a refusal is one
+     stderr line and never fails the abort, which is the same posture the
+     claim release below takes, and for the same reason: `run.json` is the
+     journal of record. */
+  for (const item of run.queue) {
+    if (RECONCILE_TERMINAL_STAGES.has(item.stage)) continue;
+    const pid = item.pid;
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    if (!pidAlive(pid)) continue;
+    const probe = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' });
+    if (probe.error || probe.status !== 0 || !/claude/.test(probe.stdout ?? '')) continue;
+    try {
+      process.kill(pid, 'SIGTERM');
+      signalledIds.push(`${item.id} (pid ${pid})`);
+    } catch (e) {
+      console.error(`abort: could not signal pid ${pid} for ${item.id} (${e.message}) — continuing`);
+    }
+  }
 
   for (const item of run.queue) {
     let marker = false;
@@ -4589,7 +4816,8 @@ function cmdAbort() {
   // folding it into either existing count would misreport what abort
   // actually did to it.
   console.log(
-    `abort: removed ${removedIds.length} item(s)${removedIds.length ? ` (${removedIds.join(', ')})` : ''}; ` +
+    `abort: signalled ${signalledIds.length} live session(s)${signalledIds.length ? ` (${signalledIds.join(', ')})` : ''}; ` +
+      `removed ${removedIds.length} item(s)${removedIds.length ? ` (${removedIds.join(', ')})` : ''}; ` +
       `kept ${keptBranchIds.length} branch(es) already staged 'branched'${keptBranchIds.length ? ` (${keptBranchIds.join(', ')} — see attention)` : ''}; ` +
       `left ${preservedIds.length} in place with an in-progress marker${preservedIds.length ? ` (${preservedIds.join(', ')} — see attention)` : ''}`
   );
@@ -4684,6 +4912,14 @@ commands:
 //      it, so the reaction is a park rather than a fix. Refusals a command CAN
 //      absorb never reach it — a `claim` 409 naming another run is exit `0`
 //      and a `skipped` item, because a refusal is information.
+//  10  a stop was requested for this run (bug-39) — `stage` refuses EVERY
+//      transition with it, and `watch` returns it after signalling the child
+//      it was given the pid of. Nothing is written by the `stage` refusal.
+//      `6`'s sibling and deliberately not `6` itself: a `6` means "stop at
+//      the next item boundary, then `finish --status paused`", a `10` means
+//      "stop now and go to `--abort`". Those are different commands and
+//      different endings, and a run that collapsed them would finish the item
+//      a person just asked it to abandon.
 export function main(argv) {
   const [cmd, ...rest] = argv;
   try {

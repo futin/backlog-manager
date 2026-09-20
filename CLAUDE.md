@@ -392,6 +392,20 @@ any of these — most encode a failure that already happened.
   surfaces (`RunControls`, `resumeGate`); Resume for a crashed run is behind `watchdogStoodDown` wherever it is drawn — its surface, the board's crashed strip,
   left with task-37 and landed in task-38 on `RunControls`, drawn in the Runs detail sheet's head and in the Watchdog page's Watching rows. Why:
   [invariants.md](docs/subsystems/invariants.md#a-pause-request-is-a-file-the-server-writes-and-the-tool-reads)
+- **A stop is the control file's SECOND `kind`, and nothing resumes a stopped run** (bug-39). `PauseRequest.kind` is `'pause' | 'stop'` and **absent means
+  `'pause'`**; one control fact per project stays one file (a stop overwrites a pause and back, `cancel` deletes either); the two predicates are DISJOINT on
+  both sides, `stopRequestEffective` being the pause predicate's two clauses plus `kind === 'stop'`. `POST /api/agents/stop` is `pause`'s sibling — guarded,
+  `cancel === true` only, independent of `BM_AGENTS`, `running` fresh **or stale** — and then attempts ONE `/backlog-orchestrate --abort` spawn: recording the
+  fact and ending the run are two outcomes and only the first is guaranteed, so a gate refusal is a 200 carrying `abortRefused`, never an error. The spawn is
+  unconditional, because a live driver is evicted by the abort session's own `takeOverRun` write. `stopRequested` rides the runs payload beside
+  `pauseRequested`, derived from the SAME control-file read, and **both the sweeper and `RunControls` read that one field** — it is deliberately NOT a third
+  input to `watchdogStoodDown`, whose being TRUE is what makes the board OFFER a Resume, so the coupling's biconditional narrows to an implication in the safe
+  direction. In the tool: `stage` refuses EVERY transition with exit `10` (wider than the pause gate in both dimensions — a stop may abandon a worktree, which
+  `abort`'s marker-preservation rule keeps safe), `watch` kills the child **by the pid it was given** and returns `10`, and `takeOverRun(dir, run, force)`
+  gains a REQUIRED third parameter — `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`, so a resume can still never steal a live run.
+  `RunQueueItem.pid` is written by `stage <id> dispatched --pid <p>` and signalled by `cmdAbort` only behind three guards (non-terminal, `pidAlive`, and
+  `ps -o args=` naming a `claude` process). No sixth `RunStatus`, no `--force` flag, no server-side kill. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-stop-is-the-control-files-second-kind-and-nothing-resumes-a-stopped-run)
 - **A resume is serialized at three layers, and only the third one can refuse a resume this app never asked for** (bug-19). (1) The board's Resume control has a
   synchronous in-flight guard and its mark ends on `running` **and `fresh`**. (2) `AgentsService.resume()` takes `WatchdogEntry.resumeSpawnAt` synchronously
   before its next `await`, holds it for `RUN_STALE_MS`, clears it when the spawn throws, and refuses with an **uncoded** 409. (3) `orchestrate.mjs` records a
@@ -422,7 +436,8 @@ any of these — most encode a failure that already happened.
 - **Any spawn attempt starts the grace clock; only a success counts against the cap.** `exhausted` is decided before grace. A board resume is a spawn attempt
   too (`WatchdogService.noteBoardResume`, called from the controller BEFORE `arm()`): grace yes, cap no. Why:
   [invariants.md](docs/subsystems/invariants.md#grace-any-attempt-starts-the-clock-only-a-success-counts)
-- **The board offers a hand resume exactly when the watchdog will not spawn one, and that is one function, not two agreeing expressions.** `watchdogStoodDown`
+- **The board offers a hand resume exactly when the watchdog will not spawn one — absent a stop request, which suppresses both sides — and that is one
+  function, not two agreeing expressions.** `watchdogStoodDown`
   (`shared/agent.ts`) is read by `watchdog.service.ts`'s `visit()` and by whichever surface offers the click — `RunStrip` until task-37, NOTHING in between, and
   `RunControls` from task-38, which is ONE reader for both surfaces that offer it (the Runs detail head and the Watchdog page's rows draw the same component, so
   `WatchdogMonitor` must never call the predicate itself). `test/watchdog-coupling.test.tsx`'s reader list is an exact set for that reason. Its inputs

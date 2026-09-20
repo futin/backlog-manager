@@ -8,13 +8,13 @@ import '@testing-library/jest-dom';
 import { ApiError } from '../client/src/lib/agents';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import { RunControls, inFlightItemId } from '../client/src/components/RunControls';
-import type { RunControlsRun } from '../client/src/components/RunControls';
+import type { RunControlsChange, RunControlsRun } from '../client/src/components/RunControls';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
 
 const fixture = rawFixture as OrchestratorRun;
 
-/** The three calls this component can make, all stubbed — every case here is
+/** The five calls this component can make, all stubbed — every case here is
  *  about what the component decides, never about what the API answers. */
 jest.mock('../client/src/lib/agents', () => {
   const actual = jest.requireActual('../client/src/lib/agents');
@@ -22,7 +22,12 @@ jest.mock('../client/src/lib/agents', () => {
     ...actual,
     pauseOrchestrate: jest.fn(() => Promise.resolve({ pauseRequested: true })),
     cancelPauseOrchestrate: jest.fn(() => Promise.resolve({ pauseRequested: false })),
-    resumeOrchestrate: jest.fn(() => Promise.resolve({ sessionId: 'sess-1' }))
+    resumeOrchestrate: jest.fn(() => Promise.resolve({ sessionId: 'sess-1' })),
+    // bug-39. The default answer is the SUCCEEDING one — a stop recorded and
+    // an abort session started — so a case about a refusal has to arrange it
+    // rather than inherit it.
+    stopOrchestrate: jest.fn(() => Promise.resolve({ stopRequested: true, abortSession: 'sess-abort', abortRefused: null })),
+    cancelStopOrchestrate: jest.fn(() => Promise.resolve({ stopRequested: false, abortSession: null, abortRefused: null }))
   };
 });
 
@@ -31,6 +36,8 @@ const agents = jest.requireMock('../client/src/lib/agents') as {
   pauseOrchestrate: jest.Mock;
   cancelPauseOrchestrate: jest.Mock;
   resumeOrchestrate: jest.Mock;
+  stopOrchestrate: jest.Mock;
+  cancelStopOrchestrate: jest.Mock;
 };
 
 const OPEN_GATE = { canResume: true, blockedReason: null };
@@ -67,6 +74,7 @@ function runFor(over: Partial<RunControlsRun> = {}): RunControlsRun {
     project: fixture.project,
     fresh: true,
     pauseRequested: false,
+    stopRequested: false,
     queue: fixture.queue.map((q) => ({ id: q.id, stage: q.stage })),
     ...over
   };
@@ -77,7 +85,7 @@ function renderControls(
   props: Partial<{
     gate: { canResume: boolean; blockedReason: string | null };
     resuming: boolean;
-    onChanged: (kind: 'pause' | 'cancel' | 'resume') => void;
+    onChanged: (kind: RunControlsChange) => void;
   }> = {}
 ) {
   const onChanged = props.onChanged ?? jest.fn();
@@ -109,26 +117,55 @@ beforeEach(() => {
  * environment ladder alone.
  */
 describe('RunControls — what renders, by run', () => {
+  /**
+   * The exact control set per run state, as an EXACT set rather than a
+   * presence check — bug-39 added a second control to two of these rows, and
+   * a case that only asserted what it expected to find would not have
+   * noticed either the addition or a later accidental removal.
+   *
+   * A `running` run carries Stop in both of its rows, fresh or pausing
+   * alike, because `running` fresh-or-stale is exactly the set the stop route
+   * accepts. A `paused` run does not: it has already stopped, and the route
+   * refuses it.
+   */
+  const ALL_CONTROLS = ['run-controls-pause', 'run-controls-cancel', 'run-controls-stop', 'run-controls-cancel-stop', 'run-controls-resume'];
+
   it.each([
-    ['a fresh running run', { status: 'running' as const, fresh: true, pauseRequested: false }, 'run-controls-pause'],
-    ['a fresh running run already pausing', { status: 'running' as const, fresh: true, pauseRequested: true }, 'run-controls-cancel'],
-    ['a paused run', { status: 'paused' as const, fresh: false, pauseRequested: false }, 'run-controls-resume']
-  ])('offers the right single control for %s', (_label, over, testid) => {
+    ['a fresh running run', { status: 'running' as const, fresh: true, pauseRequested: false }, ['run-controls-pause', 'run-controls-stop']],
+    ['a fresh running run already pausing', { status: 'running' as const, fresh: true, pauseRequested: true }, ['run-controls-cancel', 'run-controls-stop']],
+    ['a paused run', { status: 'paused' as const, fresh: false, pauseRequested: false }, ['run-controls-resume']]
+  ])('offers exactly the right controls for %s', (_label, over, expected) => {
     renderControls(over);
-    expect(screen.getByTestId(testid)).toBeInTheDocument();
-    for (const other of ['run-controls-pause', 'run-controls-cancel', 'run-controls-resume'].filter((t) => t !== testid)) {
+    for (const testid of expected) expect(screen.getByTestId(testid)).toBeInTheDocument();
+    for (const other of ALL_CONTROLS.filter((t) => !expected.includes(t))) {
       expect(screen.queryByTestId(other)).toBeNull();
     }
   });
 
   it.each([
-    ['a crashed run the server has not annotated yet', { status: 'running' as const, fresh: false }],
     ['a done run', { status: 'done' as const, fresh: false }],
     ['an aborted run', { status: 'aborted' as const, fresh: false }],
     ['a failed run', { status: 'failed' as const, fresh: false }]
   ])('renders nothing at all for %s', (_label, over) => {
     const { container } = render(<RunControls run={runFor(over)} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  /**
+   * bug-39 moved the crashed-but-unannotated run OUT of the table above, and
+   * the move is the fix rather than a concession to it. `status: 'running'`
+   * with a dead heartbeat is exactly the run `POST /api/agents/stop` accepts
+   * and exactly the run this bug was filed about — a driver killed by hand
+   * leaves one for fifteen minutes. The RESUME is still withheld (the server
+   * has not said what the sweeper intends, and an unknown reads as "it may
+   * still act"), which is what the second assertion pins.
+   */
+  it('offers Stop, and only Stop, for a crashed run the server has not annotated yet', () => {
+    renderControls({ status: 'running', fresh: false });
+    expect(screen.getByTestId('run-controls-stop')).toBeInTheDocument();
+    for (const other of ['run-controls-pause', 'run-controls-cancel', 'run-controls-resume']) {
+      expect(screen.queryByTestId(other)).toBeNull();
+    }
   });
 
   // The note names the item the run will finish before it stops — the one
@@ -287,9 +324,26 @@ describe('RunControls — the crashed run', () => {
   // The environment ladder applies to this branch exactly as it does to the
   // paused one — both halves of the gate must agree before any control is
   // drawn, and the environment half HIDES rather than disables.
-  it('renders nothing when the environment cannot spawn, however far the sweeper has stood down', () => {
-    const { container } = render(<RunControls run={crashedRun()} gate={{ canResume: false, blockedReason: null }} resuming={false} onChanged={jest.fn()} />);
-    expect(container.firstChild).toBeNull();
+  it('offers no Resume when the environment cannot spawn, however far the sweeper has stood down', () => {
+    render(<RunControls run={crashedRun()} gate={{ canResume: false, blockedReason: null }} resuming={false} onChanged={jest.fn()} />);
+    expect(screen.queryByTestId('run-controls-resume')).toBeNull();
+  });
+
+  /**
+   * bug-39, and the inverse of the case above: the environment ladder governs
+   * the RESUME and must not reach the Stop.
+   *
+   * `POST /api/agents/stop` is deliberately independent of `BM_AGENTS`, for
+   * the reason `pause` is — a stop is a fact recorded on this machine's own
+   * disk about a run that is already going, and gating it on the launcher
+   * would mean a run started while agents were on could never be ended after
+   * somebody turned them off, which is the exact moment a person most wants
+   * to end one. Hiding the control here would reproduce bug-39 on any machine
+   * with agents off.
+   */
+  it('still offers Stop when the environment cannot spawn — a stop is not a spawn', () => {
+    render(<RunControls run={crashedRun()} gate={{ canResume: false, blockedReason: null }} resuming={false} onChanged={jest.fn()} />);
+    expect(screen.getByTestId('run-controls-stop')).toBeInTheDocument();
   });
 
   /**
@@ -354,5 +408,102 @@ describe('RunControls — the crashed run', () => {
     doubleClick(screen.getByTestId('run-controls-pause'));
 
     expect(agents.pauseOrchestrate).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * bug-39 — the Stop control, and the readings a stopped run carries.
+ *
+ * The rendering rules are covered by the exact-control-set table at the top
+ * of this file and by `test/watchdog-coupling.test.tsx`'s stop leg (no Resume
+ * under a stop, whatever the sweeper's state). What is left here is the
+ * BEHAVIOUR: which call each control makes, what the head says once a stop is
+ * on file, and how the one fact no later poll can re-supply — a refused
+ * `--abort` spawn — reaches the reader.
+ */
+describe('RunControls — the stop', () => {
+  it('sends a stop for a fresh run and reports the change to its host', async () => {
+    const onChanged = renderControls({ status: 'running', fresh: true });
+
+    await userEvent.click(screen.getByTestId('run-controls-stop'));
+
+    expect(agents.stopOrchestrate).toHaveBeenCalledWith(fixture.project);
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith('stop'));
+  });
+
+  /**
+   * A crashed run is the case this bug was filed about, and the control has to
+   * reach the same call from that branch — a Stop that only existed on a
+   * heartbeating run would be absent from precisely the runs that cannot be
+   * ended any other way.
+   */
+  it('sends a stop for a crashed run too', async () => {
+    renderControls({ status: 'running', fresh: false });
+
+    await userEvent.click(screen.getByTestId('run-controls-stop'));
+
+    expect(agents.stopOrchestrate).toHaveBeenCalledWith(fixture.project);
+  });
+
+  it('says the run is being ended, and offers only the withdrawal', () => {
+    renderControls({ status: 'running', fresh: true, stopRequested: true });
+
+    expect(screen.getByTestId('run-controls-stop-note')).toHaveTextContent('Stopping');
+    expect(screen.getByTestId('run-controls-cancel-stop')).toBeInTheDocument();
+    // Not a second Stop, and not a Pause: the run is already ending, and a
+    // pause would be asking a run that is stopping to stop more politely.
+    expect(screen.queryByTestId('run-controls-stop')).toBeNull();
+    expect(screen.queryByTestId('run-controls-pause')).toBeNull();
+  });
+
+  it('withdraws the request through the cancel call, not the pause one', async () => {
+    const onChanged = renderControls({ status: 'running', fresh: true, stopRequested: true });
+
+    await userEvent.click(screen.getByTestId('run-controls-cancel-stop'));
+
+    expect(agents.cancelStopOrchestrate).toHaveBeenCalledWith(fixture.project);
+    // The two control files are one file, but the two ROUTES are not
+    // interchangeable: cancelling a stop through `pause`'s cancel would
+    // 409 on a run this one accepts.
+    expect(agents.cancelPauseOrchestrate).not.toHaveBeenCalled();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith('cancel-stop'));
+  });
+
+  /**
+   * `abortRefused` is the one thing this component learns that no later poll
+   * can tell it: a refusal starts nothing and writes nothing, so there is
+   * nothing on disk for the runs payload to report. It is rendered from the
+   * click's own answer, beside the withdrawal, and it names the command a
+   * person can run instead.
+   */
+  it('renders the refusal sentence the stop click came back with', async () => {
+    agents.stopOrchestrate.mockResolvedValueOnce({
+      stopRequested: true,
+      abortSession: null,
+      abortRefused: 'agents are off on this machine — run `/backlog-orchestrate --abort` at the project root to end the run'
+    });
+    const { rerender } = render(
+      <RunControls run={runFor({ status: 'running', fresh: true })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />
+    );
+
+    await userEvent.click(screen.getByTestId('run-controls-stop'));
+    // The host's next poll turns the run into a stop-requested one, which is
+    // the state the refusal is drawn in — the same component instance, so the
+    // note it learned from the click survives the re-render.
+    rerender(<RunControls run={runFor({ status: 'running', fresh: true, stopRequested: true })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('run-controls-abort-refused')).toHaveTextContent('--abort'));
+  });
+
+  /* bug-19's layer 1 again, over the branch bug-39 added: the guard is
+     `act`'s, so a branch that dispatched around it would fail this row and no
+     other. Two POSTs would be two `--abort` spawns into one run. */
+  it('fires exactly one stop for two clicks', () => {
+    agents.stopOrchestrate.mockImplementation(() => new Promise<void>(() => {}));
+    render(<RunControls run={runFor({ status: 'running', fresh: true })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
+
+    doubleClick(screen.getByTestId('run-controls-stop'));
+
+    expect(agents.stopOrchestrate).toHaveBeenCalledTimes(1);
   });
 });

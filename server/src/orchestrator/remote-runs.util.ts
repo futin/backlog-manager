@@ -209,6 +209,12 @@ function queueItemOf(issueNumber: number, claim: ParsedClaim, title: string | nu
     branch: state.branch ?? null,
     // Not published (`ClaimState` does not carry it), so unknown here.
     permissionMode: null,
+    // Always `null` for a remote run, and not for want of a field to publish
+    // it in: a pid is meaningful only on the machine whose kernel minted it,
+    // so carrying another machine's across would be a number this one could
+    // signal by accident. The one reader (`cmdAbort`) never sees a remote
+    // run at all — it reads this machine's own run file.
+    pid: null,
     fixLoops: state.fixLoops ?? 0,
     stageAt: state.stageAt ?? {},
     verification: state.verification ?? [],

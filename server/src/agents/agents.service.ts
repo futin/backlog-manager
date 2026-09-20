@@ -27,7 +27,7 @@ import {
   PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
-import { clearPauseRequest, pauseRequestEffective, readPauseRequest, writePauseRequest } from '../orchestrator/pause-control.util';
+import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
@@ -39,7 +39,8 @@ import type {
   MergeMode,
   PauseResult,
   PermissionMode,
-  QuestionMode
+  QuestionMode,
+  StopResult
 } from '../../../shared/types';
 
 /**
@@ -175,6 +176,24 @@ const ORCHESTRATE_PROMPT = '/backlog-orchestrate';
  * — not a second, independent string this file invented.
  */
 const RESUME_PROMPT = '/backlog-orchestrate --resume';
+
+/**
+ * `POST /api/agents/stop`'s whole spawn (bug-39) — `RESUME_PROMPT`'s exact
+ * sibling, and a documented flag of this skill's own trigger (SKILL.md's
+ * invocation line: `--resume` takes over an interrupted run, `--abort` ends
+ * one), never a string this file invented. Nothing a caller sends reaches
+ * it: the request body is rebuilt down to `project` and `cancel`, exactly as
+ * resume's is.
+ *
+ * **The spawn is unconditional, not "only for a stale run", and that is the
+ * force stop itself.** If the real driver is still alive, the abort session's
+ * `takeOverRun` write evicts it: the driver's very next command hits
+ * `assertDriver`, exits `7`, and stops immediately writing nothing more.
+ * That is the lease working exactly as designed rather than being worked
+ * around — which is why this route needs no pid for the driver and no kill
+ * channel to one.
+ */
+const STOP_PROMPT = '/backlog-orchestrate --abort';
 
 /**
  * Body of `POST /api/agents/orchestrate`, already reduced to exactly the
@@ -839,6 +858,28 @@ export class AgentsService {
       // through to the spawn without a second condition being needed.
       throw new HttpException({ error: 'no crashed or paused run to resume for this project' }, 409);
     }
+    // bug-39 — a stop and a resume are opposite instructions about one run,
+    // and the stop is the one a person made most recently by construction:
+    // the control file has to post-date the run's own start for the field to
+    // read `true` at all. Refused here as well as suppressed in the board's
+    // controls, because the sweeper is not the only caller — a stale tab, a
+    // hand-rolled request, or the Watchdog page in another window can all
+    // still reach this method with the control gone from their own render.
+    //
+    // UNCODED, like the resume lock below and for the same reason:
+    // `RUN_IN_PROGRESS_CODE` means "a run is alive right now", which both
+    // callers treat as a silent success. This one needs a person to act
+    // (cancel the stop), so it must not be swallowed.
+    if (run.stopRequested) {
+      throw new HttpException(
+        {
+          error:
+            `run ${run.runId} has a stop request on file — nothing resumes a stopped run. Cancel the stop first ` +
+            'if this run should carry on; otherwise let it end.'
+        },
+        409
+      );
+    }
     if (run.fresh) {
       // `run.fresh` is the one and only freshness number this app computes
       // (OrchestratorService.runs(), against RUN_STALE_MS) — not a second
@@ -1077,6 +1118,116 @@ export class AgentsService {
       writePauseRequest(project, run.runId);
     }
     return { pauseRequested: pauseRequestEffective(readPauseRequest(project), run) };
+  }
+
+  /**
+   * `POST /api/agents/stop` (bug-39) — record that a person ENDED this run,
+   * and then try to end it.
+   *
+   * **Two outcomes, and only the first is guaranteed.** Writing the control
+   * file is the fact; spawning `--abort` is an attempt at the consequence. A
+   * gate refusal or a spawn failure is therefore NOT an error status here:
+   * the request is already on disk, the sweeper is already standing down on
+   * it, and `abort` will already take the lease on the strength of it — so
+   * the honest answer is a 200 saying what did and did not happen, plus the
+   * one command a person can run instead. Returning a 5xx would tell a
+   * caller the stop did not land when the half that matters did.
+   *
+   * It is `pause()`'s sibling in every other respect — same refusal (a
+   * `running` run, fresh or stale alike, and a stale one is the case this
+   * whole bug is about), same strict `cancel === true`, same independence
+   * from `BM_AGENTS`: recording the fact must work on a machine whose
+   * launcher is off, and the spawn half simply does not happen there.
+   *
+   * **Why this is not `pause` with a flag.** A pause is read at two dispatch
+   * gates and deliberately cannot strand half-finished work; a stop refuses
+   * every transition and is allowed to abandon a worktree, because a person
+   * decided the run should end rather than finish its item. Widening pause
+   * would make every pause do the second thing. Two keys, one file.
+   */
+  async stop(project: string, cancel: boolean): Promise<StopResult> {
+    // Read fresh, the same posture `pause()` takes and for the same reason:
+    // the runId this request is pinned to has to be the run going right now.
+    const run = this.orchestrator.runs().runs.find((r) => r.project === project);
+    if (run === undefined || run.status !== 'running') {
+      // `running` only, fresh or stale alike — a stale `running` run is
+      // exactly the shape bug-39 was filed about (a killed driver leaves one
+      // for fifteen minutes), so `fresh` is deliberately not part of the
+      // gate. Every other status is refused with one uncoded message: a run
+      // that is `done`, `aborted`, `failed` or `paused` has already stopped.
+      throw new HttpException({ error: 'no running run to stop for this project' }, 409);
+    }
+
+    if (cancel) {
+      // The same delete a pause cancel makes, on the same one file — a
+      // project has one control fact, and withdrawing it is withdrawing it
+      // whichever kind it was. Nothing is spawned: cancelling a stop is
+      // asking for the run to CARRY ON, which is `resume`'s job and not this
+      // route's to do implicitly.
+      clearPauseRequest(project);
+      return { stopRequested: stopRequestEffective(readPauseRequest(project), run), abortSession: null, abortRefused: null };
+    }
+
+    writePauseRequest(project, run.runId, new Date(), controlHome(), 'stop');
+    // RE-DERIVED from what landed on disk, never echoed back from the
+    // request — the confirmation-not-acknowledgement rule `pause()` follows.
+    const stopRequested = stopRequestEffective(readPauseRequest(project), run);
+
+    const { abortSession, abortRefused } = await this.spawnAbort(project);
+    return { stopRequested, abortSession, abortRefused };
+  }
+
+  /**
+   * The spawn half of `stop()` — split out because every failure in it is a
+   * VALUE this route returns rather than an exception it propagates, and a
+   * method whose whole body is one `try` reads worse than one that is.
+   *
+   * The gate is `resume()`'s, called rather than re-derived, for the reason
+   * `resume()`'s own doc comment gives at length: an earlier hand-written
+   * copy of `projectDispatchGate`'s ladder dropped four of its five rungs.
+   * The difference is only in what a refusal DOES — there, a status; here, a
+   * sentence in the body.
+   */
+  private async spawnAbort(project: string): Promise<{ abortSession: string | null; abortRefused: string | null }> {
+    try {
+      const status = await this.status();
+      if (!status.enabled) {
+        // Not an error, and not silence either: a machine with agents off can
+        // still record a stop, and the person who asked deserves to be told
+        // that the run will not be ended for them here.
+        return { abortSession: null, abortRefused: 'agents are off on this machine — run `/backlog-orchestrate --abort` at the project root to end the run' };
+      }
+      const gate = projectDispatchGate(status, project);
+      if (gate.control !== 'enabled') {
+        return { abortSession: null, abortRefused: `${gate.reason} — run \`/backlog-orchestrate --abort\` at the project root to end the run` };
+      }
+
+      const cfg = readAgentsConfig();
+      const dirName = (await this.projectMap(cfg)).get(project);
+      if (dirName === undefined) {
+        // The same TTL-race guard every other spawn path carries — never
+        // derive a dirName from the path to route around it.
+        return { abortSession: null, abortRefused: 'the dashboard cannot see this project — run `/backlog-orchestrate --abort` at the project root to end the run' };
+      }
+
+      const result = await this.spawn(cfg, {
+        project: dirName,
+        prompt: STOP_PROMPT,
+        name: stopSessionName(project),
+        // 'auto', clamped — the same trade every unattended session in this
+        // file makes. An abort removes worktrees and branches, so a session
+        // that cannot self-approve its own git calls would do nothing at all.
+        permissionMode: clampMode('auto', status.spawnMaxPermission)
+      });
+      return { abortSession: result.sessionId, abortRefused: null };
+    } catch (e) {
+      // Every throw from the three awaits above lands here — an unreachable
+      // dashboard, a refused spawn, a malformed answer. The control file is
+      // already written, so this is information about the second outcome and
+      // never a reason to fail the first.
+      const message = e instanceof HttpException ? String((e.getResponse() as { error?: unknown }).error ?? e.message) : e instanceof Error ? e.message : String(e);
+      return { abortSession: null, abortRefused: `${message} — run \`/backlog-orchestrate --abort\` at the project root to end the run` };
+    }
   }
 
   /**
@@ -1727,6 +1878,16 @@ function orchestrateSessionName(projectPath: string): string {
 export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
   const prefix = origin === 'watchdog' ? 'watchdog resume' : 'resume';
   return `${prefix} ${basename(projectPath)}`.slice(0, 60);
+}
+
+/**
+ * The abort session's row name (bug-39) — `resumeSessionName`'s sibling, with
+ * no `origin` because there is only one: a stop is always a person's, and
+ * nothing automated ever sends one. Same `slice(0, 60)` and same plain-space
+ * separator, for the reasons that function's comment gives at length.
+ */
+export function stopSessionName(projectPath: string): string {
+  return `stop ${basename(projectPath)}`.slice(0, 60);
 }
 
 /**

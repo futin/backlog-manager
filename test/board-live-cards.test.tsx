@@ -41,7 +41,7 @@ const fixture = rawFixture as OrchestratorRun;
 // below builds one, but the payload this board reads carries it and a type
 // that dropped it would let a case hand `BoardView` a shape the endpoint
 // never sends.
-type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; watchdog?: RunWatchdog };
+type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; stopRequested: boolean; watchdog?: RunWatchdog };
 
 describe('BoardView: card live strips', () => {
   const PROJECTS: ProjectSummary[] = [
@@ -168,7 +168,7 @@ describe('BoardView: card live strips', () => {
 
   /** One fresh alpha run over exactly the queue entries handed in. */
   function alphaRun(queue: RunQueueItem[], over: Partial<Payload> = {}): Payload {
-    return { ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false, queue, ...over };
+    return { ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false, queue, ...over };
   }
 
   /** The live strip on a card, found by the card's own title. */
@@ -200,7 +200,7 @@ describe('BoardView: card live strips', () => {
   // border class — because a cyan bar on an amber-bordered card reads as two
   // different claims about one item.
   it("gives the card matching the fresh run's queue entry a live strip, then clears it once the run goes stale", async () => {
-    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false }], [fakeItem({})]);
     await renderBoard();
 
     const card = await screen.findByText('wire the heartbeat');
@@ -221,7 +221,7 @@ describe('BoardView: card live strips', () => {
     // (useOrchestratorRuns.ts fires `refresh()` unconditionally on focus),
     // proving the marker actually reacts to fresh data going stale under it
     // rather than merely being correct on first paint.
-    stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0, pauseRequested: false }], [fakeItem({})]);
+    stub([{ ...fixture, project: '/abs/alpha', fresh: false, pastRuns: 0, pauseRequested: false, stopRequested: false }], [fakeItem({})]);
     window.dispatchEvent(new Event('focus'));
 
     await waitFor(() => {
@@ -243,7 +243,7 @@ describe('BoardView: card live strips', () => {
   // two separate, unrelated renders.
   it('gives a needs-answers card its own strip, and no strip at all to a pending one', async () => {
     stub(
-      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }],
+      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false }],
       [
         fakeItem({
           id: 'task-21',
@@ -308,7 +308,7 @@ describe('BoardView: card live strips', () => {
   // a contrived one.
   it('does not mark a same-id card belonging to a different project', async () => {
     stub(
-      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false }],
+      [{ ...fixture, project: '/abs/alpha', fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false }],
       [fakeItem({ project: 'beta', projectPath: '/abs/beta', path: '/abs/beta/backlog/tasks/open/task-14.md' })]
     );
     await renderBoard();

@@ -4,9 +4,11 @@ title: No force stop for an orchestrator run
 created: 2026-09-19
 tags: watchdog, orchestrator
 runner-fix: true
-updated: 2026-09-20T12:31:44Z
+updated: 2026-09-20T21:32:20Z
 groom-elapsed: 351
 groom-tokens: 92549
+execute-elapsed: 32202
+execute-tokens: 135058
 ---
 
 ## Symptom
@@ -206,3 +208,60 @@ return above it and a field on the run entry rather than on `RunWatchdog`. Whoev
 - In the browser (playwright MCP tools): with the stack up (`pnpm run docker:up`) open `http://127.0.0.1:5177`, go to **Runs → History**, select a project with
   a `running` run, and confirm the detail head shows a **Stop** control beside Pause; click it, confirm the head switches to the stop-requested reading with a
   **Cancel stop** control and **no Resume control**, and that it still reads that way after a poll; click **Cancel stop** and confirm the Stop control returns.
+
+## Outcome
+
+2026-09-20 — fixed as the `## Fix` section specified, all six numbered changes, with no deviation and nothing added.
+
+1. **The control file learned a `kind`.** `PauseRequest.kind` is `'pause' | 'stop'` and absent means `'pause'`, so every control file written before this key
+   existed goes on meaning what it has always meant. `pauseRequestEffective` and `stopRequestEffective` are disjoint over one file — both sides factor the two
+   shared clauses into a private `controlRequestTimely`, and the server's copy and `orchestrate.mjs`'s copy stay duplicated rather than imported, the boundary
+   rule the pause predicate already followed.
+2. **`POST /api/agents/stop`** is `pause`'s sibling — same guard, same `@HttpCode(200)`, same field-by-field rebuild, same `cancel === true` strictness, same
+   independence from `BM_AGENTS` — refused unless the project has a `running` run, fresh **or stale**, which is the state this bug was filed about. It then
+   attempts one `/backlog-orchestrate --abort` spawn through `resume()`'s own gate, and a refusal rides back in `abortRefused` as a 200: recording the fact and
+   ending the run are two outcomes, and only the first is guaranteed.
+3. **Nothing resumes a stopped run.** `stopRequested` joins `pauseRequested` on the runs payload, derived at the one site that already derives its sibling from
+   a single control-file read; `visit()` returns early on it (after the `fresh` branch, before the stand-down branch) and logs `stopped` once behind
+   `entry.stoppedLogged`; `AgentsService.resume()` refuses with an uncoded 409; `RunControls` suppresses every Resume branch and renders `Cancel stop` plus the
+   `abortRefused` sentence. It is deliberately not a third input to `watchdogStoodDown`.
+4. **`takeOverRun(dir, run, force)`** takes the third parameter required, with no default. `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`, so a
+   resume still can never steal a live run — and a stop on file un-strands the hand-run terminal, whose `sessionIdentity()` is `null`.
+5. **A live driver notices within one tick.** New exit code `10`: `cmdWatch` signals the child by the pid it was given and returns it (before the heartbeat
+   write, so the noticing tick does not push `updatedAt` forward), and the `stage` gate refuses **every** transition rather than only `preflight`/`dispatched`.
+   SKILL.md gained the code, the §4 branch and §10's *Stopping* subsection.
+6. **`RunQueueItem.pid`** is written by `stage <id> dispatched --pid <p>` and signalled by `cmdAbort` behind three guards — non-terminal by
+   `RECONCILE_TERMINAL_STAGES`, `pidAlive`, and `ps -o args=` naming a `claude` process. `SIGTERM`, never a pattern, never a `pkill`.
+
+### Verification
+
+`pnpm run typecheck` — clean.
+
+The five jest suites this touched:
+
+```
+Test Suites: 5 passed, 5 total
+Tests:       171 passed, 171 total
+```
+
+(`test/agents-stop.test.ts` — 13 new route cases; `test/watchdog-sweep.test.ts`, `test/watchdog-coupling.test.tsx`, `test/run-controls.test.tsx`,
+`test/agents-origin-guard.test.ts`.)
+
+`pnpm test` (both runners): jest 2106 passed / 5 failed, node 682 passed / 1 failed. **All six failures reproduce at `HEAD` (13bf87e) in a clean worktree with
+this branch's changes absent**, so none of them is this fix's — they are the WSL2 platform cases in `test/supertest-bind.test.ts`, two
+`test/dispatch-button.test.tsx` cases, one `test/board-live-cards.test.tsx` case, and `orchestrate.test.mjs`'s submodule-discriminator case.
+
+The twelve new `orchestrate.test.mjs` cases cover the disjointness, the two refusal clauses, `stage`'s exit `10` against a pause's exit `6`, `abort` taking a
+fresh foreign lease with a stop on file and still refusing without one, `claim` refusing in both, `watch`'s signal-and-return-10, `--pid` recording, and the
+three `cmdAbort` pid guards.
+
+In the browser, against the running stack (client on 5187, API on 4322) with a scratch project and a real `orchestrate.mjs init` run — never a
+hand-written `run.json`:
+
+- **Runs → the live run's detail head shows `Stop` beside `Pause`.**
+- Clicking it switches the head to `Stopping — this run is being ended`, a `Cancel stop` control, no Resume, and the `abortRefused` sentence
+  (`the dashboard does not list /tmp/bm-stopcheck … — run `/backlog-orchestrate --abort` at the project root to end the run`), which is the gate refusal
+  rendered as designed rather than an error.
+- The tool saw the same fact immediately from the other side of the boundary: `orchestrate.mjs stage task-1 preflight` exited `10` writing nothing, and
+  `status` printed `stop requested at 2026-09-20T21:31:35.921Z`.
+- `Cancel stop` restored `Pause` and `Stop`. The scratch run was aborted and its project unregistered afterwards.

@@ -16,8 +16,8 @@ import type { OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
  * only the fields its own case cares about.
  */
 function fakeRun(
-  overrides: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean }> = {}
-): OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean } {
+  overrides: Partial<OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; stopRequested: boolean }> = {}
+): OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; stopRequested: boolean } {
   return {
     runId: 'run-1',
     project: '/p',
@@ -35,6 +35,7 @@ function fakeRun(
     fresh: true,
     pastRuns: 0,
     pauseRequested: false,
+    stopRequested: false,
     ...overrides
   };
 }
@@ -108,7 +109,10 @@ describe('WatchdogStateService', () => {
       lastError: null,
       recovered: false,
       exhaustedLogged: false,
-      disabledLogged: false
+      disabledLogged: false,
+      // bug-39: the `stopped` line's once-per-condition guard, unset like
+      // every other log flag on a fresh entry.
+      stoppedLogged: false
     });
   });
 

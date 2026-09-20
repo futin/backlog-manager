@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 
-import { ApiError, cancelPauseOrchestrate, pauseOrchestrate, resumeOrchestrate } from '../lib/agents';
+import { ApiError, cancelPauseOrchestrate, cancelStopOrchestrate, pauseOrchestrate, resumeOrchestrate, stopOrchestrate } from '../lib/agents';
 import { isTerminalStage } from '../lib/run-time';
 import { isCrashed } from '../lib/run-watchdog';
 import { Chip } from './ui/Chip';
@@ -61,6 +61,19 @@ import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../shared
 export type RunControlsRun = Pick<OrchestratorRun, 'status' | 'project'> & {
   fresh: boolean;
   pauseRequested: boolean;
+  /**
+   * bug-39 — a person has asked for this run to END. Read verbatim off the
+   * runs payload, never re-derived, and it outranks every other reading this
+   * component makes: while it holds, no Resume is drawn in ANY branch, the
+   * sweeper is standing down on the same one boolean, and the only control
+   * offered is the one that withdraws the request.
+   *
+   * It is deliberately not folded into `watchdogStoodDown`: that predicate
+   * being TRUE is what makes the crashed branch OFFER a Resume, so a stop
+   * expressed through it would light up the button on exactly the runs it is
+   * meant to take it away from.
+   */
+  stopRequested: boolean;
   queue: ReadonlyArray<Pick<RunQueueItem, 'id' | 'stage'>>;
   /** The sweeper's own record for this run, `undefined` for a run it has
    *  never been a subject of — the narrow window between a run first going
@@ -73,7 +86,7 @@ export type RunControlsRun = Pick<OrchestratorRun, 'status' | 'project'> & {
 
 /** Which call a completed click made — the hosts react differently to a
  *  resume (they also mark the poll) than to the other two. */
-export type RunControlsChange = 'pause' | 'cancel' | 'resume';
+export type RunControlsChange = 'pause' | 'cancel' | 'resume' | 'stop' | 'cancel-stop';
 
 /**
  * The item the run is working right now, or `null` when it is between items
@@ -128,6 +141,19 @@ export function RunControls({
    */
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
+  /**
+   * bug-39 — `StopResult.abortRefused` from the click this component made,
+   * or `null`.
+   *
+   * Component state rather than a field on `run`, and that is the honest
+   * place for it: the runs payload can say whether a stop was REQUESTED (a
+   * file on disk) but nothing on disk records whether a spawn was refused,
+   * because a refusal starts nothing and writes nothing. So this survives
+   * exactly as long as the tab that made the request, which is exactly as
+   * long as the person who needs to read it is looking. A reload drops it
+   * and the run is still stopped — the half that matters is on disk.
+   */
+  const [abortNote, setAbortNote] = useState<string | null>(null);
 
   const act = (kind: RunControlsChange, call: () => Promise<unknown>): void => {
     if (busyRef.current) return;
@@ -227,6 +253,88 @@ export function RunControls({
     );
   };
 
+  /**
+   * The Stop control (bug-39) — drawn beside Pause on a fresh run and beside
+   * (or instead of) Resume on a crashed one, because `running` fresh or stale
+   * is exactly the set `POST /api/agents/stop` accepts and a STALE running run
+   * is the case this bug was filed about: a driver killed by hand leaves one
+   * for fifteen minutes, during which nothing could end it.
+   *
+   * `variant` is left at the default accent, unlike Pause's cancel: this one
+   * IS destructive — it abandons whatever worktree the run is mid-way through
+   * — and a control that ends work must read like one.
+   *
+   * Through `act` like every other branch (bug-19's layer 1). The result is
+   * read inside the call rather than in `onChanged`, because `abortRefused`
+   * is the one thing this component learns that no later poll can tell it.
+   */
+  const stopControl = (): JSX.Element => (
+    <Chip
+      size={28}
+      data-testid="run-controls-stop"
+      title="end this run now — the item in flight is abandoned"
+      onClick={() =>
+        act('stop', async () => {
+          const result = await stopOrchestrate(run.project);
+          setAbortNote(result.abortRefused);
+        })
+      }
+    >
+      Stop
+    </Chip>
+  );
+
+  /**
+   * bug-39, and it outranks every branch below it: a person has asked for this
+   * run to END.
+   *
+   * First, because a stop is a stronger statement than anything else this
+   * component can read off a run. A stopped run offers no Pause (there is
+   * nothing left to pause gracefully), and above all no Resume in ANY of the
+   * three branches that draw one — a board that offered to resume a run
+   * somebody just stopped would be fighting its own user, and on a crashed
+   * stopped run the click would also race the `--abort` session this stop
+   * already spawned.
+   *
+   * What is left is the withdrawal. `Cancel stop` clears the same control file
+   * a `Cancel` clears; it does NOT restart anything, because asking a stopped
+   * run to carry on is a Resume and belongs to the person, not to this click.
+   */
+  if (run.stopRequested) {
+    return (
+      <span className="run-controls">
+        <span className="run-controls-note" data-testid="run-controls-stop-note">
+          Stopping — this run is being ended
+        </span>
+        {/* `flat` for the same reason Pause's Cancel is flat (DESIGN.md
+            §8.4.1): withdrawing a request destroys nothing, and a control
+            that is not destructive must not read as one. */}
+        <Chip
+          size={28}
+          variant="flat"
+          data-testid="run-controls-cancel-stop"
+          onClick={() =>
+            act('cancel-stop', async () => {
+              await cancelStopOrchestrate(run.project);
+              // Cleared with the request it describes: a refusal to spawn an
+              // abort for a stop nobody is making any more is not a fact
+              // anyone can act on.
+              setAbortNote(null);
+            })
+          }
+        >
+          Cancel stop
+        </Chip>
+        {abortNote === null ? null : (
+          <span className="run-controls-note" data-testid="run-controls-abort-refused">
+            {abortNote}
+          </span>
+        )}
+        {errorNode}
+      </span>
+    );
+  }
+
   // A fresh, reporting run: the only state with something to STOP. Checked
   // first so every branch below can assume a run that is not moving.
   if (run.status === 'running' && run.fresh) {
@@ -244,6 +352,14 @@ export function RunControls({
           <Chip size={28} variant="flat" data-testid="run-controls-cancel" onClick={() => act('cancel', () => cancelPauseOrchestrate(run.project))}>
             Cancel
           </Chip>
+          {/* A pause already on file does not make a stop unreachable. They
+              are different requests, and a person who asked for the graceful
+              one is entitled to change their mind before the run reaches a
+              boundary — which, if its session is wedged, it never will. The
+              click overwrites the pause with a stop on the one control file,
+              last write wins, which is why there is no third state to
+              render here. */}
+          {stopControl()}
           {errorNode}
         </span>
       );
@@ -256,6 +372,7 @@ export function RunControls({
         <Chip size={28} data-testid="run-controls-pause" title="pause after the current item" onClick={() => act('pause', () => pauseOrchestrate(run.project))}>
           Pause
         </Chip>
+        {stopControl()}
         {errorNode}
       </span>
     );
@@ -282,8 +399,21 @@ export function RunControls({
     //   An ABSENT `watchdog` key offers nothing: it means the server has not
     // annotated this run yet, so the sweeper's intentions are unknown, and an
     // unknown must read as "it may still act" rather than as a stand-down.
-    if (run.watchdog === undefined || !watchdogStoodDown(run.watchdog)) return null;
-    return resumeControl();
+    //
+    //   bug-39: what this branch may not do any more is return NOTHING. A
+    // crashed run is `running` with a dead heartbeat, which is precisely the
+    // shape `POST /api/agents/stop` accepts and precisely the shape this bug
+    // was filed about — a driver killed by hand leaves one for fifteen
+    // minutes, and until now the board offered no way to end it. So the
+    // Resume stays gated exactly as it was, and the Stop is drawn either way.
+    const resume = run.watchdog !== undefined && watchdogStoodDown(run.watchdog) ? resumeControl() : null;
+    return (
+      <span className="run-controls">
+        {resume}
+        {stopControl()}
+        {errorNode}
+      </span>
+    );
   }
 
   if (run.status === 'paused') return resumeControl();

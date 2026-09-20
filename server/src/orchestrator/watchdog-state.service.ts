@@ -111,6 +111,17 @@ export interface WatchdogEntry {
   recovered: boolean;
   exhaustedLogged: boolean;
   disabledLogged: boolean;
+  /**
+   * bug-39 — the once-per-condition guard for the `stopped` line, exactly
+   * the shape `disabledLogged` above has. It is NOT a record that a stop was
+   * ever requested: `stopRequested` is derived per request from the control
+   * file, and this flag only answers "have I already said so in the log".
+   * Never cleared, unlike `exhaustedLogged`: a stop is withdrawn by deleting
+   * the control file, and the next thing the sweeper does with this entry is
+   * spawn — which logs a line of its own — so there is no second, genuinely
+   * new stop of the same run for a cleared flag to re-announce.
+   */
+  stoppedLogged: boolean;
 }
 
 @Injectable()
@@ -180,7 +191,8 @@ export class WatchdogStateService {
         lastError: null,
         recovered: false,
         exhaustedLogged: false,
-        disabledLogged: false
+        disabledLogged: false,
+        stoppedLogged: false
       };
       this.entries.set(runId, entry);
     }

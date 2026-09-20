@@ -187,13 +187,13 @@ export function RunDetail({
   summary: OrchestratorArchiveRun;
   /** The live poll's own entry for this runId — the whole payload entry
    *  (task-17), not a bare `OrchestratorRun`: `RunControls` below decides
-   *  from `fresh`, `pauseRequested` and — since task-38 put the crashed
-   *  run's Resume in this sheet's head — `watchdog`, all three annotations
-   *  the endpoint adds rather than fields the run file carries. Named as
-   *  exactly those three rather than the whole payload entry, so this prop
-   *  states what it READS: `pastRuns` rides the same entry and is none of
-   *  this sheet's business. */
-  live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean; watchdog?: RunWatchdog }) | null;
+   *  from `fresh`, `pauseRequested`, `stopRequested` (bug-39) and — since
+   *  task-38 put the crashed run's Resume in this sheet's head — `watchdog`,
+   *  all four annotations the endpoint adds rather than fields the run file
+   *  carries. Named as exactly those four rather than the whole payload
+   *  entry, so this prop states what it READS: `pastRuns` rides the same
+   *  entry and is none of this sheet's business. */
+  live: (OrchestratorRun & { fresh: boolean; pauseRequested: boolean; stopRequested: boolean; watchdog?: RunWatchdog }) | null;
   /** task-48: another machine's run, drawn from its claim comments
    *  (`MergedRun.remote`). Read-only: no `RunControls` — pause, resume, abort
    *  and the watchdog are all local mechanisms on the machine that holds the
@@ -572,7 +572,8 @@ export function RunDetail({
                     project: summary.project,
                     queue: source.queue,
                     fresh: false,
-                    pauseRequested: false
+                    pauseRequested: false,
+                    stopRequested: false
                   }
                 }
                 gate={gate}

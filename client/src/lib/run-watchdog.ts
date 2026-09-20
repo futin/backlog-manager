@@ -246,6 +246,10 @@ export const WATCHDOG_KIND_GLYPH: Record<WatchdogEventKind, string> = {
   failed: '✕',
   exhausted: '⚠',
   disabled: '‖',
+  // bug-39 — a square, the universal stop glyph, and deliberately not the
+  // `‖` pause bars beside it: the two are different requests and a reader
+  // scanning the feed must be able to tell them apart at a glance.
+  stopped: '■',
   armed: '◉',
   idle: '○'
 };
@@ -266,6 +270,10 @@ export const WATCHDOG_KIND_TONE: Record<WatchdogEventKind, WatchdogKindTone> = {
   failed: 'bad',
   exhausted: 'warn',
   disabled: 'warn',
+  // `muted`, not `warn`: amber means a human must act, and a stop is a human
+  // who already HAS. The sweeper standing down on a stop is the requested
+  // outcome, not news the reader has to do something about.
+  stopped: 'muted',
   armed: 'muted',
   idle: 'muted'
 };

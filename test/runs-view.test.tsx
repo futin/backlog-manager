@@ -122,6 +122,7 @@ function item(
     sessionId: null,
     worktree: null,
     branch: null,
+    pid: null,
     permissionMode: null,
     fixLoops: over.fixLoops ?? 0,
     stageAt: over.stageAt ?? {},
@@ -154,6 +155,7 @@ function liveQueueItem(
     sessionId: null,
     worktree: null,
     branch: null,
+    pid: null,
     permissionMode: null,
     fixLoops: over.fixLoops ?? 0,
     stageAt: over.stageAt ?? {},
@@ -350,7 +352,8 @@ const LIVE_RUNS: OrchestratorRunsPayload['runs'] = [
     attention: [],
     fresh: true,
     pastRuns: 2,
-    pauseRequested: false
+    pauseRequested: false,
+    stopRequested: false
   }
 ];
 
@@ -865,7 +868,8 @@ describe('RunsView', () => {
       ],
       fresh: true,
       pastRuns: 0,
-      pauseRequested: false
+      pauseRequested: false,
+      stopRequested: false
     };
 
     await renderRunsView([archiveEntry], [liveEntry]);
@@ -924,7 +928,8 @@ describe('RunsView', () => {
       ],
       fresh: true,
       pastRuns: 0,
-      pauseRequested: false
+      pauseRequested: false,
+      stopRequested: false
     };
 
     await renderRunsView([archiveEntry], [liveEntry]);
@@ -1009,7 +1014,8 @@ describe('RunsView', () => {
         attention: [],
         fresh: true,
         pastRuns: 0,
-        pauseRequested: false
+        pauseRequested: false,
+        stopRequested: false
       };
 
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
@@ -1045,7 +1051,8 @@ describe('RunsView', () => {
         attention: [],
         fresh: true,
         pastRuns: 0,
-        pauseRequested: false
+        pauseRequested: false,
+        stopRequested: false
       };
       mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [], remote: [] } satisfies OrchestratorRunsPayload);
 
@@ -1450,7 +1457,8 @@ describe('RunsView history paging (task-16)', () => {
       attention: [],
       fresh: true,
       pastRuns: 0,
-      pauseRequested: false
+      pauseRequested: false,
+      stopRequested: false
     };
 
     const { container } = await renderRunsView([live, ...minuteSeries(RUNS_PAGE_SIZE + 5)], [liveEntry]);
@@ -1883,7 +1891,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
         attention: [],
         fresh: false,
         pastRuns: 0,
-        pauseRequested: false
+        pauseRequested: false,
+        stopRequested: false
       }
     ];
 
@@ -1926,7 +1935,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
             attention: [],
             fresh: false,
             pastRuns: 0,
-            pauseRequested: false
+            pauseRequested: false,
+            stopRequested: false
           }
         ],
         starting: [],

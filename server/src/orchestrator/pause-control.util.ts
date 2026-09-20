@@ -54,10 +54,29 @@ import type { OrchestratorRun } from '../../../shared/types';
 
 /** The shape written to, and expected back from, the control file — the
  *  whole file, not a fragment of a larger one. `orchestrate.mjs` reads the
- *  same two keys and ignores nothing else, because there is nothing else. */
+ *  same three keys and ignores nothing else, because there is nothing else. */
 export interface PauseRequest {
   runId: string;
   requestedAt: string;
+  /**
+   * Which control fact this file records (bug-39).
+   *
+   * **Absent means `'pause'`**, and that default is not a convenience: every
+   * control file this server has already written lacks the key, and every one
+   * of them means a pause. A reader that treated absence as anything else
+   * would re-interpret bytes written before the key existed.
+   *
+   * One control fact per project stays ONE FILE. A stop overwrites a pause
+   * and a pause overwrites a stop — last write wins in both directions — and
+   * `cancel` deletes either. Two files would be two facts to reconcile
+   * ("stopped but also paused"), and the reconciliation would be a third
+   * rule nobody reads.
+   *
+   * The two predicates below are DISJOINT by construction: a `'stop'` file
+   * is never an effective pause, and anything that is not `'stop'` is never
+   * an effective stop.
+   */
+  kind?: 'pause' | 'stop';
 }
 
 /**
@@ -108,9 +127,15 @@ export function readPauseRequest(project: string, root: string = controlHome()):
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-  const { runId, requestedAt } = parsed as Partial<PauseRequest>;
+  const { runId, requestedAt, kind } = parsed as Partial<PauseRequest>;
   if (typeof runId !== 'string' || typeof requestedAt !== 'string') return null;
-  return { runId, requestedAt };
+  // `kind` is carried through only when it is one of the two words. An
+  // unrecognised one is DROPPED rather than refusing the whole file, which
+  // makes it read as the absent case — a pause. That direction is the safe
+  // one: the worst a misread stop can do under this rule is stop at the next
+  // item boundary instead of immediately, where refusing the file outright
+  // would make a hand-edited `kind` cancel a request somebody made.
+  return kind === 'stop' || kind === 'pause' ? { runId, requestedAt, kind } : { runId, requestedAt };
 }
 
 /**
@@ -136,6 +161,38 @@ export function readPauseRequest(project: string, root: string = controlHome()):
  */
 export function pauseRequestEffective(request: PauseRequest | null, run: Pick<OrchestratorRun, 'runId' | 'startedAt' | 'unpausedAt'>): boolean {
   if (request === null) return false;
+  // bug-39's one added clause, and the reason the two predicates below are
+  // disjoint rather than nested: a STOP is not a stronger pause, it is a
+  // different request with a different gate, and a file that says `stop`
+  // must not also make `stage <id> preflight` exit `6` — the run would then
+  // take the cooperative path (`finish --status paused`) for a request whose
+  // whole point is that the cooperative path is not reaching it.
+  if (request.kind === 'stop') return false;
+  return controlRequestTimely(request, run);
+}
+
+/**
+ * Is this request an effective STOP for this run (bug-39)? The same two
+ * clauses `pauseRequestEffective` applies — `runId` pins it to one run,
+ * `requestedAt` must post-date that run's most recent start — plus
+ * `kind === 'stop'`, which absence can never satisfy.
+ *
+ * A separate exported predicate rather than a `kind` argument on the one
+ * above: three of the four readers ask only one of the two questions, and a
+ * shared entry point with a mode parameter is one call site away from asking
+ * the wrong one. `orchestrate.mjs` carries its own byte-equivalent copy, for
+ * the boundary reason this file's header gives.
+ */
+export function stopRequestEffective(request: PauseRequest | null, run: Pick<OrchestratorRun, 'runId' | 'startedAt' | 'unpausedAt'>): boolean {
+  if (request === null) return false;
+  if (request.kind !== 'stop') return false;
+  return controlRequestTimely(request, run);
+}
+
+/** The two clauses both predicates share — pinned to this run, and newer than
+ *  its most recent start. Private: what makes a request EFFECTIVE is one of
+ *  the two exported answers above, never this half of it. */
+function controlRequestTimely(request: PauseRequest, run: Pick<OrchestratorRun, 'runId' | 'startedAt' | 'unpausedAt'>): boolean {
   if (request.runId !== run.runId) return false;
 
   const requestedAt = Date.parse(request.requestedAt);
@@ -161,8 +218,19 @@ export function pauseRequestEffective(request: PauseRequest | null, run: Pick<Or
  * a test needs one reading it controls, and the stamp is compared against a
  * run's own timestamps rather than merely displayed.
  */
-export function writePauseRequest(project: string, runId: string, now: Date = new Date(), root: string = controlHome()): PauseRequest {
-  const request: PauseRequest = { runId, requestedAt: now.toISOString() };
+export function writePauseRequest(
+  project: string,
+  runId: string,
+  now: Date = new Date(),
+  root: string = controlHome(),
+  kind: 'pause' | 'stop' = 'pause'
+): PauseRequest {
+  // Written even for a `'pause'`, rather than relying on the absent-means-
+  // pause default: the default exists to read files this server wrote BEFORE
+  // bug-39, not to let it go on writing ambiguous ones. A file whose kind is
+  // spelled out says what a person asked for to anyone who opens it, which is
+  // the only reason this file is on disk at all.
+  const request: PauseRequest = { runId, requestedAt: now.toISOString(), kind };
   const file = controlFile(project, root);
   const dir = dirname(file);
   mkdirSync(dir, { recursive: true });

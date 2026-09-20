@@ -133,7 +133,10 @@ describe('writePauseRequest / clearPauseRequest', () => {
 
     const result = writePauseRequest('/a/b', 'run-1', now, root);
 
-    expect(result).toEqual({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00.000Z' });
+    // `kind` is written even for a pause (bug-39): the absent-means-pause
+    // default exists to READ files written before that key, not to go on
+    // writing ambiguous ones.
+    expect(result).toEqual({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00.000Z', kind: 'pause' });
     expect(JSON.parse(readFileSync(controlFile('/a/b', root), 'utf8'))).toEqual(result);
   });
 

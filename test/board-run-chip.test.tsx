@@ -261,10 +261,10 @@ describe('BoardView: the run chip', () => {
     localStorage.clear();
   });
 
-  type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean };
+  type Payload = OrchestratorRun & { fresh: boolean; pastRuns: number; pauseRequested: boolean; stopRequested: boolean };
 
   function run(over: Partial<Payload>): Payload {
-    return { ...fixture, fresh: true, pastRuns: 0, pauseRequested: false, ...over };
+    return { ...fixture, fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false, ...over };
   }
 
   function stub(runs: Payload[], startingRuns: StartingRun[] = []): void {

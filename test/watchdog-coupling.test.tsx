@@ -82,6 +82,7 @@ describe('the Resume stand-down verdict', () => {
       project: fixture.project,
       fresh: false,
       pauseRequested: false,
+      stopRequested: false,
       queue: fixture.queue.map((q) => ({ id: q.id, stage: q.stage })),
       watchdog: rowWatchdog(row)
     };
@@ -93,6 +94,41 @@ describe('the Resume stand-down verdict', () => {
     // this board can still talk to the process.
     expect(screen.queryByTestId('run-controls-pause')).toBeNull();
     expect(screen.queryByTestId('run-controls-cancel')).toBeNull();
+    // bug-39: Stop is drawn on EVERY row, which is what keeps this table a
+    // statement about the RESUME coupling alone. A crashed run is always
+    // stoppable — that is the bug this control closes — so a Stop that
+    // varied with `standsDown` would mean the two questions had been folded
+    // into one again.
+    expect(screen.getByTestId('run-controls-stop')).toBeInTheDocument();
+  });
+
+  /**
+   * bug-39's leg, and a SECOND pass over the same rows rather than a
+   * `stopRequested` column, for the reason `test/watchdog-sweep.test.ts`'s
+   * own stop leg gives: the answer under a stop does not vary by row, so a
+   * column would be one rule written out seven times. Swept over every row
+   * anyway — including the rows where the sweeper WOULD spawn and the head
+   * would otherwise offer nothing — because "a stop suppresses both sides"
+   * is only worth asserting where the two sides disagree without it.
+   */
+  it.each(COUPLING_ROWS)('offers no Resume under a stop request, whatever the row says — $name', (row) => {
+    const run: RunControlsRun = {
+      status: 'running',
+      project: fixture.project,
+      fresh: false,
+      pauseRequested: false,
+      stopRequested: true,
+      queue: fixture.queue.map((q) => ({ id: q.id, stage: q.stage })),
+      watchdog: rowWatchdog(row)
+    };
+    render(<RunControls run={run} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
+
+    expect(screen.queryByTestId('run-controls-resume')).toBeNull();
+    // What it offers instead is the withdrawal, and only that: a stopped run
+    // has nothing to pause and no second stop to ask for.
+    expect(screen.getByTestId('run-controls-cancel-stop')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-controls-stop')).toBeNull();
+    expect(screen.queryByTestId('run-controls-pause')).toBeNull();
   });
 
   /**
@@ -104,14 +140,15 @@ describe('the Resume stand-down verdict', () => {
    * stand-down, or the one window in which nothing can be known about the
    * sweeper's intentions is the one window a click could race it.
    */
-  it('offers nothing while the server has not annotated the run yet', () => {
-    const { container } = render(
+  it('offers no Resume while the server has not annotated the run yet', () => {
+    render(
       <RunControls
         run={{
           status: 'running',
           project: fixture.project,
           fresh: false,
           pauseRequested: false,
+          stopRequested: false,
           queue: fixture.queue.map((q) => ({ id: q.id, stage: q.stage }))
         }}
         gate={OPEN_GATE}
@@ -119,7 +156,12 @@ describe('the Resume stand-down verdict', () => {
         onChanged={jest.fn()}
       />
     );
-    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId('run-controls-resume')).toBeNull();
+    // The Stop is not gated on the annotation and must not become so: a run
+    // the server has not described yet is still a run a person can end, and
+    // this window — between a run first going crashed and the next
+    // annotation pass — is precisely when they are most likely to want to.
+    expect(screen.getByTestId('run-controls-stop')).toBeInTheDocument();
   });
 
   /**

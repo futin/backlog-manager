@@ -169,7 +169,9 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   two-tone count, wall time and the cost beside it when usage exists, behind a counted `load more` in pages of 25 — a render decision over a corpus the client
   already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
 - **The detail sheet** shows the selected run whole: a head with the project, the run id and `RunControls` (Pause, Cancel with its `Pausing after <id>` note,
-  Resume for a paused run, and Resume for a crashed one exactly when `watchdogStoodDown` says the sweeper will not); then the facts strip, the mode and question
+  Stop beside both — and on a crashed run too, which is the run a person most needs to end — Resume for a paused run, and Resume for a crashed one exactly
+  when `watchdogStoodDown` says the sweeper will not. A run with a stop on file drops to the `Stopping` reading plus `Cancel stop`, and offers no Resume in
+  any branch); then the facts strip, the mode and question
   notes, the chip row, `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with its stage chip, its `RowTime` reading, its
   seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries

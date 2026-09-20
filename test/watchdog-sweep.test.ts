@@ -8,7 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { WatchdogService } from '../server/src/agents/watchdog.service';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
-import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
+import { clearPauseRequest, readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { WatchdogStateService, type WatchdogEntry } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
@@ -282,6 +282,13 @@ describe('watchdog sweeper', () => {
   });
 
   afterEach(async () => {
+    // The control file lives under the process-wide `BM_ORCH_CONTROL_HOME`
+    // (test/helpers/env.ts), which is shared by every case in this file — and
+    // a leaked STOP is not the harmless leftover a leaked pause is: the
+    // sweeper reads it and would stand down in every case that followed.
+    // Cleared unconditionally rather than by the cases that write one, so a
+    // case added later cannot forget.
+    clearPauseRequest(projectPath);
     if (app) {
       // Closed while any fake clock is still installed, so the sweeper's
       // clearTimeout() matches the setTimeout() that made the handle.
@@ -631,6 +638,80 @@ describe('watchdog sweeper', () => {
     await svc().tick();
 
     expect(dash.spawns()).toHaveLength(row.standsDown ? 0 : 1);
+  });
+
+  /**
+   * bug-39's leg of the same table, and the reason it is a SECOND pass over
+   * `COUPLING_ROWS` rather than a `stopRequested` column on each row: the
+   * answer under a stop does not vary by row. A column would be the literal
+   * `true` seven times beside seven different verdicts, which reads as data
+   * and is really one rule — so the rule is stated once, here, and swept over
+   * every row to prove it holds even for the rows where the sweeper would
+   * otherwise spawn.
+   *
+   * `stopRequested` is deliberately not an input to `watchdogStoodDown`: that
+   * predicate being TRUE is what makes the board OFFER a Resume, so a stop
+   * expressed through it would light the button up on exactly the runs a
+   * person just stopped. Both sides read the one payload field instead, which
+   * is what `test/watchdog-coupling.test.tsx`'s own stop leg pins on the
+   * client.
+   */
+  it.each(COUPLING_ROWS)('$name: a stop request stands the sweeper down whatever the row says', async (row) => {
+    const dash = stubDashboard();
+    writeConfig({ enabled: row.configEnabled, maxAttempts: row.maxAttempts });
+    await createApp();
+    const run = crashedRun(projectPath);
+    writeRun(run);
+    if (row.attempts > 0) state().upsert(fixture.runId, projectPath).attempts = row.attempts;
+    // Written through the server's own writer, against this run's id and
+    // stamped now — the two clauses the predicate checks — so the case cannot
+    // pass on a request the tool would have judged ineffective.
+    writePauseRequest(projectPath, run.runId, new Date(), undefined, 'stop');
+
+    expect(app!.get(OrchestratorService).runs().runs[0].stopRequested).toBe(true);
+
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(0);
+    // The `stopped` event, not the spawn count alone, is what pins THIS
+    // layer. A stop is refused twice by design — the sweeper returns early
+    // here, and `AgentsService.resume()` refuses a stopped run underneath it
+    // — so a spawn count of zero is satisfied by the second layer on its own
+    // and would stay green with this branch deleted. The event only exists if
+    // the sweeper made the decision itself.
+    expect(kinds('stopped')).toHaveLength(1);
+    expect(kinds('failed')).toHaveLength(0);
+  });
+
+  /**
+   * The `stopped` line is logged once per CONDITION, not once per tick — the
+   * shape `disabled` and `exhausted` already use, and for the identical
+   * reason: the event log is a ring buffer and cannot answer "did I already
+   * say this" once fifty other events have pushed the line out.
+   */
+  it('logs stopped once across several ticks, and spawns again once the request is withdrawn', async () => {
+    const dash = stubDashboard();
+    await createApp();
+    const run = crashedRun(projectPath);
+    writeRun(run);
+    writePauseRequest(projectPath, run.runId, new Date(), undefined, 'stop');
+
+    await svc().tick();
+    await svc().tick();
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(0);
+    expect(kinds('stopped')).toHaveLength(1);
+    expect(kinds('stopped')[0].detail).toMatch(/stop was requested/);
+
+    // Withdrawn: the control file is the whole of the fact, so deleting it
+    // returns the run to an ordinary crashed one and the very next tick
+    // resumes it. Nothing about the stop is remembered — `stoppedLogged`
+    // guards a log line, not a verdict.
+    clearPauseRequest(projectPath);
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(1);
   });
 
   // --- 8: a rejected spawn starts grace but burns no attempt ----------------

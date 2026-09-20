@@ -7,7 +7,7 @@ import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { isAgentAction } from '../../../shared/agent';
-import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, PauseResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
+import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
  * Under /api like every other controller — test/vite-proxy.test.ts asserts it
@@ -301,6 +301,34 @@ export class AgentsController {
     const project = typeof body?.project === 'string' ? body.project.trim() : '';
     if (project === '') throw new HttpException({ error: 'project is required' }, 400);
     return this.agents.pause(project, body?.cancel === true);
+  }
+
+  /**
+   * `POST /api/agents/stop` (bug-39) — record that a person ended this
+   * project's run, and try to end it, or withdraw that request with
+   * `cancel: true`.
+   *
+   * The exact sibling of `pause` above, field for field and guard for guard:
+   * `project` trimmed and required, `cancel === true` the only form honoured
+   * (here too `cancel` is the direction that undoes a human's decision, and
+   * here too a string `'true'` is not one), `@HttpCode(200)` because nothing
+   * is created in the sense a 201 promises, and independent of `BM_AGENTS`
+   * because recording the fact must work on a machine whose launcher is off.
+   *
+   * Where it is NOT pause's sibling: this route may spawn a session, so
+   * unlike pause it is not "the one that starts nothing". Nothing is armed
+   * or marked afterwards even so — `noteBoardResume` and `arm()` are both
+   * about a RESUME, and this spawn is the opposite instruction. The sweeper
+   * needs no nudge to notice a stop either: it reads `stopRequested` off the
+   * same payload it already reads, on whatever tick comes next.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('stop')
+  @HttpCode(200)
+  async stop(@Body() body: { project?: unknown; cancel?: unknown } | undefined): Promise<StopResult> {
+    const project = typeof body?.project === 'string' ? body.project.trim() : '';
+    if (project === '') throw new HttpException({ error: 'project is required' }, 400);
+    return this.agents.stop(project, body?.cancel === true);
   }
 
   /**

@@ -16,6 +16,7 @@ import {
   pauseRequestEffective,
   readPermissionDenials,
   readSessionUsage,
+  stopRequestEffective,
   trackerPollAgeText,
   trackerRetryDelayMs
 } from './orchestrate.mjs';
@@ -4622,6 +4623,299 @@ test('unpause is exempt from the lease, so a fresh session can resume a paused r
   // not the driver still refuses.
   assert.equal(runAs('sess-paused', project, home, 'heartbeat').status, 7);
 });
+
+// --- bug-39: the STOP request -------------------------------------------
+// A stop is a second `kind` of control-file request, and the three readers
+// below are three genuinely different refusals: `stage` refuses every
+// transition, `watch` kills the child it holds the pid of, and `abort` takes
+// the lease from a driver the run file still believes in. The pause cases
+// further up this file are the control group for every one of them — a
+// `pause` file must go on doing exactly what it did before this key existed.
+
+// The stop counterpart of `effectiveControl` above: same run, same clock,
+// `kind: 'stop'`.
+function effectiveStop(home, project, over = {}) {
+  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  writeControl(home, project, { runId: run.runId, requestedAt: new Date().toISOString(), kind: 'stop', ...over });
+  return run;
+}
+
+test('stopRequestEffective and pauseRequestEffective are disjoint, and an absent kind reads as pause', () => {
+  const run = { runId: 'run-1', startedAt: '2026-09-05T10:00:00Z' };
+  const at = { requestedAt: '2026-09-05T11:00:00Z' };
+
+  // Absent: every control file written before bug-39, and every one of them
+  // meant a pause.
+  assert.equal(pauseRequestEffective({ runId: 'run-1', ...at }, run), true);
+  assert.equal(stopRequestEffective({ runId: 'run-1', ...at }, run), false);
+
+  // Explicit pause: identical to absent.
+  assert.equal(pauseRequestEffective({ runId: 'run-1', ...at, kind: 'pause' }, run), true);
+  assert.equal(stopRequestEffective({ runId: 'run-1', ...at, kind: 'pause' }, run), false);
+
+  // A stop is NOT a stronger pause — the pause predicate must answer false,
+  // or the run would take the cooperative path for a request whose whole
+  // point is that the cooperative path is not reaching it.
+  assert.equal(pauseRequestEffective({ runId: 'run-1', ...at, kind: 'stop' }, run), false);
+  assert.equal(stopRequestEffective({ runId: 'run-1', ...at, kind: 'stop' }, run), true);
+
+  // An unrecognised kind is not a stop. It reads as the absent case, which is
+  // the safe direction: the worst a misread stop can do is stop at the next
+  // boundary instead of immediately.
+  assert.equal(stopRequestEffective({ runId: 'run-1', ...at, kind: 'halt' }, run), false);
+  assert.equal(pauseRequestEffective({ runId: 'run-1', ...at, kind: 'halt' }, run), true);
+});
+
+test('a stop is refused by the same two clauses a pause is — wrong runId, or older than the run', () => {
+  const run = { runId: 'run-1', startedAt: '2026-09-05T10:00:00Z' };
+  const stop = (over) => stopRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z', kind: 'stop', ...over }, run);
+
+  assert.equal(stop({}), true);
+  assert.equal(stop({ runId: 'run-2' }), false, 'a request naming another run stopped this one');
+  assert.equal(stop({ requestedAt: '2026-09-05T09:00:00Z' }), false, 'a request older than the run was effective');
+  assert.equal(stop({ requestedAt: 'yesterday' }), false);
+  assert.equal(stopRequestEffective(null, run), false);
+  assert.equal(stopRequestEffective(undefined, run), false);
+  // `unpausedAt` is the later clock for a stop exactly as it is for a pause.
+  assert.equal(stopRequestEffective({ runId: 'run-1', requestedAt: '2026-09-05T11:00:00Z', kind: 'stop' }, { ...run, unpausedAt: '2026-09-05T12:00:00Z' }), false);
+});
+
+test('a stop refuses EVERY stage transition with exit 10, writing nothing — where a pause refuses only two', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  effectiveStop(home, project);
+  const before = fs.readFileSync(runFile(home, project));
+
+  // `merged` is the case the pause gate deliberately lets through: an item
+  // already in flight must not be stranded half-worked by a PAUSE. A stop is
+  // allowed to abandon it, which is the difference between the two.
+  const merged = run(project, home, 'stage', 'task-5', 'merged');
+  assert.equal(merged.status, 10, merged.stderr);
+  assert.match(merged.stderr, /stop was requested/);
+  assert.match(merged.stderr, /--abort/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage');
+
+  // And the two the pause gate does cover.
+  assert.equal(run(project, home, 'stage', 'task-5', 'inspecting').status, 10);
+  assert.equal(run(project, home, 'stage', 'task-5', 'reviewing').status, 10);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by a refused stage');
+});
+
+test('under a PAUSE, stage still exits 6 at the two gates and 0 everywhere else — bug-39 changed nothing here', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'preflight').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  effectiveControl(home, project);
+
+  // Past `dispatched`: a pause never blocks an item already in flight.
+  assert.equal(run(project, home, 'stage', 'task-5', 'inspecting').status, 0);
+  // And the gate itself, on a transition into one of the two stages.
+  assert.equal(run(project, home, 'stage', 'task-5', 'pending').status, 0);
+  const gated = run(project, home, 'stage', 'task-5', 'preflight');
+  assert.equal(gated.status, 6, gated.stderr);
+  assert.match(gated.stderr, /finish --status paused/);
+});
+
+test('abort takes the lease from a FRESH run another session drives when a stop is on file, and still refuses without one', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+  const file = runFile(home, project);
+  const before = fs.readFileSync(file, 'utf8');
+
+  // No stop: today's refusal, unchanged. This is the control group — the
+  // lease must not become a suggestion.
+  const refused = runAs('sess-b', project, home, 'abort');
+  assert.equal(refused.status, 7, refused.stderr);
+  assert.match(refused.stderr, /request a stop from the board/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused abort wrote to the run file');
+
+  // With a stop: the run is still `running` and still FRESH — nothing about
+  // the file changed — and the abort goes through anyway, because the
+  // evidence it acts on is the human act the control file records, not the
+  // heartbeat.
+  effectiveStop(home, project);
+  const out = runAs('sess-b', project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.equal(after.driver.sessionId, 'sess-b');
+});
+
+test('a stop un-strands the hand-run terminal, whose session identity is null', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+
+  // `me === null` compares unequal to any driver, so a person typing the
+  // command was refused where `assertDriver` — same file, same lease —
+  // deliberately warns and proceeds.
+  assert.equal(runAs(null, project, home, 'abort').status, 7);
+
+  effectiveStop(home, project);
+  const out = runAs(null, project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'aborted');
+});
+
+test('claim still exits 7 on a fresh run another session drives, stop on file or not', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', project, home, 'init', '--project', project).status, 0);
+
+  assert.equal(runAs('sess-b', project, home, 'claim').status, 7);
+  effectiveStop(home, project);
+  // The escape hatch is abort's alone. A resume taking a live run over on the
+  // strength of a stop would be the resume fighting the stop.
+  assert.equal(runAs('sess-b', project, home, 'claim').status, 7);
+});
+
+test('watch returns 10 and signals the pid it was given, rather than the budget elapsing', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+
+  // A process THIS TEST started, never a pattern — the same rule the tool
+  // itself follows. `sleep` so it is alive when watch looks and observable
+  // afterwards; it is killed in `t.after` whatever this case proves.
+  const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+  t.after(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* already gone — that is this case's success path */
+    }
+  });
+
+  const jsonl = path.join(home, 'watch.jsonl');
+  fs.writeFileSync(jsonl, '');
+  effectiveStop(home, project);
+
+  const out = run(project, home, 'watch', 'task-5', '--pid', String(child.pid), '--jsonl', jsonl, '--interval-ms', '1000', '--budget-ms', '30000');
+
+  assert.equal(out.status, 10, out.stderr);
+  assert.match(out.stderr, /stop was requested/);
+  // The child took the signal. `once('exit')` rather than a poll: the process
+  // is this test's own, so its exit is observable directly.
+  const [, signal] = await once(child, 'exit');
+  assert.equal(signal, 'SIGTERM');
+});
+
+test('stage <id> dispatched --pid records the pid, and a later stage without the flag leaves it alone', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const queued = () => JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-5');
+
+  // Null until a dispatch records one — `init` writes the key, so an older
+  // run file's absent one is the only other shape a reader ever sees.
+  assert.equal(queued().pid, null);
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b', '--pid', '4242').status, 0);
+  assert.equal(queued().pid, 4242);
+
+  // Every later stage re-stages the item without the flag, and clearing the
+  // pid there would take the child's address away from an abort at exactly
+  // the point the child is most likely to still be running.
+  assert.equal(run(project, home, 'stage', 'task-5', 'inspecting').status, 0);
+  assert.equal(queued().pid, 4242);
+
+  // A malformed pid is refused rather than dropped: the one thing worse than
+  // no recorded pid is a wrong one.
+  const bad = run(project, home, 'stage', 'task-5', 'reviewing', '--pid', 'nope');
+  assert.equal(bad.status, 1, bad.stderr);
+  assert.match(bad.stderr, /--pid must be a positive integer/);
+  assert.equal(queued().stage, 'inspecting', 'a refused stage was written anyway');
+});
+
+/**
+ * A live process whose `ps -o args=` line names `claude` — a shell script of
+ * that name, spawned by this test and killed by it. It stands in for the
+ * dispatched session because the guard under test reads the COMMAND LINE,
+ * which is the only thing distinguishing "the child this run started" from
+ * "whatever now owns a recycled pid". Nothing here is found by pattern: the
+ * pid is the one `spawn` returned.
+ */
+function spawnFakeClaude(t, home) {
+  const bin = path.join(home, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const script = path.join(bin, 'claude');
+  fs.writeFileSync(script, '#!/bin/sh\nsleep 30\n');
+  fs.chmodSync(script, 0o755);
+  const child = spawn(script, [], { stdio: 'ignore' });
+  t.after(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* already gone — that is the success path of the case that kills it */
+    }
+  });
+  return child;
+}
+
+test('abort signals a live recorded pid whose process is a claude session', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const child = spawnFakeClaude(t, home);
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b', '--pid', String(child.pid)).status, 0);
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /signalled 1 live session\(s\)/);
+  const [, signal] = await once(child, 'exit');
+  assert.equal(signal, 'SIGTERM');
+});
+
+test('abort refuses to signal a live pid whose process is NOT a claude session — the pid-reuse guard', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  // A pid the OS handed to something else between the dispatch and this
+  // abort. Signalling it would end somebody's unrelated work, which is the
+  // one outcome this guard exists to make impossible — so the refusal, not
+  // the kill, is what this case asserts.
+  const stranger = spawn('sleep', ['30'], { stdio: 'ignore' });
+  t.after(() => {
+    try {
+      stranger.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  });
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b', '--pid', String(stranger.pid)).status, 0);
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /signalled 0 live session\(s\)/);
+  assert.equal(stranger.killed, false);
+});
+
+test('abort leaves a TERMINAL item\'s recorded pid alone, however alive that pid now is', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const child = spawnFakeClaude(t, home);
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b', '--pid', String(child.pid)).status, 0);
+  // `merged` — the item is finished with, so its child exited long ago and
+  // the recorded number has had every chance to be handed to something else.
+  assert.equal(run(project, home, 'stage', 'task-5', 'merged').status, 0);
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /signalled 0 live session\(s\)/);
+  assert.equal(child.killed, false);
+});
+
 
 // --- bug-28: the per-item execute session is named ------------------------
 // Every other session this system spawns carries a `-n` display name

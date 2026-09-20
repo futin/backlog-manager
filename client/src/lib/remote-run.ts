@@ -27,13 +27,15 @@ export function isRemoteRun(run: object | null | undefined): boolean {
 
 /**
  * A remote run as the live entry the rows and the sheet read. `pastRuns` is
- * `0` because this machine holds no run files for it, and `pauseRequested` is
- * `false` because pause is a local file on the other machine. No `watchdog`:
- * this machine's watchdog never watches another machine's run. The `remote`
- * field survives the spread, which is what `isRemoteRun` reads.
+ * `0` because this machine holds no run files for it, and `pauseRequested`
+ * and `stopRequested` are `false` because both are local control files on the
+ * OTHER machine — a remote row is read-only here by construction, so neither
+ * could be true of anything this machine can act on. No `watchdog`: this
+ * machine's watchdog never watches another machine's run. The `remote` field
+ * survives the spread, which is what `isRemoteRun` reads.
  */
 export function remoteAsLive(run: RemoteRun): LiveRun {
-  return { ...run, pastRuns: 0, pauseRequested: false };
+  return { ...run, pastRuns: 0, pauseRequested: false, stopRequested: false };
 }
 
 /**

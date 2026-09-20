@@ -23,7 +23,7 @@ const fixture = rawFixture as OrchestratorRun;
  * parameter nobody would vary.
  */
 function payload(fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false }], starting: [], remote: [] };
+  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [] };
 }
 
 /**
@@ -35,7 +35,7 @@ function payload(fresh: boolean): OrchestratorRunsPayload {
  * lib/run-watchdog.ts) — the poll must still be running for it.
  */
 function payloadWith(status: OrchestratorRun['status'], fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false }], starting: [], remote: [] };
+  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [] };
 }
 
 /** Same shape as test/agents-client.test.ts's own `stub`: every call answers

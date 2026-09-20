@@ -4,6 +4,7 @@ import { projectLabel } from '../../lib/project-label';
 import { formatClock, formatSpanCompact, freshnessFraction, lastReportedEntry } from '../../lib/run-time';
 import { graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../../lib/run-watchdog';
 import { RunControls } from '../RunControls';
+import type { RunControlsChange } from '../RunControls';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { Dot } from '../ui/Dot';
@@ -119,7 +120,11 @@ export function WatchdogMonitor({
    *  the detail sheet's head reads, so the two controls cannot disagree about
    *  whether a resume is already on its way. */
   resuming: ReadonlySet<string>;
-  onChanged: (project: string, kind: 'pause' | 'cancel' | 'resume') => void;
+  /** `RunControlsChange` rather than a hand-written copy of its members
+   *  (bug-39): this prop forwards whatever that component reports, so spelling
+   *  the union out again here is a second copy of a vocabulary that has now
+   *  grown twice. */
+  onChanged: (project: string, kind: RunControlsChange) => void;
 }) {
   const { status, error } = useWatchdog();
 

@@ -284,7 +284,8 @@ describe('the kind records', () => {
     failed: true,
     exhausted: true,
     recovered: true,
-    disabled: true
+    disabled: true,
+    stopped: true
   };
   const kinds = Object.keys(every) as WatchdogEventKind[];
 

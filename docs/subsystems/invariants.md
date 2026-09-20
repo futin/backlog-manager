@@ -161,12 +161,14 @@ Spec: [2026-09-06-backlog-retro-design.md](../superpowers/specs/2026-09-06-backl
 
 **task-17.** Everything else under `~/.backlog-manager/` travels tool → server: `backlog.mjs` writes `registry.json`, `orchestrate.mjs` writes `run.json`, and
 this server reads both and writes neither. The pause request is the one file that travels the other way — the server writes
-`~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json` (`{ runId, requestedAt }`, atomically, `$BM_ORCH_CONTROL_HOME` to
-override), and `skills/backlog-orchestrate/tools/orchestrate.mjs` reads it at its two dispatch gates.
+`~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json` (`{ runId, requestedAt, kind }` since bug-39 — see "A stop is the
+control file's second kind" below; atomically, `$BM_ORCH_CONTROL_HOME` to override), and `skills/backlog-orchestrate/tools/orchestrate.mjs` reads it at its
+two dispatch gates.
 
 `POST /api/agents/pause` (`{ project, cancel? }`, origin-guarded, **independent of `BM_AGENTS`** and never calling the dashboard — a pause is a fact on this
 machine's disk, and gating it on that switch would mean a run started while agents were on could never be stopped after they were turned off) writes
-`~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json` — `{ runId, requestedAt }`, `$BM_ORCH_CONTROL_HOME` to override.
+`~/.backlog-manager/settings/orchestrator-control/<encodeURIComponent(project)>.json` — `{ runId, requestedAt, kind: 'pause' }`, `$BM_ORCH_CONTROL_HOME` to
+override. The `kind` key is bug-39's; **absent means `'pause'`**, so every file written before it existed goes on meaning what it always meant.
 
 **Why `settings/`, when it is not a setting.** That subdirectory is already the read-write nested mount inside an otherwise read-only `~/.backlog-manager` (see
 "The settings-file exception" below) — it is the only ground this process can write in the container. A control directory anywhere else would either be
@@ -182,8 +184,12 @@ re-stamping its own heartbeat every few turns.
 
 ```
 control.runId === run.runId &&
-Date.parse(control.requestedAt) > Date.parse(run.unpausedAt ?? run.startedAt)
+Date.parse(control.requestedAt) > Date.parse(run.unpausedAt ?? run.startedAt) &&
+control.kind !== 'stop'
 ```
+
+(The third clause is bug-39's, and it is what makes the two predicates DISJOINT rather than nested — `stopRequestEffective` is the same first two clauses plus
+`kind === 'stop'`.)
 
 Missing file, unparseable file, missing or non-string field, unparseable date → not effective, on both sides, without throwing. The `runId` clause stops a
 request that outlived its run from pausing the NEXT run of the same project. The timestamp clause is what RETIRES a request: `unpause` stamps `unpausedAt`, the
@@ -246,6 +252,96 @@ is unchanged.
 Resume button came back on the very next payload, ~90s before the resumed session could possibly have heartbeated, and a person looking at an unchanged strip
 clicked again: that is occurrence 1 of bug-19, three spawns inside ten seconds. Freshness costs the paused case nothing, because `unpause` writes `status`,
 `unpausedAt` and `updatedAt` from one clock reading, so a just-unpaused run is fresh by construction.
+
+## A stop is the control file's second kind, and nothing resumes a stopped run
+
+**bug-39.** A pause is a cooperative request read at two dispatch gates; it stops a run at the next item boundary and it deliberately cannot strand
+half-finished work. It is therefore invisible to exactly the run a person most wants to stop — a session that is dead, or forty minutes into a build, reaches
+no boundary. The filing's own shape: a driver was killed by hand, `orchestrate.mjs abort` exited `7` ("is alive … and driven by session …") because the run
+FILE was still fresh, and the watchdog resumed the run before the heartbeat could age out. Three mechanisms, and none of them a stop.
+
+The missing thing was a per-run fact meaning **a person ended this run** — not on the wire, not in the control file, not in the run file, not in the
+sweeper's inputs. This is that fact, in the one channel that already travels server → tool.
+
+**`PauseRequest.kind` is `'pause' | 'stop'`, and absent means `'pause'`.** Every control file written before bug-39 lacks the key and means exactly what it
+has always meant. One control fact per project stays ONE FILE: a stop overwrites a pause, a pause overwrites a stop, last write wins in both directions, and
+`cancel` deletes either. Two files would be two facts to reconcile and the reconciliation would be a third rule nobody reads. An unrecognised `kind` is
+DROPPED rather than refusing the file, which makes it read as a pause — the safe direction, since the worst a misread stop can then do is stop at a boundary
+instead of immediately.
+
+**The two predicates are disjoint, on both sides of the boundary, and duplicated rather than shared** (a skill's `tools/` may never import from the server —
+the same reason `pauseRequestEffective` was already duplicated). `stopRequestEffective` is the pause predicate's two clauses — `runId` pins the run,
+`requestedAt` post-dates `unpausedAt ?? startedAt` — plus `kind === 'stop'`. A stop is NOT a stronger pause: if the pause predicate also answered `true`, the
+run would take the cooperative path (`finish --status paused`) for a request whose whole point is that the cooperative path is not reaching it.
+
+**`POST /api/agents/stop`** is `pause`'s exact sibling — `SameOriginPostGuard`, `@HttpCode(200)`, body rebuilt field by field, `cancel === true` the only form
+honoured, independent of `BM_AGENTS` (recording the fact must work on a machine whose launcher is off), and refused unless the project has a `running` run,
+**fresh or stale alike**, because a stale `running` run is the case this bug is about. Where it differs: it then attempts ONE spawn, through the gate
+`resume()` uses, of `/backlog-orchestrate --abort`.
+
+**Recording the fact and ending the run are two outcomes, and only the first is guaranteed.** The response is
+`{ stopRequested, abortSession, abortRefused }`, and a gate refusal or a spawn failure is not an error — the request is on disk, the sweeper is already
+standing down on it and `abort` will already take the lease on the strength of it, so the refusal rides back in `abortRefused` naming the one command a person
+can run instead. A 5xx here would tell a caller the stop did not land when the half that matters did.
+
+**The spawn is unconditional, not "only for a stale run", and that IS the force stop.** If the real driver is alive, the abort session's `takeOverRun` write
+evicts it: its next command hits `assertDriver`, exits `7`, and stops immediately. That is the lease working as designed rather than being worked around,
+which is also why this route needs no pid for the driver and no kill channel to one.
+
+**`stopRequested: boolean` joins `pauseRequested` on the runs payload** — mandatory, derived per request from the SAME single control-file read (which is what
+makes the two mutually exclusive rather than merely usually so), stored nowhere, and `false` for a remote row. **Both sides read that one field; neither
+re-derives it, and it is deliberately NOT a third input to `watchdogStoodDown`.** That predicate answers "will the sweeper spawn", and the board renders its
+hand Resume on the same answer being TRUE — so folding a stop into it would offer a Resume on precisely the runs a person just stopped. One boolean on the
+wire, read verbatim by two readers, is stronger than two expressions that agree.
+
+**The coupling's biconditional narrows to an implication, and that is deliberate.** "The board offers a hand resume exactly when the sweeper will not spawn
+one" holds whenever no stop is on file; under a stop, neither side acts. The set of runs offering a Resume is now a SUBSET of the set the sweeper declines to
+spawn for, never a superset — which is the safe direction, and the only direction, since the hazard the coupling exists for is a second spawn.
+`test/watchdog-coupling.test.tsx` and `test/watchdog-sweep.test.ts` each sweep `COUPLING_ROWS` a second time under a stop rather than growing a
+`stopRequested` column: the answer does not vary by row, so a column would be one rule written out seven times.
+
+**Three readers in the tool, three different refusals.**
+
+- `stage` refuses **every** transition with exit `10`, nothing written — wider than the pause gate in both dimensions (every stage, and not only a
+  transition). A stop is allowed to abandon a half-finished worktree; that is the whole difference between it and a pause, and `abort`'s existing
+  marker-preservation rule (a worktree still carrying an in-progress `phase:` marker is LEFT IN PLACE with an `attention` entry) is what keeps that safe. The
+  re-stamp exemption does not apply either: the pause gate exempts re-stamps so a live child always has its session id recorded, and under a stop that child
+  is about to be killed.
+- `watch` kills the child **by the pid it was given** and returns `10`. This is the one place in the system that holds a live child's pid, which is why the
+  kill belongs here and nowhere else; it is never a pattern, and the signal is `SIGTERM` because the child owns a transcript `usage`/`denials` still read.
+  The check runs BEFORE the tick's heartbeat write, so a run being stopped does not have its `updatedAt` pushed forward by the very tick that noticed.
+- `abort` may TAKE the lease. `takeOverRun(dir, run, force)` gained a **required third parameter, no default** — `runClaimBlock`'s rule for `starting`
+  (bug-21), for the identical reason: a default would let a future caller silently opt out. `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`
+  unchanged, so a resume can still never steal a live run. A recorded control-file request is evidence of a human act that passed the origin guard, which is
+  exactly the evidence the tool has no other way to get — and deliberately not a `--force` flag, which every automated caller could reach for. It also
+  un-strands the hand-run terminal: the refusal's condition is `driver.sessionId !== me` and a person typing the command has `me === null`.
+
+**Exit `10` is `6`'s sibling and not `6` itself.** A `6` means "stop at the next item boundary, then `finish --status paused`"; a `10` means "stop now and go
+to `--abort`". Different commands, different endings, and a run that collapsed them would finish the very item a person asked it to abandon.
+
+**`RunQueueItem.pid` exists because a stop whose driver is already dead must still be able to reach an orphaned executor.** `run.driver` is
+`{ sessionId, at }` and a session id is not a process, so until this nothing anywhere held an address for the child. Written by
+`stage <id> dispatched --pid <p>` through the same `applyQueueItemFields` path `--session` uses, from the pid SKILL.md §4 already writes to
+`logs/<id>.pid` — nothing scans `logs/`, which is why the number has to reach the run file. `cmdAbort` signals it only when the item is non-terminal,
+`pidAlive(pid)` holds, and `ps -o args= -p <pid>` names a `claude` process: the cheap guard against the pid-reuse TOCTOU `pidAlive`'s own comment documents.
+That last guard's bias is the OPPOSITE of `pidAlive`'s, deliberately — a `ps` that fails or names something else is a decision NOT to signal, because the cost
+of not killing is a stray process a person can find and the cost of killing wrongly is somebody else's work. Mandatory in the TYPE (the compiler is the
+fixture checklist) and absent from every run file written before bug-39, which do not contradict: the one reader guards with `Number.isInteger` before it goes
+anywhere near a signal.
+
+**The sweeper's own branch is an early return placed AFTER `fresh` and BEFORE the stand-down branch.** After `fresh`, because a stopped run still heartbeating
+is a run whose driver has not noticed yet — it will, within one `watch` tick. Before the stand-down branch, because a stop is a stronger refusal than either
+of those two: `off` and `exhausted` both mean "not right now, and a person may hand-resume", while a stop means "not at all, by that person's own request",
+and reporting the weaker reason would invite exactly the click it is there to prevent. `'stopped'` is an eighth `WatchdogEventKind`, logged once per condition
+behind `entry.stoppedLogged` — the ring buffer cannot answer "did I already say this". `AgentsService.resume()` refuses a stopped run with an **uncoded** 409
+for the same reason the resume lock's is uncoded: `RUN_IN_PROGRESS_CODE` is treated as a silent success by both callers, and this one needs a person to cancel
+the stop.
+
+**What was rejected, and why.** A sixth `RunStatus` (`stopped`): `aborted` already means "a person ended this run", and a second spelling would reach every
+exhaustiveness site for no fact anyone could act on differently — the same reasoning that keeps `crashed` from being one. The server writing `run.json`:
+flatly out, one writer. `abort --force`: available to every automated caller, including a confused `--resume` session, and it would reduce the lease to a
+suggestion. The server killing the driver process: it has no pid and no kill channel, and it must never pattern-kill. Making `pause` bite mid-item: that is
+what the two-gate placement deliberately rules out, and widening it would make every pause abandon a half-finished worktree.
 
 ## `backlog-orchestrate` is the only skill that commits or merges
 
@@ -1528,13 +1624,21 @@ same reason. `WatchdogStateService.spawningEnabled(config)` is the one answer to
 what the sweeper's own gate calls, rather than the sweeper re-testing `config.enabled` under an env check made separately in `sweep()`; that was the second copy
 of a vocabulary, and CLAUDE.md's `isAgentAction` invariant already says which copy goes stale. And `exhausted` is **derived**, never stored — see below.
 
+**bug-39 narrows the biconditional to an implication, in the safe direction.** A stop request suppresses BOTH sides: the sweeper returns before it reaches
+this predicate at all, and `RunControls` draws no Resume in any branch. So "offers a Resume" is now a SUBSET of "the sweeper will not spawn", never a
+superset — the hazard the coupling exists for is a SECOND spawn, and a client offering none cannot cause one. `stopRequested` is deliberately not a third
+input here: this predicate being TRUE is what makes the board offer the control, so a stop expressed through it would light the button up on exactly the runs
+a person just stopped. See "A stop is the control file's second kind" above.
+
 Pinned by two suites and one table, because no single `it` can hold both halves (one needs jsdom and a React tree, the other a real Nest app):
 `test/watchdog-coupling.test.tsx` drives the predicate against every row of `test/helpers/watchdog-coupling.ts`, renders `RunControls` for a crashed run in each
 row's state and asserts the Resume appears on exactly that row's verdict, and pins WHO reads `watchdogStoodDown` as an exact set.
 `test/watchdog-sweep.test.ts`'s own table case arranges the sweeper for the same rows and asserts it spawns iff the row does not stand down. Each row carries a
 hand-checked `standsDown` literal rather than a derived one: without it, both halves would assert only that they agree with `watchdogStoodDown`, which a
 `watchdogStoodDown` broken into a constant would also satisfy — the two sides would move together and stay "coupled" while saying something false. Sharing a
-fixture across suites is against this repo's usual convention, and is the point here: two copies of the table would be two copies of the rule.
+fixture across suites is against this repo's usual convention, and is the point here: two copies of the table would be two copies of the rule. Each
+suite also sweeps the same rows a SECOND time under a stop request, rather than the table growing a `stopRequested` column: the answer under a stop does not
+vary by row, so a column would be one rule written out seven times.
 
 ### `exhausted` is derived from `attempts` and `maxAttempts`, never stored
 

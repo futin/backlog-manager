@@ -677,6 +677,7 @@ function fullQueueItem(id: string, stage: RunStage): RunQueueItem {
     sessionId: null,
     worktree: null,
     branch: null,
+    pid: null,
     permissionMode: null,
     fixLoops: 0,
     stageAt: {},

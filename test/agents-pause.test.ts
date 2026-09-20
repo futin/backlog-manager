@@ -142,7 +142,10 @@ describe('POST /api/agents/pause', () => {
     expect(res.body).toEqual({ pauseRequested: true });
     expect(readPauseRequest(projectPath, controlRoot)).toEqual({
       runId: fixture.runId,
-      requestedAt: expect.any(String)
+      requestedAt: expect.any(String),
+      // bug-39 — spelled out rather than left to the absent-means-pause
+      // default, so a file this route wrote says which of the two it is.
+      kind: 'pause'
     });
   });
 

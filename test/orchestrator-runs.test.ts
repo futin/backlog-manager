@@ -143,7 +143,7 @@ describe('GET /api/orchestrator/runs', () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     // toEqual over the whole object (not just a `fresh`/`pastRuns` check) is
     // what proves the queue — and every other field — survives verbatim.
-    expect(res.body.runs).toEqual([{ ...run, fresh: true, pastRuns: 0, pauseRequested: false }]);
+    expect(res.body.runs).toEqual([{ ...run, fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false }]);
   });
 
   it("carries a run's merge-mode fields through untouched when they already disagree", async () => {

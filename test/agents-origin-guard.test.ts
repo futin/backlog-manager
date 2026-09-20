@@ -117,12 +117,12 @@ describe('the agents POST guard', () => {
       };
     }
     const verb = route.slice('/api/agents/'.length);
-    return verb === 'orchestrate' || verb === 'resume' || verb === 'pause' ? { project: projectPath } : verb === 'watchdog/config' ? { enabled: true } : body();
+    return verb === 'orchestrate' || verb === 'resume' || verb === 'pause' || verb === 'stop' ? { project: projectPath } : verb === 'watchdog/config' ? { enabled: true } : body();
   };
 
   // This array, not a count in CLAUDE.md's prose, is where the guarded set
-  // actually lives — six agents routes (`pause` is task-17's) and the seven
-  // item-write routes task-46 added.
+  // actually lives — the agents routes (`pause` is task-17's, `stop` is
+  // bug-39's) and the seven item-write routes task-46 added.
   const GUARDED = [
     '/api/agents/plan',
     '/api/agents/dispatch',
@@ -130,6 +130,7 @@ describe('the agents POST guard', () => {
     '/api/agents/resume',
     '/api/agents/watchdog/config',
     '/api/agents/pause',
+    '/api/agents/stop',
     '/api/items/create',
     '/api/items/state',
     '/api/items/claim',

@@ -125,7 +125,8 @@ needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-or
 
 - **The registry** — `backlog.mjs` upserts on `init`/`new` and removes on `unregister`; everything else in this repo only reads it.
 - **Each project's store** — the skills are its only writers, one Markdown file per item.
-- **The run file** — `orchestrate.mjs` writes it; the API reads it. The pause request travels the other way, server → tool, and is the one file that does.
+- **The run file** — `orchestrate.mjs` writes it; the API reads it. The control file travels the other way, server → tool, and is the one file that does: one
+  per project, holding either a PAUSE (stop at the next item boundary) or a STOP (end the run now, bug-39), never both.
 - **The retro home** — `retro.mjs record` writes `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`) and nothing else does, once per sweep and refusing to overwrite
   an existing record; `retro.mjs sweep` only reads it back for the deltas. Nothing in the server or the client reads it at all — a board view over the newest
   record is a separate design, once records exist.

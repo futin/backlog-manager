@@ -46,6 +46,7 @@ function queueItem(overrides: Partial<RunQueueItem> = {}): RunQueueItem {
     sessionId: 'session-1',
     worktree: '/abs/project/.worktrees/bug-1',
     branch: 'backlog/bug-1',
+    pid: null,
     permissionMode: 'auto',
     fixLoops: 0,
     stageAt: { pending: '2026-08-31T08:40:03Z', merged: '2026-08-31T08:59:55Z' },

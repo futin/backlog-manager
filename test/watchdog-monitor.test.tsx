@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { WatchdogMonitor } from '../client/src/components/runs/WatchdogMonitor';
+import type { RunControlsChange } from '../client/src/components/RunControls';
 import { projectLabel } from '../client/src/lib/project-label';
 import { formatClock, formatSpanCompact } from '../client/src/lib/run-time';
 import { watchdogClause, WATCHDOG_KIND_GLYPH, WATCHDOG_KIND_TONE } from '../client/src/lib/run-watchdog';
@@ -52,6 +53,7 @@ function queueItem(id: string, stage: RunStage): RunQueueItem {
     sessionId: null,
     worktree: null,
     branch: null,
+    pid: null,
     permissionMode: null,
     fixLoops: 0,
     stageAt: {},
@@ -82,6 +84,7 @@ function liveRun(over: Partial<LiveRun> = {}): LiveRun {
     fresh: true,
     pastRuns: 0,
     pauseRequested: false,
+    stopRequested: false,
     ...over
   };
 }
@@ -129,7 +132,7 @@ async function renderMonitor(
   over: Partial<{
     gateFor: (project: string) => { canResume: boolean; blockedReason: string | null };
     resuming: ReadonlySet<string>;
-    onChanged: (project: string, kind: 'pause' | 'cancel' | 'resume') => void;
+    onChanged: (project: string, kind: RunControlsChange) => void;
   }> = {}
 ): Promise<jest.Mock> {
   const fetchMock = stubFetch(watchdog);

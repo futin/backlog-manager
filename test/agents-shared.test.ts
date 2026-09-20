@@ -595,7 +595,7 @@ type RunPayload = OrchestratorRunsPayload['runs'][number];
  *  stays the real one, with only the two fields each case varies replaced. */
 function runWith(stage: RunStage, over: Partial<RunPayload> = {}): RunPayload {
   const entry: RunQueueItem = { ...runFixture.queue[0], id: 'bug-1', stage };
-  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, ...over };
+  return { ...runFixture, project: '/abs/alpha', queue: [entry], fresh: true, pastRuns: 0, pauseRequested: false, stopRequested: false, ...over };
 }
 
 /** One starting-run placeholder (task-14) for `project`, defaulting to the

@@ -29,6 +29,7 @@ function runFor(ids: string[], stage: RunStage, over: Partial<RunPayload> = {}):
     fresh: true,
     pastRuns: 0,
     pauseRequested: false,
+    stopRequested: false,
     ...over
   };
 }

@@ -12,6 +12,7 @@ import type {
   PermissionMode,
   QuestionMode,
   StartingRun,
+  StopResult,
   WatchdogConfig,
   WatchdogStatus
 } from '../../../shared/types';
@@ -396,6 +397,42 @@ export async function pauseOrchestrate(project: string): Promise<PauseResult> {
 export async function cancelPauseOrchestrate(project: string): Promise<PauseResult> {
   return unwrap<PauseResult>(
     await fetch('/api/agents/pause', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project, cancel: true })
+    })
+  );
+}
+
+/**
+ * The Runs detail head's "Stop run" control (bug-39) — `POST
+ * /api/agents/stop`. `pauseOrchestrate`'s sibling, and separate from it for
+ * exactly the reason the pause/cancel pair is a pair of functions rather than
+ * one with a flag: a stop and a pause are different requests with different
+ * consequences, and neither may be reachable from the other by a misread
+ * argument.
+ *
+ * The 200 body carries THREE facts, not one — the request landed, and
+ * separately whether an `--abort` session was started for it. The caller
+ * renders the second only when it is a refusal; see `StopResult`.
+ */
+export async function stopOrchestrate(project: string): Promise<StopResult> {
+  return unwrap<StopResult>(
+    await fetch('/api/agents/stop', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project })
+    })
+  );
+}
+
+/** The withdrawal half of `stopOrchestrate` above — `cancel: true` is the only
+ *  form the server honours (a string `'true'` is read as a stop), so it is a
+ *  literal here rather than anything derived from a caller. It spawns nothing:
+ *  cancelling a stop asks for the run to carry on, which is `resume`'s job. */
+export async function cancelStopOrchestrate(project: string): Promise<StopResult> {
+  return unwrap<StopResult>(
+    await fetch('/api/agents/stop', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project, cancel: true })

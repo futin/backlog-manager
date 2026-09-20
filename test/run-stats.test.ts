@@ -51,6 +51,7 @@ function archiveItem(over: Partial<ArchiveQueueItem> = {}): ArchiveQueueItem {
     sessionId: null,
     worktree: null,
     branch: null,
+    pid: null,
     permissionMode: null,
     fixLoops: 0,
     stageAt: {},
