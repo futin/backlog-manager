@@ -82,6 +82,13 @@ summary to **stderr** and exiting `1` if either failed. Both halves are load-bea
 An orchestrator run verifies an item with `test`, `typecheck` and `build` resolved off [`package.json`](../../package.json), so those three are the real gate —
 the same three a human types.
 
+`typecheck` passes `--tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo`, and that flag is load-bearing rather than tuning. `tsconfig.json` sets
+`incremental: true` with `outDir: ./dist`, so even `tsc --noEmit` writes `dist/tsconfig.tsbuildinfo` — and `dist/` belongs to **root**, because the compose
+stack's server container builds into the same bind-mounted tree as the user that runs inside it. A host `pnpm run typecheck` then dies on
+`error TS5033: … EACCES`, with nothing wrong with the code. Redirecting the file to `node_modules/` puts it back under the host user's ownership (and inside an
+already-ignored directory). Deleting `dist/` does not fix it: the next `docker compose up` recreates it as root. Nothing in the image runs `typecheck`, so the
+flag only ever affects the host.
+
 Suites run in band, on a pinned timezone, with `BM_WATCHDOG=off` defaulted for every suite (`test/helpers/env.ts`, wired through `setupFiles`). That default is
 not tidiness: any suite that builds `AppModule` arms the watchdog's bootstrap scan, which reads the developer's real orchestrator state directory unless the
 suite overrode `BM_ORCH_HOME` — and with `BM_AGENTS` genuinely on in that shell, a crashed run sitting there would have `pnpm test` start a real agent session
