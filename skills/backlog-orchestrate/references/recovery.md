@@ -190,6 +190,12 @@ first — a pause needs no lease — and abort the paused run.
 - **Marker present** → it leaves that item **completely alone**, worktree _and_ branch, and pushes an `attention` entry naming the absolute worktree path, the
   exact `backlog.mjs stop <id>` to run, and the exact `worktree remove` / `branch -D` commands to finish with afterwards.
 
+**In a tracker project it then gives every claim the run still holds back**, with the reason `aborted` and this run's bill, before it ends the run — every
+queue item that carries a claim and has not reached a stage that already released it, the marker-preserved ones included. Without that release the issue keeps
+an unreleased claim comment, the `in-progress` label and the assignee, and the item's dispatch control stays disabled on every machine's board: an unreleased
+claim going stale entitles the next run to contest it but does not clear what the board reads. A failed release is one stderr line and never fails the abort.
+A files run makes no request at all. (For an item stranded by an abort from an older build, `backlog.mjs stop <id> --abandon` releases its claim by hand.)
+
 Then it sets the run to `aborted` and prints a one-line summary of three counts: what it removed, how many branches it kept because their items were `branched`,
 and what it left in place with a marker.
 

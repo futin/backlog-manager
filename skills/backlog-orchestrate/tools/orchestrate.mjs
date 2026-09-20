@@ -1797,7 +1797,12 @@ function claimCountersFor(run, item) {
  * reason: by the time this runs the item has REACHED its terminal stage, and
  * on the `merged` path the issue is already closed. Failing the command would
  * report a finished item as unfinished. A dangling live claim goes stale on
- * its own within `CLAIM_STALE_MS`, which is the protocol's own repair.
+ * its own within `CLAIM_STALE_MS`, which is the protocol's own repair — of the
+ * PROTOCOL only. Going stale entitles the next contestant to retire the claim;
+ * it does not clear what the board reads off it (bug-40), so the repair is
+ * worth relying on for a rare failed call and was never worth relying on for a
+ * release nobody makes. `cmdAbort` is this function's second caller for that
+ * reason.
  */
 function trackerRelease(run, item, reason, counters = undefined) {
   if (item.claim === undefined) return;
@@ -4410,6 +4415,38 @@ function cmdAbort() {
       }
     }
     if (item.worktree || (item.branch && item.stage !== 'branched')) removedIds.push(item.id);
+  }
+
+  // bug-40, tracker only: give back every claim this run still holds, before
+  // `cmdFinish` below stamps its outcome on one of them. Until this, the only
+  // caller of `trackerRelease` was the `stage` path's `CLAIM_RELEASE_STAGES`
+  // check, and an abort ends the RUN rather than walking each item through a
+  // terminal stage — so every claimed item was stranded with an unreleased
+  // claim, the `in-progress` label and the assignee still on the issue.
+  //
+  // "Goes stale on its own in 15 minutes" (task-48's stated reason for making
+  // this a non-goal) is true of the claim protocol's CONTEST rule and false of
+  // the board: the mapper reads `started`/`phase` off any unreleased claim,
+  // fresh or stale, and `progressBlock` gates on `started` being present
+  // rather than on its age. So the dispatch control stayed disabled on every
+  // machine indefinitely, not for `CLAIM_STALE_MS` and then clear.
+  //
+  // "Still holds" is the same predicate `cmdHeartbeat` uses, including the
+  // marker-preserved items above: their worktree was left in place, but the
+  // run that claimed the issue is over either way. The reason is `'aborted'`
+  // and deliberately NOT a `RunStage` — `remote-runs.util.ts` reads a release
+  // reason as the item's stage when it happens to be one, so this spelling
+  // leaves the item's last reported stage intact on every other machine's
+  // Runs page. Counters are billed the ordinary way (no `counters` argument,
+  // so `trackerRelease` reads them through `claimCountersFor`): the session
+  // did the work it did up to the abort. Best-effort per item, so a refusal
+  // is one stderr line and this command still exits 0 having written
+  // `{"status":"aborted"}` — `run.json` is the journal of record and the
+  // claim is a published copy.
+  if (projectSource(projectRoot) === 'github') {
+    for (const item of run.queue) {
+      if (item.claim !== undefined && !CLAIM_RELEASE_STAGES.has(item.stage)) trackerRelease(run, item, 'aborted');
+    }
   }
 
   run.updatedAt = nowISO();

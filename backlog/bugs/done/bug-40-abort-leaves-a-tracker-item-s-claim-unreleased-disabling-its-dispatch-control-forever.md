@@ -4,9 +4,12 @@ title: abort leaves a tracker item's claim unreleased, disabling its dispatch co
 created: 2026-09-20
 tags: tracker, github, orchestrator, claims, abort
 runner-fix: true
-updated: 2026-09-20T10:04:22Z
+updated: 2026-09-20T11:19:03Z
 groom-elapsed: 68
 groom-tokens: 15974
+started: 2026-09-20T11:01:00Z
+execute-elapsed: 1083
+execute-tokens: 106828
 ---
 
 ## Symptom
@@ -95,3 +98,78 @@ missing release rather than the way the stamp is read.
 Then correct task-48's Decision 11 where it says a leftover claim "goes stale on its own in 15 minutes": that is true of the claim protocol's contest rule and
 false of the board, which is what made this a non-goal in the first place.
 
+
+## Outcome
+
+2026-09-20 — fixed as the `## Fix` section specified, with no deviation.
+
+`cmdAbort` (`skills/backlog-orchestrate/tools/orchestrate.mjs`) now walks its queue a second time, after the git teardown loop and before `writeRunAtomic` /
+`cmdFinish`, and calls `trackerRelease(run, item, 'aborted')` for every item the run still holds — `item.claim !== undefined && !CLAIM_RELEASE_STAGES.has(item.stage)`,
+the same predicate `cmdHeartbeat` uses. The whole pass is gated on `projectSource(projectRoot) === 'github'`, so a files run's path is unchanged. No `counters`
+argument is passed, so `trackerRelease` bills the ordinary way through `claimCountersFor`. `trackerRelease` gained a second caller and nothing else changed in it.
+
+The four things the plan singled out all hold, and each has a case:
+
+- the reason is `'aborted'`, which is deliberately not a `RunStage`, so `deriveRemoteRuns` falls through to `state.stage` and another machine's Runs page keeps
+  the item's last reported stage;
+- the releases land before `cmdFinish`'s `finished` stamp (asserted as an exact request order);
+- a refused release is one stderr line and `abort` still exits `0` having written `{"status":"aborted"}`;
+- a files run makes no API request on any path.
+
+`progressBlock`, the `GithubSource` mapper and `GithubSource.release`'s decision to leave the assignee alone are all untouched, as the plan required.
+
+### Verification
+
+`node --test --test-name-pattern "bug-40" skills/backlog-orchestrate/tools/orchestrate.test.mjs`:
+
+```
+✔ bug-40: abort releases every claim the run still holds, reason aborted, before it finishes the run (1584.372161ms)
+✔ bug-40: a refused release is one stderr line and abort still exits 0 with the run aborted (1109.142689ms)
+✔ bug-40: a files run-s abort makes no API request on any path (175.838705ms)
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+```
+
+`pnpm test` (both runners) — the node runner:
+
+```
+ℹ tests 665
+ℹ pass 664
+ℹ fail 1
+
+✖ failing tests:
+✖ a submodule working tree resolves to itself and is never refused — commondir, not ".git is a file", is the discriminator
+```
+
+and jest:
+
+```
+Test Suites: 3 failed, 124 passed, 127 total
+Tests:       5 failed, 2064 passed, 2069 total
+```
+
+**All six failures are pre-existing and none is reachable from this change**, each proved rather than assumed:
+
+- the submodule case was run against `git show HEAD:…/orchestrate.mjs` copied over the working file and failed identically (it is an environment/`git submodule`
+  fixture problem, not a `resolveProjectRoot` one);
+- the five jest failures (`board-live-cards`, `dispatch-button`, `supertest-bind`) were re-run with every file of this diff reverted to `HEAD` — `Tests: 5
+  failed, 60 passed, 65 total`, the same five — and none of those suites reads any file this diff touches. This diff changes no TypeScript at all; `pnpm run
+  typecheck` is clean.
+
+Contract sweep: 7 sites updated (CLAUDE.md's tracker-claim invariant; docs/subsystems/invariants.md — the claim section's lead sentence, the "a failed release
+is one stderr line too" posture whose "goes stale, which is the protocol's own repair" rationale was the false half, and a new sub-entry under "What the rest of
+the run publishes"; docs/subsystems/skills.md's tracker table row; skills/backlog-orchestrate/SKILL.md's tracker bullet and §10; skills/backlog-orchestrate/
+references/recovery.md's description of what `abort` walks; backlog/tasks/done/task-48-*.md Decision 11; and `trackerRelease`'s own doc comment in
+orchestrate.mjs, which carried the same "goes stale on its own — the protocol's own repair" sentence).
+
+Two sites left standing on purpose. `docs/superpowers/specs/2026-09-17-tracker-backed-backlog-design.md` §6.4 still says "a terminal stage releases it", and the
+`.worktrees/task-47/` copies of several of the files above still carry the old text. The specs and plans under `docs/superpowers/` are dated design records of
+what was decided at the time — CLAUDE.md describes them as what the repo "was built from" — and editing one to match a later fix would destroy the record the
+bug's own history depends on; `.worktrees/task-47` is another tree entirely and this skill writes only under the root `show` resolved.
+
+Red proof: 2 tests went red with the change reverted (the release-set/order case failed with `actual: []` against `expected: [503, 505]`; the refusal case
+failed on an empty stderr). The third — "a files run's abort makes no API request on any path" — stays green with the change reverted, and deliberately so:
+it pins the invariant's "byte-identical output" half, which is a statement that this change did **not** reach the files path, so there is no production change
+for it to go red without. It would go red only if a future edit dropped the `projectSource` gate *and* `trackerRelease`'s `item.claim === undefined` early
+return, which is exactly the regression worth a standing guard.

@@ -2535,8 +2535,9 @@ commands, so anything that weakens or routes around the normalisation needs prov
 ## The driver owns a tracker item's claim for the whole item
 
 Task-47, spec §7.1. On a tracker project the orchestrator's driver claims an item's issue at `stage <n> preflight` — **before the worktree exists** — and
-releases it at the item's terminal stage. The dispatched `backlog-execute` session never runs `start`, `stop`, `heartbeat`, `move` or `comment` on the item at
-all, which is the exact opposite of the files arrangement, where execute stamps the item file itself.
+releases it at the item's terminal stage, or at `abort` for anything that never reached one (bug-40, below). The dispatched `backlog-execute` session never
+runs `start`, `stop`, `heartbeat`, `move` or `comment` on the item at all, which is the exact opposite of the files arrangement, where execute stamps the item
+file itself.
 
 **The reason is the worktree.** A files item's marker is a line in a file the execute session has in its own tree. A tracker item's marker is a comment on an
 issue, and the session that would post it lives in a directory with no `run.json`, no run id, and no way to say which run it belongs to — so a claim it posted
@@ -2562,7 +2563,10 @@ decision depends on cannot stay an opaque blob. `state` is round-tripped verbati
 - **A failed heartbeat is one stderr line and never fails the command.** `run.json` is the journal of record on this machine; the claim's `state` is a
   published copy. Failing a `stage` call over a copy would cost this machine an item mid-flight for a write nothing local depends on.
 - **A failed release is one stderr line too.** By then the item has reached its terminal stage and, on the `merged` path, the issue is already closed; refusing
-  would report a finished item as unfinished. A dangling live claim goes stale within `CLAIM_STALE_MS`, which is the protocol's own repair.
+  would report a finished item as unfinished. A dangling live claim goes stale within `CLAIM_STALE_MS`, which is the protocol's own repair — **of the protocol
+  only.** Going stale entitles the next contestant to retire the claim; it does not remove the `started` stamp the board reads, so the cost of a release that
+  never happened is paid on every machine's board until a person runs `backlog.mjs stop <id> --abandon`. That asymmetry is why bug-40 made `abort` release
+  rather than leaving its claims to age out: a rare failed release is worth the trade, a systematic one is not.
 - **A failed CLOSE is exit `9`, with the stage NOT written and no release sent.** That one is not a copy — it is the only record anywhere that the item is done
   — and an item staged `merged` whose issue is still open is an issue nobody ever closes, because the run has moved on and no later command looks back.
 
@@ -2609,6 +2613,28 @@ Three more commands publish to the issue, each after the run file is written and
   a user of their own `@mention`, and the token is the user's own; the fix for that is a GitHub App identity (spec §15), not a workaround here.
 - **`heartbeat` heartbeats every claim the run still holds** — `claim` set and the stage not in `CLAIM_RELEASE_STAGES`, so `needs-answers` is included. Before
   this it stamped only `run.json`, and a review longer than fifteen minutes let the in-flight claim go stale and read as crashed on another machine.
+
+And **`abort` gives every claim the run still holds back** (bug-40) — the same "still holds" predicate `heartbeat` uses, over the same queue, immediately
+before `abort` delegates to `cmdFinish`. Until bug-40 the only caller of `trackerRelease` was the `stage` path's `CLAIM_RELEASE_STAGES` check, and an abort
+ends the RUN rather than walking each item through a terminal stage, so every claimed item was left with an unreleased claim, the `in-progress` label and the
+assignee still on its issue. Four things this entry pins, because each looks arbitrary from the code alone:
+
+- **The reason is `'aborted'`, and it must not be a `RunStage`.** `deriveRemoteRuns` reads a release reason as the item's stage when it happens to be one and
+  otherwise falls through to `state.stage`, so this spelling leaves the item's last reported stage intact on every other machine's Runs page.
+- **The release runs before `finish`.** `finish` stamps `finished` on the last-touched CLAIMED item, and `item.claim` survives a release, so the stamp still
+  lands — on an already-released claim, which is exactly the case `GithubSource.heartbeat` accepts and where it sets `finished` and nothing else.
+- **Counters are billed the ordinary way**, read through `claimCountersFor` rather than omitted: the session did the work it did up to the abort. This is not
+  `backlog.mjs stop --abandon`'s dead-interval case.
+- **The marker-preserved item is released too.** `abort`'s one branch that skips an item's git teardown — a worktree still carrying an in-progress `phase:`
+  marker — cannot fire for a tracker item at all (there is no item file for `findItemFilePath` to find), and an item left in place still needs its claim back,
+  because the run that held it is over either way. A files run makes no request on any path, since `trackerRelease` returns immediately with no `claim`.
+
+**Why this was worth a bug rather than the non-goal task-48 recorded it as.** The non-goal's stated rationale was that leftover claims "go stale on their own
+in 15 minutes". That is true of the claim protocol's CONTEST rule and false of the board: the mapper fills `BacklogItem.started` from any unreleased claim,
+fresh or stale, and `progressBlock` gates on `started` being present rather than on its age, so the item's dispatch control was disabled on every machine
+indefinitely rather than for `CLAIM_STALE_MS`. The defect was the missing release, not the way the stamp is read — `progressBlock` and the mapper are
+deliberately unchanged, and so is `GithubSource.release` leaving the assignee alone as the record of who last worked the item. Items stranded by a past abort
+are recovered by hand with `backlog.mjs stop <id> --abandon`; there is no migration.
 
 And one command READS the issue: **`reconcile` adds a `claim` column** in a tracker project — `this-run` / `other` / `released` / `none` / `unknown` — and
 `other` (another run's LIVE claim) turns the suggestion into `skip`. A files run's report has no `claim` key at all.

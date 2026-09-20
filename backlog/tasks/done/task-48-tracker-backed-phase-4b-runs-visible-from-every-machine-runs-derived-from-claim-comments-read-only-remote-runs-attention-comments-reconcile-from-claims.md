@@ -125,6 +125,13 @@ disagree, the code wins, and you record the disagreement in `## Outcome`.
 11. **Out of scope, recorded so nobody thinks it was forgotten:**
     - releasing a finished run's leftover `needs-answers` claims, which go stale on their own in 15 minutes;
     - `abort` releasing claims;
+
+    **Corrected 2026-09-20 by bug-40.** The second bullet was wrong and the first is under-stated, on the same mistake: "go stale on their own in 15 minutes"
+    is true of the claim protocol's CONTEST rule and false of the board. Going stale entitles the next run to retire the claim; it does not remove the
+    `started` stamp the mapper fills from any unreleased claim, and `progressBlock` gates on that stamp being present rather than on its age — so the item's
+    dispatch control stayed disabled on every machine indefinitely, not for `CLAIM_STALE_MS` and then clear. `abort` now releases every claim the run still
+    holds, with the reason `aborted`. The `needs-answers` bullet is left as it was: that case is a finished run, not an aborted one, and has not been
+    re-examined.
     - cross-machine pause/resume (spec §15);
     - showing remote runs on the Board's run chip. The Runs page is the §13 visible result; the Board already shows a remote claim on the card through
       `started`/`phase`.

@@ -98,7 +98,7 @@ the suite pins by driving a whole stage sequence with `BM_API_PORT` pointed at a
 | the queue            | candidates from `GET /api/items` filtered to this project; bodies from `GET /api/items/body`; the UNCHANGED `gateItem` verdicts. No `<base>` read, so no "not committed on `<base>`" skip. `hoisted` reads the `runner-fix` LABEL |
 | ids                  | the BARE issue number (`31`). `--ids` accepts nothing else, naming the shape it wants                                                                 |
 | `init`               | `git pull --ff-only origin <base>` in the tree holding the base, BEFORE the queue is built. A failure refuses the init, nothing written                |
-| the claim            | `stage <n> preflight` claims; every field-changing command heartbeats the state; a terminal stage releases with this run's bill; `stage <n> merged --outcome <file>` closes the issue |
+| the claim            | `stage <n> preflight` claims; every field-changing command heartbeats the state; a terminal stage releases with this run's bill, and so does `abort` for everything the run still holds (reason `aborted`, bug-40); `stage <n> merged --outcome <file>` closes the issue |
 | publishing (task-48) | `finish` stamps `finished` on the last-touched claimed item; `attention` posts a `bm:attention` comment with an `@mention`; `heartbeat` heartbeats every held claim — all best-effort, one stderr line on failure |
 | `reconcile`          | each row gains `claim` (`this-run`/`other`/`released`/`none`/`unknown`, from `GET /api/items/claim`); `other` makes the suggestion `skip` |
 

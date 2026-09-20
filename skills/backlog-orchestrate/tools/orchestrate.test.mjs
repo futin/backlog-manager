@@ -6529,6 +6529,101 @@ test('C-4: heartbeat keeps every claim the run still holds alive, and none it re
   );
 });
 
+// --- bug-40: abort gives every claim it still holds back ---------------------
+//
+// Before this, `trackerRelease` had exactly one caller — the `stage` path's
+// `CLAIM_RELEASE_STAGES` check — so a run torn down by `abort` never passed
+// through a terminal stage and never gave its issues back. The cost is not
+// bounded by `CLAIM_STALE_MS` the way the claim protocol's own contest rule
+// is: the mapper reads `started`/`phase` off any UNRELEASED claim, fresh or
+// stale, and `progressBlock` gates on the presence of `started` rather than
+// its age, so the item's dispatch control stayed disabled on every machine's
+// board until a person ran `backlog.mjs stop <id> --abandon` by hand.
+//
+// The two halves this case pins are the release set ("still holds", the same
+// predicate `heartbeat` uses) and the ORDER: the releases must land before
+// `cmdFinish`'s own `finished` stamp, which `GithubSource.heartbeat` accepts
+// on an already-released claim and which would otherwise be stamping a claim
+// this run was about to hand back.
+
+test('bug-40: abort releases every claim the run still holds, reason aborted, before it finishes the run', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '3', stage: 'reviewing', claim: 503 },
+    { id: '5', stage: 'needs-answers', claim: 505 },
+    { id: '7', stage: 'merged', claim: 507 },
+    { id: '9', stage: 'pending' },
+  ]);
+
+  const { out, requests } = await withApi(
+    {
+      '/api/items/claim': {
+        body: { commentId: 0, record: { v: 1, counters: { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 } } },
+      },
+      '/api/items/release': { status: 201, body: { commentId: 0, record: { v: 1 } } },
+      '/api/items/heartbeat': { status: 201, body: { commentId: 0, record: { v: 1 } } },
+    },
+    (port) => runApi(project, home, port, 'abort'),
+  );
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /"status":"aborted"/);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'aborted');
+
+  const released = posts(requests, 'release');
+  assert.deepEqual(
+    released.map((r) => r.body.commentId).sort(),
+    [503, 505],
+    'abort released the wrong set of claims — "still holds" is claim set and the stage not one that already released it',
+  );
+  for (const r of released) {
+    // NOT a `RunStage`: `remote-runs.util.ts` reads a release reason as the
+    // item's stage when it happens to be one, and otherwise leaves the last
+    // reported stage alone. `aborted` is deliberately not a stage name.
+    assert.equal(r.body.reason, 'aborted');
+    assert.equal(r.body.id, `#${r.body.commentId === 503 ? 3 : 5}`);
+    // Billed the ordinary way, through `claimCountersFor` — an abort is not
+    // `backlog.mjs stop --abandon`'s dead-interval case.
+    assert.deepEqual(r.body.counters, { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 });
+  }
+
+  const order = requests.filter((r) => r.method === 'POST' && ['/api/items/release', '/api/items/heartbeat'].includes(r.path)).map((r) => r.path);
+  assert.deepEqual(order, ['/api/items/release', '/api/items/release', '/api/items/heartbeat'], 'the finished stamp must land after every release');
+});
+
+test('bug-40: a refused release is one stderr line and abort still exits 0 with the run aborted', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [{ id: '3', stage: 'reviewing', claim: 503 }]);
+
+  const { out, requests } = await withApi(
+    {
+      '/api/items/claim': { body: { commentId: 0, record: { v: 1, counters: { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } } },
+      '/api/items/release': { status: 502, body: { error: 'github said no' } },
+      '/api/items/heartbeat': { status: 201, body: { commentId: 0, record: { v: 1 } } },
+    },
+    (port) => runApi(project, home, port, 'abort'),
+  );
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /"status":"aborted"/);
+  assert.match(out.stderr, /release of 3 was refused/);
+  assert.equal(posts(requests, 'release').length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'aborted');
+});
+
+test('bug-40: a files run-s abort makes no API request on any path', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-26', 'Some task');
+  commitEverything(project, 'seed');
+
+  const { out, requests } = await withApi({}, async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    return runApi(project, home, port, 'abort');
+  });
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(requests.length, 0, `a files run reached the API: ${requests.map((r) => r.path).join(', ')}`);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'aborted');
+});
+
 test('C-5: reconcile reads who holds each item, and another run-s live claim means skip', async (t) => {
   const { home, project, runId } = await seededTrackerRun(t, [
     { id: '3', stage: 'reviewing', claim: 503 },

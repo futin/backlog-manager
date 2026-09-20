@@ -222,7 +222,10 @@ any of these — most encode a failure that already happened.
   `stage <n> preflight` — before the worktree exists — with `phase: 'execute'` and a `ClaimRun` naming the run; it publishes the queue item as `ClaimState`
   through `heartbeat` from every command that changes one (`stage`, `usage`, `verify`, `assume`, `watch`'s tick); and it releases at a terminal stage
   (`merged`, `branched`, `failed`, `skipped`, `parked`, `ungroomed` — never `needs-answers`), billing `executeElapsed`/`executeTokens` on top of the counters
-  it reads first. **A failed heartbeat or release is one stderr line and never fails the command** — `run.json` is the journal of record and the claim is a
+  it reads first. **`abort` releases too, with the reason `aborted`** (bug-40): a torn-down run passes through no terminal stage, and an unreleased claim is
+  not repaired by going stale — the mapper reads `started`/`phase` off any unreleased claim, fresh or stale, so the item's dispatch control stays disabled on
+  every machine until a person intervenes. The released set is the one `heartbeat` already uses ("still holds": `claim` set and the stage not one that
+  released it), the reason is deliberately NOT a `RunStage`, and the release runs before `finish` stamps `finished` on one of the same claims. **A failed heartbeat or release is one stderr line and never fails the command** — `run.json` is the journal of record and the claim is a
   published copy — while a failed CLOSE is exit `9` with nothing written, because it is the only record anywhere that the item is done. A 409 naming ANOTHER
   run skips the item (exit `0`, `claimed elsewhere`); a resumed driver re-claims its own run's items and the SERVER makes that a takeover, by `run.runId`.
   The dispatched `backlog-execute` session runs none of `start`/`stop`/`heartbeat`/`move`/`comment`: it writes its `## Outcome` to the path the

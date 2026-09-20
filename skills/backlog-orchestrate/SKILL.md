@@ -102,7 +102,8 @@ What differs is gathered here, and each item names the section it belongs to. A 
   `#` opens a comment in a shell, and a `#31` substituted into one of these fenced blocks would swallow the rest of the line.
 - **The stack must be up.** Exit `8` from any command means it is not; start it and retry the same call. There is no offline mode on purpose.
 - **The driver holds the item's claim, not the execute session** (§3, §9). The run claims the issue at `stage <n> preflight`, before the worktree exists, and
-  releases it at the item's terminal stage. The dispatched session never runs `start`, `stop`, `move` or `heartbeat` on the item — its SKILL.md says so.
+  releases it at the item's terminal stage — or at `abort`, which releases everything the run still holds before it ends the run (§10). The dispatched session
+  never runs `start`, `stop`, `move` or `heartbeat` on the item — its SKILL.md says so.
 - **A claim refusal naming another run is a skip, not a failure** (§3). Another machine is draining the same project and got there first.
 - **The session's `## Outcome` goes to a file, and the file becomes the closing comment** (§4, §5, §9).
 - **The reviewer and `verify` read a snapshot** (§5, §7) — `orchestrate.mjs snapshot <n>`, which writes the issue's body plus that Outcome to one file.
@@ -1532,6 +1533,10 @@ Two rules stay here, because a reader who stops at this line still has to know t
   three outcomes again rather than reusing a path from before the interruption.
 - **`--abort` runs before any marker is cleared, never after.** Clearing a mid-flight item's marker first makes `abort` classify that item as safe and
   `git worktree remove --force` it — which deletes uncommitted work that was never committed and never staged, with no reflog entry to recover it from.
+
+- **`--abort` in a tracker project gives every claim the run still holds back**, with the reason `aborted`, before it ends the run. Nothing to do by hand:
+  the tool does it, best-effort, and a refusal is one stderr line rather than a failed abort. It matters because a run torn down this way reaches no terminal
+  stage, and an unreleased claim keeps the item's dispatch control disabled on every machine's board — going stale does not clear it.
 
 `--abort` ends a run; it never undoes one. Everything already merged stays merged.
 
