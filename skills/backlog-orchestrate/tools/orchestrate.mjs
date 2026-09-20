@@ -1533,6 +1533,93 @@ function orderGatedQueue(gated, maxItems) {
   });
 }
 
+// --- bug-41: how old the cache a tracker queue was built from is ------------
+//
+// `GET /api/items` is served from the poller's in-memory cache for a tracker
+// project, and that is deliberate: the hourly rate limit makes a per-request
+// fetch to GitHub impossible, and `polledAt` is what keeps the age honest.
+// Everything in this block exists to say that age out loud, because an issue
+// GitHub accepted after the last tick is absent from the queue for up to one
+// interval and nothing used to report it.
+//
+// `TRACKER_POLL_MS` mirrors `TRACKER_POLL_MS` in
+// `server/src/tracker/poller.service.ts`, restated rather than imported for
+// the reason this file's header gives: a plugin skill's `tools/` is installed
+// as a standalone copy and may not import the server. A drift makes the retry
+// wait the wrong amount and nothing else — it is a comfort margin, never a
+// correctness boundary, which is why the copy is acceptable here where
+// `RUN_STALE_MS`'s copy already set the precedent.
+const TRACKER_POLL_MS = 15_000;
+
+/** One poll interval plus the slack a tick's own work takes. A wait of this
+ *  length starting at a fresh `polledAt` lands after the NEXT tick. */
+export const TRACKER_POLL_WINDOW_MS = TRACKER_POLL_MS + 2_000;
+
+/**
+ * How long to wait before re-reading the index after a miss: until the next
+ * tick is due, and never longer than one whole window.
+ *
+ * Timing it off `polledAt` rather than sleeping a flat interval is what keeps
+ * the wait proportional — a cache polled 14 seconds ago is one second from
+ * answering — and an OVERDUE stamp deliberately waits not at all: a poller
+ * that is disarmed (no token, nothing connected) will not answer a longer
+ * wait either, so the second read happens at once and the refusal arrives
+ * with the age that explains it. `null` (never polled, or the API could not
+ * say) waits the whole window, since there is nothing to time from.
+ */
+export function trackerRetryDelayMs(polledAtMs, nowMs = Date.now()) {
+  if (polledAtMs === null) return TRACKER_POLL_WINDOW_MS;
+  return Math.min(TRACKER_POLL_WINDOW_MS, Math.max(0, polledAtMs + TRACKER_POLL_WINDOW_MS - nowMs));
+}
+
+/** The age as a person reads it — the board's own `polled 12 s ago` wording,
+ *  copied so the CLI and the card say the same thing about the same number.
+ *  Never negative: a server clock a little ahead of this process is skew, not
+ *  a poll in the future. */
+export function trackerPollAgeText(polledAtMs, nowMs = Date.now()) {
+  if (polledAtMs === null) return 'never polled';
+  return `polled ${Math.max(0, Math.round((nowMs - polledAtMs) / 1000))} s ago`;
+}
+
+/**
+ * When the poller last successfully read THIS project's repo, in ms, or `null`
+ * when the API cannot say (no poll yet, no such row, the API down or
+ * refusing). Read off `GET /api/trackers` — the same posture `trackerLogin`
+ * takes toward the same route: the server already knows, and the token never
+ * leaves it. Matched by the registry path with a RAW string compare, the rule
+ * every membership check in this app follows.
+ *
+ * Never throws. Every caller is composing a message or a wait, and neither is
+ * worth failing a command over.
+ */
+function trackerPolledAt(projectRoot) {
+  try {
+    const res = apiCall('GET', '/api/trackers');
+    if (!res.ok || res.data === null || !Array.isArray(res.data.projects)) return null;
+    const row = res.data.projects.find((p) => p && p.path === projectRoot);
+    if (!row || typeof row.polledAt !== 'string') return null;
+    const at = Date.parse(row.polledAt);
+    return Number.isNaN(at) ? null : at;
+  } catch {
+    return null;
+  }
+}
+
+/** This project's open bugs and tasks, as one read of the index. Pulled out of
+ *  `trackerCandidates` by bug-41 because the miss path reads it twice, and two
+ *  spellings of one filter is how the two reads would come to disagree. */
+function trackerIndexItems(projectRoot) {
+  const index = apiCall('GET', '/api/items');
+  if (!index.ok) throw new OrchestrateError(apiErrorText(index, 'GET /api/items was refused'), EXIT_API_REFUSED);
+  const all = index.data !== null && Array.isArray(index.data.items) ? index.data.items : [];
+  return all.filter((item) => item.projectPath === projectRoot && item.status === 'open' && (item.section === 'bugs' || item.section === 'tasks'));
+}
+
+/** The index keyed by the id a run uses — the bare issue number. */
+function trackerById(mine) {
+  return new Map(mine.map((item) => [String(item.id).replace(/^#/, ''), item]));
+}
+
 // A tracker project's candidates, gated (task-47) — the queue builder's other
 // half, and deliberately the ONLY thing about the queue that differs.
 //
@@ -1556,38 +1643,77 @@ function orderGatedQueue(gated, maxItems) {
 // files walk applies to its own `<prefix>-<n>` numbers, and for the same
 // reason: the oldest open thing has been waiting longest.
 function trackerCandidates(projectRoot, { ids }) {
-  const index = apiCall('GET', '/api/items');
-  if (!index.ok) throw new OrchestrateError(apiErrorText(index, 'GET /api/items was refused'), EXIT_API_REFUSED);
-  const all = index.data !== null && Array.isArray(index.data.items) ? index.data.items : [];
-
-  const mine = all.filter((item) => item.projectPath === projectRoot && item.status === 'open' && (item.section === 'bugs' || item.section === 'tasks'));
+  let mine = trackerIndexItems(projectRoot);
   // The bare issue number is the id INSIDE a run, and `#31` is the id
   // everywhere else. `#` opens a comment in every shell SKILL.md's fenced
   // blocks use, and this id is substituted into dozens of them — so the `#`
   // comes off once, here, at the one place a run's queue is built.
   // `shared/agent.ts`'s `queueItemIs` is the reader-side half of the same
   // decision.
-  const byId = new Map(mine.map((item) => [String(item.id).replace(/^#/, ''), item]));
+  let byId = trackerById(mine);
 
   const ordered = [];
   if (ids !== undefined) {
+    /* A tracker run names items by bare number and nothing else. `#31`, a
+       URN and a files id are each refused rather than normalised, and the
+       refusal names the shape: a caller typing `#31` at a terminal has the
+       board's spelling in mind and needs to be told the run's, and a caller
+       passing `task-3` is carrying a habit across from a files project.
+       Normalising them silently would leave `--ids '#31'` working here and
+       failing in every later `stage`/`verify` call that takes the same
+       string.
+
+       Every id's SHAPE is checked before any of them is looked up — bug-41
+       moved this loop out ahead of the lookups — because a miss below now
+       costs a sleep, and a malformed list has nothing to wait for. */
     for (const id of ids) {
-      /* A tracker run names items by bare number and nothing else. `#31`, a
-         URN and a files id are each refused rather than normalised, and the
-         refusal names the shape: a caller typing `#31` at a terminal has the
-         board's spelling in mind and needs to be told the run's, and a caller
-         passing `task-3` is carrying a habit across from a files project.
-         Normalising them silently would leave `--ids '#31'` working here and
-         failing in every later `stage`/`verify` call that takes the same
-         string. */
       if (!/^\d+$/.test(id)) {
         throw new OrchestrateError(`tracker items are named by issue number inside a run — got ${id}`, 1);
       }
+    }
+
+    // bug-41, part 1. A named id the cache has not seen yet is the ordinary
+    // case for an issue filed at GitHub seconds ago — `gh issue create`, or
+    // the web UI — and for at most one poll interval it is indistinguishable
+    // from an id that names nothing. So a miss buys ONE re-read, timed to land
+    // after the next tick is due, and only a second miss is a refusal: two
+    // reads a poll apart is genuine evidence, one read is not.
+    //
+    // One retry, never a loop, and never a fresh `GET` to GitHub — the
+    // groomer rejected giving this READ path `issueNow`'s per-id fallback as
+    // disproportionate (a new route and a new way for a preview to spend rate
+    // limit, to save at most fifteen seconds). The sleep is `sleepSync`,
+    // `watch`'s own `Atomics.wait`, because this file holds no asynchronous
+    // work and must stay on `process.exitCode = main(...)`.
+    if (ids.some((id) => !byId.has(id))) {
+      sleepSync(trackerRetryDelayMs(trackerPolledAt(projectRoot)));
+      mine = trackerIndexItems(projectRoot);
+      byId = trackerById(mine);
+    }
+
+    for (const id of ids) {
       const found = byId.get(id);
-      if (!found) throw new OrchestrateError(`unknown item id: ${id}`, 1);
+      // bug-41, part 2. The old refusal was `unknown item id: <n>` and nothing
+      // else, which reads as "that issue does not exist" for the one case that
+      // brings a user here — an issue that plainly does exist and is one tick
+      // from being visible. The age is what makes the sentence actionable:
+      // it says which cache answered and how stale that answer was.
+      if (!found) {
+        throw new OrchestrateError(
+          `unknown item id: ${id} — the tracker cache (${trackerPollAgeText(trackerPolledAt(projectRoot))}) holds no open bug or task numbered ${id} in this project, on two reads a poll apart. An issue filed in the last few seconds is not in it yet; check the number, or re-run once the cache has polled again.`,
+          1
+        );
+      }
       ordered.push(found);
     }
   } else {
+    // bug-41, part 2, and the half that matters: the whole-queue case has no
+    // refusal to improve. An issue the cache has not polled yet is simply
+    // absent from the queue, silently, and a run drains what it believes is
+    // the backlog with the newest item missing. The age is the only thing that
+    // can be said without a second request, so it is said every time — at
+    // `plan` and at `init` alike, on stderr so `--json` stdout is untouched.
+    console.error(`queue built from the tracker cache (${trackerPollAgeText(trackerPolledAt(projectRoot))}) — an issue filed since that poll is not in it yet`);
     const num = (item) => Number(String(item.id).replace(/^#/, ''));
     const bugs = mine.filter((item) => item.section === 'bugs').sort((a, b) => num(a) - num(b));
     const tasks = mine.filter((item) => item.section === 'tasks').sort((a, b) => num(a) - num(b));

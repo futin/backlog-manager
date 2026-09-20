@@ -8,13 +8,16 @@ import { once } from 'node:events';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   RUN_STALE_MS,
+  TRACKER_POLL_WINDOW_MS,
   archiveStem,
   controlFilePath,
   controlHome,
   isZombieStatState,
   pauseRequestEffective,
   readPermissionDenials,
-  readSessionUsage
+  readSessionUsage,
+  trackerPollAgeText,
+  trackerRetryDelayMs
 } from './orchestrate.mjs';
 
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url));
@@ -5784,14 +5787,27 @@ function apiItem(projectPath, number, over = {}) {
   };
 }
 
-/** The two read routes a tracker gate makes, as a route table. `bodies` is
- *  keyed by issue number. */
-function gateRoutes(items, bodies) {
+/** The three read routes a tracker gate makes, as a route table. `bodies` is
+ *  keyed by issue number.
+ *
+ *  `/api/trackers` is here because bug-41's retry times itself off this
+ *  project's `polledAt`: the default is OLDER than one poll window, so the
+ *  next tick reads as already due and a miss re-reads immediately rather than
+ *  blocking this suite for fifteen seconds. A case that wants the wait itself
+ *  measured drives `trackerRetryDelayMs` directly instead — a real sleep in a
+ *  spawned child proves nothing a pure function does not. */
+function gateRoutes(items, bodies, { projectPath = items.find((i) => i && i.projectPath)?.projectPath ?? '', polledAt = new Date(Date.now() - 60_000).toISOString() } = {}) {
   return {
     '/api/items': { body: { items, errors: [] } },
     '/api/items/body': (_body, url) => {
       const number = String(url.searchParams.get('path') ?? '').replace(/^.*#/, '');
       return { body: bodies[number] ?? '' };
+    },
+    '/api/trackers': {
+      body: {
+        platforms: [{ kind: 'github', hasToken: true, login: 'futin', limit: 5000, remaining: 4999, reset: null }],
+        projects: [{ name: 'x', path: projectPath, source: 'github', repo: 'futin/x', polledAt, access: 'ok', detail: null, connect: null }],
+      },
     },
   };
 }
@@ -5965,6 +5981,108 @@ test('--ids on a tracker project takes bare numbers only, and names the shape it
   const absent = await withApi(routes, (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '99', '--json'));
   assert.equal(absent.out.status, 1);
   assert.match(absent.out.stderr, /unknown item id: 99/);
+});
+
+// --- G-2a … G-2e: the cache a tracker queue is built from (bug-41) ----------
+//
+// `GET /api/items` is served from the poller's cache for a tracker project,
+// by design — the hourly rate limit makes a per-request fetch impossible. So
+// an issue GitHub accepted since the last tick is absent from the queue this
+// tool builds, for at most one poll interval. Two failures followed from that
+// silently: a named id read as `unknown item id: <n>`, which sounds permanent,
+// and a whole-queue run simply left the newest issue out with no message at
+// all. The fix is a bounded retry on the first and the cache's age printed on
+// the second — never a fresh GET to GitHub, which is the groomer's explicitly
+// rejected design.
+
+test('the retry waits for the next poll to be due, and never longer than one window', () => {
+  const now = Date.parse('2026-09-20T12:00:00Z');
+  // Never polled: there is nothing to time from, so wait one whole window.
+  assert.equal(trackerRetryDelayMs(null, now), TRACKER_POLL_WINDOW_MS);
+  // Polled this instant: the next tick is a whole window away.
+  assert.equal(trackerRetryDelayMs(now, now), TRACKER_POLL_WINDOW_MS);
+  // Mid-window: only the remainder is worth waiting for.
+  assert.equal(trackerRetryDelayMs(now - 10_000, now), TRACKER_POLL_WINDOW_MS - 10_000);
+  // Overdue: the tick this read is waiting for is already late, so re-read at
+  // once — a poller that has stopped is not going to answer a longer wait.
+  assert.equal(trackerRetryDelayMs(now - 60_000, now), 0);
+  // A stamp in the future (clock skew between this process and the server's)
+  // must not buy a wait longer than a fresh poll would.
+  assert.equal(trackerRetryDelayMs(now + 60_000, now), TRACKER_POLL_WINDOW_MS);
+});
+
+test('the poll age reads as whole seconds, and says so when there has never been a poll', () => {
+  const now = Date.parse('2026-09-20T12:00:00Z');
+  assert.equal(trackerPollAgeText(null, now), 'never polled');
+  assert.equal(trackerPollAgeText(now - 12_000, now), 'polled 12 s ago');
+  // Skew again: an age is never negative on the page that reads it.
+  assert.equal(trackerPollAgeText(now + 5_000, now), 'polled 0 s ago');
+});
+
+test('a named tracker id the cache has not polled yet gets one retry and then runs', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const item = apiItem(project, 7, { section: 'bugs' });
+  let reads = 0;
+  const routes = {
+    ...gateRoutes([item], { 7: GROOMED_BUG_BODY }, { projectPath: project }),
+    // The issue exists at GitHub throughout; the cache only learns about it on
+    // the tick between these two reads.
+    '/api/items': () => {
+      reads++;
+      return { body: { items: reads === 1 ? [] : [item], errors: [] } };
+    },
+  };
+
+  const { out } = await withApi(routes, (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '7', '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(reads, 2, 'a first miss must re-read the index exactly once');
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((r) => r.id),
+    ['7'],
+  );
+});
+
+test('a tracker id missing from both reads is refused, and the refusal names the cache and its age', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const routes = gateRoutes([apiItem(project, 3, { section: 'bugs' })], { 3: GROOMED_BUG_BODY }, { projectPath: project, polledAt: new Date(Date.now() - 42_000).toISOString() });
+
+  const { out, requests } = await withApi(routes, (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '99', '--json'));
+
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /unknown item id: 99/);
+  assert.match(out.stderr, /tracker cache/);
+  assert.match(out.stderr, /polled \d+ s ago/);
+  assert.equal(requests.filter((r) => r.path === '/api/items').length, 2, 'two reads a poll apart, then the refusal');
+});
+
+test('a tracker queue preview says how old the cache it was built from is', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const routes = gateRoutes([apiItem(project, 3, { section: 'bugs' })], { 3: GROOMED_BUG_BODY }, { projectPath: project, polledAt: new Date(Date.now() - 12_000).toISOString() });
+
+  const { out } = await withApi(routes, (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stderr, /tracker cache \(polled \d+ s ago\)/);
+  // The line is stderr, so `--json` stdout stays exactly as parseable as it was.
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((r) => r.id),
+    ['3'],
+  );
+});
+
+test('a files queue preview says nothing about a tracker cache', async (t) => {
+  // The files branch of buildGatedQueue never reaches trackerCandidates, so
+  // bug-41's two changes must be invisible here — with the API unreachable, as
+  // O-1 pins it.
+  const { home, project } = orchFixture(t);
+  const port = await closedPort();
+  seedReadyTask(project, 'task-1', 'a task');
+
+  const out = await runApi(project, home, port, 'plan', '--project', project, '--json');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.doesNotMatch(out.stderr, /tracker cache/);
 });
 
 // --- G-3 / G-4: init's pull, and the API being down -------------------------

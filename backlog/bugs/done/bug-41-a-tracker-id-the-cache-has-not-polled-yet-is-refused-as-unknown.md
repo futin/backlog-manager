@@ -4,9 +4,12 @@ title: A tracker id the cache has not polled yet is refused as unknown
 created: 2026-09-20
 tags: tracker, github, orchestrator, cache
 runner-fix: true
-updated: 2026-09-20T10:10:23Z
+updated: 2026-09-20T12:05:54Z
 groom-elapsed: 33
 groom-tokens: 5903
+started: 2026-09-20T11:43:05Z
+execute-elapsed: 1369
+execute-tokens: 135227
 ---
 
 ## Symptom
@@ -82,3 +85,69 @@ the wait is not tolerable, that is the design to revisit, and this paragraph is 
 
 A files project must be byte-identical: both changes live inside `trackerCandidates`, which the files branch of `buildGatedQueue` never reaches.
 
+
+## Outcome
+
+2026-09-20 — fixed as groomed, both parts, entirely inside `trackerCandidates`
+(`skills/backlog-orchestrate/tools/orchestrate.mjs`). No new route, no adapter method, no request to GitHub; the rejected per-id fresh-`GET` design stays
+rejected and is now recorded in `invariants.md` with its reasoning, so the next person to hit this starts from the argument rather than from scratch.
+
+**Part 1 — one bounded retry for a named id.** `--ids` shape validation moved ahead of every lookup (a malformed list has nothing to wait for), and a miss now
+sleeps until the next poll is due, re-reads `GET /api/items` once, and refuses only on a second miss. The wait is timed off this project's `polledAt`
+(`GET /api/trackers`) rather than being a flat interval: `trackerRetryDelayMs` returns the remainder of one window, clamped to that window for a `null` or
+future stamp and to **zero** for a stamp already overdue — a disarmed poller will not answer a longer wait, so the refusal arrives at once with the age that
+explains it. The sleep is `sleepSync` (`watch`'s `Atomics.wait`), so the file stays synchronous and stays on `process.exitCode = main(...)`.
+
+**Part 2 — both surfaces name the cache.** The refusal keeps its `unknown item id: <n>` opening (a `stage`-time refusal elsewhere shares the phrase and
+SKILL.md §3's recovery bullet reads it) and gains the age, the project scope and the fact that two reads a poll apart were made. The whole-queue branch — the
+half with no message to improve — prints `queue built from the tracker cache (polled 12 s ago) — an issue filed since that poll is not in it yet` on stderr at
+`plan` and `init` alike, so `--json` stdout is untouched.
+
+Extracted on the way: `trackerIndexItems` (the index read and its filter, now read twice) and `trackerById`, so the two reads cannot come to disagree about
+what counts as a candidate.
+
+A files project is untouched: everything above lives inside `trackerCandidates`, which the files branch of `buildGatedQueue` never enters, and a new case pins
+it with the API port closed.
+
+Files changed: `skills/backlog-orchestrate/tools/orchestrate.mjs`, `skills/backlog-orchestrate/tools/orchestrate.test.mjs`,
+`skills/backlog-orchestrate/SKILL.md`, `docs/subsystems/invariants.md`, `docs/subsystems/skills.md`, `CLAUDE.md`.
+
+### Verification
+
+`pnpm run typecheck` → exit 0. The six new cases, run by name:
+
+```
+✔ the retry waits for the next poll to be due, and never longer than one window (9.480765ms)
+✔ the poll age reads as whole seconds, and says so when there has never been a poll (0.31595ms)
+✔ a named tracker id the cache has not polled yet gets one retry and then runs (717.99159ms)
+✔ a tracker id missing from both reads is refused, and the refusal names the cache and its age (721.876797ms)
+✔ a tracker queue preview says how old the cache it was built from is (595.017364ms)
+✔ a files queue preview says nothing about a tracker cache (84.388203ms)
+ℹ tests 6
+ℹ pass 6
+ℹ fail 0
+```
+
+Whole `pnpm run test:skills`:
+
+```
+ℹ tests 671
+ℹ pass 670
+ℹ fail 1
+✖ a submodule working tree resolves to itself and is never refused — commondir, not ".git is a file", is the discriminator (235.215319ms)
+```
+
+**That one failure is pre-existing and environmental, not this change's.** The same fixture run by hand against `git show HEAD:…/orchestrate.mjs` fails
+identically: this machine has no `init.defaultBranch`, so the test's `git init -q` fixture lands on `master` and `init` correctly refuses
+`--base must be an existing local branch: "main" is not a branch in …`. Five jest cases also fail (`board-live-cards`, `dispatch-button`, `supertest-bind`) and
+all five reproduce on a pristine `git worktree` at HEAD with this change absent — jest's `testMatch` cannot reach `skills/` at all, so nothing here could have
+caused them. Neither was filed: both predate this item.
+
+Contract sweep: 4 sites updated (CLAUDE.md, docs/subsystems/invariants.md, docs/subsystems/skills.md, skills/backlog-orchestrate/SKILL.md)
+Red proof: 5 tests went red with the change reverted
+
+Red proof detail, one revert at a time against a file copy (never `git stash`): removing the retry block reddened both `--ids` cases; removing the stderr line
+reddened the queue-preview case; restoring the bare `unknown item id: ${id}` refusal reddened the refusal case; flattening `trackerRetryDelayMs` to a constant
+reddened the delay case; dropping `trackerPollAgeText`'s `never polled` and its clamp reddened the age case. The sixth new case — a files preview saying
+nothing about a tracker cache — is a negative guard with no production change to revert (the files branch never enters this function), so it is the one
+skipped, deliberately.

@@ -2337,6 +2337,21 @@ board would exhaust 5,000 requests an hour in minutes. It is kept honest by bein
 age (`futin/x · polled 12 s ago`), the item modal prints it beside the body it drew from that same cache, and the Trackers card prints it per project. A cache
 whose staleness is on screen is a different object from one that is not.
 
+**The orchestrator's queue preview is the fourth reader of that age, and a named id gets one retry before it is refused (bug-41).** `trackerCandidates`
+(`skills/backlog-orchestrate/tools/orchestrate.mjs`) builds a tracker run's whole queue from one `GET /api/items`, which for a tracker project is this cache —
+so an issue GitHub accepted after the last tick is absent from it for up to one poll interval. That produced two failures, and the second was the worse one: a
+`--ids <n>` naming such an issue read as `unknown item id: <n>`, which sounds permanent for a case that clears itself in seconds, and a whole-queue run simply
+left the newest issue out with no message at all. Both are now the age being said out loud. The `--ids` miss sleeps until the next tick is due
+(`trackerRetryDelayMs`, timed off this project's `polledAt` from `GET /api/trackers`, clamped to one window and to zero for a stamp already overdue — a
+disarmed poller will not answer a longer wait either), re-reads the index ONCE, and refuses only on a second miss, with the age in the sentence; the
+whole-queue branch prints `queue built from the tracker cache (polled 12 s ago) …` on stderr, at `plan` and `init` alike, because that branch has no refusal
+to improve and the age IS the fix there. A files project reaches none of it — the files branch of `buildGatedQueue` never enters this function.
+
+What was rejected, and why it stays rejected: giving the READ path `GithubSource.issueNow`'s per-id fresh `GET` (plus a route for the CLI to reach it) would
+close the window exactly rather than wait it out, at the price of a second read path into the adapter and a new way for a preview to spend rate limit — to
+save at most fifteen seconds. `GET /api/items/claim` exists because a CLAIM cannot tolerate being one poll stale; an item's EXISTENCE plainly can. If a case
+ever appears where the wait is not tolerable, that is the design to revisit.
+
 **A `304` leaves the cache unchanged and MOVES `polledAt`.** Every tick sends `If-None-Match`, and an unchanged repo answers `304` at no cost against the
 budget. Task-45 shipped the opposite reading — its authoritative test case said the age did not move, against spec §12.2, and the disagreement was recorded for
 the next phase to settle rather than rediscover. Task-46 settled it in the spec's favour, on 2026-09-18, and this paragraph is the record of why.

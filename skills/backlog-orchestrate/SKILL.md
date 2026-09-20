@@ -108,6 +108,10 @@ What differs is gathered here, and each item names the section it belongs to. A 
 - **The session's `## Outcome` goes to a file, and the file becomes the closing comment** (§4, §5, §9).
 - **The reviewer and `verify` read a snapshot** (§5, §7) — `orchestrate.mjs snapshot <n>`, which writes the issue's body plus that Outcome to one file.
 - **The run pushes** (§9). Pull before each item's worktree, push after each merge, close the issue only once the push succeeded.
+- **The queue comes from a cache, and every preview says how old it is** (§1, §2). A tracker project's items are read from the poller's cache — the hourly rate
+  limit makes a per-request fetch impossible — so `plan` and `init` print `queue built from the tracker cache (polled 12 s ago) …` beside the queue they built.
+  An issue filed at GitHub since that poll is not in it yet. A `--ids` entry the cache has not seen is re-read once, after the next tick is due, and refused
+  only if it misses twice; that refusal names the age. If an issue you just filed is missing from a preview, re-run the preview rather than doubting the number.
 
 ## 1. Preview the queue — `plan` first, always
 
